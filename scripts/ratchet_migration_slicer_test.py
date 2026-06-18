@@ -220,6 +220,20 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertNotIn("packages/example/c.lua:5", body)
         self.assertIn("- The allowlist count decreases by exactly 2.", body)
 
+    def test_render_child_issue_specifies_already_converged_noop(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [
+            slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline"),
+        ]
+
+        body = slicer.render_child_issue(spec, inventory, 1)
+
+        self.assertIn(
+            "- If every listed site is already migrated and every corresponding allowlist entry is already absent, "
+            "treat the slice as already converged and make no source changes.",
+            body,
+        )
+
     def test_json_schema_carries_stable_dedup_key_and_sites(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [
