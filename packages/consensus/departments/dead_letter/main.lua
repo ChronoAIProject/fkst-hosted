@@ -1,16 +1,13 @@
 local core = require("core")
 local dead_letter = require("std.dead_letter")
 local error_facts = require("std.error_facts")
+local saga = require("std.saga")
 
-local M = {}
+local function dead_letter_done(_event)
+  return false
+end
 
-M.spec = {
-  consumes = { "dead_letter" },
-  produces = {},
-  stall_window = "2m",
-}
-
-function pipeline(event)
+local function act_dead_letter(event)
   local payload = event.payload or {}
   local error_class = error_facts.one_line(payload.error_class or "dead-letter")
   local error_message = payload.error or payload.message or error_class
@@ -33,6 +30,12 @@ function pipeline(event)
   )
 end
 
-pipeline = core.wrap_pipeline_failure("dead_letter", pipeline)
-
-return M
+return saga.department{
+  consumes = { "dead_letter" },
+  produces = {},
+  stall_window = "2m",
+  done = dead_letter_done,
+  act = act_dead_letter,
+  wrap = core.wrap_pipeline_failure,
+  name = "dead_letter",
+}
