@@ -332,12 +332,15 @@ end
 
 local function create_or_update_branch(repo, base_branch, current_pin, target_sha)
   local old_branch_head = fetch_bump_branch_head()
-  if remote_bump_branch_pin(old_branch_head) == target_sha then
-    return "already-current"
-  end
   local base_head = M.current_base_head(base_branch)
   if base_head == nil then
     error("github-devloop: unable to read base branch head for substrate-ref bump")
+  end
+  if old_branch_head ~= nil and remote_bump_branch_pin(old_branch_head) == target_sha then
+    local ancestry = M.git_is_ancestor(base_head, old_branch_head, 30)
+    if ancestry.exit_code == 0 then
+      return "already-current"
+    end
   end
   local runtime_root = read_runtime_root()
   local worktree = bump_worktree_path(runtime_root, repo, target_sha)
