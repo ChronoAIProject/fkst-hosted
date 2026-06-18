@@ -16,6 +16,7 @@ M.spec = {
   },
   fanout = { "devloop_merge_queue_tick" },
   stall_window = "2m",
+  retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
 local function log_gate(merge_ready, outcome, reason)

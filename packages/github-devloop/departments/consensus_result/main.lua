@@ -10,6 +10,7 @@ local spec = {
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
+  retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
 local function result_version(reached)
