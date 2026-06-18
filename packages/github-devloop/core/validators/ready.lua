@@ -21,7 +21,6 @@ function M.is_supported_ready(payload)
           state = "ready",
           marker_version = payload.ready_hand_off.marker_version,
           event_version = payload.dedup_key,
-          effects = "result-marker,ready-label,devloop-ready",
         })))
     and (payload.impl_retry_attempt == nil
       or (tonumber(payload.impl_retry_attempt) ~= nil

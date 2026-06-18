@@ -121,7 +121,6 @@ function M.is_ready_hand_off(hand_off, ready)
     and hand_off.event_version == ready.dedup_key
     and M._is_bounded_string(hand_off.marker_version, M._max_dedup_len)
     and hand_off.stage_rank == M.stage_rank("ready")
-    and hand_off.effects == "result-marker,ready-label,devloop-ready"
     and M.is_safe_comment_id(hand_off.comment_id)
 end
 
@@ -167,11 +166,20 @@ local function state_marker_comment_verified(M, repo, hand_off)
   if not M._is_trusted_comment(comment) then
     return false, "comment-author-untrusted"
   end
-  local marker = M.state_marker(hand_off.proposal_id, hand_off.state, hand_off.marker_version, hand_off.effects)
-  if M._comment_body(comment):find(marker, 1, true) == nil then
-    return false, "state-marker-missing"
+  local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
+  for marker in M._comment_body(comment):gmatch(marker_pattern) do
+    local marker_proposal = marker:match('proposal="([^"]+)"')
+    local marker_state = marker:match('state="([^"]+)"')
+    local marker_version = marker:match('version="([^"]*)"')
+    local marker_stage_rank = marker:match('stage_rank="([^"]+)"')
+    if marker_proposal == hand_off.proposal_id
+      and marker_state == hand_off.state
+      and marker_version == hand_off.marker_version
+      and tonumber(marker_stage_rank) == M.stage_rank(hand_off.state) then
+      return true, "verified"
+    end
   end
-  return true, "verified"
+  return false, "state-marker-missing"
 end
 
 function M.verify_own_state_marker_hand_off(repo, hand_off, expected)

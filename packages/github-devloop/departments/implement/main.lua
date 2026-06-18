@@ -884,7 +884,6 @@ local function process_ready_event(event)
           state = "ready",
           marker_version = ready.ready_hand_off.marker_version,
           event_version = ready.dedup_key,
-          effects = "result-marker,ready-label,devloop-ready",
         })
       end
       if retry_failure == nil and ready.impl_retry_attempt == nil and verified_state ~= nil then
