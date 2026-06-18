@@ -16,6 +16,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Callable
 
 import check_repo_dedup as code_dedup
+import check_repo_forward_direct as forward_direct
 import check_repo_gh_git_adapter as gh_git_adapter
 
 
@@ -23,12 +24,12 @@ TARGET_COUNT = 0
 DEFAULT_SLICE_SIZE = 3
 MAX_SLICE_SIZE = 10
 SCHEMA = "fkst.ratchet-slice.v1"
-VALID_RATCHETS = ("gh-git-adapter", "saga-handler", "code-dedup")
+VALID_RATCHETS = ("gh-git-adapter", "saga-handler", "code-dedup", "forward-direct-raise")
 RATCHET_ALIASES = {
     "891": "gh-git-adapter",
     "892": "saga-handler",
 }
-DEFAULT_RECONCILE_RATCHETS = ("saga-handler", "code-dedup")
+DEFAULT_RECONCILE_RATCHETS = ("saga-handler", "code-dedup", "forward-direct-raise")
 DEFAULT_LABELS = ("fkst-dev:enabled",)
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -258,11 +259,23 @@ def load_code_dedup_inventory(root: Path, spec: MigrationSpec) -> list[Inventory
     return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
 
 
+def load_forward_direct_inventory(root: Path, spec: MigrationSpec) -> list[InventorySite]:
+    allowlist_path = validated_repo_path(root, spec.allowlist_path)
+    sites: list[InventorySite] = []
+    for site in sorted(forward_direct.load_allowlist(allowlist_path)):
+        source_path = validated_repo_path(root, site.path)
+        source = read_text(source_path)
+        line = line_for_function_basename(source, site.function) or 1
+        sites.append(InventorySite(site.path, line, f"forward_direct_raise: {site.function} {site.queue}"))
+    return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
+
+
 def line_for_function_basename(source: str, basename: str) -> int | None:
     code = code_dedup.code_without_comments_and_strings(source)
+    expected = code_dedup.function_basename(basename)
     for offset, line in enumerate(code.splitlines(), start=1):
         match = code_dedup.FUNCTION_RE.match(line)
-        if match is not None and code_dedup.function_basename(match.group("name")) == basename:
+        if match is not None and code_dedup.function_basename(match.group("name")) == expected:
             return offset
     return None
 
@@ -299,6 +312,15 @@ def specs() -> dict[str, MigrationSpec]:
             title="code dedup allowlist migration slice",
             reference_shape="Hoist the byte-identical production Lua function body to an existing shared module such as std.*, then call the shared helper from each site.",
             inventory_loader=load_code_dedup_inventory,
+        ),
+        "forward-direct-raise": MigrationSpec(
+            parent="1046",
+            ratchet="forward-direct-raise",
+            migration_kind="allowlist",
+            allowlist_path="migration/forward-direct-raise.allowlist",
+            title="forward-direct raise allowlist migration slice",
+            reference_shape="Route marker-gated forward progress through visible write-confirm facts, or declare the raise as a redrive from visible marker facts.",
+            inventory_loader=load_forward_direct_inventory,
         ),
     }
 
@@ -347,6 +369,35 @@ def slice_document(spec: MigrationSpec, inventory: list[InventorySite], slice_si
         "sites_fingerprint": fingerprint,
         "dedup_key": f"{spec.ratchet}/slice/{fingerprint}",
         "sites": sites,
+    }
+
+
+def controller_plan(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> dict[str, object]:
+    doc = slice_document(spec, inventory, slice_size)
+    if not inventory:
+        return {
+            "schema_version": SCHEMA,
+            "ratchet": spec.ratchet,
+            "allowlist_path": spec.allowlist_path,
+            "remaining_count": 0,
+            "slice_size": slice_size,
+            "status": "inventory_empty",
+            "next_slice": None,
+        }
+    return {
+        "schema_version": SCHEMA,
+        "ratchet": spec.ratchet,
+        "allowlist_path": spec.allowlist_path,
+        "remaining_count": len(inventory),
+        "slice_size": slice_size,
+        "status": "slice_available",
+        "next_slice": {
+            "dedup_key": doc["dedup_key"],
+            "sites": doc["sites"],
+            "title": slice_issue_title(doc),
+            "body": render_reconciled_issue_body(spec, inventory, slice_size),
+            "labels": list(DEFAULT_LABELS),
+        },
     }
 
 
@@ -657,7 +708,7 @@ def main(argv: list[str] | None = None) -> int:
             print("error: --json without --reconcile requires one ratchet", file=sys.stderr)
             return 2
         spec, inventory = inventories[0]
-        print(json.dumps(slice_document(spec, inventory, args.slice_size), sort_keys=True, ensure_ascii=False))
+        print(json.dumps(controller_plan(spec, inventory, args.slice_size), sort_keys=True, ensure_ascii=False))
     else:
         if len(inventories) != 1:
             print("error: dry-run body output requires one ratchet", file=sys.stderr)
