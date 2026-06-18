@@ -172,6 +172,16 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 解决任何非平凡问题前，先识别支配这类问题的**成熟人类理论 / 工业最佳实践 / prior art**，把方案锚定在它之上，再动手：分布式投递 → at-least-once + 幂等 + DLQ + lease/fencing（Temporal/SQS 形态）；并发状态 → CAS / 乐观并发 / 版本总序；外部系统 → 最终一致假设 + 写前重导；测试 → fail-closed mock + 行为验收。产出（设计、实现、判断）要说明：套用了哪个成熟实践、在哪里**有意**偏离、为什么。最好的 harness 是让 AI 先自动找到 harness 然后再执行——判断管线（intake/consensus/review）同样据此审：无理据偏离成熟实践的方案应被质疑；声称新颖前先证明现有实践不适用。
 
+## Harness 的本质：唯一确定一种写法，机械禁止其他写法绕过（one canonical way, bypass forbidden）
+
+**一个 harness 的核心不止是「锚定 prior art」——而是：对「做某件事」唯一确定**一种**规范写法（the single canonical way），并用机械不变式（conformance / ratchet）让其他一切写法「不可表示」（CI 直接拦下）。** 这是「make illegal states unrepresentable」从「非法状态」推广到「非法写法」：不是写文档劝大家用 X，而是让 X 成为**唯一能通过的表达**，任何绕过 X 的旁路写法 Y 在 CI 红、合不进来。
+
+**它根治的失效形态——多写法并存 ⇒ 某种写法绕过了安全/正确的那种 ⇒ 静默 bug。** 旁路写法通常「能用」（不报错、CI 绿、看起来对），所以**只有机械不变式抓得到它**：人 review 看不出「这里本该走 A 却抄近路走了 B」，因为 B 单独看也合法。系统反复栽的根就是这个——同一目的存在 ≥2 种写法，迟早有人（codex 或人）走了那条不安全的旁路。**典范病例（写读 marker-visibility 竞态）**：一个 state-trigger 有多个 producer——安全的因果路径（写确认 → comment_handoff 派生 trigger）+ 不安全的旁路（转移 dept 与自己的 GitHub 写**并发**直 raise trigger，同 dedup_key 抢赢、顶掉因果 raise）。bug 的真身不是「重试太慢」，是「**有唯一安全写法却被另一种写法绕过**」。Harness 解 = 唯一确定「forward trigger 只能由写确认因果派生」+ conformance 枚举断言该 trigger 队列的唯一 forward producer，旁路的 forward-direct-raise 一律 CI 红（redrive/self-heal 的「读到已可见 marker 再重投」是另一种**显式区分**的合法写法，机械区分、非一刀切禁）。
+
+**这正是本仓所有 ratchet/conformance 的同一形状**，本节给它们命名共同本质：G-ADAPTER（gh/git 只能经 `std.github`/`std.git` argv，裸 gh/git=0）、G-DEDUP（一份 canonical body，禁字节级 clone）、强制 saga（唯一形状 `std.saga.department`）、god-state（一状态一职责）、活性契约（每个非终止态必声明 budget+watchdog）、ports（唯一 egress 路径）——全是「唯一确定一种写法 + 机械禁止旁路」。
+
+**纪律**：建 harness 时，问题不止「prior art 是什么」，更是「**这件事的唯一规范写法是什么、我如何让其他每一种写法在机械上不可表示（CI 红）**」。同一目的存在多种并存写法本身就是 smell——**先收敛成一种，再锁死旁路**。新增能力时同步给出「唯一写法 + 旁路禁止的不变式」，否则旁路迟早重新长出来、悄悄收回隐形税（实证：竞态旁路一年都没人发现，因为它「能用」）。
+
 ## 按架构原则自主决策，不为技术选择请示（decide by principle, don't ask）
 
 **禁止使用 `AskUserQuestion`**（用户裁定 2026-06-14，硬规则、不设例外）——任何分叉都不 pop up、不请示、不阻塞等待。技术选择（哪种实现 / 哪种数据源 / 归属哪层 / 是否跨仓）有架构最优解，自己定、直接做。需要的信息先从已有上下文、代码、git/GitHub、用户既往裁定里自取；遇到真正属于用户的取舍（产品方向、不可逆的业务/运营决策）也**不弹窗**——选最符合架构原则、最保守可逆的默认推进，并在正常回复里**明确说出所做选择与理由**，让用户在对话里纠正。按既有原则选最优并落地：
