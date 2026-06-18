@@ -733,6 +733,16 @@ function M.autonomy_audited_result_fact(comments, proposal_id, pr_number, versio
       end
     end
   end
+  fact.attempt_projection = M.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
+    proposal_id = proposal_id,
+    now_seconds = type(opts) == "table" and opts.now_seconds or nil,
+    timed_out_after_seconds = type(opts) == "table" and opts.timed_out_after_seconds or nil,
+    abandoned_after_seconds = type(opts) == "table" and opts.abandoned_after_seconds or nil,
+  })
+  fact.attempts = fact.attempt_projection.attempts
+  fact.attempt_outcomes = fact.attempt_projection.outcomes
+  fact.avm_rate_numerator = fact.attempt_projection.valid_merges
+  fact.avm_rate_denominator = fact.attempt_projection.total_attempts
   return fact
 end
 

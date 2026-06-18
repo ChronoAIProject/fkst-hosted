@@ -270,6 +270,66 @@ return {
     t.eq(projection.attempts[1].claim_marker_id, 1001)
   end,
 
+  test_autonomy_auditor_exposes_derived_attempt_projection = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local first_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local second_version = first_version .. "/reimplement/2"
+    local head_sha = "def456"
+    local autonomy_record = {
+      proposal_id = proposal_id,
+      repo = "owner/repo",
+      issue_number = "42",
+      pr_number = "7",
+      version = second_version,
+      head_sha = head_sha,
+      task_class = "L2",
+      human_touch_count = 0,
+      rounds = 2,
+      retry_count = 0,
+      codex_calls = nil,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    }
+    local comments = {
+      trusted_comment(core.implement_attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
+      trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
+      trusted_comment(core.implement_attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
+      trusted_comment(core.autonomy_result_marker(autonomy_record), "2026-06-03T01:31:00Z", 1005),
+      trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
+    }
+
+    local fact = core.autonomy_audited_result_fact(
+      comments,
+      proposal_id,
+      "7",
+      second_version,
+      head_sha,
+      {
+        repo = "owner/repo",
+        merge_commit_sha = head_sha,
+        status_check_rollup = {
+          { status = "COMPLETED", conclusion = "SUCCESS" },
+        },
+      }
+    )
+
+    t.eq(fact.avm_rate_denominator, 2)
+    t.eq(fact.avm_rate_numerator, 1)
+    t.eq(fact.attempt_projection.total_attempts, 2)
+    t.eq(fact.attempt_outcomes.blocked, 1)
+    t.eq(fact.attempt_outcomes.merged, 1)
+    t.eq(fact.attempts[1].claim_evidence.comment_id, 1001)
+    t.eq(fact.attempts[1].terminal_evidence.comment_id, 1002)
+    t.eq(fact.attempts[2].claim_evidence.comment_id, 1003)
+    t.eq(fact.attempts[2].terminal_evidence.comment_id, 1004)
+  end,
+
   test_task_class_uses_explicit_label_before_title_fallback = function()
     t.eq(core.autonomy_task_class({
       title = "fix scheduler regression",
