@@ -9,7 +9,7 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
-## v0.2.3 — 2026-06-18
+## v0.2.4 — 2026-06-18
 
 ## Fixed
 
