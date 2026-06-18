@@ -1,0 +1,123 @@
+{
+  "schema": "github-devloop.competence-obligations.v1",
+  "owner": "github-devloop",
+  "framing": "policy-as-code architectural fitness function for L3 durable state-machine changes",
+  "mapping_source": "packages/github-devloop/tests/competence_gate_helpers.lua",
+  "untrusted_diff_boundary": "scripts/competence_gate.py parses only local git diff metadata and treats path and hunk text as untrusted input.",
+  "risk_classifier": {
+    "schema": "github-devloop.diff-risk-classifier.v1",
+    "default_level": "L0",
+    "levels": {
+      "L0": "No github-devloop architectural risk surface touched.",
+      "L1": "Low-risk package or documentation change.",
+      "L2": "Repository checks, tests, or adjacent automation touched.",
+      "L3": "Durable state-machine, liveness, fact, marker, migration, conformance, or operator/backstop surface touched."
+    },
+    "l3_path_prefixes": [
+      "packages/github-devloop/core/restart/",
+      "packages/github-devloop/core/validators/",
+      "packages/github-devloop/departments/",
+      "packages/github-devloop/raisers/"
+    ],
+    "l3_exact_paths": [
+      ".competence/obligations.json",
+      "packages/github-devloop/core.lua",
+      "packages/github-devloop/core/liveness.lua",
+      "packages/github-devloop/core/markers.lua",
+      "packages/github-devloop/core/ready_split.lua",
+      "packages/github-devloop/core/replayer.lua",
+      "packages/github-devloop/core/requests.lua",
+      "packages/github-devloop/core/restart.lua",
+      "packages/github-devloop/core/state.lua",
+      "packages/github-devloop/tests/competence_gate_helpers.lua",
+      "packages/github-devloop/tests/competence_gate_test.lua",
+      "scripts/competence_gate.py",
+      "scripts/competence_gate_test.py"
+    ],
+    "l2_path_prefixes": [
+      "scripts/",
+      "packages/github-devloop/tests/"
+    ],
+    "surfaces": [
+      "state-definitions",
+      "liveness-responsibility-maps",
+      "terminal-predicates",
+      "fact-marker-families",
+      "migrations",
+      "conformance-graders",
+      "durable-write-sequences",
+      "operator-backstop-paths"
+    ]
+  },
+  "metrics": [
+    "challenge_recall",
+    "bug_class_recall",
+    "false_reject_rate",
+    "mutant_kill_rate"
+  ],
+  "obligations": [
+    {
+      "id": "001-release-replay-uses-split-version",
+      "challenge_id": "001",
+      "bug_class": "strand",
+      "surface": "durable-write-sequences",
+      "evidence": "competence_gate_report.challenge.001",
+      "expected_error": "dependency_wait: release replay must preserve split state.version in devloop_ready dedup_shape"
+    },
+    {
+      "id": "002-queue-wait-extra-successor",
+      "challenge_id": "002",
+      "bug_class": "grader-weakening",
+      "surface": "liveness-responsibility-maps",
+      "evidence": "competence_gate_report.challenge.002",
+      "production_evidence_path": "packages/github-devloop/core/restart/responsibility_contract.lua",
+      "production_evidence": "queue_wait may only add terminal cancel/block successors",
+      "expected_error": "ready: queue_wait may only add terminal cancel/block successors"
+    },
+    {
+      "id": "003-dependency-hold-marker-families",
+      "challenge_id": "003",
+      "bug_class": "false-terminal",
+      "surface": "fact-marker-families",
+      "evidence": "competence_gate_report.challenge.003",
+      "expected_error": "dependency-hold: canonical marker family missing: dependency-cycle"
+    },
+    {
+      "id": "004-operator-waiver-does-not-write-raw-ready",
+      "challenge_id": "004",
+      "bug_class": "operator-path-partial-migration",
+      "surface": "operator-backstop-paths",
+      "evidence": "competence_gate_report.challenge.004",
+      "expected_error": "dependency-waiver: operator path must write dependency-waiver marker"
+    },
+    {
+      "id": "005-ready-replay-uses-inner-version",
+      "challenge_id": "005",
+      "bug_class": "version-lineage-mismatch",
+      "surface": "durable-write-sequences",
+      "evidence": "competence_gate_report.challenge.005",
+      "expected_error": "implementing: ready replay must use ready_payload_inner_version"
+    },
+    {
+      "id": "006-ready-dependency-partition-boundary",
+      "challenge_id": "006",
+      "bug_class": "partition-boundary",
+      "surface": "liveness-responsibility-maps",
+      "evidence": "competence_gate_report.challenge.006",
+      "production_evidence_path": "packages/github-devloop/core/restart/responsibility_contract.lua",
+      "production_evidence": "invariant #6 forbids dependency release_gate defer on actionable ready",
+      "expected_error": "ready: invariant #6 forbids dependency release_gate defer on actionable ready",
+      "mutation_required": true
+    },
+    {
+      "id": "007-partial-write-idempotency-completeness",
+      "challenge_id": "007",
+      "bug_class": "partial-write-idempotency",
+      "surface": "durable-write-sequences",
+      "evidence": "competence_gate_report.challenge.007",
+      "production_evidence_path": "packages/github-devloop/core/restart.lua",
+      "production_evidence": "multi-effect row must declare a completeness derivation",
+      "expected_error": "ready: multi-effect row must declare a completeness derivation"
+    }
+  ]
+}
