@@ -1,7 +1,5 @@
 packages/autochrono/departments/propose/main.lua
 packages/autochrono/departments/reply/main.lua
-packages/consensus/departments/dead_letter/main.lua
-packages/consensus/departments/decide/main.lua
 packages/github-autochrono/departments/inbound_glue/main.lua
 packages/github-autochrono/departments/outbound_glue/main.lua
 packages/github-devloop/departments/comment_handoff/main.lua
