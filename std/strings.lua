@@ -43,6 +43,34 @@ function S.is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
 end
 
+function S.is_git_ref_safe(value)
+  local max_branch_len = 160
+  if not S.is_bounded_string(value, max_branch_len) then
+    return false
+  end
+  local text = tostring(value)
+  if text:sub(1, 1) == "-" or text:sub(1, 1) == "/" then
+    return false
+  end
+  if text:find("%.%.", 1, true) ~= nil
+    or text:find("//", 1, true) ~= nil
+    or text:find("@{", 1, true) ~= nil
+    or text:sub(-1) == "/"
+    or text:sub(-1) == "."
+    or text:sub(-5) == ".lock" then
+    return false
+  end
+  if text:find("[%s~^:?%[%]\\*]") ~= nil then
+    return false
+  end
+  for segment in text:gmatch("[^/]+") do
+    if segment == "." or segment == ".." or segment:sub(1, 1) == "." then
+      return false
+    end
+  end
+  return text:find("^[%w%._%-%/]+$") ~= nil
+end
+
 function S.decimal_checksum(value)
   local hash = 2166136261
   local text = tostring(value or "")

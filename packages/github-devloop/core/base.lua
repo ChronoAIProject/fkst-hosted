@@ -177,33 +177,7 @@ local function fix_reflection_checkpoint_round()
 end
 
 local is_path_safe_key = strings.is_path_safe_key
-
-local function is_git_ref_safe(value)
-  if not is_bounded_string(value, max_branch_len) then
-    return false
-  end
-  local text = tostring(value)
-  if text:sub(1, 1) == "-" or text:sub(1, 1) == "/" then
-    return false
-  end
-  if text:find("%.%.", 1, true) ~= nil
-    or text:find("//", 1, true) ~= nil
-    or text:find("@{", 1, true) ~= nil
-    or text:sub(-1) == "/"
-    or text:sub(-1) == "."
-    or text:sub(-5) == ".lock" then
-    return false
-  end
-  if text:find("[%s~^:?%[%]\\*]") ~= nil then
-    return false
-  end
-  for segment in text:gmatch("[^/]+") do
-    if segment == "." or segment == ".." or segment:sub(1, 1) == "." then
-      return false
-    end
-  end
-  return text:find("^[%w%._%-%/]+$") ~= nil
-end
+local is_git_ref_safe = strings.is_git_ref_safe
 
 local function is_git_sha(value)
   return is_bounded_string(value, max_sha_len) and tostring(value):find("^%x+$") ~= nil
