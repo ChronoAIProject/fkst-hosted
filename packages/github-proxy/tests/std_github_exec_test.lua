@@ -152,6 +152,28 @@ return {
     end
   end,
 
+  test_github_issue_add_sub_issue_builds_native_sub_issue_argv = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      if #calls == 1 then
+        return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
+      end
+      return { stdout = "ok", stderr = "", exit_code = 0 }
+    end)
+
+    handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
+
+    assert_argv_equal(calls[1].argv, { "gh", "api", "repos/owner/repo/issues/120" }, "sub_issue_rest_view")
+    assert_argv_equal(
+      calls[2].argv,
+      { "gh", "api", "--method", "POST", "repos/owner/repo/issues/979/sub_issues", "-F", "sub_issue_id=987654321" },
+      "issue_add_sub_issue"
+    )
+    assert(calls[1].timeout == 31)
+    assert(calls[2].timeout == 31)
+  end,
+
   test_github_entity_methods_build_argv = function()
     local calls = {}
     local handle = gh.new(function(opts)
