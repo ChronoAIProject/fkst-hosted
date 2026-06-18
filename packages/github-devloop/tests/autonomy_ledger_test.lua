@@ -10,6 +10,16 @@ local function mock_check_runs(json)
   })
 end
 
+local function trusted_comment(body, created_at, id)
+  return {
+    id = id,
+    body = body,
+    author_login = "fkst-test-bot",
+    created_at = created_at,
+    url = "https://github.example/owner/repo/issues/42#issuecomment-" .. tostring(id or 1),
+  }
+end
+
 return {
   test_valid_autonomous_merge_stays_pending_until_all_required_gates_pass = function()
     local gates = {
@@ -195,6 +205,129 @@ return {
     t.eq(fact.gates.post_merge_probe, "fail")
     t.eq(fact.audit_reason, "missing-status-rollup")
     t.eq(fact.audit_gates.post_merge_probe, "fail")
+  end,
+
+  test_autonomy_attempt_projection_counts_reattempts_from_existing_markers = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local first_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local second_version = first_version .. "/reimplement/2"
+    local head_sha = "def456"
+    local autonomy_record = {
+      proposal_id = proposal_id,
+      repo = "owner/repo",
+      issue_number = "42",
+      pr_number = "7",
+      version = second_version,
+      head_sha = head_sha,
+      task_class = "L2",
+      human_touch_count = 0,
+      rounds = 2,
+      retry_count = 0,
+      codex_calls = nil,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    }
+    local comments = {
+      trusted_comment(core.implement_attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
+      trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
+      trusted_comment(core.implement_attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
+      trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
+    }
+
+    local projection = core.autonomy_attempt_projection(comments, "owner/repo", "42")
+    t.eq(projection.total_attempts, 2)
+    t.eq(projection.outcomes.blocked, 1)
+    t.eq(projection.outcomes.merged, 1)
+    t.eq(projection.valid_merges, 1)
+    t.eq(projection.attempts[1].claim_marker_id, 1001)
+    t.eq(projection.attempts[1].outcome, "blocked")
+    t.eq(projection.attempts[2].claim_marker_id, 1003)
+    t.eq(projection.attempts[2].outcome, "merged")
+    t.eq(projection.attempts[2].autonomy_result.valid_autonomous_merge, "true")
+    t.eq(core.autonomy_attempt_denominator(comments, "owner/repo", "42"), 2)
+  end,
+
+  test_autonomy_attempt_projection_ignores_untrusted_attempt_markers = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local comments = {
+      {
+        body = core.implement_attempt_marker(proposal_id, version, 1, "100"),
+        author_login = "mallory",
+        created_at = "2026-06-03T01:00:00Z",
+      },
+      trusted_comment(core.implement_attempt_marker(proposal_id, version, 1, "100"), "2026-06-03T01:01:00Z", 1001),
+    }
+
+    local projection = core.autonomy_attempt_projection(comments, "owner/repo", "42")
+    t.eq(projection.total_attempts, 1)
+    t.eq(projection.attempts[1].claim_marker_id, 1001)
+  end,
+
+  test_autonomy_auditor_exposes_derived_attempt_projection = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local first_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local second_version = first_version .. "/reimplement/2"
+    local head_sha = "def456"
+    local autonomy_record = {
+      proposal_id = proposal_id,
+      repo = "owner/repo",
+      issue_number = "42",
+      pr_number = "7",
+      version = second_version,
+      head_sha = head_sha,
+      task_class = "L2",
+      human_touch_count = 0,
+      rounds = 2,
+      retry_count = 0,
+      codex_calls = nil,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    }
+    local comments = {
+      trusted_comment(core.implement_attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
+      trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
+      trusted_comment(core.implement_attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
+      trusted_comment(core.autonomy_result_marker(autonomy_record), "2026-06-03T01:31:00Z", 1005),
+      trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
+    }
+
+    local fact = core.autonomy_audited_result_fact(
+      comments,
+      proposal_id,
+      "7",
+      second_version,
+      head_sha,
+      {
+        repo = "owner/repo",
+        merge_commit_sha = head_sha,
+        status_check_rollup = {
+          { status = "COMPLETED", conclusion = "SUCCESS" },
+        },
+      }
+    )
+
+    t.eq(fact.avm_rate_denominator, 2)
+    t.eq(fact.avm_rate_numerator, 1)
+    t.eq(fact.attempt_projection.total_attempts, 2)
+    t.eq(fact.attempt_outcomes.blocked, 1)
+    t.eq(fact.attempt_outcomes.merged, 1)
+    t.eq(fact.attempts[1].claim_evidence.comment_id, 1001)
+    t.eq(fact.attempts[1].terminal_evidence.comment_id, 1002)
+    t.eq(fact.attempts[2].claim_evidence.comment_id, 1003)
+    t.eq(fact.attempts[2].terminal_evidence.comment_id, 1004)
   end,
 
   test_task_class_uses_explicit_label_before_title_fallback = function()
