@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
 import re
@@ -17,6 +19,11 @@ REQUIRED_FLAG = "migration/coverage-uncovered.required"
 DEFAULT_ARTIFACTS = (".fkst/run/lua-coverage/coverage.json", ".fkst/run/coverage.json")
 HASH_RE = re.compile(r"[0-9a-f]{8,128}")
 BASE_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/\-]*")
+LUA_KEYWORDS = {
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+    "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then",
+    "true", "until", "while",
+}
 
 
 @dataclass(frozen=True, order=True)
@@ -131,6 +138,174 @@ def line_text(entry: Any, indexed: dict[int, dict[str, Any]], line: int) -> str:
     return ""
 
 
+def normalize_source_line(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip())
+
+
+def normalized_source_hash(text: str) -> str:
+    return hashlib.sha256(normalize_source_line(text).encode("utf-8")).hexdigest()[:16]
+
+
+def without_lua_string_literals(text: str) -> str:
+    result: list[str] = []
+    quote: str | None = None
+    escape = False
+    for char in text:
+        if quote is not None:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == quote:
+                quote = None
+            result.append(" ")
+        elif char in {"'", '"'}:
+            quote = char
+            result.append(" ")
+        else:
+            result.append(char)
+    return "".join(result)
+
+
+def strip_lua_line_comment(text: str) -> str:
+    candidate = without_lua_string_literals(text)
+    idx = candidate.find("--")
+    if idx == -1:
+        return text
+    return text[:idx]
+
+
+def is_candidate_executable_lua_line(text: str) -> bool:
+    stripped = normalize_source_line(strip_lua_line_comment(text))
+    if stripped == "":
+        return False
+    if stripped in {"end", "else", "then", "do", "until"}:
+        return False
+    if stripped in {"end,", "end)", "end}", "else,"}:
+        return False
+    if stripped in {")", "}", "},", "),"}:
+        return False
+    if stripped.startswith("--"):
+        return False
+    if stripped in LUA_KEYWORDS:
+        return False
+    return True
+
+
+def source_lines_for_file(root: Path, file: str) -> list[str]:
+    path = root / file
+    if not path.is_file():
+        raise ValueError(f"coverage artifact references missing source file: {file}")
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def candidate_lines(root: Path, file: str, lines: list[str]) -> set[int]:
+    return {
+        idx for idx, text in enumerate(lines, start=1)
+        if is_candidate_executable_lua_line(text)
+    }
+
+
+def coverage_map_files(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if "files" in data:
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for file, item in data.items():
+        if isinstance(file, str) and isinstance(item, dict):
+            result[file] = item
+    return result
+
+
+def repository_coverage_path(file: str, package_name: str | None = None) -> str:
+    if is_production_lua_path(file):
+        return file
+    if package_name is None or file.startswith("../") or file.startswith("/"):
+        return file
+    if file.startswith("std/"):
+        return file
+    return f"packages/{package_name}/{file}"
+
+
+def uncovered_from_covered_line_map(
+    root: Path,
+    data: dict[str, Any],
+    package_name: str | None = None,
+) -> dict[CoverageKey, UncoveredLine]:
+    if not data:
+        raise ValueError("coverage artifact has no covered-line metadata")
+    result: dict[CoverageKey, UncoveredLine] = {}
+    for artifact_file, file_data in coverage_map_files(data).items():
+        file = repository_coverage_path(artifact_file, package_name)
+        if not is_production_lua_path(file):
+            continue
+        covered = covered_line_set(file_data.get("covered_lines", file_data.get("covered")))
+        lines = source_lines_for_file(root, file)
+        for idx in sorted(candidate_lines(root, file, lines)):
+            if idx in covered:
+                continue
+            text = lines[idx - 1]
+            key = CoverageKey(file=file, line=idx, normalized_line_hash=normalized_source_hash(text))
+            result[key] = UncoveredLine(key=key, text=normalize_source_line(text))
+    return result
+
+
+def all_production_lua_paths(root: Path) -> list[str]:
+    paths: list[str] = []
+    for base in ("packages", "std"):
+        start = root / base
+        if not start.exists():
+            continue
+        for path in start.rglob("*.lua"):
+            if path.is_symlink():
+                continue
+            relpath = path.relative_to(root).as_posix()
+            if is_production_lua_path(relpath):
+                paths.append(relpath)
+    return sorted(paths)
+
+
+def uncovered_from_covered_sets(
+    root: Path,
+    covered_by_file: dict[str, set[int]],
+) -> dict[CoverageKey, UncoveredLine]:
+    if not covered_by_file:
+        raise ValueError("coverage artifact has no covered-line metadata")
+    result: dict[CoverageKey, UncoveredLine] = {}
+    for file in all_production_lua_paths(root):
+        lines = source_lines_for_file(root, file)
+        covered = covered_by_file.get(file, set())
+        for idx in sorted(candidate_lines(root, file, lines)):
+            if idx in covered:
+                continue
+            text = lines[idx - 1]
+            key = CoverageKey(file=file, line=idx, normalized_line_hash=normalized_source_hash(text))
+            result[key] = UncoveredLine(key=key, text=normalize_source_line(text))
+    return result
+
+
+def covered_sets_from_artifact(path: Path, package_name: str | None = None) -> dict[str, set[int]]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError("coverage artifact must be a JSON object")
+    result: dict[str, set[int]] = {}
+    for artifact_file, file_data in coverage_map_files(data).items():
+        file = repository_coverage_path(artifact_file, package_name)
+        if not is_production_lua_path(file):
+            continue
+        result.setdefault(file, set()).update(
+            covered_line_set(file_data.get("covered_lines", file_data.get("covered")))
+        )
+    return result
+
+
+def merge_covered_sets(artifacts: list[tuple[Path, str | None]]) -> dict[str, set[int]]:
+    covered_by_file: dict[str, set[int]] = {}
+    for artifact, package_name in artifacts:
+        for file, covered in covered_sets_from_artifact(artifact, package_name).items():
+            covered_by_file.setdefault(file, set()).update(covered)
+    return covered_by_file
+
+
 def line_entries(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -194,7 +369,11 @@ def coverage_files(data: dict[str, Any]) -> list[dict[str, Any]]:
     return []
 
 
-def uncovered_from_artifact(path: Path) -> dict[CoverageKey, UncoveredLine]:
+def uncovered_from_artifact(
+    path: Path,
+    root: Path | None = None,
+    package_name: str | None = None,
+) -> dict[CoverageKey, UncoveredLine]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("coverage artifact must be a JSON object")
@@ -202,7 +381,14 @@ def uncovered_from_artifact(path: Path) -> dict[CoverageKey, UncoveredLine]:
     files = coverage_files(data)
     top_level_missing = line_entries(data.get("missing_lines", data.get("uncovered_lines")))
     if not files and not top_level_missing:
-        raise ValueError("coverage artifact has no engine-authored Lua line metadata")
+        if root is None:
+            raise ValueError("coverage artifact has no engine-authored Lua line metadata")
+        mapped = uncovered_from_covered_line_map(root, data, package_name)
+        if not mapped and data:
+            return {}
+        if not mapped and not data:
+            raise ValueError("coverage artifact has no engine-authored Lua line metadata")
+        return mapped
     for item in top_level_missing:
         if not isinstance(item, dict):
             raise ValueError("top-level uncovered lines must include file metadata")
@@ -327,6 +513,62 @@ def ratchet_messages(
     return messages
 
 
+def allowlist_entry(key: CoverageKey) -> dict[str, Any]:
+    return {
+        "file": key.file,
+        "line": key.line,
+        "normalized_line_hash": key.normalized_line_hash,
+        "reason": "baseline",
+    }
+
+
+def allowlist_text(uncovered: dict[CoverageKey, UncoveredLine]) -> str:
+    lines = [
+        json.dumps(allowlist_entry(key), separators=(",", ":"), ensure_ascii=False)
+        for key in sorted(uncovered)
+    ]
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def write_uncovered_baseline(
+    uncovered: dict[CoverageKey, UncoveredLine],
+    allowlist_path: Path,
+) -> int:
+    allowlist_path.parent.mkdir(parents=True, exist_ok=True)
+    allowlist_path.write_text(allowlist_text(uncovered), encoding="utf-8")
+    return len(uncovered)
+
+
+def write_current_uncovered(
+    coverage_json: Path,
+    allowlist_path: Path,
+    root: Path | None = None,
+    package_name: str | None = None,
+) -> int:
+    uncovered = uncovered_from_artifact(coverage_json, root, package_name)
+    return write_uncovered_baseline(uncovered, allowlist_path)
+
+
+def write_current_uncovered_from_covered_sets(
+    covered_by_file: dict[str, set[int]],
+    allowlist_path: Path,
+    root: Path,
+) -> int:
+    uncovered = uncovered_from_covered_sets(root, covered_by_file)
+    return write_uncovered_baseline(uncovered, allowlist_path)
+
+
+def parse_covered_json_arg(value: str) -> tuple[Path, str | None]:
+    if "=" not in value:
+        return Path(value), None
+    package_name, path = value.split("=", 1)
+    if package_name == "" or path == "":
+        raise ValueError("--covered-json entries must be PATH or PACKAGE=PATH")
+    return Path(path), package_name
+
+
 def warn_disabled(message: str) -> None:
     print(f"warning: Lua coverage ratchet not enabled (no {REQUIRED_FLAG}); {message}", file=sys.stderr)
 
@@ -349,7 +591,7 @@ def repository_messages(root: Path) -> list[str]:
             return []
         return [f"Lua coverage artifact does not exist: {path}"]
     try:
-        uncovered = uncovered_from_artifact(path)
+        uncovered = uncovered_from_artifact(path, root)
         if not required:
             if uncovered:
                 warn_disabled(f"{len(uncovered)} uncovered line(s) would block once enabled")
@@ -370,3 +612,65 @@ def repository_messages(root: Path) -> list[str]:
         messages.append("cannot resolve coverage base allowlist to enforce shrink-only ratchet; ensure CI provides GITHUB_BASE_REF or FKST_LUA_COVERAGE_BASE_REF")
     messages.extend(ratchet_messages(uncovered, allowlist, base_allowlist, base_ref or "base"))
     return messages
+
+
+def cli(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--coverage-json",
+        type=Path,
+        help="engine-authored coverage.json to read; defaults to FKST_LUA_COVERAGE_JSON or the standard artifact path",
+    )
+    parser.add_argument(
+        "--write-current-uncovered",
+        type=Path,
+        metavar="ALLOWLIST_PATH",
+        help="write the current uncovered production-Lua line baseline as JSONL",
+    )
+    parser.add_argument(
+        "--package-name",
+        help="map package-root-relative coverage paths to packages/<name>/... while leaving std/... unchanged",
+    )
+    parser.add_argument(
+        "--covered-json",
+        action="append",
+        default=[],
+        metavar="[PACKAGE=]COVERAGE_JSON",
+        help="merge a pinned-engine covered-lines artifact; PACKAGE maps relative paths to packages/<PACKAGE>/...",
+    )
+    args = parser.parse_args(argv)
+
+    if args.write_current_uncovered is None:
+        messages = repository_messages(Path.cwd())
+        for message in messages:
+            print(message)
+        return 1 if messages else 0
+
+    try:
+        if args.covered_json:
+            artifacts = [parse_covered_json_arg(value) for value in args.covered_json]
+            count = write_current_uncovered_from_covered_sets(
+                merge_covered_sets(artifacts),
+                args.write_current_uncovered,
+                Path.cwd(),
+            )
+        else:
+            coverage_json = args.coverage_json or artifact_path(Path.cwd())
+            if coverage_json is None:
+                print("error: Lua coverage artifact was not found", file=sys.stderr)
+                return 1
+            count = write_current_uncovered(
+                coverage_json,
+                args.write_current_uncovered,
+                Path.cwd(),
+                args.package_name,
+            )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        print(f"error: could not write current uncovered allowlist: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {count} uncovered line(s) to {args.write_current_uncovered}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(cli())
