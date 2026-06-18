@@ -16,6 +16,7 @@ M.spec = {
     "devloop_reviewing",
   },
   stall_window = "10m",
+  retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
 local function raise_impl_failed(repo, issue_number, ready, reason, detail, attempt)

@@ -11,6 +11,7 @@ M.spec = {
     "devloop_review_meta",
   },
   stall_window = "10m",
+  retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
 local function branch_worktree(repo, issue_number, version, branch)

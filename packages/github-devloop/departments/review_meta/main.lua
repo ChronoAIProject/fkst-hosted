@@ -11,6 +11,7 @@ M.spec = {
     "devloop_fixing",
   },
   stall_window = "2m",
+  retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
 function pipeline(event)
