@@ -59,11 +59,14 @@ end
 
 local function plan_for(ratchet)
   local result = exec_argv({
-    "python3",
-    "scripts/ratchet_migration_slicer.py",
-    ratchet.ratchet,
-    "--json",
-  }, 120)
+    argv = {
+      "python3",
+      "scripts/ratchet_migration_slicer.py",
+      ratchet.ratchet,
+      "--json",
+    },
+    timeout = 120,
+  })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     error("github-devloop: ratchet migration slicer failed for " .. tostring(ratchet.ratchet))
   end
