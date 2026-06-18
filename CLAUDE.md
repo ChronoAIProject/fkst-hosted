@@ -180,6 +180,15 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 **这正是本仓所有 ratchet/conformance 的同一形状**，本节给它们命名共同本质：G-ADAPTER（gh/git 只能经 `std.github`/`std.git` argv，裸 gh/git=0）、G-DEDUP（一份 canonical body，禁字节级 clone）、强制 saga（唯一形状 `std.saga.department`）、god-state（一状态一职责）、活性契约（每个非终止态必声明 budget+watchdog）、ports（唯一 egress 路径）——全是「唯一确定一种写法 + 机械禁止旁路」。
 
+**机械实现「唯一写法」的强度梯度：PREVENT > DETECT，scan 是兜底不是终局。** 建 harness 先问「能不能让旁路**根本拿不到原语 / 发不出 effect**」，而不是先写 grep。按旁路性质选档，强→弱：
+
+- **④ capability restriction（最强：旁路原语不在业务代码 reach 内）**——可绕过的 primitive 只注入给 canonical path，业务层够不着 → 旁路**写不出**。判据：旁路 = 调用某**共享原语**。已实现例：`std.ports` 持有 `gh/git` argv 构造权，业务 dept 拿不到裸 gh/git。目标形态：`M.spec.produces` 成为 `raise()` 的**能力授予**（dept 只能 raise 自己声明的队列）。
+- **③ runtime guard on schema grant（动态语言里的实际 PREVENT）**——effect 边界按 schema 授权，未授权 **fail-closed**：旁路语法还能写，但 effect 发不出。判据：旁路 = 需授权的 **effect**。如引擎强制 `raise(queue) ⊆ 当前 dept 的 produces`，未声明即 fail-closed（且 raised 事件传输须不可被业务代码伪造，否则 guard 可被绕）。
+- **② declarative schema / typed table（结构上不可表达）**——契约写成**数据**，只有 canonical 形状有字段，缺字段 / 多 producer / 缺 liveness 行直接 conformance 红。判据：旁路 = **数据的结构属性**。已实现例：`restart_transition_table`、`std.saga.department(spec, handlers)`、responsibility signature、liveness contract。**别为此造 YAML / 外部 DSL——`M.spec`/Lua table + conformance 本身就是 schema-checked DSL**，加序列化边界只增成本不增强制。
+- **① conformance scan / ratchet（DETECT，仅迁移期 + 防回归兜底）**——grep/AST 抓**已知**旁路形状，allowlist shrink-only 到 0。旁路仍可写、false negative 永远可能。判据：旁路 = emergent 跨文件 / 任意源码属性（字节级 clone、文本 smell），天然降不到 ②③④。
+
+**铁律：能表达成 ②③④ 的契约不得长期停在 ① scan。** scan 的职责是**暴露迁移债 + 防回归**，不是权限边界——把它当主防线，就是「编程语言太灵活、谁都能写另一种写法」的根源。判一个旁路该爬到哪档：调用共享原语→④收紧原语（如 forward-direct-raise 应经 produces 能力化，而非永久停在 scan）；数据结构属性→②schema；需授权的 effect→③runtime guard；任意源码 emergent→①scan 兜底。注意粒度：「一队列一 producer」只施于 **lifecycle/authority 队列**，telemetry/fanout/shared 队列可合法多 producer；同一队列若有 forward（写确认后触发）vs redrive（读到已可见 marker 后重投）两种权限语义，队列级能力分不出二者，需 queue 拆分 / typed egress 或保留 schema+scan backstop 区分。引擎层能力化（`raise⊆produces` fail-closed + 不可伪造的 raised 传输）属 substrate，不在包侧硬造。
+
 **纪律**：建 harness 时，问题不止「prior art 是什么」，更是「**这件事的唯一规范写法是什么、我如何让其他每一种写法在机械上不可表示（CI 红）**」。同一目的存在多种并存写法本身就是 smell——**先收敛成一种，再锁死旁路**。新增能力时同步给出「唯一写法 + 旁路禁止的不变式」，否则旁路迟早重新长出来、悄悄收回隐形税（实证：竞态旁路一年都没人发现，因为它「能用」）。
 
 ## 按架构原则自主决策，不为技术选择请示（decide by principle, don't ask）

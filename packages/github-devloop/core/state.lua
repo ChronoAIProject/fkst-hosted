@@ -254,6 +254,9 @@ local function compare_version_keys(left, right)
   if left.ready_split_n ~= right.ready_split_n then
     return left.ready_split_n > right.ready_split_n and 1 or -1
   end
+  if left.stage_rank ~= right.stage_rank then
+    return left.stage_rank > right.stage_rank and 1 or -1
+  end
   return 0
 end
 
@@ -406,10 +409,7 @@ local function compare_state_marker(a, b)
   end
   local a_key = version_sort_key(a.version, a.stage_rank)
   local b_key = version_sort_key(b.version, b.stage_rank)
-  if b_key.stage_rank ~= a_key.stage_rank then
-    return b_key.stage_rank > a_key.stage_rank
-  end
-  return false
+  return compare_version_keys(b_key, a_key) > 0
 end
 
 function M.comment_bodies(comments)
