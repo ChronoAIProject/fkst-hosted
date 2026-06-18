@@ -1,8 +1,7 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
     "devloop_reconcile",
@@ -14,7 +13,11 @@ M.spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
-function pipeline(event)
+local function loop_done(_event)
+  return false
+end
+
+local function pipeline(event)
   local unresolved = event.payload or {}
   if not core.is_supported_unresolved(unresolved) then
     core.log_entry("loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
@@ -122,6 +125,9 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("loop", pipeline)
-
-return M
+return saga.department(spec, {
+  done = loop_done,
+  act = pipeline,
+  wrap = core.wrap_pipeline_failure,
+  name = "loop",
+})

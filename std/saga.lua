@@ -46,6 +46,7 @@ local function spec_from_spec(spec)
     retry = spec.retry,
     fanout = spec.fanout,
     ephemeral = spec.ephemeral,
+    graph_json = spec.graph_json,
   }
 end
 
