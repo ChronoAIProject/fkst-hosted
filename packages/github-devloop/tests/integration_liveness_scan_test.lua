@@ -233,7 +233,9 @@ local function timeout_state_comment(state_name, state_version, created_at)
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
 end
-
+local function ready_state_comment(comment_id, state_version, created_at)
+  return { id = comment_id, body = core.state_marker(proposal_id, "ready", state_version, "result-marker,ready-label,devloop-ready"), author_login = "fkst-test-bot", created_at = created_at or "2026-06-03T00:00:00Z" }
+end
 local function timeout_attempt_comment(state_name, state_version, round, created_at)
   return {
     body = core.timeout_attempt_marker(proposal_id, state_version, state_name, round, core.issue_source_ref(repo, 42)),
@@ -480,18 +482,17 @@ return {
     mock_blocked_by(42, {})
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
-      timeout_state_comment("ready", version),
-    })
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", { ready_state_comment("IC_ready_timeout", version) })
     mock_empty_pr_list()
-
     local result = run_liveness_scan("liveness-scan-ready-timeout-redrive")
     t.eq(result.exit_code, 0)
     assert_no_observe_reinject(result)
     local ready_raise = find_raise(result.raises, "devloop_ready")
     t.is_true(ready_raise ~= nil)
     t.eq(ready_raise.payload.proposal_id, proposal_id)
-    t.eq(ready_raise.payload.dedup_key, "ready/" .. version)
+    t.is_true(ready_raise.payload.dedup_key:find("/redrive/ready/1", 1, true) ~= nil)
+    t.eq(ready_raise.payload.ready_hand_off.comment_id, "IC_ready_timeout")
+    t.eq(ready_raise.payload.ready_hand_off.marker_version, version)
     t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
@@ -619,9 +620,7 @@ return {
   end,
 
   test_liveness_scan_timeout_attempt_climbs_to_escalation_across_frozen_sweeps = function()
-    local comments = {
-      timeout_state_comment("ready", version, "2026-06-03T00:00:00Z"),
-    }
+    local comments = { ready_state_comment("IC_ready_timeout_sweep", version, "2026-06-03T00:00:00Z") }
     for sweep = 1, 3 do
       mock_blocked_by(42, {})
       mock_repo()
@@ -629,14 +628,14 @@ return {
       mock_issue_list({ { number = 42, state = "open", updated_at = updated_at } })
       mock_issue_state_number(42, { "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", comments, updated_at)
       mock_empty_pr_list()
-
       local result = run_liveness_scan("liveness-scan-ready-timeout-sweep-" .. tostring(sweep))
       t.eq(result.exit_code, 0)
       assert_no_observe_reinject(result)
       if sweep < 3 then
         local ready_raise = find_raise(result.raises, "devloop_ready")
         t.is_true(ready_raise ~= nil)
-        t.eq(ready_raise.payload.dedup_key, "ready/" .. version)
+        t.is_true(ready_raise.payload.dedup_key:find("/redrive/ready/" .. tostring(sweep), 1, true) ~= nil)
+        t.eq(ready_raise.payload.ready_hand_off.comment_id, "IC_ready_timeout_sweep")
         t.eq(core.version_timeout_round(ready_raise.payload.dedup_key, "ready"), 0)
         local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
         t.is_true(attempt ~= nil)

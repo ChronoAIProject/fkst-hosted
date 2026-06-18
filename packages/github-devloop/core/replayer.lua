@@ -454,7 +454,6 @@ local function replay_implementing(dept, issue, state, row, facts)
   local payload = M.build_devloop_ready_payload({
     proposal_id = proposal_id,
     dedup_key = M.ready_payload_inner_version(state.version),
-    impl_retry_attempt = reimplement_attempt,
     source_ref = issue.source_ref,
     impl_retry_attempt = M.implementation_retry_attempt(state.version),
   })
@@ -476,19 +475,16 @@ local function replay_impl_failed(dept, issue, state, row, facts)
     proposal_id = proposal_id,
     ["impl-failure"] = failure,
   })
-  local retry_state = { state = "ready", version = fields.dedup_key }
-  local replay_facts = {}
-  for key, value in pairs(facts or {}) do
-    replay_facts[key] = value
-  end
-  replay_facts.current = replay_facts.current or { comments = {}, labels = {} }
-  replay_facts.ready_payload = M.build_devloop_ready_payload({
+  local payload = M.build_devloop_ready_payload({
     proposal_id = fields.proposal_id,
     dedup_key = M.ready_payload_inner_version(fields.dedup_key),
     source_ref = fields.source_ref,
     impl_retry_attempt = M.next_impl_retry_attempt(failure),
   })
-  return M.replay_ready_state(dept, issue, retry_state, M.restart_transition_row("ready"), replay_facts)
+  M.log_cas_decision(dept, proposal_id, state, "impl-failed", "implementing", "applied(replay)", "retryable implementation failure is below the retry ceiling")
+  return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
+    { queue = "devloop_ready", payload = payload },
+  })
 end
 
 local function replay_fixing_to_reviewing(dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)

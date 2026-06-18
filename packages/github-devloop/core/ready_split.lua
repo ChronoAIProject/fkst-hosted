@@ -5,12 +5,13 @@ function S.install(M)
 local dependency_gate_rederive = true
 
 function M.build_ready_split_canonicalized_comment_request(repo, issue_number, proposal_id, from_version, to_state, to_version, gate, source_ref)
+  local state_effects = to_state == "ready" and "result-marker,ready-label,devloop-ready" or "ready-split-canonicalized"
   local markers = M.ready_split_canonicalized_marker(proposal_id, from_version, to_version, to_state, gate and gate.reason or "ready_split_rederive")
-    .. "\n" .. M.state_marker(proposal_id, to_state, to_version, "ready-split-canonicalized")
+    .. "\n" .. M.state_marker(proposal_id, to_state, to_version, state_effects)
   if to_state == "dependency_wait" then
     markers = markers .. "\n" .. M.dependency_wait_marker(proposal_id, to_version, gate and gate.unmet or {}, gate and gate.kind or "waiting", gate and gate.reason or "waiting-on-dependency")
   end
-  return M.attach_issue_claim({
+  local request = M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -20,6 +21,16 @@ function M.build_ready_split_canonicalized_comment_request(repo, issue_number, p
     dedup_key = M._dedup_key({ "ready-split", "canonicalized", tostring(proposal_id), tostring(from_version), tostring(to_version) }),
     source_ref = M.normalize_source_ref(source_ref),
   }, source_ref)
+  if to_state == "ready" then
+    request.handoff = {
+      kind = "github-devloop.ready",
+      proposal_id = proposal_id,
+      version = to_version,
+      marker_version = to_version,
+      source_ref = M.normalize_source_ref(source_ref),
+    }
+  end
+  return request
 end
 
 function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
@@ -53,7 +64,6 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     table.insert(raised, "github-proxy.github_issue_label_request")
   else
     remove_labels = { M._blocked_on_dependency_label }
-    table.insert(raised, "devloop_ready")
     if M.has_label(current.labels, M._blocked_on_dependency_label) then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
@@ -91,11 +101,6 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
       issue.source_ref
     ))
   end
-  M.log_raise(dept, proposal_id, "devloop_ready", M.build_devloop_ready_payload({
-    proposal_id = proposal_id,
-    dedup_key = to_version,
-    source_ref = issue.source_ref,
-  }))
   return true
 end
 
@@ -107,9 +112,9 @@ local function replay_fields(M, row, state, issue, proposal_id)
   })
 end
 
-local function raise_dependency_release(M, dept, issue, proposal_id, state, current, ready_payload, command_comment_request, gate)
+local function raise_dependency_release(M, dept, issue, proposal_id, state, current, command_comment_request, gate)
   local ready_version = M.ready_split_version(state.version)
-  local raised = { "github-proxy.github_issue_comment_request", "devloop_ready" }
+  local raised = { "github-proxy.github_issue_comment_request" }
   local has_blocked_label = M.has_label(current.labels, M._blocked_on_dependency_label)
   local release_fact = M.dependency_release_fact(current.comments, proposal_id, state.version)
   if release_fact == nil then table.insert(raised, "github-proxy.github_issue_comment_request") end
@@ -133,12 +138,6 @@ local function raise_dependency_release(M, dept, issue, proposal_id, state, curr
       M._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }), issue.source_ref
     ))
   end
-  ready_payload.dedup_key = M.build_devloop_ready_payload({
-    proposal_id = proposal_id,
-    dedup_key = ready_version,
-    source_ref = issue.source_ref,
-  }).dedup_key
-  M.log_raise(dept, proposal_id, "devloop_ready", ready_payload)
   return true
 end
 
@@ -178,12 +177,6 @@ end
 
 function M.replay_dependency_wait_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
-  local fields = replay_fields(M, row, state, issue, proposal_id)
-  local ready_payload = facts.ready_payload or M.build_devloop_ready_payload({
-    proposal_id = fields.proposal_id,
-    dedup_key = fields.dedup_key,
-    source_ref = fields.source_ref,
-  })
   local gate = facts.dependency_gate or M.dependency_gate(issue.repo, issue.number, {
     proposal_id = proposal_id,
     version = state.version,
@@ -196,7 +189,11 @@ function M.replay_dependency_wait_state(dept, issue, state, row, facts)
   local command_comment_request = facts.command_comment_request or (facts.command ~= nil
     and M.build_operator_issue_reready_comment_request(issue.repo, issue.number, facts.command, "dependency-release", issue.source_ref)
     or nil)
-  return raise_dependency_release(M, dept, issue, proposal_id, state, facts.current, ready_payload, command_comment_request, gate)
+  return raise_dependency_release(M, dept, issue, proposal_id, state, facts.current, command_comment_request, gate)
+end
+
+local function next_ready_redrive_version(marker_version, round)
+  return tostring(marker_version or "") .. "/redrive/ready/" .. tostring(round)
 end
 
 function M.replay_ready_state(dept, issue, state, row, facts)
@@ -223,10 +220,28 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     ))
     return true
   end
-  local ready_payload = facts.ready_payload or M.build_devloop_ready_payload({
+  local ready_comment_id = M.ready_hand_off_comment_id(
+    facts.current.comments,
+    proposal_id,
+    state.version
+  )
+  if ready_comment_id == nil then
+    M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "skip-pending(ready-marker-comment-not-visible)", "trusted ready state marker comment id is not visible")
+    return false
+  end
+  local ready_redrive_round = (M.timeout_attempt_round(
+    facts.current.comments,
+    proposal_id,
+    state.version,
+    row.from_state
+  ) or 0) + 1
+  local ready_payload = M.build_devloop_ready_payload({
     proposal_id = fields.proposal_id,
-    dedup_key = fields.dedup_key,
+    dedup_key = next_ready_redrive_version(state.version, ready_redrive_round),
     source_ref = fields.source_ref,
+    effect_version = state.version,
+    include_ready_hand_off = true,
+    ready_comment_id = ready_comment_id,
   })
   local raised = { "devloop_ready" }
   local command_comment_request = nil

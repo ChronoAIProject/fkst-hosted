@@ -370,7 +370,11 @@ return {
     local command_response = find_issue_comment_raise(result.raises, "operator command accepted: reready")
     t.is_true(command_response ~= nil)
     t.is_true(command_response.payload.body:find('outcome="applied"', 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "devloop_ready") ~= nil)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
+      return type(payload.handoff) == "table"
+        and payload.handoff.kind == "github-devloop.ready"
+    end) ~= nil)
     t.is_true(find_raise(result.raises, "github-proxy.github_issue_label_request") ~= nil)
   end,
 

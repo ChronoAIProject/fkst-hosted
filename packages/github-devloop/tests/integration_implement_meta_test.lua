@@ -730,6 +730,41 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
+  test_implement_redrive_hand_off_uses_original_ready_marker_version = function()
+    local original_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local redrive = core.build_devloop_ready_payload({
+      proposal_id = ready().proposal_id,
+      dedup_key = original_version .. "/redrive/ready/2",
+      source_ref = source_ref(),
+      effect_version = original_version,
+      include_ready_hand_off = true,
+      ready_comment_id = "IC_ready_original",
+    })
+    local branch = deterministic_branch_for(redrive)
+    local marker = core.state_marker(redrive.proposal_id, "ready", original_version, "result-marker,ready-label,devloop-ready")
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_original'", {
+      stdout = '{"body":"' .. json_string(marker) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+    mock_fresh_implement_worktree()
+    mock_implement_codex(0, "implemented")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+
+    local result = run_implement(redrive, opts("implement-ready-redrive-original-hand-off"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 5)
+    assert_implement_attempt(result.raises, redrive)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
+    assert_open_pr_kickoff(result.raises, redrive, branch, "def456")
+    t.eq(count_calls("repos/owner/repo/issues/comments/IC_ready_original"), 1)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
   test_implement_retry_ignores_ready_hand_off_before_marker_visibility = function()
     local event = ready({
       impl_retry_attempt = 2,

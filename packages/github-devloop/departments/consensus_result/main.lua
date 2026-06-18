@@ -7,7 +7,6 @@ local spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
-    "devloop_ready",
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
@@ -16,15 +15,6 @@ local spec = {
 
 local function result_version(reached)
   return tostring(reached.effect_version or reached.dedup_key)
-end
-
-local function with_effect_version(reached, version)
-  local copy = {}
-  for key, value in pairs(reached) do
-    copy[key] = value
-  end
-  copy.dedup_key = version
-  return copy
 end
 
 local function dependency_hold_effects_complete(current, reached, version)
@@ -91,7 +81,6 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
     if dependency_release_comment_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_comment_request")
     end
-    table.insert(raised, "devloop_ready")
   else
     if dependency_comment_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_comment_request")
@@ -122,8 +111,6 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
     core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_release_comment_request)
   end
   core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready", reason, "result effects complete or recoverable")
-  local versioned_reached = with_effect_version(reached, version)
-  core.log_raise("consensus_result", reached.proposal_id, "devloop_ready", core.build_devloop_ready_payload(versioned_reached))
 end
 
 local function make_department(ports)

@@ -169,12 +169,24 @@ return {
   end,
 
   test_observe_re_derives_labels_and_skips_stale_enabled_payload = function()
-    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" })
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local marker_version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
+      {
+        id = "IC_ready_visible",
+        body = core.state_marker(proposal_id, "ready", marker_version, "result-marker,ready-label,devloop-ready"),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
+    })
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled" } }), opts("observe-stale-payload"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
-    t.eq(find_raise(result.raises, "devloop_ready").payload.schema, "github-devloop.ready.v1")
+    local ready = find_raise(result.raises, "devloop_ready").payload
+    t.eq(ready.schema, "github-devloop.ready.v1")
+    t.eq(ready.ready_hand_off.comment_id, "IC_ready_visible")
+    t.eq(ready.ready_hand_off.marker_version, marker_version)
+    t.is_true(ready.dedup_key:find("/redrive/ready/1", 1, true) ~= nil)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -471,10 +483,9 @@ return {
     mock_issue_result({ "fkst-dev:thinking" })
     local result = run_result(reached(), opts("result-approve"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
-    local ready_raise = find_raise(result.raises, "devloop_ready")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.eq(label_raise.payload.remove_labels[1], "fkst-dev:thinking")
     t.eq(#label_raise.payload.remove_labels, 12)
@@ -483,9 +494,8 @@ return {
     t.eq(comment_raise.payload.issue_number, "42")
     t.is_true(comment_raise.payload.body:find("github-devloop decision: approve", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('decision="approve"', 1, true) ~= nil)
-    t.eq(ready_raise.payload.schema, "github-devloop.ready.v1") t.eq(ready_raise.payload.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
-    t.is_nil(ready_raise.payload.ready_hand_off) t.eq(comment_raise.payload.handoff.kind, "github-devloop.ready")
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    t.eq(comment_raise.payload.handoff.kind, "github-devloop.ready")
   end,
 
   test_consensus_result_threads_framing_to_ready_and_implement_prompt = function()
@@ -494,13 +504,14 @@ return {
       framing = "DO X ONLY",
     }), opts("result-approve-framing"))
     t.eq(result.exit_code, 0)
-    local ready_raise = find_raise(result.raises, "devloop_ready")
-    t.eq(ready_raise.payload.framing, "DO X ONLY")
+    local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    t.eq(comment_raise.payload.handoff.kind, "github-devloop.ready")
 
-    local prompt = core.build_implement_prompt(ready_raise.payload.proposal_id, {
+    local prompt = core.build_implement_prompt(reached().proposal_id, {
       title = "Fix parser",
       body = "Expected behavior",
-    }, ready_raise.payload.framing)
+    }, "DO X ONLY")
     t.is_true(prompt:find("Agreed consensus framing", 1, true) ~= nil)
     t.is_true(prompt:find("Implement EXACTLY within this", 1, true) ~= nil)
     t.is_true(prompt:find("DO X ONLY", 1, true) ~= nil)
@@ -520,7 +531,7 @@ return {
 
     local result = run_result(event, opts("result-body-marker-injection"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(comment_raise.payload.body:find(forged, 1, true) == nil, true)
@@ -541,12 +552,12 @@ return {
 
     local stale_ready = run_result(reached(), opts("result-approve-stale-ready"))
     t.eq(stale_ready.exit_code, 0)
-    t.eq(#stale_ready.raises, 3)
+    t.eq(#stale_ready.raises, 2)
     local label_raise = find_raise(stale_ready.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
     t.eq(#label_raise.payload.remove_labels, 12)
     t.is_true(find_raise(stale_ready.raises, "github-proxy.github_issue_comment_request") ~= nil)
-    t.is_true(find_raise(stale_ready.raises, "devloop_ready") ~= nil)
+    t.eq(find_raise(stale_ready.raises, "devloop_ready"), nil)
 
     local completed = reached()
     local marker = core.result_marker(completed.proposal_id, completed.decision, completed.dedup_key)
@@ -622,10 +633,10 @@ return {
 
     local result = run_result(current, opts("result-marker"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2) t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
+    t.eq(#result.raises, 1) t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
-    t.is_true(find_raise(result.raises, "devloop_ready") ~= nil)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
   test_consensus_result_skips_when_terminal_label_and_result_marker_present = function()
@@ -665,11 +676,11 @@ return {
 
     local result = run_result(current, opts("result-older-same-direction-marker"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
     t.is_true(comment_raise.payload.dedup_key:find("/v2", 1, true) ~= nil)
-    t.is_true(find_raise(result.raises, "devloop_ready") ~= nil)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
 
   test_consensus_result_uses_effect_version_for_ready_state_marker = function()
@@ -683,16 +694,12 @@ return {
 
     local result = run_result(current, opts("result-effect-version-cas"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find(core.state_marker(current.proposal_id, "ready", current.effect_version, "result-marker,ready-label,devloop-ready"), 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
-    local ready_raise = find_raise(result.raises, "devloop_ready")
-    t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload({
-      proposal_id = current.proposal_id,
-      dedup_key = current.effect_version,
-      source_ref = current.source_ref,
-    }).dedup_key)
+    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    t.eq(comment_raise.payload.handoff.marker_version, current.effect_version)
   end,
 
   test_consensus_result_old_version_skips_when_newer_ready_marker_exists = function()
@@ -746,12 +753,12 @@ return {
 
     local first = run_result(reached(), run_opts)
     t.eq(first.exit_code, 0)
-    t.eq(#first.raises, 3) t.is_true(find_raise(first.raises, "devloop_ready") ~= nil)
+    t.eq(#first.raises, 2) t.eq(find_raise(first.raises, "devloop_ready"), nil)
 
     mock_issue_result({ "fkst-dev:thinking" })
     local second = run_result(reached({ body = "Different body." }), run_opts)
     t.eq(second.exit_code, 0)
-    t.eq(#second.raises, 3) t.is_true(find_raise(second.raises, "devloop_ready") ~= nil)
+    t.eq(#second.raises, 2) t.eq(find_raise(second.raises, "devloop_ready"), nil)
   end,
 
   test_loop_unresolved_records_converge_round_and_reraises_proposal = function()

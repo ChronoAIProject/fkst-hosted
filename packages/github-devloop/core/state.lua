@@ -465,6 +465,30 @@ function M.has_state_marker(comments, proposal_id, state, version)
   return false
 end
 
+function M.state_marker_comment_id(comments, proposal_id, state, version, effects)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker = M.state_marker(proposal_id, state, version, effects)
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    if M._comment_body(comment):find(marker, 1, true) ~= nil
+      and M.is_safe_comment_id(comment.id) then
+      return tostring(comment.id)
+    end
+  end
+  return nil
+end
+
+function M.ready_hand_off_comment_id(comments, proposal_id, marker_version)
+  return M.state_marker_comment_id(
+    comments,
+    proposal_id,
+    "ready",
+    marker_version,
+    "result-marker,ready-label,devloop-ready"
+  )
+end
+
 local function normalize_state(state)
   if state == nil then
     return "unmanaged"

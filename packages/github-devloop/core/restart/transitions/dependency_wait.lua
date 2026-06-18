@@ -88,11 +88,11 @@ return function(M, h)
     version_identity = "strip_transition_version_suffixes(state.version)",
     effects = effect(
       { "dependency-wait-marker", "dependency-release-marker", "state:v1 ready", "devloop_ready" },
-      "dependency_wait replay refreshes blocker facts while held and creates a fresh ready entry plus devloop_ready exactly when the dependency gate releases",
+      "dependency_wait replay refreshes blocker facts while held and creates a fresh ready entry; comment handoff raises devloop_ready exactly when the dependency gate release ready marker write is acknowledged",
       "dependency_gate_rederive"
     ),
     marker_facts = "state:v1 dependency_wait plus dependency-wait:v1",
     kickoff = "github-proxy.github_entity_changed",
-    replay = "Observe/liveness re-derive blockedBy; held blockers refresh dependency_wait, released blockers enter fresh ready and raise devloop_ready.",
+    replay = "Observe/liveness re-derive blockedBy; held blockers refresh dependency_wait, released blockers enter fresh ready and route devloop_ready through comment handoff.",
   }
 end

@@ -222,7 +222,11 @@ return {
   test_observe_issue_reraises_ready_for_poll_self_heal = function()
     local event = reached()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:ready" }, "OPEN", {
-      core.state_marker(event.proposal_id, "ready", event.dedup_key),
+      {
+        id = "IC_ready_self_heal",
+        body = core.state_marker(event.proposal_id, "ready", event.dedup_key, "result-marker,ready-label,devloop-ready"),
+        created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
+      },
     })
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:ready" } }), opts("observe-issue-ready-self-heal"))
@@ -232,12 +236,9 @@ return {
     t.eq(ready_raise.payload.schema, "github-devloop.ready.v1")
     t.eq(ready_raise.payload.proposal_id, event.proposal_id)
     t.eq(ready_raise.payload.source_ref.ref, "owner/repo#issue/42")
-    t.eq(ready_raise.payload.dedup_key, core.build_devloop_ready_payload({
-      proposal_id = event.proposal_id,
-      dedup_key = event.dedup_key,
-      source_ref = event.source_ref,
-    }).dedup_key)
-    t.is_nil(ready_raise.payload.ready_hand_off)
+    t.is_true(ready_raise.payload.dedup_key:find("/redrive/ready/1", 1, true) ~= nil)
+    t.eq(ready_raise.payload.ready_hand_off.comment_id, "IC_ready_self_heal")
+    t.eq(ready_raise.payload.ready_hand_off.marker_version, event.dedup_key)
     t.eq(count_calls("--json body"), 0)
   end,
 

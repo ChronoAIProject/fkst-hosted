@@ -351,6 +351,13 @@ local function marker_body(raises, needle)
   return raise and raise.payload.body or nil
 end
 
+local function ready_handoff_raise(raises)
+  return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
+    return type(payload.handoff) == "table"
+      and payload.handoff.kind == "github-devloop.ready"
+  end)
+end
+
 return {
   test_dependency_graphql_contract_is_named = function()
     local operations = core.github_graphql_queries
@@ -604,7 +611,8 @@ return {
     mock_blocker_issue(52, "merged")
     local result = run_result()
     t.eq(result.exit_code, 0)
-    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(result.raises) ~= nil)
   end,
 
   test_observe_issue_ready_holds_then_cascades_when_satisfied = function()
@@ -630,7 +638,8 @@ return {
     mock_blocker_issue(53, "merged")
     local cascaded = run_observe()
     t.eq(cascaded.exit_code, 0)
-    t.is_true(has_queue(cascaded.raises, "devloop_ready"))
+    t.eq(has_queue(cascaded.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(cascaded.raises) ~= nil)
     t.is_true(has_marker(cascaded.raises, "fkst:github-devloop:dependency-release:v1"))
     local clear = find_raise(cascaded.raises, "github-proxy.github_issue_label_request", function(payload)
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
@@ -675,10 +684,11 @@ return {
     mock_blocker_issue(53, "merged")
     local result = run_observe()
     t.eq(result.exit_code, 0)
-    t.eq(count_queue(result.raises, "devloop_ready"), 1)
+    t.eq(count_queue(result.raises, "devloop_ready"), 0)
     local split_version = core.ready_split_version(version)
-    local ready = find_raise(result.raises, "devloop_ready")
-    t.eq(ready.payload.dedup_key, core._dedup_key({ "ready", split_version }))
+    local ready_comment = ready_handoff_raise(result.raises)
+    t.is_true(ready_comment ~= nil)
+    t.eq(ready_comment.payload.handoff.marker_version, split_version)
     local body = marker_body(result.raises, "ready-split-canonicalized:v1")
     t.is_true(body ~= nil)
     t.is_true(body:find('state="ready"', 1, true) ~= nil)
@@ -721,7 +731,8 @@ return {
       }),
     }, h.opts("dependency-liveness-observe"))
     t.eq(observed.exit_code, 0)
-    t.is_true(has_queue(observed.raises, "devloop_ready"))
+    t.eq(has_queue(observed.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(observed.raises) ~= nil)
     t.is_true(has_marker(observed.raises, "fkst:github-devloop:dependency-release:v1"))
   end,
 
@@ -730,7 +741,8 @@ return {
     mock_blocked_by(42, { { number = 56, state = "CLOSED", state_reason = "NOT_PLANNED" } })
     local result = run_result()
     t.eq(result.exit_code, 0)
-    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(result.raises) ~= nil)
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-release:v1"))
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-void:v1"))
     t.is_true(has_marker(result.raises, 'blocker="56"'))
@@ -748,7 +760,8 @@ return {
     mock_blocked_by(42, { { number = 57, state = "CLOSED", state_reason = "NOT_PLANNED" } })
     local released = run_observe()
     t.eq(released.exit_code, 0)
-    t.is_true(has_queue(released.raises, "devloop_ready"))
+    t.eq(has_queue(released.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(released.raises) ~= nil)
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-void:v1"))
     local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
@@ -782,9 +795,11 @@ return {
     mock_blocker_issue(60, "ready")
     local result = run_observe()
     t.eq(result.exit_code, 0)
-    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
     local split_version = core.ready_split_version(version)
-    t.eq(find_raise(result.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", split_version }))
+    local ready_comment = ready_handoff_raise(result.raises)
+    t.is_true(ready_comment ~= nil)
+    t.eq(ready_comment.payload.handoff.marker_version, split_version)
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-waiver:v1"))
     t.is_true(has_marker(result.raises, "fkst:github-devloop:dependency-release:v1"))
     t.is_true(has_marker(result.raises, "fkst:github-devloop:ready-split-canonicalized:v1"))
@@ -810,7 +825,8 @@ return {
     mock_blocker_issue(59, "ready")
     local released = run_observe()
     t.eq(released.exit_code, 0)
-    t.is_true(has_queue(released.raises, "devloop_ready"))
+    t.eq(has_queue(released.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(released.raises) ~= nil)
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-waiver:v1"))
     t.is_true(has_marker(released.raises, 'blocker="59"'))
@@ -912,8 +928,8 @@ return {
     mock_blocked_by(42, {})
     local released = run_observe()
     t.eq(released.exit_code, 0)
-    t.is_true(has_queue(released.raises, "devloop_ready"))
-    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", core.ready_split_version(version) }))
+    t.eq(has_queue(released.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(released.raises) ~= nil)
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
     local clear = find_raise(released.raises, "github-proxy.github_issue_label_request", function(payload)
       return h.has_value(payload.remove_labels, "fkst-dev:blocked-on-dependency")
@@ -933,8 +949,8 @@ return {
     mock_blocked_by(42, {})
     local released = run_observe()
     t.eq(released.exit_code, 0)
-    t.is_true(has_queue(released.raises, "devloop_ready"))
-    t.eq(find_raise(released.raises, "devloop_ready").payload.dedup_key, core._dedup_key({ "ready", core.ready_split_version(version) }))
+    t.eq(has_queue(released.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(released.raises) ~= nil)
     t.is_true(has_marker(released.raises, "fkst:github-devloop:dependency-release:v1"))
   end,
 
@@ -972,6 +988,7 @@ return {
     mock_blocked_by(42, {})
     local result = run_result()
     t.eq(result.exit_code, 0)
-    t.is_true(has_queue(result.raises, "devloop_ready"))
+    t.eq(has_queue(result.raises, "devloop_ready"), false)
+    t.is_true(ready_handoff_raise(result.raises) ~= nil)
   end,
 }

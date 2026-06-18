@@ -47,13 +47,15 @@ function M.build_result_comment_request(repo, issue_number, reached, state_name)
       .. "/" .. (tostring(reached.dedup_key):gsub(":", "-")),
     source_ref = M.normalize_source_ref(reached.source_ref),
   }, reached.source_ref)
-  request.handoff = {
-    kind = "github-devloop.ready",
-    proposal_id = reached.proposal_id,
-    version = reached.dedup_key,
-    marker_version = tostring(reached.effect_version or reached.dedup_key),
-    source_ref = M.normalize_source_ref(reached.source_ref),
-  }
+  if canonical_state == "ready" then
+    request.handoff = {
+      kind = "github-devloop.ready",
+      proposal_id = reached.proposal_id,
+      version = reached.dedup_key,
+      marker_version = tostring(reached.effect_version or reached.dedup_key),
+      source_ref = M.normalize_source_ref(reached.source_ref),
+    }
+  end
   return request
 end
 function M.result_effects_complete(current, reached)
