@@ -32,6 +32,30 @@ local required_gate_names = {
   "cost_budget",
 }
 
+local terminal_attempt_states = {
+  blocked = true,
+  ["impl-failed"] = true,
+  merged = true,
+}
+
+local timeout_order_states = {
+  "thinking",
+  "ready",
+  "implementing",
+  "impl-failed",
+  "pr-open",
+  "reviewing",
+  "review-meta",
+  "merge-ready",
+  "merging",
+  "fixing",
+  "blocked",
+}
+
+local function marker_attr(marker, name)
+  return tostring(marker or ""):match(name .. '="([^"]*)"')
+end
+
 local function normalize_gate_state(value)
   local state = tostring(value or "")
   if gate_states[state] then
@@ -128,6 +152,295 @@ function M.autonomy_post_merge_probe_gate(pr, opts)
     return "pass", reason
   end
   return "fail", reason
+end
+
+local function autonomy_projection_proposal_id(repo, issue_number, opts)
+  if type(opts) == "table" and opts.proposal_id ~= nil then
+    return tostring(opts.proposal_id)
+  end
+  return "github-devloop/issue/" .. tostring(repo or "") .. "/" .. tostring(issue_number or "")
+end
+
+local function comment_evidence(M, comment)
+  return {
+    comment_id = type(comment) == "table" and comment.id or nil,
+    comment_url = type(comment) == "table" and comment.url or nil,
+    comment_created_at = M._comment_created_at(comment),
+  }
+end
+
+local function event_created_seconds(M, event)
+  return M.iso_timestamp_epoch_seconds(event.comment_created_at)
+end
+
+local function version_max_timeout_round(M, version)
+  local max_n = 0
+  for _, state_name in ipairs(timeout_order_states) do
+    max_n = math.max(max_n, M.version_timeout_round(version, state_name))
+  end
+  return max_n
+end
+
+local function event_order_key(M, event)
+  local version = tostring(event.version or event.claim_epoch or "")
+  local primary = M.version_updated_at(version)
+  if primary == "" then
+    primary = M.version_order_key(version)
+  end
+  return {
+    primary = primary,
+    loop_n = M.version_loop_round(version),
+    fix_n = M.version_fix_round(version),
+    reimplement_n = M.version_reimplement_round(version),
+    timeout_n = version_max_timeout_round(M, version),
+    review_loop_n = M.version_review_loop_round(version),
+    review_meta_action_n = M.version_review_meta_action_round(version),
+    stage_rank = tonumber(event.stage_rank) or 0,
+    kind_rank = event.kind == "claim" and 0 or 1,
+    created_seconds = event_created_seconds(M, event),
+    sequence = tonumber(event.sequence) or 0,
+  }
+end
+
+local function event_before(M, left, right)
+  local a = event_order_key(M, left)
+  local b = event_order_key(M, right)
+  for _, name in ipairs({
+    "primary",
+    "loop_n",
+    "fix_n",
+    "reimplement_n",
+    "timeout_n",
+    "review_meta_action_n",
+    "review_loop_n",
+    "stage_rank",
+    "kind_rank",
+  }) do
+    if a[name] ~= b[name] then
+      return a[name] < b[name]
+    end
+  end
+  if a.created_seconds ~= nil and b.created_seconds ~= nil and a.created_seconds ~= b.created_seconds then
+    return a.created_seconds < b.created_seconds
+  end
+  return a.sequence < b.sequence
+end
+
+local function claim_epoch_key(dedup_key, attempt)
+  return tostring(dedup_key or "") .. "#" .. tostring(attempt or "")
+end
+
+local function collect_autonomy_claim_events(M, comments, proposal_id, repo, issue_number, events, sequence)
+  local seen = {}
+  local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-attempt:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    local body = M._comment_body(comment)
+    for marker in body:gmatch(marker_pattern) do
+      sequence = sequence + 1
+      local marker_proposal = marker_attr(marker, "proposal")
+      local dedup_key = marker_attr(marker, "dedup")
+      local attempt = tonumber(marker_attr(marker, "attempt"))
+      local started_at = marker_attr(marker, "started_at")
+      if marker_proposal == proposal_id
+        and M._is_bounded_string(dedup_key, M._max_dedup_len)
+        and attempt ~= nil
+        and attempt >= 1
+        and attempt == math.floor(attempt) then
+        local epoch = claim_epoch_key(dedup_key, attempt)
+        if seen[epoch] == nil then
+          seen[epoch] = true
+          table.insert(events, {
+            kind = "claim",
+            proposal_id = marker_proposal,
+            repo = tostring(repo or ""),
+            issue_number = tostring(issue_number or ""),
+            claim_epoch = epoch,
+            claim_version = dedup_key,
+            version = dedup_key,
+            claim_attempt = attempt,
+            started_at = started_at,
+            comment_created_at = M._comment_created_at(comment),
+            evidence = comment_evidence(M, comment),
+            sequence = sequence,
+          })
+        end
+      end
+    end
+  end
+  return sequence
+end
+
+local function put_terminal_event(events_by_key, key, event)
+  local existing = events_by_key[key]
+  if existing == nil or (event.marker_family == "merged" and existing.marker_family ~= "merged") then
+    events_by_key[key] = event
+  end
+end
+
+local function collect_autonomy_terminal_events(M, comments, proposal_id, events, sequence)
+  local terminals = {}
+  local state_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
+  local merged_pattern = "<!%-%- fkst:github%-devloop:merged:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    local body = M._comment_body(comment)
+    for marker in body:gmatch(state_pattern) do
+      sequence = sequence + 1
+      local marker_proposal = marker_attr(marker, "proposal")
+      local state = marker_attr(marker, "state")
+      local version = marker_attr(marker, "version")
+      if marker_proposal == proposal_id
+        and terminal_attempt_states[state] == true
+        and M._is_bounded_string(version, M._max_dedup_len) then
+        put_terminal_event(terminals, tostring(state) .. ":" .. tostring(version), {
+          kind = "terminal",
+          marker_family = "state",
+          proposal_id = marker_proposal,
+          outcome = state,
+          terminal_state = state,
+          version = version,
+          stage_rank = M.stage_rank(state),
+          comment_created_at = M._comment_created_at(comment),
+          evidence = comment_evidence(M, comment),
+          sequence = sequence,
+        })
+      end
+    end
+    for marker in body:gmatch(merged_pattern) do
+      sequence = sequence + 1
+      local marker_proposal = marker_attr(marker, "proposal")
+      local version = marker_attr(marker, "version")
+      local pr_number = marker_attr(marker, "pr")
+      local head_sha = marker_attr(marker, "head_sha")
+      if marker_proposal == proposal_id
+        and M._is_bounded_string(version, M._max_dedup_len)
+        and M._is_positive_pr_number(pr_number)
+        and M._is_git_sha(head_sha) then
+        local autonomy_result = nil
+        if marker:find('autonomy_result="v1"', 1, true) ~= nil then
+          autonomy_result = M.autonomy_result_record_from_marker(marker, comment, marker_proposal, pr_number, version, head_sha)
+        end
+        put_terminal_event(terminals, "merged:" .. tostring(version), {
+          kind = "terminal",
+          marker_family = "merged",
+          proposal_id = marker_proposal,
+          outcome = "merged",
+          terminal_state = "merged",
+          version = version,
+          pr_number = tonumber(pr_number),
+          head_sha = head_sha,
+          autonomy_result = autonomy_result,
+          valid_autonomous_merge = autonomy_result and autonomy_result.valid_autonomous_merge or nil,
+          stage_rank = M.stage_rank("merged"),
+          comment_created_at = M._comment_created_at(comment),
+          evidence = comment_evidence(M, comment),
+          sequence = sequence,
+        })
+      end
+    end
+  end
+  for _, event in pairs(terminals) do
+    table.insert(events, event)
+  end
+  return sequence
+end
+
+local function unresolved_attempt_outcome(M, row, opts)
+  local options = opts or {}
+  local now_seconds = tonumber(options.now_seconds)
+  local claim_seconds = M.iso_timestamp_epoch_seconds(row.claim_comment_created_at)
+  if now_seconds ~= nil and claim_seconds ~= nil then
+    local age = now_seconds - claim_seconds
+    local timed_out_after = tonumber(options.timed_out_after_seconds)
+    if timed_out_after ~= nil and age >= timed_out_after then
+      return "timed_out"
+    end
+    local abandoned_after = tonumber(options.abandoned_after_seconds)
+    if abandoned_after ~= nil and age >= abandoned_after then
+      return "abandoned"
+    end
+  end
+  return "in_flight"
+end
+
+local function close_attempt_with_terminal(row, event)
+  row.outcome = event.outcome
+  row.terminal_state = event.terminal_state
+  row.terminal_version = event.version
+  row.terminal_comment_created_at = event.comment_created_at
+  row.terminal_evidence = event.evidence
+  row.pr_number = event.pr_number
+  row.head_sha = event.head_sha
+  row.autonomy_result = event.autonomy_result
+  row.valid_autonomous_merge = event.valid_autonomous_merge
+end
+
+local function close_attempt_without_terminal(M, row, opts)
+  if row.outcome == nil then
+    row.outcome = unresolved_attempt_outcome(M, row, opts)
+  end
+end
+
+function M.autonomy_attempt_projection(comments, repo, issue_number, opts)
+  local proposal_id = autonomy_projection_proposal_id(repo, issue_number, opts)
+  local events = {}
+  local sequence = collect_autonomy_claim_events(M, comments, proposal_id, repo, issue_number, events, 0)
+  collect_autonomy_terminal_events(M, comments, proposal_id, events, sequence)
+  table.sort(events, function(left, right)
+    return event_before(M, left, right)
+  end)
+
+  local projection = {
+    schema = "github-devloop.autonomy-attempt-projection.v1",
+    repo = tostring(repo or ""),
+    issue_number = tostring(issue_number or ""),
+    proposal_id = proposal_id,
+    total_attempts = 0,
+    attempts = {},
+    outcomes = {},
+    valid_merges = 0,
+  }
+  local current = nil
+  for _, event in ipairs(events) do
+    if event.kind == "claim" then
+      if current ~= nil then
+        close_attempt_without_terminal(M, current, opts)
+      end
+      current = {
+        attempt_id = tostring(repo or "") .. "#issue/" .. tostring(issue_number or "") .. "#" .. event.claim_epoch,
+        repo = tostring(repo or ""),
+        issue_number = tostring(issue_number or ""),
+        proposal_id = event.proposal_id,
+        claim_epoch = event.claim_epoch,
+        claim_version = event.claim_version,
+        claim_marker_id = event.evidence and event.evidence.comment_id or nil,
+        attempt = event.claim_attempt,
+        started_at = event.started_at,
+        claim_comment_created_at = event.comment_created_at,
+        claim_evidence = event.evidence,
+      }
+      table.insert(projection.attempts, current)
+    elseif event.kind == "terminal" and current ~= nil and current.outcome == nil then
+      close_attempt_with_terminal(current, event)
+      current = nil
+    end
+  end
+  if current ~= nil then
+    close_attempt_without_terminal(M, current, opts)
+  end
+
+  projection.total_attempts = #projection.attempts
+  for _, row in ipairs(projection.attempts) do
+    local outcome = tostring(row.outcome or "unknown")
+    projection.outcomes[outcome] = (projection.outcomes[outcome] or 0) + 1
+    if row.valid_autonomous_merge == "true" then
+      projection.valid_merges = projection.valid_merges + 1
+    end
+  end
+  return projection
+end
+
+function M.autonomy_attempt_denominator(comments, repo, issue_number, opts)
+  return M.autonomy_attempt_projection(comments, repo, issue_number, opts).total_attempts
 end
 
 function M.autonomy_result_record(repo, issue_number, merge_ready, issue, post_merge_pr)
@@ -420,6 +733,16 @@ function M.autonomy_audited_result_fact(comments, proposal_id, pr_number, versio
       end
     end
   end
+  fact.attempt_projection = M.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
+    proposal_id = proposal_id,
+    now_seconds = type(opts) == "table" and opts.now_seconds or nil,
+    timed_out_after_seconds = type(opts) == "table" and opts.timed_out_after_seconds or nil,
+    abandoned_after_seconds = type(opts) == "table" and opts.abandoned_after_seconds or nil,
+  })
+  fact.attempts = fact.attempt_projection.attempts
+  fact.attempt_outcomes = fact.attempt_projection.outcomes
+  fact.avm_rate_numerator = fact.attempt_projection.valid_merges
+  fact.avm_rate_denominator = fact.attempt_projection.total_attempts
   return fact
 end
 
