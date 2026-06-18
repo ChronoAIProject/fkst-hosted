@@ -1,10 +1,5 @@
 local M = {}
-
-local function url_encode(value)
-  return (tostring(value or ""):gsub("([^%w%-%._~])", function(char)
-    return string.format("%%%02X", string.byte(char))
-  end))
-end
+local shell = require("std.github.shell")
 
 local function repo_owner(repo)
   return tostring(repo or ""):match("^([^/]+)/")
@@ -34,7 +29,7 @@ local function issue_list_intake_probe_argv(repo, limit, since)
   local query = "repos/" .. tostring(repo)
     .. "/issues?state=open&sort=created&direction=desc&per_page=" .. tostring(limit)
   if since ~= nil and tostring(since) ~= "" then
-    query = query .. "&since=" .. url_encode(since)
+    query = query .. "&since=" .. shell.url_encode(since)
   end
   return { "gh", "api", query }
 end
@@ -99,16 +94,16 @@ local function pr_list_merge_queue_argv(repo, base)
     "api",
     "--paginate",
     "--slurp",
-    "repos/" .. tostring(repo) .. "/pulls?state=open&base=" .. url_encode(base) .. "&per_page=100",
+    "repos/" .. tostring(repo) .. "/pulls?state=open&base=" .. shell.url_encode(base) .. "&per_page=100",
   }
 end
 
 local function pr_list_head_argv(repo, branch, base_branch)
   local owner = repo_owner(repo)
   local head_filter = owner ~= nil and (owner .. ":" .. tostring(branch)) or tostring(branch)
-  local query = "repos/" .. tostring(repo) .. "/pulls?state=open&head=" .. url_encode(head_filter) .. "&per_page=100"
+  local query = "repos/" .. tostring(repo) .. "/pulls?state=open&head=" .. shell.url_encode(head_filter) .. "&per_page=100"
   if base_branch ~= nil then
-    query = query .. "&base=" .. url_encode(base_branch)
+    query = query .. "&base=" .. shell.url_encode(base_branch)
   end
   return { "gh", "api", "--paginate", "--slurp", query }
 end
