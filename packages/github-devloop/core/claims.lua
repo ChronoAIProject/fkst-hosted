@@ -2,6 +2,7 @@ local S = {}
 local github_handle = nil
 
 function S.install(M)
+local github_view = require("std.github_view")
 local function github()
   if github_handle ~= nil then
     return github_handle
@@ -104,16 +105,8 @@ function M.read_current_issue_assignees(repo, issue_number)
   return M.assignee_logins(ownership and ownership.assignees)
 end
 
-local function decoded_label_names(decoded)
-  local labels = {}
-  for _, label in ipairs((decoded and decoded.labels) or {}) do
-    if type(label) == "table" and label.name ~= nil then
-      table.insert(labels, tostring(label.name))
-    elseif type(label) == "string" then
-      table.insert(labels, label)
-    end
-  end
-  return labels
+local function issue_labels(decoded)
+  return github_view.label_names(decoded and decoded.labels)
 end
 
 function M.read_current_issue_ownership(repo, issue_number)
@@ -129,7 +122,7 @@ function M.read_current_issue_ownership(repo, issue_number)
   return {
     assignees = M.assignee_logins(decoded.assignees),
     author_login = M.issue_author_login(decoded),
-    labels = decoded_label_names(decoded),
+    labels = issue_labels(decoded),
   }
 end
 
