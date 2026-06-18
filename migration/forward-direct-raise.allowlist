@@ -1,0 +1,23 @@
+# Existing marker-gated FORWARD-direct raise inventory.
+# Format: path|function|queue
+# New entries fail CI. Remove entries only when the path is routed through
+# github_comment_written -> comment_handoff or declared REDRIVE from visible
+# marker facts.
+packages/github-devloop/core/ready_split.lua|M.canonicalize_legacy_ready_dependency_wait|devloop_ready
+packages/github-devloop/core/ready_split.lua|M.replay_ready_state|devloop_ready
+packages/github-devloop/core/ready_split.lua|raise_dependency_release|devloop_ready
+packages/github-devloop/core/requests/review.lua|M.raise_fix_reviewing|devloop_reviewing
+packages/github-devloop/core/review_carry_over.lua|M.raise_review_carry_over|devloop_merge_ready
+packages/github-devloop/departments/consensus_result/main.lua|raise_result_effects|devloop_ready
+packages/github-devloop/departments/fix/main.lua|raise_stale_speculation_refix|devloop_fixing
+packages/github-devloop/departments/implement/main.lua|raise_implementing|devloop_open_pr
+packages/github-devloop/departments/implement/main.lua|raise_open_pr_from_fact|devloop_open_pr
+packages/github-devloop/departments/loop/main.lua|pipeline|devloop_reconcile
+packages/github-devloop/departments/merge/main.lua|raise_fixing|devloop_fixing
+packages/github-devloop/departments/merge/main.lua|raise_reviewing_for_current_head|devloop_reviewing
+packages/github-devloop/departments/observe_pr/main.lua|maybe_apply_rereview_command|devloop_reviewing
+packages/github-devloop/departments/observe_pr/main.lua|maybe_redrive_not_mergeable_pr|devloop_fixing
+packages/github-devloop/departments/observe_pr/main.lua|process_pr_event|devloop_reviewing
+packages/github-devloop/departments/review_meta/main.lua|pipeline|devloop_fixing
+packages/github-devloop/departments/review_result/main.lua|pipeline|devloop_fixing
+packages/github-devloop/departments/review_result/main.lua|pipeline|devloop_merge_ready
