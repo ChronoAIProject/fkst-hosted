@@ -13,6 +13,7 @@ M.spec = {
     "devloop_ready",
     "devloop_reviewing",
     "devloop_fixing",
+    "devloop_review_meta",
     "devloop_decompose",
     "devloop_merge_ready",
     "devloop_reconcile",

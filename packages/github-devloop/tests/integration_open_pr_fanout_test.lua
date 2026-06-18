@@ -114,7 +114,7 @@ local function seed_cached_issue_view(repo, issue_number, stdout, updated_at, pr
 end
 
 local function seed_cache(entry, run_opts)
-  return t.run_department("tests/cache_seed_helpers.lua", {
+  return t.run_department("departments/test_cache_seed/main.lua", {
     queue = "cache_seed",
     payload = entry,
   }, run_opts)

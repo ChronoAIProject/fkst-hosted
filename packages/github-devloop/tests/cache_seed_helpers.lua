@@ -11,4 +11,6 @@ function pipeline(event)
   raise("cache_seeded", { key = payload.key })
 end
 
+M.pipeline = pipeline
+
 return M

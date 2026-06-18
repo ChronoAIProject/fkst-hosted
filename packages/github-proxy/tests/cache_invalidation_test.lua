@@ -41,7 +41,7 @@ local function issue_comment_event()
 end
 
 local function run_entity_view_probe(run_opts, consumer, marker_bearing, named_marker_reader)
-  local result = t.run_department("tests/entity_view_probe_helpers.lua", {
+  local result = t.run_department("departments/test_entity_view_probe/main.lua", {
     queue = "entity_view_probe",
     payload = {
       repo = "owner/x",

@@ -7,8 +7,7 @@ M.spec = {
   produces = { "entity_view_probe_result" },
 }
 
-function pipeline(event)
-  local payload = event.payload or {}
+function M.run(payload)
   local kind = tostring(payload.kind or "issue")
   local result
   if kind == "pr" then
@@ -36,11 +35,18 @@ function pipeline(event)
       })
     end
   end
-  raise("entity_view_probe_result", {
+  return {
     exit_code = result.exit_code,
     stdout = result.stdout,
     stderr = result.stderr,
-  })
+  }
 end
+
+function pipeline(event)
+  local payload = event.payload or {}
+  raise("entity_view_probe_result", M.run(payload))
+end
+
+M.pipeline = pipeline
 
 return M

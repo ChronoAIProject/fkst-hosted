@@ -270,6 +270,19 @@ local function payload_for_queue(queue)
     },
     devloop_rollup_ready = core.rollup_ready_payload("owner/repo", "dev", "integration/dev", 7, "def456"),
     devloop_substrate_ref_tick = { schema = "github-devloop.substrate-ref-tick.v1" },
+    board_digest_probe = {
+      mode = "block",
+      repo = "owner/repo",
+      tick = "2026-06-10T02:12:03Z",
+    },
+    cache_seed = {
+      key = "github-devloop/test-cache-key",
+      value = "test-cache-value",
+    },
+    context_bundle_probe = {
+      mode = "round_trip",
+      root = "/tmp/fkst-packages-test/github-devloop-unsupported-context-bundle",
+    },
     devloop_sync_conflict = {
       schema = "github-devloop.v1",
       repo = "owner/repo",

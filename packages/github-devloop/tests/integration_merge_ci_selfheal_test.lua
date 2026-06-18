@@ -85,7 +85,7 @@ local function mock_head_nudge_worktree(old_head, new_head)
 end
 
 local function seed_cache(key, value, run_opts)
-  return t.run_department("tests/cache_seed_helpers.lua", {
+  return t.run_department("departments/test_cache_seed/main.lua", {
     queue = "cache_seed",
     payload = {
       key = key,
