@@ -239,6 +239,13 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(doc["sites"][0]["site_ref"], "packages/example/a.lua:3")
         self.assertEqual(doc["sites"][1]["site_ref"], "packages/example/b.lua:4")
 
+    def test_registered_ratchets_use_live_parent_tracks(self) -> None:
+        all_specs = slicer.specs()
+
+        self.assertEqual(all_specs["saga-handler"].parent, "979")
+        self.assertEqual(all_specs["code-dedup"].parent, "1018")
+        self.assertNotEqual(all_specs["code-dedup"].parent, "1002")
+
     def test_reconciler_dry_run_reports_one_slice_without_writing(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [

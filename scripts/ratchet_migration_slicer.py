@@ -292,7 +292,7 @@ def specs() -> dict[str, MigrationSpec]:
             inventory_loader=load_saga_inventory,
         ),
         "code-dedup": MigrationSpec(
-            parent="1002",
+            parent="1018",
             ratchet="code-dedup",
             migration_kind="allowlist",
             allowlist_path="migration/code-dedup.allowlist",
