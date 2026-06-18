@@ -8,6 +8,7 @@ local mock_comment_view = h.mock_comment_view
 local mock_comment_write = h.mock_comment_write
 local mock_poll = h.mock_poll
 local count_calls = h.count_calls
+require("tests.entity_view_probe_helpers")
 
 local function mock_issue_view(title)
   t.mock_command("gh api repos/owner/x/issues/42", {
@@ -40,8 +41,7 @@ local function issue_comment_event()
 end
 
 local function run_entity_view_probe(run_opts, consumer, marker_bearing, named_marker_reader)
-  local result_path = "/tmp/fkst-packages-test/github-proxy-entity-view-" .. tostring(now()) .. "-" .. tostring({}):gsub("[^%w._-]", "_") .. ".lua"
-  local result = t.run_department("tests/entity_view_probe_helpers.lua", {
+  local result = t.run_department("departments/test_entity_view_probe/main.lua", {
     queue = "entity_view_probe",
     payload = {
       repo = "owner/x",
@@ -51,11 +51,11 @@ local function run_entity_view_probe(run_opts, consumer, marker_bearing, named_m
       consumer = consumer,
       marker_bearing = marker_bearing,
       named_marker_reader = named_marker_reader,
-      result_path = result_path,
     },
   }, run_opts)
   t.eq(result.exit_code, 0)
-  return assert(loadfile(result_path))()
+  t.eq(#result.raises, 1)
+  return result.raises[1].payload
 end
 
 return {

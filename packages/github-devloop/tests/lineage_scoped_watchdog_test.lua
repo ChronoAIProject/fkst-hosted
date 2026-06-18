@@ -51,7 +51,7 @@ local function mock_empty_pr_list()
 end
 
 local function seed_cache(entry, run_opts)
-  return t.run_department("tests/cache_seed_helpers.lua", {
+  return t.run_department("departments/test_cache_seed/main.lua", {
     queue = "cache_seed",
     payload = entry,
   }, run_opts or opts("lineage-watchdog-cache-seed"))

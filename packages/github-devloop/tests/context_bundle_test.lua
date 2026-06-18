@@ -13,13 +13,11 @@ local function runtime_root(name)
 end
 
 local function run_probe(mode, root)
-  local result_path = root .. "/probe-result.lua"
-  local result = t.run_department("tests/context_bundle_probe_helpers.lua", {
+  local result = t.run_department("departments/test_context_bundle_probe/main.lua", {
     queue = "context_bundle_probe",
     payload = {
       mode = mode,
       root = root,
-      result_path = result_path,
     },
   }, {
     env = {
@@ -27,7 +25,12 @@ local function run_probe(mode, root)
     },
   })
   t.eq(result.exit_code, 0)
-  return assert(loadfile(result_path))()
+  for _, raised in ipairs(result.raises or {}) do
+    if raised.queue == "context_bundle_probe_result" then
+      return raised.payload
+    end
+  end
+  error("missing context bundle probe result")
 end
 
 local function assert_valid_utf8(value)

@@ -173,7 +173,7 @@ local function mock_linked_pr_state(comments, state, exit_code, times, run_opts)
     exit_code = exit_code or 0,
   }, times or 1)
   if exit_code == nil or exit_code == 0 then
-    t.run_department("tests/cache_seed_helpers.lua", { queue = "cache_seed", payload = { key = core.entity_view_cache_key(repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
+    t.run_department("departments/test_cache_seed/main.lua", { queue = "cache_seed", payload = { key = core.entity_view_cache_key(repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
     entity_read_mocks.mock_pr_read_forms(t, {
       repo = repo,
       number = 7,

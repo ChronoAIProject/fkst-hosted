@@ -130,27 +130,6 @@ local function write_file(path, content)
   handle:close()
 end
 
-local function lua_literal(value)
-  local kind = type(value)
-  if kind == "string" then
-    return string.format("%q", value)
-  end
-  if kind == "number" or kind == "boolean" then
-    return tostring(value)
-  end
-  if kind == "nil" then
-    return "nil"
-  end
-  if kind == "table" then
-    local parts = {}
-    for key, field in pairs(value) do
-      table.insert(parts, "[" .. lua_literal(key) .. "]=" .. lua_literal(field))
-    end
-    return "{" .. table.concat(parts, ",") .. "}"
-  end
-  error("unsupported result value type: " .. kind)
-end
-
 local function mkdir_p(path)
   local ok = os.execute("mkdir -p " .. shell_single_quote(path))
   if not (ok == true or ok == 0) then
@@ -348,40 +327,36 @@ local function run_stale_manifest_rebuild(root)
 end
 
 function M.run(payload)
-  local result
   local root = payload.root
   if payload.mode == "round_trip" then
-    result = run_round_trip(root)
+    return run_round_trip(root)
   elseif payload.mode == "deleted_file" then
-    result = run_deleted_file(root)
+    return run_deleted_file(root)
   elseif payload.mode == "preexisting" then
-    result = run_preexisting(root)
+    return run_preexisting(root)
   elseif payload.mode == "publish_reuse" then
-    result = run_publish_reuse(root)
+    return run_publish_reuse(root)
   elseif payload.mode == "publish_unique_on_invalid" then
-    result = run_publish_unique_on_invalid(root)
+    return run_publish_unique_on_invalid(root)
   elseif payload.mode == "utf8_truncation" then
-    result = run_utf8_truncation(root)
+    return run_utf8_truncation(root)
   elseif payload.mode == "stale_manifest_files" then
-    result = run_stale_manifest_files(root)
+    return run_stale_manifest_files(root)
   elseif payload.mode == "stale_manifest_rebuild" then
-    result = run_stale_manifest_rebuild(root)
-  else
-    error("unknown context bundle probe mode")
+    return run_stale_manifest_rebuild(root)
   end
-  return result
+  error("unknown context bundle probe mode")
 end
 
 function pipeline(event)
   local payload = event.payload or {}
-  if payload.result_path == nil then
-    error("context bundle probe requires result_path")
-  end
   local root = payload.root
   if root ~= nil then
     mkdir_p(root)
   end
-  write_file(payload.result_path, "return " .. lua_literal(M.run(payload)) .. "\n")
+  raise("context_bundle_probe_result", M.run(payload))
 end
+
+M.pipeline = pipeline
 
 return M

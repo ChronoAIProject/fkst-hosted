@@ -86,7 +86,7 @@ local function run_probe(run_opts)
 end
 
 local function seed_probe_cursor(value, run_opts)
-  local result = t.run_department("tests/cache_seed_helpers.lua", {
+  local result = t.run_department("departments/test_cache_seed/main.lua", {
     queue = "cache_seed",
     payload = {
       key = "github-devloop/intake-probe/created-cursor",
