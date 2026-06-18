@@ -1,11 +1,8 @@
 local S = {}
+local strings = require("std.strings")
 
 local marker_prefix = "<!-- fkst:debug-stamp:v1"
 local max_attr_len = 120
-
-local function trim(value)
-  return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
-end
 
 local function checksum(value)
   local hash = 2166136261
@@ -22,7 +19,7 @@ local function attr_value(value)
   text = text:gsub('"', "'")
   text = text:gsub("[<>]", "_")
   text = text:gsub("%s+", " ")
-  text = trim(text)
+  text = strings.trim(text)
   if #text > max_attr_len then
     text = text:sub(1, max_attr_len)
   end
@@ -37,7 +34,7 @@ local function read_debug_flag(read_env)
     return false
   end
   local ok, value = pcall(read_env, "FKST_DEBUG_STAMP")
-  return ok and trim(value) == "1"
+  return ok and strings.trim(value) == "1"
 end
 
 local function read_code_version(git)
@@ -48,7 +45,7 @@ local function read_code_version(git)
   if not ok or type(result) ~= "table" or result.exit_code ~= 0 then
     return "unknown"
   end
-  local head = trim(result.stdout)
+  local head = strings.trim(result.stdout)
   if head:find("^[0-9A-Fa-f]+$") == nil then
     return "unknown"
   end
