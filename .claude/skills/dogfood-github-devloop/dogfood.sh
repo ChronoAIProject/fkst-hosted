@@ -336,7 +336,28 @@ cmd_doctor() {
   echo "engine BIN:"; bin_freshness_report | sed 's/^/  /'
   echo "supervises:"
   for n in $(expand "${1:-all}"); do doctor_one "$n"; done
+  echo "upstream($UPSTREAM_BRANCH) CI:"; for n in $(expand "${1:-all}"); do upstream_ci_one "$n"; done
   echo "graphql: $(gh api rate_limit --jq '.resources.graphql.remaining' 2>/dev/null||echo ?)/5000"
+}
+
+# upstream_ci_one <name>: report the latest `ci` conclusion on UPSTREAM_BRANCH (dev) for the
+# target's repo. The supervise gates merges on feature/integration CI, NOT on the dev-push run,
+# so a dev-push CI that goes red is INVISIBLE to the board's per-PR view — yet a permanently-red
+# dev CI masks real regressions (you cannot tell a genuine dev break from a chronic one). This
+# line is the operator's trustworthiness check on the dev gate itself. REST (`gh run list`), so it
+# does not compete with the pipeline's graphql budget.
+upstream_ci_one() {
+  cfg "$1" 2>/dev/null || return 0
+  local row concl sha
+  row=$(gh run list --repo "$REPO" --branch "$UPSTREAM_BRANCH" --workflow ci.yml --event push \
+        --limit 1 --json conclusion,headSha -q '.[]|"\(.conclusion) \(.headSha[0:8])"' 2>/dev/null)
+  concl=${row%% *}; sha=${row##* }
+  case "$concl" in
+    success) printf '  %-9s green (%s)\n' "$1" "$sha" ;;
+    "")      printf '  %-9s (no push CI runs)\n' "$1" ;;
+    *)       printf '  %-9s ⚠ %s (%s) — %s CI NOT green; real regression or workflow defect, investigate\n' \
+               "$1" "$concl" "$sha" "$UPSTREAM_BRANCH" ;;
+  esac
 }
 
 # _sync_checkout <dir>: fast-forward a pinned operator checkout to origin/$UPSTREAM_BRANCH. Only
