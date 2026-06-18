@@ -168,6 +168,18 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 参考案例：durable backlog 风暴——先 wipe 撑爆的 durable + 重启**止血**，再 substrate#67（reliable raised delivery-id 改 entity-stable 折叠）**根因修复**。
 
+## 直接改根因，不畏复杂（deferred cost 10–100×，HARD GATE）
+
+**发现问题就直接修它的根因——不管根因多复杂、跨多少仓、工作量多大；绝不为「这次便宜」选 band-aid / 症状补丁 / 把已知真根推后。** 成本会**复利**：一个 symptom-patch 留在原地，日后代价是当下的 **10–100×**——它复发、催生补丁去补补丁、掩盖真缺陷让安全/活性/competence 网都抓不到、与别的债叠加、且越晚越贵（越多代码依赖那个坏形状，改它的 blast radius 越大）。「根因看起来贵」从来不是推迟的理由：根因只会越来越贵，band-aid 的「省」是负利率借贷。prior art：**1–10–100 缺陷成本律**（同一缺陷，设计期修 1 / 集成期修 10 / 生产期修 100）、**技术债利息**（Cunningham：债不还，利息吃掉你）、**broken windows**（一扇没修的破窗招来更多破坏）、**shift-left**。本仓实证病例：把内容塞 payload 再机械截断的 `max_*_len`、用 retry-tuning 掩盖 write/read causal race、用 per-case 确定性分支堆砌而不上 harness——全是「当时省事、之后 10–100× 偿还」。
+
+**这是 HARD GATE，不是劝导文（机械强制、CI fail-closed，非 prose）。** 与「Harness 的本质：唯一写法 + 机械禁旁路」同形——band-aid 就是要被 ratchet 到 0 的**旁路写法**：
+
+- **band-aid 不是免费选项，必须登记为 shrink-only 债 + 链接根因 issue**：确需先上临时补丁（如止血）时，它必须进一个 shrink-only `migration/<class>.allowlist`（或等价债账本），带一行 WHY + 一个**根因修复的 tracking issue 号**；CI 在账本**增长**（新 band-aid 未登记）或补丁**无链接根因 issue** 时 fail-closed。这把「我先 band-aid、之后修根因」从口头承诺变成机械收敛：债可见、ratchet 向 0、不静默累积（静默累积正是 10–100× 复利的发生方式）。
+- **已命名的 band-aid 反模式在新代码里 conformance-禁止**：内容截断 `max_*_len`（正解＝`source_ref` 回源 fetch）、retry-tuning 替代 causal-ordering（正解＝写确认因果 outbox）等，新增即 CI 红，存量进 shrink-only allowlist 向 0。
+- **新症状类必须建自己的 shrink-only ratchet**（detect→prevent 梯度，见「Harness 的本质」）；现有 G-ADAPTER / G-DEDUP / forward-direct-raise / saga / god-state / liveness / coverage 就是这条已落地的实例，新类照办，绝不只在 review 里口头提醒。
+
+**边界（不与既有 doctrine 冲突）**：与「先止血，再根因」一致——止血是**临时止血带**（运维面、争时间），本 gate 强制其「再根因」那一半（止血落账本 + 挂根因 issue，绝不固化成仪式）；与「hotfix 只修那个 bug，不顺手改架构」一致——改的是**这个问题的因果链根因**，不是借口去重写无关模块（根因 ≠ scope-creep）；与「模式服务当前问题 / 三次法则」一致——修根因 ≠ 提前造投机抽象（10–100× 说的是**放着已知真根不修**的代价，不是「没预先泛化」的代价）。
+
 ## 先找 harness 再执行（harness-first）
 
 解决任何非平凡问题前，先识别支配这类问题的**成熟人类理论 / 工业最佳实践 / prior art**，把方案锚定在它之上，再动手：分布式投递 → at-least-once + 幂等 + DLQ + lease/fencing（Temporal/SQS 形态）；并发状态 → CAS / 乐观并发 / 版本总序；外部系统 → 最终一致假设 + 写前重导；测试 → fail-closed mock + 行为验收。产出（设计、实现、判断）要说明：套用了哪个成熟实践、在哪里**有意**偏离、为什么。最好的 harness 是让 AI 先自动找到 harness 然后再执行——判断管线（intake/consensus/review）同样据此审：无理据偏离成熟实践的方案应被质疑；声称新颖前先证明现有实践不适用。
