@@ -2,6 +2,8 @@ local S = {}
 local github_handle = nil
 
 function S.install(M)
+local github_view = require("std.github_view")
+local label_names = github_view.label_names
 local function github()
   if github_handle ~= nil then
     return github_handle
@@ -188,18 +190,6 @@ local function board_feed_cmd(M)
     return nil
   end
   return cmd
-end
-
-local function label_names(labels_json)
-  local labels = {}
-  for _, label in ipairs(labels_json or {}) do
-    if type(label) == "table" and label.name ~= nil then
-      table.insert(labels, tostring(label.name))
-    elseif type(label) == "string" then
-      table.insert(labels, label)
-    end
-  end
-  return labels
 end
 
 local function parse_board_list(stdout)

@@ -2,6 +2,8 @@ local S = {}
 
 function S.install(M)
 local strings = require("std.strings")
+local github_view = require("std.github_view")
+local label_names = github_view.label_names
 function M.parse_issue_view_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return M.issue_state_from_json(decoded)
@@ -54,18 +56,6 @@ function M.comments_from_json(comments_json)
     end
   end
   return comments
-end
-
-local function label_names(labels_json)
-  local labels = {}
-  for _, label in ipairs(labels_json or {}) do
-    if type(label) == "table" and label.name ~= nil then
-      table.insert(labels, tostring(label.name))
-    elseif type(label) == "string" then
-      table.insert(labels, label)
-    end
-  end
-  return labels
 end
 
 local function each_paginated_item(decoded, callback)
