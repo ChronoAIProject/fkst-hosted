@@ -1,8 +1,7 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "devloop_intake_candidate" },
   produces = {
     "consensus.proposal",
@@ -14,6 +13,10 @@ M.spec = {
   },
   stall_window = "2m",
 }
+
+local function intake_judge_done(_event)
+  return false
+end
 
 local function decline_result(reason)
   return {
@@ -208,7 +211,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   }
 end
 
-function pipeline(event)
+local function act_intake_judge(event)
   local candidate = event.payload or {}
   if not core.is_supported_intake_candidate(candidate) then
     core.log_entry("intake_judge", event, "unknown", core.payload_field(candidate, "dedup_key"))
@@ -358,6 +361,9 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("intake_judge", pipeline)
-
-return M
+return saga.department(spec, {
+  done = intake_judge_done,
+  act = act_intake_judge,
+  wrap = core.wrap_pipeline_failure,
+  name = "intake_judge",
+})

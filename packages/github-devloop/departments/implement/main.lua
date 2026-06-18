@@ -1,12 +1,11 @@
 local core = require("core")
-
-local M = {}
+local saga = require("std.saga")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
 
-M.spec = {
+local spec = {
   consumes = { "devloop_ready" },
   produces = {
     "github-proxy.github_issue_label_request",
@@ -18,6 +17,10 @@ M.spec = {
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+local function implement_done(_event)
+  return false
+end
 
 local function raise_impl_failed(repo, issue_number, ready, reason, detail, attempt)
   local comment_request = core.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
@@ -925,12 +928,15 @@ local function process_ready_event(event)
   end)
 end
 
-function pipeline(event)
-  core.dispatch_consumed_queue("implement", M.spec, event, {
+local function act_implement(event)
+  core.dispatch_consumed_queue("implement", spec, event, {
     devloop_ready = process_ready_event,
   })
 end
 
-pipeline = core.wrap_pipeline_failure("implement", pipeline)
-
-return M
+return saga.department(spec, {
+  done = implement_done,
+  act = act_implement,
+  wrap = core.wrap_pipeline_failure,
+  name = "implement",
+})
