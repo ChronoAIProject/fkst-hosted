@@ -387,7 +387,7 @@ impl GithubAppTokens {
         let install_id = self.resolve_installation(owner_repo).await?;
 
         // 3. Mint token outside the lock.
-        let (bare_repo_name, _) = owner_repo.split_once('/').expect("validated by regex");
+        let (_, bare_repo_name) = owner_repo.split_once('/').expect("validated by regex");
         let req = InstallationTokenRequest {
             repositories: vec![bare_repo_name.to_string()],
             permissions: Some(perms.clone()),
@@ -678,6 +678,9 @@ mod tests {
         next_mint_gone: std::sync::Mutex<bool>,
         /// If set, the next installation lookup returns NotInstalled.
         next_install_not_found: std::sync::Mutex<bool>,
+        /// Records the `repositories` of the most recent token-mint request
+        /// (regression coverage for #276 — owner vs repo name).
+        last_mint_repos: std::sync::Mutex<Vec<String>>,
     }
 
     impl FakeApi {
@@ -694,6 +697,10 @@ mod tests {
 
         fn installation_calls(&self) -> usize {
             self.installation_calls.load(Ordering::SeqCst)
+        }
+
+        fn last_mint_repos(&self) -> Vec<String> {
+            self.last_mint_repos.lock().unwrap().clone()
         }
 
         fn set_next_mint_gone(&self, gone: bool) {
@@ -727,8 +734,9 @@ mod tests {
             &self,
             _app_jwt: &SecretString,
             id: InstallationId,
-            _req: &InstallationTokenRequest,
+            req: &InstallationTokenRequest,
         ) -> Result<InstallationToken, GithubAppError> {
+            *self.last_mint_repos.lock().unwrap() = req.repositories.clone();
             self.mint_count.fetch_add(1, Ordering::SeqCst);
             if *self.next_mint_gone.lock().unwrap() {
                 *self.next_mint_gone.lock().unwrap() = false;
@@ -780,6 +788,25 @@ mod tests {
         let t2 = svc.token_for_repo("acme/site", None).await.expect("second");
         assert_eq!(t1.expose_secret(), t2.expose_secret(), "must be same token");
         assert_eq!(api.mint_count(), 1, "only one mint");
+    }
+
+    #[tokio::test]
+    async fn mint_scopes_token_to_repo_name_not_owner() {
+        // Regression for #276: the installation token must be scoped to the
+        // repository NAME (the part after the slash), not the owner (before it).
+        // Sending the owner makes GitHub 422 "repository does not exist".
+        let api = Arc::new(FakeApi::new(5));
+        let svc = service(api.clone());
+
+        svc.token_for_repo("chronoai-shining/hr-fkst", None)
+            .await
+            .expect("mint");
+
+        assert_eq!(
+            api.last_mint_repos(),
+            vec!["hr-fkst".to_string()],
+            "token must be scoped to the repo name, not the owner"
+        );
     }
 
     #[tokio::test]
