@@ -100,6 +100,126 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertEqual(set(uncovered), {self.key()})
         self.assertEqual(uncovered[self.key()].text, "return missing_branch()")
 
+    def test_write_current_uncovered_writes_stable_sorted_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "schema": "fkst.lua.coverage.v1",
+                    "files": [
+                        {
+                            "file": "std/zeta.lua",
+                            "missing_lines": [{
+                                "line": 7,
+                                "normalized_line_hash": "bbbbbbbb",
+                                "text": "return zeta()",
+                            }],
+                        },
+                        {
+                            "file": "packages/example/tests/core_test.lua",
+                            "missing_lines": [{
+                                "line": 1,
+                                "normalized_line_hash": "cccccccc",
+                                "text": "error('test')",
+                            }],
+                        },
+                        {
+                            "file": "packages/example/core.lua",
+                            "missing_lines": [{
+                                "line": 2,
+                                "normalized_line_hash": "abcdef12",
+                                "text": "return missing_branch()",
+                            }],
+                        },
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            allowlist = root / "migration" / "coverage-uncovered.allowlist"
+
+            count = coverage.write_current_uncovered(artifact, allowlist)
+            first = allowlist.read_text(encoding="utf-8")
+            count_again = coverage.write_current_uncovered(artifact, allowlist)
+            second = allowlist.read_text(encoding="utf-8")
+
+        self.assertEqual(count, 2)
+        self.assertEqual(count_again, 2)
+        self.assertEqual(first, second)
+        self.assertEqual(
+            [json.loads(line) for line in first.splitlines()],
+            [
+                {
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
+                    "reason": "baseline",
+                },
+                {
+                    "file": "std/zeta.lua",
+                    "line": 7,
+                    "normalized_line_hash": "bbbbbbbb",
+                    "reason": "baseline",
+                },
+            ],
+        )
+
+    def test_write_current_uncovered_from_covered_sets_includes_uncovered_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "packages" / "example").mkdir(parents=True)
+            (root / "packages" / "example" / "core.lua").write_text(
+                "\n".join([
+                    "local M = {}",
+                    "function M.covered()",
+                    "  return 1",
+                    "end",
+                    "function M.missing()",
+                    "  return 2",
+                    "end",
+                    "return M",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            (root / "packages" / "example" / "unused.lua").write_text(
+                "\n".join([
+                    "local M = {}",
+                    "function M.unused()",
+                    "  return 3",
+                    "end",
+                    "return M",
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            allowlist = root / "migration" / "coverage-uncovered.allowlist"
+
+            count = coverage.write_current_uncovered_from_covered_sets(
+                {"packages/example/core.lua": {1, 2, 3, 8}},
+                allowlist,
+                root,
+            )
+            entries = [json.loads(line) for line in allowlist.read_text(encoding="utf-8").splitlines()]
+
+        self.assertGreaterEqual(count, 3)
+        self.assertIn(
+            {
+                "file": "packages/example/core.lua",
+                "line": 5,
+                "normalized_line_hash": coverage.normalized_source_hash("function M.missing()"),
+                "reason": "baseline",
+            },
+            entries,
+        )
+        self.assertIn(
+            {
+                "file": "packages/example/unused.lua",
+                "line": 2,
+                "normalized_line_hash": coverage.normalized_source_hash("function M.unused()"),
+                "reason": "baseline",
+            },
+            entries,
+        )
+
     def test_repository_messages_loads_jsonl_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
