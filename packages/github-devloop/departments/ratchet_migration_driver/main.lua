@@ -29,12 +29,36 @@ local function bot_login()
   return login
 end
 
-local function trusted_author(record, login)
-  if login == nil or login == "" then
+local function trusted_bot_logins()
+  local logins = {}
+  local current = core.strip_bot_login_suffix(bot_login())
+  if current == nil or current == "" then
+    return logins
+  end
+  logins[current] = true
+  for entry in tostring(read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS") or ""):gmatch("[^,%s]+") do
+    local login = core.strip_bot_login_suffix(core._trim(entry))
+    if login ~= nil and login ~= "" then
+      logins[login] = true
+    end
+  end
+  return logins
+end
+
+local function set_empty(values)
+  for _ in pairs(values or {}) do
+    return false
+  end
+  return true
+end
+
+local function trusted_author(record, trusted_logins)
+  if set_empty(trusted_logins) then
     return true
   end
   local author = record and (record.author_login or (type(record.author) == "table" and record.author.login))
-  return core.strip_bot_login_suffix(author) == core.strip_bot_login_suffix(login)
+  author = core.strip_bot_login_suffix(author)
+  return author ~= nil and trusted_logins[author] == true
 end
 
 local function body(record)
@@ -124,18 +148,18 @@ local function require_issue_number(issue_number, context)
   return number
 end
 
-local function parent_has_marker(parent, marker, login)
+local function parent_has_marker(parent, marker, trusted_logins)
   for _, comment in ipairs(parent.comments or {}) do
-    if trusted_author(comment, login) and body(comment):find(marker, 1, true) ~= nil then
+    if trusted_author(comment, trusted_logins) and body(comment):find(marker, 1, true) ~= nil then
       return true
     end
   end
   return false
 end
 
-local function parent_has_issue_created_marker(parent, dedup_key, login)
+local function parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
   for _, comment in ipairs(parent.comments or {}) do
-    if trusted_author(comment, login) then
+    if trusted_author(comment, trusted_logins) then
       for marker in body(comment):gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
         if marker:match('dedup="([^"]+)"') == dedup_key then
           return true
@@ -154,9 +178,9 @@ local function search_issues(github, repo, query, fields, timeout)
   return result or {}
 end
 
-local function has_open_slice(github, repo, ratchet, login)
+local function has_open_slice(github, repo, ratchet, trusted_logins)
   for _, issue in ipairs(search_issues(github, repo, ratchet_slice_search_query(ratchet), "number,title,state,author,body,url", 30)) do
-    if trusted_author(issue, login)
+    if trusted_author(issue, trusted_logins)
       and body(issue):find("fkst:ratchet-slice:v1", 1, true) ~= nil
       and body(issue):find('ratchet="' .. tostring(ratchet) .. '"', 1, true) ~= nil
       and tostring(issue.state or ""):upper() ~= "CLOSED" then
@@ -166,10 +190,10 @@ local function has_open_slice(github, repo, ratchet, login)
   return nil
 end
 
-local function has_existing_slice(github, repo, dedup_key, login)
+local function has_existing_slice(github, repo, dedup_key, trusted_logins)
   local marker = issue_create_marker(dedup_key)
   for _, issue in ipairs(search_issues(github, repo, marker, "number,title,state,author,body,url", 30)) do
-    if trusted_author(issue, login) and body(issue):find(marker, 1, true) ~= nil then
+    if trusted_author(issue, trusted_logins) and body(issue):find(marker, 1, true) ~= nil then
       return issue
     end
   end
@@ -195,7 +219,7 @@ local function parent_issue(github, repo, ratchet)
 end
 
 local function reconcile_one(github, repo, ratchet)
-  local login = bot_login()
+  local trusted_logins = trusted_bot_logins()
   local plan = plan_for(ratchet)
   local parent = parent_issue(github, repo, ratchet)
   if plan.status == "inventory_empty" then
@@ -214,13 +238,13 @@ local function reconcile_one(github, repo, ratchet)
 
   local slice = plan.next_slice
   local dedup_key = tostring(slice.dedup_key or "")
-  if parent_has_issue_created_marker(parent, dedup_key, login) then
+  if parent_has_issue_created_marker(parent, dedup_key, trusted_logins) then
     return "deduped-parent-ledger"
   end
-  if has_open_slice(github, repo, ratchet.ratchet, login) ~= nil then
+  if has_open_slice(github, repo, ratchet.ratchet, trusted_logins) ~= nil then
     return "deduped-in-flight"
   end
-  if has_existing_slice(github, repo, dedup_key, login) ~= nil then
+  if has_existing_slice(github, repo, dedup_key, trusted_logins) ~= nil then
     return "deduped-existing-slice"
   end
   if not write_enabled() then
@@ -228,7 +252,7 @@ local function reconcile_one(github, repo, ratchet)
   end
 
   local intent = issue_create_intent_marker(dedup_key)
-  if not parent_has_marker(parent, intent, login) then
+  if not parent_has_marker(parent, intent, trusted_logins) then
     write_comment(github, repo, ratchet.parent_issue, dedup_key, "intent", intent .. "\n")
   end
   local issue_number = create_issue(github, repo, slice)

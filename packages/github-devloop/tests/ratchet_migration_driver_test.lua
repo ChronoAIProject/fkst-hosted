@@ -16,14 +16,48 @@ local function json_string(value)
   return require("std.strings").json_string(value)
 end
 
-local function plan_json(status, dedup_key)
-  if status == "inventory_empty" then
-    return '{"schema_version":"fkst.ratchet-slice.v1","ratchet":"saga-handler","allowlist_path":"migration/saga-handler.allowlist","remaining_count":0,"slice_size":3,"status":"inventory_empty","next_slice":null}\n'
+local ratchet_allowlist_paths = {
+  ["saga-handler"] = "migration/saga-handler.allowlist",
+  ["code-dedup"] = "migration/code-dedup.allowlist",
+  ["forward-direct-raise"] = "migration/forward-direct-raise.allowlist",
+}
+
+local function ratchet_title(ratchet)
+  return tostring(ratchet or "saga-handler"):gsub("%-", " ") .. " allowlist migration slice"
+end
+
+local function plan_json(status, dedup_key, ratchet)
+  ratchet = ratchet or "saga-handler"
+  local allowlist_path = ratchet_allowlist_paths[ratchet]
+  if allowlist_path == nil then
+    error("unknown test ratchet: " .. tostring(ratchet))
   end
-  local body = "# saga handler allowlist migration slice\n\nMachine-filed ratchet slice issue.\n\n<!-- fkst:github-proxy:issue-create:" .. dedup_key .. " -->\n<!-- fkst:ratchet-slice:v1 ratchet=\"saga-handler\" dedup=\"" .. dedup_key .. "\" -->\n"
-  return '{"schema_version":"fkst.ratchet-slice.v1","ratchet":"saga-handler","allowlist_path":"migration/saga-handler.allowlist","remaining_count":3,"slice_size":3,"status":"slice_available","next_slice":{"dedup_key":'
+  if status == "inventory_empty" then
+    return '{"schema_version":"fkst.ratchet-slice.v1","ratchet":'
+      .. json_string(ratchet)
+      .. ',"allowlist_path":'
+      .. json_string(allowlist_path)
+      .. ',"remaining_count":0,"slice_size":3,"status":"inventory_empty","next_slice":null}\n'
+  end
+  local title = ratchet_title(ratchet)
+  local body = "# "
+    .. title
+    .. "\n\nMachine-filed ratchet slice issue.\n\n<!-- fkst:github-proxy:issue-create:"
+    .. dedup_key
+    .. " -->\n<!-- fkst:ratchet-slice:v1 ratchet=\""
+    .. ratchet
+    .. "\" dedup=\""
+    .. dedup_key
+    .. "\" -->\n"
+  return '{"schema_version":"fkst.ratchet-slice.v1","ratchet":'
+    .. json_string(ratchet)
+    .. ',"allowlist_path":'
+    .. json_string(allowlist_path)
+    .. ',"remaining_count":3,"slice_size":3,"status":"slice_available","next_slice":{"dedup_key":'
     .. json_string(dedup_key)
-    .. ',"sites":[],"title":"saga handler allowlist migration slice: abc123","body":'
+    .. ',"sites":[],"title":'
+    .. json_string(title .. ": abc123")
+    .. ',"body":'
     .. json_string(body)
     .. ',"labels":["fkst-dev:enabled"]}}\n'
 end
@@ -36,8 +70,13 @@ local function parent_json(comments, state)
   return '{"number":979,"state":' .. json_string(state or "OPEN") .. ',"comments":[' .. table.concat(parts, ",") .. ']}\n'
 end
 
+local function query_ratchet(query)
+  return tostring(query or ""):match('ratchet="([^"]+)"')
+end
+
 local function new_fake_github(opts)
   local options = opts or {}
+  local dedup_key = options.dedup_key or "saga-handler/slice/abc123"
   local model = {
     writes = {},
     searches = {},
@@ -53,9 +92,20 @@ local function new_fake_github(opts)
     table.insert(model.writes, { kind = "issue_search", repo = repo, query = query, fields = fields, timeout = timeout })
     local stdout = "[]\n"
     if options.open_slice and query:find("fkst:ratchet-slice:v1", 1, true) ~= nil then
-      stdout = '[{"number":121,"state":"OPEN","author":{"login":"fkst-test-bot"},"body":"<!-- fkst:ratchet-slice:v1 ratchet=\\"saga-handler\\" dedup=\\"old\\" -->"}]\n'
+      local ratchet = options.open_slice_all_ratchets and query_ratchet(query) or options.open_slice_ratchet or "saga-handler"
+      stdout = '[{"number":121,"state":"OPEN","author":{"login":'
+        .. json_string(options.open_slice_author_login or "fkst-test-bot")
+        .. '},"body":"<!-- fkst:ratchet-slice:v1 ratchet=\\"'
+        .. ratchet
+        .. '\\" dedup=\\"'
+        .. dedup_key
+        .. '\\" -->"}]\n'
     elseif options.existing_slice and query:find("fkst:github-proxy:issue-create:", 1, true) ~= nil then
-      stdout = '[{"number":122,"state":"CLOSED","author":{"login":"fkst-test-bot"},"body":' .. json_string(query) .. '}]\n'
+      stdout = '[{"number":122,"state":"CLOSED","author":{"login":'
+        .. json_string(options.existing_slice_author_login or "fkst-test-bot")
+        .. '},"body":'
+        .. json_string(query)
+        .. '}]\n'
     end
     return { stdout = stdout, stderr = "", exit_code = 0 }
   end
@@ -95,7 +145,12 @@ local function run_driver(opts)
       t.eq(type(value), "string")
     end
     table.insert(exec_calls, spec)
-    return { stdout = options.plan or plan_json("slice_available", "saga-handler/slice/abc123"), stderr = "", exit_code = 0 }
+    local requested_ratchet = spec.argv[3]
+    local stdout = options.plan
+    if stdout == nil then
+      stdout = plan_json("slice_available", options.dedup_key or "saga-handler/slice/abc123", requested_ratchet)
+    end
+    return { stdout = stdout, stderr = "", exit_code = 0 }
   end
   file = {
     write = function(path, body)
@@ -124,9 +179,13 @@ local function run_driver(opts)
     return env[name] or ""
   end
   local ok, err = pcall(function()
+    local payload = {}
+    if not options.all_ratchets then
+      payload.ratchet = options.ratchet or "saga-handler"
+    end
     dept.pipeline({
       queue = "ratchet_migration_poll",
-      payload = { ratchet = "saga-handler" },
+      payload = payload,
     })
   end)
   core.read_env = old_read
@@ -199,6 +258,120 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
   end,
 
+  test_poll_with_managed_sibling_open_slice_noops = function()
+    local result = run_driver({
+      all_ratchets = true,
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "ElonSG",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG,loning",
+      },
+      github = {
+        open_slice = true,
+        open_slice_all_ratchets = true,
+        open_slice_author_login = "loning[bot]",
+        dedup_key = "saga-handler/slice/abc123",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 3)
+    t.eq(#result.exec_calls, 3)
+  end,
+
+  test_poll_with_managed_sibling_parent_ledger_noops = function()
+    local result = run_driver({
+      all_ratchets = true,
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "ElonSG",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG loning",
+      },
+      github = {
+        parent_comments = {
+          {
+            author_login = "loning[bot]",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+    t.eq(#result.exec_calls, 3)
+  end,
+
+  test_poll_with_managed_sibling_existing_slice_noops = function()
+    local result = run_driver({
+      all_ratchets = true,
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "ElonSG",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG loning",
+      },
+      github = {
+        existing_slice = true,
+        existing_slice_author_login = "loning[bot]",
+        dedup_key = "saga-handler/slice/abc123",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 6)
+    t.eq(#result.exec_calls, 3)
+  end,
+
+  test_single_instance_login_does_not_trust_sibling_by_default = function()
+    local result = run_driver({
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "ElonSG",
+      },
+      github = {
+        existing_slice = true,
+        existing_slice_author_login = "loning[bot]",
+        dedup_key = "saga-handler/slice/abc123",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 2)
+  end,
+
+  test_untrusted_matching_slice_marker_does_not_suppress_creation = function()
+    local result = run_driver({
+      all_ratchets = true,
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "ElonSG",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG,loning",
+      },
+      github = {
+        open_slice = true,
+        open_slice_all_ratchets = true,
+        open_slice_author_login = "randomuser",
+        dedup_key = "saga-handler/slice/abc123",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 3)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 3)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 6)
+  end,
+
   test_poll_with_empty_inventory_closes_parent = function()
     local result = run_driver({
       plan = plan_json("inventory_empty"),
@@ -221,5 +394,28 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+  end,
+
+  test_empty_current_login_keeps_permissive_author_dedup = function()
+    local result = run_driver({
+      all_ratchets = true,
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "",
+        FKST_GITHUB_BOT_LOGIN = "",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG,loning",
+      },
+      github = {
+        open_slice = true,
+        open_slice_all_ratchets = true,
+        open_slice_author_login = "randomuser",
+        dedup_key = "saga-handler/slice/abc123",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 3)
   end,
 }
