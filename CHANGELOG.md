@@ -9,6 +9,15 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
+## v0.2.3 — 2026-06-18
+
+## Fixed
+
+- Repository `.fkst/` setup and engine git access now work — a GitHub App token-scoping bug had been blocking every App operation.
+
+## New Feature
+
+## Changed
 <!-- END PENDING -->
 
 ## v0.2.2 — 2026-06-17
