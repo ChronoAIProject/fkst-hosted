@@ -86,8 +86,15 @@ local function run_driver(opts)
   local old_file = file
   local files = {}
   local old_log = log
-  exec_argv = function(argv, timeout)
-    table.insert(exec_calls, { argv = argv, timeout = timeout })
+  exec_argv = function(spec)
+    t.eq(type(spec), "table")
+    t.eq(type(spec.argv), "table")
+    t.eq(type(spec.timeout), "number")
+    t.is_nil(spec.cmd)
+    for _, value in ipairs(spec.argv) do
+      t.eq(type(value), "string")
+    end
+    table.insert(exec_calls, spec)
     return { stdout = options.plan or plan_json("slice_available", "saga-handler/slice/abc123"), stderr = "", exit_code = 0 }
   end
   file = {
@@ -179,6 +186,7 @@ return {
     t.eq(result.exec_calls[1].argv[3], "saga-handler")
     t.eq(result.exec_calls[1].argv[4], "--json")
     t.eq(result.exec_calls[1].argv[5], nil)
+    t.eq(result.exec_calls[1].timeout, 120)
   end,
 
   test_poll_with_in_flight_slice_noops = function()
