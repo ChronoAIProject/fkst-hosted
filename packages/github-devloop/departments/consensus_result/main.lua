@@ -226,7 +226,6 @@ local function make_department(ports)
 end
 
 local M = ports_seam.install(make_department)
-M.make_department = make_department
 _G.pipeline = M.pipeline
 
 return M
