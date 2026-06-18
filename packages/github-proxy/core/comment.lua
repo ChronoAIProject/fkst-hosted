@@ -199,6 +199,13 @@ local function trusted_rest_comment_with_fragment(M, repo, target, fragment, bot
   return M.trusted_comment_with_fragment(comments, fragment, bot_login)
 end
 
+local function confirmed_existing_handoff_comment(M, repo, target, dedup_key, bot_login, handoff)
+  if handoff == nil then
+    return nil
+  end
+  return trusted_rest_comment_with_fragment(M, repo, target, M.comment_marker(dedup_key), bot_login)
+end
+
 function M.gh_pr_comment(repo, pr_number, body_file, timeout)
   return M.github().pr_comment(repo, pr_number, body_file, timeout or 30)
 end
@@ -346,9 +353,7 @@ function M.write_comment_request(payload, target)
       existing = M.trusted_comment_with_fragment(comments, tostring(replace_marker), bot_login)
     elseif M.has_trusted_marker(comments, payload.dedup_key, bot_login) then
       log.info("github-proxy: comment marker already present")
-      if payload.handoff ~= nil then
-        written_comment = trusted_rest_comment_with_fragment(M, repo, target, M.comment_marker(payload.dedup_key), bot_login)
-      end
+      written_comment = confirmed_existing_handoff_comment(M, repo, target, payload.dedup_key, bot_login, payload.handoff)
       return
     end
     local claim_issue_number = target.kind == "issue" and target.number or payload.issue_number
