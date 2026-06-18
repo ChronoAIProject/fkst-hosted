@@ -1,8 +1,7 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "devloop_intake_probe_tick" },
   produces = { "devloop_intake_candidate" },
   fanout = { "devloop_intake_probe_tick" },
@@ -68,7 +67,11 @@ local function maybe_raise_candidate(repo, issue, delivery_version)
   core.log_raise("intake_probe", proposal_id, "devloop_intake_candidate", payload)
 end
 
-function pipeline(event)
+local function intake_probe_done(_event)
+  return false
+end
+
+local function act_intake_probe(event)
   core.log_entry("intake_probe", event, "github-devloop/intake-probe", "tick")
   core.assert_trusted_bot_configured()
 
@@ -108,6 +111,9 @@ function pipeline(event)
   end
 end
 
-pipeline = core.wrap_pipeline_failure("intake_probe", pipeline)
-
-return M
+return saga.department(spec, {
+  done = intake_probe_done,
+  act = act_intake_probe,
+  wrap = core.wrap_pipeline_failure,
+  name = "intake_probe",
+})
