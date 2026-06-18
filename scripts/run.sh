@@ -226,6 +226,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_fkst_layout.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_dedup_test.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_saga_head_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py" || fail=1
@@ -385,6 +386,33 @@ LUA
   echo "OK: SDK primitive truncate_utf8 is available in BIN: $BIN"
 }
 
+run_self_test_with_optional_lua_coverage() {
+  local coverage_dir="$FKST_RUNTIME_ROOT/lua-coverage" coverage_json out rc
+  rm -rf "$coverage_dir"
+  mkdir -p "$coverage_dir"
+  set +e
+  out="$(cd "$coverage_dir" && "$BIN" --self-test --coverage 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    printf '%s\n' "$out"
+    coverage_json="$coverage_dir/coverage.json"
+    if [ ! -f "$coverage_json" ]; then
+      echo "error: fkst-framework --self-test --coverage did not write coverage.json in $coverage_dir" >&2
+      return 1
+    fi
+    FKST_LUA_COVERAGE_JSON="$coverage_json" FKST_LUA_COVERAGE_REQUIRED=1 python3 -B "$ROOT/scripts/check_repo.py"
+    return $?
+  fi
+  if printf '%s\n' "$out" | grep -q "unknown --self-test option: --coverage"; then
+    echo "warning: fkst-framework does not expose --self-test --coverage; skipping Lua coverage ratchet artifact collection" >&2
+    "$BIN" --self-test
+    return $?
+  fi
+  printf '%s\n' "$out" >&2
+  return "$rc"
+}
+
 # Run "$@"; unless verbose (cmd_test's flag), drop advisory `PASS` lines from its
 # combined output so only failures surface. Returns the command's own exit code
 # (via PIPESTATUS, not grep's). The `set +e`/`set -e` guard makes it safe in any
@@ -449,7 +477,7 @@ cmd_test() {
   report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
 
   echo "=== self-test ==="
-  if ! "$BIN" --self-test; then
+  if ! run_self_test_with_optional_lua_coverage; then
     fail=$((fail + 1))
   fi
 

@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Unit tests for the Lua coverage shrink-only ratchet."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+def load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+scripts = Path(__file__).resolve().parent
+coverage = load_module("check_repo_coverage", scripts / "check_repo_coverage.py")
+
+
+class CoverageRatchetTest(unittest.TestCase):
+    def key(self, file: str = "packages/example/core.lua", line: int = 2, digest: str = "abcdef12"):
+        return coverage.CoverageKey(file, line, digest)
+
+    def test_new_uncovered_production_line_fails_with_source_text(self) -> None:
+        uncovered = {
+            self.key(): coverage.UncoveredLine(self.key(), "return missing_branch()"),
+        }
+
+        messages = coverage.ratchet_messages(uncovered, set())
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("packages/example/core.lua:2:return missing_branch()", messages[0])
+        self.assertIn("not in migration/coverage-uncovered.allowlist", messages[0])
+
+    def test_allowlisted_uncovered_line_passes(self) -> None:
+        uncovered = {
+            self.key(): coverage.UncoveredLine(self.key(), "return missing_branch()"),
+        }
+
+        self.assertEqual(coverage.ratchet_messages(uncovered, {self.key()}), [])
+
+    def test_stale_allowlist_entry_forces_prune(self) -> None:
+        messages = coverage.ratchet_messages({}, {self.key()})
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("is no longer uncovered; prune the stale entry", messages[0])
+
+    def test_allowlist_growth_relative_to_base_fails(self) -> None:
+        old_key = self.key(line=1, digest="11111111")
+        current = {old_key, self.key()}
+        base = {old_key}
+
+        messages = coverage.ratchet_messages({}, current, base)
+
+        self.assertIn("grows migration/coverage-uncovered.allowlist relative to dev", messages[-1])
+
+    def test_engine_file_metadata_is_authoritative_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact = Path(tmp) / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "schema": "fkst.lua.coverage.v1",
+                    "files": [{
+                        "file": "packages/example/core.lua",
+                        "coverable_lines": [
+                            {"line": 1, "normalized_line_hash": "11111111", "text": "local M = {}", "covered": True},
+                            {"line": 2, "normalized_line_hash": "abcdef12", "text": "return missing_branch()", "covered": False},
+                        ],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            uncovered = coverage.uncovered_from_artifact(artifact)
+
+        self.assertEqual(set(uncovered), {self.key()})
+        self.assertEqual(uncovered[self.key()].text, "return missing_branch()")
+
+    def test_repository_messages_loads_jsonl_allowlist(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.allowlist").write_text(
+                json.dumps({
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
+                    "reason": "legacy uncovered branch",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            artifact = root / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "files": [{
+                        "file": "packages/example/core.lua",
+                        "missing_lines": [{
+                            "line": 2,
+                            "normalized_line_hash": "abcdef12",
+                            "text": "return missing_branch()",
+                        }],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "allowlist_at_dev_base", return_value=("absent", None)):
+                    messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
