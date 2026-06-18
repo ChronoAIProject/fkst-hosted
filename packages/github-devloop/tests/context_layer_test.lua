@@ -148,15 +148,18 @@ local function find_raise(raises, queue)
 end
 
 local function run_probe(payload, opts)
-  return t.run_department("tests/board_digest_probe_helpers.lua", {
+  local result_path = "/tmp/fkst-packages-test/github-devloop-board-digest-" .. tostring(now()) .. "-" .. tostring({}):gsub("[^%w._-]", "_") .. ".lua"
+  payload.result_path = result_path
+  local result = t.run_department("tests/board_digest_probe_helpers.lua", {
     queue = "board_digest_probe",
     payload = payload,
   }, opts)
+  t.eq(result.exit_code, 0)
+  return assert(loadfile(result_path))()
 end
 
 local function probe_result(result)
-  local raised = find_raise(result.raises, "board_digest_result")
-  return raised and raised.payload or nil
+  return result
 end
 
 return {
@@ -371,7 +374,6 @@ return {
       tick = "2026-06-10T02:12:03Z",
     }, h.opts("board-digest-utf8-title"))
 
-    t.eq(result.exit_code, 0)
     local body = probe_result(result).body
     assert_valid_utf8(body)
     t.is_true(body:find("#1 [fkst-dev:thinking] " .. string.rep("a", 59), 1, true) ~= nil)

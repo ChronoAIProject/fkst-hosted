@@ -252,6 +252,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    local result_path = "/tmp/fkst-packages-test/github-proxy-entity-view-" .. tostring(now()) .. "-" .. tostring({}):gsub("[^%w._-]", "_") .. ".lua"
     local cached = t.run_department("tests/entity_view_probe_helpers.lua", {
       queue = "entity_view_probe",
       payload = {
@@ -260,9 +261,11 @@ return {
         number = 42,
         updated_at = "2026-06-03T01:02:03Z",
         consumer = "cache-warmer",
+        result_path = result_path,
       },
     }, run_opts)
     t.eq(cached.exit_code, 0)
+    t.eq(assert(loadfile(result_path))().exit_code, 0)
 
     local guard_calls_before = count_calls("gh api repos/owner/x/issues/42")
     local pr_create_calls_before = count_calls("gh pr create")

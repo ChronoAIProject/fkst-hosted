@@ -7,6 +7,7 @@ M.spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
+    "devloop_ready",
     "devloop_reviewing",
     "devloop_fixing",
     "devloop_decompose",
