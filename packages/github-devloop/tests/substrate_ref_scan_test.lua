@@ -147,6 +147,14 @@ local function mock_base_head()
   })
 end
 
+local function mock_bump_branch_base_ancestry(exit_code)
+  t.mock_command("git merge-base --is-ancestor " .. base_sha .. " " .. old_branch_sha, {
+    stdout = "",
+    stderr = "",
+    exit_code = exit_code or 0,
+  })
+end
+
 local function mock_runtime_root(name)
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/" .. tostring(name),
@@ -729,6 +737,8 @@ return {
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
+    mock_base_head()
+    mock_bump_branch_base_ancestry(0)
     mock_bump_pr_view()
     mock_bump_diff(".fkst/substrate-ref\nREADME.md")
 
@@ -779,6 +789,8 @@ return {
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
+    mock_base_head()
+    mock_bump_branch_base_ancestry(0)
     mock_bump_pr_view(nil, {
       rollup = '[{"name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]',
     })
@@ -797,6 +809,38 @@ return {
     t.eq(result.exit_code, 0)
     eq_zero(count_calls("gh pr merge"), "merge call for red CI")
     eq_zero(count_raises(result, "github-proxy.github_pr_comment_request"), "comment raises for red CI")
+  end,
+
+  test_real_mode_refreshes_existing_bump_branch_when_pin_matches_but_base_is_stale = function()
+    mock_env("1")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_existing_pr()
+    mock_branch_present()
+    mock_branch_pin(target_sha)
+    mock_bump_pr_view(nil, {
+      rollup = '[{"name":"ci","status":"COMPLETED","conclusion":"FAILURE"}]',
+    })
+    mock_bump_diff(".fkst/substrate-ref\nREADME.md")
+    mock_base_head()
+    mock_bump_branch_base_ancestry(1)
+    mock_runtime_root("substrate-stale-base")
+    mock_no_checked_out_bump_branch()
+    mock_worktree_commands("substrate-stale-base", true, old_branch_sha)
+    mock_existing_pr()
+    mock_bump_pr_view(nil, {
+      rollup = '[{"name":"ci","status":"IN_PROGRESS","conclusion":""}]',
+    })
+    mock_bump_diff(".fkst/substrate-ref\nREADME.md")
+
+    local result = run_scan(opts("substrate-stale-base", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("git merge-base --is-ancestor " .. base_sha .. " " .. old_branch_sha), 1)
+    t.eq(count_calls("git worktree add -B chore/substrate-ref-bump"), 1)
+    t.eq(count_calls("--force-with-lease=refs/heads/chore/substrate-ref-bump:" .. old_branch_sha), 1)
+    eq_zero(count_calls("gh pr merge '27' --repo 'owner/repo' --merge --match-head-commit '" .. pr_head_sha .. "'"), "merge call after stale-base refresh")
+    eq_zero(count_raises(result, "github-proxy.github_pr_comment_request"), "comment raises after stale-base refresh")
   end,
 
   test_real_mode_removes_stale_checked_out_bump_branch_worktree_before_update = function()
