@@ -57,6 +57,34 @@ class DedupRatchetTest(unittest.TestCase):
 
         self.assertEqual(dedup.ratchet_messages(self.sources(), allowlist), [])
 
+    def test_nested_function_definitions_are_not_module_scope_units(self) -> None:
+        sources = {
+            "packages/one/core.lua": (
+                "local function top_one(items)\n"
+                "local function ignored(items)\n"
+                "  return items\n"
+                "end\n"
+                "local function shared_total(items)\n"
+                f"{duplicate_body()}"
+                "end\n"
+                "return shared_total(items) + 1\n"
+                "end\n"
+            ),
+            "packages/two/core.lua": (
+                "local function top_two(items)\n"
+                "local function ignored(items)\n"
+                "  return items\n"
+                "end\n"
+                "local function shared_total(items)\n"
+                f"{duplicate_body()}"
+                "end\n"
+                "return shared_total(items) + 2\n"
+                "end\n"
+            ),
+        }
+
+        self.assertEqual(dedup.duplicate_groups(sources), set())
+
     def test_stale_allowlist_entry_forces_prune(self) -> None:
         stale = dedup.DedupEntry(
             name="old_helper",

@@ -15,7 +15,7 @@ FUNCTION_RE = re.compile(
     r"^(?P<indent>[ \t]*)(?:local\s+)?function\s+"
     r"(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:\s*[.:]\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*\("
 )
-SAME_INDENT_END_RE = re.compile(r"^(?P<indent>[ \t]*)end(?:\s*(?:--.*)?)?$")
+LUA_WORD_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
 
 
 @dataclass(frozen=True, order=True)
@@ -123,25 +123,51 @@ def normalized_body(lines: list[str]) -> str:
     return "\n".join(stripped for line in lines if (stripped := line.strip()))
 
 
+def block_delta(line: str) -> int:
+    tokens = LUA_WORD_RE.findall(line)
+    delta = 0
+    for index, token in enumerate(tokens):
+        if token in {"function", "do", "repeat"}:
+            delta += 1
+        elif token == "then" and (index == 0 or tokens[index - 1] != "elseif"):
+            delta += 1
+        elif token in {"end", "until"}:
+            delta -= 1
+    return delta
+
+
+def matching_function_end(code_lines: list[str], signature_index: int) -> int | None:
+    depth = block_delta(code_lines[signature_index])
+    if depth <= 0:
+        return signature_index
+    cursor = signature_index + 1
+    while cursor < len(code_lines):
+        depth += block_delta(code_lines[cursor])
+        if depth <= 0:
+            return cursor
+        cursor += 1
+    return None
+
+
 def module_scope_functions(path: str, source: str) -> list[FunctionBody]:
     original_lines = source.splitlines()
     code_lines = code_without_comments_and_strings(source).splitlines()
     bodies: list[FunctionBody] = []
     index = 0
+    block_depth = 0
     while index < len(code_lines):
         line = code_lines[index]
-        match = FUNCTION_RE.match(line)
+        match = FUNCTION_RE.match(line) if block_depth == 0 else None
         if match is not None:
             body_start = index + 1
-            cursor = body_start
-            while cursor < len(code_lines):
-                end_match = SAME_INDENT_END_RE.match(code_lines[cursor])
-                if end_match is not None and end_match.group("indent") == match.group("indent"):
-                    body = normalized_body(original_lines[body_start:cursor])
-                    if len(body) >= MIN_NORMALIZED_BODY_CHARS:
-                        bodies.append(FunctionBody(function_basename(match.group("name")), path, body))
-                    break
-                cursor += 1
+            body_end = matching_function_end(code_lines, index)
+            if body_end is not None:
+                body = normalized_body(original_lines[body_start:body_end])
+                if len(body) >= MIN_NORMALIZED_BODY_CHARS:
+                    bodies.append(FunctionBody(function_basename(match.group("name")), path, body))
+                index = body_end + 1
+                continue
+        block_depth = max(0, block_depth + block_delta(line))
         index += 1
     return bodies
 
