@@ -108,6 +108,18 @@ function M.labels_json(labels)
   return "[" .. table.concat(parts, ",") .. "]"
 end
 
+function M.label_names(labels_json)
+  local labels = {}
+  for _, label in ipairs(labels_json or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
 function M.assignees_json(assignees)
   local parts = {}
   for _, assignee in ipairs(assignees or {}) do

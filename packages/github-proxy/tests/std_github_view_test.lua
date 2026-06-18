@@ -40,6 +40,25 @@ return {
     t.eq(view.assignees[2].login, "reviewer")
   end,
 
+  test_label_names_extracts_supported_issue_label_shapes = function()
+    local labels = github_view.label_names({
+      { name = "bug" },
+      "triage",
+      { name = 42 },
+      { color = "ededed" },
+      false,
+      { name = false },
+    })
+
+    t.eq(#labels, 4)
+    t.eq(labels[1], "bug")
+    t.eq(labels[2], "triage")
+    t.eq(labels[3], "42")
+    t.eq(labels[4], "false")
+    t.eq(#github_view.label_names(nil), 0)
+    t.eq(#github_view.label_names({}), 0)
+  end,
+
   test_pr_rest_json_fields_render_to_view_shape = function()
     local pr = json.decode('{"state":"closed","merged_at":"2026-06-03T01:02:03Z","head":{"repo":{"owner":{"login":"fork"},"name":"repo"}},"base":{"repo":{"full_name":"owner/repo"}}}')
     local view_json = '{"state":' .. github_view.json_value(github_view.rest_pr_state(pr))

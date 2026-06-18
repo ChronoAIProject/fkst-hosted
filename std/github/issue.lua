@@ -5,6 +5,7 @@ local rest_state = github_view.rest_state
 local json_string = github_view.json_string
 local json_value = github_view.json_value
 local labels_json = github_view.labels_json
+local label_names = github_view.label_names
 local assignees_json = github_view.assignees_json
 local parse_view_updated_at = github_view.parse_view_updated_at
 local parse_updated_at_stdout = github_view.parse_updated_at_stdout
@@ -157,18 +158,6 @@ local function comments_from_json(comments_json)
     end
   end
   return comments
-end
-
-local function label_names(labels_json)
-  local labels = {}
-  for _, label in ipairs(labels_json or {}) do
-    if type(label) == "table" and label.name ~= nil then
-      table.insert(labels, tostring(label.name))
-    elseif type(label) == "string" then
-      table.insert(labels, label)
-    end
-  end
-  return labels
 end
 
 local function repo_and_number(source_ref)
