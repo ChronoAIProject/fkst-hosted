@@ -1,10 +1,52 @@
 local M = {}
+local error_facts = require("std.error_facts")
 local payload_validator = require("std.payload")
 local source_refs = require("std.source_ref")
 local strings = require("std.strings")
 
 function M.persistence_class()
   return "judgment_pipeline"
+end
+
+function M.error_class_from_message(message)
+  local text = tostring(message or "")
+  local class = text:match("autochrono: ([%w%-]+):")
+    or text:match("autochrono: ([%w%-]+) failed:")
+  return class or "caught-failure"
+end
+
+function M.log_error_fact(level, dept, tag, error_class, queue, message, context)
+  local fields = error_facts.error_fact_fields(error_class, queue, dept, message, context)
+  table.insert(fields, "queue=" .. error_facts.one_line(queue))
+  table.insert(fields, "error=" .. error_facts.one_line(message))
+  log[level or "warn"]("autochrono dept=" .. error_facts.one_line(dept) .. " tag=" .. error_facts.one_line(tag or "FAILURE") .. " " .. table.concat(fields, " "))
+end
+
+local event_source_ref = error_facts.event_source_ref
+
+local function failure_context(event)
+  if type(event) ~= "table" then
+    return nil, {
+      source_ref = nil,
+      attempt = nil,
+    }
+  end
+  return event.queue, {
+    source_ref = event_source_ref(event),
+    attempt = event.attempt,
+  }
+end
+
+function M.wrap_pipeline_failure(dept, fn)
+  return function(event)
+    local ok, err = pcall(fn, event)
+    if ok then
+      return err
+    end
+    local queue, context = failure_context(event)
+    M.log_error_fact("error", dept, "FAILURE", M.error_class_from_message(err), queue, err, context)
+    error(err, 0)
+  end
 end
 
 local max_key_len = 200
