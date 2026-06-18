@@ -12,6 +12,7 @@ import sys
 import unittest
 from unittest import mock
 from pathlib import Path
+import ratchet_base_test
 
 
 def load_check_repo():
@@ -407,6 +408,7 @@ class RunScriptContractTest(unittest.TestCase):
         source = self.source()
 
         self.assertIn('python3 -B "$ROOT/scripts/check_repo.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/ratchet_base_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_dedup_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
@@ -417,17 +419,8 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertIn('python3 -B "$ROOT/scripts/run_sh_coverage_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/board_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/doctor_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/check_repo.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/check_repo_fkst_layout.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/check_repo_dedup_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/check_repo_saga_head_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/check_repo_fkst_layout_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/run_sh_coverage_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/board_test.py"', source)
-        self.assertNotIn('python3 "$ROOT/scripts/doctor_test.py"', source)
+        for path in ("check_repo.py", "ratchet_base_test.py", "check_repo_fkst_layout.py", "check_repo_dedup_test.py", "check_repo_test.py", "check_repo_saga_head_test.py", "check_repo_fkst_layout_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py"):
+            self.assertNotIn(f'python3 "$ROOT/scripts/{path}"', source)
 
     def test_package_runtime_view_is_regenerated_from_source_packages(self) -> None:
         source = self.source()
@@ -455,9 +448,9 @@ class RunScriptContractTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
-            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_coverage.py", "check_repo_dedup.py", "check_repo_gh_git_adapter.py", "check_repo_github_devloop_helpers.py", "check_repo_ingress.py", "check_repo_perm.py", "check_repo_saga_head.py"):
+            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_coverage.py", "check_repo_dedup.py", "check_repo_gh_git_adapter.py", "check_repo_github_devloop_helpers.py", "check_repo_ingress.py", "check_repo_perm.py", "check_repo_saga_head.py", "ratchet_base.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
-            for name in ("check_repo_coverage_test.py", "check_repo_dedup_test.py", "check_repo_test.py", "check_repo_saga_head_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "check_repo_github_devloop_helpers_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py"):
+            for name in ("check_repo_coverage_test.py", "check_repo_dedup_test.py", "check_repo_test.py", "check_repo_saga_head_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "check_repo_github_devloop_helpers_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py", "ratchet_base_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
 
             core_lines = [
@@ -773,6 +766,18 @@ class SagaHandlerRatchetTest(unittest.TestCase):
             ),
             [],
         )
+
+    def test_dev_base_allowlist_resolves_from_origin_dev_without_local_dev(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ratchet_base_test.init_repo(root)
+            base_commit = ratchet_base_test.commit_file(root, "migration/saga-handler.allowlist", "# comment\npackages/example/departments/dept/main.lua\n\n", "base allowlist")
+            ratchet_base_test.git(root, "update-ref", "refs/remotes/origin/dev", base_commit)
+            ratchet_base_test.commit_file(root, "migration/saga-handler.allowlist", "packages/example/departments/dept/main.lua\npackages/example/departments/new/main.lua\n", "head allowlist")
+            status, allowlist = check_repo.saga_allowlist_at_dev_base(root)
+
+        self.assertEqual(status, "present")
+        self.assertEqual(allowlist, {"packages/example/departments/dept/main.lua"})
 
     def test_missing_dev_base_is_violation_not_warning(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

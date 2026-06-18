@@ -27,8 +27,8 @@ jobs:
 
       - name: Ensure dev ref is available
         run: |
-          git fetch origin dev:dev
-          git show-ref --verify refs/heads/dev
+          git fetch --no-tags --prune origin +refs/heads/dev:refs/remotes/origin/dev
+          git rev-parse --verify refs/remotes/origin/dev^{commit}
 
       - name: Resolve fkst-substrate source pin
         id: substrate_ref

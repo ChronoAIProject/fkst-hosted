@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+import ratchet_base
 
 
 ALLOWLIST = "migration/code-dedup.allowlist"
@@ -244,22 +245,13 @@ def repository_messages(root: Path, packages: Path, read_text, rel) -> list[str]
 
 def allowlist_at_dev_base(root: Path) -> tuple[str, set[DedupEntry] | None]:
     try:
-        git = lambda args, **kwargs: subprocess.run(["git", *args], cwd=root, check=False, **kwargs)
-        if git(["rev-parse", "--verify", "dev"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-            return "unresolved", None
-        base = git(["merge-base", "HEAD", "dev"], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        base_commit = base.stdout.strip()
-        if base.returncode != 0 or base_commit == "":
-            return "unresolved", None
-        base_allowlist = base_commit + ":" + ALLOWLIST
-        if git(["cat-file", "-e", base_allowlist], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-            return "absent", None
-        shown = git(["show", base_allowlist], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        if shown.returncode != 0:
-            return "unresolved", None
+        status, shown = ratchet_base.file_at_base(root, ALLOWLIST)
+        if status != "present":
+            return status, None
+        assert shown is not None
         entries = {
             DedupEntry.parse(line.strip())
-            for line in shown.stdout.splitlines()
+            for line in shown.splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         }
         return "present", entries

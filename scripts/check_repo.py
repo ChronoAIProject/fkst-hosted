@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_coverage, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head
+import check_repo_coverage, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -948,15 +948,11 @@ def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str]
 
 def saga_allowlist_at_dev_base(root: Path) -> tuple[str, set[str] | None]:
     try:
-        git = lambda args, **kwargs: subprocess.run(["git", *args], cwd=root, check=False, **kwargs)
-        if git(["rev-parse", "--verify", "dev"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0: return "unresolved", None
-        base = git(["merge-base", "HEAD", "dev"], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        base_commit = base.stdout.strip()
-        if base.returncode != 0 or base_commit == "": return "unresolved", None
-        base_allowlist = base_commit + ":migration/saga-handler.allowlist"
-        if git(["cat-file", "-e", base_allowlist], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0: return "absent", None
-        shown = git(["show", base_allowlist], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        return ("unresolved", None) if shown.returncode != 0 else ("present", {line.strip() for line in shown.stdout.splitlines() if line.strip() and not line.lstrip().startswith("#")})
+        status, shown = ratchet_base.file_at_base(root, "migration/saga-handler.allowlist")
+        if status != "present":
+            return status, None
+        assert shown is not None
+        return "present", {line.strip() for line in shown.splitlines() if line.strip() and not line.lstrip().startswith("#")}
     except Exception:
         return "unresolved", None
 

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -24,6 +25,30 @@ def load_module(name: str, path: Path):
 scripts_dir = Path(__file__).resolve().parent
 check_repo = load_module("check_repo", scripts_dir / "check_repo.py")
 dedup = check_repo.check_repo_dedup
+
+
+def git(root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return result.stdout.strip()
+
+
+def init_git_repo(root: Path) -> None:
+    git(root, "init")
+    git(root, "config", "user.email", "fkst-test@example.invalid")
+    git(root, "config", "user.name", "fkst test")
+
+
+def commit_paths(root: Path, paths: list[str], message: str) -> str:
+    git(root, "add", *paths)
+    git(root, "commit", "-m", message)
+    return git(root, "rev-parse", "HEAD")
 
 
 def duplicate_body() -> str:
@@ -119,6 +144,27 @@ class DedupRatchetTest(unittest.TestCase):
         messages = dedup.ratchet_messages(self.sources(), {current}, {base})
 
         self.assertEqual(messages, [])
+
+    def test_dev_base_allowlist_resolves_from_origin_dev_without_local_dev(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            init_git_repo(root)
+            (root / "migration").mkdir()
+            entry = dedup.DedupEntry(
+                name="shared_total",
+                body_hash="0123456789abcdef0123456789abcdef",
+                files=("packages/one/core.lua", "packages/two/core.lua"),
+            )
+            (root / dedup.ALLOWLIST).write_text(f"# comment\n{entry.allowlist_line()}\n\n", encoding="utf-8")
+            base_commit = commit_paths(root, [dedup.ALLOWLIST], "base allowlist")
+            git(root, "update-ref", "refs/remotes/origin/dev", base_commit)
+            (root / dedup.ALLOWLIST).write_text("", encoding="utf-8")
+            commit_paths(root, [dedup.ALLOWLIST], "head allowlist")
+
+            status, allowlist = dedup.allowlist_at_dev_base(root)
+
+        self.assertEqual(status, "present")
+        self.assertEqual(allowlist, {entry})
 
     def test_production_sources_exclude_tests_helpers_and_fakes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
