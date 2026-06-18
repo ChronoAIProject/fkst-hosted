@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("core.registry")
+local registry = require("std.registry")
 local source_refs = require("std.source_ref")
 
 function S.install(M)
@@ -102,7 +102,7 @@ local liveness_resolver_families = {
   },
 }
 
-local liveness_signal_producers = registry.load_indexed_map("core.restart.liveness_signal_producers.index", "family")
+local liveness_signal_producers = registry.load_indexed_map("core.restart.liveness_signal_producers.index", "family", nil, nil, "github-devloop")
 
 function M.liveness_signal_producer_contract(family)
   return liveness_signal_producers[tostring(family or "")]

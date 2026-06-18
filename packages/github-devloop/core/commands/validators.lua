@@ -1,4 +1,5 @@
 local S = {}
+local gitref = require("std.gitref")
 
 function S.bounded_limit(value, fallback, minimum, maximum, message)
   local n = tonumber(value or fallback)
@@ -17,35 +18,19 @@ function S.validate_fields(fields, message)
 end
 
 function S.require_safe_branch(M, name, value)
-  if not M._is_git_ref_safe(value) then
-    error("github-devloop: invalid " .. tostring(name))
-  end
-  return tostring(value)
+  return gitref.require_safe_branch(name, value, "github-devloop")
 end
 
 function S.require_safe_remote(M, remote)
-  local value = tostring(remote or "")
-  if value == "" or value:find("[\r\n]") ~= nil then
-    error("github-devloop: invalid git remote")
-  end
-  if not M._is_git_ref_safe(value) then
-    error("github-devloop: invalid git remote")
-  end
-  return value
+  return gitref.require_safe_remote(remote, "github-devloop")
 end
 
 function S.require_safe_sha(M, name, value)
-  if not M._is_git_sha(value) then
-    error("github-devloop: invalid " .. tostring(name))
-  end
-  return tostring(value)
+  return gitref.require_safe_sha(name, value, "github-devloop")
 end
 
 function S.require_positive_pr_number(M, value)
-  if not M._is_positive_pr_number(value) then
-    error("github-devloop: invalid pull request number")
-  end
-  return tostring(value)
+  return gitref.require_positive_pr_number(value, "github-devloop")
 end
 
 function S.require_label_name(name)

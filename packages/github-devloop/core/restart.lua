@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("core.registry")
+local registry = require("std.registry")
 
 function S.install(M)
 
@@ -15,9 +15,9 @@ local payload_derivations = {
   ["comment_body:fix-feedback"] = true,
 }
 
-local marker_fields = registry.load_indexed_map("core.restart.marker_fields.index", "family")
+local marker_fields = registry.load_indexed_map("core.restart.marker_fields.index", "family", nil, nil, "github-devloop")
 
-local required_replay_payload_fields = registry.load_indexed_map("core.restart.required_replay_payload_fields.index", "state")
+local required_replay_payload_fields = registry.load_indexed_map("core.restart.required_replay_payload_fields.index", "state", nil, nil, "github-devloop")
 
 local function fact(family, freshness)
   return { family = family, freshness = freshness }
@@ -98,7 +98,7 @@ local transition_table = registry.load_indexed_array("core.restart.transitions.i
   watchdog = watchdog,
   actionable_epoch = actionable_epoch,
   responsibility_signature = responsibility_signature,
-})
+}, "github-devloop")
 
 local audit_by_state = {}
 for _, row in ipairs(transition_table) do

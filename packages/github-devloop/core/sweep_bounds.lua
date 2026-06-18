@@ -1,22 +1,13 @@
 local S = {}
-local strings = require("std.strings")
-local decimal_checksum = strings.decimal_checksum
+local sweep = require("std.sweep")
 
 function S.install(M)
 local default_call_timeout = 10
 local default_wall_clock_budget = 90
 
-local function positive_integer(value, fallback, minimum, maximum)
-  local n = tonumber(value)
-  if n == nil or n ~= math.floor(n) or n < minimum or n > maximum then
-    return fallback
-  end
-  return n
-end
-
 function M.sweep_deadline(now_seconds, limits)
   local base = tonumber(now_seconds) or now()
-  local budget = positive_integer(limits and limits.wall_clock_budget, default_wall_clock_budget, 1, 3600)
+  local budget = sweep.positive_integer(limits and limits.wall_clock_budget, default_wall_clock_budget, 1, 3600)
   return base + budget
 end
 
@@ -29,7 +20,7 @@ function M.sweep_remaining_seconds(deadline)
 end
 
 function M.sweep_call_timeout(limits, deadline)
-  local configured = positive_integer(limits and limits.call_timeout, default_call_timeout, 1, 300)
+  local configured = sweep.positive_integer(limits and limits.call_timeout, default_call_timeout, 1, 300)
   local remaining = M.sweep_remaining_seconds(deadline)
   if remaining == 0 then
     return 0
@@ -42,21 +33,6 @@ end
 
 function M.sweep_has_budget(deadline)
   return M.sweep_remaining_seconds(deadline) > 0
-end
-
-function M.sweep_deadline_deferred_result(error_class, stderr)
-  return {
-    deferred = true,
-    reason = "deadline",
-    error_class = tostring(error_class or "sweep command"),
-    stdout = "",
-    stderr = tostring(stderr or "sweep deadline exhausted"),
-    exit_code = 0,
-  }
-end
-
-function M.sweep_result_deferred(result)
-  return type(result) == "table" and result.deferred == true
 end
 
 function M.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
@@ -119,19 +95,12 @@ function M.sweep_rotation_seed(event)
   return tostring(math.floor(now() / 60))
 end
 
-function M.sweep_rotation_offset(count, seed)
-  local n = tonumber(count)
-  if n == nil or n <= 0 then
-    return 0
-  end
-  local numeric_seed = tonumber(seed)
-  if numeric_seed ~= nil and numeric_seed == math.floor(numeric_seed) then
-    return numeric_seed % n
-  end
-  local hash = decimal_checksum(tostring(seed or ""))
-  return tonumber(hash) % n
-end
+M.sweep_rotation_offset = sweep.rotation_offset
 
+-- rotate/batch stay package-local so their facade call graph
+-- (M.sweep_rotate -> M.sweep_rotation_offset, M.sweep_batch -> M.sweep_rotate)
+-- is preserved exactly; only the leaf rotation_offset/positive_integer math is
+-- shared from std.sweep.
 function M.sweep_rotate(items, seed)
   local source = items or {}
   local count = #source
@@ -153,7 +122,7 @@ end
 
 function M.sweep_batch(items, seed, cap, default_cap)
   local source = items or {}
-  local bounded_cap = positive_integer(cap, default_cap or 25, 1, 1000)
+  local bounded_cap = sweep.positive_integer(cap, default_cap or 25, 1, 1000)
   if #source <= bounded_cap then
     local all_items = {}
     for _, item in ipairs(source) do
@@ -172,53 +141,11 @@ function M.sweep_batch(items, seed, cap, default_cap)
   return selected, math.max(0, #source - #selected)
 end
 
-function M.sweep_cursor_batch(items, cursor, cap, default_cap)
-  local source = items or {}
-  local count = #source
-  local bounded_cap = positive_integer(cap, default_cap or 25, 1, 1000)
-  if count <= bounded_cap then
-    local all_items = {}
-    for _, item in ipairs(source) do
-      table.insert(all_items, item)
-    end
-    return all_items, 0, 0
-  end
-
-  local start = tonumber(cursor) or 0
-  if start < 0 or start ~= math.floor(start) then
-    start = 0
-  end
-  start = start % count
-
-  local selected = {}
-  for i = 1, bounded_cap do
-    local index = ((start + i - 1) % count) + 1
-    table.insert(selected, source[index])
-  end
-
-  local next_cursor = (start + #selected) % count
-  return selected, math.max(0, count - #selected), next_cursor
-end
-
-function M.sweep_cursor_advance(cursor, total, processed)
-  local count = tonumber(total) or 0
-  if count <= 0 or count ~= math.floor(count) then
-    return 0
-  end
-  local start = tonumber(cursor) or 0
-  if start < 0 or start ~= math.floor(start) then
-    start = 0
-  end
-  local step = tonumber(processed) or 0
-  if step < 0 or step ~= math.floor(step) then
-    step = 0
-  end
-  return (start + step) % count
-end
-
-function M.sweep_positive_integer(value, fallback, minimum, maximum)
-  return positive_integer(value, fallback, minimum, maximum)
-end
+M.sweep_cursor_batch = sweep.cursor_batch
+M.sweep_cursor_advance = sweep.cursor_advance
+M.sweep_deadline_deferred_result = sweep.deadline_deferred_result
+M.sweep_result_deferred = sweep.result_deferred
+M.sweep_positive_integer = sweep.positive_integer
 
 end
 

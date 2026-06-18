@@ -1,4 +1,4 @@
-local registry = require("core.registry")
+local registry = require("std.registry")
 local t = fkst.test
 
 local function with_modules(modules, fn)
@@ -42,12 +42,12 @@ return {
         return { name = "second-entry", value = "b" }
       end,
     }, function()
-      local loaded = registry.load_indexed_map("tests.fake_registry.index", "name")
+      local loaded = registry.load_indexed_map("tests.fake_registry.index", "name", nil, nil, "github-devloop")
       t.eq(loaded["first-entry"].value, "a")
       t.eq(loaded["second-entry"].value, "b")
       t.eq(loaded["first-entry"].name, nil)
 
-      local loaded_again = registry.load_indexed_map("tests.fake_registry.index", "name")
+      local loaded_again = registry.load_indexed_map("tests.fake_registry.index", "name", nil, nil, "github-devloop")
       t.eq(loaded_again["first-entry"].value, "a")
       t.eq(loaded_again["second-entry"].value, "b")
       t.eq(loaded_again["first-entry"].name, nil)
@@ -61,7 +61,7 @@ return {
       end,
     }, function()
       expect_error_contains(function()
-        registry.load_indexed_array("tests.unsorted_registry.index", "name")
+        registry.load_indexed_array("tests.unsorted_registry.index", "name", nil, nil, "github-devloop")
       end, "not sorted")
     end)
   end,
@@ -73,7 +73,7 @@ return {
       end,
     }, function()
       expect_error_contains(function()
-        registry.load_indexed_array("tests.duplicate_registry.index", "name")
+        registry.load_indexed_array("tests.duplicate_registry.index", "name", nil, nil, "github-devloop")
       end, "duplicate registry index entry")
     end)
   end,
@@ -90,7 +90,7 @@ return {
       end,
     }, function()
       expect_error_contains(function()
-        registry.load_indexed_array("tests.mismatch_registry.index", "name")
+        registry.load_indexed_array("tests.mismatch_registry.index", "name", nil, nil, "github-devloop")
       end, "does not match index entry")
     end)
   end,

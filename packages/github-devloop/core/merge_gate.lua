@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("core.registry")
+local registry = require("std.registry")
 local strings = require("std.strings")
 
 function S.install(M)
@@ -267,7 +267,7 @@ function M.evaluate_ci_merge_gate(pr, opts)
   return true, "merge-gate-ok"
 end
 
-local merge_gate_reason_classes = registry.load_indexed_map("core.merge_gate.reason_classes.index", "reason")
+local merge_gate_reason_classes = registry.load_indexed_map("core.merge_gate.reason_classes.index", "reason", nil, nil, "github-devloop")
 
 local function merge_gate_reason_row(reason)
   local text = tostring(reason or "")
