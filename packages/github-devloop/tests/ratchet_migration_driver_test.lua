@@ -67,6 +67,10 @@ local function new_fake_github(opts)
     table.insert(model.writes, { kind = "issue_create", repo = repo, title = title, body_file = body_file, body = file.read(body_file), labels = labels, assignees = assignees, timeout = timeout })
     return { stdout = model.created_stdout, stderr = "", exit_code = 0 }
   end
+  function handle.issue_add_sub_issue(repo, parent_issue_number, sub_issue_number, timeout)
+    table.insert(model.writes, { kind = "issue_add_sub_issue", repo = repo, parent_issue_number = parent_issue_number, sub_issue_number = sub_issue_number, timeout = timeout })
+    return { stdout = "", stderr = "", exit_code = 0 }
+  end
   function handle.issue_close(repo, issue_number, timeout)
     table.insert(model.writes, { kind = "issue_close", repo = repo, issue_number = issue_number, timeout = timeout })
     return { stdout = "", stderr = "", exit_code = 0 }
@@ -157,13 +161,17 @@ return {
     local result = run_driver()
     local writes = result.github._model.writes
     local created = write_of_kind(writes, "issue_create")
+    local linked = write_of_kind(writes, "issue_add_sub_issue")
     local intent = write_of_kind(writes, "issue_comment", 1)
     local ledger = write_of_kind(writes, "issue_comment", 2)
 
     t.eq(count_kind(writes, "issue_create"), 1)
+    t.eq(count_kind(writes, "issue_add_sub_issue"), 1)
     t.eq(count_kind(writes, "issue_comment"), 2)
     t.is_true(created.body:find("Machine-filed ratchet slice issue.", 1, true) ~= nil)
     t.eq(created.labels[1], "fkst-dev:enabled")
+    t.eq(linked.parent_issue_number, 979)
+    t.eq(linked.sub_issue_number, 120)
     t.is_true(intent.body:find("issue-create-intent:v1", 1, true) ~= nil)
     t.is_true(ledger.body:find("issue-created:v1", 1, true) ~= nil)
     t.eq(result.exec_calls[1].argv[1], "python3")
@@ -179,6 +187,7 @@ return {
     })
 
     t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
   end,
 
@@ -189,6 +198,7 @@ return {
 
     t.eq(count_kind(result.github._model.writes, "issue_close"), 1)
     t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
   end,
 
   test_dry_run_does_not_write_github_mutations = function()
@@ -201,6 +211,7 @@ return {
     })
 
     t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
   end,
 }

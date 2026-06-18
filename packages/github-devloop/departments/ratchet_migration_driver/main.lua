@@ -113,6 +113,14 @@ local function parse_created_issue_number(stdout)
   return number
 end
 
+local function require_issue_number(issue_number, context)
+  local number = tonumber(issue_number)
+  if number == nil then
+    error("github-devloop: missing issue number for " .. tostring(context))
+  end
+  return number
+end
+
 local function parent_has_marker(parent, marker, login)
   for _, comment in ipairs(parent.comments or {}) do
     if trusted_author(comment, login) and body(comment):find(marker, 1, true) ~= nil then
@@ -175,7 +183,7 @@ local function create_issue(github, repo, slice)
   local path = body_file(slice.dedup_key, "body")
   file.write(path, tostring(slice.body or ""))
   local result = github.issue_create(repo, slice.title, path, slice.labels or { "fkst-dev:enabled" }, {}, 30)
-  return parse_created_issue_number(result and result.stdout)
+  return require_issue_number(parse_created_issue_number(result and result.stdout), "created ratchet slice")
 end
 
 local function parent_issue(github, repo, ratchet)
@@ -221,6 +229,7 @@ local function reconcile_one(github, repo, ratchet)
     write_comment(github, repo, ratchet.parent_issue, dedup_key, "intent", intent .. "\n")
   end
   local issue_number = create_issue(github, repo, slice)
+  github.issue_add_sub_issue(repo, ratchet.parent_issue, issue_number, 30)
   write_comment(github, repo, ratchet.parent_issue, dedup_key, "created", issue_created_marker(dedup_key, issue_number) .. "\n")
   return "created-slice"
 end
