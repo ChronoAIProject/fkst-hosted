@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm
+import check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -921,6 +921,10 @@ def check_gh_git_adapter_ratchet(root: Path, violations: list[str]) -> None:
     for message in gh_git_adapter.ratchet_messages(sources, allowlist, lua_string_literals):
         add(violations, "G-ADAPTER", message)
 
+def check_code_dedup_ratchet(root: Path, violations: list[str]) -> None:
+    for message in check_repo_dedup.repository_messages(root, packages_root(root), read_text, rel):
+        add(violations, "G-DEDUP", message)
+
 def check_no_permission_control(root: Path, violations: list[str]) -> None: check_repo_perm.check_no_permission_control(root, violations, read_text=read_text, rel=rel)
 
 def is_saga_handler_source(source: str) -> bool:
@@ -980,6 +984,7 @@ def main() -> int:
         add(violations, "G13", message)
     check_no_permission_control(root, violations)
     check_gh_git_adapter_ratchet(root, violations)
+    check_code_dedup_ratchet(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
 
     for warning in warnings: print(f"warning: {warning}", file=sys.stderr)
