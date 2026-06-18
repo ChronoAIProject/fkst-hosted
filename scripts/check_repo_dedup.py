@@ -44,6 +44,9 @@ class DedupEntry:
     def label(self) -> str:
         return f"{self.name} {self.body_hash} {' '.join(self.files)}"
 
+    def clone_key(self) -> tuple[str, str]:
+        return self.name, self.body_hash
+
 
 @dataclass(frozen=True)
 class FunctionBody:
@@ -213,11 +216,19 @@ def ratchet_messages(
             f"{entry.label()} no longer matches a duplicate group in {ALLOWLIST}; prune the stale entry"
         )
     if base_allowlist is not None:
-        for entry in sorted(allowlist - base_allowlist):
+        for entry in sorted(entry for entry in allowlist if not covered_by_base_allowlist(entry, base_allowlist)):
             messages.append(
                 f"{entry.label()} grows code-dedup allowlist relative to dev; deduplicate instead"
             )
     return messages
+
+
+def covered_by_base_allowlist(entry: DedupEntry, base_allowlist: set[DedupEntry]) -> bool:
+    entry_files = set(entry.files)
+    return any(
+        base.clone_key() == entry.clone_key() and entry_files.issubset(base.files)
+        for base in base_allowlist
+    )
 
 
 def repository_messages(root: Path, packages: Path, read_text, rel) -> list[str]:

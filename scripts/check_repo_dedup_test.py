@@ -108,6 +108,18 @@ class DedupRatchetTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("grows code-dedup allowlist relative to dev", messages[0])
 
+    def test_partial_duplicate_group_shrink_does_not_grow_allowlist(self) -> None:
+        current = next(iter(dedup.duplicate_groups(self.sources())))
+        base = dedup.DedupEntry(
+            name=current.name,
+            body_hash=current.body_hash,
+            files=tuple(sorted((*current.files, "packages/three/core.lua"))),
+        )
+
+        messages = dedup.ratchet_messages(self.sources(), {current}, {base})
+
+        self.assertEqual(messages, [])
+
     def test_production_sources_exclude_tests_helpers_and_fakes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
