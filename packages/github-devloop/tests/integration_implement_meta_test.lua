@@ -790,6 +790,70 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
+  test_implement_accepts_ready_hand_off_with_alternate_effects_before_marker_visibility = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    event.ready_hand_off = {
+      kind = "own-state-marker",
+      proposal_id = event.proposal_id,
+      state = "ready",
+      marker_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      event_version = event.dedup_key,
+      stage_rank = core.stage_rank("ready"),
+      effects = "alternate-ready-producer",
+      comment_id = "IC_ready_alternate_effects",
+    }
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    for _ = 1, 2 do
+      t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_alternate_effects'", {
+        stdout = '{"body":"' .. json_string(core.state_marker(event.proposal_id, "ready", event.ready_hand_off.marker_version, "alternate-ready-producer")) .. '","user":{"login":"fkst-test-bot"}}\n',
+        stderr = "",
+        exit_code = 0,
+      })
+    end
+    mock_fresh_implement_worktree("/tmp/fkst-packages-test/github-devloop/runtime")
+    mock_implement_codex(0, "implemented")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+
+    local result = run_implement(event, opts("implement-ready-hand-off-alternate-effects"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 5)
+    assert_worktree_ready_state(result.raises, event)
+    t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
+    assert_open_pr_kickoff(result.raises, event, branch, "def456")
+    t.eq(count_calls("repos/owner/repo/issues/comments/IC_ready_alternate_effects"), 1)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
+  test_implement_rejects_ready_hand_off_when_comment_marker_state_is_not_ready = function()
+    local event = ready()
+    event.ready_hand_off = {
+      kind = "own-state-marker",
+      proposal_id = event.proposal_id,
+      state = "ready",
+      marker_version = event.dedup_key,
+      event_version = event.dedup_key,
+      stage_rank = core.stage_rank("ready"),
+      effects = "alternate-ready-producer",
+      comment_id = "IC_ready_wrong_state",
+    }
+    mock_issue_implement_raw({ "fkst-dev:ready" }, {})
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_ready_wrong_state'", {
+      stdout = '{"body":"' .. json_string(core.state_marker(event.proposal_id, "reviewing", event.ready_hand_off.marker_version, "alternate-ready-producer")) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local result = run_implement(event, opts("implement-ready-hand-off-wrong-state"))
+    t.eq(result.exit_code, 1)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git -C"), 0)
+  end,
+
   test_implement_redrive_hand_off_uses_original_ready_marker_version = function()
     local original_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local redrive = core.build_devloop_ready_payload({
