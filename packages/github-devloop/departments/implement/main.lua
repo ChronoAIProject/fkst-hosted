@@ -3,6 +3,7 @@ local saga = require("std.saga")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
+local IMPLEMENT_ATTEMPT_LIVE_SECONDS = 120 * 60
 local implemented_branch_head
 
 local spec = {
@@ -34,18 +35,26 @@ local function raise_impl_failed(repo, issue_number, ready, reason, detail, atte
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
-local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
-  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
+local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
+  local comment_request = core.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
   local label_request = core.build_implementing_label_request(repo, issue_number, ready)
-  local open_pr_payload = core.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
   local add_labels, remove_labels = core.state_label_changes("implementing")
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
-    "devloop_open_pr",
   })
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+end
+
+local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
+  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
+  local open_pr_payload = core.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
+  core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = {}, remove = {} }, {
+    "github-proxy.github_issue_comment_request",
+    "devloop_open_pr",
+  })
+  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   core.log_raise("implement", ready.proposal_id, "devloop_open_pr", open_pr_payload)
 end
 
@@ -195,6 +204,12 @@ local function implementing_mismatch_is_durable(current, proposal_id, state)
     or core.implementing_fact(current and current.comments, proposal_id, version) ~= nil
 end
 
+local function live_implement_attempt_visible(comments, proposal_id, version)
+  local attempt = core.latest_implement_attempt_fact(comments, proposal_id, version)
+  local started = tonumber(attempt and attempt.started_at)
+  return started ~= nil and (now() - started) < IMPLEMENT_ATTEMPT_LIVE_SECONDS
+end
+
 implemented_branch_head = function(base_head, branch)
   local ahead_result = core.git_branch_ahead_count(base_head, branch, 30)
   if ahead_result.exit_code ~= 0 then
@@ -338,12 +353,16 @@ local function prepare_worktree(repo, issue_number, ready, branch, base_head)
   return worktree
 end
 
-local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, attempt, event_ts, event_queue)
+local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt)
   local worktree = prepare_worktree(repo, issue_number, ready, branch, base_head)
   merge_integration_for_implementation(worktree, branches.integration, base_head)
 
   local codex_started_at = now()
-  raise_implement_attempt(repo, issue_number, ready, attempt, codex_started_at)
+  raise_implementing_state(repo, issue_number, ready, worktree, branch, branches.integration, base_head, attempt, codex_started_at)
+  return worktree, codex_started_at
+end
+
+local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, worktree, codex_started_at, attempt, event_ts, event_queue)
   core.log_codex_start("implement", ready.proposal_id, "implement")
   local content_fetch = core.context_fetch_from_bundle({
     dept = "implement",
@@ -558,7 +577,17 @@ local function implementation_transition_status(state, expected_states, marker_v
   return core.versioned_transition_status(state, expected_state_names(expected_states or { "ready" }), "implementing", marker_version)
 end
 
-local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
+local function expected_states_include(expected_states, state_name)
+  for _, expected in ipairs(expected_states or {}) do
+    local expected_state = type(expected) == "table" and expected.state or expected
+    if tostring(expected_state or "") == tostring(state_name or "") then
+      return true
+    end
+  end
+  return false
+end
+
+local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off, allow_same_version_implementing)
   local view = core.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
@@ -576,6 +605,10 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
     local fact = core.implementing_fact(current.comments, marker_ready.proposal_id, marker_ready.dedup_key)
     if fact ~= nil then
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "implementing", "skip-idempotent(implementation marker already visible)", "implementation fact marker already visible")
+      return false
+    end
+    if not expected_states_include(expected_from_states, "implementing") and not allow_same_version_implementing then
+      core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
       return false
     end
     return true
@@ -618,6 +651,10 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
     local link = core.pr_link_fact(current.comments, marker_ready.proposal_id)
     if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
+      return false
+    end
+    if not expected_states_include(expected_from_states, "implementing") then
+      core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
       return false
     end
     return true
@@ -770,6 +807,10 @@ local function process_ready_event(event)
         return
       end
       local fact = core.implementing_fact(current.comments, ready.proposal_id, marker_ready.dedup_key)
+      if fact == nil and live_implement_attempt_visible(current.comments, ready.proposal_id, marker_ready.dedup_key) then
+        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation attempt heartbeat is still live")
+        return
+      end
       local progress = nil
       if fact ~= nil then
         progress = remote_branch_fact(fact.branch, fact.base_branch, fact)
@@ -892,21 +933,31 @@ local function process_ready_event(event)
     return
   end
 
-  local pre_spawn_gate_ok = false
+  local worktree, codex_started_at
   with_lock(lock_key, function()
-    pre_spawn_gate_ok = precheck_implementation_write_gate(
+    if precheck_implementation_write_gate(
       repo,
       issue_number,
       attempt_plan.marker_ready,
       attempt_plan.expected_from_states,
       attempt_plan.accepted_ready_hand_off
-    )
+    ) then
+      if attempt_plan.base_head == nil then
+        attempt_plan.base_head = prepare_base(attempt_plan.branches)
+      end
+      worktree, codex_started_at = prepare_attempt(
+        repo,
+        issue_number,
+        attempt_plan.marker_ready,
+        attempt_plan.branches,
+        attempt_plan.branch,
+        attempt_plan.base_head,
+        attempt_plan.attempt
+      )
+    end
   end)
-  if not pre_spawn_gate_ok then
+  if worktree == nil then
     return
-  end
-  if attempt_plan.base_head == nil then
-    attempt_plan.base_head = prepare_base(attempt_plan.branches)
   end
 
   local outcome = run_attempt(
@@ -917,12 +968,14 @@ local function process_ready_event(event)
     attempt_plan.branches,
     attempt_plan.branch,
     attempt_plan.base_head,
+    worktree,
+    codex_started_at,
     attempt_plan.attempt,
     event.ts,
     event.queue
   )
   with_lock(lock_key, function()
-    if recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states, attempt_plan.accepted_ready_hand_off) then
+    if recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states, attempt_plan.accepted_ready_hand_off, true) then
       raise_attempt_outcome(repo, issue_number, outcome)
     end
   end)

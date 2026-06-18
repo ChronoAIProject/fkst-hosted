@@ -60,6 +60,12 @@ local function impl_failed_comments(event, reason, attempt, command)
   return comments
 end
 
+local function find_worktree_ready_comment(raises)
+  return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
+    return tostring(payload.body or ""):find("github-devloop implementation worktree ready", 1, true) ~= nil
+  end)
+end
+
 return {
   test_observe_autoretries_codex_failed_once = function()
     local event = reached()
@@ -197,11 +203,11 @@ return {
 
     local result = run_implement(ready, opts("implement-retry-success"))
     t.eq(result.exit_code, 0)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
-      return tostring(payload.body or ""):find("github-devloop implementation started", 1, true) ~= nil
-    end)
+    local comment = find_worktree_ready_comment(result.raises)
     t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "implementing", ready.dedup_key .. "/reimplement/2"), 1, true) ~= nil)
+    t.eq(core.implementing_fact({ comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
+    t.is_true(find_raise(result.raises, "devloop_open_pr") ~= nil)
   end,
 
   test_blocked_reimplement_receiver_writes_fresh_attempt_version = function()
@@ -235,10 +241,10 @@ return {
 
     local result = run_implement(ready, opts("implement-blocked-reimplement-success"))
     t.eq(result.exit_code, 0)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
-      return tostring(payload.body or ""):find("github-devloop implementation started", 1, true) ~= nil
-    end)
+    local comment = find_worktree_ready_comment(result.raises)
     t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "implementing", ready.dedup_key .. "/reimplement/2"), 1, true) ~= nil)
+    t.eq(core.implementing_fact({ comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
+    t.is_true(find_raise(result.raises, "devloop_open_pr") ~= nil)
   end,
 }
