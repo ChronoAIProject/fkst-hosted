@@ -110,6 +110,18 @@ local function gh_issue_updated_at_argv(repo, issue_number)
   }
 end
 
+local function gh_issue_add_sub_issue_argv(repo, parent_issue_number, sub_issue_id)
+  return {
+    "gh",
+    "api",
+    "--method",
+    "POST",
+    "repos/" .. tostring(repo) .. "/issues/" .. tostring(parent_issue_number) .. "/sub_issues",
+    "-F",
+    "sub_issue_id=" .. tostring(sub_issue_id),
+  }
+end
+
 local function assignee_logins(assignees)
   local logins = {}
   for _, assignee in ipairs(assignees or {}) do
@@ -174,6 +186,15 @@ local function parse_json_object(stdout, context)
     return decoded
   end
   error("std.github: " .. tostring(context) .. " response is not valid JSON")
+end
+
+local function issue_database_id(stdout, context)
+  local decoded = parse_json_object(stdout, context)
+  local id = tonumber(decoded.id)
+  if id == nil then
+    error("std.github: " .. tostring(context) .. " response is missing issue id")
+  end
+  return id
 end
 
 local function comments_json(comments)
@@ -334,6 +355,15 @@ function M.install(handle)
 
   function handle.issue_updated_at(repo, issue_number, timeout)
     return handle._exec(gh_issue_updated_at_argv(repo, issue_number), timeout, "gh issue updated_at")
+  end
+
+  function handle.issue_add_sub_issue(repo, parent_issue_number, sub_issue_number, timeout)
+    local child = handle._exec(gh_issue_rest_argv(repo, sub_issue_number), timeout, "gh issue REST view")
+    return handle._exec(
+      gh_issue_add_sub_issue_argv(repo, parent_issue_number, issue_database_id(child.stdout, "sub-issue")),
+      timeout,
+      "gh issue add sub-issue"
+    )
   end
 
   function handle.entity_updated_at(repo, kind, number, timeout)

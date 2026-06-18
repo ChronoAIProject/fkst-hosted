@@ -131,6 +131,17 @@ function M.new(model)
       tostring(label),
     }, timeout, "gh issue remove label")
   end
+  function handle.issue_add_sub_issue(repo, parent_issue_number, sub_issue_number, timeout)
+    return handle._exec({
+      "gh",
+      "api",
+      "--method",
+      "POST",
+      "repos/" .. tostring(repo) .. "/issues/" .. tostring(parent_issue_number) .. "/sub_issues",
+      "-F",
+      "sub_issue_id=" .. tostring(sub_issue_number),
+    }, timeout, "gh issue add sub-issue")
+  end
   require("std.github.graphql").install(handle)
   return handle
 end
