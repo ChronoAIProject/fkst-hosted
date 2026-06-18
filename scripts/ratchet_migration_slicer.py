@@ -4,28 +4,38 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+import check_repo_dedup as code_dedup
 import check_repo_gh_git_adapter as gh_git_adapter
 
 
 TARGET_COUNT = 0
 DEFAULT_SLICE_SIZE = 3
 MAX_SLICE_SIZE = 10
-VALID_PARENTS = ("891", "892")
+SCHEMA = "fkst.ratchet-slice.v1"
+VALID_RATCHETS = ("gh-git-adapter", "saga-handler", "code-dedup")
+RATCHET_ALIASES = {
+    "891": "gh-git-adapter",
+    "892": "saga-handler",
+}
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 
 
 @dataclass(frozen=True)
 class MigrationSpec:
     parent: str
+    ratchet: str
     migration_kind: str
     allowlist_path: str
     title: str
+    reference_shape: str
     inventory_loader: Callable[[Path, "MigrationSpec"], list["InventorySite"]]
 
 
@@ -126,31 +136,114 @@ def load_saga_inventory(root: Path, spec: MigrationSpec) -> list[InventorySite]:
     return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
 
 
+def load_code_dedup_inventory(root: Path, spec: MigrationSpec) -> list[InventorySite]:
+    allowlist_path = validated_repo_path(root, spec.allowlist_path)
+    sites: list[InventorySite] = []
+    for entry in sorted(code_dedup.load_allowlist(allowlist_path)):
+        for relpath in entry.files:
+            source_path = validated_repo_path(root, relpath)
+            source = read_text(source_path)
+            line = line_for_function_basename(source, entry.name)
+            detail = f"duplicate_function: {entry.name} {entry.body_hash}"
+            sites.append(InventorySite(relpath, line or 1, detail))
+    return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
+
+
+def line_for_function_basename(source: str, basename: str) -> int | None:
+    code = code_dedup.code_without_comments_and_strings(source)
+    for offset, line in enumerate(code.splitlines(), start=1):
+        match = code_dedup.FUNCTION_RE.match(line)
+        if match is not None and code_dedup.function_basename(match.group("name")) == basename:
+            return offset
+    return None
+
+
 def strip_lua_comments_and_strings(text: str) -> str:
     return gh_git_adapter.lua_code_mask(text)
 
 
 def specs() -> dict[str, MigrationSpec]:
     return {
-        "891": MigrationSpec(
+        "gh-git-adapter": MigrationSpec(
             parent="891",
+            ratchet="gh-git-adapter",
             migration_kind="allowlist",
             allowlist_path="migration/gh-git-adapter.allowlist",
             title="gh/git ports adapter allowlist migration slice",
+            reference_shape="Migrate raw gh/git command construction behind std.github/std.git adapter operations.",
             inventory_loader=load_gh_git_inventory,
         ),
-        "892": MigrationSpec(
-            parent="892",
+        "saga-handler": MigrationSpec(
+            parent="979",
+            ratchet="saga-handler",
             migration_kind="allowlist",
             allowlist_path="migration/saga-handler.allowlist",
             title="saga handler allowlist migration slice",
+            reference_shape="Use the existing std.saga.department(spec, handlers) shape from migrated departments.",
             inventory_loader=load_saga_inventory,
+        ),
+        "code-dedup": MigrationSpec(
+            parent="1002",
+            ratchet="code-dedup",
+            migration_kind="allowlist",
+            allowlist_path="migration/code-dedup.allowlist",
+            title="code dedup allowlist migration slice",
+            reference_shape="Hoist the byte-identical production Lua function body to an existing shared module such as std.*, then call the shared helper from each site.",
+            inventory_loader=load_code_dedup_inventory,
         ),
     }
 
 
+def markdown_code(value: str) -> str:
+    text = str(value).replace("`", "\\`")
+    return f"`{text}`"
+
+
+def selected_sites(inventory: list[InventorySite], slice_size: int) -> list[InventorySite]:
+    return inventory[:slice_size]
+
+
+def site_records(inventory: list[InventorySite], slice_size: int) -> list[dict[str, object]]:
+    return [
+        {
+            "path": site.path,
+            "line": site.line,
+            "detail": site.detail,
+            "site_ref": site.site_ref(),
+        }
+        for site in selected_sites(inventory, slice_size)
+    ]
+
+
+def sites_fingerprint(sites: list[dict[str, object]]) -> str:
+    encoded = json.dumps(sites, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def slice_document(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> dict[str, object]:
+    sites = site_records(inventory, slice_size)
+    fingerprint = sites_fingerprint(sites)
+    return {
+        "schema": SCHEMA,
+        "ratchet": spec.ratchet,
+        "parent_issue": int(spec.parent),
+        "migration_kind": spec.migration_kind,
+        "allowlist_path": spec.allowlist_path,
+        "title": spec.title,
+        "reference_shape": spec.reference_shape,
+        "current_count": len(inventory),
+        "target_count": TARGET_COUNT,
+        "slice_size": slice_size,
+        "selected_count": len(sites),
+        "sites_fingerprint": fingerprint,
+        "dedup_key": f"{spec.ratchet}/slice/{fingerprint}",
+        "sites": sites,
+    }
+
+
 def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> str:
-    selected = inventory[:slice_size]
+    doc = slice_document(spec, inventory, slice_size)
+    selected = selected_sites(inventory, slice_size)
     lines = [
         f"# {spec.title}",
         "",
@@ -158,18 +251,24 @@ def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slic
         "",
         "## Ratchet",
         f"- parent_issue: #{spec.parent}",
-        f"- migration_kind: {spec.migration_kind}",
-        f"- allowlist_path: {spec.allowlist_path}",
+        f"- ratchet: {markdown_code(spec.ratchet)}",
+        f"- migration_kind: {markdown_code(spec.migration_kind)}",
+        f"- allowlist_path: {markdown_code(spec.allowlist_path)}",
         f"- current_count: {len(inventory)}",
         f"- target_count: {TARGET_COUNT}",
         f"- slice_size: {slice_size}",
         f"- selected_count: {len(selected)}",
+        f"- sites_fingerprint: {markdown_code(str(doc['sites_fingerprint']))}",
+        f"- dedup_key: {markdown_code(str(doc['dedup_key']))}",
+        "",
+        "## Reference Shape",
+        spec.reference_shape,
         "",
         "## Exact Sites",
     ]
     if selected:
         for site in selected:
-            lines.append(f"- {site.site_ref()} ({site.detail})")
+            lines.append(f"- {markdown_code(site.site_ref())} ({markdown_code(site.detail)})")
     else:
         lines.append("- none")
     lines.extend(
@@ -180,6 +279,7 @@ def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slic
             f"- Remove only those migrated entries from `{spec.allowlist_path}`.",
             f"- The allowlist count decreases by exactly {len(selected)}.",
             "- Behavior is preserved.",
+            "- `scripts/run.sh test` exits 0.",
             "- No broad cleanup, opportunistic refactors, or unrelated migration work.",
         ]
     )
@@ -192,9 +292,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Print a deterministic dry-run child issue body for a code-owned allowlist ratchet parent.",
     )
-    parser.add_argument("parent", choices=VALID_PARENTS, help="Code-owned parent issue selector.")
+    parser.add_argument("ratchet", choices=(*VALID_RATCHETS, *RATCHET_ALIASES.keys()), help="Code-owned ratchet selector.")
     parser.add_argument("--repo-root", default=Path(__file__).resolve().parents[1], type=Path)
     parser.add_argument("--slice-size", type=int, default=DEFAULT_SLICE_SIZE)
+    parser.add_argument("--json", action="store_true", help="Emit the stable machine-readable slice schema.")
     return parser.parse_args(argv)
 
 
@@ -204,13 +305,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: --slice-size must be between 1 and {MAX_SLICE_SIZE}", file=sys.stderr)
         return 2
     root = args.repo_root.resolve()
-    spec = specs()[args.parent]
+    ratchet = RATCHET_ALIASES.get(args.ratchet, args.ratchet)
+    spec = specs()[ratchet]
     try:
         inventory = spec.inventory_loader(root, spec)
     except Exception as exc:
         print(f"error: ratchet inventory failed: {exc}", file=sys.stderr)
         return 1
-    print(render_child_issue(spec, inventory, args.slice_size), end="")
+    if args.json:
+        print(json.dumps(slice_document(spec, inventory, args.slice_size), sort_keys=True, ensure_ascii=False))
+    else:
+        print(render_child_issue(spec, inventory, args.slice_size), end="")
     return 0
 
 

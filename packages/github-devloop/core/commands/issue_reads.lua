@@ -59,6 +59,17 @@ function S.install(M)
     end)
   end
 
+  function M.gh_issue_list_ratchet_slices(repo, ratchet, timeout)
+    return support.gh_result(function()
+      return support.github().issue_search(
+        repo,
+        M.ratchet_slice_search_query(ratchet),
+        "number,title,state,body",
+        timeout
+      )
+    end)
+  end
+
   function M.gh_issue_list_recent_closed(repo, limit, timeout)
     return support.gh_result(function()
       return support.github().issue_list_recent_closed(
