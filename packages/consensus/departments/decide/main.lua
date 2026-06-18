@@ -1,12 +1,5 @@
 local core = require("core")
-
-local M = {}
-
-M.spec = {
-  consumes = { "proposal" },
-  produces = { "consensus_reached", "consensus_converge" },
-  stall_window = "2m",
-}
+local saga = require("std.saga")
 
 local function read_runtime_root()
   local result = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
@@ -116,14 +109,14 @@ local function decide(proposal)
   }
 end
 
-function pipeline(event)
+local function decision_done(event)
   local proposal = event.payload or {}
   if proposal.schema ~= "consensus.proposal.v1" then
     log.warn("consensus: unsupported proposal schema")
-    return
+    return true
   end
   if not core.is_eligible(proposal) then
-    return
+    return true
   end
 
   local cache_key = core.reached_cache_key(proposal.dedup_key)
@@ -131,9 +124,12 @@ function pipeline(event)
   with_lock(cache_key, function()
     already_reached = cache_get(cache_key) ~= nil
   end)
-  if already_reached then
-    return
-  end
+  return already_reached
+end
+
+local function act_decide(event)
+  local proposal = event.payload or {}
+  local cache_key = core.reached_cache_key(proposal.dedup_key)
 
   local ok, result = pcall(decide, proposal)
   if not ok then
@@ -168,6 +164,12 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("decide", pipeline)
-
-return M
+return saga.department{
+  consumes = { "proposal" },
+  produces = { "consensus_reached", "consensus_converge" },
+  stall_window = "2m",
+  done = decision_done,
+  act = act_decide,
+  wrap = core.wrap_pipeline_failure,
+  name = "decide",
+}
