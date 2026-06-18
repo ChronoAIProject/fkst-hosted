@@ -200,6 +200,37 @@ return {
     t.eq(current.state, "blocked")
     t.eq(current.stage_rank, core.stage_rank("blocked"))
   end,
+  test_ready_marker_wins_same_version_tie_and_allows_implement_cas = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "ready", version),
+      core.state_marker(proposal_id, "thinking", version),
+    }, proposal_id)
+    t.eq(core.stage_rank("ready") > core.stage_rank("thinking"), true)
+    t.eq(current.state, "ready")
+    t.eq(current.version, version)
+    t.eq(current.stage_rank, core.stage_rank("ready"))
+
+    local transition = core.versioned_transition_status(current, { "ready" }, "implementing", version)
+    t.eq(transition, "apply")
+    t.eq(core.cas_outcome(current, transition, version), "applied")
+  end,
+  test_stage_rank_does_not_override_different_versions = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local older_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local newer_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-05T01-02-03Z"
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "blocked", older_version),
+      core.state_marker(proposal_id, "ready", newer_version),
+    }, proposal_id)
+
+    t.eq(core.stage_rank("blocked") > core.stage_rank("ready"), true)
+    t.eq(current.state, "ready")
+    t.eq(current.version, newer_version)
+  end,
   test_current_state_converges_same_version_review_conflict_to_fixing = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
