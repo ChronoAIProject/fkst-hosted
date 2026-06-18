@@ -1,6 +1,3 @@
-packages/github-devloop/departments/fix/main.lua
-packages/github-devloop/departments/implement/main.lua
-packages/github-devloop/departments/intake_judge/main.lua
 packages/github-devloop/departments/intake_probe/main.lua
 packages/github-devloop/departments/intake_scan/main.lua
 packages/github-devloop/departments/liveness_scan/main.lua

@@ -1,8 +1,7 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "devloop_fixing" },
   produces = {
     "github-proxy.github_issue_label_request",
@@ -13,6 +12,10 @@ M.spec = {
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+local function fix_done(_event)
+  return false
+end
 
 local function branch_worktree(repo, issue_number, version, branch)
   local runtime_result = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
@@ -610,7 +613,7 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   raise_reviewing(repo, issue_number, fix, outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary)
 end
 
-function pipeline(event)
+local function act_fix(event)
   local fix = event.payload or {}
   if not core.is_supported_fixing(fix) then
     core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
@@ -814,6 +817,9 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("fix", pipeline)
-
-return M
+return saga.department(spec, {
+  done = fix_done,
+  act = act_fix,
+  wrap = core.wrap_pipeline_failure,
+  name = "fix",
+})
