@@ -8,5 +8,5 @@ return {
   marker_source = "core/implement_attempt.lua",
   request_source = "core/requests/lifecycle.lua",
   marker_builder = "implement_attempt_marker",
-  request_builder = "build_implement_attempt_comment_request",
+  request_builder = "build_implementing_state_comment_request",
 }

@@ -87,7 +87,7 @@ return function(M, h)
     },
     version_identity = "ready_payload_inner_version(state.version) plus implementation_retry_attempt(state.version)",
     effects = effect({ "devloop_ready" }, "implementing replay is complete only when observe_issue can re-raise devloop_ready with the frozen implementing version for implement to re-derive PR link, remote branch, local branch, or bounded retry"),
-    marker_facts = "state:v1 implementing plus implementing:v1 and implement-attempt:v1",
+    marker_facts = "active run uses state:v1 implementing plus implement-attempt:v1; implementing:v1 exists only after codex completion",
     kickoff = "devloop_ready",
     replay = "Observe re-raises devloop_ready only when the implement attempt is past its liveness budget; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
   }

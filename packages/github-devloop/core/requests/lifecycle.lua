@@ -175,7 +175,6 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
   end
   local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
   local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "")
-  local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
   return M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
@@ -186,13 +185,45 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
       .. "\n" .. M.comment_string("head_label") .. tostring(head_sha)
       .. "\n" .. M.comment_string("base_branch_label") .. tostring(base_branch)
       .. "\n" .. M.comment_string("base_head_label") .. tostring(base_sha)
-      .. "\n\n" .. state_marker
-      .. "\n" .. attempt_marker
+      .. "\n\n" .. attempt_marker
       .. "\n" .. marker,
     dedup_key = M._dedup_key({
       "implement",
       "comment",
       "implementing",
+      tostring(ready.dedup_key),
+    }),
+    source_ref = M.normalize_source_ref(ready.source_ref),
+  }, ready.source_ref)
+end
+
+function M.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
+  if not M._is_git_ref_safe(branch) then
+    error("github-devloop: invalid implementing branch")
+  end
+  if not M._is_git_ref_safe(base_branch) then
+    error("github-devloop: invalid implementing base_branch")
+  end
+  if not M._is_git_sha(base_sha) then
+    error("github-devloop: invalid implementing base_sha")
+  end
+  local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
+  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "")
+  return M.attach_issue_claim({
+    schema = "github-proxy.v1",
+    repo = repo,
+    issue_number = issue_number,
+    body = "github-devloop implementation worktree ready"
+      .. "\n\n" .. M.comment_string("worktree_label") .. tostring(worktree)
+      .. "\n" .. M.comment_string("branch_label") .. tostring(branch)
+      .. "\n" .. M.comment_string("base_branch_label") .. tostring(base_branch)
+      .. "\n" .. M.comment_string("base_head_label") .. tostring(base_sha)
+      .. "\n\n" .. state_marker
+      .. "\n" .. attempt_marker,
+    dedup_key = M._dedup_key({
+      "implement",
+      "comment",
+      "implementing-state",
       tostring(ready.dedup_key),
     }),
     source_ref = M.normalize_source_ref(ready.source_ref),
