@@ -1,0 +1,163 @@
+local GitMechanics = {}
+
+function GitMechanics.install(M, shared)
+  local require_safe_branch = shared.require_safe_branch
+  local require_safe_sha = shared.require_safe_sha
+  local git = shared.git
+  local run_git_ok = shared.run_git_ok
+
+  function M.git_is_ancestor(maybe_ancestor_sha, descendant_sha, timeout)
+    return git().is_ancestor(
+      require_safe_sha("ancestor sha", maybe_ancestor_sha),
+      require_safe_sha("descendant sha", descendant_sha),
+      timeout
+    )
+  end
+
+  function M.git_merge_no_ff(worktree, sha, timeout)
+    return git().merge_no_ff(worktree, require_safe_sha("merge sha", sha), timeout)
+  end
+
+  function M.git_fast_forward(worktree, sha, timeout)
+    return git().fast_forward(worktree, require_safe_sha("fast-forward sha", sha), timeout)
+  end
+
+  function M.git_remote_trees_equal_quiet(upstream, integration, timeout)
+    return git().remote_trees_equal_quiet(
+      require_safe_branch("upstream branch", upstream),
+      require_safe_branch("integration branch", integration),
+      timeout
+    )
+  end
+
+  function M.git_trees_equal_quiet(sha_a, sha_b, timeout)
+    return git().trees_equal_quiet(
+      require_safe_sha("tree compare sha", sha_a),
+      require_safe_sha("tree compare sha", sha_b),
+      timeout
+    )
+  end
+
+  function M.current_base_head(base_branch)
+    local branch = require_safe_branch("base branch", base_branch)
+    local fetch_result, fetch_error = run_git_ok(function()
+      return git().fetch_branch("origin", branch, 60)
+    end, "base fetch")
+    if fetch_result == nil then
+      return nil, fetch_error
+    end
+    local head_result, head_error = run_git_ok(function()
+      return git().remote_branch_head("origin", branch, 30)
+    end, "base head")
+    if head_result == nil then
+      return nil, head_error
+    end
+    local base_head = tostring(head_result.stdout or ""):gsub("%s+$", "")
+    if not M.is_safe_head_sha(base_head) then
+      return nil, "unsafe base head"
+    end
+    return base_head
+  end
+
+  function M.has_empty_resolution_delta(approved_head_sha, base_head_sha, new_head_sha)
+    local approved = require_safe_sha("approved head sha", approved_head_sha)
+    local base = require_safe_sha("base head sha", base_head_sha)
+    local new_head = require_safe_sha("new head sha", new_head_sha)
+    local merge_tree = git().merge_tree(approved, base, 120)
+    local tree = tostring(merge_tree.stdout or ""):gsub("%s+$", "")
+    if tree == "" then
+      return false, "merge-tree produced no tree"
+    end
+    local result = git().trees_equal_quiet(tree, new_head, 30)
+    if result.exit_code == 0 then
+      return true, "empty"
+    end
+    return false, tostring(result.stderr or "")
+  end
+
+  function M.current_branch_head_sha(branch)
+    local safe_branch = require_safe_branch("branch", branch)
+    local fetch_result = git().fetch_branch("origin", safe_branch, 60)
+    if fetch_result.exit_code ~= 0 then
+      return nil
+    end
+    local head_result = git().fetch_head_commit(30)
+    if head_result.exit_code ~= 0 then
+      return nil
+    end
+    local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
+    if not M.is_safe_head_sha(head_sha) then
+      error("github-devloop: unsafe PR origin branch head sha")
+    end
+    return head_sha
+  end
+
+  function M.git_push_branch_force_with_lease(branch, new_sha, expected_old_sha, timeout)
+    return git().push_branch_force_with_lease(
+      require_safe_branch("push branch", branch),
+      require_safe_sha("new branch sha", new_sha),
+      require_safe_sha("expected old branch sha", expected_old_sha),
+      timeout
+    )
+  end
+
+  function M.git_push_branch_update(branch, timeout)
+    return git().push_branch_update(require_safe_branch("push branch", branch), timeout)
+  end
+
+  function M.git_push_worktree_branch_update(worktree, branch, timeout)
+    return git().push_worktree_branch_update(worktree, require_safe_branch("push branch", branch), nil, timeout)
+  end
+
+  function M.git_push_worktree_branch_update_with_lease(worktree, branch, expected_old_sha, timeout)
+    return git().push_worktree_branch_update(
+      worktree,
+      require_safe_branch("push branch", branch),
+      require_safe_sha("expected old branch sha", expected_old_sha),
+      timeout
+    )
+  end
+
+  function M.git_unmerged_paths(worktree, timeout)
+    return git().unmerged_paths(worktree, timeout)
+  end
+
+  function M.git_diff_check(worktree, timeout)
+    return git().diff_check(worktree, false, timeout)
+  end
+
+  function M.git_diff_cached_check(worktree, timeout)
+    return git().diff_check(worktree, true, timeout)
+  end
+
+  function M.git_conflict_markers(worktree, timeout)
+    return git().conflict_markers(worktree, timeout)
+  end
+
+  function M.git_commit_message_file(worktree, message_file, timeout)
+    return git().commit_message_file(worktree, message_file, timeout)
+  end
+
+  function M.git_worktree_add_detached_plan(worktree, sha)
+    local value = tostring(worktree or "")
+    if value == "" or value:find("[\r\n]") ~= nil then
+      error("github-devloop: invalid worktree path")
+    end
+    return {
+      parent_dir = value:gsub("/+$", ""):match("^(.*)/[^/]+$") or ".",
+      worktree = value,
+      sha = require_safe_sha("worktree base sha", sha),
+    }
+  end
+
+  function M.git_worktree_add_detached(worktree, sha, timeout)
+    local plan = M.git_worktree_add_detached_plan(worktree, sha)
+    return git().worktree_add_detached(plan.worktree, plan.sha, timeout)
+  end
+
+  function M.git_worktree_remove(worktree, timeout)
+    return git().worktree_remove(worktree, timeout)
+  end
+end
+
+return GitMechanics

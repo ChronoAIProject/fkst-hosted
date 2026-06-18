@@ -189,6 +189,9 @@ local default_consumer_sources = {
   "packages/github-devloop/core/ready_split.lua",
   "packages/github-devloop/core/replayer.lua",
   "packages/github-devloop/core/requests.lua",
+  "packages/github-devloop/core/requests/lifecycle.lua",
+  "packages/github-devloop/core/requests/review.lua",
+  "packages/github-devloop/core/pr_label_requests.lua",
 }
 
 local function source_contains_any(paths, needle)

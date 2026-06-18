@@ -1,5 +1,6 @@
 local S = {}
 local error_facts = require("std.error_facts")
+local logging = require("std.logging")
 
 function S.install(M)
 
@@ -45,33 +46,14 @@ function M.wrap_pipeline_failure(dept, fn)
 end
 
 function M.log_line(level, dept, proposal_id, tag, fields)
-  local parts = {
-    "github-devloop",
-    "dept=" .. tostring(dept or "unknown"),
-    "proposal_id=" .. tostring(proposal_id or "unknown"),
-    "tag=" .. tostring(tag or "event"),
-  }
-  for _, field in ipairs(fields or {}) do
-    table.insert(parts, tostring(field))
-  end
-  log[level or "info"](table.concat(parts, " "))
+  return logging.log_line("github-devloop", level, dept, proposal_id, tag, fields)
 end
 
 function M.log_entry(dept, event, proposal_id, dedup_key)
-  M.log_line("info", dept, proposal_id, "ENTRY", {
-    "queue=" .. tostring(event and event.queue or "unknown"),
-    "payload_type=" .. type(event and event.payload),
-    "version=" .. tostring(dedup_key or ""),
-    "dedup_key=" .. tostring(dedup_key or ""),
-  })
+  return logging.log_entry("github-devloop", dept, event, proposal_id, dedup_key)
 end
 
-function M.payload_field(payload, key)
-  if type(payload) ~= "table" then
-    return nil
-  end
-  return payload[key]
-end
+M.payload_field = logging.payload_field
 
 function M.log_cas_decision(dept, proposal_id, current, from_state, to_state, outcome, reason)
   local current_state = current
