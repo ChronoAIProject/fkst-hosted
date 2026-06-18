@@ -1,12 +1,12 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
 local LIVENESS_SCAN_MAX_PER_TICK = 100
 local LIVENESS_SCAN_CALL_TIMEOUT = 10
 local LIVENESS_SCAN_WALL_CLOCK_BUDGET = 25
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/cursor/"
 
-M.spec = {
+local spec = {
   consumes = { "devloop_liveness_tick" },
   produces = {
     "github-proxy.github_entity_changed",
@@ -366,7 +366,11 @@ local function reinject(repo, entity, kind, tick)
   core.log_raise("liveness_scan", proposal_id, "github-proxy.github_entity_changed", payload)
 end
 
-function pipeline(event)
+local function liveness_scan_done(_event)
+  return false
+end
+
+local function act_liveness_scan(event)
   core.log_entry("liveness_scan", event, "github-devloop/liveness-scan", "tick")
   core.assert_trusted_bot_configured()
 
@@ -451,4 +455,8 @@ function pipeline(event)
   end
 end
 
-return M
+return saga.department(spec, {
+  done = liveness_scan_done,
+  act = act_liveness_scan,
+  name = "liveness_scan",
+})
