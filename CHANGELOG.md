@@ -9,6 +9,8 @@ release PR, and frozen into a permanent entry once the release is tagged. Do not
 edit released sections by hand.
 
 <!-- BEGIN PENDING -->
+<!-- END PENDING -->
+
 ## v0.2.3 — 2026-06-18
 
 ## Fixed
@@ -18,7 +20,6 @@ edit released sections by hand.
 ## New Feature
 
 ## Changed
-<!-- END PENDING -->
 
 ## v0.2.2 — 2026-06-17
 
