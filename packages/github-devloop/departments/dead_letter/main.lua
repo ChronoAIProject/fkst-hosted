@@ -1,16 +1,20 @@
 local core = require("core")
 
-local M = {}
 local dead_letter = require("std.dead_letter")
 local error_facts = require("std.error_facts")
+local saga = require("std.saga")
 
-M.spec = {
+local spec = {
   consumes = { "dead_letter" },
   produces = { "github-proxy.github_issue_create_request" },
   stall_window = "2m",
 }
 
-function pipeline(event)
+local function dead_letter_done(_event)
+  return false
+end
+
+local function act_dead_letter(event)
   local payload = event.payload or {}
 
   log.warn(
@@ -38,4 +42,8 @@ function pipeline(event)
   end
 end
 
-return M
+return saga.department(spec, {
+  done = dead_letter_done,
+  act = act_dead_letter,
+  name = "dead_letter",
+})
