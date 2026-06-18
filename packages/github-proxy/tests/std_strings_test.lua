@@ -60,6 +60,18 @@ return {
     t.eq(strings.is_bounded_string(123, 3), false)
   end,
 
+  test_git_ref_safe_rejects_unsafe_boundaries_and_accepts_normal_ref = function()
+    t.is_true(strings.is_git_ref_safe("feat/x"))
+    t.eq(strings.is_git_ref_safe("-feat/x"), false)
+    t.eq(strings.is_git_ref_safe("/feat/x"), false)
+    t.eq(strings.is_git_ref_safe("feat/../x"), false)
+    t.eq(strings.is_git_ref_safe("feat//x"), false)
+    t.eq(strings.is_git_ref_safe("feat/@{x"), false)
+    t.eq(strings.is_git_ref_safe("feat/x/"), false)
+    t.eq(strings.is_git_ref_safe("feat/x."), false)
+    t.eq(strings.is_git_ref_safe(("a"):rep(161)), false)
+  end,
+
   test_decimal_checksum_matches_existing_package_algorithm = function()
     t.eq(strings.decimal_checksum("DRY/Rule-of-Three"), "1383444728")
   end,

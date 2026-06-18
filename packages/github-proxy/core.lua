@@ -53,7 +53,6 @@ local allowed_env = {
   FKST_DEBUG_STAMP = true,
 }
 local trusted_bot_login = nil
-local max_branch_len = 160
 local max_marker_value_len = 300
 local state_stage_rank = {
   thinking = 100,
@@ -70,32 +69,7 @@ local state_stage_rank = {
   merged = 900,
 }
 
-local function is_git_ref_safe(value)
-  if not strings.is_bounded_string(value, max_branch_len) then
-    return false
-  end
-  local text = tostring(value)
-  if text:sub(1, 1) == "-" or text:sub(1, 1) == "/" then
-    return false
-  end
-  if text:find("%.%.", 1, true) ~= nil
-    or text:find("//", 1, true) ~= nil
-    or text:find("@{", 1, true) ~= nil
-    or text:sub(-1) == "/"
-    or text:sub(-1) == "."
-    or text:sub(-5) == ".lock" then
-    return false
-  end
-  if text:find("[%s~^:?%[%]\\*]") ~= nil then
-    return false
-  end
-  for segment in text:gmatch("[^/]+") do
-    if segment == "." or segment == ".." or segment:sub(1, 1) == "." then
-      return false
-    end
-  end
-  return text:find("^[%w%._%-%/]+$") ~= nil
-end
+local is_git_ref_safe = strings.is_git_ref_safe
 
 local function is_safe_marker_value(value)
   return type(value) == "string" and value ~= "" and #value <= max_marker_value_len
@@ -287,7 +261,9 @@ function M.entity_label_lock_key(repo, target_kind, number)
   return "github-proxy/label-lock/" .. id
 end
 
-function M.is_safe_branch(branch) return is_git_ref_safe(branch) end
+function M.is_safe_branch(branch)
+  return is_git_ref_safe(branch)
+end
 
 function M.is_safe_pr_number(pr_number) return M.is_positive_integer(pr_number) end
 
