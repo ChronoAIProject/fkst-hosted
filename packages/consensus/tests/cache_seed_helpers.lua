@@ -12,3 +12,7 @@ function pipeline(event)
     key = payload.key,
   })
 end
+
+M.pipeline = pipeline
+
+return M

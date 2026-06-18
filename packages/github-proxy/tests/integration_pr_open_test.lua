@@ -252,7 +252,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    local cached = t.run_department("tests/entity_view_probe_helpers.lua", {
+    local cached = t.run_department("departments/test_entity_view_probe/main.lua", {
       queue = "entity_view_probe",
       payload = {
         repo = "owner/x",

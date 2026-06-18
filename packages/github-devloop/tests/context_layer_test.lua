@@ -148,7 +148,7 @@ local function find_raise(raises, queue)
 end
 
 local function run_probe(payload, opts)
-  return t.run_department("tests/board_digest_probe_helpers.lua", {
+  return t.run_department("departments/test_board_digest_probe/main.lua", {
     queue = "board_digest_probe",
     payload = payload,
   }, opts)

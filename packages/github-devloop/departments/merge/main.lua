@@ -12,9 +12,10 @@ M.spec = {
     "devloop_fixing",
     "devloop_fix_reconcile",
     "devloop_decompose",
+    "devloop_merge_ready",
     "devloop_merge_queue_tick",
   },
-  fanout = { "devloop_merge_queue_tick" },
+  fanout = { "devloop_merge_queue_tick", "devloop_merge_ready" },
   stall_window = "2m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }

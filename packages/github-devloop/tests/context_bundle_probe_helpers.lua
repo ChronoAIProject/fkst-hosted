@@ -326,26 +326,37 @@ local function run_stale_manifest_rebuild(root)
   }
 end
 
+function M.run(payload)
+  local root = payload.root
+  if payload.mode == "round_trip" then
+    return run_round_trip(root)
+  elseif payload.mode == "deleted_file" then
+    return run_deleted_file(root)
+  elseif payload.mode == "preexisting" then
+    return run_preexisting(root)
+  elseif payload.mode == "publish_reuse" then
+    return run_publish_reuse(root)
+  elseif payload.mode == "publish_unique_on_invalid" then
+    return run_publish_unique_on_invalid(root)
+  elseif payload.mode == "utf8_truncation" then
+    return run_utf8_truncation(root)
+  elseif payload.mode == "stale_manifest_files" then
+    return run_stale_manifest_files(root)
+  elseif payload.mode == "stale_manifest_rebuild" then
+    return run_stale_manifest_rebuild(root)
+  end
+  error("unknown context bundle probe mode")
+end
+
 function pipeline(event)
   local payload = event.payload or {}
   local root = payload.root
-  if payload.mode == "round_trip" then
-    raise("context_bundle_probe_result", run_round_trip(root))
-  elseif payload.mode == "deleted_file" then
-    raise("context_bundle_probe_result", run_deleted_file(root))
-  elseif payload.mode == "preexisting" then
-    raise("context_bundle_probe_result", run_preexisting(root))
-  elseif payload.mode == "publish_reuse" then
-    raise("context_bundle_probe_result", run_publish_reuse(root))
-  elseif payload.mode == "publish_unique_on_invalid" then
-    raise("context_bundle_probe_result", run_publish_unique_on_invalid(root))
-  elseif payload.mode == "utf8_truncation" then
-    raise("context_bundle_probe_result", run_utf8_truncation(root))
-  elseif payload.mode == "stale_manifest_files" then
-    raise("context_bundle_probe_result", run_stale_manifest_files(root))
-  elseif payload.mode == "stale_manifest_rebuild" then
-    raise("context_bundle_probe_result", run_stale_manifest_rebuild(root))
-  else
-    error("unknown context bundle probe mode")
+  if root ~= nil then
+    mkdir_p(root)
   end
+  raise("context_bundle_probe_result", M.run(payload))
 end
+
+M.pipeline = pipeline
+
+return M

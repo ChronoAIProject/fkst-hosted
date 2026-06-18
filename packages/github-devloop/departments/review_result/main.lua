@@ -11,6 +11,7 @@ M.spec = {
     "devloop_fix_reconcile",
     "devloop_decompose",
     "devloop_merge_ready",
+    "devloop_review_meta",
   },
   fanout = { "consensus.consensus_reached" },
   stall_window = "30s",
