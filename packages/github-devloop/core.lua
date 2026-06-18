@@ -86,6 +86,5 @@ require("core.context_bundle").install(M)
 require("core.operator_commands").install(M)
 require("core.claims").install(M)
 require("core.doctor").install(M)
-require("core.ratchet_slicer").install(M)
 
 return M

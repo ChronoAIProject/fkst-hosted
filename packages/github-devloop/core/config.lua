@@ -67,10 +67,6 @@ function M.write_mode(exec)
   return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
 end
 
-function M.configured_repo(exec)
-  return M.read_env("FKST_GITHUB_REPO", exec)
-end
-
 -- Claim mode is opt-in and additive: the default (unset/empty/unknown) is
 -- "assignee", which is byte-for-byte today's behavior. "label" opts into
 -- holding ownership via the fkst-dev:claimed label, which a GitHub App can set
