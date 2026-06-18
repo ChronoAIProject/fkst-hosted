@@ -51,7 +51,7 @@ _self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _cfg="${DOGFOOD_CONFIG:-$_self_dir/dogfood.config.sh}"
 [ -f "$_cfg" ] && . "$_cfg"
 
-DOGFOOD_ROOT="${DOGFOOD_ROOT:-/private/tmp}"                              # base for all worktrees/logs/scratch
+DOGFOOD_ROOT="${DOGFOOD_ROOT:-$HOME/.fkst-dogfood}"                       # base for all worktrees/logs/scratch (STABLE $HOME path; NOT /private/tmp, which macOS age-cleans)
 SUBSTRATE_SRC="${SUBSTRATE_SRC:-$HOME/fkst-substrate}"                    # substrate checkout the engine BIN builds from
 BIN="${BIN:-$SUBSTRATE_SRC/target/debug/fkst-framework}"
 RATE_POOL="${FKST_RATE_POOL_ROOT:-${RATE_POOL:-$DOGFOOD_ROOT/fkst-rate-pools}}"
@@ -103,8 +103,9 @@ expand() { [ "${1:-all}" = all ] && echo "$DOGFOOD_REPOS" || echo "$1"; }
 # this device's autonomous changes BEFORE they promote to dev. The rollup target
 # stays UPSTREAM_BRANCH (FKST_DEVLOOP_UPSTREAM_BRANCH=dev); only the engine BIN +
 # the pinned operator/skill checkouts stay on dev.
-# Self-heal a run checkout corrupted by a volatile DOGFOOD_ROOT. DOGFOOD_ROOT defaults to
-# /private/tmp, which macOS age-cleans (files untouched >3d): it strips .git and older tracked
+# Self-heal a run checkout corrupted by a volatile DOGFOOD_ROOT. DOGFOOD_ROOT now defaults to a
+# STABLE $HOME/.fkst-dogfood, but an explicit override to a volatile base like /private/tmp gets
+# age-cleaned by macOS (files untouched >3d): it strips .git and older tracked
 # files, leaving a partial tree. The constantly-written durable store survives, but the static
 # package source rots — so the supervise either reads "skew/current" against the rotted checkout
 # (operator fixes never deploy) or, on restart, refuses to start on an incomplete package graph
