@@ -1,5 +1,3 @@
-packages/github-devloop/departments/comment_handoff/main.lua
-packages/github-devloop/departments/consensus_result/main.lua
 packages/github-devloop/departments/dead_letter/main.lua
 packages/github-devloop/departments/doctor/main.lua
 packages/github-devloop/departments/ensure_repo/main.lua

@@ -1,9 +1,8 @@
 local core = require("core")
+local saga = require("std.saga")
 local source_refs = require("std.source_ref")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
     "devloop_ready",
@@ -37,13 +36,30 @@ local function supported_handoff(payload)
   return nil
 end
 
-function pipeline(event)
+local function accept_handoff(event)
+  return supported_handoff((event and event.payload) or {}) ~= nil
+end
+
+local function handoff_done(_event)
+  return false
+end
+
+local function log_unsupported_handoff(event)
   local payload = event.payload or {}
   local handoff = supported_handoff(payload)
   if handoff == nil then
     local proposal_id = type(payload.handoff) == "table" and tostring(payload.handoff.proposal_id or "unknown") or "unknown"
     core.log_entry("comment_handoff", event, proposal_id, core.payload_field(payload, "dedup_key"))
     core.log_cas_decision("comment_handoff", proposal_id, { state = nil, version = nil }, "comment-written", "handoff", "skip-foreign(payload)", "unsupported comment-written handoff")
+    return
+  end
+end
+
+local function act_handoff(event)
+  local payload = event.payload or {}
+  local handoff = supported_handoff(payload)
+  if handoff == nil then
+    log_unsupported_handoff(event)
     return
   end
 
@@ -74,6 +90,11 @@ function pipeline(event)
   core.log_raise("comment_handoff", handoff.proposal_id, "devloop_reviewing", reviewing)
 end
 
-pipeline = core.wrap_pipeline_failure("comment_handoff", pipeline)
-
-return M
+return saga.department(spec, {
+  accept = accept_handoff,
+  done = handoff_done,
+  act = act_handoff,
+  on_skip_foreign = log_unsupported_handoff,
+  wrap = core.wrap_pipeline_failure,
+  name = "comment_handoff",
+})
