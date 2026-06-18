@@ -273,7 +273,37 @@ local function raise_stale_dependency_label_clear(issue, proposal_id, state, lab
   return true
 end
 
-local function maybe_apply_issue_reready_command(issue, proposal_id, current, state)
+local function timeout_reconcile_reready_reentry_state(current, proposal_id, state, source_ref, link)
+  if state.state ~= "blocked" or link ~= nil then
+    return nil, "reready requires ready or dependency_wait state"
+  end
+  local fact = core.timeout_reconcile_fact_for_terminal_version(current.comments, proposal_id, state.version)
+  if fact == nil then
+    return nil, "reready requires ready or dependency_wait state"
+  end
+  if fact.from_state ~= "ready" and fact.from_state ~= "dependency_wait" then
+    return nil, "reready requires timeout-reconcile from ready or dependency_wait state"
+  end
+  local marker_source = fact.source_ref or {}
+  if tostring(marker_source.kind or "") ~= tostring(source_ref and source_ref.kind or "")
+    or tostring(marker_source.ref or "") ~= tostring(source_ref and source_ref.ref or "") then
+    return nil, "reready requires timeout-reconcile source_ref to match the issue"
+  end
+  return {
+    state = fact.from_state,
+    version = fact.from_version,
+    stage_rank = core.stage_rank(fact.from_state),
+    marker_created_at = fact.comment_created_at,
+    operator_reentry = {
+      command = "reready",
+      from_state = "blocked",
+      terminal_version = state.version,
+      timeout_round = fact.round,
+    },
+  }, nil
+end
+
+local function maybe_apply_issue_reready_command(issue, proposal_id, current, state, link)
   local command = core.operator_command_fact(current.comments, "reready")
   if command == nil then
     return false
@@ -282,19 +312,24 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
     core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
+  local replay_state = state
+  local refusal_reason = nil
   if state.state ~= "ready" and state.state ~= "dependency_wait" then
+    replay_state, refusal_reason = timeout_reconcile_reready_reentry_state(current, proposal_id, state, issue.source_ref, link)
+  end
+  if replay_state == nil then
     core.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "refused(invalid-state)", "operator reready requires ready state")
     local refusal = core.build_operator_issue_command_refusal_request(
       issue.repo,
       issue.number,
       command,
-      "reready requires ready or dependency_wait state",
+      refusal_reason or "reready requires ready or dependency_wait state",
       issue.source_ref
     )
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return true
   end
-  core.replay_from_table("observe_issue", issue, state, core.restart_transition_row(state.state), {
+  core.replay_from_table("observe_issue", issue, replay_state, core.restart_transition_row(replay_state.state), {
     proposal_id = proposal_id,
     current = current,
     command = command,
@@ -486,18 +521,25 @@ local function process_issue_event(event)
     end
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
     local link = core.pr_link_fact(current.comments, proposal_id)
+    local issue_state = core.current_state(current.comments, proposal_id)
+    local claim_checked = false
+    if issue_state.state ~= nil then
+      if not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
+        return
+      end
+      claim_checked = true
+      if maybe_apply_issue_reready_command(issue, proposal_id, current, issue_state, link) then
+        return
+      end
+    end
     local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
     snapshot.fresh = true
     local state = snapshot.state
-    local issue_state = core.current_state(current.comments, proposal_id)
     if state.state ~= nil then
-      if not ensure_managed_issue_claim(issue, proposal_id, current, state) then
+      if not claim_checked and not ensure_managed_issue_claim(issue, proposal_id, current, state) then
         return
       end
       if maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event.ts) then
-        return
-      end
-      if maybe_apply_issue_reready_command(issue, proposal_id, current, state) then
         return
       end
       if maybe_apply_issue_dependency_waiver_command(issue, proposal_id, current, state) then

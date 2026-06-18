@@ -344,6 +344,54 @@ function M.has_timeout_reconcile_marker(comments, proposal_id, issue_version, st
   end
   return false
 end
+
+function M.timeout_reconcile_fact_for_terminal_version(comments, proposal_id, terminal_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = attr(marker, "proposal")
+      local version = attr(marker, "version")
+      local state_name = attr(marker, "state")
+      local round = valid_round(attr(marker, "round"))
+      local action = attr(marker, "action")
+      local from_state = attr(marker, "from_state")
+      local from_version = attr(marker, "from_version")
+      local dedup = attr(marker, "dedup")
+      local expected_dedup = "timeout-reconcile:" .. tostring(from_version)
+        .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(round)
+      if marker_proposal == tostring(proposal_id)
+        and version == tostring(terminal_version)
+        and action == "drop"
+        and round ~= nil
+        and state_name ~= nil
+        and from_state == state_name
+        and M.restart_transition_row(from_state) ~= nil
+        and M.restart_transition_row(from_state).terminal == false
+        and M._is_bounded_string(from_version, M._max_dedup_len)
+        and dedup == expected_dedup then
+        return {
+          proposal_id = marker_proposal,
+          terminal_version = version,
+          state = state_name,
+          round = round,
+          action = action,
+          dedup_key = dedup,
+          from_state = from_state,
+          from_version = from_version,
+          source_ref = {
+            kind = attr(marker, "source_ref_kind"),
+            ref = attr(marker, "source_ref"),
+          },
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
 end
 
 return S
