@@ -1,5 +1,3 @@
-packages/github-autochrono/departments/inbound_glue/main.lua
-packages/github-autochrono/departments/outbound_glue/main.lua
 packages/github-devloop/departments/comment_handoff/main.lua
 packages/github-devloop/departments/consensus_result/main.lua
 packages/github-devloop/departments/dead_letter/main.lua
