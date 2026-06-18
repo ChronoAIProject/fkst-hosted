@@ -1,20 +1,33 @@
 local core = require("core")
 local mapping = require("departments.propose.mapping")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "issue" },
   produces = { "consensus.proposal" },
   stall_window = "30s",
 }
 
-function pipeline(event)
+local function proposal_done(event)
   local issue = event.payload or {}
   if issue.schema ~= "autochrono.issue.v1" then
     log.warn("autochrono: unsupported issue schema")
-    return
+    return true
   end
+  if not core.is_eligible(issue) then
+    return true
+  end
+
+  local cache_key = core.proposal_cache_key(issue.repo, issue.issue_number, issue.updated_at)
+  local already_proposed = false
+  with_lock(cache_key, function()
+    already_proposed = cache_get(cache_key) ~= nil
+  end)
+  return already_proposed
+end
+
+local function act_propose(event)
+  local issue = event.payload or {}
   if not core.is_eligible(issue) then
     return
   end
@@ -38,4 +51,9 @@ function pipeline(event)
   end)
 end
 
-return M
+return saga.department(spec, {
+  done = proposal_done,
+  act = act_propose,
+  wrap = core.wrap_pipeline_failure,
+  name = "propose",
+})
