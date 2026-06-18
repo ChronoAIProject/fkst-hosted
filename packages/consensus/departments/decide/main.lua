@@ -1,6 +1,12 @@
 local core = require("core")
 local saga = require("std.saga")
 
+local spec = {
+  consumes = { "proposal" },
+  produces = { "consensus_reached", "consensus_converge" },
+  stall_window = "2m",
+}
+
 local function read_runtime_root()
   local result = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
   if result.exit_code ~= 0 then
@@ -164,12 +170,9 @@ local function act_decide(event)
   end)
 end
 
-return saga.department{
-  consumes = { "proposal" },
-  produces = { "consensus_reached", "consensus_converge" },
-  stall_window = "2m",
+return saga.department(spec, {
   done = decision_done,
   act = act_decide,
   wrap = core.wrap_pipeline_failure,
   name = "decide",
-}
+})

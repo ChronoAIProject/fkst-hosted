@@ -410,6 +410,7 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_dedup_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
+        self.assertIn('python3 -B "$ROOT/scripts/check_repo_saga_head_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_bootstrap_test.py"', source)
@@ -419,6 +420,7 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_fkst_layout.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_dedup_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_test.py"', source)
+        self.assertNotIn('python3 "$ROOT/scripts/check_repo_saga_head_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/check_repo_fkst_layout_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_cache_test.py"', source)
         self.assertNotIn('python3 "$ROOT/scripts/bin_bootstrap_test.py"', source)
@@ -451,9 +453,9 @@ class RunScriptContractTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
-            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_dedup.py", "check_repo_gh_git_adapter.py", "check_repo_github_devloop_helpers.py", "check_repo_ingress.py", "check_repo_perm.py"):
+            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_dedup.py", "check_repo_gh_git_adapter.py", "check_repo_github_devloop_helpers.py", "check_repo_ingress.py", "check_repo_perm.py", "check_repo_saga_head.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
-            for name in ("check_repo_dedup_test.py", "check_repo_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "check_repo_github_devloop_helpers_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py"):
+            for name in ("check_repo_dedup_test.py", "check_repo_test.py", "check_repo_saga_head_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "check_repo_github_devloop_helpers_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
 
             core_lines = [
@@ -702,7 +704,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
         }, allowlist)
 
     def test_saga_shaped_department_not_on_allowlist_passes(self) -> None:
-        source = 'local saga = require("std.saga")\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        source = 'local saga = require("std.saga")\nlocal spec = {consumes = {"q"}}\nreturn saga.department(spec, {done = d, act = a})\n'
         self.assertEqual(self.violations(source, set()), [])
 
     def test_free_form_department_on_allowlist_passes(self) -> None:
@@ -721,7 +723,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
         self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
 
     def test_saga_shaped_department_with_leftover_pipeline_fails(self) -> None:
-        source = 'local saga = require("std.saga")\npipeline = function() end\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        source = 'local saga = require("std.saga")\nlocal spec = {consumes = {"q"}}\npipeline = function() end\nreturn saga.department(spec, {done = d, act = a})\n'
         self.assertIn("still defines free-form top-level pipeline", self.violations(source, set())[0])
 
     def test_paren_call_saga_department_is_detected(self) -> None:
@@ -746,7 +748,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
 
     def test_allowlist_equal_or_shrunk_relative_to_base_passes(self) -> None:
         free_form = 'function pipeline(event)\n  return event\nend\n'
-        saga_shaped = 'local saga = require("std.saga")\nreturn saga.department{done = d, act = a, consumes = {"q"}}\n'
+        saga_shaped = 'local saga = require("std.saga")\nlocal spec = {consumes = {"q"}}\nreturn saga.department(spec, {done = d, act = a})\n'
         base = {
             "packages/example/departments/dept/main.lua",
             "packages/example/departments/old/main.lua",

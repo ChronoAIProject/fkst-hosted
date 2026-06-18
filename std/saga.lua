@@ -19,59 +19,66 @@ local function validate_consumes(consumes)
   end
 end
 
-local function validate_opts(opts)
-  if type(opts) ~= "table" then
-    error("std.saga: department requires opts")
+local function validate_spec(spec)
+  if type(spec) ~= "table" then
+    error("std.saga: department requires spec")
   end
-  validate_consumes(opts.consumes)
-  if type(opts.done) ~= "function" then
+  validate_consumes(spec.consumes)
+end
+
+local function validate_handlers(handlers)
+  if type(handlers) ~= "table" then
+    error("std.saga: department requires handlers")
+  end
+  if type(handlers.done) ~= "function" then
     error("std.saga: department requires done")
   end
-  if type(opts.act) ~= "function" then
+  if type(handlers.act) ~= "function" then
     error("std.saga: department requires act")
   end
 end
 
-local function spec_from_opts(opts)
+local function spec_from_spec(spec)
   return {
-    consumes = opts.consumes,
-    produces = opts.produces,
-    stall_window = opts.stall_window,
-    retry = opts.retry,
-    fanout = opts.fanout,
-    ephemeral = opts.ephemeral,
+    consumes = spec.consumes,
+    produces = spec.produces,
+    stall_window = spec.stall_window,
+    retry = spec.retry,
+    fanout = spec.fanout,
+    ephemeral = spec.ephemeral,
   }
 end
 
-function S.department(opts)
-  validate_opts(opts)
+function S.department(spec, handlers)
+  validate_spec(spec)
+  validate_handlers(handlers)
 
-  local accept = opts.accept or always_accept
+  local accept = handlers.accept or always_accept
   local function raw(event)
     if not accept(event) then
-      if type(opts.on_skip_foreign) == "function" then
-        opts.on_skip_foreign(event)
+      if type(handlers.on_skip_foreign) == "function" then
+        handlers.on_skip_foreign(event)
       end
       return nil
     end
-    if opts.done(event) then
-      if type(opts.on_skip) == "function" then
-        opts.on_skip(event)
+    if handlers.done(event) then
+      if type(handlers.on_skip) == "function" then
+        handlers.on_skip(event)
       end
       return nil
     end
-    return opts.act(event)
+    return handlers.act(event)
   end
 
-  local name = opts.name or "std.saga"
+  local name = handlers.name or "std.saga"
   local wrapped = raw
-  if type(opts.wrap) == "function" then
-    wrapped = opts.wrap(name, raw)
+  if type(handlers.wrap) == "function" then
+    wrapped = handlers.wrap(name, raw)
   end
   _G.pipeline = wrapped
 
   return {
-    spec = spec_from_opts(opts),
+    spec = spec_from_spec(spec),
   }
 end
 

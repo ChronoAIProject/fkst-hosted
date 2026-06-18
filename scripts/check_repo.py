@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm
+import check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -930,16 +930,13 @@ def check_no_permission_control(root: Path, violations: list[str]) -> None: chec
 def is_saga_handler_source(source: str) -> bool:
     return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
 
-def has_free_form_pipeline_source(source: str) -> bool:
-    return FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None
-
 def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
     violations: list[str] = []
     for path, source in sorted(sources.items()):
         saga_shaped = is_saga_handler_source(source)
         if saga_shaped and path in allowlist:
             violations.append(f"G10: {path} saga-shaped department remains on saga-handler allowlist; remove it")
-        if saga_shaped and has_free_form_pipeline_source(source):
+        if saga_shaped and FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None:
             violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
         if not saga_shaped and path not in allowlist:
             violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to std.saga.department or (only for pre-existing) keep listed")
@@ -986,6 +983,8 @@ def main() -> int:
     check_gh_git_adapter_ratchet(root, violations)
     check_code_dedup_ratchet(root, violations)
     check_saga_handler_ratchet(root, violations, warnings)
+    sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
+    for message in check_repo_saga_head.violations(sources, strip_lua_comments_and_strings): add(violations, "G-SAGA-HEAD", message)
 
     for warning in warnings: print(f"warning: {warning}", file=sys.stderr)
     if violations:

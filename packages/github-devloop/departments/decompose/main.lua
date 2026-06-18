@@ -1,6 +1,15 @@
 local core = require("core")
 local saga = require("std.saga")
 
+local spec = {
+  consumes = { "devloop_decompose" },
+  produces = {
+    "github-proxy.github_issue_create_request",
+  },
+  stall_window = "2m",
+  retry = { max_attempts = 2, base = "5s", cap = "10s" },
+}
+
 local MAX_RUNTIME_ID_LEN = 180
 local context_cache = setmetatable({}, { __mode = "k" })
 
@@ -401,16 +410,10 @@ local function act_decompose(event)
   end)
 end
 
-return saga.department{
-  consumes = { "devloop_decompose" },
-  produces = {
-    "github-proxy.github_issue_create_request",
-  },
-  stall_window = "2m",
-  retry = { max_attempts = 2, base = "5s", cap = "10s" },
+return saga.department(spec, {
   accept = accepted_decompose,
   done = decomposed_done,
   act = act_decompose,
   wrap = core.wrap_pipeline_failure,
   name = "decompose",
-}
+})

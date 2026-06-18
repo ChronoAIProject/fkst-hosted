@@ -16,9 +16,10 @@ return {
   test_department_sets_pipeline_and_runs_act_when_not_done = function()
     local acted = 0
     local module = saga.department({
-      name = "demo",
       consumes = { "demo" },
       produces = { "done" },
+    }, {
+      name = "demo",
       done = function(_event)
         return false
       end,
@@ -39,6 +40,7 @@ return {
     local skipped = 0
     saga.department({
       consumes = { "demo" },
+    }, {
       done = function(_event)
         return true
       end,
@@ -62,6 +64,7 @@ return {
     local skipped_foreign = 0
     saga.department({
       consumes = { "demo" },
+    }, {
       accept = function(_event)
         accepted = accepted + 1
         return false
@@ -88,8 +91,9 @@ return {
   test_department_uses_wrap = function()
     local wrapped_name = nil
     saga.department({
-      name = "wrapped-demo",
       consumes = { "demo" },
+    }, {
+      name = "wrapped-demo",
       done = function(_event)
         return false
       end,
@@ -113,13 +117,16 @@ return {
       saga.department(nil)
     end)
     t.raises(function()
-      saga.department({ consumes = {}, done = function() end, act = function() end })
+      saga.department({ consumes = {} }, { done = function() end, act = function() end })
     end)
     t.raises(function()
-      saga.department({ consumes = { "demo" }, act = function() end })
+      saga.department({ consumes = { "demo" } }, { act = function() end })
     end)
     t.raises(function()
-      saga.department({ consumes = { "demo" }, done = function() end })
+      saga.department({ consumes = { "demo" } }, { done = function() end })
+    end)
+    t.raises(function()
+      saga.department({ consumes = { "demo" } }, nil)
     end)
   end,
 }
