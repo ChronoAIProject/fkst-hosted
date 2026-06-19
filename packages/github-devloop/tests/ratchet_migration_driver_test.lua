@@ -26,8 +26,9 @@ local function ratchet_title(ratchet)
   return tostring(ratchet or "saga-handler"):gsub("%-", " ") .. " allowlist migration slice"
 end
 
-local function plan_json(status, dedup_key, ratchet)
+local function plan_json(status, dedup_key, ratchet, entry_key)
   ratchet = ratchet or "saga-handler"
+  entry_key = entry_key or "entryabc"
   local allowlist_path = ratchet_allowlist_paths[ratchet]
   if allowlist_path == nil then
     error("unknown test ratchet: " .. tostring(ratchet))
@@ -48,6 +49,8 @@ local function plan_json(status, dedup_key, ratchet)
     .. ratchet
     .. "\" dedup=\""
     .. dedup_key
+    .. "\" entries=\""
+    .. entry_key
     .. "\" -->\n"
   return '{"schema_version":"fkst.ratchet-slice.v1","ratchet":'
     .. json_string(ratchet)
@@ -55,7 +58,9 @@ local function plan_json(status, dedup_key, ratchet)
     .. json_string(allowlist_path)
     .. ',"remaining_count":3,"slice_size":3,"status":"slice_available","next_slice":{"dedup_key":'
     .. json_string(dedup_key)
-    .. ',"sites":[],"title":'
+    .. ',"sites":[{"entry_key":'
+    .. json_string(entry_key)
+    .. '}],"title":'
     .. json_string(title .. ": abc123")
     .. ',"body":'
     .. json_string(body)
@@ -65,9 +70,22 @@ end
 local function parent_json(comments, state)
   local parts = {}
   for _, comment in ipairs(comments or {}) do
-    table.insert(parts, '{"body":' .. json_string(comment.body) .. ',"author":{"login":' .. json_string(comment.author_login or "fkst-test-bot") .. '}}')
+    local created = comment.created_at and (',"createdAt":' .. json_string(comment.created_at)) or ""
+    table.insert(parts, '{"body":' .. json_string(comment.body) .. ',"author":{"login":' .. json_string(comment.author_login or "fkst-test-bot") .. '}' .. created .. "}")
   end
   return '{"number":979,"state":' .. json_string(state or "OPEN") .. ',"comments":[' .. table.concat(parts, ",") .. ']}\n'
+end
+
+local function issue_json(number, state, body_text, author_login)
+  return '{"number":'
+    .. tostring(number or 121)
+    .. ',"state":'
+    .. json_string(state or "OPEN")
+    .. ',"author":{"login":'
+    .. json_string(author_login or "fkst-test-bot")
+    .. '},"body":'
+    .. json_string(body_text or "")
+    .. "}\n"
 end
 
 local function query_ratchet(query)
@@ -85,6 +103,14 @@ local function new_fake_github(opts)
   local handle = { _model = model }
   function handle.issue_view(repo, issue_number, fields, timeout)
     table.insert(model.writes, { kind = "issue_view", repo = repo, issue_number = issue_number, fields = fields, timeout = timeout })
+    if options.child_issues and options.child_issues[issue_number] then
+      local child = options.child_issues[issue_number]
+      return {
+        stdout = issue_json(issue_number, child.state, child.body, child.author_login),
+        stderr = "",
+        exit_code = 0,
+      }
+    end
     return { stdout = parent_json(options.parent_comments, options.parent_state), stderr = "", exit_code = 0 }
   end
   function handle.issue_search(repo, query, fields, timeout)
@@ -99,9 +125,13 @@ local function new_fake_github(opts)
         .. ratchet
         .. '\\" dedup=\\"'
         .. dedup_key
+        .. '\\" entries=\\"'
+        .. (options.open_slice_entry_key or "entryabc")
         .. '\\" -->"}]\n'
     elseif options.existing_slice and query:find("fkst:github-proxy:issue-create:", 1, true) ~= nil then
-      stdout = '[{"number":122,"state":"CLOSED","author":{"login":'
+      stdout = '[{"number":122,"state":'
+        .. json_string(options.existing_slice_state or "OPEN")
+        .. ',"author":{"login":'
         .. json_string(options.existing_slice_author_login or "fkst-test-bot")
         .. '},"body":'
         .. json_string(query)
@@ -282,7 +312,7 @@ return {
     t.eq(#result.exec_calls, 3)
   end,
 
-  test_poll_with_managed_sibling_parent_ledger_noops = function()
+  test_poll_with_managed_sibling_parent_ledger_open_child_noops = function()
     local result = run_driver({
       all_ratchets = true,
       env = {
@@ -298,6 +328,80 @@ return {
             body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
           },
         },
+        child_issues = {
+          [121] = {
+            author_login = "loning[bot]",
+            state = "OPEN",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_view"), 6)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+    t.eq(#result.exec_calls, 3)
+  end,
+
+  test_poll_with_managed_sibling_parent_ledger_closed_child_recreates = function()
+    local result = run_driver({
+      env = {
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "ElonSG",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG loning",
+      },
+      github = {
+        parent_comments = {
+          {
+            author_login = "loning[bot]",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "loning[bot]",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 2)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
+  end,
+
+  test_poll_with_parent_ledger_later_open_retry_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="122" -->',
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "fkst-test-bot",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+          [122] = {
+            author_login = "fkst-test-bot",
+            state = "OPEN",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
       },
     })
 
@@ -305,7 +409,101 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
-    t.eq(#result.exec_calls, 3)
+    t.eq(count_kind(result.github._model.writes, "issue_view"), 3)
+  end,
+
+  test_poll_with_parent_ledger_later_unknown_retry_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+            created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()),
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "fkst-test-bot",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_view"), 2)
+  end,
+
+  test_poll_with_parent_ledger_unknown_issue_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+            created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()),
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+  end,
+
+  test_poll_with_parent_ledger_stale_unknown_issue_recreates = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+            created_at = "2000-01-01T00:00:00Z",
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 2)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
+  end,
+
+  test_poll_with_parent_ledger_untrusted_child_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "unknown-user",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
   end,
 
   test_poll_with_managed_sibling_existing_slice_noops = function()
@@ -329,6 +527,34 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_search"), 6)
     t.eq(#result.exec_calls, 3)
+  end,
+
+  test_poll_with_closed_existing_slice_recreates = function()
+    local result = run_driver({
+      github = {
+        existing_slice = true,
+        existing_slice_state = "CLOSED",
+        existing_slice_author_login = "fkst-test-bot",
+        dedup_key = "saga-handler/slice/abc123",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 2)
+  end,
+
+  test_poll_with_open_slice_for_different_entry_creates = function()
+    local result = run_driver({
+      github = {
+        open_slice = true,
+        open_slice_entry_key = "differententry",
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 2)
   end,
 
   test_single_instance_login_does_not_trust_sibling_by_default = function()
