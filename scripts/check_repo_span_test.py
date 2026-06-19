@@ -283,8 +283,59 @@ class SpanContractRatchetTest(unittest.TestCase):
 
         self.assertEqual(len(messages), 1)
         self.assertIn("span start predecessor", messages[0])
-        self.assertIn("does not emit durable start marker", messages[0])
+        self.assertIn("does not bind durable start marker", messages[0])
         self.assertIn("implement-attempt:v1", messages[0])
+
+    def test_declared_state_start_predecessor_can_validate_declared_state_marker(self) -> None:
+        transition_sources = {
+            "packages/github-devloop/core/restart/transitions/fixing.lua": textwrap.dedent(
+                """\
+                return function(M, h)
+                  local span_contract = h.span_contract
+                  return {
+                    from_state = "fixing",
+                    driving_queue = "devloop_fixing",
+                    responsibility_signature = responsibility_signature({
+                      state_kind = "worker",
+                    }),
+                    span_contract = span_contract({
+                      department = "fix",
+                      durable_start_marker = "state:v1 fixing",
+                      spawn_predecessor = "precheck_fix_write_gate",
+                      spawn_function = "run_fix_attempt",
+                    }),
+                  }
+                end
+                """
+            )
+        }
+        department_sources = {
+            "packages/github-devloop/departments/fix/main.lua": textwrap.dedent(
+                """\
+                local function validate_fix_write_gate_snapshot(pr, fix)
+                  local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
+                  if rechecked_state.state ~= "fixing" then
+                    return nil
+                  end
+                  return pr
+                end
+
+                local function precheck_fix_write_gate(repo, fix, branch)
+                  return validate_fix_write_gate_snapshot(pr, fix) ~= nil
+                end
+
+                local function run_fix_attempt(plan)
+                  local result = spawn_codex_sync({ prompt = prompt })
+                  return result
+                end
+
+                precheck_fix_write_gate(repo, fix, branch)
+                local outcome = run_fix_attempt(attempt_plan)
+                """
+            )
+        }
+
+        self.assertEqual(span.spawn_start_messages(transition_sources, department_sources), [])
 
     def test_declared_spawn_function_checks_predecessor_before_function_call(self) -> None:
         transition_sources = {
@@ -312,6 +363,18 @@ class SpanContractRatchetTest(unittest.TestCase):
         department_sources = {
             "packages/github-devloop/departments/fix/main.lua": textwrap.dedent(
                 """\
+                local function validate_fix_write_gate_snapshot(pr, fix)
+                  local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
+                  if rechecked_state.state ~= "fixing" then
+                    return nil
+                  end
+                  return pr
+                end
+
+                local function precheck_fix_write_gate(repo, fix, branch)
+                  return validate_fix_write_gate_snapshot(pr, fix) ~= nil
+                end
+
                 local function run_fix_attempt(plan)
                   local result = spawn_codex_sync({ prompt = prompt })
                   return result
