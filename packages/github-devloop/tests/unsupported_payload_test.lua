@@ -315,10 +315,6 @@ local function payload_for_queue(queue)
         source_ref = { kind = "external", ref = "owner/repo#issue/42" },
       },
     },
-    ratchet_migration_poll = {
-      schema = "github-devloop.ratchet-migration-poll.v1",
-      ratchet = "saga-handler",
-    },
     ["github-proxy.github_entity_changed"] = issue_entity_payload(),
     ["github-proxy.github_pr_opened"] = {
       schema = "github-proxy.pr-opened.v1",
@@ -469,11 +465,6 @@ local cases = {
     dept = "rollup_merge",
     path = "departments/rollup_merge/main.lua",
     queue = "devloop_rollup_ready",
-  },
-  {
-    dept = "ratchet_migration_driver",
-    path = "departments/ratchet_migration_driver/main.lua",
-    queue = "ratchet_migration_poll",
   },
 }
 
