@@ -18,9 +18,6 @@ return function(M, h)
     driving_queue = "devloop_ready",
     observe_surfaces = { issue = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 implementing" }, { "implementing", "dependency_wait", "blocked" }),
-    -- STOPGAP: the issue stays at `ready` for the whole implement codex run (state:v1 implementing is written
-    -- only at codex completion), so this budget governs the run; 120 = codex 60min timeout + margin (matching
-    -- `fixing`). Root fix = mark implementing-at-spawn + an actual codex-execution liveness signal.
     budget = budget(120, "Actionable ready governs the implement codex run until the implementing marker is written at completion; 120 bounds a 60-minute codex attempt plus margin (matching fixing)."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
