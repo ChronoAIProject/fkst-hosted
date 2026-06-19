@@ -94,7 +94,11 @@ cfg() {
 
 pidof_df() { pgrep -f -- "supervise --project-root ${HOST} " 2>/dev/null; }
 latest_log() { ls -t "$LOGDIR/${1}-sv-"*.log 2>/dev/null | head -1; }
-epoch_utc() { [ -z "${1:-}" ] && { echo 0; return; }; date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo 0; }
+# Parse an ISO-8601 UTC timestamp (trailing Z) to epoch. TZ=UTC is REQUIRED: BSD `date -j -f`
+# ignores the Z and parses in the local zone, so on a +HH machine every computed age is inflated by
+# the local UTC offset (e.g. +0800 -> board recency reads 8h too old -> healthy issues mislabelled
+# "STUCK 8h"). now=`date +%s` is already zone-independent, so only the parse side needed fixing.
+epoch_utc() { [ -z "${1:-}" ] && { echo 0; return; }; TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo 0; }
 expand() { [ "${1:-all}" = all ] && echo "$DOGFOOD_REPOS" || echo "$1"; }
 
 # Sync a dogfood RUN checkout (behavior PKGSRC + target HOST) to the machine's
