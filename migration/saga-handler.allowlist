@@ -1,6 +1,3 @@
-packages/github-devloop/departments/review_meta/main.lua
-packages/github-devloop/departments/review_pr/main.lua
-packages/github-devloop/departments/review_result/main.lua
 packages/github-devloop/departments/rollup_merge/main.lua
 packages/github-devloop/departments/rollup_scan/main.lua
 packages/github-devloop/departments/substrate_ref_scan/main.lua
