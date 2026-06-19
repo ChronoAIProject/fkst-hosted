@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head, ratchet_base
+import check_repo_content_truncation, check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -978,6 +978,7 @@ def main() -> int:
     check_no_permission_control(root, violations)
     check_gh_git_adapter_ratchet(root, violations)
     check_code_dedup_ratchet(root, violations)
+    for message in check_repo_content_truncation.repository_messages(root, packages_root(root), read_text, rel): add(violations, "G-CONTENT-TRUNCATION", message)
     for message in check_repo_coverage.repository_messages(root): add(violations, "G-COVERAGE", message)
     for message in check_repo_forward_direct.repository_messages(root): add(violations, "G-FORWARD-DIRECT", message)
     check_saga_handler_ratchet(root, violations, warnings)

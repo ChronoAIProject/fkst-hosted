@@ -1,0 +1,5 @@
+# Existing lossy content-truncation inventory for the source_ref/content_fetch migration.
+# Format: path|function|cap|sink|issue=#N|why=<one-line reason>
+# New entries fail CI. Remove entries only when full content is rehydrated from
+# source_ref/content_fetch instead of being capped into reliable payloads or prompts.
+packages/autochrono/departments/propose/mapping.lua|proposal_body|max_body_len|raise-payload|issue=#1117|why=legacy autochrono proposal body is capped before consensus.proposal; migrate to source_ref/content_fetch full-context rehydration
