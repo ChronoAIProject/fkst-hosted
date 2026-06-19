@@ -377,6 +377,72 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
   end,
 
+  test_poll_with_parent_ledger_later_open_retry_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="122" -->',
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "fkst-test-bot",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+          [122] = {
+            author_login = "fkst-test-bot",
+            state = "OPEN",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_view"), 3)
+  end,
+
+  test_poll_with_parent_ledger_later_unknown_retry_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+            created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()),
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "fkst-test-bot",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_view"), 2)
+  end,
+
   test_poll_with_parent_ledger_unknown_issue_noops = function()
     local result = run_driver({
       github = {
