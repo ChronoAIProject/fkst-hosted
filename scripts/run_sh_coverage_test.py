@@ -98,6 +98,35 @@ class RunShCoverageSelfTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_unknown_coverage_flag_falls_back_before_ratchet_is_enabled(self) -> None:
+        h = RunShCoverageHarness(
+            textwrap.dedent(
+                """\
+                #!/bin/sh
+                printf '%s\\n' "$*" >> "$RUN_SH_COVERAGE_ARGV_LOG"
+                if [ "$1" = "--self-test" ] && [ "$2" = "--coverage" ]; then
+                  echo "unrecognized option --coverage" >&2
+                  exit 2
+                fi
+                if [ "$1" = "--self-test" ] && [ "$#" -eq 1 ]; then
+                  exit 0
+                fi
+                echo "unexpected argv: $*" >&2
+                exit 64
+                """
+            )
+        )
+        try:
+            result = h.run_function()
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(
+                h.argv_lines(),
+                [f"--self-test --coverage {h.runtime / 'lua-coverage'}", "--self-test"],
+            )
+            self.assertIn("skipping Lua coverage ratchet artifact collection", result.stderr)
+        finally:
+            h.close()
+
     def test_missing_coverage_value_propagates_without_plain_self_test_fallback(self) -> None:
         h = RunShCoverageHarness(
             textwrap.dedent(
@@ -109,7 +138,6 @@ class RunShCoverageSelfTest(unittest.TestCase):
                   exit 2
                 fi
                 if [ "$1" = "--self-test" ] && [ "$#" -eq 1 ]; then
-                  echo "plain self-test fallback must not run" >&2
                   exit 0
                 fi
                 echo "unexpected argv: $*" >&2
@@ -124,6 +152,40 @@ class RunShCoverageSelfTest(unittest.TestCase):
             self.assertEqual(h.argv_lines(), [f"--self-test --coverage {h.runtime / 'lua-coverage'}"])
             self.assertNotIn("--self-test", h.argv_lines()[1:])
             self.assertNotIn("plain self-test fallback must not run", result.stderr + result.stdout)
+        finally:
+            h.close()
+
+    def test_unknown_self_test_coverage_flag_still_falls_back_when_ratchet_is_enabled(self) -> None:
+        h = RunShCoverageHarness(
+            textwrap.dedent(
+                """\
+                #!/bin/sh
+                printf '%s\\n' "$*" >> "$RUN_SH_COVERAGE_ARGV_LOG"
+                if [ "$1" = "--self-test" ] && [ "$2" = "--coverage" ]; then
+                  echo "unrecognized option --coverage" >&2
+                  exit 2
+                fi
+                if [ "$1" = "--self-test" ] && [ "$#" -eq 1 ]; then
+                  echo "plain self-test fallback must not run" >&2
+                  exit 0
+                fi
+                echo "unexpected argv: $*" >&2
+                exit 64
+                """
+            )
+        )
+        try:
+            (h.mini_repo / "migration").mkdir()
+            (h.mini_repo / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+
+            result = h.run_function()
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(
+                h.argv_lines(),
+                [f"--self-test --coverage {h.runtime / 'lua-coverage'}", "--self-test"],
+            )
+            self.assertIn("skipping Lua coverage ratchet artifact collection", result.stderr)
         finally:
             h.close()
 

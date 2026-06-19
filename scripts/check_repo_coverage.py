@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -465,11 +466,20 @@ def allowlist_at_base(root: Path, base_ref: str) -> tuple[str, set[CoverageKey] 
         shown = git(["show", base_allowlist], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         if shown.returncode != 0:
             return "unresolved", None
-        tmp = root / ".git" / "fkst-coverage-base.allowlist"
-        tmp.write_text(shown.stdout, encoding="utf-8")
+        tmp_file = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix="fkst-coverage-base.",
+            suffix=".allowlist",
+            delete=False,
+        )
+        tmp = Path(tmp_file.name)
         try:
+            tmp_file.write(shown.stdout)
+            tmp_file.close()
             return "present", load_allowlist(tmp)
         finally:
+            tmp_file.close()
             tmp.unlink(missing_ok=True)
     except Exception:
         return "unresolved", None
@@ -568,6 +578,23 @@ def write_current_uncovered_from_covered_sets(
     return write_uncovered_baseline(uncovered, allowlist_path)
 
 
+def merged_covered_json_text(covered_by_file: dict[str, set[int]]) -> str:
+    data = {
+        file: {"covered_lines": sorted(lines)}
+        for file, lines in sorted(covered_by_file.items())
+    }
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False) + "\n"
+
+
+def write_merged_covered_json(
+    covered_by_file: dict[str, set[int]],
+    output_path: Path,
+) -> int:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(merged_covered_json_text(covered_by_file), encoding="utf-8")
+    return len(covered_by_file)
+
+
 def parse_covered_json_arg(value: str) -> tuple[Path, str | None]:
     if "=" not in value:
         return Path(value), None
@@ -583,6 +610,39 @@ def warn_disabled(message: str) -> None:
 
 def warn_deferred(message: str) -> None:
     print(f"warning: Lua coverage ratchet deferred; {message}", file=sys.stderr)
+
+
+def repository_messages_for_uncovered(
+    root: Path,
+    uncovered: dict[CoverageKey, UncoveredLine],
+) -> list[str]:
+    required = (root / REQUIRED_FLAG).exists()
+    if not required:
+        if uncovered:
+            warn_disabled(f"{len(uncovered)} uncovered line(s) would block once enabled")
+        return []
+    try:
+        allowlist = load_allowlist(root / ALLOWLIST)
+        base_ref = selected_base_ref(root)
+        if base_ref is None:
+            base_status, base_allowlist = "unresolved", None
+        else:
+            base_required = required_flag_at_base(root, base_ref)
+            if base_required == "absent":
+                base_status, base_allowlist = "absent", None
+            elif base_required == "present":
+                base_status, base_allowlist = allowlist_at_base(root, base_ref)
+            else:
+                base_status, base_allowlist = "unresolved", None
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [f"invalid Lua coverage ratchet input: {exc}"]
+    messages: list[str] = []
+    if base_status == "unresolved":
+        messages.append("cannot resolve coverage base allowlist to enforce shrink-only ratchet; ensure CI provides GITHUB_BASE_REF or FKST_LUA_COVERAGE_BASE_REF")
+    messages.extend(ratchet_messages(uncovered, allowlist, base_allowlist, base_ref or "base"))
+    for message in stale_allowlist_messages(uncovered, allowlist):
+        print(f"warning: {message}", file=sys.stderr)
+    return messages
 
 
 def repository_messages(root: Path) -> list[str]:
@@ -608,28 +668,12 @@ def repository_messages(root: Path) -> list[str]:
         return [f"Lua coverage artifact does not exist: {path}"]
     try:
         uncovered = uncovered_from_artifact(path, root)
-        if not required:
-            if uncovered:
-                warn_disabled(f"{len(uncovered)} uncovered line(s) would block once enabled")
-            return []
-        allowlist = load_allowlist(root / ALLOWLIST)
-        base_ref = selected_base_ref(root)
-        if base_ref is None:
-            base_status, base_allowlist = "unresolved", None
-        else:
-            base_status, base_allowlist = allowlist_at_base(root, base_ref)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         if not required:
             warn_disabled(f"coverage artifact would not parse once enabled: {exc}")
             return []
         return [f"invalid Lua coverage ratchet input: {exc}"]
-    messages: list[str] = []
-    if base_status == "unresolved":
-        messages.append("cannot resolve coverage base allowlist to enforce shrink-only ratchet; ensure CI provides GITHUB_BASE_REF or FKST_LUA_COVERAGE_BASE_REF")
-    messages.extend(ratchet_messages(uncovered, allowlist, base_allowlist, base_ref or "base"))
-    for message in stale_allowlist_messages(uncovered, allowlist):
-        print(f"warning: {message}", file=sys.stderr)
-    return messages
+    return repository_messages_for_uncovered(root, uncovered)
 
 
 def cli(argv: list[str] | None = None) -> int:
@@ -656,10 +700,30 @@ def cli(argv: list[str] | None = None) -> int:
         metavar="[PACKAGE=]COVERAGE_JSON",
         help="merge a pinned-engine covered-lines artifact; PACKAGE maps relative paths to packages/<PACKAGE>/...",
     )
+    parser.add_argument(
+        "--write-merged-covered-json",
+        type=Path,
+        metavar="COVERAGE_JSON",
+        help="write a repository-relative covered-lines coverage.json from one or more --covered-json inputs",
+    )
     args = parser.parse_args(argv)
 
     if args.write_current_uncovered is None:
-        messages = repository_messages(Path.cwd())
+        try:
+            if args.covered_json:
+                covered_by_file = merge_covered_sets([parse_covered_json_arg(value) for value in args.covered_json])
+                if args.write_merged_covered_json is not None:
+                    count = write_merged_covered_json(covered_by_file, args.write_merged_covered_json)
+                    print(f"wrote {count} covered file(s) to {args.write_merged_covered_json}")
+                messages = repository_messages_for_uncovered(Path.cwd(), uncovered_from_covered_sets(Path.cwd(), covered_by_file))
+            else:
+                if args.write_merged_covered_json is not None:
+                    print("error: --write-merged-covered-json requires at least one --covered-json", file=sys.stderr)
+                    return 1
+                messages = repository_messages(Path.cwd())
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: invalid Lua coverage ratchet input: {exc}", file=sys.stderr)
+            return 1
         for message in messages:
             print(message)
         return 1 if messages else 0

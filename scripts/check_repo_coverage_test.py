@@ -229,6 +229,27 @@ class CoverageRatchetTest(unittest.TestCase):
             entries,
         )
 
+    def test_write_merged_covered_json_writes_repository_relative_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "coverage.json"
+
+            count = coverage.write_merged_covered_json(
+                {
+                    "packages/example/core.lua": {3, 1},
+                    "std/shared.lua": {2},
+                },
+                output,
+            )
+
+            self.assertEqual(count, 2)
+            self.assertEqual(
+                json.loads(output.read_text(encoding="utf-8")),
+                {
+                    "packages/example/core.lua": {"covered_lines": [1, 3]},
+                    "std/shared.lua": {"covered_lines": [2]},
+                },
+            )
+
     def test_repository_messages_loads_jsonl_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -260,8 +281,9 @@ class CoverageRatchetTest(unittest.TestCase):
 
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
                 with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
-                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
-                        messages = coverage.repository_messages(root)
+                    with mock.patch.object(coverage, "required_flag_at_base", return_value="absent"):
+                        with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
+                            messages = coverage.repository_messages(root)
 
         self.assertEqual(messages, [])
 
@@ -284,9 +306,10 @@ class CoverageRatchetTest(unittest.TestCase):
 
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
                 with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
-                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
-                        with mock.patch("sys.stderr") as stderr:
-                            messages = coverage.repository_messages(root)
+                    with mock.patch.object(coverage, "required_flag_at_base", return_value="absent"):
+                        with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
+                            with mock.patch("sys.stderr") as stderr:
+                                messages = coverage.repository_messages(root)
 
         self.assertEqual(messages, [])
         self.assertIn(
@@ -325,8 +348,9 @@ class CoverageRatchetTest(unittest.TestCase):
 
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
                 with mock.patch.object(coverage, "selected_base_ref", return_value="origin/integration"):
-                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("present", set())) as base:
-                        messages = coverage.repository_messages(root)
+                    with mock.patch.object(coverage, "required_flag_at_base", return_value="present"):
+                        with mock.patch.object(coverage, "allowlist_at_base", return_value=("present", set())) as base:
+                            messages = coverage.repository_messages(root)
 
         base.assert_called_once_with(root, "origin/integration")
         self.assertIn("relative to origin/integration", messages[-1])
@@ -356,6 +380,42 @@ class CoverageRatchetTest(unittest.TestCase):
                     messages = coverage.repository_messages(root)
 
         self.assertIn("cannot resolve coverage base allowlist", messages[0])
+
+    def test_repository_messages_first_activation_skips_base_growth_check(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+            (root / "migration" / "coverage-uncovered.allowlist").write_text(
+                json.dumps({
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
+                    "reason": "baseline",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            artifact = root / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "files": [{
+                        "file": "packages/example/core.lua",
+                        "missing_lines": [{
+                            "line": 2,
+                            "normalized_line_hash": "abcdef12",
+                            "text": "return missing_branch()",
+                        }],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
+                    with mock.patch.object(coverage, "required_flag_at_base", return_value="absent"):
+                        messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [])
 
     def test_repository_messages_report_only_without_required_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -422,8 +482,9 @@ class CoverageRatchetTest(unittest.TestCase):
 
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
                 with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
-                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
-                        messages = coverage.repository_messages(root)
+                    with mock.patch.object(coverage, "required_flag_at_base", return_value="absent"):
+                        with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
+                            messages = coverage.repository_messages(root)
 
         self.assertEqual(len(messages), 1)
         self.assertIn("not in migration/coverage-uncovered.allowlist", messages[0])
@@ -531,6 +592,35 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertEqual(messages, [
             "migration/coverage-uncovered.required may not be removed; coverage ratchet is enabled on base"
         ])
+
+    def test_allowlist_at_base_works_from_linked_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            linked = Path(tmp) / "linked"
+            root.mkdir()
+            git(root, "init")
+            git(root, "config", "user.email", "fkst-test@example.invalid")
+            git(root, "config", "user.name", "fkst test")
+
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.allowlist").write_text(
+                json.dumps({
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
+                    "reason": "baseline",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            git(root, "add", "migration/coverage-uncovered.allowlist")
+            git(root, "commit", "-m", "seed coverage allowlist")
+            base_commit = git(root, "rev-parse", "HEAD")
+            git(root, "worktree", "add", str(linked), "HEAD")
+
+            status, entries = coverage.allowlist_at_base(linked, base_commit)
+
+        self.assertEqual(status, "present")
+        self.assertEqual(entries, {self.key()})
 
 
 if __name__ == "__main__":
