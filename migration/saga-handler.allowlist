@@ -1,3 +1,6 @@
+packages/github-devloop/departments/pr_freshness_scan/main.lua
+packages/github-devloop/departments/reconcile/main.lua
+packages/github-devloop/departments/review_loop/main.lua
 packages/github-devloop/departments/review_meta/main.lua
 packages/github-devloop/departments/review_pr/main.lua
 packages/github-devloop/departments/review_result/main.lua

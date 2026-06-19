@@ -1,13 +1,13 @@
-local core, saga = require("core"), require("std.saga")
+local core = require("core")
 
-local spec = {
+local M = {}
+
+M.spec = {
   consumes = { "devloop_branch_tick" },
   produces = { "devloop_sync_conflict" },
   fanout = { "devloop_branch_tick" },
   stall_window = "10m",
 }
-
-
 
 local blocked_by_skew_label = "fkst-dev:blocked-by-skew"
 
@@ -304,7 +304,7 @@ local function process_pr(repo, branches, listed_pr)
   end)
 end
 
-return saga.department(spec, { done = function() return false end, act = function(event)
+function pipeline(event)
   core.log_entry("pr_freshness_scan", event, "pr-freshness", event and event.queue or "")
   local branches = core.branch_config()
   local cfg = core.devloop_config()
@@ -316,4 +316,6 @@ return saga.department(spec, { done = function() return false end, act = functio
   for _, pr in ipairs(list_open_prs(repo)) do
     process_pr(repo, branches, pr)
   end
-end })
+end
+
+return M
