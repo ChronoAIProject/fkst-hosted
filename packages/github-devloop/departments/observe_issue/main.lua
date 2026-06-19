@@ -1,8 +1,8 @@
-local core = require("core")
+local core, saga = require("core"), require("std.saga")
 
 local M = {}
 
-M.spec = {
+local spec = {
   consumes = { "github-proxy.github_entity_changed" },
   produces = {
     "consensus.proposal",
@@ -620,12 +620,8 @@ local function process_issue_event(event)
   end)
 end
 
-function pipeline(event)
-  core.dispatch_consumed_queue("observe_issue", M.spec, event, {
+return saga.department(spec, { done = function() return false end, act = function(event)
+  core.dispatch_consumed_queue("observe_issue", spec, event, {
     ["github-proxy.github_entity_changed"] = process_issue_event,
   })
-end
-
-pipeline = core.wrap_pipeline_failure("observe_issue", pipeline)
-
-return M
+end, wrap = core.wrap_pipeline_failure, name = "observe_issue" })
