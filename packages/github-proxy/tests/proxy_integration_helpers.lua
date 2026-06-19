@@ -580,10 +580,9 @@ local function pr_open_guard_comments(extra)
   return comments
 end
 
-local function pr_open_visible_comments(extra, pr_number)
-  local number = tostring(pr_number or 9)
+local function pr_open_visible_comments(extra)
   local comments = {
-    'github-devloop PR opened: #' .. number .. '\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="' .. number .. '" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->\n' .. core.comment_marker("open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY"),
+    'github-devloop PR opened: #9\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="9" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->\n' .. core.comment_marker("open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY"),
   }
   for _, comment in ipairs(extra or {}) do
     table.insert(comments, comment)
