@@ -31,6 +31,10 @@ local function parent_dir(path)
   return tostring(path):match("^(.*)/[^/]+$") or "."
 end
 
+local function sibling_package_root(name)
+  return parent_dir(package_root()) .. "/" .. tostring(name)
+end
+
 local function write_disk_file(path, body)
   local handle = assert(io.open(path, "w"))
   handle:write(body)
@@ -346,6 +350,29 @@ local function resume_thread(thread)
 end
 
 return {
+  test_existing_intake_surfaces_cannot_schedule_external_pr_bridge = function()
+    local proxy_poll = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_poll/main.lua")
+    local devloop_scan = read_disk_file(sibling_package_root("github-devloop") .. "/departments/intake_scan/main.lua")
+    local devloop_probe = read_disk_file(sibling_package_root("github-devloop") .. "/departments/intake_probe/main.lua")
+    local external_intake = read_disk_file(package_root() .. "/departments/external_pr_intake/main.lua")
+
+    -- Necessity proof: existing intake surfaces either emit generic PR facts
+    -- or scan GitHub issues. They do not schedule an external PR -> issue bridge.
+    t.is_true(proxy_poll:find('{ type = "pr"', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('raise("github_entity_changed"', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('"github_issue_create_request"', 1, true) == nil)
+    t.is_true(proxy_poll:find("external_pr_candidate", 1, true) == nil)
+
+    t.is_true(devloop_scan:find("fetch_shared_issue_intake_list", 1, true) ~= nil)
+    t.is_true(devloop_scan:find("#pr/", 1, true) == nil)
+    t.is_true(devloop_probe:find("issue_list_intake_probe", 1, true) ~= nil)
+    t.is_true(devloop_probe:find("#pr/", 1, true) == nil)
+
+    t.is_true(external_intake:find("github.pr_list(repo, 30)", 1, true) ~= nil)
+    t.is_true(external_intake:find("external_pr_candidate", 1, true) ~= nil)
+    t.is_true(external_intake:find("create_bridge_issue", 1, true) ~= nil)
+  end,
+
   test_bridge_lock_key_uses_production_cross_process_flock = function()
     local core = require("core")
     local runtime_root = os.getenv("FKST_RUNTIME_ROOT")
