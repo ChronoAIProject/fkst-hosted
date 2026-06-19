@@ -197,6 +197,8 @@ local function new_fake_git(opts)
   local model = {
     writes = {},
     commits = {},
+    fetched_refs = {},
+    fetched_shas = {},
     ref_sha = options.ref_sha,
     push_fail = options.push_fail,
   }
@@ -208,8 +210,19 @@ local function new_fake_git(opts)
     end
     return { stdout = model.ref_sha .. "\t" .. ref .. "\n", stderr = "", exit_code = 0 }
   end
+  function handle.fetch_ref(remote, ref, timeout)
+    table.insert(model.writes, { kind = "fetch_ref", remote = remote, ref = ref, timeout = timeout })
+    model.fetched_refs[ref] = true
+    if model.ref_sha ~= nil then
+      model.fetched_shas[model.ref_sha] = true
+    end
+    return { stdout = "", stderr = "", exit_code = 0 }
+  end
   function handle.cat_file_pretty(ref, timeout)
     table.insert(model.writes, { kind = "cat_file_pretty", ref = ref, timeout = timeout })
+    if model.ref_sha == ref and not model.fetched_shas[ref] then
+      return { stdout = "", stderr = "missing object", exit_code = 1 }
+    end
     return { stdout = commit_stdout(options.ledger_json or ledger_json({ issue_number = 121 })), stderr = "", exit_code = 0 }
   end
   function handle.rev_parse_ref_tree(ref, timeout)
@@ -326,6 +339,15 @@ local function write_of_kind(writes, kind, ordinal)
   return nil
 end
 
+local function index_of_kind(writes, kind)
+  for index, write in ipairs(writes or {}) do
+    if write.kind == kind then
+      return index
+    end
+  end
+  return nil
+end
+
 return {
   test_poll_slice_available_files_one_issue_and_ledger = function()
     local result = run_driver()
@@ -407,6 +429,7 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
     t.eq(count_kind(result.git._model.writes, "push_ref_update"), 0)
+    t.is_true(index_of_kind(result.git._model.writes, "fetch_ref") < index_of_kind(result.git._model.writes, "cat_file_pretty"))
   end,
 
   test_poll_with_fresh_ref_claim_noops = function()

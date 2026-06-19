@@ -78,6 +78,14 @@ function S.install(M)
     )
   end
 
+  function M.git_fetch_ref(remote, ref, timeout)
+    return support.git().fetch_ref(
+      validators.require_safe_remote(M, remote),
+      validators.require_safe_ref(M, "fetch ref", ref),
+      timeout
+    )
+  end
+
   function M.git_fetch_remote_branch_to_tracking_ref(remote, branch, tracking_ref, timeout)
     return support.git().fetch_remote_branch_to_tracking_ref(
       validators.require_safe_remote(M, remote),

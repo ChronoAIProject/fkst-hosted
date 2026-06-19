@@ -41,6 +41,11 @@ local function mock_ledger(issue_number)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("git fetch origin " .. ledger_ref, {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
   t.mock_command("git cat-file -p " .. ledger_sha, {
     stdout = ledger_body(issue_number),
     stderr = "",
@@ -65,6 +70,15 @@ local function find_duplicate_label(raises)
   end)
 end
 
+local function command_index(needle)
+  for index, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+      return index
+    end
+  end
+  return nil
+end
+
 return {
   test_noncanonical_migration_slice_exits_before_implementation = function()
     local event = ready()
@@ -85,6 +99,8 @@ return {
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git worktree list"), 0)
     t.eq(count_calls("git -C"), 0)
+    t.eq(count_calls("git fetch origin " .. ledger_ref), 1)
+    t.is_true(command_index("git fetch origin " .. ledger_ref) < command_index("git cat-file -p " .. ledger_sha))
     t.eq(count_calls("gh issue close"), 0)
   end,
 }

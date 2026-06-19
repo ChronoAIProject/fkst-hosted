@@ -233,6 +233,10 @@ local function read_ledger(git, entry_key)
   if sha == nil then
     return nil
   end
+  local fetched = git.fetch_ref("origin", ref, 30)
+  if type(fetched) ~= "table" or fetched.exit_code ~= 0 then
+    error("github-devloop: git ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
+  end
   local commit = git.cat_file_pretty(sha, 30)
   if type(commit) ~= "table" or commit.exit_code ~= 0 then
     error("github-devloop: git ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))

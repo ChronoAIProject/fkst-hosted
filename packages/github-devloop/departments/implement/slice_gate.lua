@@ -42,6 +42,10 @@ local function read_ledger(entry_key)
   if sha == nil then
     return nil
   end
+  local fetched = core.git_fetch_ref("origin", ref, 30)
+  if type(fetched) ~= "table" or fetched.exit_code ~= 0 then
+    error("github-devloop: ratchet slice ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
+  end
   local commit = core.git_cat_file_pretty(sha, 30)
   if type(commit) ~= "table" or commit.exit_code ~= 0 then
     error("github-devloop: ratchet slice ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
