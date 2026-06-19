@@ -10,6 +10,13 @@ return {
     t.eq(strings.trim(nil), "")
   end,
 
+  test_strip_bot_login_suffix_normalizes_app_author_logins = function()
+    t.eq(strings.strip_bot_login_suffix("fkst-test-bot[bot]"), "fkst-test-bot")
+    t.eq(strings.strip_bot_login_suffix("fkst-test-bot"), "fkst-test-bot")
+    t.eq(strings.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
+    t.is_nil(strings.strip_bot_login_suffix(nil))
+  end,
+
   test_split_repo_accepts_single_owner_name_separator = function()
     local owner, name = strings.split_repo("owner/repo")
     t.eq(owner, "owner")
