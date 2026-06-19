@@ -2,4 +2,4 @@
 # Format: path|function|cap|sink|issue=#N|why=<one-line root-cause owner reason>
 # New entries fail CI. Remove entries only when full content is rehydrated from
 # source_ref/content_fetch instead of being capped into reliable payloads or prompts.
-packages/autochrono/departments/propose/mapping.lua|proposal_body|max_body_len|raise-payload|issue=#1117|why=root-cause owner for migrating legacy autochrono proposal body from capped consensus.proposal payload text to source_ref/content_fetch full-context rehydration
+packages/autochrono/departments/propose/mapping.lua|proposal_body|max_body_len|raise-payload|issue=#1117|why=#1117 owns the root-cause migration from capped consensus.proposal payload text to source_ref/content_fetch full-context rehydration until this entry is removed
