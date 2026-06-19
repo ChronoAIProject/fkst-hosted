@@ -149,6 +149,11 @@ class SpanContractRatchetTest(unittest.TestCase):
         department_sources = {
             "packages/github-devloop/departments/implement/main.lua": textwrap.dedent(
                 """\
+                local function raise_implementing_state(repo, issue_number, ready)
+                  local marker = core.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
+                  raise("github-proxy.github_issue_comment_request", { body = marker })
+                end
+
                 local result = spawn_codex_sync({ prompt = prompt })
                 raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
                 """
@@ -187,6 +192,7 @@ class SpanContractRatchetTest(unittest.TestCase):
             "packages/github-devloop/departments/implement/main.lua": textwrap.dedent(
                 """\
                 local function raise_implementing_state()
+                  local marker = core.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
                 end
 
                 local result = spawn_codex_sync({ prompt = prompt })
@@ -224,6 +230,11 @@ class SpanContractRatchetTest(unittest.TestCase):
         department_sources = {
             "packages/github-devloop/departments/implement/main.lua": textwrap.dedent(
                 """\
+                local function raise_implementing_state(repo, issue_number, ready)
+                  local marker = core.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
+                  raise("github-proxy.github_issue_comment_request", { body = marker })
+                end
+
                 raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
                 local result = spawn_codex_sync({ prompt = prompt })
                 """
@@ -231,6 +242,49 @@ class SpanContractRatchetTest(unittest.TestCase):
         }
 
         self.assertEqual(span.spawn_start_messages(transition_sources, department_sources), [])
+
+    def test_declared_start_predecessor_must_emit_durable_start_marker(self) -> None:
+        transition_sources = {
+            "packages/github-devloop/core/restart/transitions/implementing.lua": textwrap.dedent(
+                """\
+                return function(M, h)
+                  local span_contract = h.span_contract
+                  return {
+                    from_state = "implementing",
+                    driving_queue = "devloop_ready",
+                    responsibility_signature = responsibility_signature({
+                      state_kind = "worker",
+                    }),
+                    span_contract = span_contract({
+                      department = "implement",
+                      durable_start_marker = "implement-attempt:v1",
+                      spawn_predecessor = "raise_implementing_state",
+                    }),
+                  }
+                end
+                """
+            )
+        }
+        department_sources = {
+            "packages/github-devloop/departments/implement/main.lua": textwrap.dedent(
+                """\
+                local function raise_implementing_state(repo, issue_number, ready)
+                  local marker = "<!-- fkst:github-devloop:wrong-marker:v1 -->"
+                  raise("github-proxy.github_issue_comment_request", { body = marker })
+                end
+
+                raise_implementing_state(repo, issue_number, ready)
+                local result = spawn_codex_sync({ prompt = prompt })
+                """
+            )
+        }
+
+        messages = span.spawn_start_messages(transition_sources, department_sources)
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("span start predecessor", messages[0])
+        self.assertIn("does not emit durable start marker", messages[0])
+        self.assertIn("implement-attempt:v1", messages[0])
 
     def test_declared_spawn_function_checks_predecessor_before_function_call(self) -> None:
         transition_sources = {

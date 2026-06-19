@@ -26,6 +26,7 @@ SPAN_CONTRACT_RE = re.compile(
 )
 FIELD_STRING_RE = re.compile(r"\b(?P<field>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<quote>[\"'])(?P<value>[^\"']+)(?P=quote)")
 SPAWN_RE = re.compile(r"\bspawn_codex_sync\s*\(")
+CALL_RE = re.compile(r"(?<!function\s)\b(?:[A-Za-z_][A-Za-z0-9_]*[.:])?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
 
 @dataclass(frozen=True)
@@ -168,8 +169,74 @@ def _function_contains_spawn(source: str, function_name: str) -> bool:
     return False
 
 
-def spawn_start_messages(transition_sources: dict[str, str], department_sources: dict[str, str]) -> list[str]:
+def _short_function_name(name: str) -> str:
+    return name.split(".")[-1].split(":")[-1]
+
+
+def _function_index(sources: dict[str, str]) -> dict[str, list[FunctionBlock]]:
+    index: dict[str, list[FunctionBlock]] = {}
+    for source in sources.values():
+        for block in function_blocks(source):
+            index.setdefault(_short_function_name(block.name), []).append(block)
+    return index
+
+
+def _marker_helper_name(durable_start_marker: str) -> str | None:
+    family = durable_start_marker.split()[0]
+    family = family.split(":")[0]
+    if family == "state":
+        return None
+    return family.replace("-", "_") + "_marker"
+
+
+def _state_marker_value(durable_start_marker: str) -> str | None:
+    prefix = "state:v1 "
+    if not durable_start_marker.startswith(prefix):
+        return None
+    value = durable_start_marker[len(prefix) :].strip()
+    return value or None
+
+
+def _body_mentions_marker(body: str, durable_start_marker: str) -> bool:
+    if durable_start_marker in body:
+        return True
+    helper_name = _marker_helper_name(durable_start_marker)
+    if helper_name is not None and re.search(r"\b" + re.escape(helper_name) + r"\s*\(", body) is not None:
+        return True
+    state = _state_marker_value(durable_start_marker)
+    if state is None:
+        return False
+    quoted_state = r"(?P<quote>[\"'])" + re.escape(state) + r"(?P=quote)"
+    if re.search(r"\bstate_marker\s*\(.*?" + quoted_state, body, re.DOTALL) is not None:
+        return True
+    if re.search(r"\bhas_state_marker\s*\(.*?" + quoted_state, body, re.DOTALL) is not None:
+        return True
+    if "current_entity_state" not in body:
+        return False
+    return re.search(r"\b[A-Za-z_][A-Za-z0-9_]*\.state\s*(?:==|~=)\s*" + quoted_state, body) is not None
+
+
+def _function_binds_marker(functions: dict[str, list[FunctionBlock]], function_name: str, durable_start_marker: str) -> bool:
+    pending = [function_name]
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for block in functions.get(current, []):
+            if _body_mentions_marker(block.body, durable_start_marker):
+                return True
+            for call in CALL_RE.finditer(block.body):
+                callee = call.group("name")
+                if callee not in seen and callee in functions:
+                    pending.append(callee)
+    return False
+
+
+def spawn_start_messages(transition_sources: dict[str, str], department_sources: dict[str, str], support_sources: dict[str, str] | None = None) -> list[str]:
     contracts = span_contracts(transition_sources)
+    functions = _function_index(support_sources or department_sources)
     messages: list[str] = []
     for state, path, line in _worker_states(transition_sources):
         contract = contracts.get(state)
@@ -178,6 +245,10 @@ def spawn_start_messages(transition_sources: dict[str, str], department_sources:
             continue
         if contract.department.startswith("external:"):
             continue
+        if not _function_binds_marker(functions, contract.spawn_predecessor, contract.durable_start_marker):
+            messages.append(
+                f"{contract.path}:{contract.line} span start predecessor {contract.spawn_predecessor!r} does not bind durable start marker {contract.durable_start_marker!r}"
+            )
         sources = _department_spawn_sources(department_sources, contract.department)
         if not sources:
             messages.append(f"{contract.path}:{contract.line} span_contract department {contract.department!r} has no scanned department source")
@@ -225,4 +296,4 @@ def repository_messages(root: Path) -> list[str]:
     source_map = sources(root)
     transition_sources = {path: text for path, text in source_map.items() if "/core/restart/transitions/" in path}
     department_sources = {path: text for path, text in source_map.items() if "/departments/" in path}
-    return completion_fact_name_messages(source_map) + spawn_start_messages(transition_sources, department_sources)
+    return completion_fact_name_messages(source_map) + spawn_start_messages(transition_sources, department_sources, source_map)
