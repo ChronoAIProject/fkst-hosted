@@ -282,8 +282,15 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             for line in (REPO_ROOT / spec.allowlist_path).read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         }
-        expected_entry_keys = {"882cacf645554fa3", "9b3a04ee05f242ad", "6f7eb648b89563e5"}
-        computed_entry_keys = {slicer.entry_key(slicer.InventorySite(path, 1, "already_migrated", path)) for path in expected_paths}
+        expected_entry_keys = {
+            "56025ba59fc33ff3a6c48d4b650eb96a471460eb94464426c2257064b581dd66",
+            "a5d78c76cb30e3b341a1ddba5101870076cde9369ec7e458b97af6e4e847effe",
+            "d42a3aa103f89e1d69f8fe9191986656fbdbb87e8f3757b7f450b2f6c991502c",
+        }
+        computed_entry_keys = {
+            slicer.entry_key(spec.allowlist_path, slicer.InventorySite(path, 1, "already_migrated", path))
+            for path in expected_paths
+        }
 
         self.assertTrue(expected_paths.isdisjoint(live_paths))
         self.assertTrue(expected_paths.isdisjoint(allowlist_entries))
@@ -311,7 +318,8 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(len(doc["sites_fingerprint"]), 16)
         self.assertEqual(doc["dedup_key"], f"saga-handler/slice/{doc['sites_fingerprint']}")
         self.assertEqual(doc["sites"][0]["site_ref"], "packages/example/a.lua:3")
-        self.assertEqual(len(doc["sites"][0]["entry_key"]), 16)
+        self.assertEqual(doc["sites"][0]["allowlist_entry"], "packages/example/a.lua|free_form_pipeline")
+        self.assertEqual(len(doc["sites"][0]["entry_key"]), 64)
         self.assertEqual(doc["sites"][1]["site_ref"], "packages/example/b.lua:4")
 
     def test_registered_ratchets_use_live_parent_tracks(self) -> None:
@@ -332,10 +340,16 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(doc["ratchet"], "saga-handler")
         self.assertEqual(doc["allowlist_path"], "migration/saga-handler.allowlist")
         self.assertEqual(doc["remaining_count"], 1)
+        self.assertEqual(doc["slice_size"], 1)
         self.assertEqual(doc["status"], "slice_available")
         self.assertNotIn("parent_issue", doc)
         self.assertRegex(doc["next_slice"]["dedup_key"], r"^saga-handler/slice/[0-9a-f]{16}$")
+        self.assertRegex(doc["next_slice"]["sites"][0]["entry_key"], r"^[0-9a-f]{64}$")
         self.assertIn("Machine-filed ratchet slice issue.", doc["next_slice"]["body"])
+        self.assertIn('entry_key="', doc["next_slice"]["body"])
+        self.assertIn('allowlist_path="migration/saga-handler.allowlist"', doc["next_slice"]["body"])
+        self.assertIn('generation="1"', doc["next_slice"]["body"])
+        self.assertIn('coord_ref="refs/fkst/migration-slices/', doc["next_slice"]["body"])
         self.assertEqual(doc["next_slice"]["labels"], ["fkst-dev:enabled"])
 
     def test_controller_plan_empty_inventory_has_no_next_slice(self) -> None:

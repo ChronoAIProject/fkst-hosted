@@ -2,6 +2,7 @@ local core = require("core")
 local ports_seam = require("std.ports")
 local ratchets = require("departments.ratchet_migration_driver.ratchets")
 local saga = require("std.saga")
+local strings = require("std.strings")
 
 local M = {}
 
@@ -65,6 +66,10 @@ local function body(record)
   return tostring(record and record.body or "")
 end
 
+local function json_string(value)
+  return strings.json_string(value)
+end
+
 local function decode_json_object(stdout, context)
   local ok, decoded = pcall(json.decode, stdout or "")
   if not ok or type(decoded) ~= "table" then
@@ -117,6 +122,10 @@ local function body_file(dedup_key, kind)
   return "/tmp/fkst-github-devloop-ratchet-" .. safe_runtime_segment(dedup_key) .. "-" .. tostring(kind) .. ".md"
 end
 
+local function timestamp_now()
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", tonumber(now()) or os.time())
+end
+
 local function issue_create_marker(dedup_key)
   return "<!-- fkst:github-proxy:issue-create:" .. tostring(dedup_key) .. " -->"
 end
@@ -132,6 +141,17 @@ end
 
 local function ratchet_slice_search_query(ratchet)
   return 'fkst:ratchet-slice:v1 ratchet="' .. tostring(ratchet) .. '"'
+end
+
+local function require_entry_key(slice)
+  if type(slice) ~= "table" or type(slice.sites) ~= "table" or type(slice.sites[1]) ~= "table" then
+    error("github-devloop: ratchet migration slice is missing entry_key")
+  end
+  local entry_key = tostring(slice.sites[1].entry_key or "")
+  if not entry_key:match("^[0-9a-f]+$") or #entry_key ~= 64 then
+    error("github-devloop: invalid ratchet migration entry_key")
+  end
+  return entry_key
 end
 
 local function parse_created_issue_number(stdout)
@@ -157,19 +177,6 @@ local function parent_has_marker(parent, marker, trusted_logins)
   return false
 end
 
-local function parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
-  local ledger_issues, now_seconds = {}, tonumber(now())
-  for _, comment in ipairs(parent.comments or {}) do
-    if trusted_author(comment, trusted_logins) then
-      for marker in body(comment):gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
-        if marker:match('dedup="([^"]+)"') == dedup_key then local issue = tonumber(marker:match('issue="(%d+)"')); if issue ~= nil then table.insert(ledger_issues, issue) else local created = core.iso_timestamp_epoch_seconds(comment.createdAt or comment.created_at); local age = created ~= nil and now_seconds ~= nil and now_seconds - tonumber(created) or nil; if age ~= nil and age >= 0 and age <= 15 * 60 then table.insert(ledger_issues, "unresolved") end end end
-      end
-    end
-  end; return ledger_issues
-end
-
-
-
 local function search_issues(github, repo, query, fields, timeout)
   local result = github.issue_search(repo, query, fields or "number,title,state,author,body,url", timeout or 30)
   if type(result) == "table" and result.stdout ~= nil then
@@ -178,26 +185,210 @@ local function search_issues(github, repo, query, fields, timeout)
   return result or {}
 end
 
-local function has_open_slice(github, repo, ratchet, trusted_logins)
-  local ratchet_name = type(ratchet) == "table" and ratchet.ratchet or ratchet
-  local entry_blob = type(ratchet) == "table" and tostring(body(ratchet):match('entries="([^"]*)"') or "") or ""
-  for _, issue in ipairs(search_issues(github, repo, ratchet_slice_search_query(ratchet_name), "number,title,state,author,body,url", 30)) do
-    for marker in body(issue):gmatch("<!%-%- fkst:ratchet%-slice:v1.-%-%->") do
-      local entries = marker:match('entries="([^"]*)"'); local overlap = entries == nil or entry_blob == ""
-      if not overlap then tostring(entries):gsub("[^,]+", function(entry) if ("," .. entry_blob .. ","):find("," .. entry .. ",", 1, true) then overlap = true end end) end
-      if trusted_author(issue, trusted_logins) and marker:find('ratchet="' .. tostring(ratchet_name) .. '"', 1, true) ~= nil and tostring(issue.state or ""):upper() ~= "CLOSED" and overlap then
-        return issue
-      end end
-  end return nil end
+local function marker_attr(marker, name)
+  return marker:match('%f[%w_]' .. name .. '="([^"]*)"')
+end
 
-local function has_existing_slice(github, repo, dedup_key, trusted_logins)
-  local marker = issue_create_marker(dedup_key)
-  for _, issue in ipairs(search_issues(github, repo, marker, "number,title,state,author,body,url", 30)) do
-    if trusted_author(issue, trusted_logins) and body(issue):find(marker, 1, true) ~= nil and tostring(issue.state or ""):upper() ~= "CLOSED" then
+local function marker_entry_key(marker)
+  local key = marker_attr(marker, "entry_key")
+  if key ~= nil and key ~= "" then
+    return key
+  end
+  local entries = marker_attr(marker, "entries")
+  if entries ~= nil and entries ~= "" and not entries:find(",", 1, true) then
+    return entries
+  end
+  return nil
+end
+
+local function slice_issue_entry_key(issue, ratchet_name)
+  for marker in body(issue):gmatch("<!%-%- fkst:ratchet%-slice:v1.-%-%->") do
+    if marker_attr(marker, "ratchet") == tostring(ratchet_name) then
+      local key = marker_entry_key(marker)
+      if key ~= nil then
+        return key
+      end
+    end
+  end
+  return nil
+end
+
+local function find_open_slice_by_entry_key(github, repo, ratchet_name, entry_key)
+  for _, issue in ipairs(search_issues(github, repo, ratchet_slice_search_query(ratchet_name), "number,title,state,author,body,url", 30)) do
+    if tostring(issue.state or ""):upper() ~= "CLOSED"
+      and slice_issue_entry_key(issue, ratchet_name) == tostring(entry_key) then
       return issue
     end
   end
   return nil
+end
+
+local function read_ledger(git, entry_key)
+  local ref = core.ratchet_slice_ledger_ref(entry_key)
+  local listed = git.ls_remote_ref("origin", ref, 30)
+  if type(listed) ~= "table" or listed.exit_code ~= 0 then
+    error("github-devloop: git ledger ls-remote failed: " .. tostring(listed and listed.stderr or "missing result"))
+  end
+  local sha = core.parse_ratchet_slice_ledger_ref_sha(listed.stdout)
+  if sha == nil then
+    return nil
+  end
+  local fetched = git.fetch_ref("origin", ref, 30)
+  if type(fetched) ~= "table" or fetched.exit_code ~= 0 then
+    error("github-devloop: git ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
+  end
+  local commit = git.cat_file_pretty(sha, 30)
+  if type(commit) ~= "table" or commit.exit_code ~= 0 then
+    error("github-devloop: git ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
+  end
+  return {
+    ref = ref,
+    sha = sha,
+    data = core.decode_ratchet_slice_ledger(commit.stdout),
+  }
+end
+
+local function ledger_issue_is_open(github, repo, ledger)
+  local number = ledger and ledger.data and tonumber(ledger.data.issue_number)
+  if number == nil then
+    return false
+  end
+  local issue = decode_json_object((github.issue_view(repo, number, "number,state,author,body", 30) or {}).stdout or "{}", "ledger issue")
+  return tostring(issue.state or ""):upper() ~= "CLOSED", issue
+end
+
+local function ledger_records_issue(ledger)
+  return type(ledger) == "table"
+    and type(ledger.data) == "table"
+    and ledger.data.state == "issue-created"
+    and tonumber(ledger.data.issue_number) ~= nil
+end
+
+local function ledger_claim_is_fresh(ledger)
+  if ledger == nil or type(ledger.data) ~= "table" or ledger.data.state ~= "claiming" then
+    return false
+  end
+  local seconds = core.iso_timestamp_epoch_seconds(ledger.data.claimed_at)
+  local current = tonumber(now())
+  if seconds == nil or current == nil then
+    return false
+  end
+  return current - seconds >= 0 and current - seconds <= 30 * 60
+end
+
+local function ledger_generation(ledger)
+  local value = ledger and ledger.data and tonumber(ledger.data.generation)
+  if value == nil or value < 1 then
+    return 0
+  end
+  return value
+end
+
+local function ledger_json(state)
+  return "{"
+    .. '"schema":"fkst.ratchet-migration-slice-ledger.v1"'
+    .. ',"state":' .. json_string(state.state)
+    .. ',"entry_key":' .. json_string(state.entry_key)
+    .. ',"allowlist_path":' .. json_string(state.allowlist_path)
+    .. ',"generation":' .. tostring(tonumber(state.generation) or 1)
+    .. ',"claim_owner":' .. json_string(state.claim_owner or "")
+    .. ',"claimed_at":' .. json_string(state.claimed_at or "")
+    .. ',"issue_number":' .. (state.issue_number ~= nil and tostring(tonumber(state.issue_number) or 0) or "null")
+    .. ',"updated_at":' .. json_string(state.updated_at or timestamp_now())
+    .. "}"
+end
+
+local function commit_ledger(git, ledger, state, dedup_key)
+  local head_tree = git.rev_parse_ref_tree("HEAD", 30)
+  if type(head_tree) ~= "table" or head_tree.exit_code ~= 0 then
+    error("github-devloop: git ledger HEAD tree failed: " .. tostring(head_tree and head_tree.stderr or "missing result"))
+  end
+  local tree_sha = tostring(head_tree.stdout or ""):match("(%x+)")
+  if tree_sha == nil or #tree_sha ~= 40 then
+    error("github-devloop: git ledger unsafe tree sha")
+  end
+  local path = body_file(dedup_key, "ledger")
+  file.write(path, ledger_json(state) .. "\n")
+  local commit = git.commit_tree(tree_sha, ledger and ledger.sha or nil, path, 30)
+  if type(commit) ~= "table" or commit.exit_code ~= 0 then
+    error("github-devloop: git ledger commit-tree failed: " .. tostring(commit and commit.stderr or "missing result"))
+  end
+  local sha = tostring(commit.stdout or ""):match("(%x+)")
+  if sha == nil or #sha ~= 40 then
+    error("github-devloop: git ledger unsafe commit sha")
+  end
+  return sha
+end
+
+local function write_ledger_state(git, ledger, state, dedup_key)
+  local sha = commit_ledger(git, ledger, state, dedup_key)
+  local pushed = git.push_ref_update("origin", sha, core.ratchet_slice_ledger_ref(state.entry_key), false, 60)
+  if type(pushed) ~= "table" or pushed.exit_code ~= 0 then
+    return nil, pushed
+  end
+  return sha, pushed
+end
+
+local function acquire_claim(git, ledger, slice, entry_key)
+  local generation = ledger_generation(ledger) + 1
+  local state = {
+    state = "claiming",
+    entry_key = entry_key,
+    allowlist_path = tostring(slice.allowlist_path or ""),
+    generation = generation,
+    claim_owner = bot_login(),
+    claimed_at = timestamp_now(),
+    updated_at = timestamp_now(),
+  }
+  local sha, pushed = write_ledger_state(git, ledger, state, slice.dedup_key)
+  if sha == nil then
+    return nil, pushed
+  end
+  return {
+    ref = core.ratchet_slice_ledger_ref(entry_key),
+    sha = sha,
+    data = state,
+  }
+end
+
+local function mark_issue_created(git, ledger, slice, entry_key, issue_number)
+  local state = {
+    state = "issue-created",
+    entry_key = entry_key,
+    allowlist_path = tostring(slice.allowlist_path or ""),
+    generation = ledger_generation(ledger),
+    claim_owner = ledger and ledger.data and ledger.data.claim_owner or bot_login(),
+    claimed_at = ledger and ledger.data and ledger.data.claimed_at or "",
+    issue_number = tonumber(issue_number),
+    updated_at = timestamp_now(),
+  }
+  return write_ledger_state(git, ledger, state, slice.dedup_key)
+end
+
+local function adopt_open_slice(git, ledger, slice, entry_key, issue)
+  local number = require_issue_number(issue and issue.number, "adopted ratchet slice")
+  if ledger_records_issue(ledger) and tonumber(ledger.data.issue_number) == number then
+    return
+  end
+  local base = ledger
+  if base ~= nil and ledger_claim_is_fresh(base) then
+    return
+  end
+  local generation = ledger_generation(base)
+  if generation < 1 then
+    generation = 1
+  end
+  local state = {
+    state = "issue-created",
+    entry_key = entry_key,
+    allowlist_path = tostring(slice.allowlist_path or ""),
+    generation = generation,
+    claim_owner = "adopted-open-issue",
+    claimed_at = "",
+    issue_number = number,
+    updated_at = timestamp_now(),
+  }
+  write_ledger_state(git, base, state, slice.dedup_key)
 end
 
 local function write_comment(github, repo, issue_number, dedup_key, kind, text)
@@ -218,7 +409,7 @@ local function parent_issue(github, repo, ratchet)
   return decode_json_object(result and result.stdout or "{}", "parent issue")
 end
 
-local function reconcile_one(github, repo, ratchet)
+local function reconcile_one(github, git, repo, ratchet)
   local trusted_logins = trusted_bot_logins()
   local plan = plan_for(ratchet)
   local parent = parent_issue(github, repo, ratchet)
@@ -237,18 +428,35 @@ local function reconcile_one(github, repo, ratchet)
   end
 
   local slice = plan.next_slice
+  slice.allowlist_path = plan.allowlist_path
   local dedup_key = tostring(slice.dedup_key or "")
-  local ledger_issues = parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
-  for _, ledger_issue in ipairs(ledger_issues) do local prior = ledger_issue ~= "unresolved" and decode_json_object((github.issue_view(repo, ledger_issue, "number,state,author,body", 30) or {}).stdout or "{}", "child issue") or nil; if prior == nil or not trusted_author(prior, trusted_logins) or tostring(prior.state or ""):upper() ~= "CLOSED" then return "deduped-parent-ledger" end end
-
-  if has_open_slice(github, repo, { ratchet = ratchet.ratchet, body = slice.body }, trusted_logins) ~= nil then
-    return "deduped-in-flight"
+  local entry_key = require_entry_key(slice)
+  local discovered = find_open_slice_by_entry_key(github, repo, ratchet.ratchet, entry_key)
+  local ledger = read_ledger(git, entry_key)
+  if discovered ~= nil then
+    if write_enabled() then
+      adopt_open_slice(git, ledger, slice, entry_key, discovered)
+    end
+    return "deduped-entry-key"
   end
-  if has_existing_slice(github, repo, dedup_key, trusted_logins) ~= nil then
-    return "deduped-existing-slice"
+  local ledger_open, ledger_issue = ledger_issue_is_open(github, repo, ledger)
+  if ledger_open then
+    return "deduped-ref-ledger"
+  end
+  if ledger_claim_is_fresh(ledger) then
+    return "deduped-ref-claim"
   end
   if not write_enabled() then
     return "would-create-slice"
+  end
+
+  local claim = acquire_claim(git, ledger, slice, entry_key)
+  if claim == nil then
+    local winner = find_open_slice_by_entry_key(github, repo, ratchet.ratchet, entry_key)
+    if winner ~= nil then
+      return "deduped-entry-key"
+    end
+    return "deduped-ref-race"
   end
 
   local intent = issue_create_intent_marker(dedup_key)
@@ -258,6 +466,7 @@ local function reconcile_one(github, repo, ratchet)
   local issue_number = create_issue(github, repo, slice)
   github.issue_add_sub_issue(repo, ratchet.parent_issue, issue_number, 30)
   write_comment(github, repo, ratchet.parent_issue, dedup_key, "created", issue_created_marker(dedup_key, issue_number) .. "\n")
+  mark_issue_created(git, claim, slice, entry_key, issue_number)
   return "created-slice"
 end
 
@@ -278,7 +487,7 @@ local function make_department(ports)
     local selected = event and event.payload and event.payload.ratchet
     for _, ratchet in ipairs(ratchets) do
       if selected == nil or selected == ratchet.ratchet then
-        local action = reconcile_one(ports.github, repo, ratchet)
+        local action = reconcile_one(ports.github, ports.git, repo, ratchet)
         core.log_line("info", "ratchet_migration_driver", tostring(ratchet.ratchet), "ACTION", {
           "action=" .. tostring(action),
         })

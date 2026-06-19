@@ -48,6 +48,7 @@ return {
       bounded_limit = true,
       validate_fields = true,
       require_safe_branch = true,
+      require_safe_ref = true,
       require_safe_remote = true,
       require_safe_sha = true,
       require_positive_pr_number = true,
