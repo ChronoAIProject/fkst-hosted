@@ -402,6 +402,28 @@ class CoverageRatchetTest(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
+            shifted_key = coverage.CoverageKey(
+                "packages/github-devloop/core/restart/transitions/ready.lua",
+                74,
+                "af87eb9432e4a024",
+            )
+            old_line_keyed_allowlist = {
+                coverage.CoverageKey(
+                    "packages/github-devloop/core/restart/transitions/ready.lua",
+                    71,
+                    "af87eb9432e4a024",
+                )
+            }
+            old_line_keyed_uncovered = {
+                shifted_key: coverage.UncoveredLine(shifted_key, '"result_effects_complete"')
+            }
+            old_line_keyed_messages = [
+                f"{old_line_keyed_uncovered[key].label()} "
+                "is an uncovered production Lua line not in migration/coverage-uncovered.allowlist"
+                for key in sorted(set(old_line_keyed_uncovered) - old_line_keyed_allowlist)
+            ]
+            self.assertEqual(len(old_line_keyed_messages), 1)
+            self.assertIn("not in migration/coverage-uncovered.allowlist", old_line_keyed_messages[0])
 
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
                 with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
