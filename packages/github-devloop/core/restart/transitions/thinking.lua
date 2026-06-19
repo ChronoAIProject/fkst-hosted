@@ -6,7 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
-  local responsibility_signature = h.responsibility_signature
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "thinking",
     liveness_class_id = "thinking.active",
@@ -87,5 +87,10 @@ return function(M, h)
     marker_facts = "state:v1 thinking plus optional converge-round:v1",
     kickoff = "consensus.proposal",
     replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
+    span_contract = span_contract({
+      department = "external:consensus",
+      durable_start_marker = "state:v1 thinking",
+      spawn_predecessor = "consensus.proposal",
+    }),
   }
 end
