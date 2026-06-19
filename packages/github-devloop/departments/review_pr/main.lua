@@ -1,6 +1,6 @@
-local core = require("core")
-local saga, pipeline = require("std.saga"), nil
+local core, saga = require("core"), require("std.saga")
 
+-- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
   consumes = { "devloop_reviewing" },
@@ -35,7 +35,7 @@ local function reviewing_transition_status(state, reviewing_version)
   return "stale"
 end
 
-function pipeline(event)
+return saga.department(spec, { done = function() return false end, act = function(event)
   local reviewing = event.payload or {}
   if not core.is_supported_reviewing(reviewing) then
     core.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
@@ -156,6 +156,4 @@ function pipeline(event)
     core.log_apply("review_pr", reviewing.proposal_id, nil, nil, { add = {}, remove = {} }, raised)
     core.log_raise("review_pr", reviewing.proposal_id, "consensus.proposal", proposal)
   end)
-end
-
-return saga.department(spec, { done = function() return false end, act = pipeline, wrap = core.wrap_pipeline_failure, name = "review_pr" })
+end, wrap = core.wrap_pipeline_failure, name = "review_pr" })
