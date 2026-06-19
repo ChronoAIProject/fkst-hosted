@@ -1,5 +1,7 @@
 local core = require("core")
 local saga = require("std.saga")
+local slice_gate = require("departments.implement.slice_gate")
+local transitions = require("departments.implement.transitions")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
@@ -529,69 +531,6 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
   error("github-devloop: unknown implementation outcome")
 end
 
-local function expected_state_matches(state, expected)
-  local expected_state = expected
-  local version = nil
-  if type(expected) == "table" then
-    expected_state = expected.state
-    version = expected.version
-    if version == nil then
-      version = expected.target_version
-    end
-  end
-  if version == nil then
-    return tostring(state.state or "") == tostring(expected_state)
-  end
-  return tostring(state.state or "") == tostring(expected_state)
-    and tostring(state.version or "") == tostring(version or "")
-end
-
-local function expected_state_names(expected_states)
-  local names = {}
-  for _, expected in ipairs(expected_states or {}) do
-    if type(expected) == "table" then
-      table.insert(names, expected.state)
-    else
-      table.insert(names, expected)
-    end
-  end
-  return names
-end
-
-local function expected_transition_versions(expected_states, default_version)
-  local source_version = default_version
-  local target_version = nil
-  for _, expected in ipairs(expected_states or {}) do
-    if type(expected) == "table" then
-      if expected.version ~= nil then
-        source_version = expected.version
-      end
-      if expected.target_version ~= nil then
-        target_version = expected.target_version
-      end
-    end
-  end
-  return source_version, target_version
-end
-
-local function implementation_transition_status(state, expected_states, marker_version)
-  local source_version, target_version = expected_transition_versions(expected_states, marker_version)
-  if target_version ~= nil then
-    return core.cyclic_transition_status(state, expected_state_names(expected_states), "implementing", source_version, target_version)
-  end
-  return core.versioned_transition_status(state, expected_state_names(expected_states or { "ready" }), "implementing", marker_version)
-end
-
-local function expected_states_include(expected_states, state_name)
-  for _, expected in ipairs(expected_states or {}) do
-    local expected_state = type(expected) == "table" and expected.state or expected
-    if tostring(expected_state or "") == tostring(state_name or "") then
-      return true
-    end
-  end
-  return false
-end
-
 local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off, allow_same_version_implementing)
   local view = core.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
@@ -612,7 +551,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "implementing", "skip-idempotent(implementation marker already visible)", "implementation fact marker already visible")
       return false
     end
-    if not expected_states_include(expected_from_states, "implementing") and not allow_same_version_implementing then
+    if not transitions.expected_states_include(expected_from_states, "implementing") and not allow_same_version_implementing then
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
       return false
     end
@@ -623,11 +562,11 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
     return false
   end
   for _, expected in ipairs(expected_from_states or {}) do
-    if expected_state_matches(state, expected) then
+    if transitions.expected_state_matches(state, expected) then
       return true
     end
   end
-  local transition = implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
+  local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
     if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
       core.log_cas_decision("implement", marker_ready.proposal_id, {
@@ -658,7 +597,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
       return false
     end
-    if not expected_states_include(expected_from_states, "implementing") then
+    if not transitions.expected_states_include(expected_from_states, "implementing") then
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
       return false
     end
@@ -669,11 +608,11 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
     return false
   end
   for _, expected in ipairs(expected_from_states or {}) do
-    if expected_state_matches(state, expected) then
+    if transitions.expected_state_matches(state, expected) then
       return true
     end
   end
-  local transition = implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
+  local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
     if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
       core.log_cas_decision("implement", marker_ready.proposal_id, {
@@ -749,6 +688,9 @@ local function process_ready_event(event)
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     if tostring(current.state or ""):upper() ~= "OPEN" then
       core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")
+      return
+    end
+    if slice_gate.check(repo, issue_number, ready, current) then
       return
     end
     local original_closed, origin = backing_original_closed(current)
@@ -874,7 +816,7 @@ local function process_ready_event(event)
     local expected_states = blocked_reentry
       and { { state = "blocked", version = ready.operator_reentry.state_version, target_version = ready.dedup_key } }
       or (retry_failure ~= nil and { "impl-failed" } or { "ready" })
-    local transition = implementation_transition_status(state, expected_states, ready.dedup_key)
+    local transition = transitions.implementation_transition_status(state, expected_states, ready.dedup_key)
     if transition == "idempotent" or transition == "stale" then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
