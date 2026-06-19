@@ -1,8 +1,7 @@
-local core = require("core")
+local core, saga = require("core"), require("std.saga")
 
-local M = {}
 
-M.spec = {
+local spec = {
   consumes = { "devloop_observe_tick" },
   produces = { "github-proxy.github_issue_create_request", "devloop_merge_queue_tick" },
   graph_json = true,
@@ -10,11 +9,10 @@ M.spec = {
   stall_window = "2m",
 }
 
-function pipeline(event)
+local department = saga.department(spec, { done = function() return false end, act = function(event)
   core.log_entry("observability", event, "github-devloop/observability", "tick")
   core.observe_devloop_entities(event)
-end
+end, wrap = core.wrap_pipeline_failure, name = "observability" })
+department.spec.graph_json = true
 
-pipeline = core.wrap_pipeline_failure("observability", pipeline)
-
-return M
+return department
