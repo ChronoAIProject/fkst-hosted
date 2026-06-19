@@ -581,6 +581,10 @@ def warn_disabled(message: str) -> None:
     print(f"warning: Lua coverage ratchet not enabled (no {REQUIRED_FLAG}); {message}", file=sys.stderr)
 
 
+def warn_deferred(message: str) -> None:
+    print(f"warning: Lua coverage ratchet deferred; {message}", file=sys.stderr)
+
+
 def repository_messages(root: Path) -> list[str]:
     path = artifact_path(root)
     required = (root / REQUIRED_FLAG).exists()
@@ -592,7 +596,11 @@ def repository_messages(root: Path) -> list[str]:
         if not required:
             warn_disabled("coverage artifact is absent")
             return []
-        return ["Lua coverage artifact is required but was not found"]
+        warn_deferred(
+            f"{REQUIRED_FLAG} is present but no coverage artifact is available; "
+            "set FKST_LUA_COVERAGE_JSON or produce a standard coverage artifact to enforce it"
+        )
+        return []
     if not path.exists():
         if not required:
             warn_disabled(f"coverage artifact is missing: {path}")

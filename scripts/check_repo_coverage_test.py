@@ -428,6 +428,35 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("not in migration/coverage-uncovered.allowlist", messages[0])
 
+    def test_repository_messages_required_flag_without_artifact_defers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+
+            with mock.patch.dict("os.environ", {}, clear=True):
+                with mock.patch.object(coverage, "selected_base_ref", return_value=None):
+                    with mock.patch("sys.stderr") as stderr:
+                        messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [])
+        warning = "".join(call.args[0] for call in stderr.write.call_args_list)
+        self.assertIn("Lua coverage ratchet deferred", warning)
+        self.assertIn("no coverage artifact is available", warning)
+
+    def test_repository_messages_required_flag_explicit_missing_artifact_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+            artifact = root / "missing-coverage.json"
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=True):
+                with mock.patch.object(coverage, "selected_base_ref", return_value=None):
+                    messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [f"Lua coverage artifact does not exist: {artifact}"])
+
     def test_repository_messages_ignores_coverage_json_env_without_required_flag(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
