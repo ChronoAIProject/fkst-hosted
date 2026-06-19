@@ -530,7 +530,7 @@ def parent_has_marker(parent: dict[str, Any], marker: str, bot_login: str | None
     return bool(matching_issues(comments_from_parent(parent), marker, bot_login))
 
 
-def parent_has_issue_created_marker(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> bool:
+def parent_issue_created_marker_issue(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> int | None:
     pattern = re.compile(r"<!-- fkst:github-proxy:issue-created:v1 .*?-->")
     expected = f'dedup="{ensure_marker_value(dedup_key)}"'
     for comment in comments_from_parent(parent):
@@ -538,8 +538,14 @@ def parent_has_issue_created_marker(parent: dict[str, Any], dedup_key: str, bot_
             continue
         for marker in pattern.findall(record_body(comment)):
             if expected in marker:
-                return True
-    return False
+                issue = marker_attribute(marker, "issue")
+                if issue is None or issue == "unknown":
+                    return None
+                try:
+                    return int(issue)
+                except ValueError:
+                    return None
+    return None
 
 
 def parse_json_list(stdout: str) -> list[dict[str, Any]]:
@@ -624,8 +630,17 @@ def reconcile_ratchet(
 
     doc = slice_document(spec, inventory, slice_size)
     dedup_key = str(doc["dedup_key"])
-    if parent_has_issue_created_marker(parent, dedup_key, bot_login):
-        return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
+    ledger_issue = parent_issue_created_marker_issue(parent, dedup_key, bot_login)
+    if ledger_issue is not None:
+        prior = client.issue_view(repo, ledger_issue, "number,state,author,body")
+        if is_trusted_record(prior, bot_login) and str(prior.get("state") or "").upper() != "CLOSED":
+            return ReconcileResult(
+                spec.ratchet,
+                "deduped-parent-ledger",
+                dedup_key,
+                issue_number=ledger_issue,
+                parent_issue=parent_issue,
+            )
 
     open_candidates = client.issue_search(repo, "open", ratchet_slice_search_query(spec.ratchet))
     entry_keys = selected_entry_keys(doc)
@@ -647,7 +662,7 @@ def reconcile_ratchet(
         )
 
     exact_marker = issue_create_marker(dedup_key)
-    existing = matching_issues(client.issue_search(repo, "all", exact_marker), exact_marker, bot_login)
+    existing = matching_issues(client.issue_search(repo, "open", exact_marker), exact_marker, bot_login)
     if existing:
         return ReconcileResult(
             spec.ratchet,
