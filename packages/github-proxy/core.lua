@@ -13,12 +13,7 @@ end
 -- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
 -- configured bot login match regardless of which API populated the field.
 -- No-op for ordinary user logins (which never end in "[bot]").
-function M.strip_bot_login_suffix(login)
-  if login == nil then
-    return nil
-  end
-  return (tostring(login):gsub("%[bot%]$", ""))
-end
+M.strip_bot_login_suffix = strings.strip_bot_login_suffix
 
 function M.is_positive_integer(value)
   local n = tonumber(value)
@@ -30,9 +25,9 @@ local shared_helpers = {
   is_positive_integer = M.is_positive_integer,
 }
 
--- Narrowest-surface proof for these package-owned helpers:
--- surface_proof = "package-root-nearest-stable-owner"
--- std_status = "no-existing-std-helper"
+-- Narrowest-surface proof for these shared helpers:
+-- surface_proof = "std-shared-domain-helper"
+-- std_status = "shared-with-ratchet-migration-slicer"
 -- collapse_status = "multi-call-site-behavioral-reuse"
 
 require("core.issue_create").install(M, shared_helpers)
