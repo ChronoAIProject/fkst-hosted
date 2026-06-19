@@ -87,6 +87,76 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("grows migration/coverage-uncovered.allowlist relative to integration", messages[0])
 
+    def test_shifted_uncovered_line_is_tolerated_by_content(self) -> None:
+        # An already-allowlisted uncovered line that shifts to a new line number
+        # (identical content) is the SAME line, not a new one: no regen required.
+        shifted = self.key(line=337, digest="cccccccc")
+        allow_at_old_line = self.key(line=339, digest="cccccccc")
+        uncovered = {shifted: coverage.UncoveredLine(shifted, 'error("git worktree add failed")')}
+
+        self.assertEqual(coverage.ratchet_messages(uncovered, {allow_at_old_line}), [])
+
+    def test_line_move_is_not_growth_relative_to_base(self) -> None:
+        # Same content at a new line is not allowlist growth (a move, not an add).
+        current = {self.key(line=337, digest="cccccccc")}
+        base = {self.key(line=339, digest="cccccccc")}
+
+        self.assertEqual(coverage.ratchet_messages({}, current, base, "integration"), [])
+
+    def test_covered_line_becoming_uncovered_is_still_caught(self) -> None:
+        # Content absent from the allowlist (a real coverage regression or new
+        # uncovered code) is still flagged even though matching ignores line.
+        novel = self.key(line=42, digest="deadbeef")
+        uncovered = {novel: coverage.UncoveredLine(novel, "return new_uncovered()")}
+
+        messages = coverage.ratchet_messages(uncovered, {self.key(line=339, digest="cccccccc")})
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("not in migration/coverage-uncovered.allowlist", messages[0])
+
+    def test_duplicate_content_match_is_count_aware(self) -> None:
+        # Two identical-content allowlist entries cover two uncovered duplicates;
+        # a third novel duplicate of the same content is still flagged.
+        a = self.key(line=10, digest="dup00000")
+        b = self.key(line=20, digest="dup00000")
+        c = self.key(line=30, digest="dup00000")
+        uncovered = {
+            a: coverage.UncoveredLine(a, 'error("x")'),
+            b: coverage.UncoveredLine(b, 'error("x")'),
+            c: coverage.UncoveredLine(c, 'error("x")'),
+        }
+        allowlist = {self.key(line=11, digest="dup00000"), self.key(line=21, digest="dup00000")}
+
+        messages = coverage.ratchet_messages(uncovered, allowlist)
+
+        self.assertEqual(len(messages), 1)
+
+    def test_duplicate_content_growth_is_count_aware(self) -> None:
+        # Adding a third allowlist entry for a content with only two in base grows.
+        current = {
+            self.key(line=10, digest="dup00000"),
+            self.key(line=20, digest="dup00000"),
+            self.key(line=30, digest="dup00000"),
+        }
+        base = {self.key(line=11, digest="dup00000"), self.key(line=21, digest="dup00000")}
+
+        messages = coverage.ratchet_messages({}, current, base, "integration")
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("grows", messages[0])
+
+    def test_moved_allowlist_entry_is_not_stale(self) -> None:
+        # An allowlist entry whose content is still uncovered (at a new line) is
+        # not stale; only content that is no longer uncovered anywhere is stale.
+        allowlist = {self.key(line=339, digest="cccccccc")}
+        uncovered = {
+            self.key(line=337, digest="cccccccc"): coverage.UncoveredLine(
+                self.key(line=337, digest="cccccccc"), 'error("git worktree add failed")'
+            )
+        }
+
+        self.assertEqual(coverage.stale_allowlist_messages(uncovered, allowlist), [])
+
     def test_engine_file_metadata_is_authoritative_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             artifact = Path(tmp) / "coverage.json"

@@ -10,6 +10,7 @@ import re
 import sys
 import subprocess
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -528,6 +529,21 @@ def required_flag_at_base(root: Path, base_ref: str) -> str:
         return "unresolved"
 
 
+def content_key(key: CoverageKey) -> tuple[str, str]:
+    """Identity used to compare allowlist/uncovered lines by CONTENT, not position.
+
+    The allowlist still records `line` for readability and regeneration, but the
+    ratchet matches on (file, normalized_line_hash) so that inserting or deleting
+    lines elsewhere in a file — which shifts an already-uncovered, already-allowlisted
+    line to a new line number with identical content — is recognized as the SAME
+    uncovered line, not a new one. Matching is count-aware (a multiset), so N
+    identical-content uncovered lines still require N allowlist entries and an
+    (N+1)th novel duplicate is still flagged; a covered line becoming uncovered is
+    still caught because its content is absent from the allowlist.
+    """
+    return (key.file, key.normalized_line_hash)
+
+
 def ratchet_messages(
     uncovered: dict[CoverageKey, UncoveredLine],
     allowlist: set[CoverageKey],
@@ -535,13 +551,23 @@ def ratchet_messages(
     base_ref: str = "base",
 ) -> list[str]:
     messages: list[str] = []
-    for key in sorted(set(uncovered) - allowlist):
-        messages.append(
-            f"{uncovered[key].label()} is an uncovered production Lua line not in {ALLOWLIST}"
-        )
+    allow_counts = Counter(content_key(k) for k in allowlist)
+    seen: Counter = Counter()
+    for key in sorted(uncovered):
+        ck = content_key(key)
+        seen[ck] += 1
+        if seen[ck] > allow_counts.get(ck, 0):
+            messages.append(
+                f"{uncovered[key].label()} is an uncovered production Lua line not in {ALLOWLIST}"
+            )
     if base_allowlist is not None:
-        for key in sorted(allowlist - base_allowlist):
-            messages.append(f"{key.label()} grows {ALLOWLIST} relative to {base_ref}; cover the line instead")
+        base_counts = Counter(content_key(k) for k in base_allowlist)
+        grown: Counter = Counter()
+        for key in sorted(allowlist):
+            ck = content_key(key)
+            grown[ck] += 1
+            if grown[ck] > base_counts.get(ck, 0):
+                messages.append(f"{key.label()} grows {ALLOWLIST} relative to {base_ref}; cover the line instead")
     return messages
 
 
@@ -549,10 +575,15 @@ def stale_allowlist_messages(
     uncovered: dict[CoverageKey, UncoveredLine],
     allowlist: set[CoverageKey],
 ) -> list[str]:
-    return [
-        f"{key.label()} is no longer uncovered; prune the stale entry from {ALLOWLIST}"
-        for key in sorted(allowlist - set(uncovered))
-    ]
+    uncovered_counts = Counter(content_key(k) for k in uncovered)
+    consumed: Counter = Counter()
+    messages: list[str] = []
+    for key in sorted(allowlist):
+        ck = content_key(key)
+        consumed[ck] += 1
+        if consumed[ck] > uncovered_counts.get(ck, 0):
+            messages.append(f"{key.label()} is no longer uncovered; prune the stale entry from {ALLOWLIST}")
+    return messages
 
 
 def allowlist_entry(key: CoverageKey) -> dict[str, Any]:
