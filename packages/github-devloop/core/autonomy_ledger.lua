@@ -220,10 +220,20 @@ local function event_before(M, left, right)
       return a[name] < b[name]
     end
   end
-  if a.created_seconds ~= nil and b.created_seconds ~= nil and a.created_seconds ~= b.created_seconds then
+  if a.created_seconds == nil then
+    if b.created_seconds ~= nil then
+      return false
+    end
+  elseif b.created_seconds == nil then
+    return true
+  elseif a.created_seconds ~= b.created_seconds then
     return a.created_seconds < b.created_seconds
   end
   return a.sequence < b.sequence
+end
+
+function M._autonomy_event_before(left, right)
+  return event_before(M, left, right)
 end
 
 local function claim_epoch_key(dedup_key, attempt)
