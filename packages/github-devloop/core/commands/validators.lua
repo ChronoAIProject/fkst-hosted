@@ -21,6 +21,10 @@ function S.require_safe_branch(M, name, value)
   return gitref.require_safe_branch(name, value, "github-devloop")
 end
 
+function S.require_safe_ref(M, name, value)
+  return gitref.require_safe_branch(name, value, "github-devloop")
+end
+
 function S.require_safe_remote(M, remote)
   return gitref.require_safe_remote(remote, "github-devloop")
 end
