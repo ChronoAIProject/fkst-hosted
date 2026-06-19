@@ -282,17 +282,17 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             for line in (REPO_ROOT / spec.allowlist_path).read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         }
+        expected_entry_keys = {"882cacf645554fa3", "9b3a04ee05f242ad", "6f7eb648b89563e5"}
+        computed_entry_keys = {slicer.entry_key(slicer.InventorySite(path, 1, "already_migrated", path)) for path in expected_paths}
 
         self.assertTrue(expected_paths.isdisjoint(live_paths))
         self.assertTrue(expected_paths.isdisjoint(allowlist_entries))
+        self.assertEqual(computed_entry_keys, expected_entry_keys)
+        self.assertTrue(expected_entry_keys.isdisjoint(allowlist_entries))
         for path in expected_paths:
             source = (REPO_ROOT / path).read_text(encoding="utf-8")
             self.assertIn("return saga.department(spec,", source)
             self.assertIsNone(slicer.FREE_FORM_PIPELINE_RE.search(slicer.strip_lua_comments_and_strings(source)))
-        self.assertEqual(
-            {slicer.entry_key(slicer.InventorySite(path, 1, "already_migrated", path)) for path in expected_paths},
-            {"882cacf645554fa3", "9b3a04ee05f242ad", "6f7eb648b89563e5"},
-        )
 
     def test_json_schema_carries_stable_dedup_key_and_sites(self) -> None:
         spec = slicer.specs()["saga-handler"]
