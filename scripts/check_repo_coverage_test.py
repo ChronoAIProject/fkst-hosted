@@ -63,11 +63,13 @@ class CoverageRatchetTest(unittest.TestCase):
 
         self.assertEqual(coverage.ratchet_messages(uncovered, {self.key()}), [])
 
-    def test_stale_allowlist_entry_forces_prune(self) -> None:
+    def test_stale_allowlist_entry_is_advisory(self) -> None:
         messages = coverage.ratchet_messages({}, {self.key()})
+        stale_messages = coverage.stale_allowlist_messages({}, {self.key()})
 
-        self.assertEqual(len(messages), 1)
-        self.assertIn("is no longer uncovered; prune the stale entry", messages[0])
+        self.assertEqual(messages, [])
+        self.assertEqual(len(stale_messages), 1)
+        self.assertIn("is no longer uncovered; prune the stale entry", stale_messages[0])
 
     def test_allowlist_growth_relative_to_base_fails(self) -> None:
         old_key = self.key(line=1, digest="11111111")
@@ -77,6 +79,13 @@ class CoverageRatchetTest(unittest.TestCase):
         messages = coverage.ratchet_messages({}, current, base, "integration")
 
         self.assertIn("grows migration/coverage-uncovered.allowlist relative to integration", messages[-1])
+
+    def test_stale_allowlist_entry_does_not_mask_allowlist_growth(self) -> None:
+        current = {self.key()}
+        messages = coverage.ratchet_messages({}, current, set(), "integration")
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("grows migration/coverage-uncovered.allowlist relative to integration", messages[0])
 
     def test_engine_file_metadata_is_authoritative_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -255,6 +264,35 @@ class CoverageRatchetTest(unittest.TestCase):
                         messages = coverage.repository_messages(root)
 
         self.assertEqual(messages, [])
+
+    def test_repository_messages_warns_for_stale_allowlist_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+            (root / "migration" / "coverage-uncovered.allowlist").write_text(
+                json.dumps({
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
+                    "reason": "legacy uncovered branch",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            artifact = root / "coverage.json"
+            artifact.write_text(json.dumps({"files": []}), encoding="utf-8")
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
+                    with mock.patch.object(coverage, "allowlist_at_base", return_value=("absent", None)):
+                        with mock.patch("sys.stderr") as stderr:
+                            messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [])
+        self.assertIn(
+            "is no longer uncovered; prune the stale entry",
+            "".join(call.args[0] for call in stderr.write.call_args_list),
+        )
 
     def test_repository_messages_uses_selected_base_ref(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

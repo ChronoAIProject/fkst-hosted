@@ -505,12 +505,20 @@ def ratchet_messages(
         messages.append(
             f"{uncovered[key].label()} is an uncovered production Lua line not in {ALLOWLIST}"
         )
-    for key in sorted(allowlist - set(uncovered)):
-        messages.append(f"{key.label()} is no longer uncovered; prune the stale entry from {ALLOWLIST}")
     if base_allowlist is not None:
         for key in sorted(allowlist - base_allowlist):
             messages.append(f"{key.label()} grows {ALLOWLIST} relative to {base_ref}; cover the line instead")
     return messages
+
+
+def stale_allowlist_messages(
+    uncovered: dict[CoverageKey, UncoveredLine],
+    allowlist: set[CoverageKey],
+) -> list[str]:
+    return [
+        f"{key.label()} is no longer uncovered; prune the stale entry from {ALLOWLIST}"
+        for key in sorted(allowlist - set(uncovered))
+    ]
 
 
 def allowlist_entry(key: CoverageKey) -> dict[str, Any]:
@@ -611,6 +619,8 @@ def repository_messages(root: Path) -> list[str]:
     if base_status == "unresolved":
         messages.append("cannot resolve coverage base allowlist to enforce shrink-only ratchet; ensure CI provides GITHUB_BASE_REF or FKST_LUA_COVERAGE_BASE_REF")
     messages.extend(ratchet_messages(uncovered, allowlist, base_allowlist, base_ref or "base"))
+    for message in stale_allowlist_messages(uncovered, allowlist):
+        print(f"warning: {message}", file=sys.stderr)
     return messages
 
 
