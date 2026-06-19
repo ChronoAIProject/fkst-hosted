@@ -564,14 +564,15 @@ def recent_unknown_ledger_comment(comment: dict[str, Any], now_seconds: int) -> 
     return 0 <= now_seconds - created <= UNKNOWN_LEDGER_HOLD_SECONDS
 
 
-def parent_issue_created_marker_issue(
+def parent_issue_created_marker_issues(
     parent: dict[str, Any],
     dedup_key: str,
     bot_login: str | None,
     now_seconds: int,
-) -> int | object | None:
+) -> list[int | object]:
     pattern = re.compile(r"<!-- fkst:github-proxy:issue-created:v1 .*?-->")
     expected = f'dedup="{ensure_marker_value(dedup_key)}"'
+    issues: list[int | object] = []
     for comment in comments_from_parent(parent):
         if not is_trusted_record(comment, bot_login):
             continue
@@ -580,15 +581,15 @@ def parent_issue_created_marker_issue(
                 issue = marker_attribute(marker, "issue")
                 if issue is None or issue == "unknown":
                     if recent_unknown_ledger_comment(comment, now_seconds):
-                        return UNRESOLVED_LEDGER_ISSUE
+                        issues.append(UNRESOLVED_LEDGER_ISSUE)
                     continue
                 try:
-                    return int(issue)
+                    issues.append(int(issue))
                 except ValueError:
                     if recent_unknown_ledger_comment(comment, now_seconds):
-                        return UNRESOLVED_LEDGER_ISSUE
+                        issues.append(UNRESOLVED_LEDGER_ISSUE)
                     continue
-    return None
+    return issues
 
 
 def parse_json_list(stdout: str) -> list[dict[str, Any]]:
@@ -673,8 +674,8 @@ def reconcile_ratchet(
 
     doc = slice_document(spec, inventory, slice_size)
     dedup_key = str(doc["dedup_key"])
-    ledger_issue = parent_issue_created_marker_issue(parent, dedup_key, bot_login, int(time()))
-    if ledger_issue is not None:
+    ledger_issues = parent_issue_created_marker_issues(parent, dedup_key, bot_login, int(time()))
+    for ledger_issue in ledger_issues:
         if ledger_issue is UNRESOLVED_LEDGER_ISSUE:
             return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
         prior = client.issue_view(repo, int(ledger_issue), "number,state,author,body")
