@@ -37,7 +37,7 @@ return function(M, h)
       successors = {
         {
           state = "implementing",
-          output_variant = "implementation_started",
+          output_variant = "implementation_kicked_off",
           postcondition_family = "implementation_kickoff",
           monotonic = true,
         },

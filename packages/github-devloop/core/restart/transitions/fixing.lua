@@ -7,7 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
-  local responsibility_signature = h.responsibility_signature
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "fixing",
     generation_entry = "always",
@@ -81,5 +81,11 @@ return function(M, h)
     marker_facts = "state:v1 fixing plus review-result/review-meta/merge-gate feedback, or current PR head for deterministic renormalization",
     kickoff = "devloop_fixing or devloop_reviewing",
     replay = "Observe re-raises fix when a trusted feedback fact is parseable; otherwise it re-enters reviewing for the current head.",
+    span_contract = span_contract({
+      department = "fix",
+      durable_start_marker = "state:v1 fixing",
+      spawn_predecessor = "precheck_fix_write_gate",
+      spawn_function = "run_fix_attempt",
+    }),
   }
 end

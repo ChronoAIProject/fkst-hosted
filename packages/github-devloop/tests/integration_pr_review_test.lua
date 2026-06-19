@@ -141,7 +141,7 @@ return {
       return tostring(payload.body or ""):find("github-devloop implementation worktree ready", 1, true) ~= nil
     end)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
-      return tostring(payload.body or ""):find("github-devloop implementation started", 1, true) ~= nil
+      return tostring(payload.body or ""):find("github-devloop implementation output published", 1, true) ~= nil
     end)
     local open_pr_raise = find_raise(result.raises, "devloop_open_pr")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:implementing")
@@ -150,7 +150,7 @@ return {
     t.is_true(state_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true) ~= nil)
     t.is_true(state_raise.payload.body:find("fkst:github-devloop:implement-attempt:v1", 1, true) ~= nil)
     t.eq(core.implementing_fact({ state_raise.payload.body }, event.proposal_id, event.dedup_key), nil)
-    t.is_true(comment_raise.payload.body:find("github-devloop implementation started", 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find("github-devloop implementation output published", 1, true) ~= nil)
     t.eq(comment_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true), nil)
     local outcome_attempt_raise = find_comment_with(result.raises, "github-devloop implementation attempt started")
     t.is_true(outcome_attempt_raise ~= nil)

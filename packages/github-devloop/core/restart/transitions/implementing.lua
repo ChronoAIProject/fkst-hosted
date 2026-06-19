@@ -6,7 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
-  local responsibility_signature = h.responsibility_signature
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "implementing",
     liveness_class_id = "implementing.active",
@@ -90,5 +90,10 @@ return function(M, h)
     marker_facts = "active run uses state:v1 implementing plus implement-attempt:v1; implementing:v1 exists only after codex completion",
     kickoff = "devloop_ready",
     replay = "Observe re-raises devloop_ready only when the implement attempt is past its liveness budget; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
+    span_contract = span_contract({
+      department = "implement",
+      durable_start_marker = "implement-attempt:v1",
+      spawn_predecessor = "raise_implementing_state",
+    }),
   }
 end

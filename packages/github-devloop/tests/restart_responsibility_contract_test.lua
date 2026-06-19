@@ -89,6 +89,11 @@ local function clean_row()
         },
       },
     },
+    span_contract = {
+      department = "synthetic",
+      durable_start_marker = "synthetic-start:v1",
+      spawn_predecessor = "raise_synthetic_start",
+    },
   }
 end
 
@@ -385,6 +390,44 @@ return {
     t.is_true(contains_error(errors, "synthetic-bad: backward successor requires generation bump: synthetic-earlier"))
   end,
 
+  test_worker_rows_require_span_contract = function()
+    local row = clean_row()
+    row.from_state = "synthetic-worker-without-span"
+    row.span_contract = nil
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "synthetic-worker-without-span: worker row must declare span_contract"), joined_errors(errors))
+  end,
+
+  test_worker_span_contract_requires_durable_start_marker = function()
+    local row = clean_row()
+    row.from_state = "synthetic-worker-bad-span"
+    row.span_contract = {
+      department = "synthetic",
+      durable_start_marker = "synthetic-start",
+      spawn_predecessor = "raise_synthetic_start",
+    }
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "synthetic-worker-bad-span: span_contract.durable_start_marker must name a durable marker family"), joined_errors(errors))
+  end,
+
+  test_worker_span_contract_requires_all_start_fields = function()
+    for _, field in ipairs({ "department", "durable_start_marker", "spawn_predecessor" }) do
+      local row = clean_row()
+      row.from_state = "synthetic-worker-missing-" .. field
+      row.span_contract[field] = nil
+      local errors = core.strict_restart_responsibility_contract_errors({ row })
+      t.is_true(contains_error(errors, row.from_state .. ": span_contract." .. field .. " must be declared"), joined_errors(errors))
+    end
+  end,
+
+  test_worker_span_contract_rejects_empty_spawn_function = function()
+    local row = clean_row()
+    row.from_state = "synthetic-worker-empty-spawn-function"
+    row.span_contract.spawn_function = ""
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "synthetic-worker-empty-spawn-function: span_contract.spawn_function must be a non-empty string when declared"), joined_errors(errors))
+  end,
+
   test_anti_allowlist_extra_error_on_listed_state_is_not_suppressed = function()
     local rows = copy_rows(core.restart_transition_table())
     local ready = rows_by_state(rows).ready
@@ -419,7 +462,7 @@ return {
     row.responsibility_signature.successors = {
       {
         state = "implementing",
-        output_variant = "implementation_started",
+        output_variant = "implementation_kicked_off",
         postcondition_family = "implementation_kickoff",
         monotonic = true,
       },
