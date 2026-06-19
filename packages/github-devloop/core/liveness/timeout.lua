@@ -152,6 +152,8 @@ function M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds)
   local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or max_timeout_attempts
   local heartbeat = M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limit)
   if heartbeat ~= nil then return heartbeat end
+  local codex_run = M.actionable_epoch_codex_run_decision(row, state, facts, due, age)
+  if codex_run ~= nil then return codex_run end
   if not due then
     return { action = "wait", age_minutes = age }
   end

@@ -12,23 +12,22 @@ return function(M, h)
     liveness_class_id = "implementing.active",
     watchdog = {
       mode = "live-defer",
-      budget_ms = 45 * 60 * 1000,
+      budget_ms = 120 * 60 * 1000,
       on_stale = {
         op = "redrive_receiver",
         producer = "implement-attempt",
       },
     },
     actionable_epoch = {
-      source = "live_defer_heartbeat:v1",
+      source = "codex_run:v1",
       generation_source = "same_as_actionable_epoch",
       live_marker = "implement-attempt:v1",
       producer = "implement-attempt",
     },
     defer = {
-      kind = "heartbeat",
+      kind = "codex_run",
       live_marker = "implement-attempt:v1",
       producer = "implement-attempt",
-      freshness_ms = 120 * 60 * 1000,
       redrive_opens_generation = true,
     },
     terminal = false,
@@ -36,7 +35,7 @@ return function(M, h)
     driving_queue = "devloop_ready",
     observe_surfaces = { issue = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 pr-open", "state:v1 impl-failed" }, { "pr-open", "impl-failed" }),
-    budget = budget(45, "The long implementation receiver is supervised by implement-attempt heartbeats; this budget only bounds stale heartbeat redrive."),
+    budget = budget(120, "A live implementation codex defers indefinitely via fkst.codex_runs() exec_ref truth; when the codex is absent, resolve_codex_run currently uses the state-entry actionable epoch, so this budget must cover the full codex runtime like fixing: 120 = 60 minute codex attempt + 30 minute watchdog margin + slack, bounding no-live reactivation until follow-up: no-live-onset epoch."),
     liveness_contract = liveness({
       mode = "live-defer",
       signal = {
@@ -44,7 +43,6 @@ return function(M, h)
         producer = "implement-attempt",
         surface = "issue-comment-stream",
         version_form = "raw",
-        max_age_minutes = 120,
       },
     }),
     on_timeout = timeout("devloop_ready"),
@@ -87,9 +85,9 @@ return function(M, h)
     },
     version_identity = "ready_payload_inner_version(state.version) plus implementation_retry_attempt(state.version)",
     effects = effect({ "devloop_ready" }, "implementing replay is complete only when observe_issue can re-raise devloop_ready with the frozen implementing version for implement to re-derive PR link, remote branch, local branch, or bounded retry"),
-    marker_facts = "active run uses state:v1 implementing plus implement-attempt:v1; implementing:v1 exists only after codex completion",
+    marker_facts = "active run uses state:v1 implementing plus implement-attempt:v1 exec_ref; implementing:v1 exists only after codex completion",
     kickoff = "devloop_ready",
-    replay = "Observe re-raises devloop_ready only when the implement attempt is past its liveness budget; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
+    replay = "Observe re-raises devloop_ready only when no matching codex run exists; implement then re-derives PR link, remote branch, local branch, or bounded retry.",
     span_contract = span_contract({
       department = "implement",
       durable_start_marker = "implement-attempt:v1",

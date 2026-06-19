@@ -29,9 +29,11 @@ local function runtime_root(name)
 end
 
 local function opts(name, extra)
+  local root = runtime_root(name)
   local result = {
     env = {
-      FKST_RUNTIME_ROOT = runtime_root(name),
+      FKST_RUNTIME_ROOT = root,
+      FKST_RUNTIME_LOG_DIR = root .. "/logs",
       FKST_CANDIDATE_PREFIX = "candidate",
       FKST_CANDIDATE_FROM_SEP = "-from-",
       FKST_DEVLOOP_UPSTREAM_BRANCH = "dev",

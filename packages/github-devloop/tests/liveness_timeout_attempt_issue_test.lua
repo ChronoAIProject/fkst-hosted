@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local codex_status = require("tests.codex_status_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -63,12 +64,12 @@ local function mock_decompose_children()
   })
 end
 
-local function run_liveness_scan(name)
+local function run_liveness_scan(name, run_opts)
   return t.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = { schema = "github-devloop.tick.v1" },
     ts = "2026-06-03T01:32:03Z",
-  }, opts(name or "liveness-timeout-attempt"))
+  }, run_opts or opts(name or "liveness-timeout-attempt"))
 end
 
 local function find_raise(result, queue)
@@ -111,29 +112,34 @@ end
 return {
   test_timeout_attempt_not_counted_while_implement_receiver_attempt_live = function()
     local event = h.ready()
+    local live_opts = opts("liveness-live-implement-attempt-no-timeout-count")
+    local live_exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+    codex_status.seed_implement_codex_run(live_opts, event.proposal_id, event.dedup_key)
     local comments = {
       state_comment("implementing", event.dedup_key, "2026-06-03T00:00:00Z"),
-      issue_comment(core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 60))),
+      issue_comment(core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201), live_exec_ref)),
     }
     mock_repo()
     mock_issue_list()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, comments)
     mock_empty_pr_list()
 
-    local scanned = run_liveness_scan("liveness-live-implement-attempt-no-timeout-count")
+    local scanned = run_liveness_scan("liveness-live-implement-attempt-no-timeout-count", live_opts)
     t.eq(scanned.exit_code, 0)
     assert_no_timeout_progress(scanned)
 
+    local dead_opts = opts("liveness-expired-implement-attempt-counts")
+    local dead_exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
     local expired = {
       state_comment("implementing", event.dedup_key, "2026-06-03T00:00:00Z"),
-      issue_comment(core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201))),
+      issue_comment(core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 60), dead_exec_ref)),
     }
     mock_repo()
     mock_issue_list("2026-06-03T01:02:04Z")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, expired, "2026-06-03T01:02:04Z")
     mock_empty_pr_list()
 
-    local redriven = run_liveness_scan("liveness-expired-implement-attempt-counts")
+    local redriven = run_liveness_scan("liveness-expired-implement-attempt-counts", dead_opts)
     t.eq(redriven.exit_code, 0)
     t.eq(find_raise(redriven, "devloop_timeout_reconcile"), nil)
     t.eq(find_raise(redriven, "devloop_ready") ~= nil, true)

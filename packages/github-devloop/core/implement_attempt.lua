@@ -2,16 +2,59 @@ local S = {}
 
 function S.install(M)
 
-function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at)
+function M.implement_exec_ref(proposal_id, dedup_key)
+  return M._dedup_key({
+    "implement-exec",
+    tostring(proposal_id or ""),
+    tostring(dedup_key or ""),
+    "implement",
+  })
+end
+
+local function codex_runs_status()
+  if type(fkst) ~= "table" or type(fkst.codex_runs) ~= "function" then
+    error("github-devloop: fkst.codex_runs SDK primitive is required for implement liveness")
+  end
+  local ok, status = pcall(fkst.codex_runs)
+  if not ok then
+    error("github-devloop: fkst.codex_runs failed for implement liveness: " .. tostring(status))
+  end
+  if type(status) ~= "table" or type(status.running) ~= "table" then
+    error("github-devloop: fkst.codex_runs returned invalid implement liveness status")
+  end
+  return status
+end
+
+function M.implement_exec_ref_running(exec_ref, status)
+  if type(exec_ref) ~= "string" or exec_ref == "" then
+    return false
+  end
+  local runs = status or codex_runs_status()
+  for _, run in ipairs(runs.running or {}) do
+    if type(run) == "table"
+      and tostring(run.status or "running") == "running"
+      and tostring(run.role or "") == "implement"
+      and M.implement_exec_ref(run.proposal_id, run.dedup_key) == exec_ref then
+      return true
+    end
+  end
+  return false
+end
+
+function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at, exec_ref)
   local n = tonumber(attempt)
   if n == nil or n < 1 or n ~= math.floor(n) then
     error("github-devloop: invalid implement attempt")
   end
-  return '<!-- fkst:github-devloop:implement-attempt:v1 proposal="' .. tostring(proposal_id)
+  local marker = '<!-- fkst:github-devloop:implement-attempt:v1 proposal="' .. tostring(proposal_id)
     .. '" dedup="' .. tostring(dedup_key)
     .. '" attempt="' .. tostring(n)
     .. '" started_at="' .. tostring(started_at or "")
-    .. '" -->'
+    .. '"'
+  if exec_ref ~= nil and exec_ref ~= "" then
+    marker = marker .. ' exec_ref="' .. tostring(exec_ref) .. '"'
+  end
+  return marker .. " -->"
 end
 
 function M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
@@ -26,6 +69,7 @@ function M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local attempt = tonumber(marker:match('attempt="(%d+)"'))
       local started_at = marker:match('started_at="([^"]*)"')
+      local exec_ref = marker:match('exec_ref="([^"]*)"')
       if marker_proposal == proposal_id
         and marker_dedup == tostring(dedup_key)
         and attempt ~= nil
@@ -36,11 +80,26 @@ function M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
           dedup_key = marker_dedup,
           attempt = attempt,
           started_at = started_at,
+          exec_ref = exec_ref,
         }
       end
     end
   end
   return latest
+end
+
+function M.implement_attempt_exec_live_fact(comments, proposal_id, dedup_key)
+  local attempt = M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
+  if attempt == nil then
+    return nil, "missing-implement-attempt"
+  end
+  if type(attempt.exec_ref) ~= "string" or attempt.exec_ref == "" then
+    return attempt, "missing-exec-ref"
+  end
+  if M.implement_exec_ref_running(attempt.exec_ref) then
+    return attempt, "running"
+  end
+  return attempt, "not-running"
 end
 
 function M.implement_attempt_count(comments, proposal_id, dedup_key)

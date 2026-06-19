@@ -82,6 +82,45 @@ local function merge_gate_wait_identity(M, facts, state)
     source_repo
 end
 
+local function implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version)
+  local attempt = M.latest_implement_attempt_fact(comments, proposal_id, signal_version)
+  if attempt == nil then
+    return {
+      live = false,
+      reason = "missing-implement-attempt",
+      family = signal_contract.family,
+      resolver = signal_contract.resolver or signal_contract.family,
+    }
+  end
+  if type(attempt.exec_ref) ~= "string" or attempt.exec_ref == "" then
+    return {
+      live = false,
+      reason = "missing-exec-ref",
+      attempt = attempt.attempt,
+      family = signal_contract.family,
+      resolver = signal_contract.resolver or signal_contract.family,
+    }
+  end
+  if M.implement_exec_ref_running(attempt.exec_ref) then
+    return {
+      live = true,
+      reason = "codex-run-running",
+      attempt = attempt.attempt,
+      exec_ref = attempt.exec_ref,
+      family = signal_contract.family,
+      resolver = signal_contract.resolver or signal_contract.family,
+    }
+  end
+  return {
+    live = false,
+    reason = "codex-run-not-running",
+    attempt = attempt.attempt,
+    exec_ref = attempt.exec_ref,
+    family = signal_contract.family,
+    resolver = signal_contract.resolver or signal_contract.family,
+  }
+end
+
 local function live_signal_age(M, row, state, facts, now_seconds)
   local signal = row_liveness_signal(row)
   local resolver = signal and (signal.resolver or signal.family) or nil
@@ -105,18 +144,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
     end, now_seconds)
   end
   if resolver == "implement-attempt" then
-    local attempt = M.latest_implement_attempt_fact(comments, proposal_id, signal_version)
-    if attempt ~= nil then
-      local started = tonumber(attempt.started_at)
-      local current_seconds = tonumber(now_seconds)
-      if started ~= nil and current_seconds ~= nil and current_seconds >= started then
-        return math.floor((current_seconds - started) / 60)
-      end
-    end
-    return newest_matching_marker_age(M, comments, "implement-attempt", function(marker)
-      return marker_attr(marker, "proposal") == tostring(proposal_id)
-        and marker_attr(marker, "dedup") == tostring(signal_version or "")
-    end, now_seconds)
+    return nil
   end
   if resolver == "converge-round" then
     local source_ref = facts and facts.source_ref
@@ -169,6 +197,13 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
   local signal_contract = liveness_contract_signal(contract)
   if type(signal_contract) ~= "table" then
     return { live = false, reason = "no-liveness-signal" }
+  end
+  local resolver = signal_contract.resolver or signal_contract.family
+  if resolver == "implement-attempt" then
+    local comments = live_signal_comments(signal_contract, facts)
+    local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
+    local signal_version = live_signal_version(M, signal_contract, state and state.version)
+    return implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version)
   end
   local max_age = numeric_minutes(signal_contract.max_age_minutes)
   if max_age == nil then

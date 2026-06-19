@@ -269,7 +269,7 @@ return {
       thinking = { mode = "live-defer", family = "converge-round", max_age = 120, budget = 150 },
       dependency_wait = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 525600 },
       ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 120 },
-      implementing = { mode = "live-defer", family = "implement-attempt", max_age = 120, budget = 45 },
+      implementing = { mode = "live-defer", family = "implement-attempt", codex_run = true, budget = 120 },
       ["pr-open"] = { mode = "row-budget-bounds-receiver", receiver = 0, budget = 30 },
       reviewing = { mode = "live-defer", family = "review-converge-round", max_age = 120, budget = 150 },
       ["merge-ready"] = { mode = "row-budget-bounds-receiver", receiver = 30, external = 360, budget = 390 },
@@ -289,7 +289,11 @@ return {
         t.eq(row.liveness_contract.signal.family, spec.family)
         t.eq(row.liveness_contract.signal.resolver, spec.resolver)
         t.eq(row.liveness_contract.signal.producer, spec.family)
-        t.eq(row.liveness_contract.signal.max_age_minutes, spec.max_age)
+        if spec.codex_run then
+          t.eq(row.liveness_contract.signal.max_age_minutes, nil)
+        else
+          t.eq(row.liveness_contract.signal.max_age_minutes, spec.max_age)
+        end
       else
         t.eq(row.liveness_contract.receiver_bound_minutes, spec.receiver)
         t.eq(row.liveness_contract.external_wait_bound_minutes, spec.external)
@@ -388,7 +392,7 @@ return {
       "skip-foreign(decomposed)",
       "skip-foreign(pr-link)",
       "skip-pending(no-attempt-marker)",
-      "skip-pending(attempt-live)",
+      "skip-pending(codex-run-live)",
       "skip-stale(head-advanced)",
     }
     for _, outcome in ipairs(declined) do

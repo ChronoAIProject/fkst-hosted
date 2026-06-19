@@ -4,4 +4,5 @@ return {
   dedup = true,
   attempt = true,
   started_at = true,
+  exec_ref = true,
 }

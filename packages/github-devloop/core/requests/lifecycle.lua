@@ -160,7 +160,7 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
   }, candidate.source_ref)
 end
 
-function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
+function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid implementing branch")
   end
@@ -174,7 +174,7 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
     error("github-devloop: invalid implementing base_sha")
   end
   local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
-  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "")
+  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
   return M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
@@ -197,7 +197,7 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
   }, ready.source_ref)
 end
 
-function M.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
+function M.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid implementing branch")
   end
@@ -208,7 +208,7 @@ function M.build_implementing_state_comment_request(repo, issue_number, ready, w
     error("github-devloop: invalid implementing base_sha")
   end
   local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
-  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "")
+  local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
   return M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
@@ -230,8 +230,8 @@ function M.build_implementing_state_comment_request(repo, issue_number, ready, w
   }, ready.source_ref)
 end
 
-function M.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at)
-  local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt, started_at)
+function M.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at, exec_ref)
+  local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt, started_at, exec_ref)
   return {
     schema = "github-proxy.v1",
     repo = repo,

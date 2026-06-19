@@ -15,6 +15,21 @@ local mock_git_status = h.mock_git_status
 local mock_git_commit = h.mock_git_commit
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local codex_status = require("tests.codex_status_helpers")
+
+local function stale_attempt_started_at()
+  return tostring(now() - 7201)
+end
+
+local function implement_attempt_marker(event, attempt, started_at, exec_ref)
+  return core.implement_attempt_marker(event.proposal_id, event.dedup_key, attempt, started_at, exec_ref)
+end
+
+local function live_implement_attempt_marker(event, run_opts, attempt, started_at)
+  local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+  codex_status.seed_implement_codex_run(run_opts, event.proposal_id, event.dedup_key)
+  return implement_attempt_marker(event, attempt or 1, started_at or stale_attempt_started_at(), exec_ref)
+end
 
 local function implementing_comments(event, extra)
   local branch = deterministic_branch_for(event)
@@ -25,10 +40,6 @@ local function implementing_comments(event, extra)
     table.insert(comments, comment)
   end
   return comments, branch
-end
-
-local function stale_attempt_started_at()
-  return tostring(now() - 7201)
 end
 
 local function liveness_redrive_ready(event)
@@ -128,13 +139,14 @@ return {
 
   test_ready_redelivery_skips_after_worktree_ready_implementing_state = function()
     local event = ready()
+    local run_opts = opts("implement-ready-redelivery-after-state")
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now())),
+      live_implement_attempt_marker(event, run_opts, 1),
     }
     mock_issue_implement({ "fkst-dev:implementing" }, comments)
 
-    local result = run_implement(event, opts("implement-ready-redelivery-after-state"))
+    local result = run_implement(event, run_opts)
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)
@@ -235,13 +247,14 @@ return {
 
   test_liveness_replayer_skips_live_implement_attempt_before_receiver = function()
     local current = ready()
+    local run_opts = opts("observe-implement-live-attempt-budget-owner")
     local comments = {
       core.state_marker(current.proposal_id, "implementing", current.dedup_key),
-      core.implement_attempt_marker(current.proposal_id, current.dedup_key, 1, tostring(now())),
+      live_implement_attempt_marker(current, run_opts, 1),
     }
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
-    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-live-attempt-budget-owner"))
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), run_opts)
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
@@ -345,13 +358,14 @@ return {
 
   test_observe_skips_live_implement_attempt = function()
     local event = ready()
+    local run_opts = opts("observe-implement-live")
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now())),
+      live_implement_attempt_marker(event, run_opts, 1),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
 
-    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-live"))
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), run_opts)
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
@@ -545,6 +559,6 @@ return {
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-implement-recent-no-attempt"))
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_ready"), nil)
+    t.eq(find_raise(result.raises, "devloop_ready").payload.proposal_id, event.proposal_id)
   end,
 }

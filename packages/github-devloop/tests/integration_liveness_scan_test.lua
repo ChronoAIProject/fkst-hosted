@@ -412,14 +412,11 @@ return {
         state = "open",
         updated_at = "2026-06-03T01:02:03Z",
       })
-      local fresh_version = "2999-01-01T00-00-00Z"
-      mock_issue_state_number(number, { "fkst-dev:enabled", core.state_label(state) }, "OPEN", {
-        {
-          body = core.state_marker(core.proposal_id(repo, number), state, fresh_version),
-          author_login = "fkst-test-bot",
-          created_at = "2999-01-01T00:00:00Z",
-        },
-      })
+      local fresh_version = state == "implementing" and "ready/2999-01-01T00-00-00Z" or "2999-01-01T00-00-00Z"
+      local proposal = core.proposal_id(repo, number)
+      local comments = { { body = core.state_marker(proposal, state, fresh_version), author_login = "fkst-test-bot", created_at = "2999-01-01T00:00:00Z" } }
+      if state == "implementing" then table.insert(comments, { body = core.implement_attempt_marker(proposal, fresh_version, 1, tostring(now() - 60)), author_login = "fkst-test-bot", created_at = "2999-01-01T00:00:00Z" }) end
+      mock_issue_state_number(number, { "fkst-dev:enabled", core.state_label(state) }, "OPEN", comments)
       if row.terminal == false then
         expected[number] = state
       else
@@ -757,16 +754,18 @@ return {
 
   test_liveness_scan_implementing_emits_timeout_ready_with_frozen_version = function()
     local event = ready()
+    local run_opts = opts("liveness-scan-implementing-redrive-scan")
+    local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
     local stuck = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201)),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 60), exec_ref),
     }
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     h.mock_issue_implement({ "fkst-dev:enabled", "fkst-dev:implementing" }, stuck)
     mock_empty_pr_list()
 
-    local scanned = run_liveness_scan("liveness-scan-implementing-redrive-scan")
+    local scanned = run_liveness_scan("liveness-scan-implementing-redrive-scan", run_opts)
     t.eq(scanned.exit_code, 0)
     local reraised = find_raise(scanned.raises, "devloop_ready")
     t.eq(reraised ~= nil, true)

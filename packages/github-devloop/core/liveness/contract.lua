@@ -87,7 +87,12 @@ local function validate_liveness_signal_shape(M, state, signal, label, errors)
   if liveness_resolver_families[resolver] == nil then
     table.insert(errors, state .. ": " .. label .. " has no resolver: " .. tostring(resolver))
   end
-  if numeric_minutes(signal.max_age_minutes) == nil then
+  local resolver = signal.resolver or signal.family
+  if resolver == "implement-attempt" then
+    if signal.max_age_minutes ~= nil then
+      table.insert(errors, state .. ": " .. label .. " must not declare max_age_minutes for codex-run liveness")
+    end
+  elseif numeric_minutes(signal.max_age_minutes) == nil then
     table.insert(errors, state .. ": " .. label .. " must declare finite max_age_minutes")
   end
   if signal.surface ~= "issue-comment-stream" and signal.surface ~= "pr-comment-stream" then

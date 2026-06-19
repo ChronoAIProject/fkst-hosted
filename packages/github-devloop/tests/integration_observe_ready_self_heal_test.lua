@@ -17,6 +17,7 @@ local find_raise = h.find_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local codex_status = require("tests.codex_status_helpers")
 local proposal_id = "github-devloop/issue/owner/repo/42"
 
 local function has_value(values, expected)
@@ -246,13 +247,16 @@ return {
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
     local branch = core.implement_branch("owner/repo", 42, ready_payload.dedup_key)
+    local run_opts = opts("observe-issue-ready-self-heal-advanced")
+    local exec_ref = core.implement_exec_ref(event.proposal_id, ready_payload.dedup_key)
+    codex_status.seed_implement_codex_run(run_opts, event.proposal_id, ready_payload.dedup_key)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
       core.state_marker(event.proposal_id, "implementing", ready_payload.dedup_key),
-      core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now())),
+      core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now()), exec_ref),
     })
 
-    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), opts("observe-issue-ready-self-heal-advanced"))
+    local observed = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:implementing" } }), run_opts)
     t.eq(observed.exit_code, 0)
     t.eq(find_raise(observed.raises, "devloop_ready"), nil)
     t.eq(count_calls("--json body"), 0)
@@ -260,7 +264,7 @@ return {
     mock_issue_implement_raw({ "fkst-dev:implementing" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
       core.state_marker(event.proposal_id, "implementing", ready_payload.dedup_key),
-      core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now())),
+      core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now()), exec_ref),
       core.implementing_marker(event.proposal_id, ready_payload.dedup_key, branch, "abc123", "dev", "def456"),
       core.pr_link_marker(event.proposal_id, 7, branch, ready_payload.dedup_key, "dev"),
     })

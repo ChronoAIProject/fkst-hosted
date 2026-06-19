@@ -433,18 +433,13 @@ end
 local function replay_implementing(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local attempt = facts["implement-attempt"]
-  local started_at = attempt and attempt.started_at
   if attempt == nil then
     if facts.implementing == nil then
       return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
     end
-    local marker_updated_at = M.version_updated_at(state.version)
-    if marker_updated_at ~= "" then started_at = M.iso_timestamp_epoch_seconds(marker_updated_at) end
   end
-  local started = tonumber(started_at)
-  local age = started ~= nil and (now() - started) or 7200
-  if age < 7200 then
-    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(attempt-live)", "implement attempt is still inside the liveness budget")
+  if attempt ~= nil and type(attempt.exec_ref) == "string" and attempt.exec_ref ~= "" and M.implement_exec_ref_running(attempt.exec_ref) then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(codex-run-live)", "matching implement codex run is still running")
   end
   -- Pass the INNER (unwrapped) version: build_devloop_ready_payload re-applies
   -- the "ready/" wrapper, so re-wrapping the already-wrapped state.version would
@@ -457,7 +452,7 @@ local function replay_implementing(dept, issue, state, row, facts)
     source_ref = issue.source_ref,
     impl_retry_attempt = M.implementation_retry_attempt(state.version),
   })
-  M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(liveness-expired)", "implement attempt exceeded liveness budget")
+  M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(codex-run-absent)", "no matching implement codex run is running")
   return raise_effects(dept, proposal_id, "implementing", state.version, { add = {}, remove = {} }, {
     { queue = "devloop_ready", payload = payload },
   })

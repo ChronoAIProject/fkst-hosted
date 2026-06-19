@@ -81,6 +81,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_issue_view_failure = h.mock_issue_view_failure
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local codex_status = require("tests.codex_status_helpers")
 
 local function assert_open_pr_kickoff(raises, event, branch, head_sha)
   local kickoff = find_raise(raises, "devloop_open_pr")
@@ -614,12 +615,15 @@ return {
 
   test_implementing_state_with_live_attempt_skips_redelivery = function()
     local event = ready()
+    local run_opts = opts("implement-combined-marker-redelivery")
+    local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+    codex_status.seed_implement_codex_run(run_opts, event.proposal_id, event.dedup_key)
     mock_issue_implement({ "fkst-dev:implementing" }, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, now()),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, now(), exec_ref),
     })
 
-    local result = run_implement(event, opts("implement-combined-marker-redelivery"))
+    local result = run_implement(event, run_opts)
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)

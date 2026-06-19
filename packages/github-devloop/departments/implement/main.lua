@@ -3,7 +3,6 @@ local saga = require("std.saga")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
-local IMPLEMENT_ATTEMPT_LIVE_SECONDS = 120 * 60
 local implemented_branch_head
 
 local spec = {
@@ -35,8 +34,8 @@ local function raise_impl_failed(repo, issue_number, ready, reason, detail, atte
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
-local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
-  local comment_request = core.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at)
+local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
+  local comment_request = core.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   local label_request = core.build_implementing_label_request(repo, issue_number, ready)
   local add_labels, remove_labels = core.state_label_changes("implementing")
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
@@ -47,8 +46,8 @@ local function raise_implementing_state(repo, issue_number, ready, worktree, bra
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
-local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
-  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at)
+local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
+  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
   local open_pr_payload = core.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = {}, remove = {} }, {
     "github-proxy.github_issue_comment_request",
@@ -58,8 +57,8 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
   core.log_raise("implement", ready.proposal_id, "devloop_open_pr", open_pr_payload)
 end
 
-local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at)
-  local request = core.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at)
+local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at, exec_ref)
+  local request = core.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at, exec_ref)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
@@ -205,9 +204,8 @@ local function implementing_mismatch_is_durable(current, proposal_id, state)
 end
 
 local function live_implement_attempt_visible(comments, proposal_id, version)
-  local attempt = core.latest_implement_attempt_fact(comments, proposal_id, version)
-  local started = tonumber(attempt and attempt.started_at)
-  return started ~= nil and (now() - started) < IMPLEMENT_ATTEMPT_LIVE_SECONDS
+  local _, status = core.implement_attempt_exec_live_fact(comments, proposal_id, version)
+  return status == "running"
 end
 
 implemented_branch_head = function(base_head, branch)
@@ -358,11 +356,12 @@ local function prepare_attempt(repo, issue_number, ready, branches, branch, base
   merge_integration_for_implementation(worktree, branches.integration, base_head)
 
   local codex_started_at = now()
-  raise_implementing_state(repo, issue_number, ready, worktree, branch, branches.integration, base_head, attempt, codex_started_at)
-  return worktree, codex_started_at
+  local exec_ref = core.implement_exec_ref(ready.proposal_id, ready.dedup_key)
+  raise_implementing_state(repo, issue_number, ready, worktree, branch, branches.integration, base_head, attempt, codex_started_at, exec_ref)
+  return worktree, codex_started_at, exec_ref
 end
 
-local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, worktree, codex_started_at, attempt, event_ts, event_queue)
+local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, worktree, codex_started_at, exec_ref, attempt, event_ts, event_queue)
   core.log_codex_start("implement", ready.proposal_id, "implement")
   local content_fetch = core.context_fetch_from_bundle({
     dept = "implement",
@@ -375,6 +374,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   local result = spawn_codex_sync({
     prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing, content_fetch),
     worktree = worktree,
+    role = "implement", proposal_id = ready.proposal_id, dedup_key = ready.dedup_key,
   })
 
   if type(result) ~= "table" or result.exit_code ~= 0 then
@@ -391,6 +391,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       detail = stderr,
       attempt = attempt,
       started_at = codex_started_at,
+      exec_ref = exec_ref,
       finished_at = now(),
       base_sha = base_head,
       outcome = "failed: codex-failed",
@@ -421,6 +422,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
         base_sha = base_head,
         attempt = attempt,
         started_at = codex_started_at,
+        exec_ref = exec_ref,
         finished_at = now(),
         outcome = "completed",
       }
@@ -442,6 +444,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       detail = detail,
       attempt = attempt,
       started_at = codex_started_at,
+      exec_ref = exec_ref,
       finished_at = now(),
       base_sha = base_head,
       outcome = "failed: no-changes",
@@ -492,6 +495,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     base_sha = base_head,
     attempt = attempt,
     started_at = codex_started_at,
+    exec_ref = exec_ref,
     finished_at = now(),
     outcome = "completed",
   }
@@ -501,7 +505,7 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
   if outcome == nil then
     return
   end
-  raise_implement_attempt(repo, issue_number, outcome.ready, outcome.attempt, outcome.started_at)
+  raise_implement_attempt(repo, issue_number, outcome.ready, outcome.attempt, outcome.started_at, outcome.exec_ref)
   if outcome.kind == "implementing" then
     raise_implementing(
       repo,
@@ -513,7 +517,8 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
       outcome.base_branch,
       outcome.base_sha,
       outcome.attempt,
-      outcome.started_at
+      outcome.started_at,
+      outcome.exec_ref
     )
     return
   end
@@ -932,7 +937,7 @@ local function process_ready_event(event)
     return
   end
 
-  local worktree, codex_started_at
+  local worktree, codex_started_at, exec_ref
   with_lock(lock_key, function()
     if precheck_implementation_write_gate(
       repo,
@@ -944,7 +949,7 @@ local function process_ready_event(event)
       if attempt_plan.base_head == nil then
         attempt_plan.base_head = prepare_base(attempt_plan.branches)
       end
-      worktree, codex_started_at = prepare_attempt(
+      worktree, codex_started_at, exec_ref = prepare_attempt(
         repo,
         issue_number,
         attempt_plan.marker_ready,
@@ -969,6 +974,7 @@ local function process_ready_event(event)
     attempt_plan.base_head,
     worktree,
     codex_started_at,
+    exec_ref,
     attempt_plan.attempt,
     event.ts,
     event.queue
