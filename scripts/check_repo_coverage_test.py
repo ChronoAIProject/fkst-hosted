@@ -372,6 +372,66 @@ class CoverageRatchetTest(unittest.TestCase):
 
         self.assertEqual(messages, [])
 
+    def test_repository_messages_tolerates_rollup_line_shift_by_content(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "migration").mkdir()
+            (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+            # Rollup PR #1208 failed when the same uncovered ready.lua content
+            # moved from line 71 to line 74 while the allowlist stayed line-keyed.
+            (root / "migration" / "coverage-uncovered.allowlist").write_text(
+                json.dumps({
+                    "file": "packages/github-devloop/core/restart/transitions/ready.lua",
+                    "line": 71,
+                    "normalized_line_hash": "af87eb9432e4a024",
+                    "reason": "baseline",
+                }) + "\n",
+                encoding="utf-8",
+            )
+            artifact = root / "coverage.json"
+            artifact.write_text(
+                json.dumps({
+                    "files": [{
+                        "file": "packages/github-devloop/core/restart/transitions/ready.lua",
+                        "missing_lines": [{
+                            "line": 74,
+                            "normalized_line_hash": "af87eb9432e4a024",
+                            "text": "\"result_effects_complete\"",
+                        }],
+                    }],
+                }),
+                encoding="utf-8",
+            )
+            shifted_key = coverage.CoverageKey(
+                "packages/github-devloop/core/restart/transitions/ready.lua",
+                74,
+                "af87eb9432e4a024",
+            )
+            old_line_keyed_allowlist = {
+                coverage.CoverageKey(
+                    "packages/github-devloop/core/restart/transitions/ready.lua",
+                    71,
+                    "af87eb9432e4a024",
+                )
+            }
+            old_line_keyed_uncovered = {
+                shifted_key: coverage.UncoveredLine(shifted_key, '"result_effects_complete"')
+            }
+            old_line_keyed_messages = [
+                f"{old_line_keyed_uncovered[key].label()} "
+                "is an uncovered production Lua line not in migration/coverage-uncovered.allowlist"
+                for key in sorted(set(old_line_keyed_uncovered) - old_line_keyed_allowlist)
+            ]
+            self.assertEqual(len(old_line_keyed_messages), 1)
+            self.assertIn("not in migration/coverage-uncovered.allowlist", old_line_keyed_messages[0])
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
+                    with mock.patch.object(coverage, "required_flag_at_base", return_value="absent"):
+                        messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [])
+
     def test_repository_messages_warns_for_stale_allowlist_without_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
