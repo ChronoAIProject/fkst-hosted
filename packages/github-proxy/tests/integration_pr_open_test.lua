@@ -276,7 +276,7 @@ return {
     mock_comment_write()
     mock_pr_comment_view("existing pr comment")
     mock_pr_comment_write()
-    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments())
+    mock_pr_open_guard({ "fkst-dev:implementing" }, pr_open_visible_comments(nil, 11))
     mock_label_write()
 
     local result = t.run_department("departments/github_pr_open/main.lua", pr_open_event(), run_opts)
