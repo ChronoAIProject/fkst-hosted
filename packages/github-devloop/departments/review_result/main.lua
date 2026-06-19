@@ -1,8 +1,8 @@
 local core = require("core")
+local saga, pipeline = require("std.saga"), nil
 
-local M = {}
 
-M.spec = {
+local spec = {
   consumes = { "consensus.consensus_reached" },
   produces = {
     "github-proxy.github_issue_label_request",
@@ -233,6 +233,4 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("review_result", pipeline)
-
-return M
+return saga.department(spec, { done = function() return false end, act = pipeline, wrap = core.wrap_pipeline_failure, name = "review_result" })

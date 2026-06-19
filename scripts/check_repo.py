@@ -855,6 +855,7 @@ REQUIRE_RE = re.compile(
 SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']std\.saga["']""")
 SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*[({]")
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
+LOCAL_PIPELINE_DECL_RE = re.compile(r"(?m)^\s*local\s+(?!function\b)(?P<names>[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\b")
 
 
 def cross_package_require_names(
@@ -926,17 +927,17 @@ def check_code_dedup_ratchet(root: Path, violations: list[str]) -> None:
         add(violations, "G-DEDUP", message)
 
 def check_no_permission_control(root: Path, violations: list[str]) -> None: check_repo_perm.check_no_permission_control(root, violations, read_text=read_text, rel=rel)
-
-def is_saga_handler_source(source: str) -> bool:
-    return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
-
+def is_saga_handler_source(source: str) -> bool: return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
+def has_free_form_pipeline_definition(source: str) -> bool:
+    stripped = strip_lua_comments_and_strings(source)
+    return any(not any("pipeline" in [name.strip() for name in local.group("names").split(",")] for local in LOCAL_PIPELINE_DECL_RE.finditer(stripped, 0, match.start())) for match in FREE_FORM_PIPELINE_RE.finditer(stripped))
 def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
     violations: list[str] = []
     for path, source in sorted(sources.items()):
         saga_shaped = is_saga_handler_source(source)
         if saga_shaped and path in allowlist:
             violations.append(f"G10: {path} saga-shaped department remains on saga-handler allowlist; remove it")
-        if saga_shaped and FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None:
+        if saga_shaped and has_free_form_pipeline_definition(source):
             violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
         if not saga_shaped and path not in allowlist:
             violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to std.saga.department or (only for pre-existing) keep listed")

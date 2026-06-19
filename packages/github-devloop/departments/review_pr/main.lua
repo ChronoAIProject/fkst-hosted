@@ -1,8 +1,8 @@
 local core = require("core")
+local saga, pipeline = require("std.saga"), nil
 
-local M = {}
 
-M.spec = {
+local spec = {
   consumes = { "devloop_reviewing" },
   produces = {
     "consensus.proposal",
@@ -158,6 +158,4 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("review_pr", pipeline)
-
-return M
+return saga.department(spec, { done = function() return false end, act = pipeline, wrap = core.wrap_pipeline_failure, name = "review_pr" })
