@@ -194,6 +194,10 @@ local function handle_candidate(github, payload)
     local issue_number = create_bridge_issue(github, repo, pr)
     local canonical_issue_number = reconcile_created_bridge_issue(github, repo, pr_number, managed, issue_number)
     pr = read_pr(github, repo, pr_number)
+    if core.find_pr_bridge_marker(pr.comments, repo, pr_number, managed) ~= nil then
+      action = "created-bridge-marker-already-present"
+      return
+    end
     if not self_only_claim(pr, self_login) then
       action = "created-bridge-marker-deferred-lost-claim"
       return

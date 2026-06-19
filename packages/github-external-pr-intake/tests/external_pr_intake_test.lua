@@ -73,6 +73,9 @@ local function new_fake_github(opts)
     issues = options.issues or {},
     next_issue = options.next_issue or 77,
     hidden_issues_until_create = options.hidden_issues_until_create == true,
+    hidden_issues_until_creates = options.hidden_issues_until_creates or 0,
+    hidden_comments_until_creates = options.hidden_comments_until_creates or 0,
+    issue_create_yield = options.issue_create_yield,
     created_count = 0,
   }
   local handle = { _model = model }
@@ -86,12 +89,23 @@ local function new_fake_github(opts)
     if pr == nil then
       error("fake: unknown PR " .. tostring(pr_number))
     end
+    if model.created_count < model.hidden_comments_until_creates then
+      local hidden = {}
+      for key, value in pairs(pr) do
+        if key ~= "comments" then
+          hidden[key] = value
+        end
+      end
+      hidden.comments = {}
+      return { stdout = pr_json(hidden), stderr = "", exit_code = 0 }
+    end
     return { stdout = pr_json(pr), stderr = "", exit_code = 0 }
   end
   function handle.issue_search(repo, query, fields, timeout)
     table.insert(model.writes, { kind = "issue_search", repo = repo, query = query, fields = fields, timeout = timeout })
     local parts = {}
-    if not model.hidden_issues_until_create or model.created_count > 0 then
+    if (not model.hidden_issues_until_create or model.created_count > 0)
+      and model.created_count >= model.hidden_issues_until_creates then
       for _, issue in ipairs(model.issues or {}) do
         if tostring(issue.body or ""):find(query, 1, true) ~= nil then
           table.insert(parts, issue_json(issue))
@@ -119,13 +133,18 @@ local function new_fake_github(opts)
     local body = file.read(body_file)
     table.insert(model.writes, { kind = "issue_create", repo = repo, title = title, body = body, labels = labels, assignees = assignees, timeout = timeout })
     model.created_count = model.created_count + 1
+    local issue_number = model.next_issue
     table.insert(model.issues, {
-      number = model.next_issue,
+      number = issue_number,
       author_login = "fkst-test-bot",
       state = "OPEN",
       body = body,
     })
-    return { stdout = "https://github.com/" .. tostring(repo) .. "/issues/" .. tostring(model.next_issue) .. "\n", stderr = "", exit_code = 0 }
+    model.next_issue = model.next_issue + 1
+    if type(model.issue_create_yield) == "function" then
+      model.issue_create_yield(model, issue_number)
+    end
+    return { stdout = "https://github.com/" .. tostring(repo) .. "/issues/" .. tostring(issue_number) .. "\n", stderr = "", exit_code = 0 }
   end
   function handle.pr_comment(repo, pr_number, body_file, timeout)
     local body = file.read(body_file)
@@ -245,6 +264,38 @@ local function candidate_event(number)
   }
 end
 
+local function count_open_bridge_issues(github)
+  local count = 0
+  local issue_number = nil
+  for _, issue in ipairs(github._model.issues or {}) do
+    if tostring(issue.state or ""):upper() ~= "CLOSED" then
+      count = count + 1
+      issue_number = issue.number
+    end
+  end
+  return count, issue_number
+end
+
+local function count_pr_bridge_markers(github, pr_number)
+  local count = 0
+  local marker_body = nil
+  for _, comment in ipairs((github._model.prs[pr_number] or {}).comments or {}) do
+    if tostring(comment.body or ""):find('external-pr-bridge:v1 repo="owner/repo" pr="' .. tostring(pr_number) .. '"', 1, true) ~= nil then
+      count = count + 1
+      marker_body = comment.body
+    end
+  end
+  return count, marker_body
+end
+
+local function resume_thread(thread)
+  local ok, value = coroutine.resume(thread)
+  if not ok then
+    error(value, 0)
+  end
+  return value
+end
+
 return {
   test_scan_raises_only_external_candidates = function()
     local github = new_fake_github({
@@ -355,6 +406,136 @@ return {
     t.eq(count_kind(writes, "issue_close"), 1)
     t.eq(write_of_kind(writes, "issue_close").issue_number, 99)
     t.is_true(marker.body:find('issue="88"', 1, true) ~= nil)
+  end,
+
+  test_stale_visibility_reconciles_to_one_open_bridge_issue_and_one_marker = function()
+    local github = new_fake_github({
+      next_issue = 88,
+      hidden_issues_until_creates = 2,
+      hidden_comments_until_creates = 2,
+    })
+    run_pipeline({
+      github = github,
+      event = candidate_event(7),
+    })
+    run_pipeline({
+      github = github,
+      event = candidate_event(7),
+    })
+
+    local open_bridges, open_issue_number = count_open_bridge_issues(github)
+    local trusted_markers, marker_body = count_pr_bridge_markers(github, 7)
+
+    t.eq(count_kind(github._model.writes, "issue_create"), 2)
+    t.eq(count_kind(github._model.writes, "issue_close"), 1)
+    t.eq(open_bridges, 1)
+    t.eq(open_issue_number, 88)
+    t.eq(trusted_markers, 1)
+    t.is_true(tostring(marker_body or ""):find('issue="88"', 1, true) ~= nil)
+  end,
+
+  test_same_bot_concurrent_candidates_serialize_to_one_bridge_issue_and_marker = function()
+    local core = require("core")
+    local github = new_fake_github({
+      next_issue = 88,
+      issue_create_yield = function()
+        coroutine.yield("after-issue-create")
+      end,
+    })
+    local files = {}
+    local raises = {}
+    local locks = {}
+    local lock_busy = false
+    local second_worker_waited = false
+    local function bridge_lock(key, fn)
+      table.insert(locks, key)
+      while lock_busy do
+        second_worker_waited = true
+        coroutine.yield("waiting-for-lock")
+      end
+      lock_busy = true
+      local result = fn()
+      lock_busy = false
+      return result
+    end
+
+    local old_file = file
+    local old_log = log
+    local old_raise = raise
+    local old_with_lock = with_lock
+    local old_pipeline = pipeline
+    local old_read = core.read_env
+    file = {
+      write = function(path, body)
+        files[path] = body
+      end,
+      read = function(path)
+        return files[path] or ""
+      end,
+    }
+    log = {
+      info = function(_message) end,
+      warn = function(_message) end,
+      error = function(_message) end,
+    }
+    raise = function(queue, payload)
+      table.insert(raises, { queue = queue, payload = payload })
+    end
+    with_lock = bridge_lock
+    core.read_env = function(name)
+      return ({
+        FKST_GITHUB_REPO = "owner/repo",
+        FKST_GITHUB_WRITE = "1",
+        FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "fkst-test-bot,other-bot",
+      })[name] or ""
+    end
+
+    local ok, err = pcall(function()
+      local first_module = load_department()
+      local second_module = load_department()
+      local first_dept = first_module.make_department({ github = github })
+      local second_dept = second_module.make_department({ github = github })
+      local first = coroutine.create(function()
+        first_dept.pipeline(candidate_event(7))
+      end)
+      local second = coroutine.create(function()
+        second_dept.pipeline(candidate_event(7))
+      end)
+
+      t.eq(resume_thread(first), "after-issue-create")
+      t.eq(resume_thread(second), "waiting-for-lock")
+      t.eq(coroutine.status(first), "suspended")
+      t.eq(coroutine.status(second), "suspended")
+      resume_thread(first)
+      t.eq(coroutine.status(first), "dead")
+      resume_thread(second)
+      t.eq(coroutine.status(second), "dead")
+    end)
+    core.read_env = old_read
+    pipeline = old_pipeline
+    file = old_file
+    log = old_log
+    raise = old_raise
+    with_lock = old_with_lock
+    if not ok then
+      error(err, 0)
+    end
+
+    local open_bridges, open_issue_number = count_open_bridge_issues(github)
+    local trusted_markers, marker_body = count_pr_bridge_markers(github, 7)
+
+    t.eq(count_kind(github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(github._model.writes, "issue_close"), 0)
+    t.eq(count_kind(github._model.writes, "pr_comment"), 1)
+    t.eq(open_bridges, 1)
+    t.eq(open_issue_number, 88)
+    t.eq(trusted_markers, 1)
+    t.is_true(tostring(marker_body or ""):find('issue="88"', 1, true) ~= nil)
+    t.eq(#locks, 2)
+    t.eq(locks[1], core.bridge_lock_key("owner/repo", 7))
+    t.eq(locks[2], core.bridge_lock_key("owner/repo", 7))
+    t.eq(second_worker_waited, true)
   end,
 
   test_existing_bridge_issue_search_dedups_without_pr_write = function()
