@@ -32,7 +32,7 @@ RATCHET_ALIASES = {
 DEFAULT_RECONCILE_RATCHETS = ("saga-handler", "code-dedup", "forward-direct-raise")
 DEFAULT_LABELS = ("fkst-dev:enabled",)
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
-SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/,-]+$")
 SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
@@ -52,9 +52,13 @@ class InventorySite:
     path: str
     line: int
     detail: str
+    allowlist_entry: str | None = None
 
     def site_ref(self) -> str:
         return f"{self.path}:{self.line}"
+
+    def entry_id(self) -> str:
+        return self.allowlist_entry or f"{self.path}|{self.detail}"
 
 
 @dataclass(frozen=True)
@@ -224,7 +228,7 @@ def load_gh_git_inventory(root: Path, spec: MigrationSpec) -> list[InventorySite
             line = locations.get(head)
             if line is None:
                 raise ValueError(f"allowlist entry is not present in source: {relpath} -> {head}")
-            sites.append(InventorySite(relpath, line, f"command_head: {head}"))
+            sites.append(InventorySite(relpath, line, f"command_head: {head}", f"{relpath}|{head}"))
     return sites
 
 
@@ -240,9 +244,9 @@ def load_saga_inventory(root: Path, spec: MigrationSpec) -> list[InventorySite]:
         masked = strip_lua_comments_and_strings(source)
         match = FREE_FORM_PIPELINE_RE.search(masked)
         if match is None:
-            sites.append(InventorySite(relpath, 1, "stale_allowlist_entry"))
+            sites.append(InventorySite(relpath, 1, "stale_allowlist_entry", relpath))
         else:
-            sites.append(InventorySite(relpath, line_for_offset(masked, match.start()), "free_form_pipeline"))
+            sites.append(InventorySite(relpath, line_for_offset(masked, match.start()), "free_form_pipeline", relpath))
     return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
 
 
@@ -255,7 +259,7 @@ def load_code_dedup_inventory(root: Path, spec: MigrationSpec) -> list[Inventory
             source = read_text(source_path)
             line = line_for_function_basename(source, entry.name)
             detail = f"duplicate_function: {entry.name} {entry.body_hash}"
-            sites.append(InventorySite(relpath, line or 1, detail))
+            sites.append(InventorySite(relpath, line or 1, detail, entry.allowlist_line()))
     return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
 
 
@@ -266,7 +270,7 @@ def load_forward_direct_inventory(root: Path, spec: MigrationSpec) -> list[Inven
         source_path = validated_repo_path(root, site.path)
         source = read_text(source_path)
         line = line_for_function_basename(source, site.function) or 1
-        sites.append(InventorySite(site.path, line, f"forward_direct_raise: {site.function} {site.queue}"))
+        sites.append(InventorySite(site.path, line, f"forward_direct_raise: {site.function} {site.queue}", site.allowlist_line()))
     return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
 
 
@@ -341,9 +345,15 @@ def site_records(inventory: list[InventorySite], slice_size: int) -> list[dict[s
             "line": site.line,
             "detail": site.detail,
             "site_ref": site.site_ref(),
+            "entry_key": entry_key(site),
         }
         for site in selected_sites(inventory, slice_size)
     ]
+
+
+def entry_key(site: InventorySite) -> str:
+    encoded = site.entry_id().encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:16]
 
 
 def sites_fingerprint(sites: list[dict[str, object]]) -> str:
@@ -422,6 +432,7 @@ def issue_created_marker(dedup_key: str, issue_number: int | None) -> str:
 
 
 def ratchet_slice_marker(doc: dict[str, object]) -> str:
+    entry_keys = ",".join(str(site.get("entry_key")) for site in doc["sites"] if site.get("entry_key") is not None)
     return (
         '<!-- fkst:ratchet-slice:v1'
         f' schema="{ensure_marker_value(str(doc["schema"]))}"'
@@ -429,12 +440,56 @@ def ratchet_slice_marker(doc: dict[str, object]) -> str:
         f' parent="{int(doc["parent_issue"])}"'
         f' dedup="{ensure_marker_value(str(doc["dedup_key"]))}"'
         f' fingerprint="{ensure_marker_value(str(doc["sites_fingerprint"]))}"'
+        f' entries="{ensure_marker_value(entry_keys)}"'
         " -->"
     )
 
 
 def ratchet_slice_search_query(ratchet: str) -> str:
     return f'fkst:ratchet-slice:v1 ratchet="{ensure_marker_value(ratchet)}"'
+
+
+def selected_entry_keys(doc: dict[str, object]) -> set[str]:
+    keys: set[str] = set()
+    sites = doc.get("sites")
+    if not isinstance(sites, list):
+        return keys
+    for site in sites:
+        if isinstance(site, dict) and site.get("entry_key") is not None:
+            keys.add(str(site["entry_key"]))
+    return keys
+
+
+def ratchet_slice_markers(text: str) -> list[str]:
+    return re.findall(r"<!-- fkst:ratchet-slice:v1 .*?-->", text)
+
+
+def marker_attribute(marker: str, name: str) -> str | None:
+    match = re.search(r'\b' + re.escape(name) + r'="([^"]*)"', marker)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def marker_entry_keys(marker: str) -> set[str] | None:
+    entries = marker_attribute(marker, "entries")
+    if entries is None:
+        return None
+    if entries == "":
+        return set()
+    return {entry for entry in entries.split(",") if entry}
+
+
+def slice_overlaps_entry(open_issue: dict[str, Any], ratchet: str, entry_keys: set[str]) -> bool:
+    for marker in ratchet_slice_markers(record_body(open_issue)):
+        if marker_attribute(marker, "ratchet") != ratchet:
+            continue
+        open_keys = marker_entry_keys(marker)
+        if open_keys is None:
+            return True
+        if entry_keys & open_keys:
+            return True
+    return False
 
 
 def issue_author_login(issue: dict[str, Any]) -> str | None:
@@ -573,12 +628,14 @@ def reconcile_ratchet(
         return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
 
     open_candidates = client.issue_search(repo, "open", ratchet_slice_search_query(spec.ratchet))
+    entry_keys = selected_entry_keys(doc)
     open_slices = [
         issue
         for issue in open_candidates
         if is_trusted_record(issue, bot_login)
         and "fkst:ratchet-slice:v1" in record_body(issue)
         and f'ratchet="{spec.ratchet}"' in record_body(issue)
+        and slice_overlaps_entry(issue, spec.ratchet, entry_keys)
     ]
     if open_slices:
         return ReconcileResult(
