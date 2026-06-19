@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -63,11 +65,17 @@ class CoverageRatchetTest(unittest.TestCase):
 
         self.assertEqual(coverage.ratchet_messages(uncovered, {self.key()}), [])
 
-    def test_stale_allowlist_entry_forces_prune(self) -> None:
-        messages = coverage.ratchet_messages({}, {self.key()})
+    def test_stale_allowlist_entry_warns_not_fails(self) -> None:
+        # A covered-but-allowlisted line is a prune candidate, not a hard failure: coverage of
+        # data-dependent branches is not reproducible across runs/producers, so an exact
+        # allowlist == uncovered snapshot would be unconvergeable. Monotonic shrink-only is
+        # enforced separately by the base-allowlist comparison.
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            messages = coverage.ratchet_messages({}, {self.key()})
 
-        self.assertEqual(len(messages), 1)
-        self.assertIn("is no longer uncovered; prune the stale entry", messages[0])
+        self.assertEqual(messages, [])
+        self.assertIn("is no longer uncovered; consider pruning", err.getvalue())
 
     def test_allowlist_growth_relative_to_base_fails(self) -> None:
         old_key = self.key(line=1, digest="11111111")
@@ -77,6 +85,17 @@ class CoverageRatchetTest(unittest.TestCase):
         messages = coverage.ratchet_messages({}, current, base, "integration")
 
         self.assertIn("grows migration/coverage-uncovered.allowlist relative to integration", messages[-1])
+
+    def test_data_dependent_line_covered_this_run_does_not_fail(self) -> None:
+        # The #1124 unconvergeability case: a data-dependent branch already in both the allowlist
+        # and the base reads "covered" in this run. It must NOT fail (it is neither new uncovered
+        # nor allowlist growth) so a non-reproducibly-covered line cannot wedge the ratchet.
+        key = self.key()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            messages = coverage.ratchet_messages({}, {key}, {key}, "integration")
+
+        self.assertEqual(messages, [])
 
     def test_engine_file_metadata_is_authoritative_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
