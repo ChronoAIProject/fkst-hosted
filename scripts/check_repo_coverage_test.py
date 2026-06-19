@@ -383,6 +383,23 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertEqual(messages, [])
         self.assertIn("1 uncovered line(s) would block once enabled", "".join(call.args[0] for call in stderr.write.call_args_list))
 
+    def test_repository_messages_reports_empty_canonical_artifact_as_missing_line_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "coverage.json"
+            artifact.write_text("{}", encoding="utf-8")
+
+            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
+                with mock.patch.object(coverage, "selected_base_ref", return_value=None):
+                    with mock.patch("sys.stderr") as stderr:
+                        messages = coverage.repository_messages(root)
+
+        self.assertEqual(messages, [])
+        self.assertIn(
+            "coverage artifact would not parse once enabled: coverage artifact has no covered-line metadata",
+            "".join(call.args[0] for call in stderr.write.call_args_list),
+        )
+
     def test_repository_messages_required_flag_enables_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
