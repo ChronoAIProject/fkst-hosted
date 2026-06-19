@@ -278,7 +278,6 @@ local function run_driver(opts)
     FKST_GITHUB_WRITE = "1",
     FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
   }
-  local old_core = package.loaded.core
   local core = require("core")
   local old_read = core.read_env
   core.read_env = function(name)
@@ -295,7 +294,6 @@ local function run_driver(opts)
     })
   end)
   core.read_env = old_read
-  package.loaded.core = old_core
   exec_argv = old_exec_argv
   file = old_file
   log = old_log

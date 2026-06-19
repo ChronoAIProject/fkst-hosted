@@ -25,7 +25,7 @@ end
 local function bot_login()
   local login = core._trim(read_env("FKST_GITHUB_BOT_LOGIN") or "")
   if write_enabled() and login == "" then
-    error("github-devloop: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
+    error("github-ratchet-migration-slicer: bot-login-required: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
   end
   return login
 end
@@ -73,7 +73,7 @@ end
 local function decode_json_object(stdout, context)
   local ok, decoded = pcall(json.decode, stdout or "")
   if not ok or type(decoded) ~= "table" then
-    error("github-devloop: invalid ratchet migration " .. tostring(context) .. " JSON")
+    error("github-ratchet-migration-slicer: invalid-ratchet-json: " .. tostring(context))
   end
   return decoded
 end
@@ -81,7 +81,7 @@ end
 local function decode_json_list(stdout)
   local ok, decoded = pcall(json.decode, stdout or "")
   if not ok or type(decoded) ~= "table" then
-    error("github-devloop: invalid GitHub issue search JSON")
+    error("github-ratchet-migration-slicer: invalid-issue-search-json: GitHub issue search")
   end
   return decoded
 end
@@ -97,14 +97,14 @@ local function plan_for(ratchet)
     timeout = 120,
   })
   if type(result) ~= "table" or result.exit_code ~= 0 then
-    error("github-devloop: ratchet migration slicer failed for " .. tostring(ratchet.ratchet))
+    error("github-ratchet-migration-slicer: plan-command-failed: " .. tostring(ratchet.ratchet))
   end
   local plan = decode_json_object(result.stdout, "plan")
   if plan.schema_version ~= "fkst.ratchet-slice.v1" then
-    error("github-devloop: unsupported ratchet migration plan schema")
+    error("github-ratchet-migration-slicer: unsupported-plan-schema: " .. tostring(plan.schema_version))
   end
   if plan.ratchet ~= ratchet.ratchet or plan.allowlist_path ~= ratchet.allowlist_path then
-    error("github-devloop: ratchet migration plan/config mismatch")
+    error("github-ratchet-migration-slicer: plan-config-mismatch: " .. tostring(ratchet.ratchet))
   end
   return plan
 end
@@ -163,7 +163,7 @@ end
 local function require_issue_number(issue_number, context)
   local number = tonumber(issue_number)
   if number == nil then
-    error("github-devloop: missing issue number for " .. tostring(context))
+    error("github-ratchet-migration-slicer: missing-issue-number: " .. tostring(context))
   end
   return number
 end
@@ -420,7 +420,7 @@ local function reconcile_one(github, git, repo, ratchet)
     return "would-close-parent"
   end
   if plan.status ~= "slice_available" or type(plan.next_slice) ~= "table" then
-    error("github-devloop: invalid ratchet migration plan status")
+    error("github-ratchet-migration-slicer: invalid-plan-status: " .. tostring(plan.status))
   end
 
   local slice = plan.next_slice
@@ -478,7 +478,7 @@ local function make_department(ports)
     end
     local repo = read_env("FKST_GITHUB_REPO")
     if repo == nil or repo == "" then
-      error("github-devloop: FKST_GITHUB_REPO is required")
+      error("github-ratchet-migration-slicer: repo-required: FKST_GITHUB_REPO is required")
     end
     local selected = event and event.payload and event.payload.ratchet
     for _, ratchet in ipairs(ratchets) do
