@@ -128,6 +128,13 @@ local function assert_clean_open_pr_skip(result)
   t.eq(count_calls("git -C"), 0)
 end
 
+local function assert_missing_implementing_fact_defer(result)
+  t.eq(result.exit_code, 0)
+  t.eq(#result.raises, 0)
+  t.eq(count_calls("show-ref --verify --quiet"), 0)
+  t.eq(count_calls("rev-parse --verify"), 0)
+end
+
 return {
   test_open_pr_direct_kickoff_raises_pr_open_request = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -291,18 +298,81 @@ return {
     assert_clean_open_pr_skip(result)
   end,
 
-  test_open_pr_retries_when_implementing_fact_marker_missing = function()
+  test_open_pr_poll_defers_when_implementing_fact_marker_missing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
     })
 
-    local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-implementing-fact"))
+    local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-poll-missing-implementing-fact"))
 
-    t.eq(result.exit_code, 1)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("show-ref --verify --quiet"), 0)
-    t.eq(count_calls("rev-parse --verify"), 0)
+    assert_missing_implementing_fact_defer(result)
+  end,
+
+  test_open_pr_direct_defers_when_implementing_fact_marker_missing = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local event = core.build_devloop_open_pr_payload("owner/repo", 42, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      dedup_key = impl_version,
+      source_ref = source_ref(),
+    }, "devloop-owner-repo-42-01HY", "abc123", "dev")
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+    })
+
+    local result = run_open_pr(event, opts("open-pr-direct-missing-implementing-fact"))
+
+    assert_missing_implementing_fact_defer(result)
+  end,
+
+  test_open_pr_poll_recovers_after_direct_missing_fact_defer = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local direct_event = core.build_devloop_open_pr_payload("owner/repo", 42, {
+      proposal_id = proposal_id,
+      dedup_key = impl_version,
+      source_ref = source_ref(),
+    }, "devloop-owner-repo-42-01HY", "abc123", "dev")
+    local run_opts = opts("open-pr-direct-defer-then-poll-recover", {
+      FKST_GITHUB_WRITE = "1",
+    })
+
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker(proposal_id, "implementing", impl_version),
+    }, {
+      updated_at = "2026-06-03T01:02:03Z",
+      times = 1,
+    })
+    local deferred = run_open_pr(direct_event, run_opts)
+
+    assert_missing_implementing_fact_defer(deferred)
+
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker(proposal_id, "implementing", impl_version),
+      core.implementing_marker(proposal_id, impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
+    }, {
+      updated_at = "2026-06-03T01:02:34Z",
+    })
+    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
+    mock_bot_env()
+    mock_write_env("1")
+    mock_write_env("1")
+    local recovered = run_open_pr(issue({
+      labels = { "fkst-dev:implementing" },
+      updated_at = "2026-06-03T01:02:34Z",
+      dedup_key = "owner/repo#issue#42@2026-06-03T01:02:34Z",
+    }), run_opts)
+
+    t.eq(recovered.exit_code, 0)
+    t.eq(#recovered.raises, 1)
+    local pr_raise = find_raise(recovered.raises, "github-proxy.github_pr_open_request")
+    t.eq(pr_raise.payload.schema, "github-proxy.pr-open.v1")
+    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
+    t.eq(pr_raise.payload.head_sha, "abc123")
+    t.eq(pr_raise.payload.impl_version, impl_version)
+    t.eq(count_calls("show-ref --verify --quiet"), 1)
+    t.eq(count_calls("rev-parse --verify"), 1)
+    t.eq(count_calls("merge-base --is-ancestor"), 0)
   end,
 
   test_observe_claim_acquire_read_bypasses_same_validator_cache = function()

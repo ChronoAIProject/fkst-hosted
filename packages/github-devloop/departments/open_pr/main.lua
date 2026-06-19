@@ -117,8 +117,8 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local fact = core.implementing_fact(current_issue.comments, proposal_id, state.version)
     if fact == nil then
-      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "retry-pending(implementing fact marker not visible)", "branch fact marker missing")
-      error("github-devloop: implementing branch fact not visible for open_pr; retrying")
+      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "defer(implementing-branch-not-yet-present)", "branch fact marker missing; poll will retry")
+      return
     end
     if input.source == "direct" then
       if tostring(input.version or "") ~= tostring(state.version or "")
