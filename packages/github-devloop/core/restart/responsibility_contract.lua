@@ -451,7 +451,7 @@ local function validate_row(row, seen, all_rows, errors)
   validate_kind_fanout(row, signature, actual_edges, errors)
   validate_phase_monotonicity(row, signature, actual_edges, errors)
   validate_generation_entry_policy(row, actual_edges, all_rows, errors)
-  validate_blocked_by_partition_invariant(row, signature, errors)
+  validate_blocked_by_partition_invariant(row, signature, errors); if signature.state_kind == "worker" then local contract = row.span_contract; if type(contract) ~= "table" then table.insert(errors, state .. ": worker row must declare span_contract") else for _, field in ipairs({ "department", "durable_start_marker", "spawn_predecessor" }) do if not non_empty_string(contract[field]) then table.insert(errors, state .. ": span_contract." .. field .. " must be declared") end end; if tostring(contract.durable_start_marker or ""):find(":v1", 1, true) == nil then table.insert(errors, state .. ": span_contract.durable_start_marker must name a durable marker family") end; if contract.spawn_function ~= nil and not non_empty_string(contract.spawn_function) then table.insert(errors, state .. ": span_contract.spawn_function must be a non-empty string when declared") end end end
   validate_unique_signature(row, signature, seen, errors)
 end
 

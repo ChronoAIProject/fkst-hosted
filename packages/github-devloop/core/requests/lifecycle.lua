@@ -179,7 +179,7 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("implementation_started")
+    body = M.comment_string("implementation_output_published")
       .. "\n\n" .. M.comment_string("worktree_label") .. tostring(worktree)
       .. "\n" .. M.comment_string("branch_label") .. tostring(branch)
       .. "\n" .. M.comment_string("head_label") .. tostring(head_sha)
