@@ -268,7 +268,7 @@ return {
     local expected = {
       thinking = { mode = "live-defer", family = "converge-round", max_age = 120, budget = 150 },
       dependency_wait = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 525600 },
-      ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 45 },
+      ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 120 },
       implementing = { mode = "live-defer", family = "implement-attempt", max_age = 120, budget = 45 },
       ["pr-open"] = { mode = "row-budget-bounds-receiver", receiver = 0, budget = 30 },
       reviewing = { mode = "live-defer", family = "review-converge-round", max_age = 120, budget = 150 },

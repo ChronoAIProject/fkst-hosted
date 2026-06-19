@@ -168,7 +168,7 @@ return {
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
       render_comment(core.state_marker(proposal_id, "blocked", "v1"), "mallory", "2026-06-03T01:01:00Z"),
-      render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:50:00Z"),
+      render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T03:10:00Z"),
     })
 
     local logs = table.concat(gap_logs(), "\n")
@@ -176,8 +176,8 @@ return {
     t.is_true(logs:find("tag=GAP_EDGE", 1, true) ~= nil)
     t.is_true(logs:find("proposal_id=" .. proposal_id, 1, true) ~= nil)
     t.is_true(logs:find("gap_edge=ready->implementing", 1, true) ~= nil)
-    t.is_true(logs:find("gap_seconds=3000", 1, true) ~= nil)
-    t.is_true(logs:find("budget_seconds=2700", 1, true) ~= nil)
+    t.is_true(logs:find("gap_seconds=7800", 1, true) ~= nil)
+    t.is_true(logs:find("budget_seconds=7200", 1, true) ~= nil)
     t.is_true(logs:find("budget_status=over-budget", 1, true) ~= nil)
     t.is_true(logs:find("wait_class=visibility-retry", 1, true) ~= nil)
     t.is_true(logs:find("ready->blocked", 1, true) == nil)
@@ -210,7 +210,7 @@ return {
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_42, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
-      render_comment(core.state_marker(proposal_42, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:50:00Z"),
+      render_comment(core.state_marker(proposal_42, "implementing", "v1"), "fkst-test-bot", "2026-06-03T03:10:00Z"),
     }, 42)
     mock_issue_view({
       render_comment(core.state_marker(proposal_43, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
@@ -220,10 +220,10 @@ return {
     local logs = table.concat(gap_logs(), "\n")
 
     t.is_true(logs:find("## State-gap latency", 1, true) ~= nil)
-    t.is_true(logs:find("ready->implementing: count 2, P50 10m 0s, P95 50m 0s, max 50m 0s, budget 45m 0s, near 0, over 1", 1, true) ~= nil)
+    t.is_true(logs:find("ready->implementing: count 2, P50 10m 0s, P95 2h 10m, max 2h 10m, budget 2h 0m, near 0, over 1", 1, true) ~= nil)
     t.is_true(logs:find("classes visibility-retry 2", 1, true) ~= nil)
     t.is_true(logs:find("handoff unknown 2", 1, true) ~= nil)
-    t.is_true(logs:find("worst #42 50m 0s, #43 10m 0s", 1, true) ~= nil)
+    t.is_true(logs:find("worst #42 2h 10m, #43 10m 0s", 1, true) ~= nil)
   end,
 
   test_state_gap_stream_spans_issue_and_pr_marker_comments = function()
