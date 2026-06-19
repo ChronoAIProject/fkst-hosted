@@ -73,6 +73,15 @@ jobs:
       - name: Run repository checks and package tests
         env:
           BIN: ${{ github.workspace }}/fkst-substrate/target/debug/fkst-framework
+          FKST_LUA_COVERAGE_OUTPUT: ${{ github.workspace }}/.fkst/run/lua-coverage/coverage.json
         run: |
           test -x "$BIN"
           scripts/run.sh test
+
+      - name: Upload Lua coverage artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lua-coverage
+          path: .fkst/run/lua-coverage/coverage.json
+          if-no-files-found: error
