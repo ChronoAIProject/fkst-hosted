@@ -243,6 +243,31 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             body,
         )
 
+    def test_saga_handler_child_issue_defines_single_flight_dedup_contract(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [
+            slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline"),
+        ]
+
+        body = slicer.render_child_issue(spec, inventory, 1)
+
+        self.assertIn("## Allowlist Contract", body)
+        self.assertIn(
+            "- A `saga-handler` slice is single-flight by stable `dedup_key`: "
+            "at most one live issue or PR surface may own the same `dedup_key`.",
+            body,
+        )
+        self.assertIn(
+            "- Before opening or implementing a duplicate slice, prove the prior surface is stale, cancelled, invalid, "
+            "or explicitly waived as a duplicate run.",
+            body,
+        )
+        self.assertIn(
+            "- If the same `dedup_key` is already live without that proof, "
+            "treat the slice as in-flight and make no source changes.",
+            body,
+        )
+
     def test_json_schema_carries_stable_dedup_key_and_sites(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [
