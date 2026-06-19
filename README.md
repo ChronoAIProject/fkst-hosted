@@ -113,6 +113,9 @@ Flat packages:
 
 - `github-proxy`: bridges GitHub issue and PR facts into fkst events, and handles dry-run-by-default
   outbound GitHub comments, labels, PR creation, and related requests.
+- `github-external-pr-intake`: detects third-party PRs and materializes exactly one normal
+  devloop-ready bridge issue per PR, leaving implementation, review, and merge authority in
+  `github-devloop`.
 - `consensus`: source-agnostic multi-angle `codex` consensus over abstract `proposal` events,
   producing `consensus_reached` or bounded `consensus_converge` events.
 
