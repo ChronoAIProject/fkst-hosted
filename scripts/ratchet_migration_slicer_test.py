@@ -498,6 +498,74 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
                 f"duplicate_function: repeated {entry.body_hash}",
             ])
 
+    def test_code_dedup_child_issue_defines_group_owned_allowlist_contract(self) -> None:
+        spec = slicer.specs()["code-dedup"]
+        entry = "safe_segment 355dd98be98f94eb14fba5095f24ee8c packages/a.lua packages/b.lua"
+        inventory = [
+            slicer.InventorySite("packages/a.lua", 10, "duplicate_function: safe_segment 355dd98be98f94eb14fba5095f24ee8c", entry),
+            slicer.InventorySite("packages/b.lua", 20, "duplicate_function: safe_segment 355dd98be98f94eb14fba5095f24ee8c", entry),
+        ]
+
+        body = slicer.render_child_issue(spec, inventory, 2)
+
+        self.assertIn("## Allowlist Contract", body)
+        self.assertIn(
+            "- `migration/code-dedup.allowlist` is a shrink-only debt ledger, not an alternate duplicate inventory.",
+            body,
+        )
+        self.assertIn(
+            "- The authoritative current inventory is derived from `check_repo_dedup.duplicate_groups`; "
+            "an allowlist line is retained only while that exact duplicate group still exists.",
+            body,
+        )
+        self.assertIn(
+            "- A `code-dedup` allowlist line is owned as one group by its function name, body hash, and listed file set.",
+            body,
+        )
+        self.assertIn(
+            "- After a selected group is migrated so the exact duplicate group no longer exists, remove the whole matching allowlist line; "
+            "do not preserve a reduced singleton entry such as `safe_segment` as a live allowlist exception.",
+            body,
+        )
+        self.assertIn(
+            "- This spec-only slice explicitly waives a migration-slicer recurrence-class fix; "
+            "any broader slicer deduplication change must be tracked separately.",
+            body,
+        )
+
+    def test_code_dedup_stale_singleton_allowlist_entry_is_not_live_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "packages/example/a.lua"
+            second = root / "packages/example/b.lua"
+            first.parent.mkdir(parents=True)
+            first.write_text(
+                textwrap.dedent(
+                    """\
+                    local function safe_segment(value)
+                      return tostring(value or ""):gsub("[^%w._/-]", "-")
+                    end
+                    """
+                ),
+                encoding="utf-8",
+            )
+            second.write_text("return {}\n", encoding="utf-8")
+            migration = root / "migration"
+            migration.mkdir()
+            (migration / "code-dedup.allowlist").write_text(
+                "safe_segment 355dd98be98f94eb14fba5095f24ee8c packages/example/a.lua packages/example/b.lua\n",
+                encoding="utf-8",
+            )
+
+            source_map = slicer.code_dedup.sources(root, root / "packages", slicer.read_text, slicer.repo_rel)
+            allowlist = slicer.code_dedup.load_allowlist(migration / "code-dedup.allowlist")
+            messages = slicer.code_dedup.ratchet_messages(source_map, allowlist, base_allowlist=allowlist)
+
+        self.assertEqual(len(messages), 1)
+        self.assertIn("safe_segment", messages[0])
+        self.assertIn("no longer matches a duplicate group", messages[0])
+        self.assertIn("prune the stale entry", messages[0])
+
     def test_forward_direct_allowlist_maps_sites(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
