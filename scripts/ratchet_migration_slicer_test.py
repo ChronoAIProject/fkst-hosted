@@ -268,6 +268,32 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             body,
         )
 
+    def test_current_repo_d297889b91a40d50_slice_is_already_converged(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = slicer.load_saga_inventory(REPO_ROOT, spec)
+        live_paths = {site.path for site in inventory}
+        expected_paths = {
+            "packages/github-devloop/departments/pr_freshness_scan/main.lua",
+            "packages/github-devloop/departments/reconcile/main.lua",
+            "packages/github-devloop/departments/review_loop/main.lua",
+        }
+        allowlist_entries = {
+            line.strip()
+            for line in (REPO_ROOT / spec.allowlist_path).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+        expected_entry_keys = {"882cacf645554fa3", "9b3a04ee05f242ad", "6f7eb648b89563e5"}
+        computed_entry_keys = {slicer.entry_key(slicer.InventorySite(path, 1, "already_migrated", path)) for path in expected_paths}
+
+        self.assertTrue(expected_paths.isdisjoint(live_paths))
+        self.assertTrue(expected_paths.isdisjoint(allowlist_entries))
+        self.assertEqual(computed_entry_keys, expected_entry_keys)
+        self.assertTrue(expected_entry_keys.isdisjoint(allowlist_entries))
+        for path in expected_paths:
+            source = (REPO_ROOT / path).read_text(encoding="utf-8")
+            self.assertIn("return saga.department(spec,", source)
+            self.assertIsNone(slicer.FREE_FORM_PIPELINE_RE.search(slicer.strip_lua_comments_and_strings(source)))
+
     def test_json_schema_carries_stable_dedup_key_and_sites(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [
