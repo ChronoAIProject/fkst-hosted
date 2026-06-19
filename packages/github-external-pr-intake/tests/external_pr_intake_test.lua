@@ -16,6 +16,55 @@ local function json_string(value)
   return require("std.strings").json_string(value)
 end
 
+local function shell_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function mkdir_p(path)
+  local ok = os.execute("mkdir -p " .. shell_quote(path))
+  if not (ok == true or ok == 0) then
+    error("github-external-pr-intake: mkdir failed for " .. tostring(path))
+  end
+end
+
+local function parent_dir(path)
+  return tostring(path):match("^(.*)/[^/]+$") or "."
+end
+
+local function write_disk_file(path, body)
+  local handle = assert(io.open(path, "w"))
+  handle:write(body)
+  handle:close()
+end
+
+local function read_disk_file(path)
+  local handle = assert(io.open(path, "r"))
+  local body = handle:read("*a")
+  handle:close()
+  return body
+end
+
+local function wait_for_file(path, attempts)
+  for _ = 1, attempts or 100 do
+    if file.exists(path) then
+      return true
+    end
+    os.execute("sleep 0.02")
+  end
+  return false
+end
+
+local function start_python_background(script, args)
+  local parts = { "python3", shell_quote(script) }
+  for _, arg in ipairs(args or {}) do
+    table.insert(parts, shell_quote(arg))
+  end
+  local ok = os.execute(table.concat(parts, " ") .. " &")
+  if not (ok == true or ok == 0) then
+    error("github-external-pr-intake: failed to start python helper")
+  end
+end
+
 local function pr_json(pr)
   local comments = {}
   for _, comment in ipairs(pr.comments or {}) do
@@ -297,6 +346,79 @@ local function resume_thread(thread)
 end
 
 return {
+  test_bridge_lock_key_uses_production_cross_process_flock = function()
+    local core = require("core")
+    local runtime_root = os.getenv("FKST_RUNTIME_ROOT")
+    t.is_true(runtime_root ~= nil and runtime_root ~= "")
+
+    local lock_key = core.bridge_lock_key("owner/repo", 7)
+    local lock_path = runtime_root .. "/locks/" .. lock_key .. "/=lock"
+    local scratch = runtime_root .. "/external-pr-intake-lock-proof-" .. tostring(now())
+    mkdir_p(parent_dir(lock_path))
+    mkdir_p(scratch)
+
+    local ready_path = scratch .. "/ready"
+    local release_path = scratch .. "/release"
+    local released_path = scratch .. "/released"
+    local entered_path = scratch .. "/entered"
+    local locker_script = scratch .. "/hold_lock.py"
+    local releaser_script = scratch .. "/release_lock.py"
+
+    write_disk_file(locker_script, [[
+import fcntl
+import os
+import pathlib
+import sys
+import time
+
+lock_path, ready_path, release_path, released_path = sys.argv[1:5]
+pathlib.Path(os.path.dirname(lock_path)).mkdir(parents=True, exist_ok=True)
+with open(lock_path, "a+", encoding="utf-8") as handle:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    pathlib.Path(ready_path).write_text("ready\n", encoding="utf-8")
+    deadline = time.time() + 10.0
+    while not os.path.exists(release_path):
+        if time.time() > deadline:
+            pathlib.Path(released_path).write_text("timeout\n", encoding="utf-8")
+            raise SystemExit(2)
+        time.sleep(0.02)
+    pathlib.Path(released_path).write_text("released\n", encoding="utf-8")
+]])
+    write_disk_file(releaser_script, [[
+import pathlib
+import sys
+import time
+
+release_path = sys.argv[1]
+time.sleep(0.2)
+pathlib.Path(release_path).write_text("release\n", encoding="utf-8")
+]])
+
+    local ok, err = pcall(function()
+      start_python_background(locker_script, { lock_path, ready_path, release_path, released_path })
+      if not wait_for_file(ready_path, 150) then
+        error("github-external-pr-intake: lock helper did not acquire the bridge lock")
+      end
+      start_python_background(releaser_script, { release_path })
+
+      local entered_after_release = false
+      with_lock(lock_key, function()
+        entered_after_release = file.exists(released_path)
+        file.write(entered_path, tostring(entered_after_release))
+      end)
+
+      t.eq(read_disk_file(released_path), "released\n")
+      t.eq(read_disk_file(entered_path), "true")
+      t.is_true(entered_after_release)
+    end)
+
+    write_disk_file(release_path, "release\n")
+    os.execute("sleep 0.05")
+    if not ok then
+      error(err, 0)
+    end
+  end,
+
   test_scan_raises_only_external_candidates = function()
     local github = new_fake_github({
       list = {
