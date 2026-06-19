@@ -44,6 +44,7 @@ class MigrationSpec:
     allowlist_path: str
     title: str
     reference_shape: str
+    allowlist_contract: tuple[str, ...]
     inventory_loader: Callable[[Path, "MigrationSpec"], list["InventorySite"]]
 
 
@@ -297,6 +298,7 @@ def specs() -> dict[str, MigrationSpec]:
             allowlist_path="migration/gh-git-adapter.allowlist",
             title="gh/git ports adapter allowlist migration slice",
             reference_shape="Migrate raw gh/git command construction behind std.github/std.git adapter operations.",
+            allowlist_contract=(),
             inventory_loader=load_gh_git_inventory,
         ),
         "saga-handler": MigrationSpec(
@@ -306,6 +308,7 @@ def specs() -> dict[str, MigrationSpec]:
             allowlist_path="migration/saga-handler.allowlist",
             title="saga handler allowlist migration slice",
             reference_shape="Use the existing std.saga.department(spec, handlers) shape from migrated departments.",
+            allowlist_contract=(),
             inventory_loader=load_saga_inventory,
         ),
         "code-dedup": MigrationSpec(
@@ -315,6 +318,13 @@ def specs() -> dict[str, MigrationSpec]:
             allowlist_path="migration/code-dedup.allowlist",
             title="code dedup allowlist migration slice",
             reference_shape="Hoist the byte-identical production Lua function body to an existing shared module such as std.*, then call the shared helper from each site.",
+            allowlist_contract=(
+                "`migration/code-dedup.allowlist` is a shrink-only debt ledger, not an alternate duplicate inventory.",
+                "The authoritative current inventory is derived from `check_repo_dedup.duplicate_groups`; an allowlist line is retained only while that exact duplicate group still exists.",
+                "A `code-dedup` allowlist line is owned as one group by its function name, body hash, and listed file set.",
+                "After a selected group is migrated so the exact duplicate group no longer exists, remove the whole matching allowlist line; do not preserve a reduced singleton entry such as `safe_segment` as a live allowlist exception.",
+                "This spec-only slice explicitly waives a migration-slicer recurrence-class fix; any broader slicer deduplication change must be tracked separately.",
+            ),
             inventory_loader=load_code_dedup_inventory,
         ),
         "forward-direct-raise": MigrationSpec(
@@ -324,6 +334,7 @@ def specs() -> dict[str, MigrationSpec]:
             allowlist_path="migration/forward-direct-raise.allowlist",
             title="forward-direct raise allowlist migration slice",
             reference_shape="Route marker-gated forward progress through visible write-confirm facts, or declare the raise as a redrive from visible marker facts.",
+            allowlist_contract=(),
             inventory_loader=load_forward_direct_inventory,
         ),
     }
@@ -692,8 +703,12 @@ def render_child_issue(spec: MigrationSpec, inventory: list[InventorySite], slic
         "## Reference Shape",
         spec.reference_shape,
         "",
-        "## Exact Sites",
     ]
+    if spec.allowlist_contract:
+        lines.extend(["## Allowlist Contract"])
+        lines.extend(f"- {line}" for line in spec.allowlist_contract)
+        lines.append("")
+    lines.append("## Exact Sites")
     if selected:
         for site in selected:
             lines.append(f"- {markdown_code(site.site_ref())} ({markdown_code(site.detail)})")
