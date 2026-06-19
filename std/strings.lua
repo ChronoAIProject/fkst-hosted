@@ -5,6 +5,13 @@ function S.trim(value)
   return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+function S.strip_bot_login_suffix(login)
+  if login == nil then
+    return nil
+  end
+  return (tostring(login):gsub("%[bot%]$", ""))
+end
+
 function S.split_repo(repo)
   local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
   if owner == nil or owner == "" or name == nil or name == "" then
