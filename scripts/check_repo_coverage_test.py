@@ -377,6 +377,8 @@ class CoverageRatchetTest(unittest.TestCase):
             root = Path(tmp)
             (root / "migration").mkdir()
             (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
+            # Rollup PR #1208 failed when the same uncovered ready.lua content
+            # moved from line 71 to line 74 while the allowlist stayed line-keyed.
             (root / "migration" / "coverage-uncovered.allowlist").write_text(
                 json.dumps({
                     "file": "packages/github-devloop/core/restart/transitions/ready.lua",
@@ -392,9 +394,9 @@ class CoverageRatchetTest(unittest.TestCase):
                     "files": [{
                         "file": "packages/github-devloop/core/restart/transitions/ready.lua",
                         "missing_lines": [{
-                            "line": 68,
+                            "line": 74,
                             "normalized_line_hash": "af87eb9432e4a024",
-                            "text": "effects = effect(",
+                            "text": "\"result_effects_complete\"",
                         }],
                     }],
                 }),
