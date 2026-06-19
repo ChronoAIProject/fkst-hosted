@@ -351,26 +351,63 @@ end
 
 return {
   test_existing_intake_surfaces_cannot_schedule_external_pr_bridge = function()
+    local proxy_raiser = read_disk_file(sibling_package_root("github-proxy") .. "/raisers/github_poll.lua")
     local proxy_poll = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_poll/main.lua")
+    local proxy_issue_create = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_issue_create/main.lua")
+    local proxy_issue_create_core = read_disk_file(sibling_package_root("github-proxy") .. "/core/issue_create.lua")
+    local devloop_scan_raiser = read_disk_file(sibling_package_root("github-devloop") .. "/raisers/intake_poll.lua")
+    local devloop_probe_raiser = read_disk_file(sibling_package_root("github-devloop") .. "/raisers/intake_probe_poll.lua")
     local devloop_scan = read_disk_file(sibling_package_root("github-devloop") .. "/departments/intake_scan/main.lua")
     local devloop_probe = read_disk_file(sibling_package_root("github-devloop") .. "/departments/intake_probe/main.lua")
+    local external_scan_raiser = read_disk_file(package_root() .. "/raisers/external_pr_scan.lua")
     local external_intake = read_disk_file(package_root() .. "/departments/external_pr_intake/main.lua")
 
-    -- Necessity proof: existing intake surfaces either emit generic PR facts
-    -- or scan GitHub issues. They do not schedule an external PR -> issue bridge.
+    -- Necessity proof: `github-proxy` can observe generic PR facts and execute
+    -- already-formed issue-create effects, but it has no policy owner for the
+    -- required middle step: external PR selection -> bridge issue materialization.
+    t.is_true(proxy_raiser:find('produces = "github_poll_tick"', 1, true) ~= nil)
+    t.is_true(proxy_raiser:find("external_pr_scan", 1, true) == nil)
+    t.is_true(proxy_poll:find('consumes = { "github_poll_tick" }', 1, true) ~= nil)
+    t.is_true(proxy_poll:find('produces = { "github_entity_changed" }', 1, true) ~= nil)
     t.is_true(proxy_poll:find('{ type = "pr"', 1, true) ~= nil)
     t.is_true(proxy_poll:find('raise("github_entity_changed"', 1, true) ~= nil)
+    t.is_true(proxy_poll:find("core.is_external_candidate", 1, true) == nil)
     t.is_true(proxy_poll:find('"github_issue_create_request"', 1, true) == nil)
     t.is_true(proxy_poll:find("external_pr_candidate", 1, true) == nil)
 
+    t.is_true(proxy_issue_create:find('consumes = { "github_issue_create_request" }', 1, true) ~= nil)
+    t.is_true(proxy_issue_create:find('produces = { "github_issue_blocked_by_request" }', 1, true) ~= nil)
+    t.is_true(proxy_issue_create:find("core.write_issue_create_request", 1, true) ~= nil)
+    t.is_true(proxy_issue_create_core:find("payload.title", 1, true) ~= nil)
+    t.is_true(proxy_issue_create_core:find("payload.body", 1, true) ~= nil)
+    t.is_true(proxy_issue_create_core:find("payload.dedup_key", 1, true) ~= nil)
+    t.is_true(proxy_issue_create_core:find("core.is_external_candidate", 1, true) == nil)
+    t.is_true(proxy_issue_create_core:find("pr_list", 1, true) == nil)
+    t.is_true(proxy_issue_create_core:find("external-pr-bridge:v1", 1, true) == nil)
+
+    -- Manual/no-op intake starts from GitHub issues only; it has no scheduled
+    -- PR source that can notice an external PR before a human creates an issue.
+    t.is_true(devloop_scan_raiser:find('produces = "devloop_intake_tick"', 1, true) ~= nil)
+    t.is_true(devloop_probe_raiser:find('produces = "devloop_intake_probe_tick"', 1, true) ~= nil)
     t.is_true(devloop_scan:find("fetch_shared_issue_intake_list", 1, true) ~= nil)
+    t.is_true(devloop_scan:find("devloop_intake_candidate", 1, true) ~= nil)
+    t.is_true(devloop_scan:find("pr_list", 1, true) == nil)
     t.is_true(devloop_scan:find("#pr/", 1, true) == nil)
     t.is_true(devloop_probe:find("issue_list_intake_probe", 1, true) ~= nil)
+    t.is_true(devloop_probe:find("devloop_intake_candidate", 1, true) ~= nil)
+    t.is_true(devloop_probe:find("pr_list", 1, true) == nil)
     t.is_true(devloop_probe:find("#pr/", 1, true) == nil)
 
+    -- The new adapter is the smallest owner of that middle step.
+    t.is_true(external_scan_raiser:find('produces = "external_pr_scan"', 1, true) ~= nil)
+    t.is_true(external_intake:find('consumes = { "external_pr_scan", "external_pr_candidate" }', 1, true) ~= nil)
+    t.is_true(external_intake:find('produces = { "external_pr_candidate" }', 1, true) ~= nil)
     t.is_true(external_intake:find("github.pr_list(repo, 30)", 1, true) ~= nil)
+    t.is_true(external_intake:find("core.is_external_candidate", 1, true) ~= nil)
+    t.is_true(external_intake:find("with_lock(core.bridge_lock_key", 1, true) ~= nil)
     t.is_true(external_intake:find("external_pr_candidate", 1, true) ~= nil)
     t.is_true(external_intake:find("create_bridge_issue", 1, true) ~= nil)
+    t.is_true(external_intake:find("write_comment", 1, true) ~= nil)
   end,
 
   test_bridge_lock_key_uses_production_cross_process_flock = function()

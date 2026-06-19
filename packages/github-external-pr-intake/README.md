@@ -18,6 +18,14 @@ to decide which PRs are external, claim those PRs, create bridge issues, and wri
 `external-pr-bridge:v1` markers would add domain policy and lifecycle ownership to the protocol
 adapter.
 
+Reusing the existing `github-proxy` PR poll plus `github_issue_create_request` effect sink still
+leaves the required policy owner missing. `github_poll` can only publish `github_entity_changed`
+snapshots, while `github_issue_create` can only execute a complete issue-create request already
+prepared by an upstream package. The bridge work is the missing middle: scheduled PR selection,
+external-author/head filtering, claim ownership, bridge body construction, and the
+`external-pr-bridge:v1` lifecycle. Putting that middle inside `github-proxy` would make the protocol
+adapter choose product-domain work instead of merely adapting GitHub.
+
 That would collapse two responsibilities:
 
 - `github-proxy`: observe GitHub entities and execute requested GitHub effects.
@@ -38,7 +46,8 @@ but it cannot perform the required autonomous job:
 - durable deduplication through trusted `external-pr-bridge:v1` markers and bridge issue search.
 
 Manual intake is therefore a different operating mode, not a replacement for this package's
-scheduled adapter.
+scheduled adapter. A no-op/manual template begins only after a human has already found the PR and
+created the issue, so it cannot satisfy the autonomous scheduled-detection requirement.
 
 ## Contract
 
