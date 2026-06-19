@@ -20,7 +20,63 @@ local function trusted_comment(body, created_at, id)
   }
 end
 
+local function ledger_event(fields)
+  local event = {
+    kind = "claim",
+    version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+    stage_rank = 100,
+    sequence = 1,
+  }
+  for key, value in pairs(fields or {}) do
+    event[key] = value
+  end
+  return event
+end
+
+local function assert_not_before(left, right)
+  t.eq(core._autonomy_event_before(left, right), false)
+end
+
+local function assert_strictly_before(left, right)
+  t.is_true(core._autonomy_event_before(left, right))
+  assert_not_before(right, left)
+end
+
+local function assert_transitive(events)
+  for _, a in ipairs(events) do
+    for _, b in ipairs(events) do
+      for _, c in ipairs(events) do
+        if core._autonomy_event_before(a, b) and core._autonomy_event_before(b, c) then
+          t.is_true(core._autonomy_event_before(a, c))
+        end
+      end
+    end
+  end
+end
+
 return {
+  test_autonomy_event_comparator_uses_global_nil_created_seconds_policy = function()
+    local earlier = ledger_event({ comment_created_at = "2026-06-03T01:00:00Z", sequence = 30 })
+    local later = ledger_event({ comment_created_at = "2026-06-03T01:00:01Z", sequence = 20 })
+    local same_time_low_sequence = ledger_event({ comment_created_at = "2026-06-03T01:00:01Z", sequence = 1 })
+    local same_time_high_sequence = ledger_event({ comment_created_at = "2026-06-03T01:00:01Z", sequence = 2 })
+    local nil_low_sequence = ledger_event({ sequence = 1 })
+    local nil_high_sequence = ledger_event({ sequence = 2 })
+
+    assert_strictly_before(earlier, later)
+    assert_strictly_before(same_time_low_sequence, same_time_high_sequence)
+    assert_strictly_before(later, nil_low_sequence)
+    assert_not_before(nil_low_sequence, later)
+    assert_strictly_before(nil_low_sequence, nil_high_sequence)
+
+    assert_transitive({
+      ledger_event({ sequence = 1 }),
+      ledger_event({ comment_created_at = "2026-06-03T01:00:00Z", sequence = 2 }),
+      ledger_event({ comment_created_at = "2026-06-03T01:00:01Z", sequence = 0 }),
+      ledger_event({ sequence = 3 }),
+    })
+  end,
+
   test_valid_autonomous_merge_stays_pending_until_all_required_gates_pass = function()
     local gates = {
       human_touch = "pass",
