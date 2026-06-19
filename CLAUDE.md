@@ -58,6 +58,8 @@ Incident of record (2026-06-17): `mkdir -p X && chmod 0555 X` on a worktree pare
 - **迪米特法则**：一个对象应该对其他对象保持最少的了解。
 - **合成复用原则**：尽量使用对象组合，而不是继承来达到复用的目的。
 
+**守住包边界：新功能默认放包外，能在包外实现就不往已稳定的包里塞（prefer-out-of-package；上面 SRP/OCP/合成复用 在包边界的落地）。** 加一个新功能时先问「它能不能作为独立包 / 包外模块实现？」——**能，就别塞进一个已稳定、职责已收敛的包**。每一次往稳定包「顺手加功能」都是 SRP 侵蚀：它的变更原因变多、blast radius 变大、滑向 **god-package**（等同 god-class，见上「单一职责」与「全状态强制 saga 化·禁 god-state」）。判据（标准 OOP）：① **SRP**——新功能若有自己独立的「变更原因」（不同的 source / 不同的信任域 / 不同的生命周期），它就是独立职责、该独立包；② **OCP**——对扩展开放、对修改关闭：用新包 / 组合**扩展**，而不是改稳定包的内部；③ **合成复用 > 塞入**——composed 包（Facade/Adapter）把兄弟包接起来，不把逻辑复制 / 塞进彼此。本仓实证范式：`github-external-pr-intake`（外部 PR 桥接）、`github-ratchet-migration-slicer`（把切片器从 github-devloop 抽出）都遵此——`github-devloop` 只守「issue→PR→review→merge 生命周期」**这一条**职责，切片 / 外部 PR / 关系 auto-fill 一律落在包外。**边界（不与「模式服务当前问题 / 三次法则」「over-split 也是病」冲突）**：这条治的是**职责归属**（独立职责该放包外，而非默认塞进现有包），不是叫你为单个功能提前造投机抽象、也不是无职责边界地碎片化；**真有独立「变更原因」才独立包，没有就别为「干净」硬拆**——over-split（包/状态碎片化）与 over-merge（god-package/god-state）同为病。
+
 ## 核心循环：不分析原因，watchdog 心跳盲重投 + 乐观锁 + codex 兜底（简单优先）
 
 系统**不追求「用程序完美枚举处理每一种失败」**。程序保持笨、健壮、确定；智能长尾交给 codex。**「不分析原因」是铁律，但触发重投的「超时」绝不能是裸 wall-clock**——裸定时器会在健康的长跑异步 receiver（implement codex ~2h / review consensus / CI 等待）**还在干活**时就开火，把健康工作当 strand 终结，反向重造 #762 要修的病（false-terminal，不是 frozen；实证 #762 8 轮 review 逐层逼出）。正解是 **watchdog timer 模式**（嵌入式经典 harness）：被监督的 receiver 周期性「踢狗」（写心跳 marker），watchdog 只在**狗没被踢**（心跳超预算变陈）时才动作。**关键：踢狗检测不是根因分析**——它是一个通用 liveness 探针（receiver 还在不在动？），**不问「为什么慢」**，所以「不分析原因、程序保持笨」原封不动；我们没加任何 per-case 分支，只加了**一个通用 liveness 信号**。恢复路径只有三条手段，按此顺序：
@@ -83,9 +85,11 @@ Incident of record (2026-06-17): `mkdir -p X && chmod 0555 X` on a worktree pare
 
 ## 随时可重启 supervise（crash-only restart contract）
 
-**部署即重启、随时可重启：`supervise` 必须能在任何时刻被 SIGKILL + 重启而不丢工作、不造成永久停滞。** 这是 crash-only software（Candea & Fox，见上一节）的硬契约，不是「尽量」。系统不做 drain / 优雅关停 / 在途排空；恢复靠两条既有机制：① **durable 投递**（redb at-least-once + lease/fencing + retry）让在途事件重启后续投；② **从 marker / git / 外部源回源 re-derive**（真相不在内存态）让任何中间态被重新推导、重驱。被重启杀掉的在途 codex（implement / fix / review）由其状态的 live-defer 心跳变陈后**重新 spawn**——所有工作幂等、可重入。重启因此是**无害的常规运营动作**（部署新代码、清运行态、换 BIN），随时可做，不需攒批次、不需等"安全窗口"。
+**部署即重启、随时可重启：`supervise` 必须能在任何时刻被 SIGKILL + 重启而不丢工作、不造成永久停滞。** 这是 crash-only software（Candea & Fox，见上一节）的硬契约，不是「尽量」。系统不做 drain / 优雅关停 / 在途排空；恢复靠两条既有机制：① **durable 投递**（redb at-least-once + lease/fencing + retry）让在途事件重启后续投；② **从 marker / git / 外部源回源 re-derive**（真相不在内存态）让任何中间态被重新推导、重驱。**重启 orphan 在途 codex，不是杀它**：`dogfood.sh` 重启 = `kill -9 <supervise_pid>`，只杀 supervise 进程；在途 codex 是其子进程（supervise → department-child → `spawn_codex_sync` → codex），SIGKILL 不向下传播，故 codex 被 **orphan（reparent、继续跑到完成）**——不是被杀（实证 2026-06-19：一个 implement codex 启动早于重启后的新 supervise、仍存活）。重启真正中断的是那个**同步 department 调用**（department-child 也被 orphan，但它要 RAISE 给的父 supervise 已死、事件丢失）；新 supervise 从 marker re-derive、按 live-defer 心跳变陈**重驱**同血统 codex——orphan 存活 + 重驱可形成**短暂 double-spawn**（#1101 类），由 version-CAS + dedup marker 幂等收口。所有工作幂等、可重入。**纠错（2026-06-19，user-as-oracle）：「重启杀掉在途 codex」是错的——codex 不被杀，只是 orphan；以前这么说/这么写都属误判。** 重启因此是**无害的常规运营动作**（部署新代码、清运行态、换 BIN），随时可做，不需攒批次、不需等"安全窗口"。
 
 **铁律：重启永不作为问题的解释。** 看到重启后某 strand 没进展时，**默认归因不是「重启 churn 掉了它」**——这是违背本契约的偷懒归因，会掩盖真缺陷（活性盲区）。crash-only 下重启理应被 durable + re-derive 吸收；若重启**确实**导致永久丢失/停滞，那必然是一个**活性契约缺陷**（durable 没续投、re-derive 没重导、或「心跳变陈 → re-spawn」链断了），要 root-cause + 提 issue，绝不用「重启影响了它」搪塞，也绝不为「避免 churn」去不重启 / 攒批次（那让进程长跑陈旧代码，反害——见 dogfood「立即重启别攒批次」）。运营随时重启；把工作活下来是**系统的责任**，不是运营的小心翼翼。实证（2026-06-17）：误把一个 fixing-loop 停滞甩锅给「我反复 restart churn 掉 fix codex」，实查发现重启后 fix codex 已被正常 re-spawn（crash-only 生效），真信号是另一处 marker-visibility version-desync——偷懒归因差点掩盖真缺陷。
+
+**Codex 并发由引擎 admission 控制（默认全用，dogfood 不 override）**：`FKST_CODEX_PERMIT_SLOTS`=**20**（全局 codex 进程许可池上限）、`FKST_MAX_IN_FLIGHT_PER_DEPT`=**16**（每 department 并发 durable child 上限）、`FKST_DURABLE_ADMISSION_BURST_PER_DEPT`=**1**（每 dispatch pass 每 dept 只准入 1 个新 child——缓启，#512 thundering-herd 后特意设的稳态保护）。**实测同时在跑的 codex 数（常 3-5）远低于 20 cap，是「当下需求 + burst=1 缓启」而非被限流到顶**——别把低 codex 数误读成 admission 卡死或 cap 太小（纠错 2026-06-19，user-as-oracle：此前误判 cap≈3，实为 20）。想让排队的工作铺得更快可调高 `burst`，但 burst=1 是特意的 herd 保护，改前权衡（herd 风险 vs 铺开速度）。
 
 ## 错误处理三级模型（codex-as-catch）
 
