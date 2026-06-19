@@ -446,6 +446,59 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(result.action, "would-create-slice")
         self.assertEqual(client.created, [])
 
+    def test_reconciler_dedups_parent_created_marker_when_issue_is_unknown(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), None),
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-parent-ledger")
+        self.assertEqual(client.created, [])
+        self.assertEqual(getattr(client, "searched", []), [])
+
+    def test_reconciler_dedups_parent_created_marker_when_child_is_untrusted(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), 123),
+        }]
+        client.views[123] = {
+            "number": 123,
+            "state": "CLOSED",
+            "author": {"login": "unknown-user"},
+            "body": str(slicer.render_reconciled_issue_body(spec, inventory, 1)),
+        }
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-parent-ledger")
+        self.assertEqual(result.issue_number, 123)
+        self.assertEqual(client.created, [])
+        self.assertEqual(getattr(client, "searched", []), [])
+
     def test_reconciler_open_search_does_not_tombstone_closed_existing_slice(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]

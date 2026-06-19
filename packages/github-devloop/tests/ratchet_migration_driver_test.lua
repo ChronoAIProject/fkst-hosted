@@ -376,6 +376,49 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
   end,
 
+  test_poll_with_parent_ledger_unknown_issue_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+  end,
+
+  test_poll_with_parent_ledger_untrusted_child_noops = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="121" -->',
+          },
+        },
+        child_issues = {
+          [121] = {
+            author_login = "unknown-user",
+            state = "CLOSED",
+            body = '<!-- fkst:ratchet-slice:v1 ratchet="saga-handler" dedup="saga-handler/slice/abc123" entries="entryabc" -->',
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+  end,
+
   test_poll_with_managed_sibling_existing_slice_noops = function()
     local result = run_driver({
       all_ratchets = true,

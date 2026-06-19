@@ -162,12 +162,12 @@ local function parent_has_issue_created_marker(parent, dedup_key, trusted_logins
     if trusted_author(comment, trusted_logins) then
       for marker in body(comment):gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
         if marker:match('dedup="([^"]+)"') == dedup_key then
-          return tonumber(marker:match('issue="(%d+)"')) or false
+          return tonumber(marker:match('issue="(%d+)"')) or "unresolved"
         end
       end
     end
   end
-  return false
+  return nil
 end
 
 local function search_issues(github, repo, query, fields, timeout)
@@ -239,7 +239,7 @@ local function reconcile_one(github, repo, ratchet)
   local slice = plan.next_slice
   local dedup_key = tostring(slice.dedup_key or "")
   local ledger_issue = parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
-  if ledger_issue then local prior = decode_json_object((github.issue_view(repo, ledger_issue, "number,state,author,body", 30) or {}).stdout or "{}", "child issue"); if trusted_author(prior, trusted_logins) and tostring(prior.state or ""):upper() ~= "CLOSED" then return "deduped-parent-ledger" end end
+  if ledger_issue ~= nil then local prior = ledger_issue ~= "unresolved" and decode_json_object((github.issue_view(repo, ledger_issue, "number,state,author,body", 30) or {}).stdout or "{}", "child issue") or nil; if prior == nil or not trusted_author(prior, trusted_logins) or tostring(prior.state or ""):upper() ~= "CLOSED" then return "deduped-parent-ledger" end end
 
   if has_open_slice(github, repo, { ratchet = ratchet.ratchet, body = slice.body }, trusted_logins) ~= nil then
     return "deduped-in-flight"

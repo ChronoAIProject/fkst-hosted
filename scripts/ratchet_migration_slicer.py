@@ -34,6 +34,7 @@ DEFAULT_LABELS = ("fkst-dev:enabled",)
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/,-]+$")
 SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+UNRESOLVED_LEDGER_ISSUE = object()
 
 
 @dataclass(frozen=True)
@@ -530,7 +531,7 @@ def parent_has_marker(parent: dict[str, Any], marker: str, bot_login: str | None
     return bool(matching_issues(comments_from_parent(parent), marker, bot_login))
 
 
-def parent_issue_created_marker_issue(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> int | None:
+def parent_issue_created_marker_issue(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> int | object | None:
     pattern = re.compile(r"<!-- fkst:github-proxy:issue-created:v1 .*?-->")
     expected = f'dedup="{ensure_marker_value(dedup_key)}"'
     for comment in comments_from_parent(parent):
@@ -540,11 +541,11 @@ def parent_issue_created_marker_issue(parent: dict[str, Any], dedup_key: str, bo
             if expected in marker:
                 issue = marker_attribute(marker, "issue")
                 if issue is None or issue == "unknown":
-                    return None
+                    return UNRESOLVED_LEDGER_ISSUE
                 try:
                     return int(issue)
                 except ValueError:
-                    return None
+                    return UNRESOLVED_LEDGER_ISSUE
     return None
 
 
@@ -632,13 +633,15 @@ def reconcile_ratchet(
     dedup_key = str(doc["dedup_key"])
     ledger_issue = parent_issue_created_marker_issue(parent, dedup_key, bot_login)
     if ledger_issue is not None:
-        prior = client.issue_view(repo, ledger_issue, "number,state,author,body")
-        if is_trusted_record(prior, bot_login) and str(prior.get("state") or "").upper() != "CLOSED":
+        if ledger_issue is UNRESOLVED_LEDGER_ISSUE:
+            return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
+        prior = client.issue_view(repo, int(ledger_issue), "number,state,author,body")
+        if not is_trusted_record(prior, bot_login) or str(prior.get("state") or "").upper() != "CLOSED":
             return ReconcileResult(
                 spec.ratchet,
                 "deduped-parent-ledger",
                 dedup_key,
-                issue_number=ledger_issue,
+                issue_number=int(ledger_issue),
                 parent_issue=parent_issue,
             )
 
