@@ -256,6 +256,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(len(doc["sites_fingerprint"]), 16)
         self.assertEqual(doc["dedup_key"], f"saga-handler/slice/{doc['sites_fingerprint']}")
         self.assertEqual(doc["sites"][0]["site_ref"], "packages/example/a.lua:3")
+        self.assertEqual(len(doc["sites"][0]["entry_key"]), 16)
         self.assertEqual(doc["sites"][1]["site_ref"], "packages/example/b.lua:4")
 
     def test_registered_ratchets_use_live_parent_tracks(self) -> None:
@@ -315,6 +316,54 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(client.closed, [])
 
     def test_reconciler_dedups_existing_in_flight_slice(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.search_results[("open", slicer.ratchet_slice_search_query("saga-handler"))] = [{
+            "number": 123,
+            "author": {"login": "fkst-bot"},
+            "body": '<!-- fkst:ratchet-slice:v1 schema="fkst.ratchet-slice.v1" ratchet="saga-handler" parent="979" dedup="saga-handler/slice/old" fingerprint="old" entries="'
+            + str(doc["sites"][0]["entry_key"])
+            + '" -->',
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-in-flight")
+        self.assertEqual(result.issue_number, 123)
+        self.assertEqual(client.created, [])
+
+    def test_reconciler_ignores_in_flight_slice_for_different_entry(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        client = FakeGithubClient()
+        client.search_results[("open", slicer.ratchet_slice_search_query("saga-handler"))] = [{
+            "number": 123,
+            "author": {"login": "fkst-bot"},
+            "body": '<!-- fkst:ratchet-slice:v1 schema="fkst.ratchet-slice.v1" ratchet="saga-handler" parent="979" dedup="saga-handler/slice/old" fingerprint="old" entries="0000000000000000" -->',
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "would-create-slice")
+        self.assertEqual(client.created, [])
+
+    def test_reconciler_dedups_legacy_in_flight_marker_without_entries(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
         client = FakeGithubClient()
@@ -380,6 +429,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertIn("Machine-filed ratchet slice issue.", str(client.created[0]["body"]))
         self.assertIn("<!-- fkst:github-proxy:issue-create:", str(client.created[0]["body"]))
         self.assertIn("<!-- fkst:ratchet-slice:v1", str(client.created[0]["body"]))
+        self.assertIn('entries="', str(client.created[0]["body"]))
         self.assertEqual(len(client.comments), 2)
         self.assertIn("issue-create-intent:v1", client.comments[0][1])
         self.assertIn("issue-created:v1", client.comments[1][1])
