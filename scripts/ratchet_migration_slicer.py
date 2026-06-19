@@ -11,8 +11,10 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import time
 from typing import Any, Callable
 
 import check_repo_dedup as code_dedup
@@ -35,6 +37,7 @@ FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipelin
 SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/,-]+$")
 SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 UNRESOLVED_LEDGER_ISSUE = object()
+UNKNOWN_LEDGER_HOLD_SECONDS = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -531,7 +534,42 @@ def parent_has_marker(parent: dict[str, Any], marker: str, bot_login: str | None
     return bool(matching_issues(comments_from_parent(parent), marker, bot_login))
 
 
-def parent_issue_created_marker_issue(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> int | object | None:
+def parse_github_timestamp_seconds(value: object) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+def comment_created_seconds(comment: dict[str, Any]) -> int | None:
+    for key in ("createdAt", "created_at"):
+        value = parse_github_timestamp_seconds(comment.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def recent_unknown_ledger_comment(comment: dict[str, Any], now_seconds: int) -> bool:
+    created = comment_created_seconds(comment)
+    if created is None:
+        return False
+    return 0 <= now_seconds - created <= UNKNOWN_LEDGER_HOLD_SECONDS
+
+
+def parent_issue_created_marker_issue(
+    parent: dict[str, Any],
+    dedup_key: str,
+    bot_login: str | None,
+    now_seconds: int,
+) -> int | object | None:
     pattern = re.compile(r"<!-- fkst:github-proxy:issue-created:v1 .*?-->")
     expected = f'dedup="{ensure_marker_value(dedup_key)}"'
     for comment in comments_from_parent(parent):
@@ -541,11 +579,15 @@ def parent_issue_created_marker_issue(parent: dict[str, Any], dedup_key: str, bo
             if expected in marker:
                 issue = marker_attribute(marker, "issue")
                 if issue is None or issue == "unknown":
-                    return UNRESOLVED_LEDGER_ISSUE
+                    if recent_unknown_ledger_comment(comment, now_seconds):
+                        return UNRESOLVED_LEDGER_ISSUE
+                    continue
                 try:
                     return int(issue)
                 except ValueError:
-                    return UNRESOLVED_LEDGER_ISSUE
+                    if recent_unknown_ledger_comment(comment, now_seconds):
+                        return UNRESOLVED_LEDGER_ISSUE
+                    continue
     return None
 
 
@@ -631,7 +673,7 @@ def reconcile_ratchet(
 
     doc = slice_document(spec, inventory, slice_size)
     dedup_key = str(doc["dedup_key"])
-    ledger_issue = parent_issue_created_marker_issue(parent, dedup_key, bot_login)
+    ledger_issue = parent_issue_created_marker_issue(parent, dedup_key, bot_login, int(time()))
     if ledger_issue is not None:
         if ledger_issue is UNRESOLVED_LEDGER_ISSUE:
             return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)

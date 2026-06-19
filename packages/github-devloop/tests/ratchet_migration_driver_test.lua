@@ -70,7 +70,8 @@ end
 local function parent_json(comments, state)
   local parts = {}
   for _, comment in ipairs(comments or {}) do
-    table.insert(parts, '{"body":' .. json_string(comment.body) .. ',"author":{"login":' .. json_string(comment.author_login or "fkst-test-bot") .. '}}')
+    local created = comment.created_at and (',"createdAt":' .. json_string(comment.created_at)) or ""
+    table.insert(parts, '{"body":' .. json_string(comment.body) .. ',"author":{"login":' .. json_string(comment.author_login or "fkst-test-bot") .. '}' .. created .. "}")
   end
   return '{"number":979,"state":' .. json_string(state or "OPEN") .. ',"comments":[' .. table.concat(parts, ",") .. ']}\n'
 end
@@ -383,6 +384,7 @@ return {
           {
             author_login = "fkst-test-bot",
             body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+            created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()),
           },
         },
       },
@@ -392,6 +394,25 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_search"), 0)
+  end,
+
+  test_poll_with_parent_ledger_stale_unknown_issue_recreates = function()
+    local result = run_driver({
+      github = {
+        parent_comments = {
+          {
+            author_login = "fkst-test-bot",
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="saga-handler/slice/abc123" issue="unknown" -->',
+            created_at = "2000-01-01T00:00:00Z",
+          },
+        },
+      },
+    })
+
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 1)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 2)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
   end,
 
   test_poll_with_parent_ledger_untrusted_child_noops = function()

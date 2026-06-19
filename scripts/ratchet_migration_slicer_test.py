@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -446,7 +447,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(result.action, "would-create-slice")
         self.assertEqual(client.created, [])
 
-    def test_reconciler_dedups_parent_created_marker_when_issue_is_unknown(self) -> None:
+    def test_reconciler_dedups_parent_created_marker_when_unknown_issue_is_recent(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
         doc = slicer.slice_document(spec, inventory, 1)
@@ -454,6 +455,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         client.parent["comments"] = [{
             "author": {"login": "fkst-bot"},
             "body": slicer.issue_created_marker(str(doc["dedup_key"]), None),
+            "createdAt": datetime.now(timezone.utc).isoformat(),
         }]
 
         result = slicer.reconcile_ratchet(
@@ -468,6 +470,30 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(result.action, "deduped-parent-ledger")
         self.assertEqual(client.created, [])
         self.assertEqual(getattr(client, "searched", []), [])
+
+    def test_reconciler_retries_parent_created_marker_when_unknown_issue_is_stale(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), None),
+            "createdAt": (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat(),
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "would-create-slice")
+        self.assertEqual(client.created, [])
+        self.assertIn(("owner/repo", "open", slicer.ratchet_slice_search_query("saga-handler")), getattr(client, "searched", []))
 
     def test_reconciler_dedups_parent_created_marker_when_child_is_untrusted(self) -> None:
         spec = slicer.specs()["saga-handler"]

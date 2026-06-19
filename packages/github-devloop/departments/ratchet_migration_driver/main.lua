@@ -158,17 +158,17 @@ local function parent_has_marker(parent, marker, trusted_logins)
 end
 
 local function parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
+  local now_seconds = now()
   for _, comment in ipairs(parent.comments or {}) do
     if trusted_author(comment, trusted_logins) then
       for marker in body(comment):gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
-        if marker:match('dedup="([^"]+)"') == dedup_key then
-          return tonumber(marker:match('issue="(%d+)"')) or "unresolved"
-        end
+        if marker:match('dedup="([^"]+)"') == dedup_key then local issue = tonumber(marker:match('issue="(%d+)"')); if issue ~= nil then return issue end; local created = core.iso_timestamp_epoch_seconds(comment.createdAt or comment.created_at); local age = created ~= nil and tonumber(now_seconds) - tonumber(created) or nil; if age ~= nil and age >= 0 and age <= 15 * 60 then return "unresolved" end end
       end
     end
-  end
-  return nil
+  end; return nil
 end
+
+
 
 local function search_issues(github, repo, query, fields, timeout)
   local result = github.issue_search(repo, query, fields or "number,title,state,author,body,url", timeout or 30)
