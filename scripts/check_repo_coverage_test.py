@@ -229,25 +229,40 @@ class CoverageRatchetTest(unittest.TestCase):
             entries,
         )
 
-    def test_write_merged_covered_json_writes_repository_relative_artifact(self) -> None:
+    def test_write_canonical_coverage_json_writes_authoritative_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            output = Path(tmp) / "coverage.json"
+            root = Path(tmp)
+            (root / "packages" / "example").mkdir(parents=True)
+            (root / "std").mkdir()
+            (root / "packages" / "example" / "core.lua").write_text(
+                "local M = {}\nfunction M.covered()\n  return 1\nend\nreturn M\n",
+                encoding="utf-8",
+            )
+            (root / "std" / "shared.lua").write_text("return {}\n", encoding="utf-8")
+            output = root / "coverage.json"
 
-            count = coverage.write_merged_covered_json(
+            count = coverage.write_canonical_coverage_json(
                 {
-                    "packages/example/core.lua": {3, 1},
-                    "std/shared.lua": {2},
+                    "packages/example/core.lua": {1, 2, 3, 5},
+                    "std/shared.lua": {1},
                 },
                 output,
+                root,
             )
+            data = json.loads(output.read_text(encoding="utf-8"))
 
             self.assertEqual(count, 2)
-            self.assertEqual(
-                json.loads(output.read_text(encoding="utf-8")),
+            self.assertEqual(data["schema"], "fkst.lua.coverage.v1")
+            self.assertEqual([item["file"] for item in data["files"]], ["packages/example/core.lua", "std/shared.lua"])
+            core_lines = data["files"][0]["coverable_lines"]
+            self.assertIn(
                 {
-                    "packages/example/core.lua": {"covered_lines": [1, 3]},
-                    "std/shared.lua": {"covered_lines": [2]},
+                    "line": 2,
+                    "normalized_line_hash": coverage.normalized_source_hash("function M.covered()"),
+                    "text": "function M.covered()",
+                    "covered": True,
                 },
+                core_lines,
             )
 
     def test_repository_messages_loads_jsonl_allowlist(self) -> None:

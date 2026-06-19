@@ -417,7 +417,7 @@ run_self_test_with_optional_lua_coverage() {
 }
 
 enforce_lua_coverage_ratchet() {
-  local output="${FKST_LUA_COVERAGE_OUTPUT:-}" args=() artifact package_name coverage_dir
+  local output="${FKST_LUA_COVERAGE_OUTPUT:-$FKST_RUNTIME_ROOT/lua-coverage/coverage.json}" inputs=() artifact package_name
   shift || true
   if [ "$#" -eq 0 ]; then
     echo "error: Lua coverage ratchet has no package coverage artifacts" >&2
@@ -425,12 +425,34 @@ enforce_lua_coverage_ratchet() {
   fi
   for artifact in "$@"; do
     package_name="$(basename "$(dirname "$artifact")")"
-    args+=(--covered-json "$package_name=$artifact")
+    inputs+=("$package_name=$artifact")
   done
-  if [ -n "$output" ]; then
-    args+=(--write-merged-covered-json "$output")
+  FKST_LUA_COVERAGE_MERGED_OUTPUT="$output" python3 -B - "$ROOT" "${inputs[@]}" <<'PY'
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("check_repo_coverage", root / "scripts" / "check_repo_coverage.py")
+if spec is None or spec.loader is None:
+    raise SystemExit("error: could not load scripts/check_repo_coverage.py")
+coverage = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = coverage
+spec.loader.exec_module(coverage)
+artifacts = [coverage.parse_covered_json_arg(value) for value in sys.argv[2:]]
+count = coverage.write_canonical_coverage_json(
+    coverage.merge_covered_sets(artifacts),
+    Path(os.environ["FKST_LUA_COVERAGE_MERGED_OUTPUT"]),
+    root,
+)
+print(f"wrote {count} file(s) to {os.environ['FKST_LUA_COVERAGE_MERGED_OUTPUT']}")
+PY
+  if [ ! -f "$output" ]; then
+    echo "error: Lua coverage ratchet did not write coverage artifact: $output" >&2
+    return 1
   fi
-  python3 -B "$ROOT/scripts/check_repo_coverage.py" "${args[@]}"
+  FKST_LUA_COVERAGE_JSON="$output" python3 -B "$ROOT/scripts/check_repo.py"
 }
 
 # Run "$@"; unless verbose (cmd_test's flag), drop advisory `PASS` lines from its

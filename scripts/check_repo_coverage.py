@@ -284,6 +284,30 @@ def uncovered_from_covered_sets(
     return result
 
 
+def canonical_coverage_artifact(
+    root: Path,
+    covered_by_file: dict[str, set[int]],
+) -> dict[str, Any]:
+    if not covered_by_file:
+        raise ValueError("coverage artifact has no covered-line metadata")
+    files: list[dict[str, Any]] = []
+    for file in all_production_lua_paths(root):
+        lines = source_lines_for_file(root, file)
+        covered = covered_by_file.get(file, set())
+        coverable_lines = [
+            {
+                "line": idx,
+                "normalized_line_hash": normalized_source_hash(lines[idx - 1]),
+                "text": normalize_source_line(lines[idx - 1]),
+                "covered": idx in covered,
+            }
+            for idx in sorted(candidate_lines(root, file, lines))
+        ]
+        if coverable_lines:
+            files.append({"file": file, "coverable_lines": coverable_lines})
+    return {"schema": "fkst.lua.coverage.v1", "files": files}
+
+
 def covered_sets_from_artifact(path: Path, package_name: str | None = None) -> dict[str, set[int]]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -578,21 +602,15 @@ def write_current_uncovered_from_covered_sets(
     return write_uncovered_baseline(uncovered, allowlist_path)
 
 
-def merged_covered_json_text(covered_by_file: dict[str, set[int]]) -> str:
-    data = {
-        file: {"covered_lines": sorted(lines)}
-        for file, lines in sorted(covered_by_file.items())
-    }
-    return json.dumps(data, separators=(",", ":"), ensure_ascii=False) + "\n"
-
-
-def write_merged_covered_json(
+def write_canonical_coverage_json(
     covered_by_file: dict[str, set[int]],
     output_path: Path,
+    root: Path,
 ) -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(merged_covered_json_text(covered_by_file), encoding="utf-8")
-    return len(covered_by_file)
+    artifact = canonical_coverage_artifact(root, covered_by_file)
+    output_path.write_text(json.dumps(artifact, separators=(",", ":"), ensure_ascii=False) + "\n", encoding="utf-8")
+    return len(artifact["files"])
 
 
 def parse_covered_json_arg(value: str) -> tuple[Path, str | None]:
@@ -600,7 +618,7 @@ def parse_covered_json_arg(value: str) -> tuple[Path, str | None]:
         return Path(value), None
     package_name, path = value.split("=", 1)
     if package_name == "" or path == "":
-        raise ValueError("--covered-json entries must be PATH or PACKAGE=PATH")
+        raise ValueError("coverage input entries must be PATH or PACKAGE=PATH")
     return Path(path), package_name
 
 
@@ -693,34 +711,11 @@ def cli(argv: list[str] | None = None) -> int:
         "--package-name",
         help="map package-root-relative coverage paths to packages/<name>/... while leaving std/... unchanged",
     )
-    parser.add_argument(
-        "--covered-json",
-        action="append",
-        default=[],
-        metavar="[PACKAGE=]COVERAGE_JSON",
-        help="merge a pinned-engine covered-lines artifact; PACKAGE maps relative paths to packages/<PACKAGE>/...",
-    )
-    parser.add_argument(
-        "--write-merged-covered-json",
-        type=Path,
-        metavar="COVERAGE_JSON",
-        help="write a repository-relative covered-lines coverage.json from one or more --covered-json inputs",
-    )
     args = parser.parse_args(argv)
 
     if args.write_current_uncovered is None:
         try:
-            if args.covered_json:
-                covered_by_file = merge_covered_sets([parse_covered_json_arg(value) for value in args.covered_json])
-                if args.write_merged_covered_json is not None:
-                    count = write_merged_covered_json(covered_by_file, args.write_merged_covered_json)
-                    print(f"wrote {count} covered file(s) to {args.write_merged_covered_json}")
-                messages = repository_messages_for_uncovered(Path.cwd(), uncovered_from_covered_sets(Path.cwd(), covered_by_file))
-            else:
-                if args.write_merged_covered_json is not None:
-                    print("error: --write-merged-covered-json requires at least one --covered-json", file=sys.stderr)
-                    return 1
-                messages = repository_messages(Path.cwd())
+            messages = repository_messages(Path.cwd())
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: invalid Lua coverage ratchet input: {exc}", file=sys.stderr)
             return 1
@@ -729,24 +724,16 @@ def cli(argv: list[str] | None = None) -> int:
         return 1 if messages else 0
 
     try:
-        if args.covered_json:
-            artifacts = [parse_covered_json_arg(value) for value in args.covered_json]
-            count = write_current_uncovered_from_covered_sets(
-                merge_covered_sets(artifacts),
-                args.write_current_uncovered,
-                Path.cwd(),
-            )
-        else:
-            coverage_json = args.coverage_json or artifact_path(Path.cwd())
-            if coverage_json is None:
-                print("error: Lua coverage artifact was not found", file=sys.stderr)
-                return 1
-            count = write_current_uncovered(
-                coverage_json,
-                args.write_current_uncovered,
-                Path.cwd(),
-                args.package_name,
-            )
+        coverage_json = args.coverage_json or artifact_path(Path.cwd())
+        if coverage_json is None:
+            print("error: Lua coverage artifact was not found", file=sys.stderr)
+            return 1
+        count = write_current_uncovered(
+            coverage_json,
+            args.write_current_uncovered,
+            Path.cwd(),
+            args.package_name,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: could not write current uncovered allowlist: {exc}", file=sys.stderr)
         return 1
