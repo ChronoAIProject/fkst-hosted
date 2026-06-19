@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import unittest
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -33,6 +34,7 @@ slicer = load_slicer()
 class FakeGithubClient:
     def __init__(self) -> None:
         self.parent = {"number": 979, "state": "OPEN", "comments": []}
+        self.views: dict[int, dict[str, object]] = {}
         self.search_results: dict[tuple[str, str], list[dict[str, object]]] = {}
         self.created: list[dict[str, object]] = []
         self.comments: list[tuple[int, str]] = []
@@ -40,6 +42,8 @@ class FakeGithubClient:
 
     def issue_view(self, repo: str, number: int, fields: str) -> dict[str, object]:
         self.viewed = (repo, number, fields)
+        if number in self.views:
+            return self.views[number]
         return self.parent
 
     def issue_search(self, repo: str, state: str, query: str) -> list[dict[str, object]]:
@@ -386,7 +390,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertEqual(result.issue_number, 123)
         self.assertEqual(client.created, [])
 
-    def test_reconciler_dedups_parent_created_marker(self) -> None:
+    def test_reconciler_dedups_parent_created_marker_only_when_prior_slice_is_open(self) -> None:
         spec = slicer.specs()["saga-handler"]
         inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
         doc = slicer.slice_document(spec, inventory, 1)
@@ -394,6 +398,106 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         client.parent["comments"] = [{
             "author": {"login": "fkst-bot"},
             "body": slicer.issue_created_marker(str(doc["dedup_key"]), 123),
+        }]
+        client.views[123] = {
+            "number": 123,
+            "state": "OPEN",
+            "author": {"login": "fkst-bot"},
+            "body": str(slicer.render_reconciled_issue_body(spec, inventory, 1)),
+        }
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-parent-ledger")
+        self.assertEqual(result.issue_number, 123)
+        self.assertEqual(client.created, [])
+
+    def test_reconciler_recreates_parent_ledger_slice_when_prior_slice_is_closed(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), 123),
+        }]
+        client.views[123] = {
+            "number": 123,
+            "state": "CLOSED",
+            "author": {"login": "fkst-bot"},
+            "body": str(slicer.render_reconciled_issue_body(spec, inventory, 1)),
+        }
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "would-create-slice")
+        self.assertEqual(client.created, [])
+
+    def test_reconciler_dedups_parent_ledger_later_open_retry_after_closed_child(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [
+            {
+                "author": {"login": "fkst-bot"},
+                "body": slicer.issue_created_marker(str(doc["dedup_key"]), 123),
+            },
+            {
+                "author": {"login": "fkst-bot"},
+                "body": slicer.issue_created_marker(str(doc["dedup_key"]), 124),
+            },
+        ]
+        client.views[123] = {
+            "number": 123,
+            "state": "CLOSED",
+            "author": {"login": "fkst-bot"},
+            "body": str(slicer.render_reconciled_issue_body(spec, inventory, 1)),
+        }
+        client.views[124] = {
+            "number": 124,
+            "state": "OPEN",
+            "author": {"login": "fkst-bot"},
+            "body": str(slicer.render_reconciled_issue_body(spec, inventory, 1)),
+        }
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-parent-ledger")
+        self.assertEqual(result.issue_number, 124)
+        self.assertEqual(client.created, [])
+        self.assertEqual(getattr(client, "searched", []), [])
+
+    def test_reconciler_dedups_parent_created_marker_when_unknown_issue_is_recent(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), None),
+            "createdAt": datetime.now(timezone.utc).isoformat(),
         }]
 
         result = slicer.reconcile_ratchet(
@@ -407,6 +511,87 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
 
         self.assertEqual(result.action, "deduped-parent-ledger")
         self.assertEqual(client.created, [])
+        self.assertEqual(getattr(client, "searched", []), [])
+
+    def test_reconciler_retries_parent_created_marker_when_unknown_issue_is_stale(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), None),
+            "createdAt": (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat(),
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "would-create-slice")
+        self.assertEqual(client.created, [])
+        self.assertIn(("owner/repo", "open", slicer.ratchet_slice_search_query("saga-handler")), getattr(client, "searched", []))
+
+    def test_reconciler_dedups_parent_created_marker_when_child_is_untrusted(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        client.parent["comments"] = [{
+            "author": {"login": "fkst-bot"},
+            "body": slicer.issue_created_marker(str(doc["dedup_key"]), 123),
+        }]
+        client.views[123] = {
+            "number": 123,
+            "state": "CLOSED",
+            "author": {"login": "unknown-user"},
+            "body": str(slicer.render_reconciled_issue_body(spec, inventory, 1)),
+        }
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "deduped-parent-ledger")
+        self.assertEqual(result.issue_number, 123)
+        self.assertEqual(client.created, [])
+        self.assertEqual(getattr(client, "searched", []), [])
+
+    def test_reconciler_open_search_does_not_tombstone_closed_existing_slice(self) -> None:
+        spec = slicer.specs()["saga-handler"]
+        inventory = [slicer.InventorySite("packages/example/a.lua", 3, "free_form_pipeline")]
+        doc = slicer.slice_document(spec, inventory, 1)
+        client = FakeGithubClient()
+        exact_marker = slicer.issue_create_marker(str(doc["dedup_key"]))
+        client.search_results[("all", exact_marker)] = [{
+            "number": 123,
+            "state": "CLOSED",
+            "author": {"login": "fkst-bot"},
+            "body": exact_marker,
+        }]
+
+        result = slicer.reconcile_ratchet(
+            spec,
+            inventory,
+            1,
+            "owner/repo",
+            client,
+            env={"FKST_GITHUB_BOT_LOGIN": "fkst-bot"},
+        )
+
+        self.assertEqual(result.action, "would-create-slice")
+        self.assertIn(("owner/repo", "open", exact_marker), getattr(client, "searched", []))
+        self.assertNotIn(("owner/repo", "all", exact_marker), getattr(client, "searched", []))
 
     def test_reconciler_real_write_uses_intent_marker_and_creates_one_issue(self) -> None:
         spec = slicer.specs()["saga-handler"]

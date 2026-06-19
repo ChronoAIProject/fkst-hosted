@@ -158,17 +158,17 @@ local function parent_has_marker(parent, marker, trusted_logins)
 end
 
 local function parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
+  local ledger_issues, now_seconds = {}, tonumber(now())
   for _, comment in ipairs(parent.comments or {}) do
     if trusted_author(comment, trusted_logins) then
       for marker in body(comment):gmatch("<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->") do
-        if marker:match('dedup="([^"]+)"') == dedup_key then
-          return true
-        end
+        if marker:match('dedup="([^"]+)"') == dedup_key then local issue = tonumber(marker:match('issue="(%d+)"')); if issue ~= nil then table.insert(ledger_issues, issue) else local created = core.iso_timestamp_epoch_seconds(comment.createdAt or comment.created_at); local age = created ~= nil and now_seconds ~= nil and now_seconds - tonumber(created) or nil; if age ~= nil and age >= 0 and age <= 15 * 60 then table.insert(ledger_issues, "unresolved") end end end
       end
     end
-  end
-  return false
+  end; return ledger_issues
 end
+
+
 
 local function search_issues(github, repo, query, fields, timeout)
   local result = github.issue_search(repo, query, fields or "number,title,state,author,body,url", timeout or 30)
@@ -179,21 +179,21 @@ local function search_issues(github, repo, query, fields, timeout)
 end
 
 local function has_open_slice(github, repo, ratchet, trusted_logins)
-  for _, issue in ipairs(search_issues(github, repo, ratchet_slice_search_query(ratchet), "number,title,state,author,body,url", 30)) do
-    if trusted_author(issue, trusted_logins)
-      and body(issue):find("fkst:ratchet-slice:v1", 1, true) ~= nil
-      and body(issue):find('ratchet="' .. tostring(ratchet) .. '"', 1, true) ~= nil
-      and tostring(issue.state or ""):upper() ~= "CLOSED" then
-      return issue
-    end
-  end
-  return nil
-end
+  local ratchet_name = type(ratchet) == "table" and ratchet.ratchet or ratchet
+  local entry_blob = type(ratchet) == "table" and tostring(body(ratchet):match('entries="([^"]*)"') or "") or ""
+  for _, issue in ipairs(search_issues(github, repo, ratchet_slice_search_query(ratchet_name), "number,title,state,author,body,url", 30)) do
+    for marker in body(issue):gmatch("<!%-%- fkst:ratchet%-slice:v1.-%-%->") do
+      local entries = marker:match('entries="([^"]*)"'); local overlap = entries == nil or entry_blob == ""
+      if not overlap then tostring(entries):gsub("[^,]+", function(entry) if ("," .. entry_blob .. ","):find("," .. entry .. ",", 1, true) then overlap = true end end) end
+      if trusted_author(issue, trusted_logins) and marker:find('ratchet="' .. tostring(ratchet_name) .. '"', 1, true) ~= nil and tostring(issue.state or ""):upper() ~= "CLOSED" and overlap then
+        return issue
+      end end
+  end return nil end
 
 local function has_existing_slice(github, repo, dedup_key, trusted_logins)
   local marker = issue_create_marker(dedup_key)
   for _, issue in ipairs(search_issues(github, repo, marker, "number,title,state,author,body,url", 30)) do
-    if trusted_author(issue, trusted_logins) and body(issue):find(marker, 1, true) ~= nil then
+    if trusted_author(issue, trusted_logins) and body(issue):find(marker, 1, true) ~= nil and tostring(issue.state or ""):upper() ~= "CLOSED" then
       return issue
     end
   end
@@ -238,10 +238,10 @@ local function reconcile_one(github, repo, ratchet)
 
   local slice = plan.next_slice
   local dedup_key = tostring(slice.dedup_key or "")
-  if parent_has_issue_created_marker(parent, dedup_key, trusted_logins) then
-    return "deduped-parent-ledger"
-  end
-  if has_open_slice(github, repo, ratchet.ratchet, trusted_logins) ~= nil then
+  local ledger_issues = parent_has_issue_created_marker(parent, dedup_key, trusted_logins)
+  for _, ledger_issue in ipairs(ledger_issues) do local prior = ledger_issue ~= "unresolved" and decode_json_object((github.issue_view(repo, ledger_issue, "number,state,author,body", 30) or {}).stdout or "{}", "child issue") or nil; if prior == nil or not trusted_author(prior, trusted_logins) or tostring(prior.state or ""):upper() ~= "CLOSED" then return "deduped-parent-ledger" end end
+
+  if has_open_slice(github, repo, { ratchet = ratchet.ratchet, body = slice.body }, trusted_logins) ~= nil then
     return "deduped-in-flight"
   end
   if has_existing_slice(github, repo, dedup_key, trusted_logins) ~= nil then

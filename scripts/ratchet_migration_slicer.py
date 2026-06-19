@@ -11,8 +11,10 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from time import time
 from typing import Any, Callable
 
 import check_repo_dedup as code_dedup
@@ -34,6 +36,8 @@ DEFAULT_LABELS = ("fkst-dev:enabled",)
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/,-]+$")
 SAFE_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+UNRESOLVED_LEDGER_ISSUE = object()
+UNKNOWN_LEDGER_HOLD_SECONDS = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -541,16 +545,62 @@ def parent_has_marker(parent: dict[str, Any], marker: str, bot_login: str | None
     return bool(matching_issues(comments_from_parent(parent), marker, bot_login))
 
 
-def parent_has_issue_created_marker(parent: dict[str, Any], dedup_key: str, bot_login: str | None) -> bool:
+def parse_github_timestamp_seconds(value: object) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "":
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return int(parsed.timestamp())
+
+
+def comment_created_seconds(comment: dict[str, Any]) -> int | None:
+    for key in ("createdAt", "created_at"):
+        value = parse_github_timestamp_seconds(comment.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def recent_unknown_ledger_comment(comment: dict[str, Any], now_seconds: int) -> bool:
+    created = comment_created_seconds(comment)
+    if created is None:
+        return False
+    return 0 <= now_seconds - created <= UNKNOWN_LEDGER_HOLD_SECONDS
+
+
+def parent_issue_created_marker_issues(
+    parent: dict[str, Any],
+    dedup_key: str,
+    bot_login: str | None,
+    now_seconds: int,
+) -> list[int | object]:
     pattern = re.compile(r"<!-- fkst:github-proxy:issue-created:v1 .*?-->")
     expected = f'dedup="{ensure_marker_value(dedup_key)}"'
+    issues: list[int | object] = []
     for comment in comments_from_parent(parent):
         if not is_trusted_record(comment, bot_login):
             continue
         for marker in pattern.findall(record_body(comment)):
             if expected in marker:
-                return True
-    return False
+                issue = marker_attribute(marker, "issue")
+                if issue is None or issue == "unknown":
+                    if recent_unknown_ledger_comment(comment, now_seconds):
+                        issues.append(UNRESOLVED_LEDGER_ISSUE)
+                    continue
+                try:
+                    issues.append(int(issue))
+                except ValueError:
+                    if recent_unknown_ledger_comment(comment, now_seconds):
+                        issues.append(UNRESOLVED_LEDGER_ISSUE)
+                    continue
+    return issues
 
 
 def parse_json_list(stdout: str) -> list[dict[str, Any]]:
@@ -635,8 +685,19 @@ def reconcile_ratchet(
 
     doc = slice_document(spec, inventory, slice_size)
     dedup_key = str(doc["dedup_key"])
-    if parent_has_issue_created_marker(parent, dedup_key, bot_login):
-        return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
+    ledger_issues = parent_issue_created_marker_issues(parent, dedup_key, bot_login, int(time()))
+    for ledger_issue in ledger_issues:
+        if ledger_issue is UNRESOLVED_LEDGER_ISSUE:
+            return ReconcileResult(spec.ratchet, "deduped-parent-ledger", dedup_key, parent_issue=parent_issue)
+        prior = client.issue_view(repo, int(ledger_issue), "number,state,author,body")
+        if not is_trusted_record(prior, bot_login) or str(prior.get("state") or "").upper() != "CLOSED":
+            return ReconcileResult(
+                spec.ratchet,
+                "deduped-parent-ledger",
+                dedup_key,
+                issue_number=int(ledger_issue),
+                parent_issue=parent_issue,
+            )
 
     open_candidates = client.issue_search(repo, "open", ratchet_slice_search_query(spec.ratchet))
     entry_keys = selected_entry_keys(doc)
@@ -658,7 +719,7 @@ def reconcile_ratchet(
         )
 
     exact_marker = issue_create_marker(dedup_key)
-    existing = matching_issues(client.issue_search(repo, "all", exact_marker), exact_marker, bot_login)
+    existing = matching_issues(client.issue_search(repo, "open", exact_marker), exact_marker, bot_login)
     if existing:
         return ReconcileResult(
             spec.ratchet,
