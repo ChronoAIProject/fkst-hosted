@@ -405,7 +405,6 @@ run_self_test_with_optional_lua_coverage() {
       echo "error: fkst-framework --self-test --coverage did not write coverage.json in $coverage_dir" >&2
       return 1
     fi
-    FKST_LUA_COVERAGE_JSON="$coverage_json" python3 -B "$ROOT/scripts/check_repo.py"
     return $?
   fi
   if printf '%s\n' "$out" | grep -Eq "(unknown|unrecognized).*--coverage"; then
@@ -415,6 +414,45 @@ run_self_test_with_optional_lua_coverage() {
   fi
   printf '%s\n' "$out" >&2
   return "$rc"
+}
+
+enforce_lua_coverage_ratchet() {
+  local output="${FKST_LUA_COVERAGE_OUTPUT:-$FKST_RUNTIME_ROOT/lua-coverage/coverage.json}" inputs=() artifact package_name
+  shift || true
+  if [ "$#" -eq 0 ]; then
+    echo "error: Lua coverage ratchet has no package coverage artifacts" >&2
+    return 1
+  fi
+  for artifact in "$@"; do
+    package_name="$(basename "$(dirname "$artifact")")"
+    inputs+=("$package_name=$artifact")
+  done
+  FKST_LUA_COVERAGE_MERGED_OUTPUT="$output" python3 -B - "$ROOT" "${inputs[@]}" <<'PY'
+import importlib.util
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("check_repo_coverage", root / "scripts" / "check_repo_coverage.py")
+if spec is None or spec.loader is None:
+    raise SystemExit("error: could not load scripts/check_repo_coverage.py")
+coverage = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = coverage
+spec.loader.exec_module(coverage)
+artifacts = [coverage.parse_covered_json_arg(value) for value in sys.argv[2:]]
+count = coverage.write_canonical_coverage_json(
+    coverage.merge_covered_sets(artifacts),
+    Path(os.environ["FKST_LUA_COVERAGE_MERGED_OUTPUT"]),
+    root,
+)
+print(f"wrote {count} file(s) to {os.environ['FKST_LUA_COVERAGE_MERGED_OUTPUT']}")
+PY
+  if [ ! -f "$output" ]; then
+    echo "error: Lua coverage ratchet did not write coverage artifact: $output" >&2
+    return 1
+  fi
+  FKST_LUA_COVERAGE_JSON="$output" python3 -B "$ROOT/scripts/check_repo.py"
 }
 
 # Run "$@"; unless verbose (cmd_test's flag), drop advisory `PASS` lines from its
@@ -451,7 +489,8 @@ run_quiet_keep() {
 
 cmd_test() {
   local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}"
-  local report_dir report_file
+  local report_dir report_file coverage_report_dir coverage_dir coverage_file
+  local coverage_artifacts=()
   # Lines worth surfacing when a package test fails: the engine's per-test FAIL
   # line (anchored at column 0 so it does not catch mid-line tag=FAILURE in the
   # info logs of tests that deliberately exercise error paths and still pass),
@@ -479,6 +518,7 @@ cmd_test() {
   echo "test hermetic: FKST_RUNTIME_ROOT=$FKST_RUNTIME_ROOT FKST_DURABLE_ROOT=$FKST_DURABLE_ROOT (ambient overridden)"
 
   report_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-reports.XXXXXX")"
+  coverage_report_dir="$FKST_RUNTIME_ROOT/package-lua-coverage"
 
   echo "=== self-test ==="
   if ! run_self_test_with_optional_lua_coverage; then
@@ -508,13 +548,24 @@ cmd_test() {
       fi
     fi
     report_file="$report_dir/$name.json"
+    coverage_dir="$coverage_report_dir/$name"
+    rm -rf "$coverage_dir"
+    mkdir -p "$coverage_dir"
     # Default-quiet: keep only failure-relevant lines (the --report-json that
     # drives the tally and G5 coverage is unaffected). run_quiet_keep is called
     # from `if !` so the inner pipe never trips `set -e` on a failing package;
     # the loop continues, the count is correct, and FAILED: still prints.
     if ! run_quiet_keep "$test_failure_filter" \
-        "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file"; then
+        "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file" --coverage "$coverage_dir"; then
       fail=$((fail + 1))
+    else
+      coverage_file="$coverage_dir/coverage.json"
+      if [ ! -f "$coverage_file" ]; then
+        echo "error: fkst-framework test --coverage did not write coverage.json for $name in $coverage_dir" >&2
+        fail=$((fail + 1))
+      else
+        coverage_artifacts+=("$coverage_file")
+      fi
     fi
   done
   if [ "$ran" -eq 0 ]; then
@@ -528,6 +579,11 @@ cmd_test() {
   if [ -z "$target" ]; then
     if ! cmd_test_composed; then
       fail=$((fail + 1))
+    fi
+    if [ "$fail" -eq 0 ]; then
+      if ! enforce_lua_coverage_ratchet -- "${coverage_artifacts[@]}"; then
+        fail=$((fail + 1))
+      fi
     fi
     if [ "$fail" -eq 0 ]; then
       if ! check_test_file_coverage "$report_dir"; then
