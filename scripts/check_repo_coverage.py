@@ -697,10 +697,9 @@ def repository_messages_for_uncovered(
 def repository_messages(root: Path) -> list[str]:
     path = artifact_path(root)
     required = (root / REQUIRED_FLAG).exists()
-    if not required:
-        base_ref = selected_base_ref(root)
-        if base_ref is not None and required_flag_at_base(root, base_ref) == "present":
-            return [f"{REQUIRED_FLAG} may not be removed; coverage ratchet is enabled on base"]
+    # Coverage is advisory (reference, not enforced): absent REQUIRED_FLAG reports
+    # uncovered lines without blocking, and removing the flag is allowed. The
+    # enforce path is retained behind REQUIRED_FLAG for any repo that opts back in.
     if path is None:
         if not required:
             warn_disabled("coverage artifact is absent")

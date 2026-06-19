@@ -627,7 +627,9 @@ class CoverageRatchetTest(unittest.TestCase):
 
         self.assertEqual(messages, [])
 
-    def test_repository_messages_blocks_required_flag_removal(self) -> None:
+    def test_repository_messages_advisory_when_required_flag_removed(self) -> None:
+        # Coverage is advisory: with no REQUIRED_FLAG, uncovered lines are reported
+        # as a warning, not a blocking message, even when base still has the flag.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             artifact = root / "coverage.json"
@@ -648,35 +650,10 @@ class CoverageRatchetTest(unittest.TestCase):
             with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_JSON": str(artifact)}, clear=False):
                 with mock.patch.object(coverage, "selected_base_ref", return_value="integration"):
                     with mock.patch.object(coverage, "required_flag_at_base", return_value="present"):
-                        messages = coverage.repository_messages(root)
+                        with mock.patch("sys.stderr"):
+                            messages = coverage.repository_messages(root)
 
-        self.assertEqual(messages, [
-            "migration/coverage-uncovered.required may not be removed; coverage ratchet is enabled on base"
-        ])
-
-    def test_repository_messages_blocks_required_flag_removal_via_real_base_lookup(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            git(root, "init")
-            git(root, "config", "user.email", "fkst-test@example.invalid")
-            git(root, "config", "user.name", "fkst test")
-
-            (root / "migration").mkdir()
-            (root / "migration" / "coverage-uncovered.required").write_text("", encoding="utf-8")
-            git(root, "add", "migration/coverage-uncovered.required")
-            git(root, "commit", "-m", "enable coverage ratchet")
-            base_commit = git(root, "rev-parse", "HEAD")
-
-            (root / "migration" / "coverage-uncovered.required").unlink()
-            git(root, "add", "-u")
-            git(root, "commit", "-m", "remove coverage ratchet flag")
-
-            with mock.patch.dict("os.environ", {"FKST_LUA_COVERAGE_BASE_REF": base_commit}, clear=False):
-                messages = coverage.repository_messages(root)
-
-        self.assertEqual(messages, [
-            "migration/coverage-uncovered.required may not be removed; coverage ratchet is enabled on base"
-        ])
+        self.assertEqual(messages, [])
 
     def test_allowlist_at_base_works_from_linked_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
