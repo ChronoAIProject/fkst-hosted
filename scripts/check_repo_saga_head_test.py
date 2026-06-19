@@ -26,6 +26,12 @@ saga_head = check_repo.check_repo_saga_head
 
 
 class SagaSpecHeadRatchetTest(unittest.TestCase):
+    slice_1186_paths = {
+        "packages/github-devloop/departments/review_meta/main.lua",
+        "packages/github-devloop/departments/review_pr/main.lua",
+        "packages/github-devloop/departments/review_result/main.lua",
+    }
+
     def violations(self, source: str) -> list[str]:
         return saga_head.violations(
             {"packages/example/departments/dept/main.lua": source},
@@ -116,6 +122,26 @@ class SagaSpecHeadRatchetTest(unittest.TestCase):
         violations = self.violations(source)
         self.assertEqual(len(violations), 1)
         self.assertIn("must pass a named spec first argument", violations[0])
+
+    def test_issue_1186_slice_is_saga_shaped_and_allowlist_pruned(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        sources = {
+            path: (root / path).read_text(encoding="utf-8")
+            for path in sorted(self.slice_1186_paths)
+        }
+        allowlist = {
+            line.strip()
+            for line in (root / "migration" / "saga-handler.allowlist").read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+        violations = check_repo.saga_handler_ratchet_violations(sources, allowlist)
+
+        self.assertEqual(
+            [message for message in violations if any(path in message for path in self.slice_1186_paths)],
+            [],
+        )
+        self.assertTrue(self.slice_1186_paths.isdisjoint(allowlist))
 
 
 if __name__ == "__main__":

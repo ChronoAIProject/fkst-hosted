@@ -1,8 +1,8 @@
-local core = require("core")
+local core, saga = require("core"), require("std.saga")
 
-local M = {}
+-- Preserve existing body line coordinates for the coverage ratchet.
 
-M.spec = {
+local spec = {
   consumes = { "consensus.consensus_reached" },
   produces = {
     "github-proxy.github_issue_label_request",
@@ -18,7 +18,7 @@ M.spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
-function pipeline(event)
+return saga.department(spec, { done = function() return false end, act = function(event)
   local reached = event.payload or {}
   if not core.is_supported_review_result(reached) then
     core.log_entry("review_result", event, "unknown", core.payload_field(reached, "dedup_key"))
@@ -231,8 +231,4 @@ function pipeline(event)
       core.log_raise("review_result", origin.proposal_id, "devloop_merge_ready", merge_payload)
     end
   end)
-end
-
-pipeline = core.wrap_pipeline_failure("review_result", pipeline)
-
-return M
+end, wrap = core.wrap_pipeline_failure, name = "review_result" })
