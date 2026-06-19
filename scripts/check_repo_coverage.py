@@ -505,18 +505,8 @@ def ratchet_messages(
         messages.append(
             f"{uncovered[key].label()} is an uncovered production Lua line not in {ALLOWLIST}"
         )
-    # A "stale" entry (allowlisted but covered in THIS run) is housekeeping, not a hard gate.
-    # Coverage of data-dependent branches is not reproducible across runs/producers, so requiring
-    # an exact allowlist == uncovered snapshot is unconvergeable: the same line legitimately reads
-    # covered in one coverage run and uncovered in another, and no fixed allowlist satisfies both.
-    # Shrink-only is still enforced as monotonic non-growth against the version-controlled base
-    # (the base_allowlist comparison below); a covered-but-listed entry permits nothing new, so it
-    # is surfaced as a prune candidate (warning), not a build failure.
     for key in sorted(allowlist - set(uncovered)):
-        print(
-            f"warning: {key.label()} is no longer uncovered; consider pruning the stale entry from {ALLOWLIST}",
-            file=sys.stderr,
-        )
+        messages.append(f"{key.label()} is no longer uncovered; prune the stale entry from {ALLOWLIST}")
     if base_allowlist is not None:
         for key in sorted(allowlist - base_allowlist):
             messages.append(f"{key.label()} grows {ALLOWLIST} relative to {base_ref}; cover the line instead")
