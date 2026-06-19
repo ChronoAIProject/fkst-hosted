@@ -926,7 +926,10 @@ def check_code_dedup_ratchet(root: Path, violations: list[str]) -> None:
         add(violations, "G-DEDUP", message)
 
 def check_no_permission_control(root: Path, violations: list[str]) -> None: check_repo_perm.check_no_permission_control(root, violations, read_text=read_text, rel=rel)
-def is_saga_handler_source(source: str) -> bool: return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
+
+def is_saga_handler_source(source: str) -> bool:
+    return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
+
 def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
     violations: list[str] = []
     for path, source in sorted(sources.items()):
