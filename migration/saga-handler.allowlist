@@ -1,6 +1,3 @@
-packages/github-devloop/departments/loop/main.lua
-packages/github-devloop/departments/merge/main.lua
-packages/github-devloop/departments/observability/main.lua
 packages/github-devloop/departments/observe_issue/main.lua
 packages/github-devloop/departments/observe_pr/main.lua
 packages/github-devloop/departments/open_pr/main.lua
