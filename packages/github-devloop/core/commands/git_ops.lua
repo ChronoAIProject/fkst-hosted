@@ -70,6 +70,22 @@ function S.install(M)
     return support.git().ls_remote_branch(validators.require_safe_remote(M, remote), validators.require_safe_branch(M, "remote branch", branch), timeout)
   end
 
+  function M.git_ls_remote_ref(remote, ref, timeout)
+    return support.git().ls_remote_ref(
+      validators.require_safe_remote(M, remote),
+      validators.require_safe_ref(M, "remote ref", ref),
+      timeout
+    )
+  end
+
+  function M.git_fetch_ref(remote, ref, timeout)
+    return support.git().fetch_ref(
+      validators.require_safe_remote(M, remote),
+      validators.require_safe_ref(M, "fetch ref", ref),
+      timeout
+    )
+  end
+
   function M.git_fetch_remote_branch_to_tracking_ref(remote, branch, tracking_ref, timeout)
     return support.git().fetch_remote_branch_to_tracking_ref(
       validators.require_safe_remote(M, remote),
@@ -80,7 +96,42 @@ function S.install(M)
   end
 
   function M.git_rev_parse_ref_commit(ref, timeout)
-    return support.git().rev_parse_ref_commit(validators.require_safe_branch(M, "ref", ref), timeout)
+    return support.git().rev_parse_ref_commit(validators.require_safe_ref(M, "ref", ref), timeout)
+  end
+
+  function M.git_rev_parse_ref_tree(ref, timeout)
+    return support.git().rev_parse_ref_tree(validators.require_safe_ref(M, "tree ref", ref), timeout)
+  end
+
+  function M.git_cat_file_pretty(ref, timeout)
+    return support.git().cat_file_pretty(validators.require_safe_ref(M, "object ref", ref), timeout)
+  end
+
+  function M.git_commit_tree(tree_sha, parent_sha, message_file, timeout)
+    local parent = nil
+    if parent_sha ~= nil and tostring(parent_sha) ~= "" then
+      parent = validators.require_safe_sha(M, "parent commit", parent_sha)
+    end
+    return support.git().commit_tree(
+      validators.require_safe_sha(M, "tree sha", tree_sha),
+      parent,
+      message_file,
+      timeout
+    )
+  end
+
+  function M.git_push_ref_update(remote, sha, ref, force_with_lease, timeout)
+    local lease = false
+    if force_with_lease ~= nil and force_with_lease ~= false then
+      lease = validators.require_safe_sha(M, "lease sha", force_with_lease)
+    end
+    return support.git().push_ref_update(
+      validators.require_safe_remote(M, remote),
+      validators.require_safe_sha(M, "ref update sha", sha),
+      validators.require_safe_ref(M, "ref update ref", ref),
+      lease,
+      timeout
+    )
   end
 
   function M.git_fetch_pr_merge_ref(remote, pr_number, timeout)

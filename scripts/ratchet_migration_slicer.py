@@ -357,22 +357,29 @@ def selected_sites(inventory: list[InventorySite], slice_size: int) -> list[Inve
     return inventory[:slice_size]
 
 
-def site_records(inventory: list[InventorySite], slice_size: int) -> list[dict[str, object]]:
+def site_records(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> list[dict[str, object]]:
     return [
         {
             "path": site.path,
             "line": site.line,
             "detail": site.detail,
             "site_ref": site.site_ref(),
-            "entry_key": entry_key(site),
+            "allowlist_entry": site.entry_id(),
+            "entry_key": entry_key(spec.allowlist_path, site),
         }
         for site in selected_sites(inventory, slice_size)
     ]
 
 
-def entry_key(site: InventorySite) -> str:
-    encoded = site.entry_id().encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()[:16]
+def entry_key(allowlist_path: str, site: InventorySite) -> str:
+    encoded = (
+        "fkst-migration-slice-v1"
+        + "\0"
+        + str(allowlist_path)
+        + "\0"
+        + site.entry_id()
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def sites_fingerprint(sites: list[dict[str, object]]) -> str:
@@ -381,7 +388,7 @@ def sites_fingerprint(sites: list[dict[str, object]]) -> str:
 
 
 def slice_document(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> dict[str, object]:
-    sites = site_records(inventory, slice_size)
+    sites = site_records(spec, inventory, slice_size)
     fingerprint = sites_fingerprint(sites)
     return {
         "schema": SCHEMA,
@@ -402,7 +409,6 @@ def slice_document(spec: MigrationSpec, inventory: list[InventorySite], slice_si
 
 
 def controller_plan(spec: MigrationSpec, inventory: list[InventorySite], slice_size: int) -> dict[str, object]:
-    doc = slice_document(spec, inventory, slice_size)
     if not inventory:
         return {
             "schema_version": SCHEMA,
@@ -413,18 +419,19 @@ def controller_plan(spec: MigrationSpec, inventory: list[InventorySite], slice_s
             "status": "inventory_empty",
             "next_slice": None,
         }
+    doc = slice_document(spec, inventory, 1)
     return {
         "schema_version": SCHEMA,
         "ratchet": spec.ratchet,
         "allowlist_path": spec.allowlist_path,
         "remaining_count": len(inventory),
-        "slice_size": slice_size,
+        "slice_size": 1,
         "status": "slice_available",
         "next_slice": {
             "dedup_key": doc["dedup_key"],
             "sites": doc["sites"],
             "title": slice_issue_title(doc),
-            "body": render_reconciled_issue_body(spec, inventory, slice_size),
+            "body": render_reconciled_issue_body(spec, inventory, 1),
             "labels": list(DEFAULT_LABELS),
         },
     }
@@ -451,7 +458,11 @@ def issue_created_marker(dedup_key: str, issue_number: int | None) -> str:
 
 
 def ratchet_slice_marker(doc: dict[str, object]) -> str:
-    entry_keys = ",".join(str(site.get("entry_key")) for site in doc["sites"] if site.get("entry_key") is not None)
+    sites = doc["sites"]
+    entry_keys = ",".join(str(site.get("entry_key")) for site in sites if site.get("entry_key") is not None)
+    entry_key = ""
+    if len(sites) == 1 and sites[0].get("entry_key") is not None:
+        entry_key = str(sites[0]["entry_key"])
     return (
         '<!-- fkst:ratchet-slice:v1'
         f' schema="{ensure_marker_value(str(doc["schema"]))}"'
@@ -459,6 +470,10 @@ def ratchet_slice_marker(doc: dict[str, object]) -> str:
         f' parent="{int(doc["parent_issue"])}"'
         f' dedup="{ensure_marker_value(str(doc["dedup_key"]))}"'
         f' fingerprint="{ensure_marker_value(str(doc["sites_fingerprint"]))}"'
+        f' allowlist_path="{ensure_marker_value(str(doc["allowlist_path"]))}"'
+        f' entry_key="{ensure_marker_value(entry_key)}"'
+        f' generation="1"'
+        f' coord_ref="{ensure_marker_value("refs/fkst/migration-slices/" + entry_key) if entry_key else ""}"'
         f' entries="{ensure_marker_value(entry_keys)}"'
         " -->"
     )

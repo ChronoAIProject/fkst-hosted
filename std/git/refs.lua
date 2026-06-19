@@ -32,6 +32,10 @@ local function fetch_ref_argv(remote, ref)
   return { "git", "fetch", tostring(remote), tostring(ref) }
 end
 
+local function ls_remote_ref_argv(remote, ref)
+  return { "git", "ls-remote", tostring(remote), tostring(ref) }
+end
+
 local function ls_remote_branch_argv(remote, branch)
   return { "git", "ls-remote", tostring(remote), "refs/heads/" .. tostring(branch) }
 end
@@ -46,6 +50,38 @@ end
 
 local function rev_parse_ref_commit_argv(ref)
   return { "git", "rev-parse", "--verify", tostring(ref) .. "^{commit}" }
+end
+
+local function rev_parse_ref_tree_argv(ref)
+  return { "git", "rev-parse", "--verify", tostring(ref) .. "^{tree}" }
+end
+
+local function cat_file_pretty_argv(ref)
+  return { "git", "cat-file", "-p", tostring(ref) }
+end
+
+local function commit_tree_argv(tree_sha, parent_sha, message_file)
+  local argv = { "git", "commit-tree", tostring(tree_sha) }
+  if parent_sha ~= nil and tostring(parent_sha) ~= "" then
+    table.insert(argv, "-p")
+    table.insert(argv, tostring(parent_sha))
+  end
+  table.insert(argv, "-F")
+  table.insert(argv, tostring(message_file))
+  return argv
+end
+
+local function push_ref_update_argv(remote, sha, ref, force_with_lease)
+  local argv = {
+    "git",
+    "push",
+    tostring(remote),
+    tostring(sha) .. ":" .. tostring(ref),
+  }
+  if force_with_lease ~= nil and force_with_lease ~= false then
+    table.insert(argv, "--force-with-lease=" .. tostring(ref) .. ":" .. tostring(force_with_lease))
+  end
+  return argv
 end
 
 local function fetch_head_commit_argv()
@@ -305,6 +341,10 @@ function M.install(handle)
     return exec_result(handle, fetch_ref_argv(remote, ref), timeout, "git fetch ref")
   end
 
+  function handle.ls_remote_ref(remote, ref, timeout)
+    return exec_result(handle, ls_remote_ref_argv(remote, ref), timeout, "git ls-remote ref")
+  end
+
   function handle.ls_remote_branch(remote, branch, timeout)
     return exec_result(handle, ls_remote_branch_argv(remote, branch), timeout, "git ls-remote branch")
   end
@@ -319,6 +359,22 @@ function M.install(handle)
 
   function handle.rev_parse_ref_commit(ref, timeout)
     return exec_result(handle, rev_parse_ref_commit_argv(ref), timeout, "git rev-parse ref commit")
+  end
+
+  function handle.rev_parse_ref_tree(ref, timeout)
+    return exec_result(handle, rev_parse_ref_tree_argv(ref), timeout, "git rev-parse ref tree")
+  end
+
+  function handle.cat_file_pretty(ref, timeout)
+    return exec_result(handle, cat_file_pretty_argv(ref), timeout, "git cat-file -p")
+  end
+
+  function handle.commit_tree(tree_sha, parent_sha, message_file, timeout)
+    return exec_result(handle, commit_tree_argv(tree_sha, parent_sha, message_file), timeout, "git commit-tree")
+  end
+
+  function handle.push_ref_update(remote, sha, ref, force_with_lease, timeout)
+    return exec_result(handle, push_ref_update_argv(remote, sha, ref, force_with_lease), timeout, "git push ref update")
   end
 
   function handle.fetch_head_commit(timeout)
