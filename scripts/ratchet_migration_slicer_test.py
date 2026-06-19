@@ -277,8 +277,14 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             "packages/github-devloop/departments/reconcile/main.lua",
             "packages/github-devloop/departments/review_loop/main.lua",
         }
+        allowlist_entries = {
+            line.strip()
+            for line in (REPO_ROOT / spec.allowlist_path).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        }
 
         self.assertTrue(expected_paths.isdisjoint(live_paths))
+        self.assertTrue(expected_paths.isdisjoint(allowlist_entries))
         for path in expected_paths:
             source = (REPO_ROOT / path).read_text(encoding="utf-8")
             self.assertIn("return saga.department(spec,", source)
