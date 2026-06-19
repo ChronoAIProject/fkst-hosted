@@ -87,6 +87,18 @@ end
             },
         )
 
+    def test_inline_saga_act_is_pipeline_site(self) -> None:
+        text = """
+return saga.department(spec, { done = function() return false end, act = function(event)
+  core.log_raise("dept", id, "devloop_reconcile", payload)
+end })
+"""
+        sites = forward.source_sites("packages/github-devloop/departments/loop/main.lua", text)
+        self.assertEqual(
+            {site.allowlist_line() for site in sites},
+            {"packages/github-devloop/departments/loop/main.lua|pipeline|devloop_reconcile"},
+        )
+
     def test_source_scan_classifies_known_dynamic_recovery_queue(self) -> None:
         text = """
 local function maybe_redrive_not_mergeable_pr()

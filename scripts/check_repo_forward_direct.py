@@ -34,6 +34,7 @@ DYNAMIC_QUEUE_HINTS = {
 FUNCTION_RE = re.compile(
     r"^\s*(?:local\s+)?function\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)?)\b"
 )
+SAGA_ACT_FUNCTION_RE = re.compile(r"\bact\s*=\s*function\s*\(")
 
 
 @dataclass(frozen=True, order=True)
@@ -103,6 +104,8 @@ def source_sites(path: str, text: str) -> set[ForwardDirectSite]:
         match = FUNCTION_RE.match(line)
         if match is not None:
             function = match.group("name")
+        elif SAGA_ACT_FUNCTION_RE.search(line):
+            function = "pipeline"
         queues = _literal_raise_queues(line)
         if "raise_effects" in line and "(" in line:
             in_raise_effects = True
