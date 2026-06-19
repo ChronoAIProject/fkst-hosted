@@ -1,8 +1,6 @@
-local core = require("core")
+local core, saga = require("core"), require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "devloop_reconcile", "devloop_review_reconcile", "devloop_fix_reconcile", "devloop_timeout_reconcile" },
   produces = {
     "github-proxy.github_issue_comment_request",
@@ -11,6 +9,8 @@ M.spec = {
   },
   stall_window = "2m",
 }
+
+
 
 local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request, comment_queue)
   local add_labels, remove_labels = core.state_label_changes("blocked")
@@ -535,7 +535,7 @@ local function pipeline_timeout(event)
   end)
 end
 
-function pipeline(event)
+return saga.department(spec, { done = function() return false end, act = function(event)
   local schema = core.payload_field(event and event.payload, "schema")
   if schema == "github-devloop.timeout-reconcile.v1" then
     return pipeline_timeout(event)
@@ -547,8 +547,4 @@ function pipeline(event)
     return pipeline_fix(event)
   end
   return pipeline_thinking(event)
-end
-
-pipeline = core.wrap_pipeline_failure("reconcile", pipeline)
-
-return M
+end, wrap = core.wrap_pipeline_failure, name = "reconcile" })

@@ -1,8 +1,6 @@
-local core = require("core")
+local core, saga = require("core"), require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
     "consensus.proposal",
@@ -15,6 +13,8 @@ M.spec = {
   stall_window = "30s",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+
 
 local function review_truth_table_unapproved(unresolved)
   if tonumber(unresolved.round) == nil or tonumber(unresolved.round) < 1 then
@@ -63,7 +63,7 @@ local function reviewing_segment_transition_status(state, review_version)
   return "pending"  -- no marker yet, or a state earlier than reviewing -> reviewing marker not yet visible
 end
 
-function pipeline(event)
+return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
   if not core.is_supported_pr_review_unresolved(unresolved) then
     core.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
@@ -229,8 +229,4 @@ function pipeline(event)
     core.log_raise("review_loop", origin.proposal_id, "consensus.proposal", proposal)
     core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   end)
-end
-
-pipeline = core.wrap_pipeline_failure("review_loop", pipeline)
-
-return M
+end, wrap = core.wrap_pipeline_failure, name = "review_loop" })

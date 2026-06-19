@@ -6139,7 +6139,7 @@
 {"file":"packages/github-devloop/departments/ratchet_migration_driver/ratchets.lua","line":2,"normalized_line_hash":"021fb596db81e6d0","reason":"baseline"}
 {"file":"packages/github-devloop/departments/ratchet_migration_driver/ratchets.lua","line":7,"normalized_line_hash":"021fb596db81e6d0","reason":"baseline"}
 {"file":"packages/github-devloop/departments/ratchet_migration_driver/ratchets.lua","line":12,"normalized_line_hash":"021fb596db81e6d0","reason":"baseline"}
-{"file":"packages/github-devloop/departments/reconcile/main.lua","line":10,"normalized_line_hash":"2f2ef0bd6a6b431e","reason":"baseline"}
+{"file":"packages/github-devloop/departments/reconcile/main.lua","line":8,"normalized_line_hash":"2f2ef0bd6a6b431e","reason":"baseline"}
 {"file":"packages/github-devloop/departments/reconcile/main.lua","line":15,"normalized_line_hash":"663608b0f7f3dbf0","reason":"baseline"}
 {"file":"packages/github-devloop/departments/reconcile/main.lua","line":21,"normalized_line_hash":"2f2ef0bd6a6b431e","reason":"baseline"}
 {"file":"packages/github-devloop/departments/reconcile/main.lua","line":24,"normalized_line_hash":"f1bbb42fc26659dd","reason":"baseline"}
@@ -6377,7 +6377,7 @@
 {"file":"packages/github-devloop/departments/reconcile/main.lua","line":531,"normalized_line_hash":"293f80f8a0b18fcf","reason":"baseline"}
 {"file":"packages/github-devloop/departments/reconcile/main.lua","line":532,"normalized_line_hash":"c0a01a3704e944c4","reason":"baseline"}
 {"file":"packages/github-devloop/departments/reconcile/main.lua","line":533,"normalized_line_hash":"1130bf8bfd445626","reason":"baseline"}
-{"file":"packages/github-devloop/departments/review_loop/main.lua","line":12,"normalized_line_hash":"9211ff32a6be29da","reason":"baseline"}
+{"file":"packages/github-devloop/departments/review_loop/main.lua","line":10,"normalized_line_hash":"9211ff32a6be29da","reason":"baseline"}
 {"file":"packages/github-devloop/departments/review_loop/main.lua","line":19,"normalized_line_hash":"d70b5fb36d8091a4","reason":"baseline"}
 {"file":"packages/github-devloop/departments/review_loop/main.lua","line":24,"normalized_line_hash":"19921ccfad14c1de","reason":"baseline"}
 {"file":"packages/github-devloop/departments/review_loop/main.lua","line":36,"normalized_line_hash":"19921ccfad14c1de","reason":"baseline"}
