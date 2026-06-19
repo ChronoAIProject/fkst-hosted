@@ -128,6 +128,13 @@ local function assert_clean_open_pr_skip(result)
   t.eq(count_calls("git -C"), 0)
 end
 
+local function assert_missing_implementing_fact_defer(result)
+  t.eq(result.exit_code, 0)
+  t.eq(#result.raises, 0)
+  t.eq(count_calls("show-ref --verify --quiet"), 0)
+  t.eq(count_calls("rev-parse --verify"), 0)
+end
+
 return {
   test_open_pr_direct_kickoff_raises_pr_open_request = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -291,18 +298,31 @@ return {
     assert_clean_open_pr_skip(result)
   end,
 
-  test_open_pr_retries_when_implementing_fact_marker_missing = function()
+  test_open_pr_poll_defers_when_implementing_fact_marker_missing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
     })
 
-    local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-implementing-fact"))
+    local result = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-poll-missing-implementing-fact"))
 
-    t.eq(result.exit_code, 1)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("show-ref --verify --quiet"), 0)
-    t.eq(count_calls("rev-parse --verify"), 0)
+    assert_missing_implementing_fact_defer(result)
+  end,
+
+  test_open_pr_direct_defers_when_implementing_fact_marker_missing = function()
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local event = core.build_devloop_open_pr_payload("owner/repo", 42, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      dedup_key = impl_version,
+      source_ref = source_ref(),
+    }, "devloop-owner-repo-42-01HY", "abc123", "dev")
+    mock_issue_open_pr({ "fkst-dev:implementing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
+    })
+
+    local result = run_open_pr(event, opts("open-pr-direct-missing-implementing-fact"))
+
+    assert_missing_implementing_fact_defer(result)
   end,
 
   test_observe_claim_acquire_read_bypasses_same_validator_cache = function()
