@@ -97,7 +97,7 @@ local transition_table = registry.load_indexed_array("core.restart.transitions.i
   liveness = liveness,
   watchdog = watchdog,
   actionable_epoch = actionable_epoch,
-  responsibility_signature = responsibility_signature,
+  responsibility_signature = responsibility_signature, span_contract = responsibility_signature,
 }, "github-devloop")
 
 local audit_by_state = {}

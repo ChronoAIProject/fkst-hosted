@@ -220,7 +220,7 @@ local audited_english_skeletons = {
   "github-devloop intake decision: ",
   "Reason:",
   "(no reason provided)",
-  "github-devloop implementation started",
+  "github-devloop implementation output published",
   "Worktree: ",
   "Branch: ",
   "Head: ",
