@@ -66,7 +66,7 @@ function M.result_effects_complete(current, reached)
     and M.state_label_hint_matches(current.labels, "ready")
 end
 
-function M.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
+function M.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body, handoff)
   return M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
@@ -81,7 +81,7 @@ function M.build_converge_round_comment_request(repo, issue_number, unresolved, 
       tostring(round),
       tostring(unresolved.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(unresolved.source_ref),
+    source_ref = M.normalize_source_ref(unresolved.source_ref), handoff = handoff,
   }, unresolved.source_ref)
 end
 

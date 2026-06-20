@@ -5,7 +5,6 @@ local core, saga = require("core"), require("std.saga")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
-    "devloop_reconcile",
     "consensus.proposal",
     "github-proxy.github_issue_comment_request",
   },
@@ -74,22 +73,25 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.narrowed_question,
       unresolved.angle_digests
     )
-    local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
     local facts_with_current = core.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
     local hit_round_cap = budget_round >= core.max_converge_rounds()
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
-      local reconcile = core.build_devloop_reconcile_payload(unresolved, round, base_version)
+      local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body, {
+        kind = "github-devloop.reconcile",
+        proposal_id = unresolved.proposal_id,
+        round = round,
+        base_version = base_version,
+        source_ref = core.normalize_source_ref(unresolved.source_ref),
+      })
       local reason = hit_round_cap
         and ("convergence budget reached at round " .. tostring(budget_round))
         or ("true convergence stall at round " .. tostring(round))
       core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), reason)
       core.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_issue_comment_request",
-        "devloop_reconcile",
       })
       core.log_raise("loop", unresolved.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-      core.log_raise("loop", unresolved.proposal_id, "devloop_reconcile", reconcile)
       return
     end
 
@@ -111,6 +113,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return
     end
+    local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
 
     core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), "raising loop proposal round " .. tostring(next_n))
     core.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {

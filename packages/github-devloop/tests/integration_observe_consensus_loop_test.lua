@@ -789,7 +789,7 @@ return {
     t.is_true(comment.body:find('round="0"', 1, true) ~= nil)
   end,
 
-  test_loop_true_stall_records_round_and_raises_reconcile = function()
+  test_loop_true_stall_records_round_and_handoff_reconcile = function()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
       dedup_key = base_version .. "/loop/3",
@@ -807,20 +807,18 @@ return {
 
     local result = run_loop(event, opts("loop-true-stall"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
     t.is_true(result.raises[1].payload.body:find('round="3"', 1, true) ~= nil)
-    t.eq(result.raises[2].queue, "devloop_reconcile")
-    local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
-    t.eq(reconcile_raise.schema, "github-devloop.reconcile.v1")
-    t.eq(reconcile_raise.proposal_id, event.proposal_id)
-    t.eq(reconcile_raise.round, 3)
-    t.eq(reconcile_raise.base_version, base_version)
-    t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/3")
-    t.eq(reconcile_raise.source_ref.ref, "owner/repo#issue/42")
+    t.eq(find_raise(result.raises, "devloop_reconcile"), nil)
+    t.eq(result.raises[1].payload.handoff.kind, "github-devloop.reconcile")
+    t.eq(result.raises[1].payload.handoff.proposal_id, event.proposal_id)
+    t.eq(result.raises[1].payload.handoff.round, 3)
+    t.eq(result.raises[1].payload.handoff.base_version, base_version)
+    t.eq(result.raises[1].payload.handoff.source_ref.ref, "owner/repo#issue/42")
   end,
 
-  test_loop_round_cap_records_round_and_raises_reconcile_even_when_question_varies = function()
+  test_loop_round_cap_records_round_and_handoff_reconcile_even_when_question_varies = function()
     local cap = core.max_converge_rounds()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local function varying_digest(round)
@@ -842,13 +840,13 @@ return {
 
     local result = run_loop(event, opts("loop-round-cap"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
     t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
-    t.eq(result.raises[2].queue, "devloop_reconcile")
-    local reconcile_raise = find_raise(result.raises, "devloop_reconcile").payload
-    t.eq(reconcile_raise.round, cap)
-    t.eq(reconcile_raise.dedup_key, "reconcile:" .. base_version .. "/loop/" .. tostring(cap))
+    t.eq(find_raise(result.raises, "devloop_reconcile"), nil)
+    t.eq(result.raises[1].payload.handoff.kind, "github-devloop.reconcile")
+    t.eq(result.raises[1].payload.handoff.round, cap)
+    t.eq(result.raises[1].payload.handoff.base_version, base_version)
   end,
 
   test_loop_duplicate_converge_round_marker_skips = function()

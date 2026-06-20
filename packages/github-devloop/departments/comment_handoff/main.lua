@@ -1,11 +1,13 @@
 local core = require("core")
 local saga = require("std.saga")
 local source_refs = require("std.source_ref")
+local valid_round = require("core.rounds").valid_round
 
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
     "devloop_ready",
+    "devloop_reconcile",
     "devloop_reviewing",
   },
   stall_window = "30s",
@@ -30,6 +32,13 @@ local function supported_handoff(payload)
     and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
     and core.is_safe_pr_number(handoff.pr_number)
     and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
+    return handoff
+  end
+  if handoff.kind == "github-devloop.reconcile"
+    and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.base_version)
+    and core._is_bounded_string(handoff.base_version, core._max_dedup_len)
+    and valid_round(handoff.round) ~= nil
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
@@ -74,6 +83,16 @@ local function act_handoff(event)
     })
     core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "ready", version = ready.dedup_key }, "comment-written", "devloop_ready", "applied(own-write-comment-id)", "ready marker comment write was acknowledged")
     core.log_raise("comment_handoff", handoff.proposal_id, "devloop_ready", ready)
+    return
+  end
+
+  if handoff.kind == "github-devloop.reconcile" then
+    local reconcile = core.build_devloop_reconcile_payload({
+      proposal_id = handoff.proposal_id,
+      source_ref = handoff.source_ref,
+    }, handoff.round, handoff.base_version)
+    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "thinking", version = handoff.base_version }, "comment-written", "devloop_reconcile", "applied(own-write-comment-id)", "converge round comment write was acknowledged")
+    core.log_raise("comment_handoff", handoff.proposal_id, "devloop_reconcile", reconcile)
     return
   end
 
