@@ -72,6 +72,10 @@ local function mock_remote_branch(branch, head)
   })
 end
 
+local function assert_no_direct_open_pr(raises)
+  t.eq(find_raise(raises, "devloop_open_pr"), nil)
+end
+
 return {
   test_implementing_redelivery_reruns_when_no_progress_and_attempt_budget_remains = function()
     local event = ready()
@@ -98,10 +102,10 @@ return {
       return tostring(payload.body or ""):find('attempt="2"', 1, true) ~= nil
     end).payload.body
     t.eq(core.implement_attempt_count({ comment }, event.proposal_id, event.dedup_key), 2)
-    t.eq(find_raise(result.raises, "devloop_open_pr").payload.head_sha, "def456")
+    assert_no_direct_open_pr(result.raises)
   end,
 
-  test_implementing_redelivery_continues_to_open_pr_when_remote_branch_exists = function()
+  test_implementing_redelivery_sees_remote_branch_without_direct_open_pr = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
     local fact = core.implementing_marker(event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123")
@@ -116,9 +120,7 @@ return {
     local result = run_implement(event, opts("implement-liveness-remote-progress"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
-    local kickoff = find_raise(result.raises, "devloop_open_pr")
-    t.eq(kickoff.payload.branch, branch)
-    t.eq(kickoff.payload.head_sha, "abc123")
+    assert_no_direct_open_pr(result.raises)
   end,
 
   test_implementing_redelivery_skips_when_pr_link_exists = function()
@@ -295,9 +297,7 @@ return {
     local result = run_implement(event, opts("implement-liveness-local-progress-at-budget"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
-    local kickoff = find_raise(result.raises, "devloop_open_pr")
-    t.eq(kickoff.payload.branch, branch)
-    t.eq(kickoff.payload.head_sha, "def456")
+    assert_no_direct_open_pr(result.raises)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
   end,
 
@@ -430,7 +430,7 @@ return {
     local result = run_implement(reraised.payload, opts("implement-718-roundtrip"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 1, "re-raised ready must re-run implement, not skip-stale forever")
-    t.eq(find_raise(result.raises, "devloop_open_pr") ~= nil, true)
+    assert_no_direct_open_pr(result.raises)
   end,
 
   test_observe_reraises_reimplement_attempt_preserving_suffix = function()
@@ -475,9 +475,7 @@ return {
     local result = run_implement(reraised.payload, opts("implement-721-roundtrip"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
-    local kickoff = find_raise(result.raises, "devloop_open_pr")
-    t.eq(kickoff ~= nil, true)
-    t.eq(kickoff.payload.head_sha, "abc123")
+    assert_no_direct_open_pr(result.raises)
   end,
 
   test_double_wrapped_liveness_redrive_is_not_recovered = function()

@@ -314,7 +314,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
     t.eq(count_calls("gh pr merge '8' --repo 'owner/repo' --merge --match-head-commit 'fed789'"), 0)
-    t.eq(count_calls("gh issue close"), 1)
+    t.eq(count_calls("gh issue close"), 0)
     t.eq(count_calls("git fetch 'origin' '" .. branch_for_pr(8) .. "'"), 0)
     t.eq(count_calls("gh pr diff '8' --repo 'owner/repo' --name-only"), 0)
   end,

@@ -96,6 +96,10 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     core.log_forged_markers("open_pr", proposal_id, current_issue.comments)
     local state = core.current_state(current_issue.comments, proposal_id)
+    if state.state == "implementing" then
+      core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-stale(superseded-transition)", "direct open_pr was superseded by implement delegated PR child handoff")
+      return
+    end
     if state.state == "pr-open" then
       core.log_cas_decision("open_pr", proposal_id, state, "implementing", "pr-open", "skip-idempotent(already at to_state)", "PR state marker already visible")
       return

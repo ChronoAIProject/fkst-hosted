@@ -5,8 +5,6 @@
 # marker facts.
 packages/github-devloop/core/requests/review.lua|M.raise_fix_reviewing|devloop_reviewing
 packages/github-devloop/departments/fix/main.lua|raise_stale_speculation_refix|devloop_fixing
-packages/github-devloop/departments/implement/main.lua|raise_implementing|devloop_open_pr
-packages/github-devloop/departments/implement/main.lua|raise_open_pr_from_fact|devloop_open_pr
 packages/github-devloop/departments/merge/main.lua|raise_fixing|devloop_fixing
 packages/github-devloop/departments/merge/main.lua|raise_reviewing_for_current_head|devloop_reviewing
 packages/github-devloop/departments/observe_pr/main.lua|maybe_apply_rereview_command|devloop_reviewing

@@ -333,36 +333,16 @@ local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)
     repo = repo,
     number = merge_ready.pr_number,
   }, merged_body, merge_ready.dedup_key .. "/comment/merged", merged_source_ref)
-  local label_request = issue_number ~= nil and core.build_state_label_request(
-    repo,
-    issue_number,
-    "merged",
-    merge_ready.dedup_key .. "/label/merged",
-    core.issue_source_ref(repo, issue_number)
-  ) or nil
-  return comment_request, label_request
+  return comment_request
 end
 
 local function finalize_merged(repo, issue_number, merge_ready, current_state, reason, merged_pr)
-  if issue_number ~= nil then
-    local close_result = core.gh_issue_close(repo, issue_number, 60)
-    if close_result.exit_code ~= 0 then
-      error("github-devloop: issue close failed: " .. tostring(close_result.stderr))
-    end
-    core.invalidate_entity_after_write(repo, "issue", issue_number)
-  end
-
-  local comment_request, label_request = build_merged_requests(repo, issue_number, merge_ready, merged_pr)
-  local add_labels, remove_labels = core.state_label_changes("merged")
+  local comment_request = build_merged_requests(repo, issue_number, merge_ready, merged_pr)
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "merged", "applied", reason)
-  core.log_apply("merge", merge_ready.proposal_id, "merged", merge_ready.version, { add = add_labels, remove = remove_labels }, {
+  core.log_apply("merge", merge_ready.proposal_id, "merged", merge_ready.version, { add = {}, remove = {} }, {
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
   })
   core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  if label_request ~= nil then
-    core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  end
 end
 
 local function process_merge_ready_locked(repo, issue_number, merge_ready, branches, initial_pr, options)

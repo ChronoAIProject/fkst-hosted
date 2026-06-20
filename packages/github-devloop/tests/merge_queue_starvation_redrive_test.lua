@@ -205,7 +205,9 @@ return {
     t.is_true(reconcile.payload.body:find("fkst:github-devloop:queue-starvation-reconcile:v1", 1, true) ~= nil)
     t.is_true(reconcile.payload.body:find('pr="' .. tostring(stale.pr_number) .. '"', 1, true) ~= nil)
     t.is_true(reconcile.payload.body:find('head_sha="' .. stale.reviewed_head_sha .. '"', 1, true) ~= nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return tostring(payload and payload.body or ""):find("fkst:github-devloop:merged:v1", 1, true) ~= nil
+    end) ~= nil)
   end,
 
   test_queue_starvation_redrive_requeues_after_non_fifo_target_progress = function()

@@ -535,6 +535,54 @@ local function process_issue_event(event)
     local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
     snapshot.fresh = true
     local state = core.linked_snapshot_issue_state(snapshot, issue_state)
+    local function maybe_canonicalize_legacy_pr_open_issue()
+      if issue_state == nil or issue_state.state ~= "pr-open" then
+        return false
+      end
+      if link == nil
+        or tonumber(link.pr_number) == nil
+        or tostring(link.impl_version or "") ~= tostring(issue_state.version or "") then
+        core.log_cas_decision("observe_issue", proposal_id, issue_state, "pr-open", "awaiting-pr", "skip-stale(pr-link-missing)", "legacy pr-open canonicalization requires a matching visible PR link")
+        return false
+      end
+      if linked_open_pr(snapshot, link.pr_number) == nil then
+        core.log_cas_decision("observe_issue", proposal_id, issue_state, "pr-open", "awaiting-pr", "skip-pending(open-pr-missing)", "legacy pr-open canonicalization requires an open linked PR")
+        return false
+      end
+      local pr_proposal_id = core.pr_proposal_id(issue.repo, link.pr_number)
+      local delegation = "g" .. tostring(core.implementation_retry_attempt(issue_state.version) or 1)
+      local comment_body = "github-devloop canonicalized legacy issue PR state to delegated PR child"
+        .. "\n\n" .. core.state_marker(proposal_id, "awaiting-pr", issue_state.version)
+        .. "\n" .. core.pr_delegation_marker(proposal_id, pr_proposal_id, link.pr_number, issue_state.version, delegation)
+      local comment_request = core.build_entity_comment_request({
+        kind = "issue",
+        repo = issue.repo,
+        number = issue.number,
+      }, comment_body, core._dedup_key({
+        "canonicalize",
+        "pr-open",
+        tostring(proposal_id),
+        tostring(issue_state.version),
+        tostring(link.pr_number),
+      }), issue.source_ref)
+      local label_request = core.build_state_label_request(issue.repo, issue.number, "awaiting-pr", core._dedup_key({
+        "canonicalize",
+        "pr-open",
+        "label",
+        tostring(proposal_id),
+        tostring(issue_state.version),
+        tostring(link.pr_number),
+      }), issue.source_ref)
+      local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
+      core.log_cas_decision("observe_issue", proposal_id, issue_state, "pr-open", "awaiting-pr", "applied(legacy-pr-open-canonicalized)", "open linked PR preserved as delegated child")
+      core.log_apply("observe_issue", proposal_id, "awaiting-pr", issue_state.version, { add = add_labels, remove = remove_labels }, {
+        "github-proxy.github_issue_comment_request",
+        "github-proxy.github_issue_label_request",
+      })
+      core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+      core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", label_request)
+      return true
+    end
     if state.state ~= nil then
       if not claim_checked and not ensure_managed_issue_claim(issue, proposal_id, current, state) then
         return
@@ -546,6 +594,9 @@ local function process_issue_event(event)
         return
       end
       if maybe_apply_issue_reimplement_command(issue, proposal_id, current, state, snapshot) then
+        return
+      end
+      if maybe_canonicalize_legacy_pr_open_issue() then
         return
       end
       local label_state = issue_label_projection_state(state, issue_state, link, snapshot)

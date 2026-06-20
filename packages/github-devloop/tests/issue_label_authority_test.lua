@@ -42,6 +42,15 @@ local function writes_direct_pr_open_issue_label(body)
     or body:find('state_label_reconcile_changes%([^%)]-"pr%-open"', 1, false) ~= nil
 end
 
+local function contains_value(values, expected)
+  for _, value in ipairs(values or {}) do
+    if value == expected then
+      return true
+    end
+  end
+  return false
+end
+
 return {
   test_observe_issue_reconciles_pr_open_label_when_backing_pr_exists = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -62,8 +71,8 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
       return tostring(payload.target_kind or "issue") == "issue"
     end)
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:pr-open")
-    t.eq(label_raise.payload.remove_labels[1], "fkst-dev:implementing")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:awaiting-pr")
+    t.is_true(contains_value(label_raise.payload.remove_labels, "fkst-dev:implementing"))
     t.eq(count_calls("--json body"), 0)
   end,
 

@@ -591,7 +591,8 @@ return {
     h.mock_issue_close()
     local terminal = run_merge(event, opts("internal-chain-merge-terminal-recovery", { FKST_GITHUB_WRITE = "1" }))
     t.eq(terminal.exit_code, 0)
-    t.eq(find_raise(terminal.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.eq(find_raise(terminal.raises, "github-proxy.github_issue_label_request"), nil)
+    t.is_true(find_raise(terminal.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
     t.eq(find_raise(terminal.raises, "devloop_fixing"), nil)
     t.eq(find_raise(terminal.raises, "devloop_reviewing"), nil)
   end,

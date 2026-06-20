@@ -1,5 +1,6 @@
 local core = require("core")
 local saga = require("std.saga")
+local pr_child_handoff = require("departments.implement.pr_child_handoff")
 local slice_gate = require("departments.implement.slice_gate")
 local transitions = require("departments.implement.transitions")
 
@@ -13,7 +14,6 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_pr_comment_request",
-    "devloop_open_pr",
     "devloop_reviewing",
   },
   stall_window = "10m",
@@ -50,45 +50,15 @@ end
 
 local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
   local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
-  local open_pr_payload = core.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = {}, remove = {} }, {
     "github-proxy.github_issue_comment_request",
-    "devloop_open_pr",
   })
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("implement", ready.proposal_id, "devloop_open_pr", open_pr_payload)
 end
 
 local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at, exec_ref)
   local request = core.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at, exec_ref)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
-end
-
-local function open_pr_payload_from_fact(repo, issue_number, ready, fact)
-  return core.build_devloop_open_pr_payload(
-    repo,
-    issue_number,
-    {
-      proposal_id = ready.proposal_id,
-      dedup_key = fact.dedup_key or ready.dedup_key,
-      source_ref = ready.source_ref,
-    },
-    fact.branch,
-    fact.head_sha,
-    fact.base_branch
-  )
-end
-
-local function raise_open_pr_from_fact(repo, issue_number, ready, fact, reason)
-  core.log_cas_decision("implement", ready.proposal_id, {
-    state = "implementing",
-    version = fact.dedup_key or ready.dedup_key,
-  }, "implementing", "pr-open", "applied(progress-derived)", reason)
-  local payload = open_pr_payload_from_fact(repo, issue_number, ready, fact)
-  core.log_apply("implement", ready.proposal_id, "implementing", fact.dedup_key or ready.dedup_key, { add = {}, remove = {} }, {
-    "devloop_open_pr",
-  })
-  core.log_raise("implement", ready.proposal_id, "devloop_open_pr", payload)
 end
 
 local function remote_branch_fact(branch, base_branch, source_fact)
@@ -142,6 +112,16 @@ local function local_branch_fact(base_head, branch, base_branch, dedup_key)
     base_branch = base_branch,
     base_sha = base_head,
   }
+end
+
+local function handoff_existing_pr_link(repo, issue_number, ready, current, link, reason)
+  pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, ready, current, {
+    proposal_id = ready.proposal_id,
+    dedup_key = ready.dedup_key,
+    branch = link.branch,
+    head_sha = nil,
+    base_branch = link.base_branch,
+  }, reason)
 end
 
 local function ready_for_implementation_version(ready, version)
@@ -522,6 +502,19 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
       outcome.started_at,
       outcome.exec_ref
     )
+    pr_child_handoff.raise_awaiting_pr_from_fact(
+      "implement",
+      repo,
+      issue_number,
+      outcome.ready,
+      { title = nil, comments = {} },
+      {
+        branch = outcome.branch,
+        head_sha = outcome.head_sha,
+        base_branch = outcome.base_branch,
+      },
+      "implementation output published; waiting for visible delegated PR child"
+    )
     return
   end
   if outcome.kind == "impl-failed" then
@@ -543,7 +536,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
     local link = core.pr_link_fact(current.comments, marker_ready.proposal_id)
     if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
-      core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
+      handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
       return false
     end
     local fact = core.implementing_fact(current.comments, marker_ready.proposal_id, marker_ready.dedup_key)
@@ -594,7 +587,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
     local link = core.pr_link_fact(current.comments, marker_ready.proposal_id)
     if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
-      core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
+      handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
       return false
     end
     if not transitions.expected_states_include(expected_from_states, "implementing") then
@@ -750,7 +743,7 @@ local function process_ready_event(event)
       end
       local link = core.pr_link_fact(current.comments, ready.proposal_id)
       if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
-        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "pr-open", "skip-idempotent(pr-link-visible)", "linked PR fact is already visible")
+        handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
         return
       end
       local fact = core.implementing_fact(current.comments, ready.proposal_id, marker_ready.dedup_key)
@@ -770,14 +763,14 @@ local function process_ready_event(event)
       if progress ~= nil then
         progress.proposal_id = ready.proposal_id
         progress.dedup_key = marker_ready.dedup_key
-        raise_open_pr_from_fact(repo, issue_number, marker_ready, progress, "implementing remote branch progress is visible")
+        pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, progress, "implementing remote branch progress is visible")
         return
       end
       local base_head = prepare_base(branches)
       local local_progress = local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
       if local_progress ~= nil then
         local_progress.proposal_id = ready.proposal_id
-        raise_open_pr_from_fact(repo, issue_number, marker_ready, local_progress, "local implementation branch progress is visible")
+        pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, local_progress, "local implementation branch progress is visible")
         return
       end
       local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)

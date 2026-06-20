@@ -255,7 +255,7 @@ local function issue_rest_view_number(rendered)
 end
 
 return {
-  test_liveness_scan_requeues_pr_open_issue_and_observe_replays_reviewing = function()
+  test_liveness_scan_requeues_pr_open_issue_and_observe_canonicalizes_legacy_pr_open = function()
     local ready_payload = reviewing()
     local scan_opts = opts("liveness-scan-pr-open")
     mock_repo()
@@ -290,11 +290,11 @@ return {
       source_ref = raised.payload.source_ref,
     }), opts("liveness-scan-observe-pr-open"))
     t.eq(observed.exit_code, 0)
-    local reviewing_raise = find_raise(observed.raises, "devloop_reviewing")
-    t.is_true(reviewing_raise ~= nil)
-    t.eq(reviewing_raise.payload.proposal_id, ready_payload.proposal_id)
-    t.eq(reviewing_raise.payload.pr_number, ready_payload.pr_number)
-    t.eq(reviewing_raise.payload.version, version .. "/review-loop/1")
+    t.eq(find_raise(observed.raises, "devloop_reviewing"), nil)
+    local comment = find_raise(observed.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find(core.state_marker(proposal_id, "awaiting-pr", version), 1, true) ~= nil)
+    t.is_true(comment.payload.body:find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
   end,
 
   test_observe_pr_open_closed_unmerged_pr_redrives_ready = function()
@@ -783,7 +783,7 @@ return {
     t.mock_command(core.git_remote_branch_head_cmd("origin", branch), { stdout = "abc123\n", stderr = "", exit_code = 0 })
     local implemented = h.run_implement(reraised.payload, opts("liveness-scan-implementing-redrive-consumable"))
     t.eq(implemented.exit_code, 0)
-    t.eq(find_raise(implemented.raises, "devloop_open_pr") ~= nil, true)
+    t.eq(find_raise(implemented.raises, "devloop_open_pr"), nil)
   end,
 
   test_liveness_scan_requeues_open_pr_with_non_terminal_state = function()

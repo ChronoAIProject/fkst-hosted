@@ -31,10 +31,10 @@ return function(M, h)
       redrive_opens_generation = true,
     },
     terminal = false,
-    to_states = { "pr-open", "impl-failed" },
+    to_states = { "awaiting-pr", "impl-failed" },
     driving_queue = "devloop_ready",
     observe_surfaces = { issue = true, liveness_scan = true },
-    output_obligation = obligation({ "state:v1 pr-open", "state:v1 impl-failed" }, { "pr-open", "impl-failed" }),
+    output_obligation = obligation({ "state:v1 awaiting-pr", "state:v1 impl-failed" }, { "awaiting-pr", "impl-failed" }),
     budget = budget(120, "A live implementation codex defers indefinitely via fkst.codex_runs() exec_ref truth; when the codex is absent, resolve_codex_run currently uses the state-entry actionable epoch, so this budget must cover the full codex runtime like fixing: 120 = 60 minute codex attempt + 30 minute watchdog margin + slack, bounding no-live reactivation until follow-up: no-live-onset epoch."),
     liveness_contract = liveness({
       mode = "live-defer",
@@ -57,7 +57,7 @@ return function(M, h)
       lineage_keys = { "state.version", "implementing.dedup", "source_ref" },
       successors = {
         {
-          state = "pr-open",
+          state = "awaiting-pr",
           output_variant = "revision_published",
           postcondition_family = "revision_published",
           monotonic = true,

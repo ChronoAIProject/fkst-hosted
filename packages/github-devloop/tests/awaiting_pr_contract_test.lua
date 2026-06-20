@@ -44,13 +44,14 @@ return {
     t.eq(row.dedup_shape, "child-state-terminal/<proposal>/<version>/<pr>")
   end,
 
-  test_step1a_does_not_wire_runtime_entry_to_awaiting_pr = function()
+  test_forward_flip_wires_implementing_success_to_awaiting_pr = function()
     for _, row in ipairs(core.restart_transition_table()) do
       if row.from_state ~= "awaiting-pr" then
-        t.eq(has_value(row.to_states, "awaiting-pr"), false, row.from_state)
+        t.eq(has_value(row.to_states, "awaiting-pr"), row.from_state == "implementing", row.from_state)
       end
     end
-    t.eq(has_value(core._state_graph.implementing, "awaiting-pr"), false)
+    t.eq(has_value(core._state_graph.implementing, "awaiting-pr"), true)
+    t.eq(has_value(core._state_graph.implementing, "pr-open"), false)
   end,
 
   test_awaiting_pr_timeout_escalates_through_timeout_reconcile = function()

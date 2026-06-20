@@ -181,7 +181,7 @@ local function fetch_child_state_fact(facts)
     facts.current_pr = M.parse_pr_view_origin(view.stdout)
     facts.current_pr.number = delegation.pr_number
   end
-  facts.child_state = M.current_entity_state(facts.current_pr.comments, delegation.pr_proposal_id)
+  facts.child_state = M.current_entity_state(facts.current_pr.comments, delegation.proposal_id)
   return facts.child_state
 end
 

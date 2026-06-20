@@ -431,7 +431,7 @@ return {
       FKST_GITHUB_WRITE = "1",
       FKST_GITHUB_REPO = "owner/repo",
     }))
-    t.eq(find_raise(polled.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.eq(find_raise(polled.raises, "github-proxy.github_issue_label_request"), nil)
     t.is_true(find_raise(polled.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
   end,
 
@@ -567,7 +567,7 @@ return {
       FKST_GITHUB_WRITE = "1",
       FKST_GITHUB_REPO = "owner/repo",
     }))
-    t.eq(find_raise(second_poll.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.eq(find_raise(second_poll.raises, "github-proxy.github_issue_label_request"), nil)
     t.is_true(find_raise(second_poll.raises, "github-proxy.github_pr_comment_request", function(payload)
       return tostring(payload and payload.body or ""):find("fkst:github-devloop:merged:v1", 1, true) ~= nil
     end) ~= nil)
@@ -634,7 +634,8 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:merged")
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    t.is_true(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
   end,
 
   test_merge_conflicting_but_current_base_contained_waits_without_fixing = function()
@@ -704,8 +705,8 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 2)
-    t.eq(count_calls("gh issue close"), 2)
-    t.eq(#result.raises, 4)
+    t.eq(count_calls("gh issue close"), 0)
+    t.eq(#result.raises, 2)
   end,
 
   test_merge_batch_window_stops_when_candidate_head_lacks_current_base = function()
@@ -737,7 +738,7 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
-    t.eq(count_calls("gh issue close"), 1)
+    t.eq(count_calls("gh issue close"), 0)
     t.eq(count_calls("gh pr diff '8' --repo 'owner/repo' --name-only"), 0)
     local chained = find_raise(result.raises, "devloop_merge_queue_tick")
     t.is_true(chained ~= nil)
@@ -848,7 +849,7 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
-    t.eq(count_calls("gh issue close"), 1)
+    t.eq(count_calls("gh issue close"), 0)
     local chained = find_raise(result.raises, "devloop_merge_queue_tick")
     t.is_true(chained ~= nil)
     t.eq(chained.payload.cause.merged_pr_number, 7)
@@ -892,7 +893,7 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
-    t.eq(count_calls("gh issue close"), 1)
+    t.eq(count_calls("gh issue close"), 0)
     t.eq(find_raise(result.raises, "devloop_fixing") ~= nil, true)
   end,
 
@@ -938,7 +939,7 @@ return {
     }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
-    t.eq(count_calls("gh issue close"), 1)
+    t.eq(count_calls("gh issue close"), 0)
     t.eq(count_calls("gh pr diff '9' --repo 'owner/repo' --name-only"), 0)
   end,
 
@@ -988,6 +989,6 @@ return {
     local result = run_implement(event, opts("implement-wip-available", { FKST_DEVLOOP_MAX_INFLIGHT = "2" }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 1)
-    t.is_true(find_raise(result.raises, "devloop_open_pr") ~= nil)
+    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
   end,
 }

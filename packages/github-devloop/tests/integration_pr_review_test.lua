@@ -64,7 +64,6 @@ local mock_pr_fix = h.mock_pr_fix
 local mock_pr_origin_sequence = h.mock_pr_origin_sequence
 local mock_pr_head = h.mock_pr_head
 local mock_pr_diff = h.mock_pr_diff
-local mock_branch_exists = h.mock_branch_exists
 local mock_meta_codex = h.mock_meta_codex
 local mock_setup_worktree = h.mock_setup_worktree
 local deterministic_branch_for = h.deterministic_branch_for
@@ -132,7 +131,7 @@ return {
     mock_git_commit("def456", branch)
     local result = run_implement(event, opts("implement-success"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 5)
+    t.eq(#result.raises, 4)
     local attempt_raise = find_comment_with(result.raises, "fkst:github-devloop:implement-attempt:v1")
     t.is_true(attempt_raise.payload.body:find('proposal="' .. event.proposal_id .. '"', 1, true) ~= nil)
     t.is_true(attempt_raise.payload.body:find('dedup="' .. event.dedup_key .. '"', 1, true) ~= nil)
@@ -143,7 +142,6 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request", function(payload)
       return tostring(payload.body or ""):find("github-devloop implementation output published", 1, true) ~= nil
     end)
-    local open_pr_raise = find_raise(result.raises, "devloop_open_pr")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:implementing")
     t.eq(#label_raise.payload.remove_labels, 12)
     t.eq(attempt_raise.payload.body, state_raise.payload.body)
@@ -158,12 +156,7 @@ return {
     local fact = core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
-    t.eq(open_pr_raise.payload.schema, "github-devloop.open-pr.v1")
-    t.eq(open_pr_raise.payload.proposal_id, event.proposal_id)
-    t.eq(open_pr_raise.payload.version, event.dedup_key)
-    t.eq(open_pr_raise.payload.branch, branch)
-    t.eq(open_pr_raise.payload.head_sha, "def456")
-    t.eq(open_pr_raise.payload.base_branch, "dev")
+    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
     local calls = t.command_calls()
     local saw_worktree_prefix = false
     local saw_prompt = false
@@ -182,36 +175,23 @@ return {
     t.eq(count_calls("add -A"), 1)
     t.eq(count_calls("commit -m"), 1)
   end,
-  test_open_pr_write_raises_pr_open_request = function()
+  test_open_pr_write_drains_superseded_implementing_transition = function()
     local event = issue({ labels = { "fkst-dev:implementing" } })
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
       core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
-    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
     mock_bot_env()
-    mock_write_env("1")
     mock_write_env("1")
     local result = run_open_pr(event, opts("open-pr-write", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local pr_raise = find_raise(result.raises, "github-proxy.github_pr_open_request")
-    t.eq(pr_raise.payload.schema, "github-proxy.pr-open.v1")
-    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
-    t.eq(pr_raise.payload.head_sha, "abc123")
-    t.eq(pr_raise.payload.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(pr_raise.payload.impl_version, impl_version)
-    t.eq(pr_raise.payload.expected_state, "implementing")
-    t.eq(pr_raise.payload.expected_version, impl_version)
-    t.is_true(pr_raise.payload.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
-    t.is_true(pr_raise.payload.issue_comment_body_template:find("state=\"pr-open\"", 1, true) ~= nil)
-    t.eq(#pr_raise.payload.issue_label_add, 0)
-    t.eq(#pr_raise.payload.issue_label_remove, 0)
-    t.eq(count_calls("show-ref --verify --quiet"), 1)
-    t.eq(count_calls("rev-parse --verify"), 1)
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_open_request"), nil)
+    t.eq(count_calls("show-ref --verify --quiet"), 0)
+    t.eq(count_calls("rev-parse --verify"), 0)
   end,
   test_open_pr_requires_write_switch = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -219,7 +199,6 @@ return {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
       core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
-    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
     mock_bot_env()
     mock_write_env("")
     local missing_write = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-write"))
@@ -227,26 +206,21 @@ return {
     t.eq(#missing_write.raises, 0)
   end,
 
-  test_open_pr_write_raises_pr_open_request_without_label = function()
+  test_open_pr_write_without_label_drains_superseded_implementing_transition = function()
     local event = issue({ labels = { "fkst-dev:implementing" } })
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_open_pr({ "fkst-dev:implementing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
       core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
     })
-    mock_branch_exists("devloop-owner-repo-42-01HY", "abc123")
     mock_bot_env()
-    mock_write_env("1")
     mock_write_env("1")
     local result = run_open_pr(event, opts("open-pr-write-without-label", {
       FKST_GITHUB_WRITE = "1",
     }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local pr_raise = find_raise(result.raises, "github-proxy.github_pr_open_request")
-    t.eq(pr_raise.payload.schema, "github-proxy.pr-open.v1")
-    t.eq(pr_raise.payload.branch, "devloop-owner-repo-42-01HY")
-    t.eq(pr_raise.payload.head_sha, "abc123")
+    t.eq(#result.raises, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_open_request"), nil)
   end,
   test_observe_pr_backpointer_advances_issue_to_reviewing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"

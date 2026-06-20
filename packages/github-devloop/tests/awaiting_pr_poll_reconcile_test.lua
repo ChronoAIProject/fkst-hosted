@@ -7,7 +7,7 @@ local repo = "owner/repo"
 local issue_number = 42
 local pr_number = 7
 local parent = "github-devloop/issue/owner/repo/42"
-local child = "github-devloop/pr/owner/repo/7"
+local child_pr = "github-devloop/pr/owner/repo/7"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local delegation = "g1"
 local head_sha = "0123456789abcdef0123456789abcdef01234567"
@@ -62,7 +62,7 @@ local function parent_comments(fields)
   if f.delegation ~= false then
     table.insert(comments, comment(core.pr_delegation_marker(
       f.parent or parent,
-      f.child or child,
+      f.child or child_pr,
       f.pr_number or pr_number,
       f.delegation_version or state_version,
       f.delegation_generation or delegation
@@ -73,7 +73,14 @@ end
 
 local function child_comments(state, child_version)
   return {
-    comment(core.state_marker(child, state, child_version or version), core._test_bot_login, "2026-06-03T01:04:03Z"),
+    comment(core.state_marker(parent, state, child_version or version), core._test_bot_login, "2026-06-03T01:04:03Z"),
+  }
+end
+
+local function child_merged_comments_with_kept_promotion()
+  return {
+    comment(core.state_marker(parent, "merged", version)
+      .. "\n" .. core.merged_marker(parent, pr_number, version, head_sha), core._test_bot_login, "2026-06-03T01:04:03Z"),
   }
 end
 
@@ -160,6 +167,17 @@ return {
     t.is_true(resume ~= nil)
     t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_child_merged_with_kept_issue_promotion_closes_issue_once = function()
+    mock_issue_close()
+    local result = run_observe(parent_comments(), child_merged_comments_with_kept_promotion(), { write = "real" })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 

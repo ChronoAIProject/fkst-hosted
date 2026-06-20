@@ -289,11 +289,11 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:awaiting-pr")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:pr-open"))
   end,
 
-  test_observe_issue_pr_open_reraises_reviewing_for_poll_self_heal = function()
+  test_observe_issue_legacy_pr_open_canonicalizes_instead_of_issue_side_reviewing_redrive = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
     local comments = {
@@ -306,31 +306,24 @@ return {
     local first = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-1"))
     t.eq(first.exit_code, 0)
     t.eq(#first.raises, 2)
-    local first_comment = find_raise(first.raises, "github-proxy.github_pr_comment_request")
-    local first_reviewing = find_raise(first.raises, "devloop_reviewing")
-    t.is_true(first_comment.payload.body:find(core.state_marker(event.proposal_id, "reviewing", first_reviewing.payload.version), 1, true) ~= nil)
-    t.eq(first_reviewing.payload.schema, "github-devloop.reviewing.v1")
-    t.eq(first_reviewing.payload.proposal_id, event.proposal_id)
-    t.eq(first_reviewing.payload.pr_number, 7)
-    t.eq(first_reviewing.payload.version, ready_payload.dedup_key .. "/review-loop/1")
-    t.eq(first_reviewing.payload.source_ref.ref, "owner/repo#pr/7")
-
-    mock_issue_review({ "fkst-dev:reviewing" }, {
-      first_comment.payload.body,
-    })
-    local review = run_review_pr(first_reviewing.payload, opts("observe-issue-pr-open-review-kickoff-review-pr"))
-    t.eq(review.exit_code, 0)
-    t.eq(#review.raises, 1)
-    local proposal = find_raise(review.raises, "consensus.proposal").payload
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, first_reviewing.payload.version, "def456"))
+    t.eq(find_raise(first.raises, "devloop_reviewing"), nil)
+    t.eq(find_raise(first.raises, "github-proxy.github_pr_comment_request"), nil)
+    local comment = find_raise(first.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "awaiting-pr", ready_payload.dedup_key), 1, true) ~= nil)
+    t.is_true(comment.payload.body:find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
+    local label = find_raise(first.raises, "github-proxy.github_issue_label_request")
+    t.eq(label.payload.add_labels[1], "fkst-dev:awaiting-pr")
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
     mock_linked_pr_state({}, nil, nil, 2)
     local second = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:pr-open" } }), opts("observe-issue-pr-open-review-kickoff-2"))
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 2)
-    local second_reviewing = find_raise(second.raises, "devloop_reviewing")
-    t.eq(second_reviewing.payload.dedup_key, first_reviewing.payload.dedup_key)
+    t.eq(find_raise(second.raises, "devloop_reviewing"), nil)
+    local second_comment = find_raise(second.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(second_comment ~= nil)
+    t.is_true(second_comment.payload.body:find(core.state_marker(event.proposal_id, "awaiting-pr", ready_payload.dedup_key), 1, true) ~= nil)
   end,
 
   test_observe_issue_pr_open_marker_overrides_stale_blocked_label_and_pr_marker = function()
@@ -350,15 +343,13 @@ return {
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
       return tostring(payload.target_kind or "issue") == "issue"
     end)
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:pr-open")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:awaiting-pr")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:blocked"))
     local reviewing = find_raise(result.raises, "devloop_reviewing")
-    t.is_true(reviewing ~= nil)
-    t.eq(reviewing.payload.version, ready_payload.dedup_key .. "/review-loop/1")
-    t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
+    t.eq(reviewing, nil)
   end,
 
-  test_observe_issue_pr_open_timeout_redrive_reaches_reviewing = function()
+  test_observe_issue_pr_open_timeout_redrive_canonicalizes_legacy_issue_state = function()
     local event = reached()
     local ready_payload = core.build_devloop_ready_payload(event)
     local comments = {
@@ -375,19 +366,11 @@ return {
       now = "2026-06-03T03:00:00Z",
     }))
     t.eq(result.exit_code, 0)
-    local reviewing = find_raise(result.raises, "devloop_reviewing")
-    t.is_true(reviewing ~= nil)
-    t.eq(reviewing.payload.version, ready_payload.dedup_key .. "/review-loop/1")
-    t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
-
-    mock_issue_review({ "fkst-dev:reviewing" }, {
-      core.state_marker(event.proposal_id, "reviewing", reviewing.payload.version),
-    })
-    local review = run_review_pr(reviewing.payload, opts("observe-issue-pr-open-timeout-review-pr"))
-    t.eq(review.exit_code, 0)
-    local proposal = find_raise(review.raises, "consensus.proposal")
-    t.is_true(proposal ~= nil)
-    t.eq(proposal.payload.proposal_id, core.pr_review_proposal_id("owner/repo", 7, reviewing.payload.version, "def456"))
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "awaiting-pr", ready_payload.dedup_key), 1, true) ~= nil)
+    t.is_true(comment.payload.body:find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
   end,
 
   test_observe_issue_pr_open_closed_link_redrives_ready_for_replacement_pr = function()
@@ -751,7 +734,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
+    t.eq(label_raise.payload.add_labels[1], "fkst-dev:awaiting-pr")
   end,
 
   test_observe_issue_linked_pr_fetch_failure_fails_closed = function()

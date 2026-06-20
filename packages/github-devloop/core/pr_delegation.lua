@@ -86,8 +86,8 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     error("github-devloop: invalid pr-delegation head sha")
   end
   local body = "github-devloop PR child open"
-    .. "\n\n" .. M.pr_origin_marker(pr_proposal_id, pr_number, branch, impl_version, base_branch)
-    .. "\n" .. M.state_marker(pr_proposal_id, "pr-open", impl_version)
+    .. "\n\n" .. M.pr_origin_marker(issue_proposal_id, issue_number, branch, impl_version, base_branch)
+    .. "\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -125,6 +125,9 @@ local function existing_delegation(issue, issue_proposal_id, delegation)
   return {
     number = fact.pr_number,
     pr_number = fact.pr_number,
+    version = fact.version,
+    delegation = fact.delegation,
+    pr_proposal_id = fact.pr_proposal_id,
     head_ref_name = issue.branch or (issue.implementation and issue.implementation.branch),
     base_ref_name = issue.base_branch or (issue.implementation and issue.implementation.base_branch),
   }
@@ -164,15 +167,25 @@ function M.ensure_pr_child(issue, impl_version, generation)
   local head_sha = pr.head_sha or issue.head_sha or (issue.implementation and issue.implementation.head_sha)
   local effects = {}
   local pr_origin = M.pr_origin_fact(issue.pr_comments or {})
-  local pr_state = M.current_entity_state(issue.pr_comments or {}, pr_proposal_id)
-  if pr_origin == nil or tostring(pr_origin.proposal_id or "") ~= pr_proposal_id or pr_state.state ~= "pr-open" or tostring(pr_state.version or "") ~= tostring(impl_version) then
+  local pr_state = M.current_entity_state(issue.pr_comments or {}, issue_proposal_id)
+  local child_start_visible = pr_origin ~= nil
+    and tostring(pr_origin.proposal_id or "") == issue_proposal_id
+    and tostring(pr_origin.issue_number or "") == tostring(issue_number)
+    and pr_state ~= nil
+    and pr_state.state == "pr-open"
+    and tostring(pr_state.version or "") == tostring(impl_version)
+  if not child_start_visible then
     table.insert(effects, {
       queue = "github-proxy.github_pr_comment_request",
       payload = build_pr_open_comment_request(repo, pr_number, pr_proposal_id, issue_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, pr_source_ref, delegation),
     })
   end
   local delegation_fact = existing_delegation(issue, issue_proposal_id, delegation)
-  if delegation_fact == nil or tonumber(delegation_fact.pr_number) ~= pr_number then
+  local issue_delegation_visible = delegation_fact ~= nil
+    and tonumber(delegation_fact.pr_number) == pr_number
+    and tostring(delegation_fact.version or "") == tostring(impl_version)
+    and tostring(delegation_fact.delegation or "") == tostring(delegation)
+  if not issue_delegation_visible then
     table.insert(effects, {
       queue = "github-proxy.github_issue_comment_request",
       payload = build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, M.issue_source_ref(repo, issue_number)),
@@ -187,6 +200,9 @@ function M.ensure_pr_child(issue, impl_version, generation)
     base_branch = base_branch,
     head_sha = head_sha,
     delegation_generation = delegation,
+    child_start_visible = child_start_visible,
+    issue_delegation_visible = issue_delegation_visible,
+    ready_for_parent_awaiting_pr = child_start_visible and issue_delegation_visible,
     effects = effects,
   }
 end
