@@ -4,7 +4,6 @@ packages/github-devloop/departments/substrate_ref_scan/main.lua
 packages/github-devloop/departments/sync_conflict/main.lua
 packages/github-devloop/departments/sync_scan/main.lua
 packages/github-proxy/departments/github_comment/main.lua
-packages/github-proxy/departments/github_issue_blocked_by/main.lua
 packages/github-proxy/departments/github_issue_create/main.lua
 packages/github-proxy/departments/github_issue_label/main.lua
 packages/github-proxy/departments/github_poll/main.lua
