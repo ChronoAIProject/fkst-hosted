@@ -45,6 +45,40 @@ class CoverageRatchetTest(unittest.TestCase):
     def key(self, file: str = "packages/example/core.lua", line: int = 2, digest: str = "abcdef12"):
         return coverage.CoverageKey(file, line, digest)
 
+    def test_lua_candidate_classifier_excludes_structurally_non_executable_lines(self) -> None:
+        excluded = [
+            "})",
+            "))",
+            "}),",
+            "  )),",
+            "} )",
+            "local function bounded(value, limit)",
+            "function M.foo(a, b)",
+            "local f = function(x)",
+            "return function(event)",
+            "'schema text',",
+            '"a string",',
+            '"^%d+$"',
+        ]
+
+        for line in excluded:
+            with self.subTest(line=line):
+                self.assertFalse(coverage.is_candidate_executable_lua_line(line))
+
+    def test_lua_candidate_classifier_keeps_executable_behavior_lines(self) -> None:
+        included = [
+            "local function f() return 1 end",
+            'error("x: y")',
+            "return bounded(a, b)",
+            'x = foo("bar")',
+            "if not ok then",
+            "log_skip(reason, event)",
+        ]
+
+        for line in included:
+            with self.subTest(line=line):
+                self.assertTrue(coverage.is_candidate_executable_lua_line(line))
+
     def test_new_uncovered_production_line_fails_with_source_text(self) -> None:
         uncovered = {
             self.key(): coverage.UncoveredLine(self.key(), "return missing_branch()"),
@@ -283,8 +317,8 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertIn(
             {
                 "file": "packages/example/core.lua",
-                "line": 5,
-                "normalized_line_hash": coverage.normalized_source_hash("function M.missing()"),
+                "line": 6,
+                "normalized_line_hash": coverage.normalized_source_hash("  return 2"),
                 "reason": "baseline",
             },
             entries,
@@ -292,8 +326,8 @@ class CoverageRatchetTest(unittest.TestCase):
         self.assertIn(
             {
                 "file": "packages/example/unused.lua",
-                "line": 2,
-                "normalized_line_hash": coverage.normalized_source_hash("function M.unused()"),
+                "line": 3,
+                "normalized_line_hash": coverage.normalized_source_hash("  return 3"),
                 "reason": "baseline",
             },
             entries,
@@ -327,9 +361,9 @@ class CoverageRatchetTest(unittest.TestCase):
             core_lines = data["files"][0]["coverable_lines"]
             self.assertIn(
                 {
-                    "line": 2,
-                    "normalized_line_hash": coverage.normalized_source_hash("function M.covered()"),
-                    "text": "function M.covered()",
+                    "line": 3,
+                    "normalized_line_hash": coverage.normalized_source_hash("  return 1"),
+                    "text": "return 1",
                     "covered": True,
                 },
                 core_lines,

@@ -32,6 +32,38 @@ local function event(extra)
   }
 end
 
+local function archaudit_payload(extra)
+  local payload = {
+    schema = "github-proxy.issue-create.v1",
+    repo = "owner/repo",
+    title = "Archaudit: packages/archaudit/core.lua:1 SRP",
+    body = table.concat({
+      "Architecture doctrine violation:",
+      "",
+      "File: packages/archaudit/core.lua:1",
+      "Rule: SRP",
+      "",
+      "Why:",
+      "Core has one concrete issue.",
+      "",
+      "Suggested fix:",
+      "Move the local helper.",
+      "",
+      "<!-- archaudit-dedup: archaudit/owner_repo/packages_archaudit_core_lua/1/SRP/123456 -->",
+    }, "\n"),
+    labels = {},
+    dedup_key = "archaudit/owner_repo/packages_archaudit_core_lua/1/SRP/123456",
+    source_ref = {
+      kind = "repo-site",
+      ref = "owner/repo#packages/archaudit/core.lua:1#archaudit-create-intent",
+    },
+  }
+  for key, value in pairs(extra or {}) do
+    payload[key] = value
+  end
+  return payload
+end
+
 local function mock_issue_create_search(stdout)
   t.mock_command("gh issue list", {
     stdout = stdout or "[]\n",
@@ -124,6 +156,28 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 0)
+    t.eq(count_calls("gh issue list"), 1)
+    t.eq(count_calls("gh issue create"), 0)
+  end,
+
+  test_archaudit_issue_create_request_trusted_marker_skips_create = function()
+    local payload = archaudit_payload()
+    mock_write_env("1")
+    mock_bot_env()
+    mock_issue_create_search(string.format(
+      '[{"number":99,"title":"Existing","state":"OPEN","body":"already created\\n%s","author":{"login":"fkst-test-bot"}}]\n',
+      h.json_string(core.issue_create_marker(payload.dedup_key))
+    ))
+    mock_issue_create()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-archaudit-marker-skip", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
   end,

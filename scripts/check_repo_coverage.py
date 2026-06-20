@@ -26,6 +26,18 @@ LUA_KEYWORDS = {
     "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return", "then",
     "true", "until", "while",
 }
+LUA_NAME_RE = r"[A-Za-z_][A-Za-z0-9_]*(?:[.:][A-Za-z_][A-Za-z0-9_]*)*"
+CLOSING_DELIMITER_ONLY_RE = re.compile(r"^[)\]\},\s]+$")
+PURE_FUNCTION_SIGNATURE_RE = re.compile(
+    rf"^(?:"
+    rf"local function {LUA_NAME_RE}"
+    rf"|function {LUA_NAME_RE}"
+    rf"|local {LUA_NAME_RE}\s*=\s*function"
+    rf"|{LUA_NAME_RE}\s*=\s*function"
+    rf"|return function"
+    rf"|function"
+    rf")\s*\([^)]*\)$"
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -178,18 +190,24 @@ def strip_lua_line_comment(text: str) -> str:
 
 
 def is_candidate_executable_lua_line(text: str) -> bool:
-    stripped = normalize_source_line(strip_lua_line_comment(text))
+    comment_stripped = strip_lua_line_comment(text)
+    stripped = normalize_source_line(comment_stripped)
     if stripped == "":
         return False
     if stripped in {"end", "else", "then", "do", "until"}:
         return False
     if stripped in {"end,", "end)", "end}", "else,"}:
         return False
-    if stripped in {")", "}", "},", "),"}:
+    if CLOSING_DELIMITER_ONLY_RE.fullmatch(stripped) is not None:
+        return False
+    if PURE_FUNCTION_SIGNATURE_RE.fullmatch(stripped) is not None:
         return False
     if stripped.startswith("--"):
         return False
     if stripped in LUA_KEYWORDS:
+        return False
+    without_strings = re.sub(r"\s+", "", without_lua_string_literals(comment_stripped))
+    if without_strings == "" or re.fullmatch(r"[)\]\},]+", without_strings) is not None:
         return False
     return True
 
