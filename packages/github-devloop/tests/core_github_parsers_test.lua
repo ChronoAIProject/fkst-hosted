@@ -114,7 +114,7 @@ return {
     t.eq(pr_observe_opts.read_coalesce.ttl_seconds, 30)
     t.eq(
       core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
-      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&base=dev&per_page=100'"
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&per_page=100&base=dev'"
     )
     local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
     t.eq(intake[1].number, 42)

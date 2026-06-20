@@ -6,6 +6,7 @@ local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
     "devloop_ready",
+    "devloop_pr_open",
     "devloop_reviewing",
   },
   stall_window = "30s",
@@ -30,6 +31,18 @@ local function supported_handoff(payload)
     and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
     and core.is_safe_pr_number(handoff.pr_number)
     and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
+    return handoff
+  end
+  if handoff.kind == "github-devloop.pr-open"
+    and core.parse_pr_proposal_id(handoff.proposal_id) ~= nil
+    and core.parse_proposal_id(handoff.issue_proposal_id) ~= nil
+    and core.is_safe_pr_number(handoff.pr_number)
+    and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and core._is_path_safe_key(handoff.delegation_generation, core._max_dedup_len)
+    and core.is_safe_branch(handoff.branch)
+    and core.is_safe_branch(handoff.base_branch)
+    and core.is_safe_head_sha(handoff.head_sha)
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
@@ -74,6 +87,23 @@ local function act_handoff(event)
     })
     core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "ready", version = ready.dedup_key }, "comment-written", "devloop_ready", "applied(own-write-comment-id)", "ready marker comment write was acknowledged")
     core.log_raise("comment_handoff", handoff.proposal_id, "devloop_ready", ready)
+    return
+  end
+
+  if handoff.kind == "github-devloop.pr-open" then
+    local pr_open = core.build_devloop_pr_open_payload(
+      handoff.issue_proposal_id,
+      handoff.proposal_id,
+      handoff.pr_number,
+      handoff.version,
+      handoff.source_ref,
+      handoff.delegation_generation,
+      handoff.branch,
+      handoff.base_branch,
+      handoff.head_sha
+    )
+    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "pr-open", version = handoff.version }, "comment-written", "devloop_pr_open", "applied(own-write-comment-id)", "PR open marker comment write was acknowledged")
+    core.log_raise("comment_handoff", handoff.proposal_id, "devloop_pr_open", pr_open)
     return
   end
 

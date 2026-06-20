@@ -567,10 +567,10 @@ local function gh_pr_list_head_command(repo, head, base)
   local head_filter = owner ~= nil and (owner .. ":" .. tostring(head)) or tostring(head)
   local query = "repos/" .. tostring(repo)
     .. "/pulls?state=open&head=" .. url_encode(head_filter)
+    .. "&per_page=100"
   if base ~= nil then
     query = query .. "&base=" .. url_encode(base)
   end
-  query = query .. "&per_page=100"
   return "gh api --paginate --slurp " .. shell_single_quote(query)
 end
 

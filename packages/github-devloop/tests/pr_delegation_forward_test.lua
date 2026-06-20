@@ -1,0 +1,316 @@
+local h = require("tests.devloop_core_helpers")
+local core = h.core
+local t = h.t
+local gh_argv = require("tests.gh_argv_mock_helpers")
+
+local repo = "owner/repo"
+local issue_number = 42
+local issue_proposal = "github-devloop/issue/owner/repo/42"
+local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+local branch = core.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
+local base_branch = "dev"
+local head_sha = "abc123def456"
+
+local function source_ref()
+  return core.issue_source_ref(repo, issue_number)
+end
+
+local function pr_source_ref(pr_number)
+  return core.pr_source_ref(repo, pr_number)
+end
+
+local function pr_proposal(pr_number)
+  return core.pr_proposal_id(repo, pr_number)
+end
+
+local function issue(extra)
+  local value = {
+    repo = repo,
+    number = issue_number,
+    title = "Implement decision recorder",
+    proposal_id = issue_proposal,
+    source_ref = source_ref(),
+    branch = branch,
+    base_branch = base_branch,
+    head_sha = head_sha,
+    comments = {},
+    pr_comments = {},
+  }
+  for key, field in pairs(extra or {}) do
+    value[key] = field
+  end
+  return value
+end
+
+local function pr_list(pr_number)
+  if pr_number == nil then
+    return "[[]]\n"
+  end
+  return '[[{"number":' .. tostring(pr_number)
+    .. ',"head":{"ref":"' .. branch .. '","sha":"' .. head_sha .. '"},"base":{"ref":"' .. base_branch .. '"},"state":"open"}]]\n'
+end
+
+local function mock_branch_list(...)
+  local count = select("#", ...)
+  for index = 1, count do
+    local pr_number = select(index, ...)
+    t.mock_command(core.gh_pr_list_head_base_cmd(repo, branch, base_branch), {
+      stdout = pr_list(pr_number),
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
+local function count_gh_pr_create()
+  return gh_argv.count_calls(t, "gh pr create")
+end
+
+local function count_effects(effects, queue)
+  local count = 0
+  for _, effect in ipairs(effects or {}) do
+    if effect.queue == queue then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function find_effect(effects, queue)
+  for _, effect in ipairs(effects or {}) do
+    if effect.queue == queue then
+      return effect
+    end
+  end
+  return nil
+end
+
+local function assert_no_direct_pr_open_raise(effects)
+  t.eq(find_effect(effects, "devloop_pr_open"), nil)
+end
+
+local function render_comment(body)
+  return {
+    body = body,
+    author_login = "fkst-test-bot",
+    created_at = "2026-06-03T01:02:03Z",
+  }
+end
+
+local function run_handoff(request)
+  return t.run_department("departments/comment_handoff/main.lua", {
+    queue = "github-proxy.github_comment_written",
+    payload = {
+      schema = "github-proxy.comment-written.v1",
+      repo = repo,
+      target = "pr",
+      pr_number = 7,
+      comment_id = "IC_pr_open_1",
+      request_dedup_key = request.dedup_key,
+      dedup_key = tostring(request.dedup_key) .. "/written/IC_pr_open_1",
+      source_ref = request.source_ref,
+      handoff = request.handoff,
+    },
+  }, { name = "pr-delegation-handoff" })
+end
+
+return {
+  test_ensure_pr_child_creates_then_adopts_by_branch_and_writes_split_facts = function()
+    mock_branch_list(nil, 7)
+    t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/7\n", stderr = "", exit_code = 0 })
+
+    local result = core.ensure_pr_child(issue(), impl_version, 1)
+
+    t.eq(result.pr_number, 7)
+    t.eq(result.pr_proposal_id, "github-devloop/pr/owner/repo/7")
+    t.eq(result.branch, branch)
+    t.eq(result.base_branch, base_branch)
+    t.eq(count_gh_pr_create(), 1)
+    local pr_effect = find_effect(result.effects, "github-proxy.github_pr_comment_request")
+    local issue_effect = find_effect(result.effects, "github-proxy.github_issue_comment_request")
+    t.is_true(pr_effect ~= nil)
+    t.is_true(issue_effect ~= nil)
+    t.is_true(pr_effect.payload.body:find('fkst:github-devloop:pr-origin:v1', 1, true) ~= nil)
+    t.is_true(pr_effect.payload.body:find('proposal="github-devloop/pr/owner/repo/7"', 1, true) ~= nil)
+    t.is_true(pr_effect.payload.body:find('state="pr-open"', 1, true) ~= nil)
+    t.eq(pr_effect.payload.handoff.kind, "github-devloop.pr-open")
+    t.eq(pr_effect.payload.handoff.issue_proposal_id, issue_proposal)
+    t.eq(pr_effect.payload.handoff.proposal_id, "github-devloop/pr/owner/repo/7")
+    t.eq(pr_effect.payload.handoff.delegation_generation, "g1")
+    t.is_true(issue_effect.payload.body:find('fkst:github-devloop:pr-delegation:v1', 1, true) ~= nil)
+    t.is_true(issue_effect.payload.body:find('state="pr-open"', 1, true) == nil)
+    assert_no_direct_pr_open_raise(result.effects)
+  end,
+
+  test_ensure_pr_child_rerun_with_visible_facts_is_idempotent = function()
+    local pr_proposal = "github-devloop/pr/owner/repo/7"
+    local delegated = core.pr_delegation_marker(issue_proposal, pr_proposal, 7, impl_version, "g1")
+    local visible_pr_open = core.pr_origin_marker(pr_proposal, 7, branch, impl_version, base_branch)
+      .. "\n" .. core.state_marker(pr_proposal, "pr-open", impl_version)
+    mock_branch_list(7)
+
+    local result = core.ensure_pr_child(issue({
+      comments = { render_comment(delegated) },
+      pr_comments = { render_comment(visible_pr_open) },
+    }), impl_version, 1)
+
+    t.eq(result.pr_number, 7)
+    t.eq(#result.effects, 0)
+    t.eq(count_gh_pr_create(), 0)
+  end,
+
+  test_ensure_pr_child_twice_same_generation_is_idempotent_and_keys_open_by_issue_generation = function()
+    mock_branch_list(nil, 7, 7)
+    t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/7\n", stderr = "", exit_code = 0 })
+
+    local first = core.ensure_pr_child(issue(), impl_version, 1)
+    local pr_effect = find_effect(first.effects, "github-proxy.github_pr_comment_request")
+    local issue_effect = find_effect(first.effects, "github-proxy.github_issue_comment_request")
+    t.is_true(pr_effect ~= nil)
+    t.is_true(issue_effect ~= nil)
+    t.eq(pr_effect.payload.handoff.issue_proposal_id, issue_proposal)
+    t.eq(pr_effect.payload.handoff.delegation_generation, "g1")
+    local expected_open_key = core._dedup_key({ "pr-open", issue_proposal, "g1" })
+    t.eq(pr_effect.payload.dedup_key, core._dedup_key({ "pr-delegation", "pr-open", issue_proposal, "g1" }))
+    t.eq(
+      core.build_devloop_pr_open_payload(
+        issue_proposal,
+        pr_proposal(7),
+        7,
+        impl_version,
+        pr_source_ref(7),
+        "g1",
+        branch,
+        base_branch,
+        head_sha
+      ).dedup_key,
+      expected_open_key
+    )
+    t.eq(core.build_devloop_pr_open_payload(
+      issue_proposal,
+      pr_proposal(8),
+      8,
+      impl_version .. "/other-pr",
+      pr_source_ref(8),
+      "g1",
+      branch,
+      base_branch,
+      head_sha
+    ).dedup_key, expected_open_key)
+    assert_no_direct_pr_open_raise(first.effects)
+
+    local visible_pr_open = core.pr_origin_marker(pr_proposal(7), 7, branch, impl_version, base_branch)
+      .. "\n" .. core.state_marker(pr_proposal(7), "pr-open", impl_version)
+    local second = core.ensure_pr_child(issue({
+      comments = { render_comment(issue_effect.payload.body) },
+      pr_comments = { render_comment(visible_pr_open) },
+    }), impl_version, 1)
+
+    t.eq(first.pr_number, 7)
+    t.eq(second.pr_number, 7)
+    t.eq(count_gh_pr_create(), 1)
+    t.eq(count_effects(first.effects, "github-proxy.github_pr_comment_request"), 1)
+    t.eq(count_effects(first.effects, "github-proxy.github_issue_comment_request"), 1)
+    t.eq(#second.effects, 0)
+  end,
+
+  test_existing_delegation_for_different_generation_is_not_current = function()
+    local old_delegation = core.pr_delegation_marker(issue_proposal, pr_proposal(7), 7, impl_version, "g1")
+    mock_branch_list(nil, 8)
+    t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/8\n", stderr = "", exit_code = 0 })
+
+    local result = core.ensure_pr_child(issue({
+      comments = { render_comment(old_delegation) },
+    }), impl_version, 2)
+
+    t.eq(result.pr_number, 8)
+    t.eq(result.delegation_generation, "g2")
+    t.eq(count_gh_pr_create(), 1)
+    local issue_effect = find_effect(result.effects, "github-proxy.github_issue_comment_request")
+    t.is_true(issue_effect ~= nil)
+    t.is_true(issue_effect.payload.body:find('pr="8"', 1, true) ~= nil)
+    t.is_true(issue_effect.payload.body:find('delegation="g2"', 1, true) ~= nil)
+    assert_no_direct_pr_open_raise(result.effects)
+  end,
+
+  test_existing_delegation_scan_finds_requested_generation_after_prior_attempt = function()
+    local old_delegation = core.pr_delegation_marker(issue_proposal, pr_proposal(7), 7, impl_version, "g1")
+    local current_delegation = core.pr_delegation_marker(issue_proposal, pr_proposal(8), 8, impl_version, "g2")
+    local visible_pr_open = core.pr_origin_marker(pr_proposal(8), 8, branch, impl_version, base_branch)
+      .. "\n" .. core.state_marker(pr_proposal(8), "pr-open", impl_version)
+    mock_branch_list(8)
+
+    local result = core.ensure_pr_child(issue({
+      comments = {
+        render_comment(old_delegation),
+        render_comment(current_delegation),
+      },
+      pr_comments = { render_comment(visible_pr_open) },
+    }), impl_version, 2)
+
+    t.eq(result.pr_number, 8)
+    t.eq(result.delegation_generation, "g2")
+    t.eq(#result.effects, 0)
+    t.eq(count_gh_pr_create(), 0)
+  end,
+
+  test_existing_delegation_same_generation_ignores_impl_version_drift = function()
+    local prior_version = impl_version .. "/prior"
+    local delegated = core.pr_delegation_marker(issue_proposal, pr_proposal(7), 7, prior_version, "g1")
+    local visible_pr_open = core.pr_origin_marker(pr_proposal(7), 7, branch, impl_version, base_branch)
+      .. "\n" .. core.state_marker(pr_proposal(7), "pr-open", impl_version)
+
+    local result = core.ensure_pr_child(issue({
+      comments = { render_comment(delegated) },
+      pr_comments = { render_comment(visible_pr_open) },
+    }), impl_version, 1)
+
+    t.eq(result.pr_number, 7)
+    t.eq(result.delegation_generation, "g1")
+    t.eq(#result.effects, 0)
+    t.eq(count_gh_pr_create(), 0)
+  end,
+
+  test_ensure_pr_child_adopts_created_pr_after_local_fact_loss = function()
+    mock_branch_list(7)
+
+    local result = core.ensure_pr_child(issue(), impl_version, 1)
+
+    t.eq(result.pr_number, 7)
+    t.eq(count_gh_pr_create(), 0)
+    t.is_true(find_effect(result.effects, "github-proxy.github_pr_comment_request") ~= nil)
+    t.is_true(find_effect(result.effects, "github-proxy.github_issue_comment_request") ~= nil)
+    assert_no_direct_pr_open_raise(result.effects)
+  end,
+
+  test_pr_open_outbox_relays_through_comment_handoff = function()
+    local request = core.build_pr_delegation_open_comment_request(
+      repo,
+      7,
+      issue_proposal,
+      "github-devloop/pr/owner/repo/7",
+      issue_number,
+      impl_version,
+      branch,
+      base_branch,
+      head_sha,
+      pr_source_ref(7),
+      "g1"
+    )
+
+    local result = run_handoff(request)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "devloop_pr_open")
+    t.eq(result.raises[1].payload.schema, "github-devloop.pr-open.v1")
+    t.eq(result.raises[1].payload.proposal_id, "github-devloop/pr/owner/repo/7")
+    t.eq(result.raises[1].payload.issue_proposal_id, issue_proposal)
+    t.eq(result.raises[1].payload.delegation_generation, "g1")
+    t.eq(result.raises[1].payload.dedup_key, core._dedup_key({ "pr-open", issue_proposal, "g1" }))
+    t.eq(result.raises[1].payload.branch, branch)
+    t.eq(result.raises[1].payload.base_branch, base_branch)
+    t.eq(result.raises[1].payload.head_sha, head_sha)
+    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+}

@@ -90,6 +90,19 @@ function S.install(M)
     end)
   end
 
+  function M.gh_pr_create_body(repo, head, base, title, body, timeout)
+    return support.gh_result(function()
+      return support.github().pr_create_body(
+        repo,
+        validators.require_safe_branch(M, "PR head branch", head),
+        validators.require_safe_branch(M, "PR base branch", base),
+        title,
+        body,
+        timeout
+      )
+    end)
+  end
+
   function M.gh_pr_merge(repo, pr_number, head_sha, timeout)
     if tostring(head_sha or "") == "" then
       error("github-devloop: invalid merge head sha")

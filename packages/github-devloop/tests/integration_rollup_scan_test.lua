@@ -98,7 +98,7 @@ local function mock_pr_list(pr)
       h.json_string(pr.head_sha or "def456")
     )
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&base=dev&per_page=100'", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&per_page=100&base=dev'", {
     stdout = stdout,
     stderr = "",
     exit_code = 0,
@@ -115,7 +115,7 @@ local function mock_pr_list_for(integration, pr)
       h.json_string(integration)
     )
   end
-  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3A" .. tostring(integration) .. "&base=dev&per_page=100'", {
+  t.mock_command("gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3A" .. tostring(integration) .. "&per_page=100&base=dev'", {
     stdout = stdout,
     stderr = "",
     exit_code = 0,

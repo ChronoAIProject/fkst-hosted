@@ -76,6 +76,7 @@
 {"path":"packages/github-devloop/core/payloads/predicates.lua","owner":"shared","reason":"classifies payloads shared by departments."}
 {"path":"packages/github-devloop/core/payloads/shared.lua","owner":"shared","reason":"shares payload helper primitives."}
 {"path":"packages/github-devloop/core/pr_label_requests.lua","owner":"pr","reason":"builds PR-phase label reconciliation requests."}
+{"path":"packages/github-devloop/core/pr_delegation.lua","owner":"pr","reason":"ensures delegated PR child start facts and parent delegation pointers."}
 {"path":"packages/github-devloop/core/pr_review_replayer.lua","owner":"pr","reason":"replays PR review lifecycle work."}
 {"path":"packages/github-devloop/core/pr_safety.lua","owner":"pr","reason":"checks PR safety and backing issue constraints."}
 {"path":"packages/github-devloop/core/prompts.lua","owner":"shared","reason":"builds prompts used by issue and PR codex workers."}

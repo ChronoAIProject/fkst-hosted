@@ -587,7 +587,7 @@ function M.pr_link_fact(comments, proposal_id)
   return nil
 end
 
-function M.pr_delegation_fact(comments, proposal_id, version)
+function M.pr_delegation_fact(comments, proposal_id, version, delegation)
   if type(comments) ~= "table" then
     return nil
   end
@@ -602,6 +602,7 @@ function M.pr_delegation_fact(comments, proposal_id, version)
       local _, pr_number = M.parse_pr_proposal_id(marker_pr_proposal)
       if marker_proposal == tostring(proposal_id)
         and (version == nil or marker_version == tostring(version))
+        and (delegation == nil or marker_delegation == tostring(delegation))
         and pr_number ~= nil
         and tostring(pr_number) == tostring(marker_pr)
         and M._is_positive_pr_number(marker_pr)
