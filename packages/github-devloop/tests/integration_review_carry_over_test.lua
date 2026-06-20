@@ -9,6 +9,23 @@ local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 
+local function run_comment_handoff_from_request(request, comment_id, name)
+  return t.run_department("departments/comment_handoff/main.lua", {
+    queue = "github-proxy.github_comment_written",
+    payload = {
+      schema = "github-proxy.comment-written.v1",
+      repo = request.repo,
+      target = "pr",
+      pr_number = request.pr_number,
+      comment_id = comment_id,
+      request_dedup_key = request.dedup_key,
+      dedup_key = tostring(request.dedup_key) .. "/written/" .. tostring(comment_id),
+      source_ref = request.source_ref,
+      handoff = request.handoff,
+    },
+  }, opts(name))
+end
+
 local function pr_event(updated_at)
   return {
     schema = "github-proxy.v1",
@@ -71,9 +88,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready", function(payload)
-      return payload.reviewed_head_sha == new_head
-    end)
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
     t.is_true(comment_raise.payload.body:find("review%-carry%-over:v1") ~= nil)
     t.is_true(comment_raise.payload.body:find('approved_head_sha="' .. old_head .. '"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('new_head_sha="' .. new_head .. '"', 1, true) ~= nil)
@@ -81,8 +96,34 @@ return {
     t.is_true(comment_raise.payload.body:find('proof="merge-tree-empty-delta"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('decision="approve"', 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('head_sha="' .. new_head .. '"', 1, true) ~= nil)
-    t.eq(merge_raise.payload.reviewed_head_sha, new_head)
+    t.eq(comment_raise.payload.handoff.kind, "github-devloop.merge_ready")
+    t.eq(comment_raise.payload.handoff.proposal_id, event.proposal_id)
+    t.eq(comment_raise.payload.handoff.pr_number, event.pr_number)
+    t.eq(comment_raise.payload.handoff.version, event.version)
+    t.eq(comment_raise.payload.handoff.review_proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, new_head))
+    t.eq(comment_raise.payload.handoff.review_dedup_key, "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review")
+    t.eq(comment_raise.payload.handoff.reviewed_head_sha, new_head)
+    t.eq(comment_raise.payload.handoff.current_head_sha, new_head)
     t.is_true(comment_raise.payload.body:find('review_proposal="' .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. '"', 1, true) ~= nil)
+    local handoff = run_comment_handoff_from_request(comment_raise.payload, "IC_replay_carry_over_1", "review-carry-over-replayer-comment-handoff")
+    t.eq(handoff.exit_code, 0)
+    local merge_raise = find_raise(handoff.raises, "devloop_merge_ready", function(payload)
+      return payload.reviewed_head_sha == new_head
+    end)
+    local expected = core.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, event.version, new_head),
+      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review",
+      reviewed_head_sha = new_head,
+      current_head_sha = new_head,
+    }, core.pr_source_ref("owner/repo", event.pr_number))
+    t.eq(merge_raise.payload.schema, expected.schema)
+    t.eq(merge_raise.payload.proposal_id, expected.proposal_id)
+    t.eq(merge_raise.payload.pr_number, expected.pr_number)
+    t.eq(merge_raise.payload.version, expected.version)
+    t.eq(merge_raise.payload.review_proposal_id, expected.review_proposal_id)
+    t.eq(merge_raise.payload.review_dedup_key, expected.review_dedup_key)
+    t.eq(merge_raise.payload.reviewed_head_sha, expected.reviewed_head_sha)
+    t.eq(merge_raise.payload.dedup_key, expected.dedup_key)
     t.is_true(merge_raise.payload.dedup_key ~= event.dedup_key)
     t.is_true(merge_raise.payload.dedup_key:find(new_head, 1, true) ~= nil)
     t.eq(count_calls("git merge-tree --write-tree"), 1)

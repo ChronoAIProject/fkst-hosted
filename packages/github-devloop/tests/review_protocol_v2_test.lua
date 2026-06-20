@@ -12,6 +12,14 @@ local function assert_valid_utf8(value)
   t.is_true(ok and len ~= nil)
 end
 
+local function assert_merge_ready_handoff(result)
+  local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
+  t.is_true(comment ~= nil)
+  t.is_nil(h.find_raise(result.raises, "devloop_merge_ready"))
+  t.eq(comment.payload.handoff.kind, "github-devloop.merge_ready")
+  return comment.payload
+end
+
 return {
   test_review_result_approve_with_advisory_still_authorizes_merge_ready = function()
     local event = review_event({
@@ -32,8 +40,8 @@ return {
 
     local result = h.run_review_result(event, h.opts("review-v2-approve-advisory"))
     t.eq(result.exit_code, 0)
-    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
-    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local comment_request = assert_merge_ready_handoff(result)
+    local comment = comment_request.body
     t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
     t.is_true(comment:find("Advisory (non-blocking):", 1, true) ~= nil)
   end,
@@ -136,8 +144,8 @@ return {
     local result = h.run_review_result(event, h.opts("review-v2-contract-gap-advisory"))
     t.eq(result.exit_code, 0)
     t.is_nil(h.find_raise(result.raises, "devloop_fixing"))
-    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
-    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local comment_request = assert_merge_ready_handoff(result)
+    local comment = comment_request.body
     t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
     t.is_true(comment:find("Advisory (out-of-contract): rejected only for demand beyond the stated issue bounds", 1, true) ~= nil)
     t.is_true(comment:find("merge-ready", 1, true) ~= nil)
@@ -165,8 +173,8 @@ return {
     local result = h.run_review_result(event, h.opts("review-v2-pr-body-gap-advisory"))
     t.eq(result.exit_code, 0)
     t.is_nil(h.find_raise(result.raises, "devloop_fixing"))
-    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
-    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local comment_request = assert_merge_ready_handoff(result)
+    local comment = comment_request.body
     t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
     t.is_true(comment:find("Advisory (out-of-contract): rejected only for demand beyond the stated issue bounds", 1, true) ~= nil)
     t.is_true(comment:find("Missing PR body duplicate-evidence analysis", 1, true) ~= nil)
@@ -189,8 +197,8 @@ return {
     local result = h.run_review_result(event, h.opts("review-v2-gate-gap-advisory"))
     t.eq(result.exit_code, 0)
     t.is_nil(h.find_raise(result.raises, "devloop_fixing"))
-    t.is_true(h.find_raise(result.raises, "devloop_merge_ready") ~= nil)
-    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    local comment_request = assert_merge_ready_handoff(result)
+    local comment = comment_request.body
     t.is_true(comment:find("github-devloop PR review decision: approve", 1, true) ~= nil)
     t.is_true(comment:find("Advisory (out-of-contract): rejected only for gate-owned fact", 1, true) ~= nil)
   end,

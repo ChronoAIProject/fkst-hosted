@@ -65,20 +65,12 @@ function M.raise_review_carry_over(dept, repo, pr_number, issue_proposal_id, ver
   end
   local source_ref = M.pr_source_ref(repo, pr_number)
   local comment_request = M.build_review_carry_over_comment_request(repo, pr_number, issue_proposal_id, version, carry, source_ref)
-  local next_ready = M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, {
-    review_proposal_id = carry.new_review_proposal_id,
-    review_dedup_key = carry.new_review_dedup_key,
-    reviewed_head_sha = carry.new_head_sha,
-    current_head_sha = carry.new_head_sha,
-  }, source_ref)
   M.log_cas_decision(dept, issue_proposal_id, current_state, "merge-ready", "merge-ready", "applied(review-carry-over)", "approved head is ancestor and resolution delta is empty")
   M.log_apply(dept, issue_proposal_id, "merge-ready", version, { add = {}, remove = {} }, {
     "github-proxy.github_pr_comment_request",
-    "devloop_merge_ready",
   })
   M.log_raise(dept, issue_proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  M.log_raise(dept, issue_proposal_id, "devloop_merge_ready", next_ready)
-  return next_ready, "review-carry-over"
+  return comment_request, "review-carry-over"
 end
 end
 

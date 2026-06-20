@@ -10,7 +10,6 @@ local spec = {
     "devloop_fixing",
     "devloop_fix_reconcile",
     "devloop_decompose",
-    "devloop_merge_ready",
     "devloop_review_meta",
   },
   fanout = { "consensus.consensus_reached" },
@@ -174,6 +173,9 @@ return saga.department(spec, { done = function() return false end, act = functio
       end
       comment_reached.reflection_checkpoint = true
     end
+    if effective_decision == "approve" then
+      comment_reached.current_head_sha = current_pr.head_sha
+    end
     local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local label_request = nil
     if origin.issue_number ~= nil then
@@ -188,7 +190,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local fix_payload = nil
     local reflection_payload = nil
-    local merge_payload = nil
     if reflection_checkpoint then
       reflection_payload = core.build_devloop_fix_reflection_payload({
         proposal_id = reached.proposal_id,
@@ -207,14 +208,6 @@ return saga.department(spec, { done = function() return false end, act = functio
         blocking_gap = reached.blocking_gap,
       }, pr_source_ref)
       table.insert(raised, "devloop_fixing")
-    else
-      merge_payload = core.build_devloop_merge_ready_payload(origin.proposal_id, pr_number, issue_version, {
-        review_proposal_id = reached.proposal_id,
-        review_dedup_key = reached.dedup_key,
-        reviewed_head_sha = reviewed_head_sha,
-        current_head_sha = current_pr.head_sha,
-      }, pr_source_ref)
-      table.insert(raised, "devloop_merge_ready")
     end
     core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
@@ -226,9 +219,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if reflection_payload ~= nil then
       core.log_raise("review_result", origin.proposal_id, "devloop_review_meta", reflection_payload)
-    end
-    if merge_payload ~= nil then
-      core.log_raise("review_result", origin.proposal_id, "devloop_merge_ready", merge_payload)
     end
   end)
 end, wrap = core.wrap_pipeline_failure, name = "review_result" })

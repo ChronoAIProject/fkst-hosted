@@ -7,6 +7,7 @@ local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
     "devloop_ready",
+    "devloop_merge_ready",
     "devloop_reconcile",
     "devloop_reviewing",
   },
@@ -39,6 +40,16 @@ local function supported_handoff(payload)
     and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.base_version)
     and core._is_bounded_string(handoff.base_version, core._max_dedup_len)
     and valid_round(handoff.round) ~= nil
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
+    return handoff
+  end
+  if handoff.kind == "github-devloop.merge_ready"
+    and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
+    and core.is_safe_pr_number(handoff.pr_number)
+    and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and core.is_safe_pr_review_result_ref(handoff.review_proposal_id, handoff.review_dedup_key)
+    and core.is_safe_head_sha(handoff.reviewed_head_sha)
+    and core.is_safe_head_sha(handoff.current_head_sha)
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
@@ -93,6 +104,18 @@ local function act_handoff(event)
     }, handoff.round, handoff.base_version)
     core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "thinking", version = handoff.base_version }, "comment-written", "devloop_reconcile", "applied(own-write-comment-id)", "converge round comment write was acknowledged")
     core.log_raise("comment_handoff", handoff.proposal_id, "devloop_reconcile", reconcile)
+    return
+  end
+
+  if handoff.kind == "github-devloop.merge_ready" then
+    local merge_ready = core.build_devloop_merge_ready_payload(handoff.proposal_id, handoff.pr_number, handoff.version, {
+      review_proposal_id = handoff.review_proposal_id,
+      review_dedup_key = handoff.review_dedup_key,
+      reviewed_head_sha = handoff.reviewed_head_sha,
+      current_head_sha = handoff.current_head_sha,
+    }, handoff.source_ref)
+    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "merge-ready", version = handoff.version }, "comment-written", "devloop_merge_ready", "applied(own-write-comment-id)", "merge-ready marker comment write was acknowledged")
+    core.log_raise("comment_handoff", handoff.proposal_id, "devloop_merge_ready", merge_ready)
     return
   end
 

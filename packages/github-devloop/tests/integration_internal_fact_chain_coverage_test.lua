@@ -463,7 +463,25 @@ return {
     })
     local approved = run_review_result(approve, opts("internal-chain-review-approve-direct"))
     t.eq(approved.exit_code, 0)
-    local direct_merge = find_raise(approved.raises, "devloop_merge_ready")
+    local approve_comment = find_raise(approved.raises, "github-proxy.github_pr_comment_request").payload
+    t.eq(find_raise(approved.raises, "devloop_merge_ready"), nil)
+    t.eq(approve_comment.handoff.kind, "github-devloop.merge_ready")
+    local acknowledged = t.run_department("departments/comment_handoff/main.lua", {
+      queue = "github-proxy.github_comment_written",
+      payload = {
+        schema = "github-proxy.comment-written.v1",
+        repo = approve_comment.repo,
+        target = "pr",
+        pr_number = approve_comment.pr_number,
+        comment_id = "IC_internal_chain_merge_ready",
+        request_dedup_key = approve_comment.dedup_key,
+        dedup_key = tostring(approve_comment.dedup_key) .. "/written/IC_internal_chain_merge_ready",
+        source_ref = approve_comment.source_ref,
+        handoff = approve_comment.handoff,
+      },
+    }, opts("internal-chain-review-approve-handoff"))
+    t.eq(acknowledged.exit_code, 0)
+    local direct_merge = find_raise(acknowledged.raises, "devloop_merge_ready")
     t.eq(direct_merge.payload.schema, "github-devloop.merge-ready.v1")
 
     mock_pr_origin({

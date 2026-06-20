@@ -56,10 +56,15 @@ return {
 
     local result = run_review_result(event, opts("review-result-approve"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready")
+    local expected_merge_ready = core.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42", "7", impl_version, {
+      review_proposal_id = event.proposal_id,
+      review_dedup_key = event.dedup_key,
+      reviewed_head_sha = "def456",
+      current_head_sha = "def456",
+    }, core.pr_source_ref("owner/repo", 7))
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:merge-ready")
     t.eq(#label_raise.payload.remove_labels, 12)
     t.is_true(comment_raise.payload.body:find("github-devloop PR review decision: approve", 1, true) ~= nil)
@@ -70,9 +75,17 @@ return {
     t.eq(core.current_state({ comment_raise.payload.body }, "github-devloop/issue/owner/repo/42").version, impl_version)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:review-result:v1", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:merge-ready:v1", 1, true) ~= nil)
-    t.eq(merge_raise.payload.schema, "github-devloop.merge-ready.v1")
-    t.eq(tostring(merge_raise.payload.pr_number), "7")
-    t.eq(merge_raise.payload.reviewed_head_sha, "def456")
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+    t.eq(comment_raise.payload.handoff.kind, "github-devloop.merge_ready")
+    t.eq(comment_raise.payload.handoff.proposal_id, expected_merge_ready.proposal_id)
+    t.eq(comment_raise.payload.handoff.pr_number, expected_merge_ready.pr_number)
+    t.eq(comment_raise.payload.handoff.version, expected_merge_ready.version)
+    t.eq(comment_raise.payload.handoff.review_proposal_id, expected_merge_ready.review_proposal_id)
+    t.eq(comment_raise.payload.handoff.review_dedup_key, expected_merge_ready.review_dedup_key)
+    t.eq(comment_raise.payload.handoff.reviewed_head_sha, expected_merge_ready.reviewed_head_sha)
+    t.eq(comment_raise.payload.handoff.current_head_sha, "def456")
+    t.eq(comment_raise.payload.handoff.source_ref.kind, expected_merge_ready.source_ref.kind)
+    t.eq(comment_raise.payload.handoff.source_ref.ref, expected_merge_ready.source_ref.ref)
   end,
 
   test_review_result_reject_marks_issue_fixing = function()
@@ -94,6 +107,8 @@ return {
     local fixing_raise = find_raise(result.raises, "devloop_fixing")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
     t.eq(#label_raise.payload.remove_labels, 12)
+    t.eq(comment_raise.payload.handoff, nil)
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
     t.is_true(comment_raise.payload.body:find("decision=\"reject\"", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("state=\"fixing\"", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('state="fixing" version="' .. fix_version .. '"', 1, true) ~= nil)
@@ -128,7 +143,8 @@ return {
 
     local result = run_review_result(event, opts("review-result-unassigned-self-author"))
     t.eq(result.exit_code, 0)
-    t.is_true(find_raise(result.raises, "devloop_merge_ready") ~= nil)
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.handoff.kind, "github-devloop.merge_ready")
   end,
 
   test_review_result_fails_closed_when_claim_read_fails = function()
@@ -221,12 +237,13 @@ return {
 
     local result = run_review_result(event, opts("review-result-fix-round-approve"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local merge_raise = find_raise(result.raises, "devloop_merge_ready")
     t.is_true(comment_raise.payload.body:find('state="merge-ready" version="' .. fix_round_version .. '"', 1, true) ~= nil)
-    t.eq(merge_raise.payload.version, fix_round_version)
-    t.eq(merge_raise.payload.reviewed_head_sha, "feedface")
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+    t.eq(comment_raise.payload.handoff.version, fix_round_version)
+    t.eq(comment_raise.payload.handoff.reviewed_head_sha, "feedface")
+    t.eq(comment_raise.payload.handoff.current_head_sha, "feedface")
     local current = core.current_state({
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", fix_round_version),
       comment_raise.payload.body,

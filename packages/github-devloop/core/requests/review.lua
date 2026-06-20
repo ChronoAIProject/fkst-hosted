@@ -125,7 +125,7 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
     body = body .. "\n" .. M.comment_string("blocking_gap_label") .. M.neutralize_untrusted_comment_text(blocking_gap)
   end
   local _, pr_number = M.parse_pr_source_ref(source_ref)
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -142,6 +142,21 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
     tostring(reached.decision),
     tostring(reached.dedup_key),
   }), source_ref)
+  if reached.decision == "approve" then
+    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
+    request.handoff = {
+      kind = "github-devloop.merge_ready",
+      proposal_id = issue_proposal_id,
+      pr_number = pr_number,
+      version = issue_version,
+      review_proposal_id = reached.proposal_id,
+      review_dedup_key = reached.dedup_key,
+      reviewed_head_sha = reviewed_head_sha,
+      current_head_sha = reached.current_head_sha or reviewed_head_sha,
+      source_ref = M.normalize_source_ref(source_ref),
+    }
+  end
+  return request
 end
 
 function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
@@ -279,7 +294,7 @@ function M.build_review_carry_over_comment_request(repo, pr_number, issue_propos
     carry.new_head_sha,
     carry.base_head_sha
   )
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -300,6 +315,18 @@ function M.build_review_carry_over_comment_request(repo, pr_number, issue_propos
     tostring(carry.approved_head_sha),
     tostring(carry.new_head_sha),
   }), source_ref)
+  request.handoff = {
+    kind = "github-devloop.merge_ready",
+    proposal_id = issue_proposal_id,
+    pr_number = pr_number,
+    version = version,
+    review_proposal_id = carry.new_review_proposal_id,
+    review_dedup_key = carry.new_review_dedup_key,
+    reviewed_head_sha = carry.new_head_sha,
+    current_head_sha = carry.new_head_sha,
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+  return request
 end
 end
 

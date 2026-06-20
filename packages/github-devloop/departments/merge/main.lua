@@ -12,7 +12,6 @@ local spec = {
     "devloop_fixing",
     "devloop_fix_reconcile",
     "devloop_decompose",
-    "devloop_merge_ready",
     "devloop_merge_queue_tick",
   },
   fanout = { "devloop_merge_queue_tick", "devloop_merge_ready" },
