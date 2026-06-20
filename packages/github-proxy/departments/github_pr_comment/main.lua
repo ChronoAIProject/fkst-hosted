@@ -1,12 +1,15 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "github_pr_comment_request" },
   produces = { "github_comment_written" },
   stall_window = "30s",
 }
+
+local function done(_event)
+  return false
+end
 
 local function has_required_fields(payload)
   return payload.pr_number ~= nil and payload.body ~= nil and payload.dedup_key ~= nil
@@ -30,7 +33,7 @@ local function log_outbound(payload, repo, write_env)
   core.log_line("info", "github_pr_comment", "OUTBOUND", fields)
 end
 
-function pipeline(event)
+local function act(event)
   local payload = event.payload or {}
   local written, repo = core.write_with_outbound_log(payload, {
     kind = "pr",
@@ -61,6 +64,9 @@ function pipeline(event)
   end
 end
 
-pipeline = core.wrap_pipeline_failure("github_pr_comment", pipeline)
-
-return M
+return saga.department(spec, {
+  done = done,
+  act = act,
+  wrap = core.wrap_pipeline_failure,
+  name = "github_pr_comment",
+})
