@@ -137,6 +137,25 @@ Incident of record (2026-06-17): `mkdir -p X && chmod 0555 X` on a worktree pare
 
 **Codex 并发由引擎 admission 控制（默认全用，dogfood 不 override）**：`FKST_CODEX_PERMIT_SLOTS`=**20**（全局 codex 进程许可池上限）、`FKST_MAX_IN_FLIGHT_PER_DEPT`=**16**（每 department 并发 durable child 上限）、`FKST_DURABLE_ADMISSION_BURST_PER_DEPT`=**1**（每 dispatch pass 每 dept 只准入 1 个新 child——缓启，#512 thundering-herd 后特意设的稳态保护）。**实测同时在跑的 codex 数（常 3-5）远低于 20 cap，是「当下需求 + burst=1 缓启」而非被限流到顶**——别把低 codex 数误读成 admission 卡死或 cap 太小（纠错 2026-06-19，user-as-oracle：此前误判 cap≈3，实为 20）。想让排队的工作铺得更快可调高 `burst`，但 burst=1 是特意的 herd 保护，改前权衡（herd 风险 vs 铺开速度）。
 
+## 信任契约,别在包层重造框架已保证的东西（「下游不稳定」是错误前提,是意外复杂的根）
+
+**意外复杂几乎都长在同一个错误前提上:「下游 / 引擎 / 兄弟包可能不可靠,而我没法确知,所以必须自己兜底。」** 一旦默认周围不稳,就会在每个边界叠防御——自造 durability、persist-before-ACK、双保险、对已保证的东西反复重验——复杂度就是这么长出来的。`github-proxy` / `consensus` 之所以简单,正因为它们**不**做这个假设:信任拿到的契约、只管履行自己的契约。`github-devloop` 更复杂,很大一部分就是这个防御性前提的累积,而非某个具体设计本身难。
+
+**铁律:假设契约成立来写包(于是包极简);若发现契约被违反,去它所在的层修(通常是 engine),绝不在下游叠 paranoia 去绕。** 这是「框架做公共稳定部分、脚本写最简单业务」的同一句话,也是「异常向上暴露,直到懂根因的 handler 接手」在信任维度的对偶:契约破了就让它暴露到该修的那层,不在包里悄悄兜。
+
+**精确切一刀(实事求是,别从「过度防御」滑到「过度信任」):**
+- **该信任、却在防的(假前提,删):** 引擎可靠投递会不会丢、下游包会不会不写、该来的回调到底来不来。这些是**契约**,它们成立——包不得在自己这层再造一遍(自建 durable marker、persist-before-ACK、把出站 outbox 当可靠层用,都是这类冗余)。
+- **真实的契约属性(要处理,但这不叫「不稳定」,且框架已解决一次、包只管信任):** GitHub 最终一致(读滞后写)、crash-only(进程会重启)、at-least-once(同一事件可能来多次)。框架用可靠投递 + 从源 re-derive + version-CAS 幂等**解决一次**;包**信任**它,只履行幂等——这正是「多次无所谓」。**version-CAS 幂等不是防御、是幂等机制,留;persist-before-ACK 之类是防御、删。**
+- **框架真有缺口时:** 如 #1101 的 `raise()`→emit 窗口(raise 只进 in-process buffer、pipeline 返回后才落持久队列,这中间崩溃会丢)——那是 **engine 去补、让契约真的成立**,不是包叠防御去绕。
+
+**架构形状:业务逻辑完全信任,安全只集中在唯一一个诊断兜底里。** 按**完全信任**写业务(happy path 信任契约 / 事件回调,零 per-op 防御——这是最简形态);把所有「万一有 bug 让某契约没被履行」的担心**集中到唯一一个全局诊断**——一个 level-triggered sweep,poll「哪些态没按契约推进(该进展却没进展)」,对它们**盲重投**(零根因分析、version 单调 +1)。**理论上它永不命中**(契约成立时无人 stuck);**一旦真有 bug 让某步没履行契约,这一个 sweep 就能恢复。** 这正是本仓既有的 watchdog 心跳盲重投 / liveness sweep(见「核心循环」「活性 ⟂ 安全」「全状态强制 saga 化」)——本条点明其定位:**安全只许活在这一个 sweep 里,别散进每个操作的 per-op 防御**(persist-before-ACK、自建 durable marker 就是这种散落,删)。
+
+**于是 poll ≡ 消息激活(事件回调)只是触发同一个幂等 reconcile、等价。** happy path 可**完全信任**事件回调(最简);那唯一的 poll-诊断是兜底、不织进每个操作;两者都靠「reconcile 幂等(多次无所谓)」成立,绝不带 must-not-lose 语义。诊断这条信任链最稳的形态是 level-triggered——每轮从持久事实源(GitHub marker / git / 外部源)重新推导,完全不依赖任何一次事件投递是否成功(连发射端 raise 窗口的丢失都自愈)。本仓既有范式:`dependency_wait`(父等子 = blockedBy gate)就是 poll 驱动(`driving_queue = github-proxy.github_entity_changed`)、每轮重读依赖态、幂等推进 ready/blocked——任何「父等子」态(含 `awaiting-pr` 等 PR 子终态)都照这个统一形状,而非发明 push 专列 + 自建 durability。
+
+**与「边界资源公理」互补、画同一条线:** 真正不服从内部哲学、需要枚举 / 中介 / 计量 / 预算的,只有**真·外部边界**(GitHub、外部资源),且由框架在**一处**中介掉;边界之内的 engine↔package、package↔package 契约一律**信任**,别把边界的 paranoia 往里蔓延。防御只打一次、打在真边界上;里面越信任越简单。
+
+**纠错(2026-06-20,user-as-oracle):** 拆 issue/PR saga 时我纠结的 persist-before-ACK、「terminal 绝不能丢」、raise 窗口、子状态读不到——底层全是这个「下游可能不稳、我得自己兜」的假前提;user 一句「这个前提就是错的」点破。按本条:那套 push durability 全删,`awaiting-pr` 做成 `dependency_wait` 的孪生——**业务完全信任(可信事件回调),安全交给那唯一的 liveness sweep 兜底**(完全信任 + 一个诊断盲重投:理论上不命中,有 bug 也能恢复)。⟦AI:FKST⟧
+
 ## 错误处理三级模型（codex-as-catch）
 
 任何流程 `A → func1 → B` 的失败处理分三级；**catch 的产出是「立项」而非「当场修」**（prior art：OTP 监督树要求快路径 supervisor 简单确定；AIOps 异常→工单；LLM 自愈模式的已知失败形态是不确定性与副作用越界）：
