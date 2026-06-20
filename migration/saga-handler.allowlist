@@ -1,4 +1,3 @@
-packages/github-devloop/departments/rollup_merge/main.lua
 packages/github-devloop/departments/rollup_scan/main.lua
 packages/github-devloop/departments/sync_conflict/main.lua
 packages/github-devloop/departments/sync_scan/main.lua
