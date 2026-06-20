@@ -97,7 +97,7 @@ local function count_pr_view_fetches()
   return count
 end
 
-local function mock_issue(comments)
+local function mock_issue(comments, labels)
   entity_read_mocks.mock_issue_read_forms(t, {
     repo = repo,
     number = 42,
@@ -105,7 +105,7 @@ local function mock_issue(comments)
     body = "",
     state = "OPEN",
     updated_at = "2026-06-03T01:02:03Z",
-    labels = { "fkst-dev:enabled", "fkst-dev:pr-open" },
+    labels = labels or { "fkst-dev:enabled", "fkst-dev:pr-open" },
     comments = comments,
     assignees = { "fkst-test-bot" },
     times = 1,
@@ -224,6 +224,33 @@ return {
     local result = run_liveness_scan("lineage-watchdog-stuck-pr-open-times-out", run_opts)
     t.eq(result.exit_code, 0)
     t.eq(count_pr_view_fetches(), 0)
+    local reconcile = find_raise(result.raises, "devloop_timeout_reconcile")
+    t.is_true(reconcile ~= nil)
+    t.eq(reconcile.payload.state, "pr-open")
+    t.eq(reconcile.payload.issue_version, timeout_version)
+    t.eq(reconcile.payload.round, 3)
+    t.eq(reconcile.payload.source_ref.ref, "owner/repo#issue/42")
+  end,
+
+  test_issue_surface_watchdog_pr_blocked_marker_does_not_mask_pr_open = function()
+    local timeout_version = version .. "/timeout/pr-open/3"
+    local run_opts = opts("lineage-watchdog-pr-open-pr-blocked-does-not-mask")
+    mock_repo()
+    mock_issue_list()
+    mock_issue(issue_pr_open_comments(timeout_version), { "fkst-dev:enabled", "fkst-dev:blocked" })
+    seed_cached_pr({
+      {
+        body = core.state_marker(proposal_id, "blocked", version .. "/review-loop/3"),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T00:05:00Z",
+      },
+    }, run_opts)
+    mock_empty_pr_list()
+
+    local result = run_liveness_scan("lineage-watchdog-pr-open-pr-blocked-does-not-mask", run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
     local reconcile = find_raise(result.raises, "devloop_timeout_reconcile")
     t.is_true(reconcile ~= nil)
     t.eq(reconcile.payload.state, "pr-open")

@@ -534,7 +534,7 @@ local function process_issue_event(event)
     end
     local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
     snapshot.fresh = true
-    local state = snapshot.state
+    local state = core.linked_snapshot_issue_state(snapshot, issue_state)
     if state.state ~= nil then
       if not claim_checked and not ensure_managed_issue_claim(issue, proposal_id, current, state) then
         return
