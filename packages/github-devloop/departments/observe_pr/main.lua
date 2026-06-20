@@ -12,6 +12,7 @@ local spec = {
     "devloop_fixing",
     "devloop_decompose",
     "devloop_merge_ready",
+    "devloop_pr_terminal",
     "devloop_reconcile",
     "devloop_review_reconcile",
     "devloop_timeout_reconcile",

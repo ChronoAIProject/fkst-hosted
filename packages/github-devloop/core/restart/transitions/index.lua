@@ -1,4 +1,5 @@
 return {
+  { module = "awaiting_pr", key = "awaiting-pr" },
   { module = "blocked", key = "blocked" },
   { module = "dependency_wait", key = "dependency_wait" },
   { module = "fixing", key = "fixing" },

@@ -145,7 +145,7 @@ return {
     end)
     local open_pr_raise = find_raise(result.raises, "devloop_open_pr")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:implementing")
-    t.eq(#label_raise.payload.remove_labels, 11)
+    t.eq(#label_raise.payload.remove_labels, 12)
     t.eq(attempt_raise.payload.body, state_raise.payload.body)
     t.is_true(state_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true) ~= nil)
     t.is_true(state_raise.payload.body:find("fkst:github-devloop:implement-attempt:v1", 1, true) ~= nil)

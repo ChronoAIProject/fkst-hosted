@@ -23,6 +23,7 @@ function M.state_marker(proposal_id, state, version, effects)
     and state ~= "dependency_wait"
     and state ~= "ready"
     and state ~= "implementing"
+    and state ~= "awaiting-pr"
     and state ~= "pr-open"
     and state ~= "reviewing"
     and state ~= "review-meta"
@@ -162,6 +163,7 @@ local timeout_order_states = {
   "thinking",
   "ready",
   "implementing",
+  "awaiting-pr",
   "impl-failed",
   "pr-open",
   "reviewing",

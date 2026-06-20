@@ -186,6 +186,30 @@ local function live_signal_age(M, row, state, facts, now_seconds)
         and marker_attr(marker, "head_sha") == tostring(head_sha)
     end, now_seconds)
   end
+  if resolver == "child-state" then
+    local terminal_states = {}
+    for _, terminal_state in ipairs(row and row.defer and row.defer.terminal_states or {}) do
+      terminal_states[tostring(terminal_state)] = true
+    end
+    local latest = nil
+    local pattern_family = "state"
+    local marker_pattern = "<!%-%- fkst:github%-devloop:" .. pattern_family .. ":v1.-%-%->"
+    for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+      local age = signal_age_from_created_at(M, M._comment_created_at(comment), now_seconds)
+      for marker in M._comment_body(comment):gmatch(marker_pattern) do
+        if marker_attr(marker, "proposal") == tostring(proposal_id) then
+          local child_state = marker_attr(marker, "state")
+          if terminal_states[child_state] ~= true
+            and (latest == nil or (age ~= nil and (latest.age == nil or age < latest.age))) then
+            latest = {
+              age = age or 0,
+            }
+          end
+        end
+      end
+    end
+    return latest and latest.age or nil
+  end
   return nil
 end
 

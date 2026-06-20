@@ -267,6 +267,25 @@ local function resolve_codex_run(row, state, facts, now_seconds)
   return eval
 end
 
+local function resolve_child_workflow_wait(row, state, facts, now_seconds)
+  if type(M.restart_row_liveness_signal) ~= "function" then
+    return invalid("child workflow liveness signal resolver is unavailable")
+  end
+  local signal = M.restart_row_liveness_signal(row, state, facts, now_seconds)
+  if signal.live then
+    local eval = deferred("child workflow state is non-terminal")
+    eval.signal = signal
+    return eval
+  end
+  local entry_ms = state_entry_ms(state)
+  if entry_ms == nil then
+    return invalid("child workflow wait delegation epoch is missing")
+  end
+  local eval = actionable(row, state, entry_ms, "pr-delegation:v1:" .. tostring(state and state.version or ""), "child workflow terminal or absent")
+  eval.signal = signal
+  return eval
+end
+
 function M.actionable_epoch_generation_key(row, state, eval)
   if type(eval) ~= "table" or eval.status ~= "actionable" then
     return nil
@@ -293,6 +312,9 @@ function M.actionable_epoch_resolve(row, state, facts, now_seconds)
   end
   if row.actionable_epoch.source == "codex_run:v1" then
     return resolve_codex_run(row, state, facts, now_seconds)
+  end
+  if row.actionable_epoch.source == "child_workflow_wait:v1" then
+    return resolve_child_workflow_wait(row, state, facts, now_seconds)
   end
   return invalid("unsupported actionable_epoch.source")
 end
@@ -372,6 +394,13 @@ function M.actionable_epoch_timeout_attempt(row, state, facts)
       M.version_timeout_round(state and state.version, row and row.from_state) or 0
     )
   end
+  if row and row.actionable_epoch and row.actionable_epoch.source == "child_workflow_wait:v1" then
+    return math.max(
+      current,
+      M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0,
+      M.version_timeout_round(state and state.version, row and row.from_state) or 0
+    )
+  end
   if tostring(eval.generation_opened_by or ""):find("^state%-entry:v1:") then
     return math.max(current, M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0, M.version_timeout_round(state and state.version, row and row.from_state) or 0)
   end
@@ -397,6 +426,21 @@ function M.actionable_epoch_codex_run_decision(row, state, facts, due, age)
     age_minutes = age,
     version = M.next_liveness_timeout_version(row, state, facts),
   }
+end
+
+function M.actionable_epoch_child_workflow_decision(row, state, facts, due, age)
+  local eval = facts and facts.actionable_epoch_eval
+  if not (row
+    and row.actionable_epoch
+    and row.actionable_epoch.source == "child_workflow_wait:v1"
+    and type(eval) == "table"
+    and eval.status == "actionable") then
+    return nil
+  end
+  if due then
+    return nil
+  end
+  return { action = "wait", age_minutes = age }
 end
 
 function M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limit)
@@ -443,7 +487,7 @@ function M.restart_row_has_registered_actionable_epoch(row)
     return false
   end
   local source = row.actionable_epoch.source
-  return (source == "live_defer_epoch:v1" or source == "live_defer_heartbeat:v1" or source == "codex_run:v1")
+  return (source == "live_defer_epoch:v1" or source == "live_defer_heartbeat:v1" or source == "codex_run:v1" or source == "child_workflow_wait:v1")
     and M.restart_liveness_epoch_sources()[source] ~= nil
 end
 

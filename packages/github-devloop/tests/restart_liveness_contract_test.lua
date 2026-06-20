@@ -159,6 +159,12 @@ return {
     t.eq(sources["codex_run:v1"].requires_producer, true)
     t.eq(sources["codex_run:v1"].requires_exec_ref, true)
     t.eq(sources["codex_run:v1"].forbids_freshness_ms, true)
+    t.eq(sources["child_workflow_wait:v1"].durable, true)
+    t.eq(sources["child_workflow_wait:v1"].opens_generation, true)
+    t.eq(sources["child_workflow_wait:v1"].excludes_deferred_time, true)
+    t.eq(sources["child_workflow_wait:v1"].requires_live_marker, true)
+    t.eq(sources["child_workflow_wait:v1"].requires_delegation_marker, true)
+    t.eq(sources["child_workflow_wait:v1"].requires_terminal_states, true)
   end,
 
   test_row_budget_rows_declare_state_entry_actionable_epoch = function()
@@ -190,6 +196,7 @@ return {
       t.eq(core.liveness_contract_inventory_is_listed_violation(state, strict), false, state)
     end
     t.eq(core.liveness_contract_inventory_is_listed_violation("ready", strict), false)
+    t.eq(core.liveness_contract_inventory_is_listed_violation("awaiting-pr", strict), false)
   end,
 
   test_inventory_ratchet_rejects_unlisted_and_stale_entries = function()
@@ -246,6 +253,54 @@ return {
     }, now_seconds)
     t.eq(due, false)
     t.eq(age, 0)
+  end,
+
+  test_awaiting_pr_child_workflow_wait_defers_on_non_terminal_child_state = function()
+    local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
+    local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
+    local due, age = core.liveness_timeout_due_with_facts(row, {
+      state = "awaiting-pr",
+      version = "ready/1248",
+      proposal_id = "github-devloop/issue/owner/repo/1248",
+      marker_created_at = "2026-06-03T09:45:00Z",
+    }, {
+      proposal_id = "github-devloop/issue/owner/repo/1248",
+      current_pr = {
+        comments = {
+          {
+            author_login = "fkst-test-bot",
+            created_at = "2026-06-03T10:30:00Z",
+            body = core.state_marker("github-devloop/issue/owner/repo/1248", "reviewing", "ready/1248"),
+          },
+        },
+      },
+    }, now_seconds)
+    t.eq(due, false)
+    t.eq(age, nil)
+  end,
+
+  test_awaiting_pr_child_workflow_wait_actionable_on_terminal_child_state = function()
+    local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
+    local facts = {
+      proposal_id = "github-devloop/issue/owner/repo/1248",
+      current_pr = {
+        comments = {
+          {
+            author_login = "fkst-test-bot",
+            created_at = "2026-06-03T10:30:00Z",
+            body = core.state_marker("github-devloop/issue/owner/repo/1248", "merged", "ready/1248"),
+          },
+        },
+      },
+    }
+    local eval = core.actionable_epoch_resolve(row, {
+      state = "awaiting-pr",
+      version = "ready/1248",
+      proposal_id = "github-devloop/issue/owner/repo/1248",
+      marker_created_at = "2026-06-03T09:45:00Z",
+    }, facts, core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z"))
+    t.eq(eval.status, "actionable")
+    t.eq(eval.epoch_source, "child_workflow_wait:v1")
   end,
 
   test_runtime_provenance_rejects_declared_source_drift = function()
