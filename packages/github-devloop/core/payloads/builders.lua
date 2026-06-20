@@ -143,44 +143,6 @@ function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head
   }
 end
 
-function M.build_devloop_pr_terminal_payload(issue_proposal_id, pr_number, version, child_state, source_ref, terminal_fact)
-  local fact = terminal_fact or {}
-  local repo = fact.repo
-  local pr_proposal = fact.pr_proposal or fact.pr_proposal_id
-  if repo == nil then
-    repo = select(1, M.parse_pr_source_ref(source_ref))
-  end
-  if pr_proposal == nil and repo ~= nil and pr_number ~= nil then
-    pr_proposal = M.pr_proposal_id(repo, pr_number)
-  end
-  return {
-    schema = "github-devloop.pr-terminal.v1",
-    proposal_id = issue_proposal_id,
-    pr_number = pr_number,
-    version = version,
-    child_state = child_state,
-    terminal = fact.terminal or child_state,
-    pr_proposal_id = pr_proposal,
-    pr_proposal = pr_proposal,
-    repo = repo,
-    pr_identity = fact.pr_identity or pr_number,
-    delegation_generation = fact.delegation_generation or fact.delegation,
-    head_sha = fact.head_sha,
-    merge_commit_sha = fact.merge_commit_sha,
-    terminal_marker_id = fact.terminal_marker_id,
-    dedup_key = M._dedup_key({
-      "pr-terminal",
-      tostring(issue_proposal_id),
-      tostring(version),
-      tostring(pr_number),
-      tostring(child_state),
-      tostring(fact.delegation_generation or fact.delegation or "generation"),
-      tostring(fact.terminal_marker_id or "terminal-marker"),
-    }),
-    source_ref = M.normalize_source_ref(source_ref),
-  }
-end
-
 function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
   local version = origin.impl_version
   if review_fact.fix_version ~= nil then

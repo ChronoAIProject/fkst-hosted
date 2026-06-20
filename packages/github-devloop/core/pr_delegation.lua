@@ -88,7 +88,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
   local body = "github-devloop PR child open"
     .. "\n\n" .. M.pr_origin_marker(pr_proposal_id, pr_number, branch, impl_version, base_branch)
     .. "\n" .. M.state_marker(pr_proposal_id, "pr-open", impl_version)
-  local request = M.build_entity_comment_request({
+  return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -98,19 +98,6 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     tostring(issue_proposal_id),
     tostring(delegation),
   }), source_ref)
-  request.handoff = {
-    kind = "github-devloop.pr-open",
-    issue_proposal_id = issue_proposal_id,
-    proposal_id = pr_proposal_id,
-    pr_number = pr_number,
-    version = impl_version,
-    delegation_generation = delegation,
-    branch = branch,
-    base_branch = base_branch,
-    head_sha = head_sha,
-    source_ref = M.normalize_source_ref(source_ref),
-  }
-  return request
 end
 
 local function build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, source_ref)
@@ -140,26 +127,6 @@ local function existing_delegation(issue, issue_proposal_id, delegation)
     pr_number = fact.pr_number,
     head_ref_name = issue.branch or (issue.implementation and issue.implementation.branch),
     base_ref_name = issue.base_branch or (issue.implementation and issue.implementation.base_branch),
-  }
-end
-
-function M.build_devloop_pr_open_payload(issue_proposal_id, pr_proposal_id, pr_number, version, source_ref, delegation_generation, branch, base_branch, head_sha)
-  return {
-    schema = "github-devloop.pr-open.v1",
-    proposal_id = pr_proposal_id,
-    issue_proposal_id = issue_proposal_id,
-    pr_number = pr_number,
-    version = version,
-    delegation_generation = delegation_generation,
-    branch = branch,
-    base_branch = base_branch,
-    head_sha = head_sha,
-    dedup_key = M._dedup_key({
-      "pr-open",
-      tostring(issue_proposal_id),
-      tostring(delegation_generation),
-    }),
-    source_ref = M.normalize_source_ref(source_ref),
   }
 end
 

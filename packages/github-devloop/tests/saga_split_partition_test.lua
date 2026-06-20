@@ -37,7 +37,7 @@ return {
     t.eq(contract.state_allowed_for_saga("pr", "closed-unmerged"), true)
   end,
 
-  test_partition_contract_declares_boundary_and_child_liveness_shape = function()
+  test_partition_contract_declares_poll_boundary_and_child_liveness_shape = function()
     local issue_states = contract.issue_states()
     local pr_states = contract.pr_phase_states()
     local pr_terminals = contract.pr_terminal_states()
@@ -51,15 +51,11 @@ return {
       end
     end
 
-    local queues = contract.boundary_queues()
-    t.eq(queues.open, "devloop_pr_open")
-    t.eq(queues.terminal, "devloop_pr_terminal")
-
     local awaiting = contract.awaiting_pr_contract()
     t.eq(awaiting.state, "awaiting-pr")
     t.eq(awaiting.liveness_class, "child_workflow_wait")
-    t.eq(awaiting.queue_out, "devloop_pr_open")
-    t.eq(awaiting.queue_in, "devloop_pr_terminal")
+    t.eq(awaiting.queue_out, nil)
+    t.eq(awaiting.queue_in, nil)
     t.eq(has_value(awaiting.child_terminal_states, "merged"), true)
     t.eq(has_value(awaiting.child_terminal_states, "closed-unmerged"), true)
     t.eq(has_value(awaiting.child_terminal_states, "blocked"), true)

@@ -85,33 +85,12 @@ local function find_effect(effects, queue)
   return nil
 end
 
-local function assert_no_direct_pr_open_raise(effects)
-  t.eq(find_effect(effects, "devloop_pr_open"), nil)
-end
-
 local function render_comment(body)
   return {
     body = body,
     author_login = "fkst-test-bot",
     created_at = "2026-06-03T01:02:03Z",
   }
-end
-
-local function run_handoff(request)
-  return t.run_department("departments/comment_handoff/main.lua", {
-    queue = "github-proxy.github_comment_written",
-    payload = {
-      schema = "github-proxy.comment-written.v1",
-      repo = repo,
-      target = "pr",
-      pr_number = 7,
-      comment_id = "IC_pr_open_1",
-      request_dedup_key = request.dedup_key,
-      dedup_key = tostring(request.dedup_key) .. "/written/IC_pr_open_1",
-      source_ref = request.source_ref,
-      handoff = request.handoff,
-    },
-  }, { name = "pr-delegation-handoff" })
 end
 
 return {
@@ -133,13 +112,9 @@ return {
     t.is_true(pr_effect.payload.body:find('fkst:github-devloop:pr-origin:v1', 1, true) ~= nil)
     t.is_true(pr_effect.payload.body:find('proposal="github-devloop/pr/owner/repo/7"', 1, true) ~= nil)
     t.is_true(pr_effect.payload.body:find('state="pr-open"', 1, true) ~= nil)
-    t.eq(pr_effect.payload.handoff.kind, "github-devloop.pr-open")
-    t.eq(pr_effect.payload.handoff.issue_proposal_id, issue_proposal)
-    t.eq(pr_effect.payload.handoff.proposal_id, "github-devloop/pr/owner/repo/7")
-    t.eq(pr_effect.payload.handoff.delegation_generation, "g1")
+    t.eq(pr_effect.payload.handoff, nil)
     t.is_true(issue_effect.payload.body:find('fkst:github-devloop:pr-delegation:v1', 1, true) ~= nil)
     t.is_true(issue_effect.payload.body:find('state="pr-open"', 1, true) == nil)
-    assert_no_direct_pr_open_raise(result.effects)
   end,
 
   test_ensure_pr_child_rerun_with_visible_facts_is_idempotent = function()
@@ -168,36 +143,8 @@ return {
     local issue_effect = find_effect(first.effects, "github-proxy.github_issue_comment_request")
     t.is_true(pr_effect ~= nil)
     t.is_true(issue_effect ~= nil)
-    t.eq(pr_effect.payload.handoff.issue_proposal_id, issue_proposal)
-    t.eq(pr_effect.payload.handoff.delegation_generation, "g1")
-    local expected_open_key = core._dedup_key({ "pr-open", issue_proposal, "g1" })
     t.eq(pr_effect.payload.dedup_key, core._dedup_key({ "pr-delegation", "pr-open", issue_proposal, "g1" }))
-    t.eq(
-      core.build_devloop_pr_open_payload(
-        issue_proposal,
-        pr_proposal(7),
-        7,
-        impl_version,
-        pr_source_ref(7),
-        "g1",
-        branch,
-        base_branch,
-        head_sha
-      ).dedup_key,
-      expected_open_key
-    )
-    t.eq(core.build_devloop_pr_open_payload(
-      issue_proposal,
-      pr_proposal(8),
-      8,
-      impl_version .. "/other-pr",
-      pr_source_ref(8),
-      "g1",
-      branch,
-      base_branch,
-      head_sha
-    ).dedup_key, expected_open_key)
-    assert_no_direct_pr_open_raise(first.effects)
+    t.eq(pr_effect.payload.handoff, nil)
 
     local visible_pr_open = core.pr_origin_marker(pr_proposal(7), 7, branch, impl_version, base_branch)
       .. "\n" .. core.state_marker(pr_proposal(7), "pr-open", impl_version)
@@ -230,7 +177,7 @@ return {
     t.is_true(issue_effect ~= nil)
     t.is_true(issue_effect.payload.body:find('pr="8"', 1, true) ~= nil)
     t.is_true(issue_effect.payload.body:find('delegation="g2"', 1, true) ~= nil)
-    assert_no_direct_pr_open_raise(result.effects)
+    t.eq(count_effects(result.effects, "devloop_pr_open"), 0)
   end,
 
   test_existing_delegation_scan_finds_requested_generation_after_prior_attempt = function()
@@ -280,10 +227,9 @@ return {
     t.eq(count_gh_pr_create(), 0)
     t.is_true(find_effect(result.effects, "github-proxy.github_pr_comment_request") ~= nil)
     t.is_true(find_effect(result.effects, "github-proxy.github_issue_comment_request") ~= nil)
-    assert_no_direct_pr_open_raise(result.effects)
   end,
 
-  test_pr_open_outbox_relays_through_comment_handoff = function()
+  test_pr_open_comment_request_has_no_outbox_handoff = function()
     local request = core.build_pr_delegation_open_comment_request(
       repo,
       7,
@@ -298,19 +244,8 @@ return {
       "g1"
     )
 
-    local result = run_handoff(request)
-
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "devloop_pr_open")
-    t.eq(result.raises[1].payload.schema, "github-devloop.pr-open.v1")
-    t.eq(result.raises[1].payload.proposal_id, "github-devloop/pr/owner/repo/7")
-    t.eq(result.raises[1].payload.issue_proposal_id, issue_proposal)
-    t.eq(result.raises[1].payload.delegation_generation, "g1")
-    t.eq(result.raises[1].payload.dedup_key, core._dedup_key({ "pr-open", issue_proposal, "g1" }))
-    t.eq(result.raises[1].payload.branch, branch)
-    t.eq(result.raises[1].payload.base_branch, base_branch)
-    t.eq(result.raises[1].payload.head_sha, head_sha)
-    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#pr/7")
+    t.eq(request.handoff, nil)
+    t.is_true(request.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
+    t.is_true(request.body:find('state="pr-open"', 1, true) ~= nil)
   end,
 }

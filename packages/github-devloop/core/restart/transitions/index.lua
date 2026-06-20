@@ -1,6 +1,7 @@
 return {
   { module = "awaiting_pr", key = "awaiting-pr" },
   { module = "blocked", key = "blocked" },
+  { module = "closed_unmerged", key = "closed-unmerged" },
   { module = "dependency_wait", key = "dependency_wait" },
   { module = "fixing", key = "fixing" },
   { module = "impl_failed", key = "impl-failed" },

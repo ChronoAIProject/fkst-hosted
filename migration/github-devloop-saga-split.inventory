@@ -75,7 +75,7 @@
 {"path":"packages/github-devloop/core/payloads/builders.lua","owner":"shared","reason":"builds payloads used across issue and PR workflows."}
 {"path":"packages/github-devloop/core/payloads/predicates.lua","owner":"shared","reason":"classifies payloads shared by departments."}
 {"path":"packages/github-devloop/core/payloads/shared.lua","owner":"shared","reason":"shares payload helper primitives."}
-{"path":"packages/github-devloop/core/pr_terminal.lua","owner":"issue","reason":"owns the dark parent resume reducer for delegated PR terminal return facts."}
+{"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"replays parent issue resume from a delegated child PR state marker."}
 {"path":"packages/github-devloop/core/pr_label_requests.lua","owner":"pr","reason":"builds PR-phase label reconciliation requests."}
 {"path":"packages/github-devloop/core/pr_delegation.lua","owner":"pr","reason":"ensures delegated PR child start facts and parent delegation pointers."}
 {"path":"packages/github-devloop/core/pr_review_replayer.lua","owner":"pr","reason":"replays PR review lifecycle work."}
@@ -105,7 +105,6 @@
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/merge_gate_wait.lua","owner":"pr","reason":"produces PR merge-gate liveness signals."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/review_converge_round.lua","owner":"pr","reason":"produces PR review liveness signals."}
 {"path":"packages/github-devloop/core/restart/marker_fields/autonomy_result.lua","owner":"issue","reason":"declares issue autonomy-result marker fields."}
-{"path":"packages/github-devloop/core/restart/marker_fields/child_completed.lua","owner":"issue","reason":"declares parent child-completed return idempotency marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/converge_round.lua","owner":"issue","reason":"declares issue convergence marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/decomposed.lua","owner":"issue","reason":"declares issue decomposition marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/dependency_cycle.lua","owner":"issue","reason":"declares issue dependency marker fields."}
@@ -126,7 +125,6 @@
 {"path":"packages/github-devloop/core/restart/marker_fields/merging.lua","owner":"pr","reason":"declares PR merging marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/pr_delegation.lua","owner":"issue","reason":"declares parent issue to child PR delegation marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/pr_link.lua","owner":"issue","reason":"declares issue-to-PR link marker fields."}
-{"path":"packages/github-devloop/core/restart/marker_fields/pr_terminal.lua","owner":"pr","reason":"declares PR-local terminal return marker fields for the delegated child workflow."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_carry_over.lua","owner":"pr","reason":"declares PR review carry-over marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_converge_round.lua","owner":"pr","reason":"declares PR review convergence marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_meta.lua","owner":"pr","reason":"declares PR review-meta marker fields."}
@@ -138,6 +136,7 @@
 {"path":"packages/github-devloop/core/restart/responsibility_contract.lua","owner":"shared","reason":"validates restart responsibility signatures."}
 {"path":"packages/github-devloop/core/restart/transitions/awaiting_pr.lua","owner":"issue","reason":"transition row belongs to the parent issue wait boundary."}
 {"path":"packages/github-devloop/core/restart/transitions/blocked.lua","owner":"issue","reason":"transition row belongs to the issue saga authority."}
+{"path":"packages/github-devloop/core/restart/transitions/closed_unmerged.lua","owner":"pr","reason":"transition row declares the PR closed-unmerged terminal state."}
 {"path":"packages/github-devloop/core/restart/transitions/dependency_wait.lua","owner":"issue","reason":"transition row belongs to the issue saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/fixing.lua","owner":"pr","reason":"transition row belongs to the PR saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/impl_failed.lua","owner":"issue","reason":"transition row belongs to the issue saga authority."}
@@ -195,7 +194,6 @@
 {"path":"packages/github-devloop/departments/loop/main.lua","owner":"issue","reason":"owns the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/merge/main.lua","owner":"pr","reason":"owns PR-phase lifecycle work."}
 {"path":"packages/github-devloop/departments/observability/main.lua","owner":"cross-cutting","reason":"supports handoff, health, test probes, or cross-saga recovery."}
-{"path":"packages/github-devloop/departments/on_pr_terminal/main.lua","owner":"issue","reason":"dark parent receiver for delegated PR terminal return events."}
 {"path":"packages/github-devloop/departments/observe_issue/main.lua","owner":"issue","reason":"owns the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/observe_pr/main.lua","owner":"pr","reason":"owns PR-phase lifecycle work."}
 {"path":"packages/github-devloop/departments/open_pr/main.lua","owner":"pr","reason":"owns PR-phase lifecycle work."}

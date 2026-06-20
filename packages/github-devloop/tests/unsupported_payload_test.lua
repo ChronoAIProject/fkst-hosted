@@ -329,23 +329,6 @@ local function payload_for_queue(queue)
       dedup_key = "github-pr-opened/owner/repo/7",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     },
-    devloop_pr_terminal = core.build_devloop_pr_terminal_payload(
-      "github-devloop/issue/owner/repo/42",
-      7,
-      "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
-      "merged",
-      { kind = "external", ref = "owner/repo#pr/7" },
-      {
-        terminal = "merged",
-        pr_proposal = "github-devloop/pr/owner/repo/7",
-        repo = "owner/repo",
-        pr_identity = 7,
-        delegation_generation = "delegation-1",
-        head_sha = "0123456789abcdef0123456789abcdef01234567",
-        merge_commit_sha = "abcdef0123456789abcdef0123456789abcdef01",
-        terminal_marker_id = "terminal-1",
-      }
-    ),
   }
   local payload = payloads[queue]
   if payload == nil then

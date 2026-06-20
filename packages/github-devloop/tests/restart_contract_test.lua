@@ -117,7 +117,7 @@ return {
   end,
 
   test_executable_restart_table_covers_non_terminal_states = function()
-    local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
+    local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged", "closed-unmerged" }
     local by_state = table_by_state()
     t.eq(#core.liveness_contract_errors(), 0)
     for _, state in ipairs(expected) do
@@ -134,7 +134,9 @@ return {
         t.is_true(row.budget.receiver_max_work_justification ~= "")
         t.is_true(type(row.liveness_contract) == "table")
         t.is_true(type(row.on_timeout) == "table")
-        t.is_true(type(row.payload_builder) == "function")
+        if row.payload_builder ~= nil then
+          t.is_true(type(row.payload_builder) == "function")
+        end
         t.is_true(type(row.dedup_shape) == "string" and row.dedup_shape ~= "")
         t.is_true(type(row.required_facts) == "table" and #row.required_facts > 0)
         t.is_true(type(row.payload_fields) == "table")
@@ -153,8 +155,9 @@ return {
     local errors = core.liveness_contract_errors()
     t.eq(#errors, 0)
     local terminals = core.liveness_terminal_states()
-    t.eq(#terminals, 1)
-    t.eq(terminals[1], "merged")
+    t.eq(#terminals, 2)
+    t.eq(terminals[1], "closed-unmerged")
+    t.eq(terminals[2], "merged")
     local by_state = table_by_state()
     t.eq(by_state["impl-failed"].terminal, false)
     t.eq(by_state["impl-failed"].on_timeout.queue, "devloop_ready")

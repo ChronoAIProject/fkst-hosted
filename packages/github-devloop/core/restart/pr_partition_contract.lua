@@ -26,14 +26,9 @@ local PR_TERMINAL_STATES = {
   "blocked",
 }
 
-local BOUNDARY_QUEUES = {
-  open = "devloop_pr_open",
-  terminal = "devloop_pr_terminal",
-}
-
 local AWAITING_PR_CONTRACT = {
   state = "awaiting-pr",
-  responsibility = "parent issue awaits one delegated PR child terminal",
+  responsibility = "parent issue polls one delegated PR child terminal state",
   liveness_class = "child_workflow_wait",
   marker_facts = {
     "state:v1 awaiting-pr",
@@ -44,8 +39,6 @@ local AWAITING_PR_CONTRACT = {
     "closed-unmerged",
     "blocked",
   },
-  queue_in = BOUNDARY_QUEUES.terminal,
-  queue_out = BOUNDARY_QUEUES.open,
 }
 
 local function set_from(list)
@@ -96,10 +89,6 @@ end
 
 function P.pr_terminal_states()
   return copy_list(PR_TERMINAL_STATES)
-end
-
-function P.boundary_queues()
-  return copy_table(BOUNDARY_QUEUES)
 end
 
 function P.awaiting_pr_contract()

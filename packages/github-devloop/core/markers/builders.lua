@@ -166,68 +166,6 @@ function M.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, ve
     .. '" -->'
 end
 
-function M.pr_terminal_marker(terminal)
-  if type(terminal) ~= "table" then
-    error("github-devloop: invalid pr-terminal marker")
-  end
-  local terminal_state = tostring(terminal.terminal or "")
-  if terminal_state ~= "merged" and terminal_state ~= "closed-unmerged" and terminal_state ~= "blocked" then
-    error("github-devloop: invalid pr-terminal state")
-  end
-  if not M._is_bounded_string(terminal.pr_proposal, M._max_key_len)
-    or select(1, M.parse_pr_proposal_id(terminal.pr_proposal)) == nil
-    or not M._is_bounded_string(terminal.repo, M._max_key_len)
-    or not M._is_positive_pr_number(terminal.pr_identity)
-    or not M._is_positive_pr_number(terminal.pr_number or terminal.pr_identity)
-    or tostring(terminal.pr_number or terminal.pr_identity) ~= tostring(terminal.pr_identity)
-    or not M._is_path_safe_key(terminal.delegation_generation, M._max_dedup_len)
-    or not M._is_git_sha(terminal.head_sha)
-    or not M._is_path_safe_key(terminal.terminal_marker_id, M._max_dedup_len) then
-    error("github-devloop: invalid pr-terminal marker")
-  end
-  local marker = '<!-- fkst:github-devloop:pr-terminal:v1 terminal="' .. terminal_state
-    .. '" pr_proposal="' .. tostring(terminal.pr_proposal)
-    .. '" repo="' .. tostring(terminal.repo)
-    .. '" pr_identity="' .. tostring(terminal.pr_identity)
-    .. '" pr="' .. tostring(terminal.pr_identity)
-    .. '" delegation="' .. tostring(terminal.delegation_generation)
-    .. '" head_sha="' .. tostring(terminal.head_sha)
-    .. '"'
-  if terminal.merge_commit_sha ~= nil then
-    if not M._is_git_sha(terminal.merge_commit_sha) then
-      error("github-devloop: invalid pr-terminal merge sha")
-    end
-    marker = marker .. ' merge_commit_sha="' .. tostring(terminal.merge_commit_sha) .. '"'
-  end
-  return marker
-    .. ' terminal_marker_id="' .. tostring(terminal.terminal_marker_id)
-    .. '" -->'
-end
-
-function M.child_completed_marker(completed)
-  if type(completed) ~= "table"
-    or not M._is_bounded_string(completed.proposal_id, M._max_key_len)
-    or not M._is_bounded_string(completed.pr_proposal, M._max_key_len)
-    or not M._is_path_safe_key(completed.pr_source_ref, M._max_key_len)
-    or not M._is_path_safe_key(completed.delegation_generation, M._max_dedup_len)
-    or not M._is_path_safe_key(completed.terminal_marker_id, M._max_dedup_len)
-    or not M._is_path_safe_key(completed.idempotency_key, M._max_dedup_len) then
-    error("github-devloop: invalid child-completed marker")
-  end
-  local terminal_state = tostring(completed.terminal or "")
-  if terminal_state ~= "merged" and terminal_state ~= "closed-unmerged" and terminal_state ~= "blocked" then
-    error("github-devloop: invalid child-completed terminal")
-  end
-  return '<!-- fkst:github-devloop:child-completed:v1 proposal="' .. tostring(completed.proposal_id)
-    .. '" pr_proposal="' .. tostring(completed.pr_proposal)
-    .. '" pr_source_ref="' .. tostring(completed.pr_source_ref)
-    .. '" delegation="' .. tostring(completed.delegation_generation)
-    .. '" terminal_marker_id="' .. tostring(completed.terminal_marker_id)
-    .. '" terminal="' .. terminal_state
-    .. '" idempotency_key="' .. tostring(completed.idempotency_key)
-    .. '" -->'
-end
-
 function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")

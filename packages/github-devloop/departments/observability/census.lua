@@ -218,7 +218,7 @@ local function log_summary(counts, total)
     "tag=OBSERVE_SUMMARY",
     "total=" .. tostring(total or 0),
   }
-  for _, state in ipairs(core._state_order) do
+  for _, state in ipairs(core._issue_state_order) do
     table.insert(fields, state .. "=" .. tostring(counts[state] or 0))
   end
   if counts.unmanaged ~= nil then
@@ -243,7 +243,7 @@ end
 
 function core.collect_observability_entities(event, repo, limits, deadline)
   local labels = { core._enabled_label }
-  for _, state in ipairs(core._state_order) do
+  for _, state in ipairs(core._issue_state_order) do
     table.insert(labels, core.state_label(state))
   end
   local rotation_seed = core.observability_rotation_seed(event)

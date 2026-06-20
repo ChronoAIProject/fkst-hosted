@@ -273,7 +273,7 @@ function core.render_observability_dashboard(args)
   local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds)
   local instance = core.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
   local by_state = { unmanaged = {} }
-  for _, state in ipairs(core._state_order) do
+  for _, state in ipairs(core._issue_state_order) do
     by_state[state] = {}
   end
   for _, entity in ipairs(list) do
@@ -315,7 +315,7 @@ function core.render_observability_dashboard(args)
   lines = {}
   table.insert(lines, "## Board by state")
   table.insert(lines, "Total: " .. tostring(#list))
-  for _, state in ipairs(core._state_order) do
+  for _, state in ipairs(core._issue_state_order) do
     table.insert(lines, "- " .. tostring(state) .. ": " .. tostring(counts[state] or 0))
   end
   if counts.unmanaged ~= nil then

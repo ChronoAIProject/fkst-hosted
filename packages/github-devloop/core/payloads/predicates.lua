@@ -129,48 +129,6 @@ function M.is_safe_comment_id(value)
   return text ~= "" and #text <= 80 and text:find("^[%w_%-]+$") ~= nil
 end
 
-function M.is_supported_pr_terminal(payload)
-  if type(payload) ~= "table" or payload.schema ~= "github-devloop.pr-terminal.v1" then
-    return false
-  end
-  local terminal = payload.terminal or payload.child_state
-  if terminal ~= "merged" and terminal ~= "closed-unmerged" and terminal ~= "blocked" then
-    return false
-  end
-  if payload.child_state ~= nil and payload.child_state ~= terminal then
-    return false
-  end
-  local repo, pr_number = M.parse_pr_source_ref(payload.source_ref)
-  if repo == nil or pr_number == nil then
-    return false
-  end
-  local pr_proposal = payload.pr_proposal or payload.pr_proposal_id
-  local parsed_repo, parsed_pr = M.parse_pr_proposal_id(pr_proposal)
-  return parsed_repo == repo
-    and tostring(parsed_pr) == tostring(pr_number)
-    and tostring(payload.repo or repo) == tostring(repo)
-    and tostring(payload.pr_identity or payload.pr_number or pr_number) == tostring(pr_number)
-    and tostring(payload.pr_number or pr_number) == tostring(pr_number)
-    and M._is_bounded_string(payload.proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.version, M._max_dedup_len)
-    and M._is_path_safe_key(payload.delegation_generation, M._max_dedup_len)
-    and M._is_git_sha(payload.head_sha)
-    and (payload.merge_commit_sha == nil or M._is_git_sha(payload.merge_commit_sha))
-    and M._is_path_safe_key(payload.terminal_marker_id, M._max_dedup_len)
-    and M._is_path_safe_key(payload.dedup_key, M._max_dedup_len)
-end
-
-function M.classify_pr_terminal_from_view(pr)
-  local state = tostring(pr and pr.state or ""):lower()
-  if state ~= "closed" and state ~= "merged" then
-    return nil
-  end
-  if pr.merged == true or pr.is_merged == true or pr.merged_at ~= nil then
-    return "merged"
-  end
-  return "closed-unmerged"
-end
-
 function M.is_own_state_marker_hand_off(hand_off, expected)
   if type(hand_off) ~= "table" or type(expected) ~= "table" then
     return false

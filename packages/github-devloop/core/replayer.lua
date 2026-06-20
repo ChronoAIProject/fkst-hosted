@@ -154,6 +154,37 @@ local function current_pr_fact(facts)
   return find_linked_pr(facts.snapshot, link.pr_number)
 end
 
+local function child_pr_delegation_fact(facts)
+  return facts.pr_delegation
+    or facts["pr-delegation"]
+    or M.pr_delegation_fact(facts.snapshot.comments, facts.proposal_id, facts.state and facts.state.version)
+end
+
+local function fetch_child_state_fact(facts)
+  if facts.child_state ~= nil then
+    return facts.child_state
+  end
+  local delegation = child_pr_delegation_fact(facts)
+  if delegation == nil then
+    return nil
+  end
+  facts.pr_delegation = delegation
+  facts["pr-delegation"] = delegation
+  if facts.current_pr == nil then
+    local view = M.fetch_pr_view_origin(facts.issue.repo, delegation.pr_number, nil, {
+      force_fresh = true,
+      consumer = "replay_child_state",
+    })
+    if view.exit_code ~= 0 then
+      error("github-devloop: child-state PR view failed: " .. tostring(view.stderr))
+    end
+    facts.current_pr = M.parse_pr_view_origin(view.stdout)
+    facts.current_pr.number = delegation.pr_number
+  end
+  facts.child_state = M.current_entity_state(facts.current_pr.comments, delegation.pr_proposal_id)
+  return facts.child_state
+end
+
 local function require_marker_fact(facts, family)
   if family == "state" then
     return facts.state
@@ -162,10 +193,10 @@ local function require_marker_fact(facts, family)
     return facts.link or M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
   end
   if family == "pr-delegation" then
-    return nil
+    return child_pr_delegation_fact(facts)
   end
   if family == "child-state" then
-    return facts.child_state
+    return fetch_child_state_fact(facts)
   end
   if family == "converge-round" then
     local base_version = M.version_loop_round(facts.state.version) > 0 and M.converge_base_version(facts.state.version) or nil
@@ -297,6 +328,11 @@ local function store_gathered_marker_fact(facts, family, value)
     facts.merge_ready = value
   elseif family == "merging" then
     facts.merging = value
+  elseif family == "pr-delegation" then
+    facts.pr_delegation = value
+    facts["pr-delegation"] = value
+  elseif family == "child-state" then
+    facts.child_state = value
   end
 end
 
@@ -356,6 +392,8 @@ local function log_skip(dept, proposal_id, state, from_state, to_state, outcome,
   return false
 end
 
+M.replay_log_skip = log_skip
+
 local function raise_effects(dept, proposal_id, apply_state, version, label_changes, effects)
   local queues = {}
   for _, effect in ipairs(effects or {}) do
@@ -367,6 +405,8 @@ local function raise_effects(dept, proposal_id, apply_state, version, label_chan
   end
   return true
 end
+
+M.replay_raise_effects = raise_effects
 
 local function build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
   local stable_version = M.strip_transition_version_suffixes(state.version)
@@ -493,10 +533,6 @@ local function replay_impl_failed(dept, issue, state, row, facts)
   return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
     { queue = "devloop_ready", payload = payload },
   })
-end
-
-local function replay_awaiting_pr(dept, _issue, state, row, facts)
-  return log_skip(dept, facts.proposal_id, state, row.from_state, row.driving_queue, "skip-pending(boundary-unwired)", "awaiting-pr delegation return handling is declared but not wired in Step 1A")
 end
 
 local function replay_fixing_to_reviewing(dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)
@@ -822,7 +858,7 @@ local replayers = {
   dependency_wait = M.replay_dependency_wait_state,
   ready = M.replay_ready_state,
   implementing = replay_implementing,
-  ["awaiting-pr"] = replay_awaiting_pr,
+  ["awaiting-pr"] = M.replay_awaiting_pr_state,
   ["impl-failed"] = replay_impl_failed,
   fixing = replay_fixing,
   ["review-meta"] = replay_review_meta,

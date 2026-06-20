@@ -104,7 +104,7 @@ local function mock_all_issue_lists(items)
       exit_code = 0,
     })
   end
-  for _, state in ipairs(core._state_order) do
+  for _, state in ipairs(core._issue_state_order) do
     t.mock_command(observe_issue_list_first_command(core.state_label(state)), {
       stdout = "[]\n",
       stderr = "",
@@ -399,7 +399,7 @@ return {
 
     t.is_true(summary ~= nil)
     t.is_true(summary:find("total=1", 1, true) ~= nil)
-    for _, state in ipairs(core._state_order) do
+    for _, state in ipairs(core._issue_state_order) do
       local expected = state == "ready" and 1 or 0
       t.is_true(summary:find(state .. "=" .. tostring(expected), 1, true) ~= nil)
     end

@@ -23,8 +23,8 @@ return {
   test_awaiting_pr_restart_row_declares_child_workflow_boundary = function()
     local row = table_by_state()["awaiting-pr"]
     t.is_true(row ~= nil)
-    t.eq(row.driving_queue, "devloop_pr_terminal")
-    t.eq(row.on_timeout.queue, "devloop_pr_terminal")
+    t.eq(row.driving_queue, "github-proxy.github_entity_changed")
+    t.eq(row.on_timeout.queue, "github-proxy.github_entity_changed")
     t.eq(row.liveness_class_id, "child_workflow_wait")
     t.eq(row.watchdog.mode, "live-defer")
     t.eq(row.defer.kind, "child_workflow_wait")
@@ -34,13 +34,14 @@ return {
     t.eq(row.liveness_contract.signal.family, "state")
     t.eq(row.liveness_contract.signal.resolver, "child-state")
     t.eq(row.liveness_contract.signal.surface, "pr-comment-stream")
-    t.eq(row.payload_builder, core.build_devloop_pr_terminal_payload)
+    t.eq(row.payload_builder, nil)
     t.eq(row.responsibility_signature.receiver_kind, "pr-child-workflow")
-    t.eq(row.responsibility_signature.state_kind, "queue_wait")
-    t.eq(row.responsibility_signature.output_postcondition_family, "parent_resume_from_pr_terminal")
+    t.eq(row.responsibility_signature.state_kind, "gate")
+    t.eq(row.responsibility_signature.output_postcondition_family, "parent_resume_from_child_state_terminal")
     t.eq(row.to_states[1], "merged")
     t.eq(row.to_states[2], "ready")
     t.eq(row.to_states[3], "blocked")
+    t.eq(row.dedup_shape, "child-state-terminal/<proposal>/<version>/<pr>")
   end,
 
   test_step1a_does_not_wire_runtime_entry_to_awaiting_pr = function()

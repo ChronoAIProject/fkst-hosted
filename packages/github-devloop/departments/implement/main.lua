@@ -14,7 +14,6 @@ local spec = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_pr_comment_request",
     "devloop_open_pr",
-    "devloop_pr_open",
     "devloop_reviewing",
   },
   stall_window = "10m",

@@ -30,6 +30,7 @@ function M.state_marker(proposal_id, state, version, effects)
     and state ~= "merge-ready"
     and state ~= "merging"
     and state ~= "merged"
+    and state ~= "closed-unmerged"
     and state ~= "fixing"
     and state ~= "impl-failed"
     and state ~= "blocked" then
