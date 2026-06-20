@@ -116,6 +116,66 @@ return {
     t.is_nil(value)
   end,
 
+  test_write_with_outbound_log_logs_once_and_restores_read_env = function()
+    local original_read_env = core.read_env
+    local original_write_comment_request = core.write_comment_request
+    local fake_read_env = nil
+    local logged = {}
+    local payload = {
+      body = "Body",
+      dedup_key = "dedup",
+    }
+    local target = {
+      kind = "issue",
+      number = 42,
+    }
+
+    fake_read_env = function(name, exec)
+      if name == "FKST_GITHUB_REPO" then
+        t.eq(exec, "repo-exec")
+        return "owner/repo"
+      end
+      if name == "FKST_GITHUB_WRITE" then
+        return "1"
+      end
+      return nil
+    end
+
+    core.read_env = fake_read_env
+    core.write_comment_request = function(observed_payload, observed_target)
+      t.eq(observed_payload, payload)
+      t.eq(observed_target, target)
+      t.eq(core.read_env("FKST_GITHUB_REPO", "repo-exec"), "owner/repo")
+      t.eq(core.read_env("FKST_GITHUB_WRITE", "write-exec"), "1")
+      t.eq(core.read_env("FKST_GITHUB_WRITE", "write-exec-again"), "1")
+      return { id = 123 }
+    end
+
+    local ok, written, repo = pcall(function()
+      local observed_written, observed_repo = core.write_with_outbound_log(payload, target, function(observed_payload, observed_repo, write_env)
+        table.insert(logged, {
+          payload = observed_payload,
+          repo = observed_repo,
+          write_env = write_env,
+        })
+      end)
+      t.eq(core.read_env, fake_read_env)
+      return observed_written, observed_repo
+    end)
+    core.read_env = original_read_env
+    core.write_comment_request = original_write_comment_request
+    if not ok then
+      error(written)
+    end
+
+    t.eq(written.id, 123)
+    t.eq(repo, "owner/repo")
+    t.eq(#logged, 1)
+    t.eq(logged[1].payload, payload)
+    t.eq(logged[1].repo, "owner/repo")
+    t.eq(logged[1].write_env, "1")
+  end,
+
   test_devloop_replay_budget_defaults_to_ten = function()
     local value = core.devloop_replay_budget(function(_cmd)
       return { stdout = "", stderr = "", exit_code = 0 }

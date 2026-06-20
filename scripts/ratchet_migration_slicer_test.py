@@ -889,7 +889,12 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             self.assertIn("## Acceptance Criteria", result.stdout)
 
     def test_current_repo_ratchets_print_json_schema(self) -> None:
-        for ratchet in ("saga-handler", "code-dedup"):
+        # Validate the slicer JSON schema against every registered ratchet by its
+        # ACTUAL current status. This stays correct as ratchets are migrated to
+        # zero: a ratchet's status flips slice_available -> inventory_empty once its
+        # allowlist is drained (e.g. code-dedup), so the test must not hard-code
+        # which ratchets still have inventory.
+        for ratchet in slicer.specs():
             result = subprocess.run(
                 [
                     "python3",
@@ -912,11 +917,15 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             doc = json.loads(result.stdout)
             self.assertEqual(doc["schema_version"], "fkst.ratchet-slice.v1")
             self.assertEqual(doc["ratchet"], ratchet)
-            self.assertEqual(doc["status"], "slice_available")
-            self.assertEqual(
-                doc["next_slice"]["dedup_key"],
-                f"{ratchet}/slice/{doc['next_slice']['dedup_key'].split('/')[-1]}",
-            )
+            self.assertIn(doc["status"], ("slice_available", "inventory_empty"))
+            if doc["status"] == "slice_available":
+                self.assertEqual(
+                    doc["next_slice"]["dedup_key"],
+                    f"{ratchet}/slice/{doc['next_slice']['dedup_key'].split('/')[-1]}",
+                )
+            else:
+                self.assertEqual(doc["remaining_count"], 0)
+                self.assertIsNone(doc["next_slice"])
 
 
 if __name__ == "__main__":

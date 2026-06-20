@@ -30,36 +30,9 @@ local function log_outbound(payload, repo, write_env)
   core.log_line("info", "github_pr_comment", "OUTBOUND", fields)
 end
 
-local function write_with_outbound_log(payload, target)
-  local repo = payload.repo
-  local logged = false
-  local read_env = core.read_env
-  core.read_env = function(name, exec)
-    local value = read_env(name, exec)
-    if name == "FKST_GITHUB_REPO" and (repo == nil or repo == "") then
-      repo = value
-    end
-    if name == "FKST_GITHUB_WRITE" and not logged then
-      log_outbound(payload, repo, value)
-      logged = true
-    end
-    return value
-  end
-
-  local written = nil
-  local ok, err = pcall(function()
-    written = core.write_comment_request(payload, target)
-  end)
-  core.read_env = read_env
-  if not ok then
-    error(err)
-  end
-  return written, repo
-end
-
 function pipeline(event)
   local payload = event.payload or {}
-  local written, repo = write_with_outbound_log(payload, {
+  local written, repo = core.write_with_outbound_log(payload, {
     kind = "pr",
     number = payload.pr_number,
     number_field = "pr_number",
@@ -71,7 +44,7 @@ function pipeline(event)
     end,
     view_label = "GitHub PR REST comments",
     comment_label = "GitHub PR comment",
-  })
+  }, log_outbound)
   if written ~= nil and written.id ~= nil then
     raise("github_comment_written", {
       schema = "github-proxy.comment-written.v1",

@@ -87,6 +87,33 @@ M.read_env = env.read_env(read_env_command, {
   propagate_exec_errors = true,
 })
 
+function M.write_with_outbound_log(payload, target, log_outbound)
+  local repo = payload.repo
+  local logged = false
+  local read_env = M.read_env
+  M.read_env = function(name, exec)
+    local value = read_env(name, exec)
+    if name == "FKST_GITHUB_REPO" and (repo == nil or repo == "") then
+      repo = value
+    end
+    if name == "FKST_GITHUB_WRITE" and not logged then
+      log_outbound(payload, repo, value)
+      logged = true
+    end
+    return value
+  end
+
+  local written = nil
+  local ok, err = pcall(function()
+    written = M.write_comment_request(payload, target)
+  end)
+  M.read_env = read_env
+  if not ok then
+    error(err)
+  end
+  return written, repo
+end
+
 function M.devloop_replay_budget(exec)
   local ok, value = pcall(M.read_env, "FKST_DEVLOOP_REPLAY_BUDGET", exec)
   if not ok then
