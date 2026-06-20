@@ -164,6 +164,22 @@ return {
     t.eq(core.is_positive_integer("2147483648"), false)
   end,
 
+  test_normalize_labels_matches_department_label_inputs = function()
+    local normal = core.normalize_labels({ "bug", "ready" })
+    t.eq(#normal, 2)
+    t.eq(normal[1], "bug")
+    t.eq(normal[2], "ready")
+
+    local mixed = core.normalize_labels({ "bug", "", 7, false })
+    t.eq(#mixed, 3)
+    t.eq(mixed[1], "bug")
+    t.eq(mixed[2], "7")
+    t.eq(mixed[3], "false")
+
+    local empty = core.normalize_labels("bug")
+    t.eq(#empty, 0)
+  end,
+
   test_core_submodules_use_injected_shared_helpers = function()
     local helpers = {
       strip_bot_login_suffix = core.strip_bot_login_suffix,

@@ -7,19 +7,6 @@ M.spec = {
   stall_window = "30s",
 }
 
-local function normalize_labels(value)
-  local labels = {}
-  if type(value) ~= "table" then
-    return labels
-  end
-  for _, label in ipairs(value) do
-    if label ~= nil and tostring(label) ~= "" then
-      table.insert(labels, tostring(label))
-    end
-  end
-  return labels
-end
-
 local function describe_labels(add_labels, remove_labels)
   return "add=[" .. table.concat(add_labels, ",") .. "] remove=[" .. table.concat(remove_labels, ",") .. "]"
 end
@@ -133,8 +120,8 @@ function pipeline(event)
     return
   end
 
-  local add_labels = normalize_labels(payload.add_labels)
-  local remove_labels = normalize_labels(payload.remove_labels)
+  local add_labels = core.normalize_labels(payload.add_labels)
+  local remove_labels = core.normalize_labels(payload.remove_labels)
   if #add_labels == 0 and #remove_labels == 0 then
     log.warn("github-proxy: label request has no label changes")
     return

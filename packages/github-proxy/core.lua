@@ -777,6 +777,19 @@ local function normalized_unique_labels(labels)
   return unique
 end
 
+function M.normalize_labels(value)
+  local labels = {}
+  if type(value) ~= "table" then
+    return labels
+  end
+  for _, label in ipairs(value) do
+    if label ~= nil and tostring(label) ~= "" then
+      table.insert(labels, tostring(label))
+    end
+  end
+  return labels
+end
+
 function M.is_gh_label_already_exists(result)
   local lower = command_result_stderr(result):lower()
   return lower:find("already exists", 1, true) ~= nil

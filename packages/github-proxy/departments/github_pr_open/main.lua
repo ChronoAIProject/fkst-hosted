@@ -27,19 +27,6 @@ local function lock_name(repo, branch)
   return "github-proxy/" .. runtime_identity(repo, branch)
 end
 
-local function normalize_labels(value)
-  local labels = {}
-  if type(value) ~= "table" then
-    return labels
-  end
-  for _, label in ipairs(value) do
-    if label ~= nil and tostring(label) ~= "" then
-      table.insert(labels, tostring(label))
-    end
-  end
-  return labels
-end
-
 local function render_pr_number_template(value, pr_number)
   return tostring(value or ""):gsub("{{pr_number}}", tostring(pr_number))
 end
@@ -348,8 +335,8 @@ function pipeline(event)
       core.invalidate_entity_after_write(repo, "pr", pr.number)
     end
 
-    local add_labels = normalize_labels(payload.issue_label_add)
-    local remove_labels = normalize_labels(payload.issue_label_remove)
+    local add_labels = core.normalize_labels(payload.issue_label_add)
+    local remove_labels = core.normalize_labels(payload.issue_label_remove)
     if #add_labels > 0 or #remove_labels > 0 then
       with_lock(core.issue_label_lock_key(repo, payload.issue_number), function()
         local current_state = current_issue_state_for_label_edit(repo, payload, bot_login)

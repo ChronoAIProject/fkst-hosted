@@ -1,7 +1,6 @@
 fetch_branch 36e5905997f380eb0199e982e6bdeefa packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
 fetch_branches a8a3dd5f4870ab66b9c488bbfcb98853 packages/github-devloop/departments/pr_freshness_scan/main.lua packages/github-devloop/departments/rollup_scan/main.lua packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
 is_ancestor f894aa87bcec107ffa129116cf1ac290 packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
-normalize_labels 2f3ae666926836a87a19fdab44e4a13c packages/github-proxy/departments/github_issue_label/main.lua packages/github-proxy/departments/github_pr_open/main.lua
 remote_head 0f843d96869ffd47e2a3b89e6e486ed6 packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
 require_git_ok 70287fd3d1f9eef5a845788f657fc373 packages/github-devloop/departments/pr_freshness_scan/main.lua packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
 run_required 70287fd3d1f9eef5a845788f657fc373 packages/github-devloop/departments/pr_freshness_scan/main.lua packages/github-devloop/departments/rollup_scan/main.lua packages/github-devloop/departments/sync_conflict/main.lua packages/github-devloop/departments/sync_scan/main.lua
