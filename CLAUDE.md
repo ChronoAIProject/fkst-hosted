@@ -267,6 +267,35 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 这条与「先找 harness 再执行」「unattended 不 pop up」互补：harness-first 给方向，这条给执行姿态（自主、按原则、不请示、不畏复杂）。
 
+## Event-gated waiting: arm a wait, don't busy-spin the loop / 事件门控就挂等待，别空转循环
+
+When the next step is genuinely blocked on an external event you do not control — an
+autonomous-pipeline cycle, CI, a PR opening, a long-running worker, a remote job — do
+NOT busy-spin the goal/loop re-deriving "what can I do now" on every activation.
+Manufacturing motion to look busy is **over-action** (HARD GATE quick-filter ③): it
+burns cycles, invites churn, and buries the real signal under noise. The cure is to
+**arm an event-driven wait and yield to it**:
+
+- **Arm the wait, not a poll-dance.** A `Monitor`, or a `run_in_background` until-loop
+  that exits on the event (a PR opens, a marker/label changes, a job reaches a terminal
+  status). It wakes you when the event actually fires; you act then — you do not keep
+  reading state every cycle.
+- **Cover failure, not just success — silence ≠ done.** The wait must also fire on the
+  stall/failure case (a bounded stall-timeout that wakes you to investigate); a wait
+  that watches only the happy path stays silent through a hang, and silence is
+  indistinguishable from "still running" (the Monitor "silence is not success" rule).
+- **Make genuine forward progress first**, where it exists independent of the blocking
+  event — e.g. pre-stage the dependent next step as a dependency-gated issue so it
+  cascades automatically when the blocker lands — then yield to the wait.
+- **Interim goal/loop firings are terse defers**, not fabricated work: name the wait
+  and the event it watches, then yield. Do not invent motion to look productive.
+
+This is the operational face of «don't over-act» and the dogfood «if state is
+advancing, observe — don't intervene»: when the next step is gated on an event you do
+not control, arm the wait and let the event drive you, rather than manufacturing
+motion. A goal being unsatisfied is not a license to busy-spin; it is a reason to make
+the one genuine increment available now, then wait correctly. ⟦AI:FKST⟧
+
 ## 设计模式原则
 
 - **模式服务当前问题**：只有当重复形状已经出现、边界已经稳定、测试能证明收益时才引入设计模式；不要为了命名完整而提前套 Factory、Strategy、Observer 等模板。
