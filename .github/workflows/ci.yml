@@ -85,3 +85,26 @@ jobs:
           name: lua-coverage
           path: .fkst/run/lua-coverage/coverage.json
           if-no-files-found: error
+
+      # The canonical fkst.lua.coverage.v1 JSON is rendered to LCOV here (a hermetic,
+      # deterministic local step — it SHOULD fail CI if conversion errors, because that is a
+      # repository bug). The Codecov upload below is an EXTERNAL service and must NOT gate a
+      # green hermetic CI, so fail_ci_if_error is false. Repo is PUBLIC: tokenless upload may
+      # work; CODECOV_TOKEN is an OPTIONAL operator-provided secret; PR comments/status require
+      # the Codecov GitHub App to be installed by an operator.
+      - name: Render LCOV for Codecov
+        run: |
+          test -f .fkst/run/lua-coverage/coverage.json
+          python3 scripts/lua_coverage_to_lcov.py \
+            .fkst/run/lua-coverage/coverage.json \
+            .fkst/run/lua-coverage/lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./.fkst/run/lua-coverage/lcov.info
+          disable_search: true
+          flags: lua
+          name: lua-coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
