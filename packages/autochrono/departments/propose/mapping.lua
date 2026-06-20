@@ -16,7 +16,7 @@ local function proposal_body(issue)
     url = fields.url,
     updated_at = fields.updated_at,
   })
-  return core.bounded_text(rendered, core.max_body_len())
+  return rendered
 end
 
 function M.build_proposal(issue)
@@ -30,6 +30,7 @@ function M.build_proposal(issue)
     title = proposal_title(fields),
     body = proposal_body(issue),
     source_ref = fields.source_ref,
+    content_fetch = core.content_fetch_manifest(fields.source_ref),
   }
 end
 

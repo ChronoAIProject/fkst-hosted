@@ -52,6 +52,7 @@ end
 local max_key_len = 200
 local max_title_len = 240
 local max_body_len = 12000
+local max_content_fetch_len = 4000
 local max_repo_key_len = 100
 local max_issue_key_len = 30
 local max_update_key_len = 50
@@ -155,6 +156,19 @@ function M.normalize_source_ref(source_ref)
   }
 end
 
+function M.content_fetch_manifest(source_ref)
+  local normalized = M.normalize_source_ref(source_ref)
+  local manifest = table.concat({
+    "Read the full issue body and ALL comments from source_ref " .. normalized.ref .. " before judging.",
+    "Use the source_ref pointer to fetch the current source content from the external provider.",
+    "The Body above is only a brief, not the complete content.",
+  }, "\n")
+  if not is_bounded_string(manifest, max_content_fetch_len) then
+    error("autochrono: invalid-content-fetch: manifest is unbounded")
+  end
+  return manifest
+end
+
 function M.is_eligible(issue)
   if type(issue) ~= "table" then
     return false
@@ -250,6 +264,9 @@ function M.validate_proposal(proposal)
     return false
   end
   if not is_bounded_string(proposal.body, max_body_len) then
+    return false
+  end
+  if not is_bounded_string(proposal.content_fetch, max_content_fetch_len) then
     return false
   end
   return source_refs.has_bounded_source_ref(proposal.source_ref, max_key_len)

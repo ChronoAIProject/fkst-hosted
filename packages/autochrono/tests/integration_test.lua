@@ -93,6 +93,11 @@ return {
     t.eq(payload.proposal_id:find("@", 1, true), nil)
     t.eq(payload.source_ref.kind, "external")
     t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(#payload.content_fetch <= 4000)
+    t.is_true(payload.content_fetch:find("source_ref owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("full issue body", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("ALL comments", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("Body above is only a brief", 1, true) ~= nil)
     t.is_true(payload.body:find("Repository: owner/repo", 1, true) ~= nil)
     t.is_true(payload.body:find("Number: 42", 1, true) ~= nil)
     t.is_true(payload.body:find("Title: Bridge issue", 1, true) ~= nil)
@@ -136,6 +141,11 @@ return {
     t.is_true(payload.dedup_key:find(proposal_id, 1, true) == 1)
     t.eq(payload.source_ref.kind, "external")
     t.eq(payload.source_ref.ref, "owner/repo#issue/42")
+    t.is_true(#payload.content_fetch <= 4000)
+    t.is_true(payload.content_fetch:find("source_ref owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("full issue body", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("ALL comments", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("Body above is only a brief", 1, true) ~= nil)
     t.eq(#codex_calls(), 0)
   end,
 

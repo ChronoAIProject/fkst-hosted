@@ -101,6 +101,16 @@ return {
     t.is_nil(normalized.extra)
   end,
 
+  test_content_fetch_manifest_is_derived_from_source_ref = function()
+    local manifest = core.content_fetch_manifest(issue().source_ref)
+
+    t.is_true(#manifest <= 4000)
+    t.is_true(manifest:find("source_ref owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(manifest:find("full issue body", 1, true) ~= nil)
+    t.is_true(manifest:find("ALL comments", 1, true) ~= nil)
+    t.is_true(manifest:find("Body above is only a brief", 1, true) ~= nil)
+  end,
+
   test_is_eligible_accepts_open_complete_issue = function()
     t.eq(core.is_eligible(issue()), true)
   end,
@@ -158,6 +168,11 @@ return {
     local mapping = require("departments.propose.mapping")
     local payload = mapping.build_proposal(issue())
 
+    t.is_true(#payload.content_fetch <= 4000)
+    t.is_true(payload.content_fetch:find("source_ref owner/repo#issue/42", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("full issue body", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("ALL comments", 1, true) ~= nil)
+    t.is_true(payload.content_fetch:find("Body above is only a brief", 1, true) ~= nil)
     t.is_true(payload.body:find("Repository: owner/repo", 1, true) ~= nil)
     t.is_true(payload.body:find("Number: 42", 1, true) ~= nil)
     t.is_true(payload.body:find("Title: Bridge issue", 1, true) ~= nil)
@@ -182,6 +197,8 @@ return {
     t.eq(core.validate_proposal(merge(ok, { proposal_id = "autochrono/issue/owner/repo//42" })), false)  -- non-canonical
     t.eq(core.validate_proposal(merge(ok, { body = "" })), false)  -- empty body
     t.eq(core.validate_proposal(merge(ok, { source_ref = { kind = "external" } })), false)  -- ref missing
+    t.eq(core.validate_proposal(merge(ok, { content_fetch = "" })), false)
+    t.eq(core.validate_proposal(merge(ok, { content_fetch = string.rep("a", 4001) })), false)
     t.eq(core.validate_proposal(merge(ok, { schema = "other" })), false)
   end,
 
