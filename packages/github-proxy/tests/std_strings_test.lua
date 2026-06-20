@@ -101,4 +101,11 @@ return {
     t.eq(strings.sanitize_key("abc/def", 5), "abc/d")
     t.eq(strings.sanitize_key("abc/def", false), "abc/def")
   end,
+
+  test_runtime_safe_segment_normalizes_runtime_path_segments = function()
+    t.eq(strings.runtime_safe_segment("owner/repo#42"), "owner_repo_42")
+    t.eq(strings.runtime_safe_segment("__owner///repo__"), "owner_repo")
+    t.eq(strings.runtime_safe_segment("!!!"), "empty")
+    t.eq(strings.runtime_safe_segment(nil), "empty")
+  end,
 }

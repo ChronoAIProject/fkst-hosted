@@ -140,4 +140,13 @@ function S.sanitize_key(value, limit)
   return sanitized
 end
 
+function S.runtime_safe_segment(value)
+  local safe = tostring(value or ""):gsub("[^%w._-]", "_")
+  safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
+  if safe == "" then
+    return "empty"
+  end
+  return safe
+end
+
 return S

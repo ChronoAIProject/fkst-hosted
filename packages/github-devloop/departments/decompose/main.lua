@@ -1,5 +1,6 @@
 local core = require("core")
 local saga = require("std.saga")
+local strings = require("std.strings")
 
 local spec = {
   consumes = { "devloop_decompose" },
@@ -13,17 +14,8 @@ local spec = {
 local MAX_RUNTIME_ID_LEN = 180
 local context_cache = setmetatable({}, { __mode = "k" })
 
-local function safe_segment(value)
-  local safe = tostring(value or ""):gsub("[^%w._-]", "_")
-  safe = safe:gsub("_+", "_"):gsub("^_+", ""):gsub("_+$", "")
-  if safe == "" then
-    return "empty"
-  end
-  return safe
-end
-
 local function marker_body_file(repo, pr_number)
-  local id = "decompose-" .. safe_segment(repo) .. "-pr-" .. safe_segment(pr_number)
+  local id = "decompose-" .. strings.runtime_safe_segment(repo) .. "-pr-" .. strings.runtime_safe_segment(pr_number)
   if #id > MAX_RUNTIME_ID_LEN then
     id = id:sub(1, MAX_RUNTIME_ID_LEN)
   end
