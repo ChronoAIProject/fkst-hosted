@@ -224,11 +224,6 @@ local function payload_for_queue(queue)
       reviewed_head_sha = "def456",
     }, { kind = "external", ref = "owner/repo#pr/7" }),
     devloop_observe_tick = { schema = "github-devloop.observe-tick.v1" },
-    devloop_open_pr = core.build_devloop_open_pr_payload("owner/repo", "42", {
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      dedup_key = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
-      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
-    }, "devloop-owner-repo-42-01HY", "def456", "dev"),
     devloop_ready = {
       schema = "github-devloop.ready.v1",
       proposal_id = "github-devloop/issue/owner/repo/42",
@@ -316,19 +311,6 @@ local function payload_for_queue(queue)
       },
     },
     ["github-proxy.github_entity_changed"] = issue_entity_payload(),
-    ["github-proxy.github_pr_opened"] = {
-      schema = "github-proxy.pr-opened.v1",
-      repo = "owner/repo",
-      issue_number = 42,
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
-      pr_number = 7,
-      branch = "devloop-owner-repo-42-01HY",
-      head_sha = "def456",
-      base_branch = "dev",
-      dedup_key = "github-pr-opened/owner/repo/7",
-      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
-    },
   }
   local payload = payloads[queue]
   if payload == nil then
@@ -405,11 +387,6 @@ local cases = {
     dept = "consensus_result",
     path = "departments/consensus_result/main.lua",
     queue = "consensus.consensus_reached",
-  },
-  {
-    dept = "open_pr",
-    path = "departments/open_pr/main.lua",
-    queue = "devloop_open_pr",
   },
   {
     dept = "fix",

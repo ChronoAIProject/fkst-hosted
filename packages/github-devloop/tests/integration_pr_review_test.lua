@@ -24,7 +24,6 @@ local run_observe = h.run_observe
 local run_result = h.run_result
 local run_loop = h.run_loop
 local run_implement = h.run_implement
-local run_open_pr = h.run_open_pr
 local run_observe_pr = h.run_observe_pr
 local run_review_pr = h.run_review_pr
 local run_review_result = h.run_review_result
@@ -43,7 +42,6 @@ local mock_issue_result = h.mock_issue_result
 local mock_issue_loop = h.mock_issue_loop
 local mock_issue_implement = h.mock_issue_implement
 local mock_issue_implement_raw = h.mock_issue_implement_raw
-local mock_issue_open_pr = h.mock_issue_open_pr
 local mock_issue_reviewing = h.mock_issue_reviewing
 local mock_issue_review = h.mock_issue_review
 local mock_issue_fix = h.mock_issue_fix
@@ -156,7 +154,6 @@ return {
     local fact = core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
-    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
     local calls = t.command_calls()
     local saw_worktree_prefix = false
     local saw_prompt = false
@@ -174,53 +171,6 @@ return {
     t.eq(count_calls("status --porcelain"), 1)
     t.eq(count_calls("add -A"), 1)
     t.eq(count_calls("commit -m"), 1)
-  end,
-  test_open_pr_write_drains_superseded_implementing_transition = function()
-    local event = issue({ labels = { "fkst-dev:implementing" } })
-    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    mock_issue_open_pr({ "fkst-dev:implementing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
-    })
-    mock_bot_env()
-    mock_write_env("1")
-    local result = run_open_pr(event, opts("open-pr-write", {
-      FKST_GITHUB_WRITE = "1",
-    }))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_pr_open_request"), nil)
-    t.eq(count_calls("show-ref --verify --quiet"), 0)
-    t.eq(count_calls("rev-parse --verify"), 0)
-  end,
-  test_open_pr_requires_write_switch = function()
-    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    mock_issue_open_pr({ "fkst-dev:implementing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
-    })
-    mock_bot_env()
-    mock_write_env("")
-    local missing_write = run_open_pr(issue({ labels = { "fkst-dev:implementing" } }), opts("open-pr-missing-write"))
-    t.eq(missing_write.exit_code, 0)
-    t.eq(#missing_write.raises, 0)
-  end,
-
-  test_open_pr_write_without_label_drains_superseded_implementing_transition = function()
-    local event = issue({ labels = { "fkst-dev:implementing" } })
-    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    mock_issue_open_pr({ "fkst-dev:implementing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
-    })
-    mock_bot_env()
-    mock_write_env("1")
-    local result = run_open_pr(event, opts("open-pr-write-without-label", {
-      FKST_GITHUB_WRITE = "1",
-    }))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_pr_open_request"), nil)
   end,
   test_observe_pr_backpointer_advances_issue_to_reviewing = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"

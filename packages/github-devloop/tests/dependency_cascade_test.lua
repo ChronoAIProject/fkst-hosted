@@ -980,7 +980,6 @@ return {
     local result = run_implement()
     t.eq(result.exit_code, 0)
     t.is_true(has_marker(result.raises, 'state="dependency_wait"'))
-    t.eq(has_queue(result.raises, "devloop_open_pr"), false)
   end,
 
   test_no_blockers_unaffected = function()

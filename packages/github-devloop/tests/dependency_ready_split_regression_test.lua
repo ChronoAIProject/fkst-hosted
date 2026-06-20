@@ -586,8 +586,6 @@ return {
     t.eq(implemented.exit_code, 0)
     t.eq(count_queue(implemented.raises, "github-proxy.github_issue_label_request"), 1)
     t.eq(find_raise(implemented.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:implementing")
-    t.eq(find_raise(implemented.raises, "devloop_open_pr"), nil)
-    t.eq(count_queue(implemented.raises, "devloop_open_pr"), 0)
     t.eq(h.count_calls("repos/owner/repo/issues/comments/IC_dependency_release_ready"), 1)
     t.eq(h.count_calls("codex exec"), 1)
   end,

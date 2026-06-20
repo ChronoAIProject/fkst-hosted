@@ -782,12 +782,12 @@ return {
       end,
     }
 
-    local wrapped = core.wrap_pipeline_failure("github_pr_open", function(_event)
-      error("github-proxy: gh-pr-create-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a")
+    local wrapped = core.wrap_pipeline_failure("github_comment", function(_event)
+      error("github-proxy: gh-comment-failed: bad sha abcdef1234567890 at 2026-06-10T01:02:03Z /tmp/fkst-a")
     end)
     local ok, err = pcall(function()
       wrapped({
-        queue = "github_pr_open_request",
+        queue = "github_issue_comment_request",
         attempt = 5,
         terminal = false,
         payload = {
@@ -798,15 +798,15 @@ return {
 
     log = old_log
     t.eq(ok, false)
-    t.is_true(tostring(err):find("gh-pr-create-failed", 1, true) ~= nil)
+    t.is_true(tostring(err):find("gh-comment-failed", 1, true) ~= nil)
     t.eq(#captured, 1)
-    t.is_true(captured[1]:find("github-proxy dept=github_pr_open tag=FAILURE", 1, true) ~= nil)
-    t.is_true(captured[1]:find("error_class=gh-pr-create-failed", 1, true) ~= nil)
+    t.is_true(captured[1]:find("github-proxy dept=github_comment tag=FAILURE", 1, true) ~= nil)
+    t.is_true(captured[1]:find("error_class=gh-comment-failed", 1, true) ~= nil)
     t.is_true(captured[1]:find("fingerprint=", 1, true) ~= nil)
     t.is_true(captured[1]:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
     t.is_true(captured[1]:find("attempt=5", 1, true) ~= nil)
     t.is_nil(captured[1]:find("terminal=", 1, true))
-    t.is_true(captured[1]:find("queue=github_pr_open_request", 1, true) ~= nil)
+    t.is_true(captured[1]:find("queue=github_issue_comment_request", 1, true) ~= nil)
   end,
 
   test_gh_exec_fails_closed_for_non_rate_limit_failure = function()

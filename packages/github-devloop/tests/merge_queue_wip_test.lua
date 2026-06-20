@@ -989,6 +989,5 @@ return {
     local result = run_implement(event, opts("implement-wip-available", { FKST_DEVLOOP_MAX_INFLIGHT = "2" }))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 1)
-    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
   end,
 }

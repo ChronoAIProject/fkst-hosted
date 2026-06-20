@@ -419,18 +419,6 @@ local function run_implement(payload, run_opts, queue, event_extra)
   }, run_opts)
 end
 
-local function run_open_pr(payload, run_opts)
-  mock_branch_config_env()
-  local queue = "github-proxy.github_entity_changed"
-  if type(payload) == "table" and payload.schema == "github-devloop.open-pr.v1" then
-    queue = "devloop_open_pr"
-  end
-  return t.run_department("departments/open_pr/main.lua", {
-    queue = queue,
-    payload = payload,
-  }, run_opts)
-end
-
 local function run_observe_pr(payload, run_opts)
   mock_branch_config_env()
   mock_pr_origin_from_cached({
@@ -855,13 +843,6 @@ local function mock_issue_implement_raw(labels, comments, extra)
   mock_issue_title_labels_comments(labels or {}, comments, extra, nil, false, "title,body,labels,comments,state,author")
 end
 
-local function mock_issue_open_pr(labels, comments, extra)
-  local fields = extra or {}
-  local selected = with_default_state_marker(labels or { "fkst-dev:implementing" }, comments)
-  entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:implementing" }, selected, fields)
-  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:implementing" }, comments = selected, title = fields.title, body = fields.body, updated_at = fields.updated_at, state = fields.state, assignees = fields.assignees, author_login = fields.author_login }, "title,body,comments,labels,state,updatedAt,assignees")
-end
-
 local function mock_issue_reviewing(labels, comments, extra)
   set_pr_phase_comments(labels or { "fkst-dev:pr-open" }, comments)
   local fields = extra or {}
@@ -949,7 +930,6 @@ return {
   run_fix_reconcile = run_fix_reconcile,
   run_decompose = run_decompose,
   run_implement = run_implement,
-  run_open_pr = run_open_pr,
   run_observe_pr = run_observe_pr,
   run_review_pr = run_review_pr,
   run_review_result = run_review_result,
@@ -974,7 +954,6 @@ return {
   mock_issue_reconcile = mock_issue_reconcile,
   mock_issue_implement = mock_issue_implement,
   mock_issue_implement_raw = mock_issue_implement_raw,
-  mock_issue_open_pr = mock_issue_open_pr,
   mock_issue_reviewing = mock_issue_reviewing,
   mock_issue_review = mock_issue_review,
   mock_issue_decompose = mock_issue_decompose,

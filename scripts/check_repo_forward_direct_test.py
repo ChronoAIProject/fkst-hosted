@@ -43,14 +43,14 @@ class ForwardDirectRatchetTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("FORWARD-direct raise not in migration/forward-direct-raise.allowlist", messages[0])
 
-    def test_open_pr_queue_is_marker_gated(self) -> None:
+    def test_merge_ready_queue_is_marker_gated(self) -> None:
         sites = forward.source_sites(
-            "packages/github-devloop/departments/implement/main.lua",
-            'function pipeline(event)\n  core.log_raise("implement", id, "devloop_open_pr", payload)\nend\n',
+            "packages/github-devloop/departments/review_result/main.lua",
+            'function pipeline(event)\n  core.log_raise("review_result", id, "devloop_merge_ready", payload)\nend\n',
         )
         messages = forward.ratchet_messages(sites, set())
         self.assertEqual(len(messages), 1)
-        self.assertIn("devloop_open_pr", messages[0])
+        self.assertIn("devloop_merge_ready", messages[0])
 
     def test_stale_allowlist_site_fails(self) -> None:
         site = forward.ForwardDirectSite(
@@ -127,13 +127,13 @@ end
             dept.mkdir(parents=True)
             source = dept / "main.lua"
             source.write_text(
-                'function pipeline(event)\n  core.log_raise("x", id, "devloop_open_pr", payload)\nend\n',
+                'function pipeline(event)\n  core.log_raise("x", id, "devloop_merge_ready", payload)\nend\n',
                 encoding="utf-8",
             )
             migration = root / "migration"
             migration.mkdir()
             (migration / "forward-direct-raise.allowlist").write_text(
-                "packages/github-devloop/departments/x/main.lua|pipeline|devloop_open_pr\n",
+                "packages/github-devloop/departments/x/main.lua|pipeline|devloop_merge_ready\n",
                 encoding="utf-8",
             )
             self.assertEqual(forward.repository_messages(root), [])

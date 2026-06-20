@@ -3,7 +3,7 @@ local core, saga = require("core"), require("std.saga")
 local M = {}
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" },
+  consumes = { "github-proxy.github_entity_changed" },
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
@@ -33,21 +33,6 @@ local function pr_context(event)
       number = payload.number,
       dedup_key = payload.dedup_key,
       source_ref = payload.source_ref,
-    }
-  end
-  if core.is_supported_pr_opened(payload) then
-    return {
-      source = "direct-opened",
-      repo = payload.repo,
-      number = payload.pr_number,
-      dedup_key = payload.dedup_key,
-      source_ref = payload.source_ref,
-      proposal_id = payload.proposal_id,
-      issue_number = payload.issue_number,
-      impl_version = payload.impl_version,
-      branch = payload.branch,
-      head_sha = payload.head_sha,
-      base_branch = payload.base_branch,
     }
   end
   return nil
@@ -267,18 +252,6 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
   maybe_label_hints(origin, pr_number, current_pr, { state = "reviewing", version = new_version }, source_ref)
   return true
-end
-
-local function direct_opened_matches_origin(pr, origin, current_pr)
-  if pr.source ~= "direct-opened" then
-    return false
-  end
-  return tostring(pr.proposal_id or "") == tostring(origin.proposal_id or "")
-    and tostring(pr.issue_number or "") == tostring(origin.issue_number or "")
-    and tostring(pr.impl_version or "") == tostring(origin.impl_version or "")
-    and tostring(pr.branch or "") == tostring(origin.branch or "")
-    and tostring(pr.head_sha or "") == tostring(current_pr.head_sha or "")
-    and tostring(pr.base_branch or "") == tostring(origin.base_branch or "")
 end
 
 local function maybe_liveness_timeout(origin, pr_number, current_pr, state, source_ref, issue_current)
@@ -543,19 +516,10 @@ local function process_pr_event(event)
       return
     end
 
-    local direct_opened = direct_opened_matches_origin(pr, origin, current_pr)
-    if pr.source == "direct-opened" and not direct_opened then
-      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(direct-opened-fact-mismatch)", "direct PR-opened event does not match canonical PR origin")
-      return
-    end
     local transition = core.versioned_transition_status(state, { "pr-open", "unmanaged" }, "reviewing", origin.impl_version)
     if has_issue_origin and transition == "pending" then
-      if direct_opened then
-        transition = "apply"
-      else
-        core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "reviewing PR marker not yet visible")
-        return
-      end
+      core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "reviewing PR marker not yet visible")
+      return
     end
     if state.state == "pr-open" and tostring(state.version or "") ~= tostring(origin.impl_version or "") then
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "skip-stale(version-mismatch)", "PR-open marker version does not match PR origin")
@@ -595,6 +559,5 @@ end
 return saga.department(spec, { done = function() return false end, act = function(event)
   core.dispatch_consumed_queue("observe_pr", spec, event, {
     ["github-proxy.github_entity_changed"] = process_pr_event,
-    ["github-proxy.github_pr_opened"] = process_pr_event,
   })
 end, wrap = core.wrap_pipeline_failure, name = "observe_pr" })

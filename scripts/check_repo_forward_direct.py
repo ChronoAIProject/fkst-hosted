@@ -13,7 +13,6 @@ MARKER_GATED_QUEUES = {
     "devloop_reviewing",
     "devloop_fixing",
     "devloop_merge_ready",
-    "devloop_open_pr",
     "devloop_reconcile",
 }
 REDRIVE_PATHS = {

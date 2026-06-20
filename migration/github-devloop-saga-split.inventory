@@ -168,9 +168,7 @@
 {"path":"packages/github-devloop/core/validators/intake_candidate.lua","owner":"intake","reason":"validates intake candidate payloads."}
 {"path":"packages/github-devloop/core/validators/issue.lua","owner":"issue","reason":"validates issue payloads."}
 {"path":"packages/github-devloop/core/validators/merge_ready.lua","owner":"pr","reason":"validates PR merge-ready payloads."}
-{"path":"packages/github-devloop/core/validators/open_pr.lua","owner":"pr","reason":"validates PR open payloads."}
 {"path":"packages/github-devloop/core/validators/pr.lua","owner":"pr","reason":"validates PR payloads."}
-{"path":"packages/github-devloop/core/validators/pr_opened.lua","owner":"pr","reason":"validates PR-opened payloads."}
 {"path":"packages/github-devloop/core/validators/pr_review_unresolved.lua","owner":"pr","reason":"validates unresolved PR review payloads."}
 {"path":"packages/github-devloop/core/validators/ready.lua","owner":"issue","reason":"validates issue ready payloads."}
 {"path":"packages/github-devloop/core/validators/result.lua","owner":"issue","reason":"validates issue consensus result payloads."}
@@ -196,7 +194,6 @@
 {"path":"packages/github-devloop/departments/observability/main.lua","owner":"cross-cutting","reason":"supports handoff, health, test probes, or cross-saga recovery."}
 {"path":"packages/github-devloop/departments/observe_issue/main.lua","owner":"issue","reason":"owns the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/observe_pr/main.lua","owner":"pr","reason":"owns PR-phase lifecycle work."}
-{"path":"packages/github-devloop/departments/open_pr/main.lua","owner":"pr","reason":"owns PR-phase lifecycle work."}
 {"path":"packages/github-devloop/departments/pr_freshness_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop/departments/reconcile/main.lua","owner":"cross-cutting","reason":"supports handoff, health, test probes, or cross-saga recovery."}
 {"path":"packages/github-devloop/departments/review_loop/main.lua","owner":"pr","reason":"owns PR-phase lifecycle work."}

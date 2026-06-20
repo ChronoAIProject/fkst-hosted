@@ -72,10 +72,6 @@ local function mock_remote_branch(branch, head)
   })
 end
 
-local function assert_no_direct_open_pr(raises)
-  t.eq(find_raise(raises, "devloop_open_pr"), nil)
-end
-
 return {
   test_implementing_redelivery_reruns_when_no_progress_and_attempt_budget_remains = function()
     local event = ready()
@@ -102,7 +98,6 @@ return {
       return tostring(payload.body or ""):find('attempt="2"', 1, true) ~= nil
     end).payload.body
     t.eq(core.implement_attempt_count({ comment }, event.proposal_id, event.dedup_key), 2)
-    assert_no_direct_open_pr(result.raises)
   end,
 
   test_implementing_redelivery_sees_remote_branch_without_direct_open_pr = function()
@@ -120,7 +115,6 @@ return {
     local result = run_implement(event, opts("implement-liveness-remote-progress"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
-    assert_no_direct_open_pr(result.raises)
   end,
 
   test_implementing_redelivery_skips_when_pr_link_exists = function()
@@ -244,7 +238,6 @@ return {
     t.eq(count_calls("codex exec"), 1)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload.body
     t.eq(core.implement_attempt_count({ comment }, current.proposal_id, current.dedup_key), 1)
-    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
   end,
 
   test_liveness_replayer_skips_live_implement_attempt_before_receiver = function()
@@ -297,7 +290,6 @@ return {
     local result = run_implement(event, opts("implement-liveness-local-progress-at-budget"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
-    assert_no_direct_open_pr(result.raises)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
   end,
 
@@ -430,7 +422,6 @@ return {
     local result = run_implement(reraised.payload, opts("implement-718-roundtrip"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 1, "re-raised ready must re-run implement, not skip-stale forever")
-    assert_no_direct_open_pr(result.raises)
   end,
 
   test_observe_reraises_reimplement_attempt_preserving_suffix = function()
@@ -475,7 +466,6 @@ return {
     local result = run_implement(reraised.payload, opts("implement-721-roundtrip"))
     t.eq(result.exit_code, 0)
     t.eq(count_calls("codex exec"), 0)
-    assert_no_direct_open_pr(result.raises)
   end,
 
   test_double_wrapped_liveness_redrive_is_not_recovered = function()
@@ -494,7 +484,6 @@ return {
     local result = run_implement(double_wrapped, opts("implement-726-double-wrapped-redrive"))
     t.eq(result.exit_code, 1)
     t.eq(count_calls("codex exec"), 0)
-    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.eq(comment ~= nil, true)
     t.eq(core.implement_version_mismatch_attempt_count({ comment.payload.body }, event.proposal_id, double_wrapped.dedup_key, event.dedup_key), 1)

@@ -783,7 +783,6 @@ return {
     t.mock_command(core.git_remote_branch_head_cmd("origin", branch), { stdout = "abc123\n", stderr = "", exit_code = 0 })
     local implemented = h.run_implement(reraised.payload, opts("liveness-scan-implementing-redrive-consumable"))
     t.eq(implemented.exit_code, 0)
-    t.eq(find_raise(implemented.raises, "devloop_open_pr"), nil)
   end,
 
   test_liveness_scan_requeues_open_pr_with_non_terminal_state = function()

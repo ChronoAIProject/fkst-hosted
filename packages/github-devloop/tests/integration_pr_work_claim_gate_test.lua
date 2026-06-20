@@ -9,9 +9,7 @@ local fixing = h.fixing
 local review_reconcile = h.review_reconcile
 local fix_reconcile = h.fix_reconcile
 local decompose_event = h.decompose_event
-local run_open_pr = h.run_open_pr
 local mock_bot_env = h.mock_bot_env
-local mock_issue_open_pr = h.mock_issue_open_pr
 local count_calls = h.count_calls
 
 local function origin_marker(version)
@@ -229,28 +227,5 @@ return {
     t.eq(#result.raises, 0)
     t.eq(count_calls("gh pr comment"), 0)
     t.eq(count_calls("codex exec"), 0)
-  end,
-
-  test_open_pr_other_owned_issue_skips_before_branch_work = function()
-    local impl_version = reviewing().version
-    mock_issue_open_pr({ "fkst-dev:implementing" }, {
-      core.state_marker("github-devloop/issue/owner/repo/42", "implementing", impl_version),
-      core.implementing_marker("github-devloop/issue/owner/repo/42", impl_version, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123"),
-    }, {
-      assignees = { "human" },
-      author_login = "fkst-test-bot",
-    })
-    mock_bot_env()
-    local result = run_open_pr(core.build_devloop_open_pr_payload("owner/repo", 42, {
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      dedup_key = impl_version,
-      source_ref = h.source_ref(),
-    }, "devloop-owner-repo-42-01HY", "abc123", "dev"), opts("open-pr-claim-other", {
-      FKST_GITHUB_WRITE = "1",
-    }))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("show-ref --verify --quiet"), 0)
-    t.eq(count_calls("rev-parse --verify"), 0)
   end,
 }

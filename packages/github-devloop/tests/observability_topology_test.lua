@@ -103,7 +103,6 @@ local function topology_fixture()
   b.raiser("github-devloop.substrate_ref_poll", "github-devloop.devloop_substrate_ref_tick")
 
   b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, { "github-proxy.github_entity_changed" })
-  b.department("github-proxy.github_pr_open", { "github-proxy.github_pr_open_request" }, { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" })
   b.department("github-proxy.github_comment", { "github-proxy.github_issue_comment_request" }, { "github-proxy.github_comment_written" })
   b.department("github-proxy.github_pr_comment", { "github-proxy.github_pr_comment_request" }, { "github-proxy.github_comment_written" })
   b.department("github-proxy.github_issue_label", { "github-proxy.github_issue_label_request" }, {})
@@ -124,7 +123,7 @@ local function topology_fixture()
     "github-devloop.devloop_review_reconcile",
     "github-devloop.devloop_timeout_reconcile",
   })
-  b.department("github-devloop.observe_pr", { "github-proxy.github_entity_changed", "github-proxy.github_pr_opened" }, {
+  b.department("github-devloop.observe_pr", { "github-proxy.github_entity_changed" }, {
     "github-devloop.devloop_reviewing",
     "github-devloop.devloop_fixing",
     "github-devloop.devloop_decompose",
@@ -138,8 +137,7 @@ local function topology_fixture()
   b.department("github-devloop.intake_judge", { "github-devloop.devloop_intake_candidate" }, { "consensus.proposal", "github-devloop.devloop_reviewing" })
   b.department("github-devloop.consensus_result", { "consensus.consensus_reached" }, { "github-proxy.github_issue_comment_request" })
   b.department("github-devloop.comment_handoff", { "github-proxy.github_comment_written" }, { "github-devloop.devloop_ready", "github-devloop.devloop_reviewing" })
-  b.department("github-devloop.implement", { "github-devloop.devloop_ready" }, { "github-devloop.devloop_open_pr", "github-devloop.devloop_reviewing" })
-  b.department("github-devloop.open_pr", { "github-devloop.devloop_open_pr", "github-proxy.github_entity_changed" }, { "github-proxy.github_pr_open_request" })
+  b.department("github-devloop.implement", { "github-devloop.devloop_ready" }, { "github-devloop.devloop_reviewing" })
   b.department("github-devloop.review_pr", { "github-devloop.devloop_reviewing" }, { "consensus.proposal" })
   b.department("github-devloop.review_result", { "consensus.consensus_reached" }, { "github-devloop.devloop_merge_ready", "github-devloop.devloop_fixing" })
   b.department("github-devloop.merge", { "github-devloop.devloop_merge_ready", "github-devloop.devloop_merge_queue_tick" }, {
@@ -259,7 +257,6 @@ return {
     t.is_true(mermaid:find("intake_judge", 1, true) ~= nil)
     t.is_true(mermaid:find("consensus_result", 1, true) ~= nil)
     t.is_true(mermaid:find("implement", 1, true) ~= nil)
-    t.is_true(mermaid:find("github_pr_open", 1, true) ~= nil)
     t.is_true(mermaid:find("review_result", 1, true) ~= nil)
     t.is_true(mermaid:find("merge", 1, true) ~= nil)
     t.is_true(mermaid:find("rollup_merge", 1, true) ~= nil)

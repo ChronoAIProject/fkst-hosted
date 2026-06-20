@@ -22,7 +22,6 @@ local run_observe = h.run_observe
 local run_result = h.run_result
 local run_loop = h.run_loop
 local run_implement = h.run_implement
-local run_open_pr = h.run_open_pr
 local run_observe_pr = h.run_observe_pr
 local run_review_pr = h.run_review_pr
 local run_review_result = h.run_review_result
@@ -41,7 +40,6 @@ local mock_issue_result = h.mock_issue_result
 local mock_issue_loop = h.mock_issue_loop
 local mock_issue_implement = h.mock_issue_implement
 local mock_issue_implement_raw = h.mock_issue_implement_raw
-local mock_issue_open_pr = h.mock_issue_open_pr
 local mock_issue_reviewing = h.mock_issue_reviewing
 local mock_issue_review = h.mock_issue_review
 local mock_issue_fix = h.mock_issue_fix
@@ -81,10 +79,6 @@ local mock_issue_view_failure = h.mock_issue_view_failure
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 local codex_status = require("tests.codex_status_helpers")
-
-local function assert_no_direct_open_pr(raises)
-  t.eq(find_raise(raises, "devloop_open_pr"), nil)
-end
 
 local function find_comment_with(raises, text)
   return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
@@ -304,7 +298,6 @@ return {
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("git worktree add"), 0)
     t.eq(count_calls("codex exec"), 1)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
@@ -336,7 +329,6 @@ return {
     t.eq(#result.raises, 4)
     assert_implement_attempt(result.raises, event)
     assert_worktree_ready_state(result.raises, event)
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("git worktree list"), 0)
     t.eq(count_calls("codex exec"), 1)
   end,
@@ -392,7 +384,6 @@ return {
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("impl-failed"), 0)
     t.eq(count_calls("add -A"), 0)
     t.eq(count_calls("commit -m"), 0)
@@ -450,7 +441,6 @@ return {
     local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
-    assert_no_direct_open_pr(result.raises)
     t.is_true(comment:find(worktree, 1, true) ~= nil)
     t.eq(count_calls("git worktree list --porcelain"), 1)
     t.eq(count_calls("git worktree add"), 0)
@@ -480,7 +470,6 @@ return {
     t.eq(#result.raises, 4)
     assert_implement_attempt(result.raises, event)
     assert_worktree_ready_state(result.raises, event)
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("reset --hard"), 1)
     t.eq(count_calls("clean -fd"), 1)
     t.eq(count_calls("merge --no-edit 'abc123'"), 1)
@@ -521,7 +510,6 @@ return {
     t.eq(#result.raises, 4)
     assert_implement_attempt(result.raises, event)
     assert_worktree_ready_state(result.raises, event)
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("git worktree add"), 1)
     -- 2 = removing the one non-current-runtime stale worktree, plus the idempotent
     -- force-clean of the target path before `git worktree add` (#677).
@@ -562,7 +550,6 @@ return {
     t.eq(#result.raises, 4)
     assert_implement_attempt(result.raises, event)
     assert_worktree_ready_state(result.raises, event)
-    assert_no_direct_open_pr(result.raises)
     -- 3 = removing the two non-current-runtime stale worktrees, plus the idempotent
     -- force-clean of the target path before `git worktree add` (#677).
     t.eq(count_calls("git worktree remove --force"), 3)
@@ -652,7 +639,6 @@ return {
     assert_implement_attempt(visible.raises, ready())
     assert_worktree_ready_state(visible.raises, ready())
     t.eq(find_label_with_added(visible.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
-    assert_no_direct_open_pr(visible.raises)
     t.eq(count_calls("codex exec"), 1)
   end,
 
@@ -702,7 +688,6 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
-    t.eq(find_raise(result.raises, "devloop_open_pr"), nil)
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git worktree list"), 0)
     t.eq(count_calls("git -C"), 0)
@@ -778,7 +763,6 @@ return {
     t.eq(#result.raises, 4)
     assert_worktree_ready_state(result.raises, event)
     t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("repos/owner/repo/issues/comments/IC_ready_1"), 1)
     t.eq(count_calls("codex exec"), 1)
   end,
@@ -816,7 +800,6 @@ return {
     t.eq(#result.raises, 4)
     assert_worktree_ready_state(result.raises, event)
     t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("repos/owner/repo/issues/comments/IC_ready_alternate_effects"), 1)
     t.eq(count_calls("codex exec"), 1)
   end,
@@ -878,7 +861,6 @@ return {
     assert_implement_attempt(result.raises, redrive)
     assert_worktree_ready_state(result.raises, redrive)
     t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
-    assert_no_direct_open_pr(result.raises)
     t.eq(count_calls("repos/owner/repo/issues/comments/IC_ready_original"), 1)
     t.eq(count_calls("codex exec"), 1)
   end,

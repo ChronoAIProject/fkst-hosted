@@ -119,30 +119,6 @@ function M.build_current_head_reviewing_payload(origin, pr_number, current_pr, s
   }, pr_number, source_ref, state.version)
 end
 
-function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head_sha, base_branch)
-  local proposal_id = ready.proposal_id
-  if proposal_id == nil then
-    proposal_id = M.proposal_id(repo, issue_number)
-  end
-  return {
-    schema = "github-devloop.open-pr.v1",
-    proposal_id = proposal_id,
-    repo = repo,
-    issue_number = issue_number,
-    version = ready.dedup_key,
-    branch = branch,
-    head_sha = head_sha,
-    base_branch = base_branch,
-    dedup_key = M._dedup_key({
-      "open-pr-kickoff",
-      tostring(proposal_id),
-      tostring(ready.dedup_key),
-      tostring(branch),
-    }),
-    source_ref = M.normalize_source_ref(ready.source_ref),
-  }
-end
-
 function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
   local version = origin.impl_version
   if review_fact.fix_version ~= nil then

@@ -224,55 +224,6 @@ local function mock_pr_label_guard(labels, comments)
   })
 end
 
-local function encode_assignees_json(assignees)
-  local rendered = {}
-  for _, assignee in ipairs(assignees or { "fkst-test-bot" }) do
-    table.insert(rendered, string.format('{"login":"%s"}', encode_json_string(assignee)))
-  end
-  return table.concat(rendered, ",")
-end
-
-local function mock_pr_open_guard(labels, comments, assignees)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or { "fkst-dev:implementing" }) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
-  end
-  t.mock_command("gh api repos/owner/x/issues/42", {
-    stdout = '{"title":"Bridge issue","body":"","updated_at":"2026-06-03T01:02:03Z","state":"open","labels":[' .. table.concat(rendered_labels, ",") .. '],"assignees":[' .. encode_assignees_json(assignees) .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100", {
-    stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_branch_head(head_sha)
-  t.mock_command("git show-ref --verify refs/heads", {
-    stdout = tostring(head_sha or "abc123") .. " refs/heads/devloop-owner-x-42-01HY\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_branch_head_descends(descends)
-  t.mock_command("merge-base --is-ancestor", {
-    stdout = "",
-    stderr = "",
-    exit_code = descends == false and 1 or 0,
-  })
-end
-
-local function mock_non_branch_ref_head(head_sha)
-  t.mock_command("git show-ref --verify refs/heads", {
-    stdout = tostring(head_sha or "abc123") .. " refs/tags/devloop-owner-x-42-01HY\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
 local function mock_comment_write()
   t.mock_command("gh api --method POST repos/owner/x/issues/42/comments --field body=/tmp/fkst-github-proxy-comment-owner_x-issue-42.md", {
     stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
@@ -280,10 +231,6 @@ local function mock_comment_write()
   })
   t.mock_command("gh api --method POST repos/owner/payload/issues/42/comments --field body=/tmp/fkst-github-proxy-comment-owner_payload-issue-42.md", {
     stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
-    exit_code = 0,
-  })
-  t.mock_command("gh issue comment 42 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-issue-comment.md", {
-    stdout = "",
     exit_code = 0,
   })
 end
@@ -329,63 +276,6 @@ end
 local function mock_label_write(labels)
   mock_repo_label_list(labels)
   t.mock_command("gh issue edit", { stdout = "", exit_code = 0 })
-end
-
-local function mock_pr_head_list(stdout)
-  t.mock_command("gh api --paginate --slurp repos/owner/x/pulls?state=open&head=owner%3A", {
-    stdout = stdout or "[]\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_pr_head_state(head_sha, state, head_repo, is_cross_repository, base_branch, pr_number, comments)
-  local repo = head_repo or "owner/x"
-  local base_repo = is_cross_repository == true and "owner/x" or repo
-  local number = pr_number or 7
-  t.mock_command("gh api repos/owner/x/pulls/" .. tostring(number), {
-    stdout = string.format(
-      '{"head":{"ref":"devloop-owner-x-42-01HY","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","repo":{"full_name":"%s","owner":{"login":"owner"}}},"state":"%s","merged":%s,"updated_at":"2026-06-03T02:03:04Z"}\n',
-      head_sha or "abc123",
-      repo,
-      tostring(repo):match("^([^/]+)/") or "owner",
-      base_branch or "dev",
-      base_repo,
-      tostring(state or "OPEN"):lower(),
-      tostring(state or ""):upper() == "MERGED" and "true" or "false"
-    ),
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("gh api --paginate --slurp repos/owner/x/issues/" .. tostring(number) .. "/comments?per_page=100", {
-    stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_git_push()
-  t.mock_command("git push -u origin", {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_pr_create(number)
-  t.mock_command("gh pr create", {
-    stdout = string.format("https://github.example/owner/x/pull/%d\n", number or 7),
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_pr_create_stdout(stdout)
-  t.mock_command("gh pr create", {
-    stdout = stdout or "",
-    stderr = "",
-    exit_code = 0,
-  })
 end
 
 local function mock_pr_comment_view(comments, author)
@@ -541,55 +431,6 @@ local function long_dedup(suffix, total_len)
   return prefix .. string.rep("v", total_len - #prefix - #suffix) .. suffix
 end
 
-local function pr_open_event()
-  return {
-    queue = "github_pr_open_request",
-    payload = {
-      schema = "github-proxy.pr-open.v1",
-      repo = "owner/x",
-      issue_number = 42,
-      proposal_id = "github-devloop/issue/owner/x/42",
-      impl_version = "v1",
-      expected_state = "implementing",
-      expected_version = "v1",
-      branch = "devloop-owner-x-42-01HY",
-      head_sha = "abc123",
-      title = "Implement decision recorder",
-      base_branch = "dev",
-      body = 'github-devloop implementation PR for issue #42\n\n<!-- fkst:github-devloop:pr-origin:v1 proposal="github-devloop/issue/owner/x/42" issue="42" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->',
-      issue_comment_body_template = 'github-devloop PR opened: #{{pr_number}}\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="{{pr_number}}" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->',
-      issue_label_add = { "fkst-dev:pr-open" },
-      issue_label_remove = { "fkst-dev:implementing" },
-      dedup_key = "open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY",
-      source_ref = {
-        kind = "external",
-        ref = "owner/x#issue/42",
-      },
-    },
-  }
-end
-
-local function pr_open_guard_comments(extra)
-  local comments = {
-    '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" version="v1" stage_rank="600" -->',
-    '<!-- fkst:github-devloop:implementing:v1 proposal="github-devloop/issue/owner/x/42" dedup="v1" branch="devloop-owner-x-42-01HY" head_sha="abc123" base_branch="dev" base_sha="abc123" -->',
-  }
-  for _, comment in ipairs(extra or {}) do
-    table.insert(comments, comment)
-  end
-  return comments
-end
-
-local function pr_open_visible_comments(extra)
-  local comments = {
-    'github-devloop PR opened: #9\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="pr-open" version="v1" stage_rank="650" -->\n<!-- fkst:github-devloop:pr-link:v1 proposal="github-devloop/issue/owner/x/42" pr="9" branch="devloop-owner-x-42-01HY" impl_version="v1" base_branch="dev" -->\n' .. core.comment_marker("open-pr/github-devloop/issue/owner/x/42/v1/devloop-owner-x-42-01HY"),
-  }
-  for _, comment in ipairs(extra or {}) do
-    table.insert(comments, comment)
-  end
-  return pr_open_guard_comments(comments)
-end
-
 local function reviewing_marker()
   return '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="reviewing" version="v1" stage_rank="675" -->'
 end
@@ -616,19 +457,10 @@ return {
   mock_comment_view_failure = mock_comment_view_failure,
   mock_label_view = mock_label_view,
   mock_pr_label_guard = mock_pr_label_guard,
-  mock_pr_open_guard = mock_pr_open_guard,
-  mock_branch_head = mock_branch_head,
-  mock_branch_head_descends = mock_branch_head_descends,
-  mock_non_branch_ref_head = mock_non_branch_ref_head,
   mock_comment_write = mock_comment_write,
   mock_repo_label_list = mock_repo_label_list,
   mock_label_create = mock_label_create,
   mock_label_write = mock_label_write,
-  mock_pr_head_list = mock_pr_head_list,
-  mock_pr_head_state = mock_pr_head_state,
-  mock_git_push = mock_git_push,
-  mock_pr_create = mock_pr_create,
-  mock_pr_create_stdout = mock_pr_create_stdout,
   mock_pr_comment_view = mock_pr_comment_view,
   mock_pr_comment_write = mock_pr_comment_write,
   calls_matching = calls_matching,
@@ -636,8 +468,5 @@ return {
   capture_comment_department_logs = capture_comment_department_logs,
   capture_label_department_logs = capture_label_department_logs,
   long_dedup = long_dedup,
-  pr_open_event = pr_open_event,
-  pr_open_guard_comments = pr_open_guard_comments,
-  pr_open_visible_comments = pr_open_visible_comments,
   reviewing_marker = reviewing_marker,
 }

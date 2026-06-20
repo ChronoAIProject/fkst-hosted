@@ -614,23 +614,6 @@ return {
     t.eq(current.state, "impl-failed")
     t.eq(current.version, ready.dedup_key)
 
-    local pr_request = core.build_pr_open_request("owner/repo", "42", ready.proposal_id, {
-      state = "implementing",
-      version = ready.dedup_key,
-    }, "Implement decision recorder", "devloop-owner-repo-42-01HY", "abc123", "dev")
-    t.eq(pr_request.schema, "github-proxy.pr-open.v1")
-    t.eq(pr_request.proposal_id, ready.proposal_id)
-    t.eq(pr_request.impl_version, ready.dedup_key)
-    t.eq(pr_request.branch, "devloop-owner-repo-42-01HY")
-    t.eq(pr_request.head_sha, "abc123")
-    t.eq(pr_request.base_branch, "dev")
-    t.eq(pr_request.expected_state, "implementing")
-    t.eq(pr_request.expected_version, ready.dedup_key)
-    t.is_true(pr_request.body:find("fkst:github-devloop:pr-origin:v1", 1, true) ~= nil)
-    t.is_true(pr_request.issue_comment_body_template:find("fkst:github-devloop:pr-link:v1", 1, true) ~= nil)
-    t.eq(#pr_request.issue_label_add, 0)
-    t.eq(#pr_request.issue_label_remove, 0)
-
     local origin = core.pr_origin_fact({
       core.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     })

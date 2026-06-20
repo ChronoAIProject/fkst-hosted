@@ -99,8 +99,7 @@ function M.log_raise(dept, proposal_id, queue, payload)
   if queue == "github-proxy.github_issue_label_request"
     or queue == "github-proxy.github_issue_comment_request"
     or queue == "github-proxy.github_pr_comment_request"
-    or queue == "github-proxy.github_issue_create_request"
-    or queue == "github-proxy.github_pr_open_request" then
+    or queue == "github-proxy.github_issue_create_request" then
     M.log_outbound(dept, proposal_id, queue, payload)
   end
   raise(queue, payload)
