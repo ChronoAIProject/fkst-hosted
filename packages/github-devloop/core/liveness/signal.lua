@@ -82,6 +82,50 @@ local function merge_gate_wait_identity(M, facts, state)
     source_repo
 end
 
+local function delegation_comments(facts)
+  if facts and facts.current and type(facts.current.comments) == "table" then
+    return facts.current.comments
+  end
+  if facts and facts.snapshot and type(facts.snapshot.comments) == "table" then
+    return facts.snapshot.comments
+  end
+  return nil
+end
+
+local function fact_child_proposal_id(M, fact, parent_proposal_id, version)
+  if type(fact) ~= "table" then
+    return nil
+  end
+  if fact.proposal_id ~= nil and tostring(fact.proposal_id) ~= tostring(parent_proposal_id) then
+    return nil
+  end
+  if fact.version ~= nil and tostring(fact.version) ~= tostring(version or "") then
+    return nil
+  end
+  local child_proposal_id = fact.pr_proposal_id or fact.pr_proposal
+  if M.parse_pr_proposal_id(child_proposal_id) == nil then
+    return nil
+  end
+  return tostring(child_proposal_id)
+end
+
+local function pr_delegation_child_proposal_id(M, facts, parent_proposal_id, delegation_version)
+  local direct = facts and (facts.pr_delegation or facts["pr-delegation"]) or nil
+  local child_proposal_id = fact_child_proposal_id(M, direct, parent_proposal_id, delegation_version)
+  if child_proposal_id ~= nil then
+    return child_proposal_id
+  end
+  if type(M.pr_delegation_fact) ~= "function" then
+    return nil
+  end
+  return fact_child_proposal_id(
+    M,
+    M.pr_delegation_fact(delegation_comments(facts), parent_proposal_id, delegation_version),
+    parent_proposal_id,
+    delegation_version
+  )
+end
+
 local function implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version)
   local attempt = M.latest_implement_attempt_fact(comments, proposal_id, signal_version)
   if attempt == nil then
@@ -185,6 +229,34 @@ local function live_signal_age(M, row, state, facts, now_seconds)
         and marker_attr(marker, "pr") == tostring(pr_number)
         and marker_attr(marker, "head_sha") == tostring(head_sha)
     end, now_seconds)
+  end
+  if resolver == "child-state" then
+    local child_proposal_id = pr_delegation_child_proposal_id(M, facts, proposal_id, signal_version)
+    if child_proposal_id == nil then
+      return nil
+    end
+    local terminal_states = {}
+    for _, terminal_state in ipairs(row and row.defer and row.defer.terminal_states or {}) do
+      terminal_states[tostring(terminal_state)] = true
+    end
+    local latest = nil
+    local pattern_family = "state"
+    local marker_pattern = "<!%-%- fkst:github%-devloop:" .. pattern_family .. ":v1.-%-%->"
+    for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+      local age = signal_age_from_created_at(M, M._comment_created_at(comment), now_seconds)
+      for marker in M._comment_body(comment):gmatch(marker_pattern) do
+        if marker_attr(marker, "proposal") == tostring(child_proposal_id) then
+          local child_state = marker_attr(marker, "state")
+          if terminal_states[child_state] ~= true
+            and (latest == nil or (age ~= nil and (latest.age == nil or age < latest.age))) then
+            latest = {
+              age = age or 0,
+            }
+          end
+        end
+      end
+    end
+    return latest and latest.age or nil
   end
   return nil
 end

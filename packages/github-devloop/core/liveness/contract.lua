@@ -46,7 +46,8 @@ local function validate_liveness_signal_producer(M, state, signal, family, resol
     table.insert(errors, state .. ": live-defer signal producer binding does not exist: " .. tostring(producer_key))
     return
   end
-  if producer_key ~= family then
+  local binding_family = binding.marker_family or producer_key
+  if binding_family ~= family then
     table.insert(errors, state .. ": live-defer producer binding family mismatch: " .. tostring(producer_key))
   end
   if binding.resolver ~= resolver then
@@ -60,6 +61,9 @@ local function validate_liveness_signal_producer(M, state, signal, family, resol
   end
   if liveness_resolver_families[resolver] == nil or liveness_resolver_families[resolver][family] ~= true then
     table.insert(errors, state .. ": live-defer resolver does not read marker family: " .. tostring(resolver) .. "/" .. tostring(family))
+  end
+  if binding.observe_only == true then
+    return
   end
   if M.restart_durable_marker_fields()[family] == nil then
     return

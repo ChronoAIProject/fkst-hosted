@@ -54,6 +54,20 @@ local epoch_sources = {
     forbids_observed_fact = true,
     forbids_clear_opens_generation = true,
   },
+  ["child_workflow_wait:v1"] = {
+    durable = true,
+    opens_generation = true,
+    excludes_deferred_time = true,
+    requires_live_marker = true,
+    requires_producer = true,
+    requires_freshness_ms = true,
+    requires_redrive_opens_generation = true,
+    requires_delegation_marker = true,
+    requires_terminal_states = true,
+    forbids_clear_fact = true,
+    forbids_observed_fact = true,
+    forbids_clear_opens_generation = true,
+  },
 }
 
 local known_liveness_contract_violations = {}
@@ -288,6 +302,73 @@ local function validate_codex_run_defer(row, errors)
   end
 end
 
+local function validate_child_workflow_wait_defer(row, errors)
+  local state = state_name(row)
+  local defer = row and row.defer or nil
+  local epoch = row and row.actionable_epoch or nil
+  local signal = row and row.liveness_contract and row.liveness_contract.signal or nil
+  if not non_empty_string(defer.live_marker) then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare live_marker")
+  end
+  if defer.live_marker ~= "state:v1" then
+    table.insert(errors, state .. ": child_workflow_wait defer live_marker must be state:v1")
+  end
+  if not non_empty_string(defer.producer) then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare producer")
+  end
+  if tonumber(defer.freshness_ms) == nil or tonumber(defer.freshness_ms) <= 0 then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare freshness_ms")
+  end
+  if defer.redrive_opens_generation ~= true then
+    table.insert(errors, state .. ": child_workflow_wait defer.redrive_opens_generation must be true")
+  end
+  if not non_empty_string(defer.delegation_marker) then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare delegation_marker")
+  end
+  if defer.delegation_marker ~= "pr-delegation:v1" then
+    table.insert(errors, state .. ": child_workflow_wait defer delegation_marker must be pr-delegation:v1")
+  end
+  if type(defer.terminal_states) ~= "table" or #defer.terminal_states == 0 then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare terminal_states")
+  end
+  if epoch == nil or epoch.source ~= "child_workflow_wait:v1" then
+    table.insert(errors, state .. ": child_workflow_wait defer must use child_workflow_wait:v1")
+  end
+  if defer.clear_fact ~= nil then
+    table.insert(errors, state .. ": child_workflow_wait defer must not declare clear_fact")
+  end
+  if defer.observed_fact ~= nil then
+    table.insert(errors, state .. ": child_workflow_wait defer must not declare observed_fact")
+  end
+  if defer.clear_opens_generation ~= nil then
+    table.insert(errors, state .. ": child_workflow_wait defer must not declare clear_opens_generation")
+  end
+  local on_stale = row and row.watchdog and row.watchdog.on_stale
+  if type(on_stale) ~= "table" or on_stale.op ~= "redrive_receiver" then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare watchdog.on_stale.op=redrive_receiver")
+  end
+  if type(on_stale) == "table" and on_stale.producer ~= nil and on_stale.producer ~= defer.producer then
+    table.insert(errors, state .. ": child_workflow_wait defer watchdog.on_stale producer must match defer.producer")
+  end
+  if type(signal) ~= "table" then
+    table.insert(errors, state .. ": child_workflow_wait defer must declare liveness_contract.signal")
+    return
+  end
+  local resolver = signal.resolver or signal.family
+  if signal.family ~= "state" or resolver ~= "child-state" or signal.producer ~= defer.producer then
+    table.insert(errors, state .. ": child_workflow_wait defer signal must resolve the PR child state marker")
+  end
+  if signal.surface ~= "pr-comment-stream" then
+    table.insert(errors, state .. ": child_workflow_wait defer signal must use pr-comment-stream")
+  end
+  local binding = type(M.liveness_signal_producer_contract) == "function"
+    and M.liveness_signal_producer_contract(signal.producer)
+    or nil
+  if type(binding) ~= "table" or binding.resolver ~= "child-state" then
+    table.insert(errors, state .. ": child_workflow_wait defer producer must bind the child-state resolver")
+  end
+end
+
 local function validate_defer(row, source, errors)
   local state = state_name(row)
   local defer = row and row.defer or nil
@@ -307,7 +388,11 @@ local function validate_defer(row, source, errors)
     validate_codex_run_defer(row, errors)
     return
   end
-  table.insert(errors, state .. ": live-defer defer.kind must be release_gate, heartbeat, or codex_run")
+  if defer.kind == "child_workflow_wait" then
+    validate_child_workflow_wait_defer(row, errors)
+    return
+  end
+  table.insert(errors, state .. ": live-defer defer.kind must be release_gate, heartbeat, codex_run, or child_workflow_wait")
 end
 
 local function validate_row(row, errors)
@@ -363,6 +448,8 @@ local function validate_runtime_provenance(row, errors)
   elseif row.actionable_epoch.source == "live_defer_heartbeat:v1" then
     now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   elseif row.actionable_epoch.source == "codex_run:v1" then
+    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+  elseif row.actionable_epoch.source == "child_workflow_wait:v1" then
     now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   end
   local ok, eval = pcall(M.actionable_epoch_resolve, row, {

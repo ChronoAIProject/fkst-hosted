@@ -148,6 +148,24 @@ function M.pr_link_marker_template(proposal_id, branch, impl_version, base_branc
     .. '" -->'
 end
 
+function M.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, version, delegation)
+  if not M._is_positive_pr_number(pr_number) then
+    error("github-devloop: invalid pr-delegation pr number")
+  end
+  if not M._is_bounded_string(issue_proposal_id, M._max_key_len)
+    or not M._is_bounded_string(pr_proposal_id, M._max_key_len)
+    or not M._is_bounded_string(version, M._max_dedup_len)
+    or not M._is_path_safe_key(delegation, M._max_dedup_len) then
+    error("github-devloop: invalid pr-delegation marker")
+  end
+  return '<!-- fkst:github-devloop:pr-delegation:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" pr_proposal="' .. tostring(pr_proposal_id)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" version="' .. tostring(version)
+    .. '" delegation="' .. tostring(delegation)
+    .. '" -->'
+end
+
 function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch)
   if not M._is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")

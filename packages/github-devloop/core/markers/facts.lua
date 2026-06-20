@@ -587,6 +587,41 @@ function M.pr_link_fact(comments, proposal_id)
   return nil
 end
 
+function M.pr_delegation_fact(comments, proposal_id, version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-delegation:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_pr_proposal = marker:match('pr_proposal="([^"]+)"')
+      local marker_pr = marker:match('pr="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      local marker_delegation = marker:match('delegation="([^"]*)"')
+      local _, pr_number = M.parse_pr_proposal_id(marker_pr_proposal)
+      if marker_proposal == tostring(proposal_id)
+        and (version == nil or marker_version == tostring(version))
+        and pr_number ~= nil
+        and tostring(pr_number) == tostring(marker_pr)
+        and M._is_positive_pr_number(marker_pr)
+        and M._is_bounded_string(marker_version, M._max_dedup_len)
+        and M._is_path_safe_key(marker_delegation, M._max_dedup_len) then
+        return {
+          proposal_id = marker_proposal,
+          pr_proposal_id = marker_pr_proposal,
+          pr_proposal = marker_pr_proposal,
+          pr_number = tonumber(marker_pr),
+          version = marker_version,
+          delegation = marker_delegation,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
 function M.pr_origin_fact(comments)
   if type(comments) ~= "table" then
     return nil

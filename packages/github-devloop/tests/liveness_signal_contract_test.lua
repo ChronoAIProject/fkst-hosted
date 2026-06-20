@@ -37,6 +37,9 @@ return {
     t.eq(by_state.dependency_wait.liveness_contract.signal.version_form, "raw")
     t.eq(by_state.implementing.liveness_contract.signal.surface, "issue-comment-stream")
     t.eq(by_state.implementing.liveness_contract.signal.version_form, "raw")
+    t.eq(by_state["awaiting-pr"].liveness_contract.signal.surface, "pr-comment-stream")
+    t.eq(by_state["awaiting-pr"].liveness_contract.signal.version_form, "raw")
+    t.eq(by_state["awaiting-pr"].liveness_contract.signal.resolver, "child-state")
     t.eq(by_state.reviewing.liveness_contract.signal.surface, "pr-comment-stream")
     t.eq(by_state.reviewing.liveness_contract.signal.version_form, "safe_version_segment")
   end,

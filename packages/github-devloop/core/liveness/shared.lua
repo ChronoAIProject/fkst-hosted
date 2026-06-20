@@ -81,6 +81,9 @@ local liveness_resolver_families = {
   ["review-converge-round"] = {
     ["review-converge-round"] = true,
   },
+  ["child-state"] = {
+    state = true,
+  },
 }
 shared.liveness_resolver_families = liveness_resolver_families
 
