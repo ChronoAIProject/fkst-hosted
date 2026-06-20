@@ -3,4 +3,3 @@ packages/github-devloop/departments/rollup_scan/main.lua
 packages/github-devloop/departments/substrate_ref_scan/main.lua
 packages/github-devloop/departments/sync_conflict/main.lua
 packages/github-devloop/departments/sync_scan/main.lua
-packages/github-proxy/departments/github_pr_open/main.lua
