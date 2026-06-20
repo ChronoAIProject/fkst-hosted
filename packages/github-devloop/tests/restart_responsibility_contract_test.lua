@@ -134,6 +134,7 @@ return {
     t.eq(core.responsibility_contract_inventory_is_listed_violation("merge-ready", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("reviewing", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("implementing", strict), false)
+    t.eq(core.responsibility_contract_inventory_is_listed_violation("awaiting-pr", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("fixing", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("pr-open", strict), false)
     t.eq(core.responsibility_contract_inventory_is_listed_violation("merging", strict), false)
@@ -141,7 +142,7 @@ return {
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    for _, state in ipairs({ "thinking", "dependency_wait", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing", "blocked" }) do
+    for _, state in ipairs({ "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "pr-open", "reviewing", "review-meta", "merge-ready", "merging", "fixing", "blocked" }) do
       local errors = core.strict_restart_responsibility_contract_errors({ by_state[state] })
       t.eq(#errors, 0, state .. ": " .. joined_errors(errors))
     end

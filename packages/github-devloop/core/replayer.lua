@@ -13,6 +13,7 @@ function M.restart_transition_row(state_name)
   return transition_row(state_name)
 end
 local marker_aliases = {
+  ["pr-delegation"] = { pr = "pr_number", pr_proposal = "pr_proposal_id" },
   ["pr-link"] = { pr = "pr_number" },
   ["review-result"] = { gap = "blocking_gap" },
   ["merge-gate"] = { review_proposal = "review_proposal_id", review_dedup = "review_dedup_key", head_sha = "reviewed_head_sha" },
@@ -23,6 +24,12 @@ local marker_aliases = {
 local function marker_source(facts, family)
   if family == "state" then
     return facts.state
+  end
+  if family == "pr-delegation" then
+    return facts["pr-delegation"] or facts.pr_delegation
+  end
+  if family == "child-state" then
+    return facts.child_state
   end
   if family == "pr-link" then
     return facts.link
@@ -153,6 +160,12 @@ local function require_marker_fact(facts, family)
   end
   if family == "pr-link" then
     return facts.link or M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
+  end
+  if family == "pr-delegation" then
+    return nil
+  end
+  if family == "child-state" then
+    return facts.child_state
   end
   if family == "converge-round" then
     local base_version = M.version_loop_round(facts.state.version) > 0 and M.converge_base_version(facts.state.version) or nil
@@ -482,6 +495,10 @@ local function replay_impl_failed(dept, issue, state, row, facts)
   })
 end
 
+local function replay_awaiting_pr(dept, _issue, state, row, facts)
+  return log_skip(dept, facts.proposal_id, state, row.from_state, row.driving_queue, "skip-pending(boundary-unwired)", "awaiting-pr delegation return handling is declared but not wired in Step 1A")
+end
+
 local function replay_fixing_to_reviewing(dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)
   local intended_head_sha = M.current_branch_head_sha(link.branch)
   if intended_head_sha == nil then
@@ -805,6 +822,7 @@ local replayers = {
   dependency_wait = M.replay_dependency_wait_state,
   ready = M.replay_ready_state,
   implementing = replay_implementing,
+  ["awaiting-pr"] = replay_awaiting_pr,
   ["impl-failed"] = replay_impl_failed,
   fixing = replay_fixing,
   ["review-meta"] = replay_review_meta,

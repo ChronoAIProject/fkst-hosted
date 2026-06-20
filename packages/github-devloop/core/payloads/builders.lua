@@ -143,6 +143,24 @@ function M.build_devloop_open_pr_payload(repo, issue_number, ready, branch, head
   }
 end
 
+function M.build_devloop_pr_terminal_payload(issue_proposal_id, pr_number, version, child_state, source_ref)
+  return {
+    schema = "github-devloop.pr-terminal.v1",
+    proposal_id = issue_proposal_id,
+    pr_number = pr_number,
+    version = version,
+    child_state = child_state,
+    dedup_key = M._dedup_key({
+      "pr-terminal",
+      tostring(issue_proposal_id),
+      tostring(version),
+      tostring(pr_number),
+      tostring(child_state),
+    }),
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+end
+
 function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
   local version = origin.impl_version
   if review_fact.fix_version ~= nil then

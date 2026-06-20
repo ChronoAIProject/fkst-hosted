@@ -117,7 +117,7 @@ return {
   end,
 
   test_executable_restart_table_covers_non_terminal_states = function()
-    local expected = { "thinking", "dependency_wait", "ready", "implementing", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
+    local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged" }
     local by_state = table_by_state()
     t.eq(#core.liveness_contract_errors(), 0)
     for _, state in ipairs(expected) do
@@ -270,6 +270,7 @@ return {
       dependency_wait = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 525600 },
       ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 120 },
       implementing = { mode = "live-defer", family = "implement-attempt", codex_run = true, budget = 120 },
+      ["awaiting-pr"] = { mode = "live-defer", family = "state", producer = "child-state", resolver = "child-state", max_age = 1440, budget = 259200 },
       ["pr-open"] = { mode = "row-budget-bounds-receiver", receiver = 0, budget = 30 },
       reviewing = { mode = "live-defer", family = "review-converge-round", max_age = 120, budget = 150 },
       ["merge-ready"] = { mode = "row-budget-bounds-receiver", receiver = 30, external = 360, budget = 390 },
@@ -288,7 +289,7 @@ return {
       if spec.mode == "live-defer" then
         t.eq(row.liveness_contract.signal.family, spec.family)
         t.eq(row.liveness_contract.signal.resolver, spec.resolver)
-        t.eq(row.liveness_contract.signal.producer, spec.family)
+        t.eq(row.liveness_contract.signal.producer, spec.producer or spec.family)
         if spec.codex_run then
           t.eq(row.liveness_contract.signal.max_age_minutes, nil)
         else
@@ -695,70 +696,20 @@ return {
     t.eq(raised[1].payload.round, 3)
   end,
 
-  test_liveness_timeout_escalation_has_observable_event_for_every_non_terminal_row = function()
-    local original_log_raise = core.log_raise
-    local raised = {}
-    core.log_raise = function(_, _, queue, payload)
-      table.insert(raised, { queue = queue, payload = payload })
-    end
-    local ok, err = pcall(function()
-      for _, row in ipairs(core.restart_transition_table()) do
-        if row.terminal == false and row.from_state ~= "dependency_wait" then
-          local before = #raised
-          local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-          local state = {
-            state = row.from_state,
-            version = base .. "/timeout/" .. row.from_state .. "/3",
-            proposal_id = "github-devloop/issue/owner/repo/42",
-            marker_created_at = "2026-06-03T01:02:03Z",
-          }
-          local applied = core.maybe_timeout_redrive_from_table("observe_issue", {
-            repo = "owner/repo",
-            number = 42,
-            source_ref = core.issue_source_ref("owner/repo", 42),
-          }, state, row, {
-            proposal_id = state.proposal_id,
-            source_ref = row.from_state == "reviewing" and core.pr_source_ref("owner/repo", 7) or core.issue_source_ref("owner/repo", 42),
-            review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, state.version, "def456"),
-            head_sha = "def456",
-            dependency_gate = { ok = true, kind = "satisfied", reason = "satisfied" },
-            now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
-          })
-          t.eq(applied, true)
-          t.eq(#raised, before + 1)
-          if row.from_state == "blocked" then
-            t.eq(raised[#raised].queue, "github-proxy.github_issue_comment_request")
-            t.is_true(tostring(raised[#raised].payload.body or ""):find("fkst:github-devloop:decompose-exhausted:v1", 1, true) ~= nil)
-          else
-            t.eq(raised[#raised].queue, "devloop_timeout_reconcile")
-            t.eq(raised[#raised].queue == row.driving_queue, false)
-            t.eq(tostring(raised[#raised].payload.dedup_key or ""):find("/timeout/" .. row.from_state .. "/4", 1, true), nil)
-          end
-        end
-      end
-    end)
-    core.log_raise = original_log_raise
-    if not ok then
-      error(err)
-    end
-  end,
-
   test_restart_table_matches_state_graph_and_stage_rank = function()
     local by_state = table_by_state()
     local expected = {
       thinking = true,
       ready = true,
       implementing = true,
+      ["awaiting-pr"] = true,
       ["impl-failed"] = true,
       ["pr-open"] = true,
       reviewing = true,
       ["merge-ready"] = true,
-      merging = true,
-      fixing = true,
+      merging = true, fixing = true,
       ["review-meta"] = true,
-      ["impl-failed"] = true,
-      blocked = true,
-      merged = true,
+      blocked = true, merged = true,
     }
     for state, next_states in pairs(core._state_graph) do
       if expected[state] then

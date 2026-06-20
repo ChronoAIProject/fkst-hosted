@@ -42,7 +42,7 @@ return {
     local pr_states = contract.pr_phase_states()
     local pr_terminals = contract.pr_terminal_states()
     t.eq(has_value(issue_states, "implementing"), true)
-    t.eq(has_value(issue_states, "awaiting-pr"), false)
+    t.eq(has_value(issue_states, "awaiting-pr"), true)
     t.eq(has_value(pr_states, "merge-ready"), true)
     t.eq(has_value(pr_terminals, "closed-unmerged"), true)
     for _, issue_state in ipairs(issue_states) do
@@ -107,5 +107,20 @@ return {
     -- runner has no pending/xfail support, so Step 0 asserts the current behavior.
     local current = core.current_state(comments, proposal_id)
     t.eq(current.state, "merge-ready")
+  end,
+
+  test_pr_delegation_marker_shape_is_declared = function()
+    local marker_text = core.pr_delegation_marker(
+      proposal_id,
+      "github-devloop/pr/owner/repo/7",
+      7,
+      "2026-06-03T01-02-03Z",
+      "delegate-owner-repo-7"
+    )
+    t.is_true(marker_text:find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
+    t.is_true(marker_text:find('proposal="' .. proposal_id .. '"', 1, true) ~= nil)
+    t.is_true(marker_text:find('pr_proposal="github-devloop/pr/owner/repo/7"', 1, true) ~= nil)
+    t.is_true(marker_text:find('pr="7"', 1, true) ~= nil)
+    t.eq(core.restart_durable_marker_fields()["pr-delegation"].pr_proposal, true)
   end,
 }

@@ -95,6 +95,7 @@
 {"path":"packages/github-devloop/core/restart.lua","owner":"shared","reason":"loads the current flat restart table."}
 {"path":"packages/github-devloop/core/restart/actionable_epoch.lua","owner":"shared","reason":"derives actionable epochs for restart rows."}
 {"path":"packages/github-devloop/core/restart/liveness_contract.lua","owner":"shared","reason":"validates restart liveness contracts."}
+{"path":"packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua","owner":"shared","reason":"observes child PR state liveness for parent wait boundaries."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua","owner":"issue","reason":"produces issue consensus liveness signals."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua","owner":"issue","reason":"produces issue dependency-wait liveness signals."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/implement_attempt.lua","owner":"issue","reason":"produces implementation liveness signals."}
@@ -120,6 +121,7 @@
 {"path":"packages/github-devloop/core/restart/marker_fields/merge_ready.lua","owner":"pr","reason":"declares PR merge-ready marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/merged.lua","owner":"shared","reason":"declares current shared merged terminal marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/merging.lua","owner":"pr","reason":"declares PR merging marker fields."}
+{"path":"packages/github-devloop/core/restart/marker_fields/pr_delegation.lua","owner":"issue","reason":"declares parent issue to child PR delegation marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/pr_link.lua","owner":"issue","reason":"declares issue-to-PR link marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_carry_over.lua","owner":"pr","reason":"declares PR review carry-over marker fields."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_converge_round.lua","owner":"pr","reason":"declares PR review convergence marker fields."}
@@ -130,6 +132,7 @@
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/fixing.lua","owner":"pr","reason":"declares required PR fixing replay fields."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/index.lua","owner":"shared","reason":"indexes replay payload field contracts."}
 {"path":"packages/github-devloop/core/restart/responsibility_contract.lua","owner":"shared","reason":"validates restart responsibility signatures."}
+{"path":"packages/github-devloop/core/restart/transitions/awaiting_pr.lua","owner":"issue","reason":"transition row belongs to the parent issue wait boundary."}
 {"path":"packages/github-devloop/core/restart/transitions/blocked.lua","owner":"issue","reason":"transition row belongs to the issue saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/dependency_wait.lua","owner":"issue","reason":"transition row belongs to the issue saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/fixing.lua","owner":"pr","reason":"transition row belongs to the PR saga authority."}
