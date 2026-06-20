@@ -1,0 +1,43 @@
+# Codecov configuration for fkst-packages.
+#
+# Coverage on Codecov is VISUALIZATION, not a merge gate. The canonical
+# fkst.lua.coverage.v1 artifact and the migration/coverage-uncovered ratchet
+# (scripts/check_repo_coverage.py) remain the enforcement authority, and merge
+# authority is the PR-diff review consensus -- never an external service. The
+# status checks below are informational so Codecov never blocks a merge,
+# consistent with the CI upload step's fail_ci_if_error: false.
+
+coverage:
+  precision: 2
+  round: down
+  range: "50...100"
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default
+  require_changes: false
+
+# The CI upload tags the report with --flag lua; map that flag to the production
+# Lua sources it covers.
+flags:
+  lua:
+    paths:
+      - packages/
+      - std/
+    carryforward: true
+
+# Defensive restatement of scripts/check_repo_coverage.py is_production_lua_path:
+# the converter already emits only production Lua, but these globs keep Codecov
+# from ever counting tests/fakes/helpers if a future report widens.
+ignore:
+  - "**/tests/**"
+  - "**/*_test.lua"
+  - "**/*_fake.lua"
+  - "**/*_helpers.lua"
