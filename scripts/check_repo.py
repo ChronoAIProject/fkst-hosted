@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_content_truncation, check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head, check_repo_span, ratchet_base
+import check_repo_content_truncation, check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_perm, check_repo_saga_head, check_repo_saga_split, check_repo_span, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -981,6 +981,7 @@ def main() -> int:
     for message in check_repo_content_truncation.repository_messages(root, packages_root(root), read_text, rel): add(violations, "G-CONTENT-TRUNCATION", message)
     for message in check_repo_coverage.repository_messages(root): add(violations, "G-COVERAGE", message)
     for message in check_repo_forward_direct.repository_messages(root): add(violations, "G-FORWARD-DIRECT", message)
+    for message in check_repo_saga_split.repository_messages(root): add(violations, "G-SAGA-SPLIT", message)
     for message in check_repo_span.repository_messages(root): add(violations, "G-SPAN", message)
     check_saga_handler_ratchet(root, violations, warnings)
     sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}

@@ -14,6 +14,8 @@ MARKER_GATED_QUEUES = {
     "devloop_fixing",
     "devloop_merge_ready",
     "devloop_open_pr",
+    "devloop_pr_open",
+    "devloop_pr_terminal",
     "devloop_reconcile",
 }
 REDRIVE_PATHS = {

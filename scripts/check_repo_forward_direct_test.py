@@ -43,6 +43,23 @@ class ForwardDirectRatchetTest(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("FORWARD-direct raise not in migration/forward-direct-raise.allowlist", messages[0])
 
+    def test_future_pr_boundary_queues_are_marker_gated(self) -> None:
+        sites = forward.source_sites(
+            "packages/github-devloop/departments/implement/main.lua",
+            'function pipeline(event)\n  core.log_raise("implement", id, "devloop_pr_open", payload)\nend\n',
+        )
+        messages = forward.ratchet_messages(sites, set())
+        self.assertEqual(len(messages), 1)
+        self.assertIn("devloop_pr_open", messages[0])
+
+        terminal_sites = forward.source_sites(
+            "packages/github-devloop/departments/merge/main.lua",
+            'function pipeline(event)\n  raise("devloop_pr_terminal", payload)\nend\n',
+        )
+        terminal_messages = forward.ratchet_messages(terminal_sites, set())
+        self.assertEqual(len(terminal_messages), 1)
+        self.assertIn("devloop_pr_terminal", terminal_messages[0])
+
     def test_stale_allowlist_site_fails(self) -> None:
         site = forward.ForwardDirectSite(
             "packages/github-devloop/departments/review_result/main.lua",
