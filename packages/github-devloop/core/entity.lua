@@ -94,6 +94,21 @@ function M.current_linked_entity_state(repo, proposal_id, issue_comments)
   return M.current_entity_state(snapshot.comments, proposal_id)
 end
 
+function M.issue_authoritative_linked_state(issue_state, linked_state)
+  if issue_state ~= nil
+    and issue_state.state == "pr-open"
+    and linked_state ~= nil
+    and linked_state.state == "reviewing"
+    and M.strip_transition_version_suffixes(linked_state.version) == M.strip_transition_version_suffixes(issue_state.version) then
+    return linked_state
+  end
+  return issue_state
+end
+
+function M.linked_snapshot_issue_state(snapshot, issue_state)
+  return M.issue_authoritative_linked_state(issue_state, snapshot and snapshot.state)
+end
+
 function M.linked_entity_snapshot(repo, proposal_id, issue_comments, opts)
   local options = opts or {}
   local snapshot = {

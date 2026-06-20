@@ -198,7 +198,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     core.log_cas_decision("liveness_scan", proposal_id, issue_state, "tick", "observe", "liveness-deadline-deferred:" .. tostring(snapshot.defer_reason or "linked-surface"), "linked PR surface is not cached for this sweep")
     return false
   end
-  local state = snapshot.state
+  local state = core.linked_snapshot_issue_state(snapshot, issue_state)
   if not should_reinject_state(proposal_id, state) then
     return false
   end
