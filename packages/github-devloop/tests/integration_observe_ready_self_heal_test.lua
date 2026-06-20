@@ -100,9 +100,15 @@ local function assert_merged_terminal(result)
   t.is_true(comment ~= nil)
   t.is_true(tostring(comment.payload.body):find('state="merged"', 1, true) ~= nil)
   t.is_true(tostring(comment.payload.body):find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
-  local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
-  t.is_true(label ~= nil)
-  t.eq(label.payload.add_labels[1], "fkst-dev:merged")
+  local merged_label = nil
+  for _, raise in ipairs(result.raises or {}) do
+    if raise.queue == "github-proxy.github_issue_label_request"
+      and has_value(raise.payload.add_labels, "fkst-dev:merged") then
+      merged_label = raise
+      break
+    end
+  end
+  t.is_true(merged_label ~= nil)
 end
 
 local function fresh_thinking_marker(proposal_id, version)

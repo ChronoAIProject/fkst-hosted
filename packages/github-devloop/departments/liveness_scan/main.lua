@@ -119,7 +119,7 @@ local function issue_entity(repo, issue_number)
   }
 end
 
-local function issue_state_needs_linked_surface(state_name)
+local function issue_state_needs_pr_surface(state_name)
   return state_name == "pr-open"
     or state_name == "reviewing"
     or state_name == "fixing"
@@ -191,14 +191,15 @@ local function should_reinject_issue(repo, issue, limits, deadline)
   end
 
   local issue_state = core.current_entity_state(current.comments, proposal_id)
-  local snapshot = issue_state_needs_linked_surface(issue_state and issue_state.state)
-    and core.linked_entity_snapshot(repo, proposal_id, current.comments, { cache_only = true })
+  local snapshot = issue_state_needs_pr_surface(issue_state and issue_state.state)
+    and core.linked_pr_surface_snapshot(repo, proposal_id, current.comments, { cache_only = true })
     or { comments = current.comments or {}, prs = {}, absent_prs = {}, state = issue_state }
   if snapshot.deferred == true then
     core.log_cas_decision("liveness_scan", proposal_id, issue_state, "tick", "observe", "liveness-deadline-deferred:" .. tostring(snapshot.defer_reason or "linked-surface"), "linked PR surface is not cached for this sweep")
     return false
   end
-  local state = core.linked_snapshot_issue_state(snapshot, issue_state)
+  snapshot.state = issue_state
+  local state = issue_state
   if not should_reinject_state(proposal_id, state) then
     return false
   end

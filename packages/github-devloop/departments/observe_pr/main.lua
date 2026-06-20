@@ -94,17 +94,6 @@ local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source
   maybe_pr_label_hint(origin, pr_number, current_pr, state, pr_source_ref_value)
 end
 
-local function issue_comments_for_origin(origin)
-  if origin.issue_number == nil then
-    return nil
-  end
-  local issue_view = core.gh_issue_view_result(origin.repo, origin.issue_number, 30)
-  if issue_view.exit_code ~= 0 then
-    error("github-devloop: gh issue result view failed: " .. tostring(issue_view.stderr))
-  end
-  return core.parse_issue_view_result(issue_view.stdout).comments
-end
-
 local function issue_reviewing_for_origin(origin)
   if origin.issue_number == nil then
     return nil
@@ -123,25 +112,24 @@ local function issue_claim_for_origin(origin)
   return core.read_current_issue_ownership(origin.repo, origin.issue_number)
 end
 
-local function raise_current_state(origin, pr_number, current_pr, state, source_ref, known_issue)
-  local issue_comments = known_issue and known_issue.comments or nil
-  if issue_comments == nil and state.state == "fixing" then
-    issue_comments = issue_comments_for_origin(origin)
-  end
+local function replay_pr_local_state(origin, pr_number, current_pr, state, source_ref)
   if state.state == "blocked" and core.decomposed_fact(current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
     return false
   end
-  local issue_source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref
   return core.replay_from_table("observe_pr", {
     repo = origin.repo,
     number = origin.issue_number,
-    source_ref = issue_source_ref,
-    _replay_issue_comments = issue_comments,
+    source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref,
   }, state, core.restart_transition_row(state.state), {
     proposal_id = origin.proposal_id,
-    current = { comments = issue_comments or {} },
+    current = { comments = current_pr.comments or {} },
     current_pr = current_pr,
+    snapshot = {
+      comments = current_pr.comments or {},
+      prs = { { number = pr_number, current = current_pr } },
+      state = state,
+    },
     link = {
       proposal_id = origin.proposal_id,
       pr_number = pr_number,
@@ -150,6 +138,7 @@ local function raise_current_state(origin, pr_number, current_pr, state, source_
       base_branch = origin.base_branch,
     },
     source_ref = source_ref,
+    feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version),
   })
 end
 
@@ -483,13 +472,11 @@ local function process_pr_event(event)
       if issue_current == nil or issue_current.comments == nil then
         issue_current = issue_reviewing_for_origin(origin)
       end
-      local issue_comments = issue_current and issue_current.comments or issue_comments_for_origin(origin)
+      local issue_comments = issue_current and issue_current.comments or {}
       local issue_state = core.current_entity_state(issue_comments, origin.proposal_id)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
-        if raise_current_state(origin, pr.number, current_pr, issue_state, source_ref, { comments = issue_comments }) then
-          maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)
-        end
+        maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)
         return
       end
     end
@@ -507,8 +494,8 @@ local function process_pr_event(event)
       end
       local replay_state = state
       core.log_cas_decision("observe_pr", origin.proposal_id, state, "reviewing", state.state, "skip-idempotent(already at to_state)", state.state .. " marker visible on PR")
-      local raised_current_state = raise_current_state(origin, pr.number, current_pr, replay_state, source_ref, issue_current)
-      if raised_current_state then
+      local replayed = replay_pr_local_state(origin, pr.number, current_pr, replay_state, source_ref)
+      if replayed then
         maybe_label_hints(origin, pr.number, current_pr, replay_state, source_ref)
       elseif replay_state.state == "blocked" or replay_state.state == "merged" then
         maybe_pr_label_hint(origin, pr.number, current_pr, replay_state, source_ref)
@@ -526,7 +513,7 @@ local function process_pr_event(event)
       return
     end
     if state.state == "pr-open" and tostring(current_pr.state or ""):lower() ~= "open" then
-      if raise_current_state(origin, pr.number, current_pr, state, source_ref, issue_current) then
+      if replay_pr_local_state(origin, pr.number, current_pr, state, source_ref) then
         maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
       end
       return

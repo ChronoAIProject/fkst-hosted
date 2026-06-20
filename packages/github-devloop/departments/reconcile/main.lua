@@ -109,7 +109,7 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   return "state-output-obligation-timeout"
 end
 
-local function timeout_reconcile_needs_linked_surface(state_name)
+local function timeout_reconcile_needs_pr_surface(state_name)
   return state_name == "pr-open"
     or state_name == "reviewing"
     or state_name == "fixing"
@@ -131,8 +131,8 @@ local function load_timeout_issue_surface(repo, issue_number, proposal_id, state
   end
   local current_issue = core.parse_issue_view_loop(view.stdout)
   local issue_state = core.current_entity_state(current_issue.comments, proposal_id)
-  if timeout_reconcile_needs_linked_surface(state_name) then
-    local snapshot = core.linked_entity_snapshot(repo, proposal_id, current_issue.comments)
+  if timeout_reconcile_needs_pr_surface(state_name) then
+    local snapshot = core.linked_pr_surface_snapshot(repo, proposal_id, current_issue.comments)
     local current_pr = nil
     local link = core.pr_link_fact(snapshot.comments, proposal_id)
     if link ~= nil then
@@ -143,7 +143,7 @@ local function load_timeout_issue_surface(repo, issue_number, proposal_id, state
         end
       end
     end
-    snapshot.state = core.linked_snapshot_issue_state(snapshot, issue_state)
+    snapshot.state = issue_state
     return current_issue, current_pr, snapshot.comments, snapshot
   end
   return current_issue, nil, current_issue.comments, nil

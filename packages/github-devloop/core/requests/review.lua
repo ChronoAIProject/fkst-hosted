@@ -65,6 +65,25 @@ function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number
   return request
 end
 
+function M.build_operator_rereview_comment_request(repo, pr_number, proposal_id, new_version, command, source_ref)
+  local state_marker = M.state_marker(proposal_id, "reviewing", new_version)
+  local marker = M.operator_command_marker(command, "applied", "rereview")
+  return M.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = pr_number,
+  }, "github-devloop operator command accepted: rereview"
+    .. "\n\n" .. state_marker
+    .. "\n" .. marker
+    .. "\n" .. ai_sentinel, M._dedup_key({
+    "operator-command",
+    "comment",
+    tostring(command.key),
+    "applied",
+    tostring(new_version),
+  }), source_ref)
+end
+
 function M.pr_base_unmanaged_blocked_version(version)
   return tostring(version or "") .. "/blocked/pr-base-unmanaged"
 end

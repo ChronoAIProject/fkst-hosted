@@ -270,10 +270,10 @@ return {
     h.mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
+      core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", review_dedup_key, 1, "missing retry guard"),
     })
     mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
-      core.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", review_dedup_key, 1, "missing retry guard"),
     })
 
     local result = run_observe_pr(pr_event(), opts("review-v2-observe-pr-gap-self-heal"))

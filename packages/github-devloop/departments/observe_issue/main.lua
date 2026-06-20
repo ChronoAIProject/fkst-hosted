@@ -24,13 +24,12 @@ local spec = {
   stall_window = "30s",
 }
 
-local function issue_label_state(snapshot_state, issue_state)
+local function issue_label_state(issue_state)
   if issue_state ~= nil
-    and (issue_state.state == "blocked" or issue_state.state == "merged")
-    and tostring(issue_state.version or "") ~= tostring(snapshot_state and snapshot_state.version or "") then
+    and (issue_state.state == "blocked" or issue_state.state == "merged") then
     return issue_state
   end
-  return snapshot_state
+  return issue_state
 end
 
 local function linked_open_pr(snapshot, pr_number)
@@ -97,17 +96,15 @@ local function maybe_reconcile_issue_local_orphaned_pr(issue, proposal_id, curre
   return core.terminal_linked_pr_action("observe_issue", issue, issue_state, proposal_id, link, current_pr, facts)
 end
 
-local function issue_label_projection_state(snapshot_state, issue_state, link, snapshot)
+local function issue_label_projection_state(issue_state, link, snapshot)
   if issue_state ~= nil
     and issue_state.state == "pr-open"
-    and snapshot_state ~= nil
-    and snapshot_state.state == "pr-open"
     and link ~= nil
     and tostring(link.impl_version or "") == tostring(issue_state.version or "")
     and linked_open_pr(snapshot, link.pr_number) ~= nil then
     return issue_state
   end
-  return issue_label_state(snapshot_state, issue_state)
+  return issue_label_state(issue_state)
 end
 
 local function thinking_state_budget_exceeded(state)
@@ -532,9 +529,9 @@ local function process_issue_event(event)
         return
       end
     end
-    local snapshot = core.linked_entity_snapshot(issue.repo, proposal_id, current.comments)
+    local snapshot = core.linked_pr_surface_snapshot(issue.repo, proposal_id, current.comments)
     snapshot.fresh = true
-    local state = core.linked_snapshot_issue_state(snapshot, issue_state)
+    local state = issue_state
     local function maybe_canonicalize_legacy_pr_open_issue()
       if issue_state == nil or issue_state.state ~= "pr-open" then
         return false
@@ -599,7 +596,7 @@ local function process_issue_event(event)
       if maybe_canonicalize_legacy_pr_open_issue() then
         return
       end
-      local label_state = issue_label_projection_state(state, issue_state, link, snapshot)
+      local label_state = issue_label_projection_state(issue_state, link, snapshot)
       local add_labels, remove_labels = core.state_label_reconcile_changes(current.labels, label_state.state)
       if #add_labels > 0 or #remove_labels > 0 then
         local label_request = core.build_label_request(

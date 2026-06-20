@@ -322,12 +322,12 @@ local function advanced_fixing_fixture(extra)
     core.state_marker(event.proposal_id, "fixing", version),
     feedback,
   }
+  if extra and extra.reviewing_marker then
+    table.insert(comments, core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(version)))
+  end
   local issue_comments = {}
   for _, comment in ipairs(comments) do
     table.insert(issue_comments, comment)
-  end
-  if extra and extra.reviewing_marker then
-    table.insert(issue_comments, core.state_marker(event.proposal_id, "reviewing", core.next_fix_version(version)))
   end
   mock_bot_env()
   mock_pr_origin(comments, branch, current_head)
@@ -437,11 +437,13 @@ return {
   end,
 
   test_observe_pr_fixing_head_advanced_reviewing_marker_idempotent_skip = function()
-    advanced_fixing_fixture({ reviewing_marker = true })
+    local fixture = advanced_fixing_fixture({ reviewing_marker = true })
     local result = run_observe_pr_direct(opts("observe-pr-fixing-advanced-idempotent"))
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
+    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    t.eq(reviewing_raise.payload.version, core.next_fix_version(fixture.version) .. "/review-loop/1")
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment_raise.payload.body:find(core.state_marker(fixture.event.proposal_id, "reviewing", reviewing_raise.payload.version), 1, true) ~= nil)
   end,
 
   test_observe_pr_fixing_head_advanced_not_branch_head_stays_stale = function()

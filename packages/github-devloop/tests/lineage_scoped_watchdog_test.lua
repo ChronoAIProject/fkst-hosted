@@ -192,7 +192,7 @@ local function pr_reviewing_comments()
 end
 
 return {
-  test_issue_surface_watchdog_uses_linked_pr_state_before_timeout = function()
+  test_issue_surface_watchdog_uses_issue_state_for_liveness_activation = function()
     local run_opts = opts("lineage-watchdog-issue-surface-sees-pr-state")
     mock_repo()
     mock_issue_list()
@@ -204,12 +204,16 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_pr_view_fetches(), 0)
     t.eq(find_raise(result.raises, "devloop_timeout_reconcile"), nil)
-    t.eq(find_raise(result.raises, "devloop_reviewing"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
-    local changed = find_raise(result.raises, "github-proxy.github_entity_changed")
-    t.is_true(changed ~= nil)
-    t.eq(changed.payload.type, "issue")
+    local reviewing = find_raise(result.raises, "devloop_reviewing")
+    t.is_true(reviewing ~= nil)
+    t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
+    local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(attempt ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v1", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find('state="reviewing"', 1, true) == nil)
+    local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find('state="reviewing"', 1, true) ~= nil)
   end,
 
   test_issue_surface_watchdog_still_times_out_genuinely_stuck_pr_open = function()
@@ -274,7 +278,7 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
   end,
 
-  test_issue_targeted_timeout_reconcile_noops_when_pr_stream_advanced = function()
+  test_issue_targeted_timeout_reconcile_uses_issue_state_only_when_pr_stream_advanced = function()
     local timeout_version = version .. "/timeout/pr-open/3"
     local payload = core.build_devloop_timeout_reconcile_payload(
       core.restart_transition_row("pr-open"),
@@ -292,8 +296,11 @@ return {
 
     local result = run_timeout_reconcile(payload, "lineage-watchdog-reconcile-advanced-noop")
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
-    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find('state="blocked"', 1, true) ~= nil)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(label ~= nil)
   end,
 
   test_pr_gone_timeout_reconcile_falls_back_to_issue_surface_and_terminalizes = function()

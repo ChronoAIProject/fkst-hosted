@@ -124,7 +124,7 @@ local function maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, 
 end
 
 local function snapshot_from_issue_comments(repo, proposal_id, comments)
-  return M.linked_entity_snapshot(repo, proposal_id, comments or {})
+  return M.linked_pr_surface_snapshot(repo, proposal_id, comments or {})
 end
 
 local function validate_required_fact(required)
@@ -594,7 +594,7 @@ local function replay_fixing(dept, issue, state, row, facts)
     return log_skip(dept, proposal_id, state, "fixing", "fixing|reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
 
-  local feedback = M.fixing_replay_feedback_fact(facts.snapshot.comments, proposal_id, state.version)
+  local feedback = facts.feedback or M.fixing_replay_feedback_fact(facts.snapshot.comments, proposal_id, state.version)
   if feedback ~= nil then
     if feedback.review_proposal_id == nil or feedback.reviewed_head_sha == nil then
       return log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-foreign(fix-feedback-binding)", "trusted fix feedback marker lacks review binding")
@@ -603,7 +603,8 @@ local function replay_fixing(dept, issue, state, row, facts)
       return replay_fixing_to_reviewing(dept, issue, state, proposal_id, link, current_pr, feedback, facts.source_ref or M.pr_source_ref(issue.repo, link.pr_number))
     end
     local reviewing_version = M.next_fix_version(state.version)
-    if has_reviewing_marker_for_comments(facts.snapshot.comments, proposal_id, reviewing_version) then
+    if has_reviewing_marker_for_comments(facts.snapshot.comments, proposal_id, reviewing_version)
+      or has_reviewing_marker_for_comments(current_pr.comments, proposal_id, reviewing_version) then
       return log_skip(dept, proposal_id, state, "fixing", "reviewing", "skip-idempotent(reviewing marker already visible)", "reviewing state marker for fix is already visible")
     end
     local fields = resolve_payload_fields(row, state, {

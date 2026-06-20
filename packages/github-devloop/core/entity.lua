@@ -52,12 +52,6 @@ function M.current_entity_state(entity_comments, proposal_id)
   return M.current_state(entity_comments, proposal_id)
 end
 
-local function copy_comments(target, comments)
-  for _, comment in ipairs(comments or {}) do
-    table.insert(target, comment)
-  end
-end
-
 local function command_indicates_not_found(result)
   local stderr = tostring(result and result.stderr or ""):lower()
   return stderr:find("404", 1, true) ~= nil
@@ -89,36 +83,15 @@ local function linked_pr_numbers(issue_comments, proposal_id)
   return numbers
 end
 
-function M.current_linked_entity_state(repo, proposal_id, issue_comments)
-  local snapshot = M.linked_entity_snapshot(repo, proposal_id, issue_comments)
-  return M.current_entity_state(snapshot.comments, proposal_id)
-end
-
-function M.issue_authoritative_linked_state(issue_state, linked_state)
-  if issue_state ~= nil
-    and issue_state.state == "pr-open"
-    and linked_state ~= nil
-    and linked_state.state == "reviewing"
-    and M.strip_transition_version_suffixes(linked_state.version) == M.strip_transition_version_suffixes(issue_state.version) then
-    return linked_state
-  end
-  return issue_state
-end
-
-function M.linked_snapshot_issue_state(snapshot, issue_state)
-  return M.issue_authoritative_linked_state(issue_state, snapshot and snapshot.state)
-end
-
-function M.linked_entity_snapshot(repo, proposal_id, issue_comments, opts)
+function M.linked_pr_surface_snapshot(repo, proposal_id, issue_comments, opts)
   local options = opts or {}
   local snapshot = {
-    comments = {},
+    comments = issue_comments or {},
     prs = {},
     absent_prs = {},
     deferred = false,
     defer_reason = nil,
   }
-  copy_comments(snapshot.comments, issue_comments)
   for _, pr_number in ipairs(linked_pr_numbers(issue_comments, proposal_id)) do
     local pr_view
     if options.cache_only == true then
@@ -126,7 +99,6 @@ function M.linked_entity_snapshot(repo, proposal_id, issue_comments, opts)
       if pr_view == nil then
         snapshot.deferred = true
         snapshot.defer_reason = "pr-surface-not-cached"
-        snapshot.state = M.current_entity_state(snapshot.comments, proposal_id)
         return snapshot
       end
     else
@@ -147,10 +119,8 @@ function M.linked_entity_snapshot(repo, proposal_id, issue_comments, opts)
         number = pr_number,
         current = current_pr,
       })
-      copy_comments(snapshot.comments, current_pr.comments)
     end
   end
-  snapshot.state = M.current_entity_state(snapshot.comments, proposal_id)
   snapshot.fetch_before_compare = {
     ["pr-head"] = true,
   }

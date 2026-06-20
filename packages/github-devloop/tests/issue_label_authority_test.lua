@@ -90,8 +90,10 @@ return {
     end
 
     local observe_body = read_source("departments/observe_issue/main.lua")
-    t.is_true(observe_body:find("linked_entity_snapshot", 1, true) ~= nil)
-    t.is_true(observe_body:find("issue_label_projection_state(state, issue_state, link, snapshot)", 1, true) ~= nil)
+    t.is_true(observe_body:find("linked_entity_snapshot", 1, true) == nil)
+    t.is_true(observe_body:find("linked_snapshot_issue_state", 1, true) == nil)
+    t.is_true(observe_body:find("linked_pr_surface_snapshot", 1, true) ~= nil)
+    t.is_true(observe_body:find("issue_label_projection_state(issue_state, link, snapshot)", 1, true) ~= nil)
     t.is_true(observe_body:find('issue_state.state == "pr-open"', 1, true) ~= nil)
     t.is_true(observe_body:find("linked_open_pr(snapshot, link.pr_number)", 1, true) ~= nil)
     t.is_true(observe_body:find("state_label_reconcile_changes", 1, true) ~= nil)
