@@ -258,19 +258,36 @@ return {
   test_awaiting_pr_child_workflow_wait_defers_on_non_terminal_child_state = function()
     local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
     local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
+    local parent_proposal_id = "github-devloop/issue/owner/repo/1248"
+    local child_proposal_id = core.pr_proposal_id("owner/repo", 7)
+    local version = "ready/1248"
     local due, age = core.liveness_timeout_due_with_facts(row, {
       state = "awaiting-pr",
-      version = "ready/1248",
-      proposal_id = "github-devloop/issue/owner/repo/1248",
+      version = version,
+      proposal_id = parent_proposal_id,
       marker_created_at = "2026-06-03T09:45:00Z",
     }, {
-      proposal_id = "github-devloop/issue/owner/repo/1248",
+      proposal_id = parent_proposal_id,
+      current = {
+        comments = {
+          {
+            author_login = "fkst-test-bot",
+            created_at = "2026-06-03T09:45:00Z",
+            body = core.pr_delegation_marker(parent_proposal_id, child_proposal_id, 7, version, "delegate-owner-repo-7"),
+          },
+        },
+      },
       current_pr = {
         comments = {
           {
             author_login = "fkst-test-bot",
+            created_at = "2026-06-03T10:31:00Z",
+            body = core.state_marker(parent_proposal_id, "merged", version),
+          },
+          {
+            author_login = "fkst-test-bot",
             created_at = "2026-06-03T10:30:00Z",
-            body = core.state_marker("github-devloop/issue/owner/repo/1248", "reviewing", "ready/1248"),
+            body = core.state_marker(child_proposal_id, "reviewing", version),
           },
         },
       },
@@ -281,22 +298,39 @@ return {
 
   test_awaiting_pr_child_workflow_wait_actionable_on_terminal_child_state = function()
     local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
+    local parent_proposal_id = "github-devloop/issue/owner/repo/1248"
+    local child_proposal_id = core.pr_proposal_id("owner/repo", 7)
+    local version = "ready/1248"
     local facts = {
-      proposal_id = "github-devloop/issue/owner/repo/1248",
+      proposal_id = parent_proposal_id,
+      current = {
+        comments = {
+          {
+            author_login = "fkst-test-bot",
+            created_at = "2026-06-03T09:45:00Z",
+            body = core.pr_delegation_marker(parent_proposal_id, child_proposal_id, 7, version, "delegate-owner-repo-7"),
+          },
+        },
+      },
       current_pr = {
         comments = {
           {
             author_login = "fkst-test-bot",
+            created_at = "2026-06-03T10:31:00Z",
+            body = core.state_marker(parent_proposal_id, "reviewing", version),
+          },
+          {
+            author_login = "fkst-test-bot",
             created_at = "2026-06-03T10:30:00Z",
-            body = core.state_marker("github-devloop/issue/owner/repo/1248", "merged", "ready/1248"),
+            body = core.state_marker(child_proposal_id, "merged", version),
           },
         },
       },
     }
     local eval = core.actionable_epoch_resolve(row, {
       state = "awaiting-pr",
-      version = "ready/1248",
-      proposal_id = "github-devloop/issue/owner/repo/1248",
+      version = version,
+      proposal_id = parent_proposal_id,
       marker_created_at = "2026-06-03T09:45:00Z",
     }, facts, core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z"))
     t.eq(eval.status, "actionable")
