@@ -17,40 +17,12 @@ local function require_repo(repo)
   return value
 end
 
-local function run_required(result, error_class)
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
-  end
-  return result
-end
-
 local function trim_stdout(result)
   return tostring(result.stdout or ""):gsub("%s+$", "")
 end
 
-local function fetch_branch(branch)
-  run_required(core.git_fetch_branch("origin", branch, 60), "rollup fetch")
-end
-
-local function fetch_branches(repo, branches)
-  core.with_repo_ref_store_lock(repo, function()
-    for _, branch in ipairs(branches) do
-      fetch_branch(branch)
-    end
-  end)
-end
-
-local function remote_head(branch)
-  local result = run_required(core.git_remote_branch_head("origin", branch, 30), "rollup remote head")
-  local head = trim_stdout(result)
-  if not core.is_safe_head_sha(head) then
-    error("github-devloop: unsafe rollup branch head")
-  end
-  return head
-end
-
 local function ahead_count(upstream, integration)
-  local result = run_required(core.git_ahead_count(upstream, integration, 30), "rollup ahead count")
+  local result = core.run_required(core.git_ahead_count(upstream, integration, 30), "rollup ahead count")
   local text = trim_stdout(result)
   local count = tonumber(text)
   if count == nil or count < 0 then
@@ -71,7 +43,7 @@ local function has_content_diff(upstream, integration)
 end
 
 local function list_open_pr(repo, integration, upstream)
-  local listed = run_required(core.gh_pr_list_head_base(repo, integration, upstream, 30), "rollup PR list")
+  local listed = core.run_required(core.gh_pr_list_head_base(repo, integration, upstream, 30), "rollup PR list")
   local prs = core.parse_pr_list_head_base(listed.stdout)
   if #prs == 0 then
     return nil
@@ -80,7 +52,7 @@ local function list_open_pr(repo, integration, upstream)
 end
 
 local function fetch_rollup_pr(repo, pr_number)
-  local viewed = run_required(core.gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
+  local viewed = core.run_required(core.gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
   local pr = core.parse_pr_view_merge(viewed.stdout)
   pr.number = tonumber(pr_number)
   return pr
@@ -124,7 +96,7 @@ function pipeline(event)
   end
 
   with_lock(core.rollup_lock_key(repo, branches.upstream, branches.integration), function()
-    fetch_branches(repo, { branches.upstream, branches.integration })
+    core.fetch_branches(repo, { branches.upstream, branches.integration }, "rollup fetch")
     local ahead = ahead_count(branches.upstream, branches.integration)
     if ahead == 0 then
       core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(not-ahead)", "integration is not ahead of upstream")
@@ -148,7 +120,7 @@ function pipeline(event)
         })
         return
       end
-      integration_head = remote_head(branches.integration)
+      integration_head = core.remote_head(branches.integration, "rollup remote head", "unsafe rollup branch head")
       local created = create_rollup_pr(
         repo,
         branches.upstream,
@@ -167,7 +139,7 @@ function pipeline(event)
       end
     end
 
-    integration_head = integration_head or remote_head(branches.integration)
+    integration_head = integration_head or core.remote_head(branches.integration, "rollup remote head", "unsafe rollup branch head")
     core.observe_rollup_health(
       repo,
       branches.upstream,

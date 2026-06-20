@@ -17,54 +17,8 @@ local function require_repo(repo)
   return value
 end
 
-local function run_required(result, error_class)
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
-  end
-  return result
-end
-
-local function require_git_ok(result, error_class)
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
-  end
-  return result
-end
-
 local function trim_stdout(result)
   return tostring(result.stdout or ""):gsub("%s+$", "")
-end
-
-local function fetch_branch(branch)
-  run_required(core.git_fetch_branch("origin", branch, 60), "branch fetch")
-end
-
-local function fetch_branches(repo, branches)
-  core.with_repo_ref_store_lock(repo, function()
-    for _, branch in ipairs(branches) do
-      fetch_branch(branch)
-    end
-  end)
-end
-
-local function remote_head(branch)
-  local result = run_required(core.git_remote_branch_head("origin", branch, 30), "remote branch head")
-  local head = trim_stdout(result)
-  if not core.is_safe_head_sha(head) then
-    error("github-devloop: unsafe remote branch head")
-  end
-  return head
-end
-
-local function is_ancestor(ancestor_sha, descendant_sha)
-  local result = core.git_is_ancestor(ancestor_sha, descendant_sha, 30)
-  if result.exit_code == 0 then
-    return true
-  end
-  if result.exit_code == 1 then
-    return false
-  end
-  error("github-devloop: ancestor check failed: " .. tostring(result.stderr))
 end
 
 local function trees_equal(sha_a, sha_b)
@@ -76,11 +30,6 @@ local function trees_equal(sha_a, sha_b)
     return false
   end
   error("github-devloop: tree compare failed: " .. tostring(result.stderr))
-end
-
-local function runtime_root()
-  local result = run_required(exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
-  return result.stdout
 end
 
 local function cleanup_worktree(worktree)
@@ -99,8 +48,8 @@ end
 local function with_temp_worktree(runtime, repo, upstream, integration, integration_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, upstream, integration, integration_sha)
   local plan = core.git_worktree_add_detached_plan(worktree, integration_sha)
-  run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
-  require_git_ok(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
+  core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
+  core.run_required(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -113,7 +62,7 @@ end
 local function write_sync_commit(worktree, runtime, repo, upstream, integration, upstream_sha, integration_sha, result)
   local message_file = core.branch_sync_message_file(runtime, repo, upstream, integration, upstream_sha, integration_sha)
   file.write(message_file, core.sync_commit_message(repo, upstream, integration, upstream_sha, integration_sha, result))
-  require_git_ok(core.git_commit_message_file(worktree, message_file, 60), "sync commit")
+  core.run_required(core.git_commit_message_file(worktree, message_file, 60), "sync commit")
 end
 
 local function raise_conflict(repo, upstream, integration, upstream_sha, integration_sha)
@@ -145,8 +94,8 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branches(repo, { integration })
-  local rechecked_integration_sha = remote_head(integration)
+  core.fetch_branches(repo, { integration }, "branch fetch")
+  local rechecked_integration_sha = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
     core.log_cas_decision("sync_scan", "branch-sync", {
       state = "integration",
@@ -155,13 +104,13 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     return
   end
 
-  local merge_head = trim_stdout(run_required(core.git_head_sha(worktree, 30), "sync head"))
+  local merge_head = trim_stdout(core.run_required(core.git_head_sha(worktree, 30), "sync head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe branch sync merge head")
   end
-  require_git_ok(core.git_push_worktree_branch_update(worktree, integration, 120), "branch sync push")
-  fetch_branches(repo, { integration })
-  local pushed_head = remote_head(integration)
+  core.run_required(core.git_push_worktree_branch_update(worktree, integration, 120), "branch sync push")
+  core.fetch_branches(repo, { integration }, "branch fetch")
+  local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
     error("github-devloop: branch sync push verification failed")
   end
@@ -183,8 +132,8 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branches(repo, { integration })
-  local rechecked_integration_sha = remote_head(integration)
+  core.fetch_branches(repo, { integration }, "branch fetch")
+  local rechecked_integration_sha = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
     core.log_cas_decision("sync_scan", "branch-sync", {
       state = "integration",
@@ -201,9 +150,9 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
     return
   end
 
-  require_git_ok(core.git_push_branch_force_with_lease(integration, upstream_sha, integration_sha, 120), "branch sync converge")
-  fetch_branches(repo, { integration })
-  local pushed_head = remote_head(integration)
+  core.run_required(core.git_push_branch_force_with_lease(integration, upstream_sha, integration_sha, 120), "branch sync converge")
+  core.fetch_branches(repo, { integration }, "branch fetch")
+  local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= upstream_sha then
     error("github-devloop: branch sync converge verification failed")
   end
@@ -211,9 +160,9 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
 end
 
 local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
-  local runtime = runtime_root()
+  local runtime = core.runtime_root()
   with_temp_worktree(runtime, repo, upstream, integration, integration_sha, function(worktree)
-    require_git_ok(core.git_fast_forward(worktree, upstream_sha, 120), "branch sync fast-forward")
+    core.run_required(core.git_fast_forward(worktree, upstream_sha, 120), "branch sync fast-forward")
     push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
   end)
 end
@@ -230,15 +179,15 @@ function pipeline(event)
   end
 
   with_lock(core.branch_sync_lock_key(repo, branches.upstream, branches.integration), function()
-    fetch_branches(repo, { branches.upstream, branches.integration })
-    local upstream_sha = remote_head(branches.upstream)
-    local integration_sha = remote_head(branches.integration)
+    core.fetch_branches(repo, { branches.upstream, branches.integration }, "branch fetch")
+    local upstream_sha = core.remote_head(branches.upstream, "remote branch head", "unsafe remote branch head")
+    local integration_sha = core.remote_head(branches.integration, "remote branch head", "unsafe remote branch head")
 
-    if is_ancestor(upstream_sha, integration_sha) then
+    if core.is_ancestor(upstream_sha, integration_sha, "ancestor check") then
       core.log_cas_decision("sync_scan", "branch-sync", { state = "synced", version = integration_sha }, "tick", "sync", "skip-idempotent(upstream-ancestor)", "upstream head is already contained in integration")
       return
     end
-    if is_ancestor(integration_sha, upstream_sha) then
+    if core.is_ancestor(integration_sha, upstream_sha, "ancestor check") then
       fast_forward_sync(repo, branches.upstream, branches.integration, upstream_sha, integration_sha)
       return
     end
@@ -247,7 +196,7 @@ function pipeline(event)
       return
     end
 
-    local runtime = runtime_root()
+    local runtime = core.runtime_root()
     with_temp_worktree(runtime, repo, branches.upstream, branches.integration, integration_sha, function(worktree)
       local merge_result = core.git_merge_no_ff(worktree, upstream_sha, 120)
       if merge_result.exit_code == 0 then

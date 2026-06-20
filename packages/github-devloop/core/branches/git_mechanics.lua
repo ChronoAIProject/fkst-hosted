@@ -6,6 +6,54 @@ function GitMechanics.install(M, shared)
   local git = shared.git
   local run_git_ok = shared.run_git_ok
 
+  local function trim_stdout(result)
+    return tostring(result.stdout or ""):gsub("%s+$", "")
+  end
+
+  function M.run_required(result, error_class)
+    if result.exit_code ~= 0 then
+      error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
+    end
+    return result
+  end
+
+  function M.fetch_branch(branch, error_class)
+    M.run_required(M.git_fetch_branch("origin", branch, 60), error_class)
+  end
+
+  function M.fetch_branches(repo, branches, error_class)
+    M.with_repo_ref_store_lock(repo, function()
+      for _, branch in ipairs(branches) do
+        M.fetch_branch(branch, error_class)
+      end
+    end)
+  end
+
+  function M.remote_head(branch, error_class, unsafe_error)
+    local result = M.run_required(M.git_remote_branch_head("origin", branch, 30), error_class)
+    local head = trim_stdout(result)
+    if not M.is_safe_head_sha(head) then
+      error("github-devloop: " .. unsafe_error)
+    end
+    return head
+  end
+
+  function M.is_ancestor(ancestor_sha, descendant_sha, error_class)
+    local result = M.git_is_ancestor(ancestor_sha, descendant_sha, 30)
+    if result.exit_code == 0 then
+      return true
+    end
+    if result.exit_code == 1 then
+      return false
+    end
+    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
+  end
+
+  function M.runtime_root()
+    local result = M.run_required(exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
+    return result.stdout
+  end
+
   function M.git_is_ancestor(maybe_ancestor_sha, descendant_sha, timeout)
     return git().is_ancestor(
       require_safe_sha("ancestor sha", maybe_ancestor_sha),

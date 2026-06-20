@@ -19,59 +19,8 @@ local function require_repo(repo)
   return value
 end
 
-local function run_required(result, error_class)
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
-  end
-  return result
-end
-
-local function require_git_ok(result, error_class)
-  if result.exit_code ~= 0 then
-    error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
-  end
-  return result
-end
-
 local function trim_stdout(result)
   return tostring(result.stdout or ""):gsub("%s+$", "")
-end
-
-local function fetch_branch(branch)
-  run_required(core.git_fetch_branch("origin", branch, 60), "PR freshness fetch")
-end
-
-local function fetch_branches(repo, branches)
-  core.with_repo_ref_store_lock(repo, function()
-    for _, branch in ipairs(branches) do
-      fetch_branch(branch)
-    end
-  end)
-end
-
-local function remote_head(branch)
-  local result = run_required(core.git_remote_branch_head("origin", branch, 30), "PR freshness remote head")
-  local head = trim_stdout(result)
-  if not core.is_safe_head_sha(head) then
-    error("github-devloop: unsafe PR freshness branch head")
-  end
-  return head
-end
-
-local function is_ancestor(ancestor_sha, descendant_sha)
-  local result = core.git_is_ancestor(ancestor_sha, descendant_sha, 30)
-  if result.exit_code == 0 then
-    return true
-  end
-  if result.exit_code == 1 then
-    return false
-  end
-  error("github-devloop: PR freshness ancestor check failed: " .. tostring(result.stderr))
-end
-
-local function runtime_root()
-  local result = run_required(exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
-  return result.stdout
 end
 
 local function cleanup_worktree(worktree)
@@ -90,8 +39,8 @@ end
 local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
   local plan = core.git_worktree_add_detached_plan(worktree, branch_sha)
-  run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
-  require_git_ok(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
+  core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
+  core.run_required(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -137,7 +86,7 @@ local function issue_state(repo, issue_number)
   if issue_number == nil then
     return { labels = {}, comments = {} }
   end
-  local viewed = run_required(core.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
+  local viewed = core.run_required(core.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
   return core.parse_issue_view_result(viewed.stdout)
 end
 
@@ -174,12 +123,12 @@ local function candidate_reason(pr, origin, issue, state)
 end
 
 local function load_current_pr(repo, pr_number)
-  local viewed = run_required(core.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
+  local viewed = core.run_required(core.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
   return core.parse_pr_view_merge(viewed.stdout)
 end
 
 local function list_open_prs(repo)
-  local listed = run_required(core.gh_pr_list_freshness(repo, 30), "PR freshness list")
+  local listed = core.run_required(core.gh_pr_list_freshness(repo, 30), "PR freshness list")
   return core.parse_pr_list_freshness(listed.stdout)
 end
 
@@ -200,7 +149,7 @@ end
 local function write_refresh_commit(worktree, runtime, repo, branch, integration, branch_sha, integration_sha)
   local message_file = core.pr_freshness_message_file(runtime, repo, branch, integration, branch_sha, integration_sha)
   file.write(message_file, core.pr_freshness_commit_message(repo, branch, integration, branch_sha, integration_sha))
-  require_git_ok(core.git_commit_message_file(worktree, message_file, 60), "PR freshness commit")
+  core.run_required(core.git_commit_message_file(worktree, message_file, 60), "PR freshness commit")
 end
 
 local function push_if_real(repo, branch, branch_sha, worktree)
@@ -216,8 +165,8 @@ local function push_if_real(repo, branch, branch_sha, worktree)
   end
 
   core.assert_trusted_bot_configured()
-  fetch_branches(repo, { branch })
-  local rechecked_branch_sha = remote_head(branch)
+  core.fetch_branches(repo, { branch }, "PR freshness fetch")
+  local rechecked_branch_sha = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if rechecked_branch_sha ~= branch_sha then
     core.log_cas_decision("pr_freshness_scan", "pr-freshness", {
       state = "branch",
@@ -225,13 +174,13 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
     return
   end
-  local merge_head = trim_stdout(run_required(core.git_head_sha(worktree, 30), "PR freshness head"))
+  local merge_head = trim_stdout(core.run_required(core.git_head_sha(worktree, 30), "PR freshness head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe PR freshness merge head")
   end
-  require_git_ok(core.git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
-  fetch_branches(repo, { branch })
-  local pushed_head = remote_head(branch)
+  core.run_required(core.git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
+  core.fetch_branches(repo, { branch }, "PR freshness fetch")
+  local pushed_head = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if pushed_head ~= merge_head then
     error("github-devloop: PR freshness push verification failed")
   end
@@ -271,19 +220,19 @@ local function process_pr(repo, branches, listed_pr)
   end
 
   with_lock(core.pr_freshness_lock_key(repo, pr.head_ref_name), function()
-    fetch_branches(repo, { branches.integration, pr.head_ref_name })
-    local integration_sha = remote_head(branches.integration)
-    local branch_sha = remote_head(pr.head_ref_name)
+    core.fetch_branches(repo, { branches.integration, pr.head_ref_name }, "PR freshness fetch")
+    local integration_sha = core.remote_head(branches.integration, "PR freshness remote head", "unsafe PR freshness branch head")
+    local branch_sha = core.remote_head(pr.head_ref_name, "PR freshness remote head", "unsafe PR freshness branch head")
     if branch_sha ~= pr.head_sha then
       core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-stale(head)", "PR head changed after GitHub read")
       return
     end
-    if is_ancestor(integration_sha, branch_sha) then
+    if core.is_ancestor(integration_sha, branch_sha, "PR freshness ancestor check") then
       core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(integration-ancestor)", "PR branch already contains integration")
       return
     end
 
-    local runtime = runtime_root()
+    local runtime = core.runtime_root()
     with_temp_worktree(runtime, repo, pr.head_ref_name, branches.integration, branch_sha, function(worktree)
       local merge_result = core.git_merge_no_ff(worktree, integration_sha, 120)
       if merge_result.exit_code == 0 then
