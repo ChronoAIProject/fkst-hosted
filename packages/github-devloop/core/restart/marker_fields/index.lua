@@ -1,5 +1,6 @@
 return {
   { module = "autonomy_result", key = "autonomy-result" },
+  { module = "child_completed", key = "child-completed" },
   { module = "converge_round", key = "converge-round" },
   { module = "decomposed", key = "decomposed" },
   { module = "dependency_cycle", key = "dependency-cycle" },
@@ -19,6 +20,7 @@ return {
   { module = "merging", key = "merging" },
   { module = "pr_delegation", key = "pr-delegation" },
   { module = "pr_link", key = "pr-link" },
+  { module = "pr_terminal", key = "pr-terminal" },
   { module = "review_carry_over", key = "review-carry-over" },
   { module = "review_converge_round", key = "review-converge-round" },
   { module = "review_meta", key = "review-meta" },

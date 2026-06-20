@@ -35,10 +35,10 @@ return function(M, h)
       terminal_states = terminal_states,
     },
     terminal = false,
-    to_states = { "merged", "blocked" },
+    to_states = { "merged", "ready", "blocked" },
     driving_queue = contract.queue_in,
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
-    output_obligation = obligation({ "state:v1 merged", "state:v1 blocked" }, { "merged", "blocked" }),
+    output_obligation = obligation({ "state:v1 merged", "state:v1 ready", "state:v1 blocked" }, { "merged", "ready", "blocked" }),
     budget = budget(180 * 24 * 60, "The parent issue delegates PR work to a child workflow and waits on the PR child's state:v1 marker; PR review and merge time is deferred by child_workflow_wait rather than charged to the parent."),
     liveness_contract = liveness({
       mode = "live-defer",
@@ -67,6 +67,14 @@ return function(M, h)
           output_variant = "child_pr_merged",
           postcondition_family = "parent_resume_from_pr_terminal",
           monotonic = true,
+        },
+        {
+          state = "ready",
+          output_variant = "child_pr_closed_unmerged_replaced",
+          postcondition_family = "parent_resume_from_pr_terminal",
+          failure = true,
+          replacement = true,
+          bump = true,
         },
         {
           state = "blocked",

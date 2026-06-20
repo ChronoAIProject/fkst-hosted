@@ -39,7 +39,8 @@ return {
     t.eq(row.responsibility_signature.state_kind, "queue_wait")
     t.eq(row.responsibility_signature.output_postcondition_family, "parent_resume_from_pr_terminal")
     t.eq(row.to_states[1], "merged")
-    t.eq(row.to_states[2], "blocked")
+    t.eq(row.to_states[2], "ready")
+    t.eq(row.to_states[3], "blocked")
   end,
 
   test_step1a_does_not_wire_runtime_entry_to_awaiting_pr = function()

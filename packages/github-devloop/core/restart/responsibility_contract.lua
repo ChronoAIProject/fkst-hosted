@@ -113,6 +113,12 @@ local function edge_is_normal(edge)
   return not edge_is_terminal(edge) and not edge_is_failure(edge)
 end
 
+local function edge_is_generation_replacement(edge)
+  return edge ~= nil
+    and edge.replacement == true
+    and edge.bump == true
+end
+
 local function edge_is_ready_dependency_regression(row, edge)
   return state_name(row) == "ready"
     and edge ~= nil
@@ -264,6 +270,7 @@ local function validate_kind_fanout(row, signature, edges, errors)
     for _, edge in ipairs(edges or {}) do
       if not edge_is_normal(edge)
         and edge_is_terminal(edge) ~= true
+        and not edge_is_generation_replacement(edge)
         and not edge_is_ready_dependency_regression(row, edge) then
         table.insert(errors, state .. ": queue_wait may only add terminal cancel/block successors")
       end

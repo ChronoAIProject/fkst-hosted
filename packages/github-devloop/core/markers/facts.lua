@@ -623,6 +623,120 @@ function M.pr_delegation_fact(comments, proposal_id, version, delegation)
   return nil
 end
 
+local function pr_terminal_fact_from_marker(M, marker, comment)
+  local terminal = marker_attr(marker, "terminal")
+  local pr_proposal = marker_attr(marker, "pr_proposal")
+  local repo = marker_attr(marker, "repo")
+  local pr_identity = marker_attr(marker, "pr_identity")
+  local pr_number = marker_attr(marker, "pr")
+  local delegation = marker_attr(marker, "delegation")
+  local head_sha = marker_attr(marker, "head_sha")
+  local merge_commit_sha = marker_attr(marker, "merge_commit_sha")
+  local terminal_marker_id = marker_attr(marker, "terminal_marker_id")
+  local parsed_repo, parsed_pr = M.parse_pr_proposal_id(pr_proposal)
+  if (terminal == "merged" or terminal == "closed-unmerged" or terminal == "blocked")
+    and parsed_repo ~= nil
+    and tostring(parsed_repo) == tostring(repo)
+    and tostring(parsed_pr) == tostring(pr_identity)
+    and tostring(pr_number) == tostring(pr_identity)
+    and M._is_positive_pr_number(pr_identity)
+    and M._is_path_safe_key(delegation, M._max_dedup_len)
+    and M._is_git_sha(head_sha)
+    and (merge_commit_sha == nil or M._is_git_sha(merge_commit_sha))
+    and M._is_path_safe_key(terminal_marker_id, M._max_dedup_len) then
+    return {
+      terminal = terminal,
+      pr_proposal = pr_proposal,
+      pr_proposal_id = pr_proposal,
+      repo = repo,
+      pr_identity = tostring(pr_identity),
+      pr_number = tonumber(pr_identity),
+      delegation_generation = delegation,
+      delegation = delegation,
+      head_sha = head_sha,
+      merge_commit_sha = merge_commit_sha,
+      terminal_marker_id = terminal_marker_id,
+      comment_created_at = M._comment_created_at(comment),
+      comment_id = comment and comment.id or nil,
+    }
+  end
+  return nil
+end
+
+function M.pr_terminal_fact(comments, repo, pr_identity, delegation_generation)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-terminal:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local fact = pr_terminal_fact_from_marker(M, marker, comment)
+      if fact ~= nil
+        and fact.repo == tostring(repo)
+        and fact.pr_identity == tostring(pr_identity)
+        and fact.delegation_generation == tostring(delegation_generation) then
+        return fact
+      end
+    end
+  end
+  return nil
+end
+
+function M.pr_terminal_facts(comments)
+  local facts = {}
+  if type(comments) ~= "table" then
+    return facts
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-terminal:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local fact = pr_terminal_fact_from_marker(M, marker, comment)
+      if fact ~= nil then
+        table.insert(facts, fact)
+      end
+    end
+  end
+  return facts
+end
+
+function M.child_completed_fact(comments, idempotency_key)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:child%-completed:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_key = marker_attr(marker, "idempotency_key")
+      local terminal = marker_attr(marker, "terminal")
+      local proposal_id = marker_attr(marker, "proposal")
+      local pr_proposal = marker_attr(marker, "pr_proposal")
+      local pr_source_ref = marker_attr(marker, "pr_source_ref")
+      local delegation = marker_attr(marker, "delegation")
+      local terminal_marker_id = marker_attr(marker, "terminal_marker_id")
+      if marker_key == tostring(idempotency_key)
+        and (terminal == "merged" or terminal == "closed-unmerged" or terminal == "blocked")
+        and M._is_bounded_string(proposal_id, M._max_key_len)
+        and M._is_bounded_string(pr_proposal, M._max_key_len)
+        and M._is_path_safe_key(pr_source_ref, M._max_key_len)
+        and M._is_path_safe_key(delegation, M._max_dedup_len)
+        and M._is_path_safe_key(terminal_marker_id, M._max_dedup_len) then
+        return {
+          proposal_id = proposal_id,
+          pr_proposal = pr_proposal,
+          pr_proposal_id = pr_proposal,
+          pr_source_ref = pr_source_ref,
+          delegation_generation = delegation,
+          terminal_marker_id = terminal_marker_id,
+          terminal = terminal,
+          idempotency_key = marker_key,
+          comment_created_at = M._comment_created_at(comment),
+        }
+      end
+    end
+  end
+  return nil
+end
+
 function M.pr_origin_fact(comments)
   if type(comments) ~= "table" then
     return nil
