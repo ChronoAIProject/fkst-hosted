@@ -885,7 +885,10 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(f"- ratchet: `{ratchet}`", result.stdout)
             self.assertIn("- migration_kind: `allowlist`", result.stdout)
-            self.assertRegex(result.stdout, r"- selected_count: [02]")
+            # selected_count = min(slice_size=2, remaining_count); as a ratchet is
+            # drained toward zero its remaining count can be 1 (< slice_size), so the
+            # dry-run selects 1 site. Accept 0-2 instead of hard-coding 0 or 2.
+            self.assertRegex(result.stdout, r"- selected_count: [0-2]\b")
             self.assertIn("## Acceptance Criteria", result.stdout)
 
     def test_current_repo_ratchets_print_json_schema(self) -> None:

@@ -1,13 +1,16 @@
 local core = require("core")
+local saga = require("std.saga")
 
-local M = {}
-
-M.spec = {
+local spec = {
   consumes = { "devloop_branch_tick" },
   produces = { "devloop_sync_conflict" },
   fanout = { "devloop_branch_tick" },
   stall_window = "10m",
 }
+
+local function done(_event)
+  return false
+end
 
 local function require_repo(repo)
   local value = tostring(repo or "")
@@ -167,7 +170,7 @@ local function fast_forward_sync(repo, upstream, integration, upstream_sha, inte
   end)
 end
 
-function pipeline(event)
+local function act(event)
   core.log_entry("sync_scan", event, "branch-sync", event and event.queue or "")
   local branches = core.branch_config()
   local cfg = core.devloop_config()
@@ -218,6 +221,9 @@ function pipeline(event)
   end)
 end
 
-pipeline = core.wrap_pipeline_failure("sync_scan", pipeline)
-
-return M
+return saga.department(spec, {
+  done = done,
+  act = act,
+  wrap = core.wrap_pipeline_failure,
+  name = "sync_scan",
+})
