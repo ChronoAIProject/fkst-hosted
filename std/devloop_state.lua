@@ -422,9 +422,10 @@ local function compare_state_marker(a, b)
   if version_order ~= 0 then
     return version_order > 0
   end
-  if a.version == b.version
-    and ((a.state == "ready" and b.state == "blocked") or (a.state == "blocked" and b.state == "ready")) then
-    return b.state == "blocked"
+  local a_stage_rank = tonumber(a.stage_rank) or M.stage_rank(a.state)
+  local b_stage_rank = tonumber(b.stage_rank) or M.stage_rank(b.state)
+  if a_stage_rank ~= b_stage_rank then
+    return b_stage_rank > a_stage_rank
   end
   local a_key = version_sort_key(a.version, a.stage_rank)
   local b_key = version_sort_key(b.version, b.stage_rank)

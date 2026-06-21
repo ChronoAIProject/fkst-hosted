@@ -106,6 +106,3 @@ std/devloop_payloads/predicates.lua|M.is_ready_hand_off|state-equality|ready|lin
 std/devloop_replayer.lua|fetch_child_state_fact|cursor-read|current_entity_state(|line=224|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 std/devloop_replayer.lua|require_marker_fact|state-equality|implementing|line=287|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 std/devloop_restart_responsibility_contract.lua|edge_is_ready_dependency_regression|state-equality|dependency_wait|line=137|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
-std/devloop_state.lua|compare_state_marker|state-equality|blocked|line=426|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
-std/devloop_state.lua|compare_state_marker|state-equality|blocked|line=427|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
-std/devloop_state.lua|compare_state_marker|state-equality|ready|line=426|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
