@@ -1,7 +1,7 @@
 local core = require("core")
 local saga = require("std.saga")
 local source_refs = require("std.source_ref")
-local valid_round = require("core.rounds").valid_round
+local valid_round = require("std.devloop_rounds").valid_round
 
 local spec = {
   consumes = { "github-proxy.github_comment_written" },

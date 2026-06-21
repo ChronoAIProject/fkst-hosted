@@ -46,10 +46,6 @@
 {"path":"packages/github-devloop/core/liveness/signal.lua","owner":"cross-cutting","reason":"derives liveness facts from marker streams."}
 {"path":"packages/github-devloop/core/liveness/timeout.lua","owner":"cross-cutting","reason":"applies timeout redrive decisions across rows."}
 {"path":"packages/github-devloop/core/logging.lua","owner":"cross-cutting","reason":"formats cross-workflow logs."}
-{"path":"packages/github-devloop/core/markers.lua","owner":"shared","reason":"installs shared marker builders and parsers."}
-{"path":"packages/github-devloop/core/markers/builders.lua","owner":"shared","reason":"builds marker bodies for multiple workflows."}
-{"path":"packages/github-devloop/core/markers/facts.lua","owner":"shared","reason":"parses marker facts for multiple workflows."}
-{"path":"packages/github-devloop/core/markers/shared.lua","owner":"shared","reason":"shares marker parser primitives."}
 {"path":"packages/github-devloop/core/merge_batch.lua","owner":"pr","reason":"groups PR merge work."}
 {"path":"packages/github-devloop/core/merge_gate.lua","owner":"pr","reason":"owns PR merge gate decisions."}
 {"path":"packages/github-devloop/core/merge_gate/ci_gate.lua","owner":"pr","reason":"evaluates PR CI gate facts."}
@@ -154,9 +150,7 @@
 {"path":"packages/github-devloop/core/review_meta_requests.lua","owner":"pr","reason":"builds PR review-meta request bodies."}
 {"path":"packages/github-devloop/core/review_redrive.lua","owner":"pr","reason":"builds PR review redrive versions."}
 {"path":"packages/github-devloop/core/rollup_health.lua","owner":"integration","reason":"summarizes integration rollup health."}
-{"path":"packages/github-devloop/core/rounds.lua","owner":"shared","reason":"parses shared round counters."}
 {"path":"packages/github-devloop/core/saga.lua","owner":"shared","reason":"wraps shared saga helpers."}
-{"path":"packages/github-devloop/core/state.lua","owner":"shared","reason":"parses and builds current flat state markers."}
 {"path":"packages/github-devloop/core/state_gap.lua","owner":"cross-cutting","reason":"detects cross-workflow state gaps."}
 {"path":"packages/github-devloop/core/strings.lua","owner":"shared","reason":"provides package string helpers."}
 {"path":"packages/github-devloop/core/substrate_ref.lua","owner":"integration","reason":"tracks substrate reference integration state."}
