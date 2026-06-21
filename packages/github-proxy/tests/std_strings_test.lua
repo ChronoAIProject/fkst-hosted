@@ -44,6 +44,12 @@ return {
     t.eq(strings.comment_body(nil), "")
   end,
 
+  test_empty_string_helpers_return_empty = function()
+    t.eq(strings.trim(""), "")
+    t.eq(strings.strip_bot_login_suffix(""), "")
+    t.eq(strings.comment_body(""), "")
+  end,
+
   test_json_string_wraps_and_escapes_json_string_boundaries = function()
     t.eq(strings.json_string(nil), '""')
     t.eq(strings.json_string('a"b\\c'), '"a\\"b\\\\c"')
