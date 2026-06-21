@@ -52,9 +52,13 @@ created the issue, so it cannot satisfy the autonomous scheduled-detection requi
 ## Contract
 
 The package consumes `external_pr_scan` and `external_pr_candidate`, produces only
-`external_pr_candidate`, and writes no `github-devloop` state. Its durable bridge fact is the
-trusted bot-authored `external-pr-bridge:v1` marker plus the matching open bridge issue. Reliable
-payloads carry `source_ref` and small control fields; PR content stays at GitHub and is re-derived
-from `external:<repo>#pr/<number>`.
+`external_pr_candidate`, and writes no `github-devloop` state. `external_pr_scan` is the reliable,
+level-triggered durable source that periodically re-derives open PRs from GitHub. The
+`external_pr_candidate` queue is an ephemeral at-most-once activation raised by each scan; if a
+candidate handler fails, the next scan raises a fresh activation instead of folding onto a
+permanently dead-lettered candidate delivery. Duplicate activations are safe because bridge creation
+is idempotent through `with_lock`, trusted `external-pr-bridge:v1` markers, and matching open bridge
+issue search. Reliable payloads carry `source_ref` and small control fields; PR content stays at
+GitHub and is re-derived from `external:<repo>#pr/<number>`.
 
 ⟦AI:FKST⟧

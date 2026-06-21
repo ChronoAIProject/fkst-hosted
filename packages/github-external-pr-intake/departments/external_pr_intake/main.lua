@@ -6,6 +6,7 @@ local M = {}
 
 local spec = {
   consumes = { "external_pr_scan", "external_pr_candidate" },
+  ephemeral = { "external_pr_candidate" },
   produces = { "external_pr_candidate" },
   fanout = { "external_pr_scan", "external_pr_candidate" },
   stall_window = "30s",

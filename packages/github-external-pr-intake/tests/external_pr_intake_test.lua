@@ -365,6 +365,17 @@ return {
     end
   end,
 
+  test_candidate_activation_must_be_ephemeral = function()
+    local spec = load_department().spec
+    local found = false
+    for _, queue in ipairs(spec.ephemeral or {}) do
+      if queue == "external_pr_candidate" then
+        found = true
+      end
+    end
+    t.is_true(found)
+  end,
+
   test_existing_intake_surfaces_cannot_schedule_external_pr_bridge = function()
     local proxy_raiser = read_disk_file(sibling_package_root("github-proxy") .. "/raisers/github_poll.lua")
     local proxy_poll = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_poll/main.lua")
