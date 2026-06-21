@@ -84,6 +84,7 @@ local function pr_json(pr)
     .. ',"headRefName":' .. json_string(pr.head_ref_name or "feature/contrib")
     .. ',"baseRefName":' .. json_string(pr.base_ref_name or "dev")
     .. ',"state":' .. json_string(pr.state or "OPEN")
+    .. ',"createdAt":' .. json_string(pr.created_at or "2026-06-03T01:02:03Z")
     .. ',"updatedAt":' .. json_string(pr.updated_at or "2026-06-19T01:02:03Z")
     .. ',"author":{"login":' .. json_string(pr.author_login or "contributor")
     .. '},"comments":[' .. table.concat(comments, ",")
@@ -229,6 +230,7 @@ local function run_pipeline(opts)
   local old_log = log
   local old_raise = raise
   local old_with_lock = with_lock
+  local old_now = now
   file = {
     write = function(path, body)
       files[path] = body
@@ -248,6 +250,9 @@ local function run_pipeline(opts)
   with_lock = function(key, fn)
     table.insert(locks, key)
     return fn()
+  end
+  now = function()
+    return options.now_seconds or 1780459324
   end
 
   local module = load_department()
@@ -271,6 +276,7 @@ local function run_pipeline(opts)
   log = old_log
   raise = old_raise
   with_lock = old_with_lock
+  now = old_now
   if not ok then
     error(err, 0)
   end
@@ -671,6 +677,7 @@ pathlib.Path(release_path).write_text("release\n", encoding="utf-8")
     local old_raise = raise
     local old_with_lock = with_lock
     local old_pipeline = pipeline
+    local old_now = now
     local old_read = core.read_env
     file = {
       write = function(path, body)
@@ -689,6 +696,9 @@ pathlib.Path(release_path).write_text("release\n", encoding="utf-8")
       table.insert(raises, { queue = queue, payload = payload })
     end
     with_lock = bridge_lock
+    now = function()
+      return 1780459324
+    end
     core.read_env = function(name)
       return ({
         FKST_GITHUB_REPO = "owner/repo",
@@ -720,6 +730,7 @@ pathlib.Path(release_path).write_text("release\n", encoding="utf-8")
       t.eq(coroutine.status(second), "dead")
     end)
     core.read_env = old_read
+    now = old_now
     pipeline = old_pipeline
     file = old_file
     log = old_log
