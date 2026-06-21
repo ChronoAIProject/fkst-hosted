@@ -273,6 +273,21 @@ return {
     t.eq(merge_ready_first.state, "fixing")
     t.eq(fixing_first.state, "fixing")
   end,
+  test_current_state_uses_stage_rank_for_version_equivalent_markers = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local slash_version = "ready/consensus/v1"
+    local hyphen_version = "ready-consensus-v1"
+
+    local current = core.current_state({
+      core.state_marker(proposal_id, "reviewing", slash_version),
+      core.state_marker(proposal_id, "pr-open", hyphen_version),
+    }, proposal_id)
+
+    t.eq(core.safe_version_segment(slash_version), core.safe_version_segment(hyphen_version))
+    t.eq(core.stage_rank("reviewing") > core.stage_rank("pr-open"), true)
+    t.eq(current.state, "reviewing")
+    t.eq(current.version, slash_version)
+  end,
   test_current_state_converges_same_version_fixing_to_review_meta = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
