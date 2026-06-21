@@ -59,6 +59,24 @@ local function mock_wip_state(issue_number, state_name, base_branch)
   })
 end
 
+local function mock_pr_merge_view(issue_number, pr_number, head_sha, comments)
+  local rendered_comments = {}
+  for _, body in ipairs(comments or {}) do
+    table.insert(rendered_comments, render_comment(body))
+  end
+  t.mock_command(core.gh_pr_view_merge_cmd(REPO, pr_number), {
+    stdout = string.format(
+      '{"headRefName":"devloop/issue/owner/repo/%d/work","headRefOid":"%s","baseRefName":"%s","baseRefOid":"1111111111111111111111111111111111111111","state":"OPEN","updatedAt":"2026-06-03T01:00:00Z","isDraft":false,"mergedAt":null,"comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","statusCheckRollup":[]}\n',
+      issue_number,
+      head_sha,
+      INTEGRATION,
+      table.concat(rendered_comments, ",")
+    ),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 return {
   -- The reproduction: a pr-open holder whose PR base is not this instance's
   -- integration branch is excluded from the cap, so a fresh start is admitted.
@@ -72,6 +90,47 @@ return {
     t.eq(allowed, true)
     t.eq(reason, "wip-cap-available")
     t.eq(count, 0)
+    t.eq(max, 1)
+  end,
+
+  -- Regression: an explicitly held/non-runnable merge-ready holder must not burn
+  -- issue admission capacity. A trusted merge-gate-wait marker means the merge
+  -- controller is waiting on an external gate, not runnable local work.
+  test_merge_gate_wait_holder_is_excluded_from_cap = function()
+    mock_env(1)
+    local issue_number = 51
+    local proposal_id = core.proposal_id(REPO, issue_number)
+    local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/intake/1/loop/1"
+    local pr_number = issue_number + 500
+    local head_sha = "abcdef1234567890abcdef1234567890abcdef12"
+    mock_wip_list({ issue_number })
+    mock_wip_state(issue_number, "merge-ready", INTEGRATION)
+    mock_pr_merge_view(issue_number, pr_number, head_sha, {
+      core.merge_gate_wait_marker(proposal_id, pr_number, version, head_sha, "external-ci-red", "EXTERNAL_CI_RED"),
+    })
+
+    local allowed, reason, count, max = core.wip_capacity_allows_start(REPO, 42)
+    t.eq(allowed, true)
+    t.eq(reason, "wip-cap-available")
+    t.eq(count, 0)
+    t.eq(max, 1)
+  end,
+
+  -- Regression guard for the inverse: merge-ready is active WIP unless the PR-side
+  -- lifecycle facts explicitly say the merge controller is externally held.
+  test_merge_ready_without_wait_still_counts = function()
+    mock_env(1)
+    local issue_number = 51
+    local pr_number = issue_number + 500
+    local head_sha = "abcdef1234567890abcdef1234567890abcdef12"
+    mock_wip_list({ issue_number })
+    mock_wip_state(issue_number, "merge-ready", INTEGRATION)
+    mock_pr_merge_view(issue_number, pr_number, head_sha, {})
+
+    local allowed, reason, count, max = core.wip_capacity_allows_start(REPO, 42)
+    t.eq(allowed, false)
+    t.eq(reason, "wip-cap-reached")
+    t.eq(count, 1)
     t.eq(max, 1)
   end,
 

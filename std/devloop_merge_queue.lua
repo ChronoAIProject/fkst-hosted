@@ -486,27 +486,11 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
       local current = M.parse_issue_view_state(view.stdout)
       local proposal_id = M.proposal_id(repo, issue_number)
       local state = M.current_state(current.comments, proposal_id)
-      if active_wip_states[state.state] then
-        -- Admission control must not be deadlockable by un-progressable holders.
-        -- A PR-bound active holder whose pr-link base branch is not this instance's
-        -- integration branch (e.g. a PR stranded on a retired integration branch after
-        -- a topology migration) can never be advanced by this instance's observe_pr
-        -- (it skips base-mismatched PRs). Counting it would let a permanently stuck
-        -- holder pin a MAX_INFLIGHT slot and starve all new work. It is not this
-        -- instance's in-flight work, so exclude it from the cap. Log every exclusion so
-        -- the admission cap is never silently narrowed.
-        local link = M.pr_link_fact(current.comments, proposal_id)
-        if link ~= nil and tostring(link.base_branch or "") ~= tostring(integration_branch or "") then
-          M.log_line("info", "wip", proposal_id, "WIP_EXCLUDE", {
-            "reason=base-unmanaged",
-            "state=" .. tostring(state.state),
-            "pr=" .. tostring(link.pr_number),
-            "pr_base=" .. tostring(link.base_branch),
-            "integration=" .. tostring(integration_branch),
-          })
-        else
-          count = count + 1
-        end
+      local classification = M.wip_admission_classification(repo, proposal_id, current.comments, state, integration_branch)
+      if classification.counts then
+        count = count + 1
+      elseif classification.reason ~= "state-not-active-wip" then
+        M.log_wip_exclusion(proposal_id, classification)
       end
     end
   end
@@ -514,6 +498,92 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
     return false, "wip-cap-reached", count, max_inflight
   end
   return true, "wip-cap-available", count, max_inflight
+end
+
+local function pr_merge_view_for_wip(M, repo, pr_number)
+  local view = M.gh_pr_view_merge(repo, pr_number, 30)
+  if view.exit_code ~= 0 then
+    error("github-devloop: WIP PR state view failed: " .. tostring(view.stderr))
+  end
+  return M.parse_pr_view_merge(view.stdout)
+end
+
+local merge_gate_wait_wip_states = {
+  ["merge-ready"] = true,
+  merging = true,
+}
+
+function M.wip_admission_classification(repo, proposal_id, issue_comments, state, integration_branch)
+  local state_name = tostring(state and state.state or "")
+  if not active_wip_states[state_name] then
+    return {
+      counts = false,
+      reason = "state-not-active-wip",
+      state = state_name,
+    }
+  end
+
+  local link = M.pr_link_fact(issue_comments, proposal_id)
+  if link ~= nil and tostring(link.base_branch or "") ~= tostring(integration_branch or "") then
+    return {
+      counts = false,
+      reason = "base-unmanaged",
+      state = state_name,
+      pr_number = link.pr_number,
+      pr_base = link.base_branch,
+      integration = integration_branch,
+    }
+  end
+
+  if link ~= nil and merge_gate_wait_wip_states[state_name] then
+    local current_pr = pr_merge_view_for_wip(M, repo, link.pr_number)
+    local wait = nil
+    if type(current_pr) == "table" and M._is_git_sha(current_pr.head_sha) then
+      wait = M.merge_gate_wait_fact(current_pr.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
+    end
+    if wait ~= nil then
+      return {
+        counts = false,
+        reason = "merge-gate-wait",
+        state = state_name,
+        pr_number = link.pr_number,
+        pr_base = link.base_branch,
+        wait_kind = wait.kind,
+        wait_reason = wait.reason,
+      }
+    end
+  end
+
+  return {
+    counts = true,
+    reason = "active-wip",
+    state = state_name,
+    pr_number = link and link.pr_number or nil,
+    pr_base = link and link.base_branch or nil,
+  }
+end
+
+function M.log_wip_exclusion(proposal_id, classification)
+  local fields = {
+    "reason=" .. tostring(classification.reason),
+    "state=" .. tostring(classification.state),
+  }
+  if classification.pr_number ~= nil then
+    table.insert(fields, "pr=" .. tostring(classification.pr_number))
+  end
+  if classification.pr_base ~= nil then
+    table.insert(fields, "pr_base=" .. tostring(classification.pr_base))
+  end
+  if classification.integration ~= nil then
+    table.insert(fields, "integration=" .. tostring(classification.integration))
+  end
+  if classification.wait_kind ~= nil then
+    table.insert(fields, "wait_kind=" .. tostring(classification.wait_kind))
+  end
+  if classification.wait_reason ~= nil then
+    table.insert(fields, "wait_reason=" .. tostring(classification.wait_reason))
+  end
+  M.log_line("info", "wip", proposal_id, "WIP_EXCLUDE", fields)
 end
 end
 
