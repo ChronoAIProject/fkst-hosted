@@ -447,7 +447,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:blocked" } }), opts("observe-issue-decomposed-missing-children"))
 
     t.eq(result.exit_code, 0)
-    local decompose = find_raise(result.raises, "devloop_decompose")
+    local decompose = find_raise(result.raises, "github-devloop-decompose.devloop_decompose")
     t.eq(decompose.payload.schema, "github-devloop.decompose.v1")
     t.eq(decompose.payload.proposal_id, event.proposal_id)
     t.eq(decompose.payload.version, event.version)
@@ -472,7 +472,7 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:blocked" } }), opts("observe-issue-decomposed-complete-children"))
 
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_decompose"), nil)
+    t.eq(find_raise(result.raises, "github-devloop-decompose.devloop_decompose"), nil)
   end,
 
   test_observe_issue_blocked_decomposed_marker_refuses_untrusted_marker = function()
@@ -492,6 +492,6 @@ return {
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:blocked" } }), opts("observe-issue-decomposed-forged"))
 
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_decompose"), nil)
+    t.eq(find_raise(result.raises, "github-devloop-decompose.devloop_decompose"), nil)
   end,
 }

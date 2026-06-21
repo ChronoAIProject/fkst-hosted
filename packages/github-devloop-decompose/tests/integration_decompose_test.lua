@@ -26,11 +26,12 @@ local function mock_pr_view(event, comments, updated_at)
     base_branch = "dev",
     state = "OPEN",
     updated_at = updated_at or "2026-06-03T02:03:04Z",
-  }, entity_read_mocks.pr_origin_selector)
+  }, entity_read_mocks.pr_origin_selector, 1)
 end
 
 local function run_decompose_with_post_marker(event, run_opts, count)
   h.mock_default_issue_claim()
+  h.take_pr_phase_comments()
   mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
   mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
   mock_pr_view(event, blocked_comments(event, {
@@ -154,7 +155,9 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  for _ = 1, 2 do
+    t.mock_command("test -r", { stdout = "", stderr = "", exit_code = 0 })
+  end
   for _ = 1, 8 do
     t.mock_command("wc -c < ", {
       stdout = "1\n",
@@ -381,18 +384,22 @@ return {
     local run_opts = opts("decompose-parse-fail-retry")
     mock_bot_env()
     mock_write_env_real()
-    h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
+    h.take_pr_phase_comments()
     mock_decompose_codex("not json")
     mock_pr_view(event, blocked_comments(event))
+    mock_pr_view(event, blocked_comments(event))
 
-    local first = run_decompose(event, run_opts)
+    h.mock_default_issue_claim()
+    local first = t.run_department("departments/decompose/main.lua", {
+      queue = "devloop_decompose",
+      payload = event,
+    }, run_opts)
     t.eq(first.exit_code, 1)
     t.eq(#first.raises, 0)
 
     mock_bot_env()
     mock_write_env_real()
-    h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_decompose_codex("not json")
     mock_pr_comment_write(0)

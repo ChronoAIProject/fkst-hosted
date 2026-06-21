@@ -167,7 +167,7 @@ return {
 
     local exhausted = run_liveness_scan("liveness-blocked-decompose-exhausted")
     t.eq(exhausted.exit_code, 0)
-    t.eq(find_raise(exhausted, "devloop_decompose"), nil)
+    t.eq(find_raise(exhausted, "github-devloop-decompose.devloop_decompose"), nil)
     t.eq(find_raise(exhausted, "devloop_timeout_reconcile"), nil)
     t.eq(count_raises(exhausted, "github-proxy.github_issue_comment_request"), 1)
     local stop = find_raise(exhausted, "github-proxy.github_issue_comment_request")
@@ -232,7 +232,7 @@ return {
 
       local result = run_liveness_scan("liveness-blocked-missing-decomposed-stuck-sweep-" .. tostring(sweep))
       t.eq(result.exit_code, 0)
-      t.eq(find_raise(result, "devloop_decompose"), nil)
+      t.eq(find_raise(result, "github-devloop-decompose.devloop_decompose"), nil)
       t.eq(find_raise(result, "devloop_timeout_reconcile"), nil)
       local comment = find_raise(result, "github-proxy.github_issue_comment_request")
       t.is_true(comment ~= nil)

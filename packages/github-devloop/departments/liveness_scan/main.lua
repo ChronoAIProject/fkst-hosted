@@ -11,7 +11,7 @@ local spec = {
     "github-proxy.github_pr_comment_request",
     "consensus.proposal",
     "devloop_ready",
-    "devloop_decompose",
+    "github-devloop-decompose.devloop_decompose",
     "devloop_reconcile",
     "devloop_timeout_reconcile",
   },

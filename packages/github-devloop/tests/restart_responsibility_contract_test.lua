@@ -149,7 +149,7 @@ return {
     local signature = row.responsibility_signature
     t.eq(signature.state_kind, "budget_bounded_recovery")
     t.eq(signature.receiver_kind, "operator-reentry")
-    t.eq(signature.driving_queue, "devloop_decompose")
+    t.eq(signature.driving_queue, "github-devloop-decompose.devloop_decompose")
     t.eq(signature.liveness_class, "blocked.operator_reentry")
     t.eq(signature.phase_rank, core.stage_rank("blocked"))
     t.eq(row.terminal, false)
@@ -157,12 +157,12 @@ return {
     t.eq(row.watchdog.mode, "row-budget-bounds-receiver")
     t.eq(row.watchdog.budget_ms, 1440 * 60 * 1000)
     t.eq(row.actionable_epoch.source, "state_entry:v1")
-    t.eq(row.on_timeout.queue, "devloop_decompose")
+    t.eq(row.on_timeout.queue, "github-devloop-decompose.devloop_decompose")
     t.eq(row.operator_reentry.kind, "external_command")
     t.eq(row.operator_reentry.not_autonomous_successor, true)
     t.eq(row.operator_reentry.resets_budget, true)
     t.eq(signature.watchdog_escape.kind, "watchdog_escape")
-    t.eq(signature.watchdog_escape.queue, "devloop_decompose")
+    t.eq(signature.watchdog_escape.queue, "github-devloop-decompose.devloop_decompose")
     t.eq(#signature.successors, 0)
     t.eq(#core.strict_restart_responsibility_contract_errors({ row }), 0)
   end,

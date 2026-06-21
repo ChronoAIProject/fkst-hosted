@@ -70,7 +70,6 @@ local function marker_builder_paths()
     "std/devloop_convergence/attempts.lua",
     "std/devloop_decompose.lua",
     "packages/github-devloop/core/dependencies.lua",
-    "packages/github-devloop/core/decompose.lua",
     "packages/github-devloop/core/implement_attempt.lua",
   }
 end

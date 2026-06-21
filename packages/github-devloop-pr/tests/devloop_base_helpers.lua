@@ -396,7 +396,7 @@ end
 local function run_decompose(payload, run_opts)
   mock_pr_origin_from_cached(payload, payload and payload.head_sha or "def456")
   return t.run_department("departments/decompose/main.lua", {
-    queue = "github-devloop.devloop_decompose",
+    queue = "github-devloop-decompose.devloop_decompose",
     payload = payload,
   }, run_opts)
 end

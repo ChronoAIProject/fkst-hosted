@@ -66,12 +66,6 @@ local function comment_cases()
       { kind = "dependency-void", blocker_number = 7, reason = "not_planned" },
     },
   }
-  local decompose = {
-    proposal_id = issue_proposal_id,
-    version = issue_version,
-    pr_number = 7,
-  }
-
   return {
     { id = "thinking", request = core.build_observe_comment_request({ repo = "owner/repo", number = 42, source_ref = source_ref() }, { proposal_id = issue_proposal_id, dedup_key = "v1" }) },
     { id = "result", request = core.build_result_comment_request("owner/repo", "42", reached_with_angles) },
@@ -84,7 +78,6 @@ local function comment_cases()
     { id = "impl-failure", request = core.build_impl_failure_comment_request("owner/repo", "42", ready, "no-changes", "") },
     { id = "dependency-hold", request = core.build_dependency_hold_comment_request("owner/repo", "42", issue_proposal_id, issue_version, gate, dependency_marker, source_ref()) },
     { id = "dependency-release", request = core.build_dependency_release_comment_request("owner/repo", "42", issue_proposal_id, issue_version, dependency_void_gate, source_ref()) },
-    { id = "decomposed", request = { body = core.decomposed_comment_body(decompose, 2) } },
   }
 end
 
@@ -109,8 +102,6 @@ local audited_english_skeletons = {
   "github-devloop dependency hold: ",
   "github-devloop dependency release: ",
   "Acknowledged as a tracking umbrella. Individual waves should enter the pipeline as separate issues; this issue stays open for tracking.",
-  "github-devloop decomposed blocked PR into ",
-  " follow-up issue(s)",
 }
 
 local function render_cases(lang)

@@ -710,7 +710,10 @@ mock_pr_origin_from_cached = function(payload, head_sha)
   for _, comment in ipairs(cached or {}) do
     table.insert(comments, comment)
   end
-  entity_read_mocks.mock_pr_read_forms(t, { repo = repo, number = pr_number, comments = comments, head = head, head_sha = effective_head_sha, state = state, base_branch = base_branch, labels = pending and pending.labels or {} })
+  local times = pending and pending.times or 3
+  local fields = { repo = repo, number = pr_number, comments = comments, head = head, head_sha = effective_head_sha, state = state, base_branch = base_branch, labels = pending and pending.labels or {} }
+  fields.times = times
+  entity_read_mocks.mock_pr_read_forms(t, fields)
   entity_read_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = pr_number,
@@ -720,7 +723,7 @@ mock_pr_origin_from_cached = function(payload, head_sha)
     state = state,
     base_branch = base_branch,
     labels = pending and pending.labels or {},
-  }, entity_read_mocks.pr_origin_selector)
+  }, entity_read_mocks.pr_origin_selector, times)
   return repo, pr_number
 end
 

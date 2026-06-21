@@ -8,6 +8,7 @@ return function(M, h)
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature
+  local decompose_queue = M.decompose_package_queue()
   return {
     from_state = "blocked",
     liveness_class_id = "blocked.operator_reentry",
@@ -15,7 +16,7 @@ return function(M, h)
     actionable_epoch = actionable_epoch("state_entry:v1"),
     terminal = false,
     to_states = {},
-    driving_queue = "devloop_decompose",
+    driving_queue = decompose_queue,
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator reintake command" }, { "blocked", "thinking" }),
     reentry_commands = { "rereview", "reintake" },
@@ -31,10 +32,10 @@ return function(M, h)
       receiver_bound_minutes = 0,
       external_wait_bound_minutes = 1410,
     }),
-    on_timeout = timeout("devloop_decompose"),
+    on_timeout = timeout(decompose_queue),
     responsibility_signature = responsibility_signature({
       receiver_kind = "operator-reentry",
-      driving_queue = "devloop_decompose",
+      driving_queue = decompose_queue,
       state_kind = "budget_bounded_recovery",
       liveness_class = "blocked.operator_reentry",
       input_fact_family = "blocked-recovery-hold",
@@ -44,7 +45,7 @@ return function(M, h)
       successors = {},
       watchdog_escape = {
         kind = "watchdog_escape",
-        queue = "devloop_decompose",
+        queue = decompose_queue,
         output_variant = "budget_exhausted_decompose",
         postcondition_family = "blocked-decompose-escape",
         opens_generation = true,
@@ -76,7 +77,7 @@ return function(M, h)
       "decompose_children_complete"
     ),
     marker_facts = "state:v1 blocked plus decomposed:v1 when class decomposition is incomplete",
-    kickoff = "devloop_decompose",
+    kickoff = decompose_queue,
     replay = "Observe can replay decomposed blocked issues when deterministic child completion facts are missing.",
   }
 end

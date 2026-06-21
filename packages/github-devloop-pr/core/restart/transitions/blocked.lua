@@ -8,6 +8,7 @@ return function(M, h)
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature
+  local decompose_queue = M.decompose_package_queue()
   return {
     from_state = "blocked",
     liveness_class_id = "blocked.operator_reentry",
@@ -15,7 +16,7 @@ return function(M, h)
     actionable_epoch = actionable_epoch("state_entry:v1"),
     terminal = false,
     to_states = {},
-    driving_queue = "github-devloop.devloop_decompose",
+    driving_queue = decompose_queue,
     observe_surfaces = { pr = true, liveness_scan = true },
     output_obligation = obligation({ "decomposed:v1", "github-proxy.github_issue_create_request[*]", "operator rereview command" }, { "blocked", "reviewing" }),
     reentry_commands = { "rereview" },
@@ -31,10 +32,10 @@ return function(M, h)
       receiver_bound_minutes = 0,
       external_wait_bound_minutes = 1410,
     }),
-    on_timeout = timeout("github-devloop.devloop_decompose"),
+    on_timeout = timeout(decompose_queue),
     responsibility_signature = responsibility_signature({
       receiver_kind = "operator-reentry",
-      driving_queue = "github-devloop.devloop_decompose",
+      driving_queue = decompose_queue,
       state_kind = "budget_bounded_recovery",
       liveness_class = "blocked.operator_reentry",
       input_fact_family = "blocked-recovery-hold",
@@ -44,7 +45,7 @@ return function(M, h)
       successors = {},
       watchdog_escape = {
         kind = "watchdog_escape",
-        queue = "github-devloop.devloop_decompose",
+        queue = decompose_queue,
         output_variant = "budget_exhausted_decompose",
         postcondition_family = "blocked-decompose-escape",
         opens_generation = true,
@@ -71,12 +72,12 @@ return function(M, h)
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
     effects = effect(
-      { "github-devloop.devloop_decompose", "pr-state-label" },
+      { decompose_queue, "pr-state-label" },
       "blocked decompose replay is complete only when the decomposed marker count and every declared child issue are derivable",
       "decompose_children_complete"
     ),
     marker_facts = "state:v1 blocked plus decomposed:v1 when class decomposition is incomplete",
-    kickoff = "github-devloop.devloop_decompose",
+    kickoff = decompose_queue,
     replay = "PR observe can replay decomposed blocked PRs back to the parent issue decompose queue when deterministic child completion facts are missing.",
   }
 end

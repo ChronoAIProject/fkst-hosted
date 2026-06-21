@@ -9,7 +9,7 @@ function M.pr_package_queue(queue)
 end
 
 function M.decompose_package_queue()
-  return "github-devloop.devloop_decompose"
+  return "github-devloop-decompose.devloop_decompose"
 end
 
 require("std.devloop_base").install(M)

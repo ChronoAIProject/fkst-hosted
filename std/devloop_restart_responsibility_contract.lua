@@ -329,12 +329,13 @@ local function validate_kind_fanout(row, signature, edges, errors)
     if type(row.watchdog) ~= "table" or row.watchdog.mode ~= "row-budget-bounds-receiver" then
       table.insert(errors, state .. ": budget_bounded_recovery watchdog.mode must be row-budget-bounds-receiver")
     end
+    local decompose_queue = type(M.decompose_package_queue) == "function" and M.decompose_package_queue() or "devloop_decompose"
     local escape = signature.watchdog_escape
-    if type(escape) ~= "table" or escape.kind ~= "watchdog_escape" or escape.queue ~= "devloop_decompose" then
-      table.insert(errors, state .. ": budget_bounded_recovery must declare devloop_decompose watchdog escape")
+    if type(escape) ~= "table" or escape.kind ~= "watchdog_escape" or escape.queue ~= decompose_queue then
+      table.insert(errors, state .. ": budget_bounded_recovery must declare decompose watchdog escape")
     end
-    if type(row.on_timeout) ~= "table" or row.on_timeout.queue ~= "devloop_decompose" then
-      table.insert(errors, state .. ": budget_bounded_recovery on_timeout must target devloop_decompose")
+    if type(row.on_timeout) ~= "table" or row.on_timeout.queue ~= decompose_queue then
+      table.insert(errors, state .. ": budget_bounded_recovery on_timeout must target decompose queue")
     end
   end
 end

@@ -8,7 +8,7 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "devloop_fix_reconcile",
-    "github-devloop.devloop_decompose",
+    "github-devloop-decompose.devloop_decompose",
     "devloop_review_meta",
   },
   fanout = { "consensus.consensus_reached" },
@@ -143,7 +143,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         local reason = "fix-loop-max-rounds"
         core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(" .. reason .. ")", "review decision=reject")
         core.log_raise("review_result", origin.proposal_id, "devloop_fix_reconcile", fix_reconcile)
-        core.log_raise("review_result", origin.proposal_id, "github-devloop.devloop_decompose", decompose)
+        core.log_raise("review_result", origin.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
         return
       end
     end

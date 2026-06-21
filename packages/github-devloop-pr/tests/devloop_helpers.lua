@@ -248,8 +248,6 @@ function helpers.find_causal_raise(result, queue, predicate)
     kind = "github-devloop.fixing"
   elseif queue == "devloop_merge_ready" then
     kind = "github-devloop.merge_ready"
-  elseif queue == "devloop_ready" or queue == "github-devloop.devloop_ready" then
-    kind = "github-devloop.ready"
   end
   local comment = handoff_comment_request(result, kind, predicate)
   if comment == nil then

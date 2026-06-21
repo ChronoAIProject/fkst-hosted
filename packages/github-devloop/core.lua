@@ -5,7 +5,7 @@ function M.persistence_class()
 end
 
 function M.decompose_package_queue()
-  return "devloop_decompose"
+  return "github-devloop-decompose.devloop_decompose"
 end
 
 require("std.devloop_base").install(M)
@@ -41,8 +41,6 @@ require("core.impl_failure").install(M)
 require("std.devloop_payloads").install(M)
 require("std.devloop_convergence").install(M)
 require("std.devloop_decompose").install(M)
-require("core.saga").install(M)
-require("core.decompose").install(M)
 M.restart_package_name = "github-devloop"
 M.restart_lifecycle_states = {
   "thinking",

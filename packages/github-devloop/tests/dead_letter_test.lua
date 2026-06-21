@@ -71,9 +71,9 @@ end
 return {
   test_dead_letter_logs_delivery_identity = function()
     local logs = capture_logs(event({
-        delivery_id = "delivery/v1/raised/queue/github-devloop.devloop_decompose/dept/github-devloop.decompose/01HY",
-        queue = "github-devloop.devloop_decompose",
-        dept = "github-devloop.decompose",
+        delivery_id = "delivery/v1/raised/queue/github-devloop-decompose.devloop_decompose/dept/github-devloop-decompose.decompose/01HY",
+        queue = "github-devloop-decompose.devloop_decompose",
+        dept = "github-devloop-decompose.decompose",
         source_ref = {
           kind = "external",
           ref = "owner/repo#issue/140",
@@ -87,9 +87,9 @@ return {
     t.eq(
       logs[1],
       "github-devloop dept=dead_letter tag=DEAD_LETTER"
-        .. " delivery_id=delivery/v1/raised/queue/github-devloop.devloop_decompose/dept/github-devloop.decompose/01HY"
-        .. " queue=github-devloop.devloop_decompose"
-        .. " dead_dept=github-devloop.decompose"
+        .. " delivery_id=delivery/v1/raised/queue/github-devloop-decompose.devloop_decompose/dept/github-devloop-decompose.decompose/01HY"
+        .. " queue=github-devloop-decompose.devloop_decompose"
+        .. " dead_dept=github-devloop-decompose.decompose"
         .. " source_ref=external:owner/repo#issue/140"
         .. " dedup_key=github-devloop/issue/owner/repo/140/2026-06-10T08-46-17Z"
         .. " attempt=3"

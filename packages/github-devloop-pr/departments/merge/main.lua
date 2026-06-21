@@ -9,7 +9,7 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "devloop_fix_reconcile",
-    "github-devloop.devloop_decompose",
+    "github-devloop-decompose.devloop_decompose",
     "devloop_merge_queue_tick",
   },
   fanout = { "devloop_merge_queue_tick", "devloop_merge_ready" },
@@ -87,7 +87,7 @@ local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, re
   local decompose = core.build_devloop_decompose_payload(fix_reconcile)
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "blocked", "applied(fix-loop-max-rounds)", reason)
   core.log_raise("merge", merge_ready.proposal_id, "devloop_fix_reconcile", fix_reconcile)
-  core.log_raise("merge", merge_ready.proposal_id, "github-devloop.devloop_decompose", decompose)
+  core.log_raise("merge", merge_ready.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
 end
 
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)

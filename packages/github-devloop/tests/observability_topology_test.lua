@@ -117,7 +117,7 @@ local function topology_fixture()
     "github-devloop.devloop_ready",
     "github-devloop.devloop_reviewing",
     "github-devloop.devloop_fixing",
-    "github-devloop.devloop_decompose",
+    "github-devloop-decompose.devloop_decompose",
     "github-devloop.devloop_merge_ready",
     "github-devloop.devloop_reconcile",
     "github-devloop.devloop_review_reconcile",
@@ -126,7 +126,7 @@ local function topology_fixture()
   b.department("github-devloop.observe_pr", { "github-proxy.github_entity_changed" }, {
     "github-devloop.devloop_reviewing",
     "github-devloop.devloop_fixing",
-    "github-devloop.devloop_decompose",
+    "github-devloop-decompose.devloop_decompose",
     "github-devloop.devloop_merge_ready",
     "github-devloop.devloop_reconcile",
     "github-devloop.devloop_review_reconcile",
@@ -149,7 +149,7 @@ local function topology_fixture()
   b.department("branch-topology.rollup_merge", { "branch-topology.devloop_rollup_ready" }, {})
 
   b.department("github-devloop.dead_letter", { "github-devloop.dead_letter" }, { "github-proxy.github_issue_create_request" })
-  b.department("github-devloop.decompose", { "github-devloop.devloop_decompose" }, { "github-proxy.github_issue_create_request" })
+  b.department("github-devloop-decompose.decompose", { "github-devloop-decompose.devloop_decompose" }, { "github-proxy.github_issue_create_request" })
   b.department("github-devloop.doctor", { "github-devloop.devloop_doctor_tick" }, {})
   b.department("github-devloop.ensure_repo", { "github-devloop.devloop_ensure_repo_tick" }, {})
   b.department("github-devloop.fix", { "github-devloop.devloop_fixing" }, { "github-devloop.devloop_reviewing", "github-devloop.devloop_review_meta" })

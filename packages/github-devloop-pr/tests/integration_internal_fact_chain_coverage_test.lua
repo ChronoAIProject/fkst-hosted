@@ -559,7 +559,7 @@ return {
     local result = run_observe_pr_direct(opts("observe-pr-decomposed-missing-children"))
 
     t.eq(result.exit_code, 0)
-    local decompose = find_raise(result.raises, "github-devloop.devloop_decompose")
+    local decompose = find_raise(result.raises, "github-devloop-decompose.devloop_decompose")
     t.eq(decompose.payload.schema, "github-devloop.decompose.v1")
     t.eq(decompose.payload.proposal_id, event.proposal_id)
     t.eq(decompose.payload.version, event.version)
@@ -601,7 +601,7 @@ return {
     t.eq(#label.remove_labels, 1)
     t.eq(label.remove_labels[1], "fkst-dev:reviewing")
     t.eq(label.target_number, 7)
-    t.eq(find_raise(result.raises, "github-devloop.devloop_decompose"), nil)
+    t.eq(find_raise(result.raises, "github-devloop-decompose.devloop_decompose"), nil)
   end,
 
   test_observe_pr_live_308_decompose_reconcile_marker_substream_replay_does_not_require_fix_feedback = function()
@@ -634,7 +634,7 @@ return {
     }, opts("observe-pr-live-308-decompose-reconcile-replay"))
 
     t.eq(result.exit_code, 0)
-    local decompose = find_raise(result.raises, "github-devloop.devloop_decompose")
+    local decompose = find_raise(result.raises, "github-devloop-decompose.devloop_decompose")
     t.eq(decompose.payload.schema, "github-devloop.decompose.v1")
     t.eq(decompose.payload.proposal_id, event.proposal_id)
     t.eq(decompose.payload.version, event.version)
@@ -668,7 +668,7 @@ return {
     }, opts("observe-pr-live-308-decompose-reconcile-replay-noisy"))
 
     t.eq(noisy.exit_code, 0)
-    assert_same_decompose_raise(decompose, find_raise(noisy.raises, "github-devloop.devloop_decompose"))
+    assert_same_decompose_raise(decompose, find_raise(noisy.raises, "github-devloop-decompose.devloop_decompose"))
   end,
 
   test_observe_pr_live_305_merge_gate_marker_substream_replay_reaches_issue_fixing_state = function()

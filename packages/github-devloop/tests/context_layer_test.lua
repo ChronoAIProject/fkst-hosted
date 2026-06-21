@@ -183,11 +183,6 @@ return {
       fix_round = 3,
     }, issue, manifest)
     local judge_prompts = {
-      core.build_decompose_prompt({
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        source_ref = { kind = "external", ref = "owner/repo#pr/7" },
-        round = 4,
-      }, issue, manifest),
       core.build_review_meta_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
         review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),

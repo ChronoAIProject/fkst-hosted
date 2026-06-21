@@ -57,7 +57,7 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
     local reconcile = find_raise(result.raises, "devloop_fix_reconcile")
-    local decompose = find_raise(result.raises, "github-devloop.devloop_decompose")
+    local decompose = find_raise(result.raises, "github-devloop-decompose.devloop_decompose")
     t.eq(reconcile.payload.issue_version, event.version)
     t.eq(reconcile.payload.round, core.max_fix_rounds())
     t.eq(reconcile.payload.pr_number, event.pr_number)

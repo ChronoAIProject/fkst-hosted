@@ -434,7 +434,7 @@ return {
     local result = run_liveness_scan("liveness-scan-blocked-timeout-redrive")
     t.eq(result.exit_code, 0)
     assert_no_observe_reinject(result)
-    local decompose = find_raise(result.raises, "devloop_decompose")
+    local decompose = find_raise(result.raises, "github-devloop-decompose.devloop_decompose")
     t.is_true(decompose ~= nil)
     t.eq(decompose.payload.proposal_id, proposal_id)
     t.eq(decompose.payload.version, version)

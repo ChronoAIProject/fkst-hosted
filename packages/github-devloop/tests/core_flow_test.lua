@@ -334,65 +334,6 @@ return {
     t.eq(facts[1].verdicts, bare_facts[1].verdicts)
   end,
 
-  test_decompose_child_fact_indexes_keep_proxy_marker_legacy_but_completion_uses_live_open_children = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "2026-06-03T01-02-03Z"
-    local decompose = core.build_devloop_decompose_payload({
-      proposal_id = proposal_id,
-      pr_number = 7,
-      issue_version = version,
-      review_proposal_id = "github-devloop/pr-review/owner-repo/7/version/def456",
-      review_dedup_key = "consensus:github-devloop/pr-review/owner-repo/7/version/def456/review",
-      head_sha = "def456",
-      round = 0,
-      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
-    })
-    decompose.current_issue_body = "Parent body"
-    local dedup_by_index = {
-      core.build_issue_create_request("owner/repo", decompose, { title = "One", body = "Body one" }, 1).dedup_key,
-      core.build_issue_create_request("owner/repo", decompose, { title = "Two", body = "Body two" }, 2).dedup_key,
-    }
-    local completed = core.decompose_child_fact_indexes({
-      {
-        body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_by_index[1] .. '" issue="101" -->',
-        author_login = "fkst-test-bot",
-      },
-      {
-        body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_by_index[2] .. '" issue="102" -->',
-        author_login = "someone-else",
-      },
-    }, {
-      {
-        body = core.decompose_child_marker(proposal_id, version, 7, 3),
-        author_login = "fkst-test-bot",
-        state = "OPEN",
-      },
-      {
-        body = core.decompose_child_marker(proposal_id, version, 7, 2),
-        author_login = "someone-else",
-        state = "OPEN",
-      },
-    }, proposal_id, version, 7, dedup_by_index)
-    local live_completed = core.decompose_child_issue_fact_indexes({
-      {
-        body = core.decompose_child_marker(proposal_id, version, 7, 1),
-        author_login = "fkst-test-bot",
-        state = "CLOSED",
-      },
-      {
-        body = core.decompose_child_marker(proposal_id, version, 7, 3),
-        author_login = "fkst-test-bot",
-        state = "OPEN",
-      },
-    }, proposal_id, version, 7)
-
-    t.eq(completed[1], true)
-    t.eq(completed[2], nil)
-    t.eq(completed[3], true)
-    t.eq(live_completed[1], nil)
-    t.eq(live_completed[3], true)
-  end,
-
   test_decompose_replay_dedup_binds_child_completion_identity = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1/fix/2/fix/3"
