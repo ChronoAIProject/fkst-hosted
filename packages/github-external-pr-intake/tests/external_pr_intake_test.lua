@@ -130,6 +130,7 @@ local function new_fake_github(opts)
     hidden_issues_until_creates = options.hidden_issues_until_creates or 0,
     hidden_comments_until_creates = options.hidden_comments_until_creates or 0,
     issue_create_yield = options.issue_create_yield,
+    fail_pr_cli_view_once = options.fail_pr_cli_view_once,
     created_count = 0,
   }
   local handle = { _model = model }
@@ -139,6 +140,10 @@ local function new_fake_github(opts)
   end
   function handle.pr_cli_view(repo, pr_number, fields, timeout)
     table.insert(model.writes, { kind = "pr_cli_view", repo = repo, pr_number = pr_number, fields = fields, timeout = timeout })
+    if model.fail_pr_cli_view_once then
+      model.fail_pr_cli_view_once = false
+      error("fake: transient PR view failure")
+    end
     local pr = model.prs[pr_number]
     if pr == nil then
       error("fake: unknown PR " .. tostring(pr_number))
@@ -555,6 +560,41 @@ pathlib.Path(release_path).write_text("release\n", encoding="utf-8")
     t.eq(result.raises[1].payload.source_ref.kind, "external")
     t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#pr/7")
     t.eq(count_kind(github._model.writes, "pr_list"), 1)
+  end,
+
+  test_failed_ephemeral_candidate_is_rederived_by_next_scan = function()
+    local github = new_fake_github({
+      fail_pr_cli_view_once = true,
+    })
+    local ok, err = pcall(function()
+      run_pipeline({
+        github = github,
+        event = candidate_event(7),
+      })
+    end)
+    t.eq(ok, false)
+    t.is_true(tostring(err or ""):find("transient PR view failure", 1, true) ~= nil)
+    t.eq(count_kind(github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(github._model.writes, "pr_comment"), 0)
+
+    local scan = run_pipeline({
+      github = github,
+      event = { queue = "external_pr_scan", payload = { schema = "github-external-pr-intake.v1" } },
+    })
+    t.eq(#scan.raises, 1)
+    t.eq(scan.raises[1].queue, "external_pr_candidate")
+    t.eq(scan.raises[1].payload.source_ref.kind, "external")
+    t.eq(scan.raises[1].payload.source_ref.ref, "owner/repo#pr/7")
+
+    run_pipeline({
+      github = github,
+      event = {
+        queue = scan.raises[1].queue,
+        payload = scan.raises[1].payload,
+      },
+    })
+    t.eq(count_kind(github._model.writes, "issue_create"), 1)
+    t.eq(count_kind(github._model.writes, "pr_comment"), 1)
   end,
 
   test_candidate_creates_one_bridge_issue_and_pr_marker = function()
