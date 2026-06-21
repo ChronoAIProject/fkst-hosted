@@ -206,6 +206,30 @@ local function confirmed_existing_handoff_comment(M, repo, target, dedup_key, bo
   return trusted_rest_comment_with_fragment(M, repo, target, M.comment_marker(dedup_key), bot_login)
 end
 
+local function marker_attr(marker, name)
+  return tostring(marker or ""):match(name .. '="([^"]*)"')
+end
+
+local function timeout_attempt_marker_round(body)
+  local max_seen = nil
+  for marker in tostring(body or ""):gmatch("<!%-%- fkst:github%-devloop:timeout%-attempt:v[12].-%-%->") do
+    local round = tonumber(marker_attr(marker, "round"))
+    if round ~= nil and round >= 1 and (max_seen == nil or round > max_seen) then
+      max_seen = round
+    end
+  end
+  return max_seen
+end
+
+local function stale_timeout_attempt_replace(existing, next_body)
+  if existing == nil then
+    return false
+  end
+  local existing_round = timeout_attempt_marker_round(M._comment_body(existing))
+  local next_round = timeout_attempt_marker_round(next_body)
+  return existing_round ~= nil and next_round ~= nil and existing_round >= next_round
+end
+
 function M.gh_pr_comment(repo, pr_number, body_file, timeout)
   return M.github().pr_comment(repo, pr_number, body_file, timeout or 30)
 end
@@ -363,6 +387,10 @@ function M.write_comment_request(payload, target)
     end
 
     local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
+    if stale_timeout_attempt_replace(existing, body) then
+      log.info("github-proxy: timeout-attempt replacement is stale; keeping newer visible attempt")
+      return
+    end
     body = M.with_github_debug_stamp(body, {
       emitter = "github-proxy.comment",
       target = tostring(target.kind) .. ":" .. tostring(repo) .. "#" .. tostring(target.number),
