@@ -30,6 +30,7 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local merge_comments = h.merge_comments
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local count_calls = h.count_calls
 
 local function mock_branch_config_env()
@@ -260,6 +261,11 @@ end
 
 local function run_observe_pr_direct(run_opts)
   mock_branch_config_env()
+  t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
+    stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
   return t.run_department("departments/observe_pr/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = {
@@ -388,7 +394,7 @@ return {
 
     local direct = run_fix(event, opts("internal-chain-fix-direct", { FKST_GITHUB_WRITE = "1" }))
     t.eq(direct.exit_code, 0)
-    local direct_reviewing = find_raise(direct.raises, "devloop_reviewing")
+    local direct_reviewing = find_causal_raise(direct, "devloop_reviewing")
     t.eq(direct_reviewing.payload.version, core.next_fix_version(event.version))
     t.eq(direct_reviewing.payload.pr_number, event.pr_number)
 
@@ -413,7 +419,7 @@ return {
     })
     local recovered = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("internal-chain-fix-recovery"))
     t.eq(recovered.exit_code, 0)
-    local recovered_reviewing = find_raise(recovered.raises, "devloop_reviewing")
+    local recovered_reviewing = find_causal_raise(recovered, "devloop_reviewing")
     t.eq(recovered_reviewing.payload.dedup_key, direct_reviewing.payload.dedup_key)
     t.eq(recovered_reviewing.payload.version, direct_reviewing.payload.version)
   end,
@@ -423,7 +429,7 @@ return {
     local result = run_observe_pr_direct(opts("observe-pr-fixing-advanced-branch-head"))
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.eq(reviewing_raise.payload.version, core.next_fix_version(fixture.version))
     t.eq(reviewing_raise.payload.pr_number, 7)
     t.eq(reviewing_raise.payload.source_ref.ref, "owner/repo#pr/7")
@@ -440,7 +446,7 @@ return {
     local fixture = advanced_fixing_fixture({ reviewing_marker = true })
     local result = run_observe_pr_direct(opts("observe-pr-fixing-advanced-idempotent"))
     t.eq(result.exit_code, 0)
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.eq(reviewing_raise.payload.version, core.next_fix_version(fixture.version) .. "/review-loop/1")
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment_raise.payload.body:find(core.state_marker(fixture.event.proposal_id, "reviewing", reviewing_raise.payload.version), 1, true) ~= nil)
@@ -505,7 +511,7 @@ return {
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }, opts("internal-chain-review-approve-recovery"))
     t.eq(recovered_merge.exit_code, 0)
-    t.is_true(find_raise(recovered_merge.raises, "devloop_reviewing") ~= nil)
+    t.is_true(find_causal_raise(recovered_merge, "devloop_reviewing") ~= nil)
 
     local reject = review_reached({
       decision = "reject",
@@ -519,7 +525,7 @@ return {
     })
     local rejected = run_review_result(reject, opts("internal-chain-review-reject-direct"))
     t.eq(rejected.exit_code, 0)
-    local direct_fix = find_raise(rejected.raises, "devloop_fixing")
+    local direct_fix = find_causal_raise(rejected, "devloop_fixing")
     t.eq(direct_fix.payload.schema, "github-devloop.fixing.v1")
 
     local reject_fact = find_pr_comment_with(rejected.raises, "fkst:github-devloop:review-result:v1").payload.body
@@ -542,7 +548,7 @@ return {
     }, opts("internal-chain-review-reject-recovery"))
     t.eq(recovered_fix.exit_code, 0)
     t.eq(find_raise(recovered_fix.raises, "devloop_fixing"), nil)
-    t.is_true(find_raise(recovered_fix.raises, "devloop_reviewing") ~= nil)
+    t.is_true(find_causal_raise(recovered_fix, "devloop_reviewing") ~= nil)
   end,
 
   test_merge_direct_cascade_and_poll_recovery_cover_terminal_and_repair_paths = function()
@@ -557,7 +563,7 @@ return {
 
     local red = run_merge(event, opts("internal-chain-merge-red-direct", { FKST_GITHUB_WRITE = "1" }))
     t.eq(red.exit_code, 0)
-    local direct_fix = find_raise(red.raises, "devloop_fixing")
+    local direct_fix = find_causal_raise(red, "devloop_fixing")
     t.eq(direct_fix.payload.schema, "github-devloop.fixing.v1")
     t.eq(direct_fix.payload.gate_baseline_sha, "abc123")
     t.eq(count_calls("gh pr merge"), 0)
@@ -762,7 +768,7 @@ return {
     }, opts("observe-pr-live-305-merge-gate-fixing-replay"))
 
     t.eq(result.exit_code, 0)
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
     t.eq(fixing_raise.payload.version, fixture.fixing_version)
     t.eq(fixing_raise.payload.review_proposal_id, fixture.review_proposal)
@@ -813,6 +819,6 @@ return {
     }, opts("observe-pr-live-305-merge-gate-fixing-replay-noisy"))
 
     t.eq(noisy.exit_code, 0)
-    assert_same_fixing_raise(fixing_raise, find_raise(noisy.raises, "devloop_fixing"))
+    assert_same_fixing_raise(fixing_raise, find_causal_raise(noisy, "devloop_fixing"))
   end,
 	}

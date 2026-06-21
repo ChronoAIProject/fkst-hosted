@@ -114,6 +114,42 @@ local function has_reviewing_marker_for_comments(comments, proposal_id, version)
   return M.has_state_marker(comments, proposal_id, "reviewing", version)
 end
 
+local function dept_can_direct_reviewing(dept)
+  return dept ~= "observe_pr"
+end
+
+local function dept_can_direct_fixing(dept)
+  return dept ~= "observe_pr"
+end
+
+local function fixing_replay_comment_request(issue, pr_number, fix_payload, feedback, source_ref)
+  local reason = fix_payload.gate_failure_excerpt or feedback.review_reason or feedback.reason or "fixing-replay"
+  local request = M.build_merge_gate_fix_comment_request(
+    issue.repo,
+    issue.number,
+    {
+      proposal_id = fix_payload.proposal_id,
+      pr_number = pr_number,
+      version = fix_payload.version,
+      review_proposal_id = fix_payload.review_proposal_id,
+      review_dedup_key = fix_payload.review_dedup_key,
+      reviewed_head_sha = fix_payload.reviewed_head_sha,
+    },
+    fix_payload.version,
+    reason,
+    fix_payload.gate_baseline_sha,
+    source_ref,
+    fix_payload.predecessor_set,
+    {
+      blocking_gap = fix_payload.blocking_gap,
+      gate_failure_excerpt = fix_payload.gate_failure_excerpt,
+      preserve_nil_gate_failure_excerpt = fix_payload.gate_failure_excerpt == nil,
+    }
+  )
+  request.handoff.dedup_key = fix_payload.dedup_key
+  return request
+end
+
 local pr_review_tools = nil
 
 local function maybe_terminal_linked_pr_action(dept, issue, state, proposal_id, link, current_pr, facts)
@@ -619,6 +655,12 @@ local function replay_fixing(dept, issue, state, row, facts)
       impl_version = fields.version,
     }, fields.pr_number, feedback, fields.source_ref)
     M.log_cas_decision(dept, proposal_id, state, "fixing", "fixing", "applied(replay)", "trusted feedback fact is visible")
+    if not dept_can_direct_fixing(dept) then
+      local comment_request = fixing_replay_comment_request(issue, fields.pr_number, fix_payload, feedback, fields.source_ref)
+      return raise_effects(dept, proposal_id, "fixing", state.version, { add = {}, remove = {} }, {
+        { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
+      })
+    end
     return raise_effects(dept, proposal_id, "fixing", state.version, { add = {}, remove = {} }, {
       { queue = "devloop_fixing", payload = fix_payload },
     })
@@ -627,10 +669,6 @@ local function replay_fixing(dept, issue, state, row, facts)
   if dept ~= "observe_pr" then
     local new_version = M.next_fix_version(state.version)
     local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
-    local reviewing_payload = M.build_devloop_reviewing_payload({
-      proposal_id = proposal_id,
-      impl_version = new_version,
-    }, link.pr_number, source_ref, new_version)
     local comment_request = M.build_merge_head_reviewing_comment_request(
       issue.repo,
       issue.number,
@@ -655,7 +693,6 @@ local function replay_fixing(dept, issue, state, row, facts)
     return raise_effects(dept, proposal_id, "reviewing", new_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:fixing" } }, {
       { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
       { queue = "github-proxy.github_issue_label_request", payload = label_request },
-      { queue = "devloop_reviewing", payload = reviewing_payload },
     })
   end
 
@@ -723,6 +760,24 @@ local function raise_reviewing_for_current_head(dept, issue, state, proposal_id,
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "reviewing", outcome, reason)
   if reviewing_payload == nil then
     return false
+  end
+  if not dept_can_direct_reviewing(dept) then
+    local merge_ready = M.merge_ready_fact(current_pr.comments, proposal_id, state.version, link.pr_number)
+    local comment_request = M.build_merge_head_reviewing_comment_request(
+      issue.repo,
+      issue.number,
+      {
+        proposal_id = proposal_id,
+        pr_number = link.pr_number,
+      },
+      merge_ready and merge_ready.head_sha or current_pr.head_sha,
+      current_pr.head_sha,
+      state.version,
+      M.pr_source_ref(issue.repo, link.pr_number)
+    )
+    return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
+      { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
+    })
   end
   return raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
     { queue = "devloop_reviewing", payload = reviewing_payload },

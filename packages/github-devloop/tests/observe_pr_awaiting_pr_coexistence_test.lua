@@ -107,7 +107,7 @@ return {
     t.is_true(review_comment ~= nil)
     t.is_true(review_comment.payload.handoff ~= nil)
     t.eq(review_comment.payload.handoff.proposal_id, issue_proposal_id)
-    t.is_true(find_raise(result.raises, "devloop_reviewing") ~= nil)
+    t.is_true(h.find_causal_raise(result, "devloop_reviewing") ~= nil)
   end,
 
   test_awaiting_pr_parent_replay_noops_while_child_pr_is_nonterminal = function()

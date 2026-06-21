@@ -124,10 +124,6 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         proposal_id = proposal_id,
       })
       fields.version = review_version
-      local reviewing_payload = M.build_devloop_reviewing_payload({
-        proposal_id = fields.proposal_id,
-        impl_version = fields.version,
-      }, fields.pr_number, fields.source_ref, fields.version)
       local reviewing_comment = M.build_reviewing_comment_request(issue.repo, issue.number, {
         proposal_id = fields.proposal_id,
         impl_version = fields.version,
@@ -135,7 +131,6 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
       M.log_cas_decision(dept, proposal_id, state, "pr-open", "reviewing", "applied(replay)", "linked PR head/base match pr-link marker")
       return tools.raise_effects(dept, proposal_id, "pr-open", state.version, { add = {}, remove = {} }, {
         { queue = "github-proxy.github_pr_comment_request", payload = reviewing_comment },
-        { queue = "devloop_reviewing", payload = reviewing_payload },
       })
     end
   end
@@ -178,10 +173,6 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
     tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
     return true
   end
-  local payload = M.build_devloop_reviewing_payload({
-    proposal_id = fields.proposal_id,
-    impl_version = fields.version,
-  }, fields.pr_number, fields.source_ref, fields.version)
   M.log_cas_decision(dept, proposal_id, state, "reviewing", "reviewing", "applied(replay)", "current PR head has no trusted review result")
   local effects = {}
   if tostring(fields.version or "") ~= tostring(state.version or "") then
@@ -192,8 +183,23 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
         impl_version = fields.version,
       }, fields.pr_number, fields.source_ref),
     })
+  elseif dept == "observe_pr" then
+    table.insert(effects, {
+      queue = "github-proxy.github_pr_comment_request",
+      payload = M.build_reviewing_comment_request(issue.repo, issue.number, {
+        proposal_id = fields.proposal_id,
+        impl_version = fields.version,
+      }, fields.pr_number, fields.source_ref),
+    })
+  else
+    table.insert(effects, {
+      queue = "devloop_reviewing",
+      payload = M.build_devloop_reviewing_payload({
+        proposal_id = fields.proposal_id,
+        impl_version = fields.version,
+      }, fields.pr_number, fields.source_ref, fields.version),
+    })
   end
-  table.insert(effects, { queue = "devloop_reviewing", payload = payload })
   return tools.raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, effects)
 end
 

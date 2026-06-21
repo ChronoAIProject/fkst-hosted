@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
@@ -76,7 +77,7 @@ local function assert_conflict_redrive(result, expected_from_state)
   local pr_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
     return tostring(payload.target_kind or "") == "pr"
   end)
-  local fixing_raise = find_raise(result.raises, "devloop_fixing")
+  local fixing_raise = find_causal_raise(result, "devloop_fixing")
   t.is_true(comment_raise ~= nil)
   t.is_true(issue_label_raise ~= nil)
   t.is_true(pr_label_raise ~= nil)
@@ -136,7 +137,7 @@ return {
 
     local result = run_observe_pr_mergeability("observe-pr-fixing-conflict")
     t.eq(result.exit_code, 0)
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.is_true(fixing_raise ~= nil)
     t.eq(fixing_raise.payload.version, fixing_version)
     t.eq(fixing_raise.payload.review_dedup_key, review_dedup_key)
@@ -162,10 +163,9 @@ return {
 
     local result = run_observe_pr_mergeability("observe-pr-conflict-idempotent")
     t.eq(result.exit_code, 0)
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.is_true(fixing_raise ~= nil)
     t.eq(fixing_raise.payload.version, fix_version)
-    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
     local pr_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
       return tostring(payload.target_kind or "") == "pr"
     end)

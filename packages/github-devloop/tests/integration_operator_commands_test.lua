@@ -15,6 +15,7 @@ local mock_issue_state = h.mock_issue_state
 local mock_pr_origin = h.mock_pr_origin
 local merge_comments = h.merge_comments
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local function pr_event(updated_at)
   return {
@@ -124,7 +125,7 @@ return {
     local result = run_observe_pr(pr_event(), opts("operator-rereview"))
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.is_true(comment_raise.payload.body:find("operator command accepted: rereview", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("fkst:github-devloop:operator-command:v1", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find('state="reviewing"', 1, true) ~= nil)
@@ -232,7 +233,7 @@ return {
     local result = run_observe_pr(pr_event(), opts("operator-rereview-stalled-reviewing"))
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.is_true(comment_raise.payload.body:find("operator command accepted: rereview", 1, true) ~= nil)
     t.eq(reviewing_raise.payload.version, impl_version .. "/review-loop/1/rereview/1/feedface")
   end,
@@ -258,8 +259,8 @@ return {
 
     local result = run_observe_pr(pr_event(), opts("operator-rereview-duplicate"))
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_pr_comment_request"), nil)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, impl_version .. "/review-loop/4/rereview/4/feedface")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
+    t.eq(reviewing_raise.payload.version, impl_version .. "/review-loop/4/rereview/4/feedface")
   end,
 
   test_issue_rereview_command_reenters_thinking_converge = function()

@@ -98,7 +98,7 @@ return {
 
     local result = run_observe_pr(pr_event(), opts("observe-pr-unassigned-self-author"))
     t.eq(result.exit_code, 0)
-    t.is_true(h.find_raise(result.raises, "devloop_reviewing") ~= nil)
+    t.is_true(h.find_causal_raise(result, "devloop_reviewing") ~= nil)
   end,
 
   test_observe_pr_skips_without_backing_issue = function()
@@ -214,7 +214,7 @@ return {
     local result = run_observe_pr(pr_event(), opts("observe-pr-self-base-matched"))
     t.eq(result.exit_code, 0)
     t.eq(unmanaged_comment_raise(result), nil)
-    t.is_true(h.find_raise(result.raises, "devloop_reviewing") ~= nil)
+    t.is_true(h.find_causal_raise(result, "devloop_reviewing") ~= nil)
   end,
 
 }

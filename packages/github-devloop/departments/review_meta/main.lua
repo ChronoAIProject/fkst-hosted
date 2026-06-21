@@ -8,7 +8,6 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "github-proxy.github_issue_create_request",
-    "devloop_fixing",
   },
   stall_window = "2m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
@@ -172,21 +171,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     if spec_issue_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_create_request")
     end
-    local fix_payload = nil
-    if parsed.action == "fix" or parsed.action == "continue" then
-      local _, _, _, reviewed_head_sha = core.parse_pr_review_proposal_id(review_meta.review_proposal_id)
-      fix_payload = core.build_devloop_fixing_payload({
-        proposal_id = review_meta.proposal_id,
-        impl_version = exit_version,
-      }, review_meta.pr_number, {
-        review_proposal_id = review_meta.review_proposal_id,
-        review_dedup_key = review_meta.dedup_key,
-        reviewed_head_sha = reviewed_head_sha,
-        blocking_gap = parsed.blocking_gap or review_meta.blocking_gap,
-      }, review_meta.source_ref)
-      table.insert(raised, "devloop_fixing")
-    end
-
     core.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if label_request ~= nil then
@@ -194,9 +178,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if spec_issue_request ~= nil then
       core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_create_request", spec_issue_request)
-    end
-    if fix_payload ~= nil then
-      core.log_raise("review_meta", review_meta.proposal_id, "devloop_fixing", fix_payload)
     end
   end)
 end, wrap = core.wrap_pipeline_failure, name = "review_meta" })

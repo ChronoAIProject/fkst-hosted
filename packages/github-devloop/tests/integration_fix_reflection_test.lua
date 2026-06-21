@@ -13,6 +13,7 @@ local mock_issue_result = h.mock_issue_result
 local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_pr_origin = h.mock_pr_origin
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local function reflection_review_version()
   return core.next_fix_version(core.next_fix_version(reviewing().version))
@@ -88,9 +89,9 @@ return {
 
     local result = run_review_meta(event, opts("fix-reflection-continue"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    local fix_raise = find_raise(result.raises, "devloop_fixing")
+    local fix_raise = find_causal_raise(result, "devloop_fixing")
     local exit_version = core.next_review_meta_action_version(event.version)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     t.eq(fix_raise.payload.blocking_gap, "missing regression guard")

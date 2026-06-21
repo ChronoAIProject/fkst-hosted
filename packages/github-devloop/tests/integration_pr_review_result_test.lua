@@ -9,6 +9,7 @@ local mock_issue_result = h.mock_issue_result
 local mock_pr_origin = h.mock_pr_origin
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
 local verdict_summary_label = "Three-angle verdicts: "
@@ -101,13 +102,13 @@ return {
 
     local result = run_review_result(event, opts("review-result-reject"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
     t.eq(#label_raise.payload.remove_labels, 12)
-    t.eq(comment_raise.payload.handoff, nil)
+    t.eq(comment_raise.payload.handoff.kind, "github-devloop.fixing")
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
     t.is_true(comment_raise.payload.body:find("decision=\"reject\"", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("state=\"fixing\"", 1, true) ~= nil)
@@ -207,7 +208,7 @@ return {
 
     local result = run_review_result(event, opts("review-result-conflict-fixing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
@@ -273,7 +274,7 @@ return {
 
     local visible = run_review_result(event, opts("review-result-marker-visible"))
     t.eq(visible.exit_code, 0)
-    t.eq(#visible.raises, 3)
+    t.eq(#visible.raises, 2)
     t.eq(find_raise(visible.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
   end,
 

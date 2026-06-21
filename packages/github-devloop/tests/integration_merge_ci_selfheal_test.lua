@@ -13,6 +13,7 @@ local mock_pr_merge_rollup = h.mock_pr_merge_rollup
 local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local check_runs_cmd = "gh api 'repos/owner/repo/commits/def456/check-runs'"
 local rerequest_cmd = "gh api --method POST 'repos/owner/repo/check-runs/123/rerequest'"
@@ -205,11 +206,11 @@ return {
 
     local result = run_merge(event, opts("merge-unstable-failure-rollup", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(count_calls("gh pr merge"), 0)
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:fixing")
-    local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
+    local fixing_payload = find_causal_raise(result, "devloop_fixing").payload
     t.eq(fixing_payload.gate_failure_excerpt, "own-ci-red")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("own-ci-red", 1, true) ~= nil)

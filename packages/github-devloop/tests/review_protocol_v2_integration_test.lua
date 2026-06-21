@@ -16,6 +16,7 @@ local mock_issue_review_meta = h.mock_issue_review_meta
 local mock_bot_env = h.mock_bot_env
 local mock_pr_origin = h.mock_pr_origin
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function mock_issue_result_view(labels, comments)
@@ -278,7 +279,7 @@ return {
 
     local result = run_observe_pr(pr_event(), opts("review-v2-observe-pr-gap-self-heal"))
     t.eq(result.exit_code, 0)
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.is_true(fixing_raise ~= nil)
     t.eq(fixing_raise.payload.dedup_key, expected.dedup_key)
     t.eq(fixing_raise.payload.blocking_gap, "missing retry guard")
@@ -299,7 +300,7 @@ return {
 
     local original = h.run_review_result(review, opts("review-v2-fixing-original-transition"))
     t.eq(original.exit_code, 0)
-    local original_fixing = find_raise(original.raises, "devloop_fixing")
+    local original_fixing = find_causal_raise(original, "devloop_fixing")
     t.is_true(original_fixing ~= nil)
 
     h.mock_pr_origin({
@@ -329,7 +330,7 @@ return {
     t.eq(healed.exit_code, 0)
     local healed_fixing = find_raise(healed.raises, "devloop_fixing")
     t.eq(healed_fixing, nil)
-    t.is_true(find_raise(healed.raises, "devloop_reviewing") ~= nil)
+    t.is_true(find_causal_raise(healed, "devloop_reviewing") ~= nil)
   end,
 
   test_observe_pr_fixing_self_heal_fails_closed_without_reject_fact = function()

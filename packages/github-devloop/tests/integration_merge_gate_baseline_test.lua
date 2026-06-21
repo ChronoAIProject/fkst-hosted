@@ -21,6 +21,7 @@ local mock_git_push = h.mock_git_push
 local has_value = h.has_value
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local check_runs_cmd = "gh api 'repos/owner/repo/commits/def456/check-runs'"
 
 local function mock_failing_required_check_runs()
@@ -44,14 +45,35 @@ return {
 
     local result = run_merge(event, opts("merge-ci-red", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(count_calls("gh pr merge"), 0)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
-    local fixing_payload = find_raise(result.raises, "devloop_fixing").payload
+    t.eq(find_raise(result.raises, "devloop_fixing"), nil)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    local fixing_handoff = comment_raise.payload.handoff
+    t.eq(fixing_handoff.kind, "github-devloop.fixing")
+    t.eq(fixing_handoff.blocking_gap, nil)
+    local handoff_result = t.run_department("departments/comment_handoff/main.lua", {
+      queue = "github-proxy.github_comment_written",
+      payload = {
+        schema = "github-proxy.comment-written.v1",
+        repo = comment_raise.payload.repo,
+        target = "pr",
+        pr_number = comment_raise.payload.pr_number,
+        comment_id = "IC_merge_ci_red_fixing_1",
+        request_dedup_key = comment_raise.payload.dedup_key,
+        dedup_key = comment_raise.payload.dedup_key .. "/written/IC_merge_ci_red_fixing_1",
+        source_ref = comment_raise.payload.source_ref,
+        handoff = fixing_handoff,
+      },
+    }, opts("merge-ci-red-fixing-comment-handoff"))
+    t.eq(handoff_result.exit_code, 0)
+    local fixing_payload = find_raise(handoff_result.raises, "devloop_fixing").payload
     t.eq(fixing_payload.schema, "github-devloop.fixing.v1")
     t.eq(fixing_payload.gate_baseline_sha, "ba5e9999")
     t.eq(fixing_payload.gate_failure_excerpt, "own-ci-red")
-    local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
+    t.eq(fixing_payload.blocking_gap, nil)
+    local comment_body = comment_raise.payload.body
     t.is_true(comment_body:find("fkst:github-devloop:merge-gate:v1", 1, true) ~= nil)
     t.is_true(comment_body:find("gate_baseline_sha", 1, true) ~= nil)
     t.is_true(comment_body:find("own-ci-red", 1, true) ~= nil)
@@ -185,7 +207,7 @@ return {
 
     local result = run_fix(event, opts("fix-same-version-merge-gate-baseline", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("merge --no-edit '" .. event.gate_baseline_sha .. "'"), 1)
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 0)
   end,
@@ -266,7 +288,7 @@ return {
 
     local result = run_fix(corrected, opts("fix-corrected-replay-after-nil-baseline", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(corrected.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(corrected.version))
     t.eq(count_calls("merge --no-edit '" .. corrected.gate_baseline_sha .. "'"), 1)
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 0)
   end,

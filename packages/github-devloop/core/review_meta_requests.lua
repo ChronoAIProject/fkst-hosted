@@ -132,7 +132,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   local state_version = version or review_meta.version
   local marker = review_meta_result_marker(review_meta, action, reason, state_version, blocking_gap)
   local prefix = review_meta.mode == "fix-reflection" and M.comment_string("fix_reflection_prefix") or M.comment_string("review_meta_action_prefix")
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = review_meta.pr_number,
@@ -145,6 +145,16 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     tostring(review_meta.dedup_key),
     tostring(state_version),
   }), review_meta.source_ref)
+  if action == "fix" or action == "continue" then
+    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_meta.review_proposal_id)
+    return M.attach_fixing_handoff(request, review_meta.proposal_id, review_meta.pr_number, state_version, {
+      review_proposal_id = review_meta.review_proposal_id,
+      review_dedup_key = review_meta.dedup_key,
+      reviewed_head_sha = reviewed_head_sha,
+      blocking_gap = blocking_gap or review_meta.blocking_gap,
+    }, review_meta.source_ref)
+  end
+  return request
 end
 
 function M.build_spec_amendment_issue_create_request(repo, issue_number, review_meta, title_brief, reason, comments)

@@ -8,6 +8,7 @@ local mock_issue_state = h.mock_issue_state
 local run_observe = h.run_observe
 local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
 local ready = h.ready
@@ -825,7 +826,7 @@ return {
       source_ref = raised.payload.source_ref,
     }, opts("liveness-scan-observe-pr-reviewing"))
     t.eq(observed.exit_code, 0)
-    local reviewing_raise = find_raise(observed.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(observed, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(reviewing_raise.payload.version, event.version .. "/review-loop/1")
   end,
@@ -866,7 +867,7 @@ return {
       source_ref = raised.payload.source_ref,
     }, opts("liveness-scan-observe-pr-reviewing-existing-review-loop"))
     t.eq(observed.exit_code, 0)
-    local reviewing_raise = find_raise(observed.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(observed, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(reviewing_raise.payload.version, review_version)
   end,

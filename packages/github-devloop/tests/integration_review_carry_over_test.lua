@@ -7,6 +7,7 @@ local mock_issue_reviewing = h.mock_issue_reviewing
 local merge_comments = h.merge_comments
 local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local count_calls = h.count_calls
 
 local function run_comment_handoff_from_request(request, comment_id, name)
@@ -179,7 +180,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.eq(reviewing_raise.payload.version, event.version)
     t.eq(count_calls("git merge-tree --write-tree"), 1)
   end,

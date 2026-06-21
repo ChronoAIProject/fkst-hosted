@@ -16,6 +16,7 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 return {
   test_mergeable_conflicting_fix_skips_pr_merge_ref_verification = function()
@@ -68,7 +69,7 @@ return {
 
     local result = run_fix(event, opts("fix-conflicting-skips-pr-merge-ref", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("git fetch 'origin' 'refs/pull/7/merge'"), 0)
     t.eq(count_calls("git rev-parse --verify FETCH_HEAD^{commit}"), 0)
     t.eq(count_calls("git fetch 'origin' 'dev'"), 0)
@@ -137,8 +138,8 @@ return {
 
     local result = run_fix(event, opts("fix-gate-baseline-before-codex", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(#result.raises, 2)
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
 
     local merge_index = nil
     local codex_index = nil

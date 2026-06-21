@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local render_comment = h.render_comment
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 require("tests.cache_seed_helpers")
@@ -204,7 +205,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_pr_view_fetches(), 0)
     t.eq(find_raise(result.raises, "devloop_timeout_reconcile"), nil)
-    local reviewing = find_raise(result.raises, "devloop_reviewing")
+    local reviewing = find_causal_raise(result, "devloop_reviewing")
     t.is_true(reviewing ~= nil)
     t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")

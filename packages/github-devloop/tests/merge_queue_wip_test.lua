@@ -20,9 +20,9 @@ local mock_git_status = h.mock_git_status
 local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
-local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local function json_literal(value)
   return '"' .. json_string(value) .. '"'
@@ -537,7 +537,7 @@ return {
       FKST_GITHUB_WRITE = "1",
       FKST_GITHUB_REPO = "owner/repo",
     }))
-    t.is_true(find_raise(first_poll.raises, "devloop_fixing") ~= nil)
+    t.is_true(find_causal_raise(first_poll, "devloop_fixing") ~= nil)
     t.eq(find_raise(first_poll.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
 
     mock_bot_env()
@@ -894,7 +894,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh pr merge"), 1)
     t.eq(count_calls("gh issue close"), 0)
-    t.eq(find_raise(result.raises, "devloop_fixing") ~= nil, true)
+    t.eq(find_causal_raise(result, "devloop_fixing") ~= nil, true)
   end,
 
   test_merge_batch_window_does_not_skip_failed_candidate_to_later_disjoint_pr = function()

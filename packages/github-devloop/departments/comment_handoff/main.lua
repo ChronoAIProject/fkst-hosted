@@ -8,6 +8,7 @@ local spec = {
   produces = {
     "devloop_ready",
     "devloop_merge_ready",
+    "devloop_fixing",
     "devloop_reconcile",
     "devloop_reviewing",
   },
@@ -50,6 +51,22 @@ local function supported_handoff(payload)
     and core.is_safe_pr_review_result_ref(handoff.review_proposal_id, handoff.review_dedup_key)
     and core.is_safe_head_sha(handoff.reviewed_head_sha)
     and core.is_safe_head_sha(handoff.current_head_sha)
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
+    return handoff
+  end
+  if handoff.kind == "github-devloop.fixing"
+    and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
+    and core.is_safe_pr_number(handoff.pr_number)
+    and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and core.is_safe_pr_review_result_ref(handoff.review_proposal_id, handoff.review_dedup_key)
+    and core.is_safe_head_sha(handoff.reviewed_head_sha)
+    and (handoff.current_head_sha == nil or core.is_safe_head_sha(handoff.current_head_sha))
+    and (handoff.blocking_gap == nil or core._is_bounded_string(handoff.blocking_gap, core._max_blocking_gap_len))
+    and (handoff.framing == nil or core._is_bounded_string(handoff.framing, core._max_framing_len))
+    and (handoff.gate_baseline_sha == nil or core.is_safe_head_sha(handoff.gate_baseline_sha))
+    and (handoff.gate_failure_excerpt == nil or core._is_bounded_string(handoff.gate_failure_excerpt, core._max_rollup_failure_summary_len))
+    and (handoff.predecessor_set == nil or core._is_path_safe_key(handoff.predecessor_set, core._max_dedup_len))
+    and (handoff.dedup_key == nil or core._is_path_safe_key(handoff.dedup_key, core._max_dedup_len))
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
@@ -120,7 +137,41 @@ local function act_handoff(event)
   end
 
   local entity = core.parse_entity_proposal_id(handoff.proposal_id)
-  if entity == nil or not core.verify_pr_review_issue_claim("comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id) then
+  if handoff.kind == "github-devloop.fixing" then
+    local fixing = core.build_devloop_fixing_payload({
+      proposal_id = handoff.proposal_id,
+      impl_version = handoff.version,
+    }, handoff.pr_number, {
+      review_proposal_id = handoff.review_proposal_id,
+      review_dedup_key = handoff.review_dedup_key,
+      reviewed_head_sha = handoff.reviewed_head_sha,
+      framing = handoff.framing,
+      blocking_gap = handoff.blocking_gap,
+      gate_baseline_sha = handoff.gate_baseline_sha,
+      predecessor_set = handoff.predecessor_set,
+      gate_failure_excerpt = handoff.gate_failure_excerpt,
+    }, handoff.source_ref)
+    if handoff.dedup_key ~= nil then
+      fixing.dedup_key = handoff.dedup_key
+    end
+    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "fixing", version = handoff.version }, "comment-written", "devloop_fixing", "applied(own-write-comment-id)", "fixing marker comment write was acknowledged")
+    core.log_raise("comment_handoff", handoff.proposal_id, "devloop_fixing", fixing)
+    return
+  end
+
+  local claim_ok = false
+  if entity == nil then
+    claim_ok = false
+  elseif entity.kind == "pr" then
+    local repo = payload.repo
+    if repo == nil then
+      repo = select(1, core.parse_pr_source_ref(handoff.source_ref))
+    end
+    claim_ok = entity.repo == repo and tostring(entity.pr_number) == tostring(handoff.pr_number)
+  else
+    claim_ok = core.verify_pr_review_issue_claim("comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id)
+  end
+  if not claim_ok then
     return
   end
   local reviewing = core.build_devloop_reviewing_payload({

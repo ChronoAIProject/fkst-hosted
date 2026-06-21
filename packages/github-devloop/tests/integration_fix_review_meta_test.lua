@@ -33,6 +33,7 @@ local run_review_meta = h.run_review_meta
 local run_merge = h.run_merge
 local json_string = h.json_string
 local render_comment = h.render_comment
+local find_causal_raise = h.find_causal_raise
 local default_marker_version = h.default_marker_version
 local mock_issue_state = h.mock_issue_state
 local state_from_labels = h.state_from_labels
@@ -124,10 +125,10 @@ return {
 
     local result = run_fix(event, opts("fix-write", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
 	    local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
 	    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-	    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+	    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     local expected_version = core.next_fix_version(event.version)
 	    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
 	    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:fixing"))
@@ -204,7 +205,7 @@ return {
 
     local visible = run_fix(event, opts("fix-marker-visible", { FKST_GITHUB_WRITE = "1" }))
     t.eq(visible.exit_code, 0)
-    t.eq(#visible.raises, 3)
+    t.eq(#visible.raises, 2)
     t.eq(find_raise(visible.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
   end,
 
@@ -333,9 +334,9 @@ return {
 
     local with_write = run_fix(event, opts("fix-write-later-second", { FKST_GITHUB_WRITE = "1" }))
     t.eq(with_write.exit_code, 0)
-    t.eq(#with_write.raises, 3)
+    t.eq(#with_write.raises, 2)
     t.eq(find_raise(with_write.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(find_raise(with_write.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(find_causal_raise(with_write, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("git push origin"), 1)
   end,
 
@@ -392,9 +393,9 @@ return {
 
     local result = run_fix(second_event, opts("fix-second-round-origin-branch", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(second_version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(second_version))
     t.eq(count_calls("git push origin"), 1)
     t.eq(count_calls(recomputed_branch), 0)
   end,
@@ -428,10 +429,10 @@ return {
 
     local result = run_fix(event, opts("fix-push-crash-self-heal", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(core.current_state({ find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body }, event.proposal_id).version, core.next_fix_version(event.version))
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("codex exec"), 0)
     t.eq(count_calls("git push origin"), 0)
   end,
@@ -555,10 +556,10 @@ return {
 
     local result = run_fix(event, opts("fix-clean-ahead-reuse", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(core.current_state({ find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body }, event.proposal_id).version, core.next_fix_version(event.version))
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("add -A"), 0)
     t.eq(count_calls("commit -m"), 0)
     t.eq(count_calls("git push origin"), 1)
@@ -892,10 +893,10 @@ return {
     mock_meta_codex("fix", "Run another fix pass.")
     local fix_result = run_review_meta(event, opts("review-meta-fix"))
     t.eq(fix_result.exit_code, 0)
-    t.eq(#fix_result.raises, 3)
+    t.eq(#fix_result.raises, 2)
     t.eq(find_raise(fix_result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
-    t.eq(find_raise(fix_result.raises, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
-    t.eq(find_raise(fix_result.raises, "devloop_fixing").payload.blocking_gap, "missing retry guard")
+    t.eq(find_causal_raise(fix_result, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
+    t.eq(find_causal_raise(fix_result, "devloop_fixing").payload.blocking_gap, "missing retry guard")
 
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
@@ -938,7 +939,7 @@ return {
 
     local meta_result = run_review_meta(event, opts("review-meta-fix-canonical"))
     t.eq(meta_result.exit_code, 0)
-    t.eq(#meta_result.raises, 3)
+    t.eq(#meta_result.raises, 2)
     local meta_comment = find_raise(meta_result.raises, "github-proxy.github_pr_comment_request").payload.body
     local current = core.current_state({
       core.state_marker(event.proposal_id, "review-meta", event.version),
@@ -946,7 +947,7 @@ return {
     }, event.proposal_id)
     t.eq(current.state, "fixing")
     t.eq(current.version, meta_exit_version)
-    local fix_event = find_raise(meta_result.raises, "devloop_fixing").payload
+    local fix_event = find_causal_raise(meta_result, "devloop_fixing").payload
     t.eq(fix_event.version, meta_exit_version)
     t.eq(fix_event.blocking_gap, "missing retry guard")
 
@@ -975,9 +976,9 @@ return {
 
     local fix_result = run_fix(fix_event, opts("fix-from-review-meta-feedback", { FKST_GITHUB_WRITE = "1" }))
     t.eq(fix_result.exit_code, 0)
-    t.eq(#fix_result.raises, 3)
+    t.eq(#fix_result.raises, 2)
     t.eq(find_raise(fix_result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(find_raise(fix_result.raises, "devloop_reviewing").payload.version, core.next_fix_version(meta_exit_version))
+    t.eq(find_causal_raise(fix_result, "devloop_reviewing").payload.version, core.next_fix_version(meta_exit_version))
   end,
 
 }

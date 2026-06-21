@@ -11,6 +11,7 @@ local mock_pr_merge_rollup = h.mock_pr_merge_rollup
 local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local check_runs_cmd = "gh api 'repos/owner/repo/commits/def456/check-runs'"
 
@@ -55,7 +56,7 @@ return {
   test_red_pr_head_required_check_raises_fixing = function()
     local _, result = run_rollup_red_merge("merge-own-red-fixing", "failure")
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "devloop_fixing").payload.gate_failure_excerpt, "own-ci-red")
+    t.eq(find_causal_raise(result, "devloop_fixing").payload.gate_failure_excerpt, "own-ci-red")
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     t.eq(count_calls("gh pr merge"), 0)
   end,

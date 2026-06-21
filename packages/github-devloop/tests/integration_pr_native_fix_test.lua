@@ -98,15 +98,36 @@ return {
     local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
     local expected_version = core.next_fix_version(event.version)
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
+    t.eq(#result.raises, 1)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request"), nil)
+    t.eq(reviewing_raise, nil)
     t.eq(comment_raise.payload.pr_number, 7)
     t.eq(comment_raise.payload.issue_number, nil)
     t.is_true(comment_raise.payload.body:find(core.fix_marker(event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "feedface"), 1, true) ~= nil)
     t.eq(core.current_state({ comment_raise.payload.body }, event.proposal_id).state, "reviewing")
     t.eq(core.current_state({ comment_raise.payload.body }, event.proposal_id).version, expected_version)
-    t.eq(reviewing_raise.payload.proposal_id, event.proposal_id)
-    t.eq(reviewing_raise.payload.version, expected_version)
+    t.eq(comment_raise.payload.handoff.kind, "github-devloop.reviewing")
+    t.eq(comment_raise.payload.handoff.proposal_id, event.proposal_id)
+    t.eq(comment_raise.payload.handoff.pr_number, event.pr_number)
+    t.eq(comment_raise.payload.handoff.version, expected_version)
+    local handoff = t.run_department("departments/comment_handoff/main.lua", {
+      queue = "github-proxy.github_comment_written",
+      payload = {
+        schema = "github-proxy.comment-written.v1",
+        repo = comment_raise.payload.repo,
+        target = "pr",
+        pr_number = comment_raise.payload.pr_number,
+        comment_id = "IC_pr_native_fix_reviewing_1",
+        request_dedup_key = comment_raise.payload.dedup_key,
+        dedup_key = comment_raise.payload.dedup_key .. "/written/IC_pr_native_fix_reviewing_1",
+        source_ref = comment_raise.payload.source_ref,
+        handoff = comment_raise.payload.handoff,
+      },
+    }, opts("fix-pr-native-write-comment-handoff"))
+    t.eq(handoff.exit_code, 0)
+    local handoff_reviewing = find_raise(handoff.raises, "devloop_reviewing")
+    t.eq(handoff_reviewing.payload.proposal_id, event.proposal_id)
+    t.eq(handoff_reviewing.payload.version, expected_version)
     t.eq(count_calls("git push origin"), 1)
   end,
 

@@ -14,6 +14,7 @@ local mock_issue_implement_raw = h.mock_issue_implement_raw
 local mock_issue_review = h.mock_issue_review
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -351,7 +352,7 @@ return {
     end)
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:awaiting-pr")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:blocked"))
-    local reviewing = find_raise(result.raises, "devloop_reviewing")
+    local reviewing = find_causal_raise(result, "devloop_reviewing")
     t.eq(reviewing, nil)
   end,
 
@@ -494,7 +495,7 @@ return {
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local base = "ready/consensus-github-devloop/issue/owner/repo/42/185/2026-06-10T13-45-26Z"
     local issue_version = base .. "/fix/1/fix/2/fix/3/fix/4/fix/5"
-    local link_version = base .. "/fix/1/review-loop/2/rereview/2/feedface"
+    local link_version = core._strip_latest_fix_version_suffix(issue_version)
     local review_proposal = core.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(issue_version), "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
     local feedback = core.build_review_result_comment_request("owner/repo", 42, proposal_id, issue_version, {
@@ -630,7 +631,7 @@ return {
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:reviewing" } }), opts("observe-issue-reviewing-timeout-redrive"))
     t.eq(result.exit_code, 0)
-    local reviewing = find_raise(result.raises, "devloop_reviewing")
+    local reviewing = find_causal_raise(result, "devloop_reviewing")
     t.is_true(reviewing ~= nil)
     t.eq(reviewing.payload.version, version .. "/review-loop/1")
     t.eq(reviewing.payload.source_ref.ref, "owner/repo#pr/7")

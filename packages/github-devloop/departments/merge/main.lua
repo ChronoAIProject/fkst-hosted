@@ -8,8 +8,6 @@ local spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
-    "devloop_reviewing",
-    "devloop_fixing",
     "devloop_fix_reconcile",
     "devloop_decompose",
     "devloop_merge_queue_tick",
@@ -122,29 +120,19 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     merge_ready.dedup_key .. "/label/fixing",
     core.issue_source_ref(repo, issue_number)
   ) or nil
-  local fix_payload = core.build_devloop_fixing_payload({
-    proposal_id = merge_ready.proposal_id,
-    impl_version = fix_version,
-  }, merge_ready.pr_number, {
-    review_proposal_id = merge_ready.review_proposal_id,
-    review_dedup_key = merge_ready.review_dedup_key,
-    reviewed_head_sha = merge_ready.reviewed_head_sha,
-    gate_baseline_sha = gate_baseline_sha,
-    predecessor_set = predecessor_set,
-    gate_failure_excerpt = reason,
-  }, source_ref)
   local add_labels, remove_labels = core.state_label_changes("fixing")
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "fixing", "applied", reason)
-  core.log_apply("merge", merge_ready.proposal_id, "fixing", fix_version, { add = add_labels, remove = remove_labels }, {
+  local raised = {
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_fixing",
-  })
+  }
+  if label_request ~= nil then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  core.log_apply("merge", merge_ready.proposal_id, "fixing", fix_version, { add = add_labels, remove = remove_labels }, raised)
   core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if label_request ~= nil then
     core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
-  core.log_raise("merge", merge_ready.proposal_id, "devloop_fixing", fix_payload)
 end
 
 local function raise_reviewing_for_current_head(repo, issue_number, merge_ready, current_state, current_pr, reason)
@@ -157,22 +145,19 @@ local function raise_reviewing_for_current_head(repo, issue_number, merge_ready,
   local current_head_sha = tostring(current_pr.head_sha or "")
   local comment_request = core.build_merge_head_reviewing_comment_request(repo, issue_number, merge_ready, merge_ready.reviewed_head_sha, current_head_sha, review_version, source_ref)
   local label_request = issue_number ~= nil and core.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, current_head_sha, review_version, core.issue_source_ref(repo, issue_number)) or nil
-  local reviewing_payload = core.build_devloop_reviewing_payload({
-    proposal_id = merge_ready.proposal_id,
-    impl_version = review_version,
-  }, merge_ready.pr_number, source_ref, review_version)
   local add_labels, remove_labels = core.state_label_changes("reviewing")
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "applied", reason)
-  core.log_apply("merge", merge_ready.proposal_id, "reviewing", review_version, { add = add_labels, remove = remove_labels }, {
+  local raised = {
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_reviewing",
-  })
+  }
+  if label_request ~= nil then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  core.log_apply("merge", merge_ready.proposal_id, "reviewing", review_version, { add = add_labels, remove = remove_labels }, raised)
   core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if label_request ~= nil then
     core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
-  core.log_raise("merge", merge_ready.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
 local function assert_open_same_repo_pr(merge_ready, pr, repo, branch, head_sha)

@@ -7,7 +7,6 @@ local spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
-    "devloop_fixing",
     "devloop_fix_reconcile",
     "devloop_decompose",
     "devloop_review_meta",
@@ -188,7 +187,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
-    local fix_payload = nil
     local reflection_payload = nil
     if reflection_checkpoint then
       reflection_payload = core.build_devloop_fix_reflection_payload({
@@ -198,24 +196,11 @@ return saga.department(spec, { done = function() return false end, act = functio
       }, origin.proposal_id, issue_version, pr_number, core.version_fix_round(issue_version), pr_source_ref)
       reflection_payload.blocking_gap = reached.blocking_gap
       table.insert(raised, "devloop_review_meta")
-    elseif effective_decision == "reject" then
-      fix_payload = core.build_devloop_fixing_payload(origin, pr_number, {
-        review_proposal_id = reached.proposal_id,
-        review_dedup_key = reached.dedup_key,
-        reviewed_head_sha = reviewed_head_sha,
-        fix_version = issue_version,
-        framing = reached.framing,
-        blocking_gap = reached.blocking_gap,
-      }, pr_source_ref)
-      table.insert(raised, "devloop_fixing")
     end
     core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if origin.issue_number ~= nil then
       core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
-    end
-    if fix_payload ~= nil then
-      core.log_raise("review_result", origin.proposal_id, "devloop_fixing", fix_payload)
     end
     if reflection_payload ~= nil then
       core.log_raise("review_result", origin.proposal_id, "devloop_review_meta", reflection_payload)

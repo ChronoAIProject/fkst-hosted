@@ -79,6 +79,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_issue_view_failure = h.mock_issue_view_failure
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local function find_label_raise(raises, target_kind)
   return find_raise(raises, "github-proxy.github_issue_label_request", function(payload)
     return tostring(payload.target_kind or "issue") == tostring(target_kind or "issue")
@@ -192,10 +193,10 @@ return {
       },
     }, opts("observe-pr-reviewing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local pr_label_raise = find_label_raise(result.raises, "pr")
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.is_true(comment_raise.payload.body:find("state=\"reviewing\"", 1, true) ~= nil)
     t.eq(find_label_raise(result.raises, "issue"), nil)
     t.eq(pr_label_raise.payload.target_kind, "pr")
@@ -227,7 +228,7 @@ return {
       },
     }, opts("observe-pr-reconcile-reviewing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local pr_label_raise = find_label_raise(result.raises, "pr")
     t.is_true(pr_label_raise ~= nil)
     t.eq(find_label_raise(result.raises, "issue"), nil)
@@ -372,7 +373,7 @@ return {
       },
     }, opts("observe-pr-reviewing-self-heal"))
     t.eq(first.exit_code, 0)
-    local reviewing_raise = find_raise(first.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(first, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(find_label_raise(first.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(reviewing_raise.payload.version, impl_version .. "/review-loop/1")
@@ -422,7 +423,7 @@ return {
       },
     }, opts("observe-pr-reviewing-fix-round-self-heal"))
     t.eq(result.exit_code, 0)
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing")
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(find_label_raise(result.raises, "pr").payload.expected_version, fix_round_version)
     t.eq(reviewing_raise.payload.version, fix_round_version .. "/review-loop/1")
@@ -599,10 +600,10 @@ return {
     local result = run_review_result(reached_payload, opts("review-pr-gate-reject-result"))
     local fix_version = core.fix_version_from_review_version(event.version)
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local fixing_raise = find_raise(result.raises, "devloop_fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.is_true(comment_raise.payload.body:find("decision=\"reject\"", 1, true) ~= nil)
     t.is_true(comment_raise.payload.body:find("Blocking gap: missing regression guard", 1, true) ~= nil)
     t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")

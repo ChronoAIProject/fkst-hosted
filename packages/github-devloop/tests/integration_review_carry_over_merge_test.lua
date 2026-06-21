@@ -11,6 +11,7 @@ local mock_pr_merge = h.mock_pr_merge
 local merge_comments = h.merge_comments
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local function run_comment_handoff_from_request(request, comment_id, name)
   return t.run_department("departments/comment_handoff/main.lua", {
@@ -134,7 +135,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_review_loop_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_review_loop_version(event.version))
     t.eq(count_calls("git merge-tree --write-tree"), 0)
     t.eq(count_calls("gh pr merge"), 0)
   end,
@@ -153,7 +154,7 @@ return {
 
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_review_loop_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_review_loop_version(event.version))
     t.eq(count_calls("git merge-tree --write-tree"), 1)
     t.eq(count_calls("gh pr merge"), 0)
   end,
@@ -197,7 +198,7 @@ return {
     t.eq(find_raise(ci_red.raises, "devloop_reviewing"), nil)
     t.eq(find_raise(ci_red.raises, "devloop_merge_ready"), nil)
     t.eq(find_raise(ci_red.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
-    t.eq(find_raise(ci_red.raises, "devloop_fixing").payload.reviewed_head_sha, new_head)
+    t.eq(find_causal_raise(ci_red, "devloop_fixing").payload.reviewed_head_sha, new_head)
     t.eq(count_calls("gh pr merge"), 0)
   end,
 }

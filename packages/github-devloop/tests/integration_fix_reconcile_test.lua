@@ -12,6 +12,7 @@ local mock_pr_origin = h.mock_pr_origin
 local mock_issue_result = h.mock_issue_result
 local mock_issue_review = h.mock_issue_review
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 local count_calls = h.count_calls
 
 local function origin_marker(version)
@@ -71,10 +72,10 @@ return {
 
     local result = run_review_result(event, opts("fix-progress-same-framing"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    local fixing = find_raise(result.raises, "devloop_fixing")
+    local fixing = find_causal_raise(result, "devloop_fixing")
     t.eq(find_raise(result.raises, "devloop_fix_reconcile"), nil)
     t.eq(label.payload.add_labels[1], "fkst-dev:fixing")
     t.is_true(comment.payload.body:find('state="fixing" version="' .. fix_version .. '"', 1, true) ~= nil)

@@ -80,6 +80,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_issue_view_failure = h.mock_issue_view_failure
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local function seed_cache(key, value, run_opts)
   return t.run_department("departments/test_cache_seed/main.lua", {
@@ -314,8 +315,8 @@ return {
 
     local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:fixing" } }), opts("observe-issue-fixing-self-heal-no-fact"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
-    local reviewing_raise = find_raise(result.raises, "devloop_reviewing").payload
+    t.eq(#result.raises, 2)
+    local reviewing_raise = find_causal_raise(result, "devloop_reviewing").payload
     t.eq(reviewing_raise.schema, "github-devloop.reviewing.v1")
     t.eq(reviewing_raise.version, core.next_fix_version(event.version))
     t.eq(reviewing_raise.pr_number, event.pr_number)

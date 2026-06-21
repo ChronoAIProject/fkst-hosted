@@ -6,7 +6,6 @@ local spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
-    "devloop_reviewing",
     "devloop_review_meta",
   },
   stall_window = "10m",
@@ -307,7 +306,12 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
     fix.gate_failure_excerpt or fix.blocking_gap or reason,
     fix.gate_baseline_sha,
     fix.source_ref,
-    current_predecessor_set
+    current_predecessor_set,
+    {
+      blocking_gap = fix.blocking_gap,
+      gate_failure_excerpt = fix.gate_failure_excerpt,
+      preserve_nil_gate_failure_excerpt = true,
+    }
   )
   local label_request = issue_number ~= nil and core.build_state_label_request(
     repo,
@@ -316,30 +320,19 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
     fix.dedup_key .. "/label/refix/" .. tostring(core.version_fix_round(next_version)),
     core.issue_source_ref(repo, issue_number)
   ) or nil
-  local refix_payload = core.build_devloop_fixing_payload({
-    proposal_id = fix.proposal_id,
-    impl_version = next_version,
-  }, fix.pr_number, {
-    review_proposal_id = fix.review_proposal_id,
-    review_dedup_key = fix.review_dedup_key,
-    reviewed_head_sha = fix.reviewed_head_sha,
-    blocking_gap = fix.blocking_gap,
-    gate_baseline_sha = fix.gate_baseline_sha,
-    predecessor_set = current_predecessor_set,
-    gate_failure_excerpt = fix.gate_failure_excerpt,
-  }, fix.source_ref)
   local add_labels, remove_labels = core.state_label_changes("fixing")
   core.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
-  core.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, {
+  local raised = {
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_fixing",
-  })
+  }
+  if label_request ~= nil then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  core.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, raised)
   core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if label_request ~= nil then
     core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
-  core.log_raise("fix", fix.proposal_id, "devloop_fixing", refix_payload)
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)

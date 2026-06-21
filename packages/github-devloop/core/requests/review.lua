@@ -6,6 +6,52 @@ local build_convergence_display = shared.build_convergence_display
 local build_verdict_summary = shared.build_verdict_summary
 local bounded_blocking_gap = shared.bounded_blocking_gap
 
+function M.attach_reviewing_handoff(request, proposal_id, pr_number, version, source_ref)
+  request.handoff = {
+    kind = "github-devloop.reviewing",
+    proposal_id = proposal_id,
+    pr_number = pr_number,
+    version = version,
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+  return request
+end
+
+function M.attach_fixing_handoff(request, proposal_id, pr_number, version, review_fact, source_ref)
+  local normalized = M.build_devloop_fixing_payload({
+    proposal_id = proposal_id,
+    impl_version = version,
+  }, pr_number, review_fact, source_ref)
+  request.handoff = {
+    kind = "github-devloop.fixing",
+    proposal_id = normalized.proposal_id,
+    pr_number = normalized.pr_number,
+    version = normalized.version,
+    review_proposal_id = normalized.review_proposal_id,
+    review_dedup_key = normalized.review_dedup_key,
+    reviewed_head_sha = normalized.reviewed_head_sha,
+    source_ref = normalized.source_ref,
+  }
+  for _, field in ipairs({
+    "framing",
+    "blocking_gap",
+    "gate_baseline_sha",
+    "predecessor_set",
+    "gate_failure_excerpt",
+  }) do
+    if normalized[field] ~= nil then
+      request.handoff[field] = normalized[field]
+    end
+  end
+  if review_fact.current_head_sha ~= nil then
+    if not M.is_safe_head_sha(review_fact.current_head_sha) then
+      error("github-devloop: invalid fixing handoff current head sha")
+    end
+    request.handoff.current_head_sha = tostring(review_fact.current_head_sha)
+  end
+  return request
+end
+
 function M.build_review_converge_round_comment_request(repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
   return M.build_entity_comment_request({
     kind = "pr",
@@ -55,20 +101,13 @@ function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number
     tostring(origin.impl_version),
     tostring(pr_number),
   }), source_ref)
-  request.handoff = {
-    kind = "github-devloop.reviewing",
-    proposal_id = origin.proposal_id,
-    pr_number = pr_number,
-    version = origin.impl_version,
-    source_ref = M.normalize_source_ref(source_ref),
-  }
-  return request
+  return M.attach_reviewing_handoff(request, origin.proposal_id, pr_number, origin.impl_version, source_ref)
 end
 
 function M.build_operator_rereview_comment_request(repo, pr_number, proposal_id, new_version, command, source_ref)
   local state_marker = M.state_marker(proposal_id, "reviewing", new_version)
   local marker = M.operator_command_marker(command, "applied", "rereview")
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -82,6 +121,7 @@ function M.build_operator_rereview_comment_request(repo, pr_number, proposal_id,
     "applied",
     tostring(new_version),
   }), source_ref)
+  return M.attach_reviewing_handoff(request, proposal_id, pr_number, new_version, source_ref)
 end
 
 function M.pr_base_unmanaged_blocked_version(version)
@@ -174,11 +214,21 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
       current_head_sha = reached.current_head_sha or reviewed_head_sha,
       source_ref = M.normalize_source_ref(source_ref),
     }
+  elseif reached.decision == "reject" and not reached.reflection_checkpoint then
+    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
+    M.attach_fixing_handoff(request, issue_proposal_id, pr_number, issue_version, {
+      review_proposal_id = reached.proposal_id,
+      review_dedup_key = reached.dedup_key,
+      reviewed_head_sha = reviewed_head_sha,
+      framing = reached.framing,
+      blocking_gap = reached.blocking_gap,
+      current_head_sha = reached.current_head_sha,
+    }, source_ref)
   end
   return request
 end
 
-function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
+function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set, handoff_fields)
   local safe_reason = M.merge_gate_reason_class(reason)
   local display_reason = M.neutralize_untrusted_comment_text(reason or "gate-failed")
   if display_reason == "" then
@@ -200,7 +250,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     safe_reason,
     predecessor_set
   )
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
@@ -217,6 +267,21 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     tostring(predecessor_set or "nopred"),
     safe_reason,
   }), source_ref)
+  handoff_fields = handoff_fields or {}
+  local gate_failure_excerpt = handoff_fields.gate_failure_excerpt
+  if gate_failure_excerpt == nil and handoff_fields.preserve_nil_gate_failure_excerpt ~= true then
+    gate_failure_excerpt = reason
+  end
+  return M.attach_fixing_handoff(request, merge_ready.proposal_id, merge_ready.pr_number, fix_version, {
+    review_proposal_id = merge_ready.review_proposal_id,
+    review_dedup_key = merge_ready.review_dedup_key,
+    reviewed_head_sha = merge_ready.reviewed_head_sha,
+    blocking_gap = handoff_fields.blocking_gap,
+    gate_baseline_sha = gate_baseline_sha,
+    predecessor_set = predecessor_set,
+    gate_failure_excerpt = gate_failure_excerpt,
+    current_head_sha = handoff_fields.current_head_sha,
+  }, source_ref)
 end
 
 function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
@@ -226,7 +291,7 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
     summary = "\n" .. M.comment_string("fix_round_summary_label") .. M.neutralize_untrusted_comment_text(fix.fix_summary)
   end
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = fix.pr_number,
@@ -242,6 +307,7 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
     tostring(fix.review_dedup_key),
     tostring(new_head_sha),
   }), fix.source_ref)
+  return M.attach_reviewing_handoff(request, fix.proposal_id, fix.pr_number, new_version or fix.version, fix.source_ref)
 end
 
 function M.raise_fix_reviewing(opts)
@@ -263,25 +329,22 @@ function M.raise_fix_reviewing(opts)
   local comment_request = M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
   local label_request = M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
   local add_labels, remove_labels = M.state_label_changes("reviewing")
-  local reviewing_payload = M.build_devloop_reviewing_payload({
-    proposal_id = fix.proposal_id,
-    impl_version = new_version,
-  }, fix.pr_number, fix.source_ref)
-  M.log_apply(dept, fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, {
+  local raised = {
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_reviewing",
-  })
+  }
+  if issue_number ~= nil then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  M.log_apply(dept, fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, raised)
   M.log_raise(dept, fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if issue_number ~= nil then
     M.log_raise(dept, fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
-  M.log_raise(dept, fix.proposal_id, "devloop_reviewing", reviewing_payload)
 end
 
 function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_ready, old_head_sha, new_head_sha, new_version, source_ref)
   local state_marker = M.state_marker(merge_ready.proposal_id, "reviewing", new_version)
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
@@ -296,6 +359,7 @@ function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_
     tostring(new_version),
     tostring(new_head_sha),
   }), source_ref)
+  return M.attach_reviewing_handoff(request, merge_ready.proposal_id, merge_ready.pr_number, new_version, source_ref)
 end
 
 function M.build_review_carry_over_comment_request(repo, pr_number, issue_proposal_id, version, carry, source_ref)

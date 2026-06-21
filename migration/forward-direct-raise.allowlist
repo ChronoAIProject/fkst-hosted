@@ -3,12 +3,3 @@
 # New entries fail CI. Remove entries only when the path is routed through
 # github_comment_written -> comment_handoff or declared REDRIVE from visible
 # marker facts.
-packages/github-devloop/core/requests/review.lua|M.raise_fix_reviewing|devloop_reviewing
-packages/github-devloop/departments/fix/main.lua|raise_stale_speculation_refix|devloop_fixing
-packages/github-devloop/departments/merge/main.lua|raise_fixing|devloop_fixing
-packages/github-devloop/departments/merge/main.lua|raise_reviewing_for_current_head|devloop_reviewing
-packages/github-devloop/departments/observe_pr/main.lua|maybe_apply_rereview_command|devloop_reviewing
-packages/github-devloop/departments/observe_pr/main.lua|maybe_redrive_not_mergeable_pr|devloop_fixing
-packages/github-devloop/departments/observe_pr/main.lua|process_pr_event|devloop_reviewing
-packages/github-devloop/departments/review_meta/main.lua|pipeline|devloop_fixing
-packages/github-devloop/departments/review_result/main.lua|pipeline|devloop_fixing

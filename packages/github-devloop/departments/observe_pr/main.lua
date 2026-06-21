@@ -8,8 +8,6 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "devloop_ready",
-    "devloop_reviewing",
-    "devloop_fixing",
     "devloop_decompose",
     "devloop_merge_ready",
     "devloop_reconcile",
@@ -228,17 +226,11 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
     command,
     source_ref
   )
-  local reviewing_payload = core.build_devloop_reviewing_payload({
-    proposal_id = origin.proposal_id,
-    impl_version = new_version,
-  }, pr_number, source_ref, new_version)
   core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "applied(operator-rereview)", "trusted operator command requested rereview")
   core.log_apply("observe_pr", origin.proposal_id, "reviewing", new_version, { add = {}, remove = {} }, {
     "github-proxy.github_pr_comment_request",
-    "devloop_reviewing",
   })
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-  core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
   maybe_label_hints(origin, pr_number, current_pr, { state = "reviewing", version = new_version }, source_ref)
   return true
 end
@@ -334,7 +326,10 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
     reason,
     nil,
     source_ref,
-    nil
+    nil,
+    {
+      gate_failure_excerpt = reason,
+    }
   )
   local label_request = origin.issue_number ~= nil and core.build_state_label_request(
     origin.repo,
@@ -343,21 +338,18 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
     tostring(state.version) .. "/observe-pr-conflict/label/fixing",
     core.issue_source_ref(origin.repo, origin.issue_number)
   ) or nil
-  local fix_payload = core.build_devloop_fixing_payload({
-    proposal_id = origin.proposal_id,
-    impl_version = fix_version,
-  }, pr_number, review_fact, source_ref)
   core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "applied(not-mergeable)", reason)
-  core.log_apply("observe_pr", origin.proposal_id, "fixing", fix_version, { add = { "fkst-dev:fixing" }, remove = {} }, {
+  local raised = {
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_label_request",
-    "devloop_fixing",
-  })
+  }
+  if label_request ~= nil then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  core.log_apply("observe_pr", origin.proposal_id, "fixing", fix_version, { add = { "fkst-dev:fixing" }, remove = {} }, raised)
   core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if label_request ~= nil then
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
-  core.log_raise("observe_pr", origin.proposal_id, recovery.queue, fix_payload)
   maybe_label_hints(origin, pr_number, current_pr, { state = "fixing", version = fix_version }, source_ref)
   return true
 end
@@ -531,14 +523,11 @@ local function process_pr_event(event)
     end
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "applied", "writing PR-local reviewing marker")
     local comment_request = core.build_reviewing_comment_request(origin.repo, origin.issue_number, origin, pr.number, source_ref)
-    local reviewing_payload = core.build_devloop_reviewing_payload(origin, pr.number, source_ref)
     local raised = {
       "github-proxy.github_pr_comment_request",
-      "devloop_reviewing",
     }
     core.log_apply("observe_pr", origin.proposal_id, "reviewing", origin.impl_version, { add = {}, remove = {} }, raised)
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-    core.log_raise("observe_pr", origin.proposal_id, "devloop_reviewing", reviewing_payload)
     maybe_label_hints(origin, pr.number, current_pr, { state = "reviewing", version = origin.impl_version }, source_ref)
   end)
 end

@@ -219,7 +219,7 @@ return {
 
     local result = h.run_review_result(event, h.opts("review-v2-gate-plus-code-gap"))
     t.eq(result.exit_code, 0)
-    t.is_true(h.find_raise(result.raises, "devloop_fixing") ~= nil)
+    t.is_true(h.find_causal_raise(result, "devloop_fixing") ~= nil)
     t.is_nil(h.find_raise(result.raises, "devloop_merge_ready"))
   end,
 

@@ -202,6 +202,67 @@ helpers.run_merge = function(payload, ...)
   return base_run_merge(payload, ...)
 end
 
+local function handoff_comment_request(result, queue, predicate)
+  local selected = helpers.find_raise(result and result.raises, "github-proxy.github_pr_comment_request", function(payload, raised)
+    return payload.handoff ~= nil
+      and payload.handoff.kind == queue
+      and (predicate == nil or predicate(payload, raised))
+  end)
+  if selected ~= nil then
+    return selected
+  end
+  return helpers.find_raise(result and result.raises, "github-proxy.github_issue_comment_request", function(payload, raised)
+    return payload.handoff ~= nil
+      and payload.handoff.kind == queue
+      and (predicate == nil or predicate(payload, raised))
+  end)
+end
+
+function helpers.run_comment_handoff_from_request(request, comment_id, name)
+  local entity = helpers.core.parse_entity_proposal_id(request and request.handoff and request.handoff.proposal_id)
+  if entity ~= nil and entity.issue_number ~= nil then
+    mock_default_issue_claim(entity.repo, entity.issue_number)
+  end
+  return helpers.t.run_department("departments/comment_handoff/main.lua", {
+    queue = "github-proxy.github_comment_written",
+    payload = {
+      schema = "github-proxy.comment-written.v1",
+      repo = request.repo,
+      target = request.pr_number ~= nil and "pr" or "issue",
+      pr_number = request.pr_number,
+      issue_number = request.issue_number,
+      comment_id = comment_id or "IC_handoff_1",
+      request_dedup_key = request.dedup_key,
+      dedup_key = tostring(request.dedup_key) .. "/written/" .. tostring(comment_id or "IC_handoff_1"),
+      source_ref = request.source_ref,
+      handoff = request.handoff,
+    },
+  }, helpers.opts(name or "comment-handoff-from-request"))
+end
+
+function helpers.find_causal_raise(result, queue, predicate)
+  local kind = queue
+  if queue == "devloop_reviewing" then
+    kind = "github-devloop.reviewing"
+  elseif queue == "devloop_fixing" then
+    kind = "github-devloop.fixing"
+  elseif queue == "devloop_merge_ready" then
+    kind = "github-devloop.merge_ready"
+  elseif queue == "devloop_ready" then
+    kind = "github-devloop.ready"
+  end
+  local comment = handoff_comment_request(result, kind, predicate)
+  if comment == nil then
+    return nil
+  end
+  local handoff = helpers.run_comment_handoff_from_request(
+    comment.payload,
+    "IC_" .. tostring(queue):gsub("[^%w_%-]", "_") .. "_1",
+    "handoff-" .. tostring(queue):gsub("[^%w_%-]", "-")
+  )
+  return helpers.find_raise(handoff.raises, queue)
+end
+
 helpers.mock_bot_env = function(...)
   if type(helpers.reset_pr_helper_state) == "function" then
     helpers.reset_pr_helper_state()

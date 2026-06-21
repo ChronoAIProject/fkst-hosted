@@ -16,6 +16,7 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local find_causal_raise = h.find_causal_raise
 
 local function mock_fix_recovery_context(event, branch, origin_marker, reject_comment)
   mock_bot_env()
@@ -82,9 +83,9 @@ return {
 
     local result = run_fix(event, opts("fix-rebuild-missing-worktree", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:reviewing")
-    t.eq(find_raise(result.raises, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
+    t.eq(find_causal_raise(result, "devloop_reviewing").payload.version, core.next_fix_version(event.version))
     t.eq(count_calls("git worktree prune"), 1)
     t.eq(count_calls("git fetch 'origin' '" .. branch .. "'"), 1)
     t.eq(count_calls("git worktree add --force -B"), 1)
@@ -125,7 +126,7 @@ return {
 
     local result = run_fix(event, opts("fix-rebuild-outside-runtime-worktree", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     t.eq(count_calls("git worktree remove --force"), 1)
     t.eq(count_calls("git worktree prune"), 0)
     t.eq(count_calls("git fetch 'origin' '" .. branch .. "'"), 1)
