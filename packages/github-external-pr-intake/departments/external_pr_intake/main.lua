@@ -12,7 +12,7 @@ local spec = {
   stall_window = "30s",
 }
 
-local pr_view_fields = "title,headRefName,baseRefName,state,updatedAt,author,comments,assignees"
+local pr_view_fields = "title,headRefName,baseRefName,state,createdAt,updatedAt,author,comments,assignees"
 
 local function bare_queue(queue)
   return tostring(queue or ""):match("%.([^%.]+)$") or tostring(queue or "")
@@ -152,7 +152,7 @@ local function handle_candidate(github, payload)
   with_lock(core.bridge_lock_key(repo, pr_number), function()
     local managed = core.managed_bot_logins()
     local pr = read_pr(github, repo, pr_number)
-    if not core.is_external_candidate(pr, managed) then
+    if not core.is_external_candidate(pr, managed, now()) then
       action = "skip-not-external"
       return
     end
@@ -176,7 +176,7 @@ local function handle_candidate(github, payload)
       return
     end
 
-    if not core.is_external_candidate(pr, managed) then
+    if not core.is_external_candidate(pr, managed, now()) then
       action = "skip-not-external-after-claim"
       return
     end
@@ -216,7 +216,7 @@ local function handle_scan(github, event)
   local result = github.pr_list(repo, 30)
   for _, raw in ipairs(core.parse_pr_list(result and result.stdout or "[]")) do
     local pr = core.normalize_pr(raw, repo)
-    if core.is_external_candidate(pr, managed) then
+    if core.is_external_candidate(pr, managed, now()) then
       local payload = {
         schema = "github-external-pr-intake.v1",
         repo = repo,

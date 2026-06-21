@@ -14,6 +14,7 @@ local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
+  FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS = true,
 }
 
 local function read_env_command(name)
@@ -29,6 +30,7 @@ M.strip_bot_login_suffix = strings.strip_bot_login_suffix
 M.trim = strings.trim
 M.json_string = strings.json_string
 M.sanitize_key = strings.sanitize_key
+M.DEFAULT_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS = 3 * 60 * 60
 
 function M.write_enabled()
   return M.read_env("FKST_GITHUB_WRITE") == "1"
@@ -63,6 +65,77 @@ function M.managed_bot_logins()
     end
   end
   return logins
+end
+
+local function is_leap_year(year)
+  return year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)
+end
+
+local function days_in_month(year, month)
+  if month == 2 then
+    return is_leap_year(year) and 29 or 28
+  end
+  if month == 4 or month == 6 or month == 9 or month == 11 then
+    return 30
+  end
+  return 31
+end
+
+function M.iso_timestamp_epoch_seconds(timestamp)
+  local year, month, day, hour, minute, second = tostring(timestamp or ""):match(
+    "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$"
+  )
+  if year == nil then
+    year, month, day, hour, minute, second = tostring(timestamp or ""):match(
+      "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)%.%d+Z$"
+    )
+  end
+  if year == nil then
+    return nil
+  end
+  year = tonumber(year)
+  month = tonumber(month)
+  day = tonumber(day)
+  hour = tonumber(hour)
+  minute = tonumber(minute)
+  second = tonumber(second)
+  if month < 1
+    or month > 12
+    or day < 1
+    or day > days_in_month(year, month)
+    or hour > 23
+    or minute > 59
+    or second > 59 then
+    return nil
+  end
+
+  local adjusted_year = year
+  local adjusted_month = month
+  if adjusted_month <= 2 then
+    adjusted_year = adjusted_year - 1
+    adjusted_month = adjusted_month + 12
+  end
+  local era = math.floor(adjusted_year / 400)
+  local year_of_era = adjusted_year - era * 400
+  local day_of_year = math.floor((153 * (adjusted_month - 3) + 2) / 5) + day - 1
+  local day_of_era = year_of_era * 365
+    + math.floor(year_of_era / 4)
+    - math.floor(year_of_era / 100)
+    + day_of_year
+  local days_since_epoch = era * 146097 + day_of_era - 719468
+  return days_since_epoch * 86400 + hour * 3600 + minute * 60 + second
+end
+
+function M.external_pr_bridge_min_age_seconds()
+  local raw = M.trim(M.read_env("FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS") or "")
+  if raw == "" or raw:match("^%d+$") == nil then
+    return M.DEFAULT_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS
+  end
+  local parsed = tonumber(raw)
+  if parsed == nil or parsed <= 0 then
+    return M.DEFAULT_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS
+  end
+  return parsed
 end
 
 function M.is_managed_bot_login(login, managed)
@@ -261,6 +334,7 @@ function M.normalize_pr(pr, repo)
     title = tostring(pr.title or ""),
     state = state,
     url = pr.url or pr.html_url,
+    created_at = pr.createdAt or pr.created_at,
     updated_at = pr.updatedAt or pr.updated_at,
     author_login = author_login(pr),
     head_ref_name = head,
@@ -270,7 +344,7 @@ function M.normalize_pr(pr, repo)
   }
 end
 
-function M.is_external_candidate(pr, managed)
+function M.is_external_candidate(pr, managed, now_seconds)
   if type(pr) ~= "table" or pr.number == nil then
     return false
   end
@@ -283,7 +357,12 @@ function M.is_external_candidate(pr, managed)
   if tostring(pr.head_ref_name or ""):match("^devloop/") ~= nil then
     return false
   end
-  return true
+  local created_seconds = M.iso_timestamp_epoch_seconds(pr.created_at)
+  local now_value = tonumber(now_seconds)
+  if created_seconds == nil or now_value == nil then
+    return false
+  end
+  return now_value - created_seconds >= M.external_pr_bridge_min_age_seconds()
 end
 
 function M.bridge_marker_issue_number(body)

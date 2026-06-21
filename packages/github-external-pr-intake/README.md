@@ -61,4 +61,12 @@ is idempotent through `with_lock`, trusted `external-pr-bridge:v1` markers, and 
 issue search. Reliable payloads carry `source_ref` and small control fields; PR content stays at
 GitHub and is re-derived from `external:<repo>#pr/<number>`.
 
+## Staleness Window
+
+An external PR becomes bridge-eligible only after it has been open for at least
+`FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS`. The default is `10800` seconds (3 hours),
+which gives human maintainers a priority window before automation creates a bridge issue. The
+scan is level-triggered, so younger PRs are skipped and evaluated again on the next scheduled scan;
+once the PR age reaches the configured threshold, the normal idempotent bridge path runs.
+
 ⟦AI:FKST⟧
