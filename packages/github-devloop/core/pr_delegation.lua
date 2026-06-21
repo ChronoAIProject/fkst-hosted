@@ -167,13 +167,12 @@ function M.ensure_pr_child(issue, impl_version, generation)
   local head_sha = pr.head_sha or issue.head_sha or (issue.implementation and issue.implementation.head_sha)
   local effects = {}
   local pr_origin = M.pr_origin_fact(issue.pr_comments or {})
-  local pr_state = M.current_entity_state(issue.pr_comments or {}, issue_proposal_id)
   local child_start_visible = pr_origin ~= nil
     and tostring(pr_origin.proposal_id or "") == issue_proposal_id
     and tostring(pr_origin.issue_number or "") == tostring(issue_number)
-    and pr_state ~= nil
-    and pr_state.state == "pr-open"
-    and tostring(pr_state.version or "") == tostring(impl_version)
+    and tostring(pr_origin.impl_version or "") == tostring(impl_version)
+    and tostring(pr_origin.branch or "") == tostring(branch)
+    and tostring(pr_origin.base_branch or "") == tostring(base_branch)
   if not child_start_visible then
     table.insert(effects, {
       queue = "github-proxy.github_pr_comment_request",
