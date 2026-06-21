@@ -8,6 +8,7 @@ local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
 
 local canonical_labels = {
   { name = "fkst-dev:enabled", color = "1D76DB", description = "intake-approved-for-autonomous-development" },
+  { name = "fkst-dev:hold", color = "BFD4F2", description = "manual-intake-hold" },
   { name = "fkst-class:expedite", color = "D93F0B", description = "service-class-expedite-display-only" },
   { name = "fkst-class:standard", color = "1D76DB", description = "service-class-standard-display-only" },
   { name = "fkst-class:background", color = "6A737D", description = "service-class-background-display-only" },

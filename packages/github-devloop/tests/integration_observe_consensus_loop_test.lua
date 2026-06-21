@@ -167,6 +167,14 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
+  test_observe_hold_label_blocks_enabled_issue_backstop = function()
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:hold" })
+    local result = run_observe(issue({ labels = { "fkst-dev:enabled", "fkst-dev:hold" } }), opts("observe-hold-label"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
   test_observe_re_derives_labels_and_skips_stale_enabled_payload = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local marker_version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"

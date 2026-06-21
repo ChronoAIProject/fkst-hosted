@@ -450,8 +450,7 @@ M.replay_raise_effects = raise_effects
 
 local function build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
   local stable_version = M.strip_transition_version_suffixes(state.version)
-  local state_base_version = M.version_loop_round(stable_version) > 0 and M.converge_base_version(stable_version) or nil
-  local latest = M.latest_complete_converge_round(current.comments, proposal_id, state_base_version, issue.source_ref)
+  local latest = M.latest_complete_converge_round(current.comments, proposal_id, stable_version, issue.source_ref)
   if latest ~= nil then
     local base_version = M.converge_proposal_base_dedup(latest.dedup)
     local next_n = latest.round + 1
@@ -502,7 +501,7 @@ function M.has_thinking_converge_replay(current, proposal_id, state, source_ref)
   if state.state ~= "thinking" then
     return false
   end
-  local base_version = M.version_loop_round(state.version) > 0 and M.converge_base_version(state.version) or state.version
+  local base_version = M.strip_transition_version_suffixes(state.version)
   local sr_digest = M.source_ref_digest(source_ref)
   local facts = M.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
   local round = M.max_converge_round(facts)
