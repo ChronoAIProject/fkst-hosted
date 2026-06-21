@@ -203,9 +203,6 @@ local function payload_for_queue(queue)
       dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     },
-    devloop_intake_candidate = core.build_devloop_intake_candidate_payload("owner/repo", "42", "2026-06-03T01:02:03Z"),
-    devloop_intake_probe_tick = { schema = "github-devloop.intake-probe-tick.v1" },
-    devloop_intake_tick = { schema = "github-devloop.intake-tick.v1" },
     devloop_liveness_tick = { schema = "github-devloop.tick.v1" },
     devloop_merge_queue_tick = core.merge_queue_tick_payload("owner/repo", 6, {
       proposal_id = "github-devloop/issue/owner/repo/42",
@@ -345,11 +342,6 @@ local cases = {
     dept = "consensus_result",
     path = "departments/consensus_result/main.lua",
     queue = "consensus.consensus_reached",
-  },
-  {
-    dept = "intake_judge",
-    path = "departments/intake_judge/main.lua",
-    queue = "devloop_intake_candidate",
   },
   {
     dept = "observe_issue",

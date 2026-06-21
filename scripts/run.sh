@@ -316,7 +316,7 @@ from pathlib import Path
 
 report_dir = Path(sys.argv[1])
 target = (
-    "github-devloop",
+    "github-devloop-intake",
     "tests/integration_prompt_injection_canary_test.lua",
     "test_held_out_hostile_canary_runs_through_intake_judge_path",
 )
@@ -335,7 +335,7 @@ raise SystemExit(
     "error: held-out hostile canary was not executed by scripts/run.sh test"
 )
 PY
-  echo "OK: held-out hostile canary executed in github-devloop intake path"
+  echo "OK: held-out hostile canary executed in github-devloop-intake path"
 }
 
 check_sdk_primitives() {

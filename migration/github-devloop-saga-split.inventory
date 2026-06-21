@@ -5,9 +5,9 @@
 {"path":"packages/github-devloop/departments/doctor/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/ensure_repo/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/implement/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop/departments/intake_judge/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
-{"path":"packages/github-devloop/departments/intake_probe/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
-{"path":"packages/github-devloop/departments/intake_scan/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/departments/intake_judge/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/departments/intake_probe/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/departments/intake_scan/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop/departments/liveness_scan/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/loop/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/observability/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
@@ -22,6 +22,7 @@
 {"path":"packages/github-devloop/departments/test_board_digest_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/test_context_bundle_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-intake/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop-integration/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"std/devloop_autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
 {"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
@@ -37,14 +38,14 @@
 {"path":"std/devloop_entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
 {"path":"packages/github-devloop/core/error_facts.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/failure_triage.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"packages/github-devloop/core/forks.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop/core/github_capabilities.lua","owner":"shared","reason":"core module is shared or authority-neutral after extraction."}
+{"path":"std/devloop_forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
+{"path":"packages/github-devloop-intake/core/github_capabilities.lua","owner":"intake","reason":"core module owns intake trust-gate capability and hostile canary helpers."}
 {"path":"packages/github-devloop/core/github_graphql.lua","owner":"shared","reason":"core module is shared or authority-neutral after extraction."}
 {"path":"packages/github-devloop/core/impl_failure.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/implement_attempt.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop/core/intake_class.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop/core/intake_scan.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop/core/intake_service_class.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop-intake/core/intake_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/core/intake_scan.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/core/intake_service_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop/core/observability.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/observability_bounds.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/pr_delegation.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}

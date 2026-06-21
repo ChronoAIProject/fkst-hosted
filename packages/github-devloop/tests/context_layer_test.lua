@@ -183,7 +183,6 @@ return {
       fix_round = 3,
     }, issue, manifest)
     local judge_prompts = {
-      core.build_intake_prompt("github-devloop/issue/owner/repo/42", issue, manifest),
       core.build_decompose_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
         source_ref = { kind = "external", ref = "owner/repo#pr/7" },

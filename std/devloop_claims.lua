@@ -2,6 +2,8 @@ local S = {}
 local github_handle = nil
 
 function S.install(M)
+require("std.devloop_forks").install(M)
+
 local github_view = require("std.github_view")
 local function github()
   if github_handle ~= nil then
