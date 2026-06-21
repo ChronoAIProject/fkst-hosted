@@ -40,9 +40,18 @@ function M.timeout_attempt_v2_marker(proposal_id, state_name, liveness_class_id,
     .. '" -->'
 end
 
+function M.timeout_attempt_latest_marker(proposal_id, state_name, liveness_class_id, generation_key)
+  return '<!-- fkst:github-devloop:timeout-attempt:latest:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
+    .. '" state="' .. safe_attr(state_name, max_attr_len)
+    .. '" liveness_class_id="' .. safe_attr(liveness_class_id or "", max_attr_len)
+    .. '" generation_key="' .. safe_attr(generation_key or "", M._max_dedup_len)
+    .. '" -->'
+end
+
 function M.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt)
   local normalized = M.normalize_source_ref(source_ref)
   local marker = M.timeout_attempt_marker(proposal_id, state.version, row.from_state, attempt, normalized)
+  local latest_marker = M.timeout_attempt_latest_marker(proposal_id, row.from_state, "", M.strip_transition_version_suffixes(state.version))
   return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
     .. " "
@@ -50,24 +59,31 @@ function M.build_timeout_attempt_comment_request(target, proposal_id, state, row
     .. "\n\n"
     .. marker
     .. "\n"
+    .. latest_marker
+    .. "\n"
     .. "⟦AI:FKST⟧", M._dedup_key({
     "timeout-attempt",
     tostring(proposal_id),
     tostring(M.strip_transition_version_suffixes(state.version)),
     tostring(row.from_state),
     tostring(attempt),
-  }), normalized)
+  }), normalized, {
+    replace_marker = latest_marker,
+  })
 end
 
 function M.build_timeout_attempt_v2_comment_request(target, proposal_id, state, row, source_ref, attempt, generation_key)
   local normalized = M.normalize_source_ref(source_ref)
   local marker = M.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
+  local latest_marker = M.timeout_attempt_latest_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key)
   return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
     .. " "
     .. tostring(attempt)
     .. "\n\n"
     .. marker
+    .. "\n"
+    .. latest_marker
     .. "\n"
     .. "⟦AI:FKST⟧", M._dedup_key({
     "timeout-attempt:v2",
@@ -76,7 +92,9 @@ function M.build_timeout_attempt_v2_comment_request(target, proposal_id, state, 
     tostring(row.liveness_class_id),
     tostring(generation_key),
     tostring(attempt),
-  }), normalized)
+  }), normalized, {
+    replace_marker = latest_marker,
+  })
 end
 
 function M.decompose_exhausted_marker(proposal_id, issue_version, round, source_ref)
