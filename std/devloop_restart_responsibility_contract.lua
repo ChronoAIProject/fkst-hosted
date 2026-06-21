@@ -11,6 +11,18 @@ local state_kinds = {
   budget_bounded_recovery = true,
 }
 
+local gate_kinds = {
+  monotone_milestone = true,
+  decision = true,
+  current_route = true,
+}
+
+local milestone_accessors = {
+  ["std.devloop_state.reached"] = true,
+  reached = true,
+  pr_origin_fact = true,
+}
+
 local known_god_states = {}
 
 local function copy_table(map)
@@ -340,6 +352,45 @@ local function validate_kind_fanout(row, signature, edges, errors)
   end
 end
 
+local function validate_gate_kind(row, signature, errors)
+  local state = state_name(row)
+  if signature.gate_kind == nil then
+    return
+  end
+  if gate_kinds[signature.gate_kind] ~= true then
+    table.insert(errors, state .. ": responsibility_signature.gate_kind must be monotone_milestone, decision, or current_route")
+    return
+  end
+  if signature.gate_kind ~= "monotone_milestone" then
+    return
+  end
+  if signature.state_kind ~= "gate" then
+    table.insert(errors, state .. ": monotone_milestone gate_kind requires state_kind=gate")
+  end
+  if milestone_accessors[signature.milestone_accessor] ~= true then
+    table.insert(errors, state .. ": monotone_milestone gate must declare milestone_accessor=std.devloop_state.reached")
+  end
+  if not non_empty_string(signature.milestone) then
+    table.insert(errors, state .. ": monotone_milestone gate must declare milestone")
+  elseif M.stage_rank ~= nil and M.stage_rank(signature.milestone) == 0 then
+    table.insert(errors, state .. ": monotone_milestone gate milestone must be a lifecycle state")
+  end
+  if not non_empty_string(signature.milestone_domain) then
+    table.insert(errors, state .. ": monotone_milestone gate must declare milestone_domain")
+  end
+  if not non_empty_string(signature.milestone_implementation) then
+    table.insert(errors, state .. ": monotone_milestone gate must declare milestone_implementation")
+  end
+  if type(signature.lineage_keys) ~= "table" or #signature.lineage_keys == 0 then
+    table.insert(errors, state .. ": monotone_milestone gate must declare lineage_keys")
+  end
+  if signature.cursor_accessor ~= nil
+    or signature.current_accessor ~= nil
+    or signature.current_state_accessor ~= nil then
+    table.insert(errors, state .. ": monotone_milestone gate must not declare current cursor accessors")
+  end
+end
+
 local function validate_phase_monotonicity(row, signature, edges, errors)
   local state = state_name(row)
   local current_rank = tonumber(signature.phase_rank)
@@ -457,6 +508,7 @@ local function validate_row(row, seen, all_rows, errors)
   validate_terminal_escape_targets(row, actual_edges, all_rows, errors)
   validate_output_family(row, signature, actual_edges, errors)
   validate_kind_fanout(row, signature, actual_edges, errors)
+  validate_gate_kind(row, signature, errors)
   validate_phase_monotonicity(row, signature, actual_edges, errors)
   validate_generation_entry_policy(row, actual_edges, all_rows, errors)
   validate_blocked_by_partition_invariant(row, signature, errors); if signature.state_kind == "worker" then local contract = row.span_contract; if type(contract) ~= "table" then table.insert(errors, state .. ": worker row must declare span_contract") else for _, field in ipairs({ "department", "durable_start_marker", "spawn_predecessor" }) do if not non_empty_string(contract[field]) then table.insert(errors, state .. ": span_contract." .. field .. " must be declared") end end; if tostring(contract.durable_start_marker or ""):find(":v1", 1, true) == nil then table.insert(errors, state .. ": span_contract.durable_start_marker must name a durable marker family") end; if contract.spawn_function ~= nil and not non_empty_string(contract.spawn_function) then table.insert(errors, state .. ": span_contract.spawn_function must be a non-empty string when declared") end end end

@@ -523,4 +523,86 @@ return {
     end
     t.eq(#errors, 0, joined_errors(errors))
   end,
+  test_monotone_milestone_gate_signature_passes = function()
+    local row = {
+      from_state = "synthetic-milestone-gate",
+      terminal = false,
+      to_states = { "synthetic-forward-a" },
+      driving_queue = "synthetic_gate",
+      liveness_class_id = "synthetic.milestone",
+      responsibility_signature = {
+        receiver_kind = "synthetic-gate",
+        driving_queue = "synthetic_gate",
+        state_kind = "gate",
+        gate_kind = "monotone_milestone",
+        milestone_accessor = "std.devloop_state.reached",
+        milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child",
+        milestone = "pr-open",
+        milestone_domain = "github-devloop-pr",
+        liveness_class = "synthetic.milestone",
+        input_fact_family = "synthetic-pr-origin",
+        output_postcondition_family = "synthetic-pr-start-visible",
+        decision_type = "synthetic-pr-start-visible",
+        phase_rank = 600,
+        lineage_keys = { "state.version", "pr-origin.proposal" },
+        successors = {
+          {
+            state = "synthetic-forward-a",
+            output_variant = "visible",
+            postcondition_family = "synthetic-pr-start-visible",
+            decision_type = "synthetic-pr-start-visible",
+            monotonic = true,
+          },
+        },
+      },
+    }
+    local original_stage_rank = core.stage_rank
+    core.stage_rank = function(state)
+      if state == "synthetic-milestone-gate" then
+        return 600
+      end
+      if state == "synthetic-forward-a" then
+        return 650
+      end
+      return original_stage_rank(state)
+    end
+    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    core.stage_rank = original_stage_rank
+    if not ok then
+      error(errors)
+    end
+    t.eq(#errors, 0, joined_errors(errors))
+  end,
+  test_monotone_milestone_gate_rejects_cursor_accessor = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table())["awaiting-pr"])
+    row.responsibility_signature.gate_kind = "monotone_milestone"
+    row.responsibility_signature.milestone_accessor = "current_state"
+    row.responsibility_signature.milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child"
+    row.responsibility_signature.milestone = "pr-open"
+    row.responsibility_signature.milestone_domain = "github-devloop-pr"
+    row.responsibility_signature.current_state_accessor = "std.devloop_state.current_state"
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare milestone_accessor=std.devloop_state.reached"), joined_errors(errors))
+    t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must not declare current cursor accessors"), joined_errors(errors))
+  end,
+  test_monotone_milestone_gate_requires_domain = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table())["awaiting-pr"])
+    row.responsibility_signature.gate_kind = "monotone_milestone"
+    row.responsibility_signature.milestone_accessor = "std.devloop_state.reached"
+    row.responsibility_signature.milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child"
+    row.responsibility_signature.milestone = "pr-open"
+    row.responsibility_signature.milestone_domain = nil
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare milestone_domain"), joined_errors(errors))
+  end,
+  test_monotone_milestone_gate_requires_bound_implementation = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table())["awaiting-pr"])
+    row.responsibility_signature.gate_kind = "monotone_milestone"
+    row.responsibility_signature.milestone_accessor = "std.devloop_state.reached"
+    row.responsibility_signature.milestone = "pr-open"
+    row.responsibility_signature.milestone_domain = "github-devloop-pr"
+    row.responsibility_signature.milestone_implementation = nil
+    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare milestone_implementation"), joined_errors(errors))
+  end,
 }

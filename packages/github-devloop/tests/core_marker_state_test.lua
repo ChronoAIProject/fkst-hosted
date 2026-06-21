@@ -167,6 +167,51 @@ return {
     t.eq(current.state, "ready")
     t.eq(current.version, "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z")
   end,
+  test_reached_stays_true_after_later_phase_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local comments = {
+      core.state_marker(proposal_id, "pr-open", impl_version),
+      core.state_marker(proposal_id, "reviewing", impl_version),
+    }
+
+    t.eq(core.current_state(comments, proposal_id).state, "reviewing")
+    t.eq(core.reached(comments, proposal_id, "pr-open", {
+      domain = "github-devloop-pr",
+      lineage_base = impl_version,
+    }), true)
+  end,
+  test_reached_is_false_before_matching_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local comments = {
+      core.state_marker("github-devloop/issue/owner/repo/99", "reviewing", impl_version),
+    }
+
+    t.eq(core.reached(comments, proposal_id, "pr-open", {
+      domain = "github-devloop-pr",
+      lineage_base = impl_version,
+    }), false)
+  end,
+  test_reached_respects_proposal_lineage = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local other_proposal = "github-devloop/issue/owner/repo/43"
+    local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local newer_version = impl_version .. "/fix/1"
+    local comments = {
+      core.state_marker(other_proposal, "merged", impl_version),
+      core.state_marker(proposal_id, "reviewing", newer_version),
+    }
+
+    t.eq(core.reached(comments, proposal_id, "pr-open", {
+      domain = "github-devloop-pr",
+      lineage_base = impl_version,
+    }), true)
+    t.eq(core.reached(comments, proposal_id, "pr-open", {
+      domain = "github-devloop-pr",
+      lineage_base = "ready/consensus-github-devloop/issue/owner/repo/99/2026-06-04T01-02-03Z",
+    }), false)
+  end,
   test_current_state_uses_stage_rank_for_same_issue_version = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"

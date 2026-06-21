@@ -57,6 +57,7 @@ return function(M, h)
       receiver_kind = "pr-child-workflow",
       driving_queue = "github-proxy.github_entity_changed",
       state_kind = "gate",
+      gate_kind = "decision",
       liveness_class = "child_workflow_wait",
       input_fact_family = "pr-delegation-and-child-state",
       output_postcondition_family = "parent_resume_from_child_state_terminal",

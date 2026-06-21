@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_content_truncation, check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_namespaced_queue, check_repo_perm, check_repo_saga_head, check_repo_saga_split, check_repo_span, check_repo_std_dependency_model, ratchet_base
+import check_repo_content_truncation, check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_monotone_gate, check_repo_namespaced_queue, check_repo_perm, check_repo_saga_head, check_repo_saga_split, check_repo_span, check_repo_std_dependency_model, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -986,7 +986,7 @@ def main() -> int:
     # Stronger follow-up: behavioral namespaced-dispatch conformance must dispatch each spec.consumes queue under its production namespaced name and reject unknown-queue/unsupported/skip-foreign fallthrough.
     for message in check_repo_namespaced_queue.repository_messages(root, packages_root(root), read_text, rel, strip_lua_comments_and_strings, is_unmasked_range): add(violations, "G-NAMESPACED-QUEUE", message)
     for message in check_repo_saga_split.repository_messages(root): add(violations, "G-SAGA-SPLIT", message)
-    for message in check_repo_span.repository_messages(root): add(violations, "G-SPAN", message)
+    for rule, message in [("G-SPAN", m) for m in check_repo_span.repository_messages(root)] + [("G-MONOTONE-GATE", m) for m in check_repo_monotone_gate.repository_messages(root)]: add(violations, rule, message)
     check_saga_handler_ratchet(root, violations, warnings)
     sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
     for message in check_repo_saga_head.violations(sources, strip_lua_comments_and_strings): add(violations, "G-SAGA-HEAD", message)

@@ -232,6 +232,22 @@ local function marker_stage_rank(marker, state)
   return explicit_rank or M.stage_rank(state)
 end
 
+local function state_marker_fact(marker, comment)
+  local marker_proposal = marker:match('proposal="([^"]+)"')
+  local marker_state = marker:match('state="([^"]+)"')
+  local marker_version = marker:match('version="([^"]*)"')
+  if marker_proposal == nil or M._label_by_state[marker_state] == nil then
+    return nil
+  end
+  return {
+    proposal_id = marker_proposal,
+    state = marker_state,
+    version = marker_version,
+    stage_rank = marker_stage_rank(marker, marker_state),
+    marker_created_at = M._comment_created_at(comment),
+  }
+end
+
 local function compare_version_keys(left, right)
   if left.primary ~= right.primary then
     return left.primary > right.primary and 1 or -1
@@ -415,6 +431,64 @@ local function compare_state_marker(a, b)
   return compare_version_keys(b_key, a_key) > 0
 end
 
+local milestone_domains = {
+  ["github-devloop"] = nil,
+  ["github-devloop-issue"] = {
+    thinking = true,
+    dependency_wait = true,
+    ready = true,
+    implementing = true,
+    ["awaiting-pr"] = true,
+    ["impl-failed"] = true,
+    blocked = true,
+    merged = true,
+  },
+  ["github-devloop-pr"] = {
+    ["pr-open"] = true,
+    reviewing = true,
+    ["review-meta"] = true,
+    ["merge-ready"] = true,
+    merging = true,
+    fixing = true,
+    blocked = true,
+    ["closed-unmerged"] = true,
+    merged = true,
+  },
+}
+
+local function domain_allows_state(domain, state)
+  if domain == nil or domain == "" then
+    return true
+  end
+  local allowed = milestone_domains[domain]
+  if allowed == nil then
+    return domain == "github-devloop" and M._label_by_state[state] ~= nil
+  end
+  return allowed[state] == true
+end
+
+local function validate_milestone_domain(domain, milestone)
+  if domain == nil or domain == "" then
+    return
+  end
+  if milestone_domains[domain] == nil and domain ~= "github-devloop" then
+    error("github-devloop: unknown milestone domain")
+  end
+  if not domain_allows_state(domain, milestone) then
+    error("github-devloop: milestone is outside milestone domain")
+  end
+end
+
+local function lineage_matches(version, opts)
+  local options = opts or {}
+  if options.lineage_base == nil then
+    return true
+  end
+  local actual = strip_transition_version_suffixes(version)
+  local expected = strip_transition_version_suffixes(options.lineage_base)
+  return versions_equivalent(actual, expected)
+end
+
 function M.comment_bodies(comments)
   local bodies = {}
   for _, comment in ipairs(comments or {}) do
@@ -432,15 +506,13 @@ function M.current_state(comments, proposal_id)
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_state = marker:match('state="([^"]+)"')
-      local marker_version = marker:match('version="([^"]*)"')
-      if marker_proposal == proposal_id and M._label_by_state[marker_state] ~= nil then
-        local candidate = {
-          state = marker_state,
-          version = marker_version,
-          stage_rank = marker_stage_rank(marker, marker_state),
-          marker_created_at = M._comment_created_at(comment),
+      local candidate = state_marker_fact(marker, comment)
+      if candidate ~= nil and candidate.proposal_id == proposal_id then
+        candidate = {
+          state = candidate.state,
+          version = candidate.version,
+          stage_rank = candidate.stage_rank,
+          marker_created_at = candidate.marker_created_at,
         }
         if compare_state_marker(current, candidate) then
           current = candidate
@@ -453,6 +525,56 @@ function M.current_state(comments, proposal_id)
     version = nil,
     stage_rank = 0,
   }
+end
+
+function M.compare_phase(left, right, opts)
+  local options = opts or {}
+  local left_state = type(left) == "table" and left.state or left
+  local right_state = type(right) == "table" and right.state or right
+  local right_rank = M.stage_rank(right_state)
+  if M._label_by_state[right_state] == nil then
+    error("github-devloop: invalid milestone")
+  end
+  validate_milestone_domain(options.domain or options.milestone_domain, right_state)
+  local left_rank = type(left) == "table" and tonumber(left.stage_rank) or nil
+  if left_rank == nil then
+    if M._label_by_state[left_state] == nil then
+      return nil
+    end
+    left_rank = M.stage_rank(left_state)
+  end
+  return sign_order(left_rank - right_rank)
+end
+
+function M.is_at_or_after(state_or_marker, milestone, opts)
+  return (M.compare_phase(state_or_marker, milestone, opts) or -1) >= 0
+end
+
+function M.reached(comments, proposal_id, milestone, opts)
+  if type(comments) ~= "table" then
+    return false
+  end
+  local options = opts or {}
+  if M._label_by_state[milestone] == nil then
+    error("github-devloop: invalid milestone")
+  end
+  local domain = options.domain or options.milestone_domain
+  validate_milestone_domain(domain, milestone)
+
+  local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local candidate = state_marker_fact(marker, comment)
+      if candidate ~= nil
+        and candidate.proposal_id == proposal_id
+        and domain_allows_state(domain, candidate.state)
+        and lineage_matches(candidate.version, options)
+        and M.is_at_or_after(candidate, milestone, options) then
+        return true
+      end
+    end
+  end
+  return false
 end
 
 function M.has_state_marker(comments, proposal_id, state, version)
