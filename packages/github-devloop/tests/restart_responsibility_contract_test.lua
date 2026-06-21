@@ -535,7 +535,7 @@ return {
         driving_queue = "synthetic_gate",
         state_kind = "gate",
         gate_kind = "monotone_milestone",
-        milestone_accessor = "std.devloop_state.reached",
+        milestone_accessor = "std.devloop_gate.holds",
         milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child",
         milestone = "pr-open",
         milestone_domain = "github-devloop-pr",
@@ -582,7 +582,7 @@ return {
     row.responsibility_signature.milestone_domain = "github-devloop-pr"
     row.responsibility_signature.current_state_accessor = "std.devloop_state.current_state"
     local errors = core.strict_restart_responsibility_contract_errors({ row })
-    t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare milestone_accessor=std.devloop_state.reached"), joined_errors(errors))
+    t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare an approved positive milestone accessor"), joined_errors(errors))
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must not declare current cursor accessors"), joined_errors(errors))
   end,
   test_monotone_milestone_gate_requires_domain = function()

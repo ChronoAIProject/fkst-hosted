@@ -320,6 +320,25 @@ substrate primitive (`MonotoneFactSet` / `CurrentProjection`) is imaginable but 
 EXTRACTED from package policy when a second case appears, never guessed by the engine
 (dependency inversion).
 
+Sandbox-loader status after the gate DSL hardening: gate definitions under
+`core/gates/` have exactly one legitimate access path, `std.devloop_gate.load_gate()`.
+`G-MONOTONE-GATE-DSL` makes direct `require("core.gates.<name>")` and direct
+`core/gates/<name>.lua` path loads CI-red outside the loader, including tests. The
+loader runs the gate definition in a restricted `_ENV` with `require`, `load`,
+`loadstring`, `_G`, `debug`, `package`, raw table primitives, and metatable access
+bound to `nil`, then validates that the result is plain positive data.
+
+Honest residual: Lua's shared string value metatable can expose `string.dump` as
+`("").dump` even when the sandbox's injected `string` table omits `dump`. This is
+theoretical reachability in the current package sandbox, not a practical escape:
+the dumped bytecode cannot be executed inside the sandbox because `load`,
+`loadstring`, and `require` are nil, and a dumped closure that returns those names
+returns nil for each because the sandbox locals are nil. A package-level loader
+cannot make that reachability airtight without mutating VM-global metatables around
+the load, which is not a safe package primitive. The airtight form belongs in
+`fkst-substrate`: a host-owned restricted-load primitive, mlua sandbox mode, a
+host-controlled string metatable, or a fresh Lua state per gate definition.
+
 ## 6. Migration Plan
 
 Use an inventory ratchet, not a mega-PR.

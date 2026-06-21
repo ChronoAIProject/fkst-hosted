@@ -1,6 +1,16 @@
 local S = {}
 
 function S.install(M)
+local gate = require("std.devloop_gate")
+local child_start_visible_gate = nil
+
+local function load_child_start_visible_gate()
+  if child_start_visible_gate == nil then
+    child_start_visible_gate = gate.load_gate("child_start_visible")
+  end
+  return child_start_visible_gate
+end
+
 local function issue_fields(issue, impl_version)
   if type(issue) ~= "table" then
     error("github-devloop: invalid delegation issue")
@@ -133,6 +143,50 @@ local function existing_delegation(issue, issue_proposal_id, delegation)
   }
 end
 
+local function child_start_facts(comments)
+  local origin = M.pr_origin_fact(comments)
+  local origin_fields = nil
+  local pr_open_reached = false
+  if origin ~= nil then
+    origin_fields = {
+      proposal_id = origin.proposal_id,
+      issue_number = origin.issue_number,
+      impl_version = origin.impl_version,
+      branch = origin.branch,
+      base_branch = origin.base_branch,
+    }
+    pr_open_reached = M.reached(comments, origin.proposal_id, "pr-open", { domain = "github-devloop-pr" })
+  end
+  return gate.facts({
+    reached = function(milestone, opts)
+      local domain = opts and (opts.domain or opts.milestone_domain)
+      if tostring(milestone or "") ~= "pr-open" or (domain ~= nil and tostring(domain) ~= "github-devloop-pr") then
+        return false
+      end
+      if pr_open_reached or origin_fields ~= nil then
+        return true
+      end
+      return false
+    end,
+    lineage_equals = function(field, expected)
+      if origin_fields == nil then
+        return false
+      end
+      return tostring(origin_fields[field] or "") == tostring(expected)
+    end,
+  })
+end
+
+local function child_start_bindings(issue_proposal_id, issue_number, impl_version, branch, base_branch)
+  return {
+    proposal_id = issue_proposal_id,
+    issue_number = issue_number,
+    impl_version = impl_version,
+    branch = branch,
+    base_branch = base_branch,
+  }
+end
+
 function M.build_pr_delegation_open_comment_request(repo, pr_number, issue_proposal_id, pr_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, source_ref, delegation)
   return build_pr_open_comment_request(repo, pr_number, pr_proposal_id, issue_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, source_ref, delegation)
 end
@@ -166,13 +220,11 @@ function M.ensure_pr_child(issue, impl_version, generation)
   local pr_proposal_id = M.pr_proposal_id(repo, pr_number)
   local head_sha = pr.head_sha or issue.head_sha or (issue.implementation and issue.implementation.head_sha)
   local effects = {}
-  local pr_origin = M.pr_origin_fact(issue.pr_comments or {})
-  local child_start_visible = pr_origin ~= nil
-    and tostring(pr_origin.proposal_id or "") == issue_proposal_id
-    and tostring(pr_origin.issue_number or "") == tostring(issue_number)
-    and tostring(pr_origin.impl_version or "") == tostring(impl_version)
-    and tostring(pr_origin.branch or "") == tostring(branch)
-    and tostring(pr_origin.base_branch or "") == tostring(base_branch)
+  local child_start_visible = gate.holds(
+    load_child_start_visible_gate(),
+    child_start_facts(issue.pr_comments or {}),
+    child_start_bindings(issue_proposal_id, issue_number, impl_version, branch, base_branch)
+  )
   if not child_start_visible then
     table.insert(effects, {
       queue = "github-proxy.github_pr_comment_request",

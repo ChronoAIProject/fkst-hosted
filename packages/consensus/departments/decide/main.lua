@@ -3,6 +3,7 @@ local saga = require("std.saga")
 
 local spec = {
   consumes = { "proposal" },
+  published_seam = { "proposal" },
   produces = { "consensus_reached", "consensus_converge" },
   published_seam = { "proposal" },
   stall_window = "2m",

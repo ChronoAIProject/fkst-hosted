@@ -36,7 +36,7 @@ return function(M, h)
     },
     terminal = false,
     to_states = { "merged", "ready", "blocked" },
-    driving_queue = "github-proxy.github_entity_changed",
+    driving_queue = "devloop_observe_redrive",
     observe_surfaces = { issue = true, liveness_scan = true },
     timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 merged", "state:v1 ready", "state:v1 blocked" }, { "merged", "ready", "blocked" }),
@@ -52,10 +52,10 @@ return function(M, h)
         max_age_minutes = 24 * 60,
       },
     }),
-    on_timeout = timeout("github-proxy.github_entity_changed"),
+    on_timeout = timeout("devloop_observe_redrive"),
     responsibility_signature = responsibility_signature({
       receiver_kind = "pr-child-workflow",
-      driving_queue = "github-proxy.github_entity_changed",
+      driving_queue = "devloop_observe_redrive",
       state_kind = "gate",
       gate_kind = "decision",
       liveness_class = "child_workflow_wait",
@@ -111,7 +111,7 @@ return function(M, h)
       "replay_awaiting_pr_state"
     ),
     marker_facts = "state:v1 awaiting-pr plus pr-delegation:v1",
-    kickoff = "github-proxy.github_entity_changed",
+    kickoff = "devloop_observe_redrive",
     replay = "Observe/liveness read pr-delegation, fetch the child PR state marker, and CAS the parent only on a matching child terminal.",
   }
 end

@@ -25,7 +25,7 @@ return function(M, h)
     },
     terminal = false,
     to_states = { "dependency_wait", "ready", "blocked" },
-    driving_queue = "github-proxy.github_entity_changed",
+    driving_queue = "devloop_observe_redrive",
     observe_surfaces = { issue = true, liveness_scan = true },
     timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
     output_obligation = obligation({ "dependency-wait:v1", "dependency-release:v1", "state:v1 ready" }, { "dependency_wait", "ready", "blocked" }),
@@ -41,10 +41,10 @@ return function(M, h)
         max_age_minutes = 525600,
       },
     }),
-    on_timeout = timeout("github-proxy.github_entity_changed"),
+    on_timeout = timeout("devloop_observe_redrive"),
     responsibility_signature = responsibility_signature({
       receiver_kind = "issue",
-      driving_queue = "github-proxy.github_entity_changed",
+      driving_queue = "devloop_observe_redrive",
       state_kind = "gate",
       liveness_class = "dependency_held_blocker_bound",
       input_fact_family = "ready-base-preconditions-and-open-blockers",
@@ -92,7 +92,7 @@ return function(M, h)
       "dependency_gate_rederive"
     ),
     marker_facts = "state:v1 dependency_wait plus dependency-wait:v1",
-    kickoff = "github-proxy.github_entity_changed",
+    kickoff = "devloop_observe_redrive",
     replay = "Observe/liveness re-derive blockedBy; held blockers refresh dependency_wait, released blockers enter fresh ready and route devloop_ready through comment handoff.",
   }
 end

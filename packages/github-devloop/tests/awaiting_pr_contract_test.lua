@@ -23,8 +23,8 @@ return {
   test_awaiting_pr_restart_row_declares_child_workflow_boundary = function()
     local row = table_by_state()["awaiting-pr"]
     t.is_true(row ~= nil)
-    t.eq(row.driving_queue, "github-proxy.github_entity_changed")
-    t.eq(row.on_timeout.queue, "github-proxy.github_entity_changed")
+    t.eq(row.driving_queue, "devloop_observe_redrive")
+    t.eq(row.on_timeout.queue, "devloop_observe_redrive")
     t.eq(row.liveness_class_id, "child_workflow_wait")
     t.eq(row.watchdog.mode, "live-defer")
     t.eq(row.defer.kind, "child_workflow_wait")

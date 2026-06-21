@@ -18,9 +18,9 @@ local gate_kinds = {
 }
 
 local milestone_accessors = {
-  ["std.devloop_state.reached"] = true,
+  ["std.devloop_state.reached"] = true, ["std.devloop_gate.holds"] = true,
   reached = true,
-  pr_origin_fact = true,
+  holds = true,
 }
 
 local known_god_states = {}
@@ -368,7 +368,7 @@ local function validate_gate_kind(row, signature, errors)
     table.insert(errors, state .. ": monotone_milestone gate_kind requires state_kind=gate")
   end
   if milestone_accessors[signature.milestone_accessor] ~= true then
-    table.insert(errors, state .. ": monotone_milestone gate must declare milestone_accessor=std.devloop_state.reached")
+    table.insert(errors, state .. ": monotone_milestone gate must declare an approved positive milestone accessor")
   end
   if not non_empty_string(signature.milestone) then
     table.insert(errors, state .. ": monotone_milestone gate must declare milestone")

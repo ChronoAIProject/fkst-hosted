@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local gate = require("std.devloop_gate")
 local reached = h.reached
 local unresolved = h.unresolved
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
@@ -211,6 +212,214 @@ return {
       domain = "github-devloop-pr",
       lineage_base = "ready/consensus-github-devloop/issue/owner/repo/99/2026-06-04T01-02-03Z",
     }), false)
+  end,
+  test_devloop_gate_rejects_executable_or_metatable_smuggle_paths = function()
+    local facts = gate.facts({
+      reached = function()
+        return true
+      end,
+      lineage_equals = function()
+        return true
+      end,
+    })
+    local ok_spec = gate.require_reached("pr-open", {
+      domain = "github-devloop-pr",
+      lineage = {
+        proposal_id = true,
+      },
+    })
+
+    t.eq(gate.holds(ok_spec, facts, { proposal_id = "github-devloop/issue/owner/repo/42" }), true)
+    local callback_spec = {
+      op = "reached",
+      milestone = "pr-open",
+      opts = {},
+      raw = function()
+        return true
+      end,
+    }
+    local callback_ok = pcall(function()
+      gate.holds(callback_spec, facts, {})
+    end)
+    t.eq(callback_ok, false)
+    local metatable_spec = setmetatable({
+      op = "reached",
+      milestone = "pr-open",
+      opts = {},
+    }, {})
+    local metatable_ok = pcall(function()
+      gate.holds(metatable_spec, facts, {})
+    end)
+    t.eq(metatable_ok, false)
+    local raw_table_spec = {
+      op = "reached",
+      milestone = "pr-open",
+      opts = {},
+      comments = {
+        {
+          body = core.state_marker("github-devloop/issue/owner/repo/42", "pr-open", "v1"),
+        },
+      },
+    }
+    local raw_table_ok = pcall(function()
+      gate.holds(raw_table_spec, facts, {})
+    end)
+    t.eq(raw_table_ok, false)
+  end,
+  test_devloop_gate_rejects_sparse_all_lists_and_keeps_dense_false = function()
+    local facts = gate.facts({
+      reached = function(milestone)
+        return tostring(milestone or "") == "ready"
+      end,
+      lineage_equals = function()
+        return true
+      end,
+    })
+    local dense = gate.all({
+      gate.require_reached("ready"),
+      gate.require_reached("pr-open"),
+    })
+
+    t.eq(gate.holds(dense, facts, {}), false)
+    local sparse_ok = pcall(function()
+      gate.all({
+        [1] = gate.require_reached("ready"),
+        [3] = gate.require_reached("pr-open"),
+      })
+    end)
+    t.eq(sparse_ok, false)
+    local raw_sparse_ok = pcall(function()
+      gate.holds({
+        op = "all",
+        gates = {
+          [1] = gate.require_reached("ready"),
+          [3] = gate.require_reached("pr-open"),
+        },
+      }, facts, {})
+    end)
+    t.eq(raw_sparse_ok, false)
+  end,
+  test_devloop_gate_loads_gate_defs_in_restricted_sandbox = function()
+    local spec = gate._load_gate_source_for_test([[
+      return all({
+        require_reached("pr-open", {
+          domain = "github-devloop-pr",
+          lineage = {
+            proposal_id = true,
+          },
+        }),
+      })
+    ]])
+    local facts = gate.facts({
+      reached = function(milestone, opts)
+        return tostring(milestone or "") == "pr-open"
+          and tostring(opts and opts.domain or "") == "github-devloop-pr"
+      end,
+      lineage_equals = function(field, expected)
+        return tostring(field or "") == "proposal_id"
+          and tostring(expected or "") == "github-devloop/issue/owner/repo/42"
+      end,
+    })
+
+    t.eq(gate.holds(spec, facts, { proposal_id = "github-devloop/issue/owner/repo/42" }), true)
+  end,
+  test_devloop_gate_load_gate_loads_child_start_visible = function()
+    local spec = gate.load_gate("child_start_visible")
+    local facts = gate.facts({
+      reached = function(milestone, opts)
+        return tostring(milestone or "") == "pr-open"
+          and tostring(opts and opts.domain or "") == "github-devloop-pr"
+      end,
+      lineage_equals = function(field, expected)
+        return ({
+          proposal_id = "github-devloop/issue/owner/repo/42",
+          issue_number = "42",
+          impl_version = "ready/v1",
+          branch = "feature/x",
+          base_branch = "integration-ElonSG",
+        })[field] == expected
+      end,
+    })
+
+    t.eq(gate.holds(spec, facts, {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      issue_number = "42",
+      impl_version = "ready/v1",
+      branch = "feature/x",
+      base_branch = "integration-ElonSG",
+    }), true)
+  end,
+  test_devloop_gate_sandbox_rejects_reflection_and_loader_capabilities = function()
+    local forbidden_sources = {
+      [[
+        local r = require
+        r("debug")
+        return require_reached("pr-open")
+      ]],
+      [[
+        (require)("debug")
+        return require_reached("pr-open")
+      ]],
+      [[
+        return _G
+      ]],
+      [[
+        return debug
+      ]],
+      [[
+        return load("return 1")
+      ]],
+      [[
+        return string.dump(function()
+          return 1
+        end)
+      ]],
+      [[
+        return setmetatable({}, {})
+      ]],
+    }
+    for _, source in ipairs(forbidden_sources) do
+      local ok = pcall(function()
+        gate._load_gate_source_for_test(source)
+      end)
+      t.eq(ok, false)
+    end
+  end,
+  test_devloop_gate_string_dump_value_metatable_is_theoretical_only = function()
+    local spec = gate._load_gate_source_for_test([[
+      return require_reached(("").dump(function()
+        return require, load, loadstring, _G
+      end), {
+        domain = "github-devloop-pr",
+      })
+    ]])
+
+    t.eq(type(spec.milestone), "string")
+    local loaded = load(spec.milestone)
+    t.eq(type(loaded), "function")
+    local require_value, load_value, loadstring_value, global_value = loaded()
+    t.eq(require_value, nil)
+    t.eq(load_value, nil)
+    t.eq(loadstring_value, nil)
+    t.eq(global_value, nil)
+
+    local sandbox_load_ok = pcall(function()
+      gate._load_gate_source_for_test([[
+        return load(("").dump(function()
+          return require
+        end))()
+      ]])
+    end)
+    t.eq(sandbox_load_ok, false)
+
+    local sandbox_require_ok = pcall(function()
+      gate._load_gate_source_for_test([[
+        return require(("").dump(function()
+          return require
+        end))
+      ]])
+    end)
+    t.eq(sandbox_require_ok, false)
   end,
   test_current_state_uses_stage_rank_for_same_issue_version = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"

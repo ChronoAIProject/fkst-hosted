@@ -20,7 +20,7 @@ import ratchet_base
 
 MANIFEST = "migration/monotone-gate.inventory"
 ALLOWLIST = "migration/monotone-gate.allowlist"
-APPROVED_ACCESSORS = {"std.devloop_state.reached", "reached", "pr_origin_fact"}
+APPROVED_ACCESSORS = {"std.devloop_state.reached", "std.devloop_gate.holds", "reached", "holds"}
 SURFACE_KINDS = {"monotone-gate", "visibility"}
 PACKAGE_GLOB = "github-devloop*"
 STD_DEVLOOP_PREFIX = "devloop"

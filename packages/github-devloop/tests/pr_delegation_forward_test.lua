@@ -162,6 +162,27 @@ return {
     t.eq(count_gh_pr_create(), 0)
   end,
 
+  test_child_start_dsl_gate_matches_visible_child_start_markers = function()
+    local delegated = core.pr_delegation_marker(issue_proposal, pr_proposal(7), 7, impl_version, "g1")
+    local matching_origin = core.pr_origin_marker(issue_proposal, issue_number, branch, impl_version, base_branch)
+    local mismatched_origin = core.pr_origin_marker(issue_proposal, issue_number, branch .. "-old", impl_version, base_branch)
+    local advanced_child = matching_origin .. "\n" .. core.state_marker(issue_proposal, "reviewing", impl_version .. "/review/1")
+    mock_branch_list(7, 7, 7)
+
+    t.eq(core.ensure_pr_child(issue({
+      comments = { render_comment(delegated) },
+      pr_comments = {},
+    }), impl_version, 1).child_start_visible, false)
+    t.eq(core.ensure_pr_child(issue({
+      comments = { render_comment(delegated) },
+      pr_comments = { render_comment(mismatched_origin) },
+    }), impl_version, 1).child_start_visible, false)
+    t.eq(core.ensure_pr_child(issue({
+      comments = { render_comment(delegated) },
+      pr_comments = { render_comment(advanced_child) },
+    }), impl_version, 1).child_start_visible, true)
+  end,
+
   test_ensure_pr_child_twice_same_generation_is_idempotent_and_keys_open_by_issue_generation = function()
     mock_branch_list(nil, 7, 7)
     t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/7\n", stderr = "", exit_code = 0 })

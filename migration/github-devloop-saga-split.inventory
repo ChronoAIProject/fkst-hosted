@@ -37,6 +37,7 @@
 {"path":"packages/github-devloop/core/error_facts.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/failure_triage.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"std/devloop_forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
+{"path":"packages/github-devloop/core/gates/child_start_visible.lua","owner":"issue","reason":"issue-side PR child kickoff gate definition; raw PR facts stay outside the gate DSL spec."}
 {"path":"packages/github-devloop-intake/core/github_capabilities.lua","owner":"intake","reason":"core module owns intake trust-gate capability and hostile canary helpers."}
 {"path":"packages/github-devloop/core/github_graphql.lua","owner":"shared","reason":"core module is shared or authority-neutral after extraction."}
 {"path":"packages/github-devloop/core/impl_failure.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
@@ -169,6 +170,7 @@
 {"path":"std/devloop_convergence.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
 {"path":"std/devloop_decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
 {"path":"std/devloop_entity.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
+{"path":"std/devloop_gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
 {"path":"std/devloop_git_mechanics.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
 {"path":"std/devloop_github_proxy_entity_view.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
 {"path":"std/devloop_github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
