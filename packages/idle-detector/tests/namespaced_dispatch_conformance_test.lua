@@ -1,0 +1,71 @@
+local conformance = require("std.namespaced_dispatch_conformance")
+local t = fkst.test
+
+local function observe_json()
+  return table.concat({
+    '{"schema_version":1',
+    ',"generated_at_ms":1781830860000',
+    ',"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"}',
+    ',"limits":{"max_deliveries":500,"max_dead_letters":500}',
+    ',"truncated":{"deliveries":false,"dead_letters":false}',
+    ',"queues":[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}]',
+    ',"deliveries":[]',
+    ',"dead_letters":[]',
+    "}",
+  }, "")
+end
+
+local function idle_tick_payload()
+  local slot = "2026-06-19T01:00:00Z"
+  return {
+    schema = "idle-detector.idle-tick.v1",
+    slot = slot,
+    source_ref = {
+      kind = "cron",
+      ref = "idle-detector/idle_poll/" .. slot,
+    },
+  }
+end
+
+local function payload_for_queue(_path, queue)
+  if queue == "idle_tick" then
+    return idle_tick_payload()
+  end
+  error("idle-detector: no production-shaped queue fixture for " .. tostring(queue))
+end
+
+local function mock_observe()
+  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+    stdout = observe_json(),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function opts_for_case(_path, _queue, event)
+  event.ts = event.payload.slot
+  mock_observe()
+  return {
+    run_opts = {
+      env = {
+        FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/idle-detector/namespaced",
+        FKST_DURABLE_ROOT = "/tmp/fkst-packages-test/idle-detector/namespaced-durable",
+      },
+    },
+    before_replay = function()
+      mock_observe()
+    end,
+  }
+end
+
+return {
+  test_all_departments_accept_production_namespaced_consumed_queues = function()
+    conformance.assert_all_consumed_queues_route({
+      t = t,
+      package_name = "idle-detector",
+      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      payload_for_queue = payload_for_queue,
+      opts_for_case = opts_for_case,
+    })
+  end,
+}
