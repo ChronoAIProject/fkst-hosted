@@ -1,0 +1,72 @@
+local core = require("core")
+local conformance = require("std.namespaced_dispatch_conformance")
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local h = require("tests.devloop_helpers")
+local t = fkst.test
+
+local function production_decompose_payload()
+  return core.build_devloop_decompose_payload(core.build_devloop_fix_reconcile_payload({
+    proposal_id = "github-devloop/issue/owner/repo/42",
+    review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
+    review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",
+    reviewed_head_sha = "def456",
+    pr_number = 7,
+    source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+  }, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3"))
+end
+
+local function payload_for_queue(_path, queue)
+  if queue == "devloop_decompose" then
+    return production_decompose_payload()
+  end
+  error("github-devloop-decompose: no production-shaped queue fixture for " .. tostring(queue))
+end
+
+local function mock_decompose_reads(payload)
+  h.mock_default_issue_claim()
+  entity_read_mocks.mock_issue_view_selector(t, {
+    labels = { "fkst-dev:blocked" },
+    comments = {
+      core.state_marker(payload.proposal_id, "blocked", payload.version),
+    },
+    title = "Original large issue",
+    body = "Child body.\n\n" .. core.decompose_lineage_marker(payload.proposal_id, 1),
+  }, "title,body,labels,comments")
+  entity_read_mocks.mock_pr_view_selector(t, {
+    comments = {
+      core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
+      core.state_marker(payload.proposal_id, "blocked", payload.version),
+      core.fix_reconcile_marker(payload.proposal_id, payload.version, "drop"),
+    },
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = "dev",
+    state = "OPEN",
+  }, entity_read_mocks.pr_origin_selector, 2)
+end
+
+local function opts_for_case(_path, _queue, event)
+  mock_decompose_reads(event.payload)
+  return {
+    run_opts = {
+      env = {
+        FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
+      },
+    },
+    before_replay = function()
+      mock_decompose_reads(event.payload)
+    end,
+  }
+end
+
+return {
+  test_all_departments_accept_production_namespaced_consumed_queues = function()
+    conformance.assert_all_consumed_queues_route({
+      t = t,
+      package_name = "github-devloop-decompose",
+      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      payload_for_queue = payload_for_queue,
+      opts_for_case = opts_for_case,
+    })
+  end,
+}
