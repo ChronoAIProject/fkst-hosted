@@ -11,11 +11,12 @@
 #   website   : target fkst-website    (host = website worktree + its own site-board package)
 #
 # Package layout: `.fkst/` is RUNTIME/build only (gitignored: runtime, durable, substrate-src, board
-# cache) — never committed code. Committed package source lives at repo-root `packages/<pkg>` in every
-# repo. The engine BIN + shared devloop trio are the PLATFORM (like GitHub runners + marketplace
-# actions); each target repo owns its CUSTOM packages in its own `packages/`. So --package-root is
-# `<repo>/packages/<pkg>`: the trio from the platform fkst-packages checkout (PKGSRC), a repo-local
-# custom package from the host (HOST). (The old `.fkst/packages` symlink is obsolete and unused.)
+# cache) — never committed code. The Lua-primary platform repo (fkst-packages) commits package source
+# at repo-root `packages/<pkg>`; a website-source-primary host repo (e.g. fkst-website) commits its OWN
+# custom Lua under `.fkst/local-packages/<pkg>` (root stays website source). The engine BIN + shared
+# devloop trio are the PLATFORM (like GitHub runners + marketplace actions). So --package-root is the
+# trio from `$PKGSRC/packages/<pkg>` (platform) + the host's own package from `$HOST/.fkst/local-packages/<pkg>`.
+# (The old `.fkst/packages` symlink is obsolete and unused; `.fkst/` is a tracked+ignored interface dir.)
 #
 # Commands:
 #   ./dogfood.sh status  [name|all]            pid/uptime/code-version/panic per supervise
@@ -64,15 +65,17 @@ GH_ORG="${GH_ORG:-ChronoAIProject}"
 DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos this host drives ('all' / board default expand here)
 
 # The shared devloop trio = the PLATFORM (like GitHub runners + marketplace actions), loaded from the
-# platform fkst-packages checkout's repo-root packages/. Each TARGET repo owns its CUSTOM packages in
-# its own repo-root packages/. So every --package-root is `<repo>/packages/<pkg>`: the trio from PKGSRC,
-# a repo-local custom package from HOST. `.fkst/` is runtime-only and is NOT a package-resolution path.
+# platform fkst-packages (Lua-primary) checkout's repo-root packages/ (PKGSRC). Each website-source-
+# primary TARGET repo (host) commits its OWN custom Lua packages under `.fkst/local-packages/<pkg>`
+# (root stays website source) — so the trio comes from `$PKGSRC/packages/<pkg>`, a host's own package
+# from `$HOST/.fkst/local-packages/<pkg>`. (`.fkst/` is a tracked+ignored runtime INTERFACE dir, not
+# "all runtime": host repos commit their own Lua there. See fkst-website CLAUDE.md.)
 DEVLOOP_PKGS="github-devloop github-proxy consensus"   # platform trio (same for every target, from PKGSRC)
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
 # layout across machines); stable durable roots default under it but are commonly PINNED per machine
 # (DUR_* in the config) to an existing redb store so restarts resume in-flight. LOCAL_PKGS lists the
-# target's OWN packages (committed at the host repo's repo-root packages/), loaded from $HOST/packages/<pkg>.
+# host target's OWN packages (committed under the host repo's `.fkst/local-packages/<pkg>`).
 cfg() {
   LOCAL_PKGS=""   # repo-local custom packages this target drives (committed in the host repo)
   case "$1" in
@@ -240,11 +243,12 @@ start_one() {
   if [ -n "$existing" ]; then echo "[$1] already running (pid $existing) — use restart"; return 0; fi
   local ts log rt; ts=$(date +%s); log="$LOGDIR/${1}-sv-${ts}.log"; rt="$LOGDIR/dogfood-rt-${1}.${ts}"
   clean_stale_runtime_worktrees "$1" "$rt"
-  # Package roots: the platform trio from PKGSRC's repo-root packages/, each repo-local custom package
-  # from the host repo's repo-root packages/. `.fkst/` stays runtime-only (not a package-resolution path).
+  # Package roots: the platform trio from PKGSRC (Lua-primary) repo-root packages/; each host's own
+  # custom package from the host repo's `.fkst/local-packages/` (host repos are website-source-primary:
+  # own Lua committed there, root stays website source — see fkst-website CLAUDE.md).
   local roots=() p
-  for p in $DEVLOOP_PKGS; do roots+=( --package-root "$PKGSRC/packages/$p" ); done
-  for p in $LOCAL_PKGS;   do roots+=( --package-root "$HOST/packages/$p" );   done
+  for p in $DEVLOOP_PKGS; do roots+=( --package-root "$PKGSRC/packages/$p" );            done
+  for p in $LOCAL_PKGS;   do roots+=( --package-root "$HOST/.fkst/local-packages/$p" );   done
   BIN="$BIN" FKST_GITHUB_REPO="$REPO" FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN="$BOT" \
     FKST_DEVLOOP_UPSTREAM_BRANCH="$UPSTREAM_BRANCH" FKST_DEVLOOP_INTEGRATION_BRANCH="$INTEGRATION_BRANCH" \
     FKST_DEVLOOP_ROLLUP_MERGE="$ROLLUP_MERGE" \
