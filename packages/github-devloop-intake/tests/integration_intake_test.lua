@@ -339,24 +339,26 @@ return {
     mock_issue_list({
       { number = 40, labels = { "fkst-dev:enabled" } },
       { number = 41, labels = { "fkst-dev:thinking" } },
-      { number = 42, labels = { "fkst-class:expedite" } },
-      { number = 43, labels = {} },
+      { number = 42, labels = { "fkst-dev:hold" } },
+      { number = 43, labels = { "fkst-class:expedite" } },
       { number = 44, labels = {} },
+      { number = 45, labels = {} },
     })
     mock_intake_scan_view({ "fkst-dev:enabled" }, {}, "OPEN", 40)
     mock_intake_scan_view({ "fkst-dev:thinking" }, {}, "OPEN", 41)
-    mock_intake_scan_view({ "fkst-class:expedite" }, {}, "OPEN", 42)
-    mock_intake_scan_view({}, {}, "CLOSED", 43)
+    mock_intake_scan_view({ "fkst-dev:hold" }, {}, "OPEN", 42)
+    mock_intake_scan_view({ "fkst-class:expedite" }, {}, "OPEN", 43)
+    mock_intake_scan_view({}, {}, "CLOSED", 44)
     mock_intake_scan_view({}, {
-      core.intake_decision_marker("github-devloop/issue/owner/repo/44", "decline", "intake/github-devloop/issue/owner/repo/44/v1", "standard"),
-    }, "OPEN", 44)
+      core.intake_decision_marker("github-devloop/issue/owner/repo/45", "decline", "intake/github-devloop/issue/owner/repo/45/v1", "standard"),
+    }, "OPEN", 45)
 
     local result = run_scan(opts("intake-scan-filter"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
-    t.eq(result.raises[1].payload.issue_number, "42")
-    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/42")
+    t.eq(result.raises[1].payload.issue_number, "43")
+    t.eq(result.raises[1].payload.source_ref.ref, "owner/repo#issue/43")
   end,
 
   test_scan_reintake_requeues_issue_with_trusted_intake_marker = function()
@@ -480,6 +482,17 @@ return {
     })
 
     local result = run_judge(payload, opts("intake-claimed-by-other"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_judge_skips_held_candidate_before_claim_or_codex = function()
+    local payload = candidate()
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:hold" }, {})
+
+    local result = run_judge(payload, opts("intake-judge-hold-label"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
     t.eq(count_calls("codex exec"), 0)

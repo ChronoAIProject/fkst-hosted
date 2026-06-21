@@ -122,13 +122,15 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
   end
-
   local current = core.parse_issue_view_intake_judge(view.stdout)
-  current.repo = repo
-  current.number = issue_number
+  current.repo, current.number = repo, issue_number
   core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
   if current.state ~= "OPEN" then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
+    return nil
+  end
+  if core.is_intake_held(current.labels) then
+    core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-held", "fkst-dev:hold label is present")
     return nil
   end
   if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then
@@ -168,13 +170,11 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
       return nil
     end
   end
-
   local decision_dedup_key = core.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil)
   if expected_decision_dedup_key ~= nil and tostring(decision_dedup_key or "") ~= tostring(expected_decision_dedup_key or "") then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-stale(decision-dedup-changed)", "issue intake inputs changed while codex was running")
     return nil
   end
-
   local intake_fact = core.intake_decision_fact(current.comments, candidate.proposal_id)
   local authoritative_state = core.current_state(current.comments, candidate.proposal_id)
   local can_replay_enable_successor = intake_fact ~= nil

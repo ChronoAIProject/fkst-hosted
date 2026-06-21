@@ -152,6 +152,20 @@ return {
     t.eq(count_rendered_calls("--json labels,comments,state,assignees"), 0)
   end,
 
+  test_probe_skips_hold_label_without_issue_view = function()
+    h.mock_bot_env()
+    mock_probe_proof()
+    mock_repo_env()
+    mock_probe_issue_list({
+      { number = 42, created_at = "2026-06-03T01:01:00Z", labels = { "fkst-dev:hold" } },
+    })
+
+    local result = run_probe(opts("intake-probe-hold-label"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_rendered_calls("--json labels,comments,state,assignees"), 0)
+  end,
+
   test_probe_cursor_uses_since_and_same_second_issue_number_tiebreak = function()
     local run_opts = opts("intake-probe-same-second-cursor")
     seed_probe_cursor("2026-06-03T01:01:00Z\t42", run_opts)

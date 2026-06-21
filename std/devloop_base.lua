@@ -38,6 +38,7 @@ local test_bot_login = "fkst-test-bot"
 
 local enabled_label = "fkst-dev:enabled"
 local tracking_label = "fkst-dev:tracking"
+local hold_label = "fkst-dev:hold"
 local thinking_label = "fkst-dev:thinking"
 local ready_label = "fkst-dev:ready"
 local implementing_label = "fkst-dev:implementing"
@@ -312,6 +313,10 @@ function M.is_opted_in(labels)
     end
   end
   return false
+end
+
+function M.is_intake_held(labels)
+  return has_value(labels, hold_label)
 end
 
 function M.proposal_id(repo, issue_number)
@@ -910,6 +915,7 @@ M._untrusted_issue_data_end = untrusted_issue_data_end
 M._test_bot_login = test_bot_login
 M._enabled_label = enabled_label
 M._tracking_label = tracking_label
+M._hold_label = hold_label
 M._thinking_label = thinking_label
 M._ready_label = ready_label
 M._implementing_label = implementing_label
