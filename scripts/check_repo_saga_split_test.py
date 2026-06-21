@@ -112,6 +112,23 @@ return {}
             self.write_allowlist(root, [])
             self.assertEqual(self.repository_messages(root), [])
 
+    def test_nested_std_devloop_modules_are_inventory_paths(self) -> None:
+        tmp, root = self.make_repo()
+        with tmp:
+            nested = root / "std" / "devloop_merge_gate" / "reason_classes"
+            nested.mkdir(parents=True)
+            (nested / "index.lua").write_text("return {}\n", encoding="utf-8")
+            rows = self.base_rows() + [
+                {
+                    "path": "std/devloop_merge_gate/reason_classes/index.lua",
+                    "owner": "shared",
+                    "reason": "nested shared std helper",
+                }
+            ]
+            self.write_manifest(root, rows)
+            self.write_allowlist(root, [])
+            self.assertEqual(self.repository_messages(root), [])
+
     def test_pr_phase_states_are_derived_from_lua_contract(self) -> None:
         tmp, root = self.make_repo()
         with tmp:
@@ -191,6 +208,30 @@ end
             )
             messages = self.repository_messages(root)
             self.assertTrue(any("leak-new" in message and "merge-ready" in message for message in messages), messages)
+
+    def test_issue_to_pr_boundary_seed_pr_open_marker_is_allowed(self) -> None:
+        tmp, root = self.make_repo()
+        with tmp:
+            rows = self.base_rows() + [
+                {
+                    "path": "packages/github-devloop/core/pr_delegation.lua",
+                    "owner": "issue",
+                    "reason": "issue-to-pr boundary seed",
+                }
+            ]
+            self.write_manifest(root, rows)
+            self.write_allowlist(root, [])
+            (root / "packages/github-devloop" / "core" / "pr_delegation.lua").write_text(
+                """local function build_pr_open_comment_request(issue_proposal_id, impl_version)
+  local body = M.pr_origin_marker(issue_proposal_id, 42, "branch", impl_version, "base")
+    .. "\\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
+  return body
+end
+""",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(self.repository_messages(root), [])
 
     def test_shared_label_builder_pr_phase_vocabulary_is_not_an_authority_leak(self) -> None:
         tmp, root = self.make_repo()

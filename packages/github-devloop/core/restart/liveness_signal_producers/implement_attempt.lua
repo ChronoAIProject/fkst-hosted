@@ -6,7 +6,7 @@ return {
   producer = "departments/implement/main.lua",
   queue = "github-proxy.github_issue_comment_request",
   marker_source = "core/implement_attempt.lua",
-  request_source = "core/requests/lifecycle.lua",
+  request_source = "std/devloop_requests/lifecycle.lua",
   marker_builder = "implement_attempt_marker",
   request_builder = "build_implementing_state_comment_request",
 }

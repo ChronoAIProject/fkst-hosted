@@ -23,6 +23,7 @@ REDRIVE_PATHS = {
 }
 CAUSAL_PATHS = {
     "packages/github-devloop/departments/comment_handoff/main.lua",
+    "packages/github-devloop-pr/departments/comment_handoff/main.lua",
 }
 LOG_RAISE_RE = re.compile(r"\b(?:core|M)\s*\.\s*log_raise\s*\((?P<args>[^\n]*)")
 RAW_RAISE_RE = re.compile(r"\braise\s*\(\s*(?P<quote>[\"'])(?P<queue>devloop_[A-Za-z0-9_]+)(?P=quote)")

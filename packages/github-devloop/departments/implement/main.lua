@@ -14,7 +14,6 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_pr_comment_request",
-    "devloop_reviewing",
   },
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },

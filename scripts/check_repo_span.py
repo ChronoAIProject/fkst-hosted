@@ -280,15 +280,24 @@ def spawn_start_messages(transition_sources: dict[str, str], department_sources:
 
 
 def sources(root: Path) -> dict[str, str]:
-    base = root / "packages" / "github-devloop"
-    if not base.exists():
-        return {}
     found: dict[str, str] = {}
-    for path in sorted(base.rglob("*.lua")):
-        if "/tests/" in path.as_posix():
+    for package in ("github-devloop", "github-devloop-pr"):
+        base = root / "packages" / package
+        if not base.exists():
             continue
-        rel = path.relative_to(root).as_posix()
-        found[rel] = path.read_text(encoding="utf-8")
+        for path in sorted(base.rglob("*.lua")):
+            if "/tests/" in path.as_posix():
+                continue
+            rel = path.relative_to(root).as_posix()
+            found[rel] = path.read_text(encoding="utf-8")
+    std = root / "std"
+    if std.exists():
+        for path in sorted(std.rglob("*.lua")):
+            rel = path.relative_to(root).as_posix()
+            if not (rel.startswith("std/devloop_") or rel.startswith("std/devloop/")):
+                continue
+            rel = path.relative_to(root).as_posix()
+            found[rel] = path.read_text(encoding="utf-8")
     return found
 
 

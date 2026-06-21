@@ -53,12 +53,8 @@ return {
       "dependency_wait",
       "ready",
       "implementing",
-      "pr-open",
-      "reviewing",
-      "fixing",
-      "review-meta",
-      "merge-ready",
-      "merging",
+      "awaiting-pr",
+      "impl-failed",
       "blocked",
     }
     for _, state in ipairs(expected) do

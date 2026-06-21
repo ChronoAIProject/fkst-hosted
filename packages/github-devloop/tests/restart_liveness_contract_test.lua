@@ -169,7 +169,7 @@ return {
 
   test_row_budget_rows_declare_state_entry_actionable_epoch = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    for _, state in ipairs({ "pr-open", "fixing", "merge-ready", "merging", "review-meta", "impl-failed", "blocked" }) do
+    for _, state in ipairs({ "ready", "impl-failed", "blocked" }) do
       local row = by_state[state]
       t.is_true(type(row.liveness_class_id) == "string" and row.liveness_class_id ~= "", state)
       t.eq(row.watchdog.mode, "row-budget-bounds-receiver")
@@ -192,7 +192,7 @@ return {
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = core.strict_restart_liveness_contract_errors()
-    for _, state in ipairs({ "reviewing", "implementing", "thinking" }) do
+    for _, state in ipairs({ "implementing", "thinking" }) do
       t.eq(core.liveness_contract_inventory_is_listed_violation(state, strict), false, state)
     end
     t.eq(core.liveness_contract_inventory_is_listed_violation("ready", strict), false)
@@ -202,24 +202,24 @@ return {
   test_inventory_ratchet_rejects_unlisted_and_stale_entries = function()
     local rows = copy_rows(core.restart_transition_table())
     local by_state = rows_by_state(rows)
-    by_state["pr-open"].actionable_epoch = nil
+    by_state.ready.actionable_epoch = nil
     local errors = core.restart_liveness_inventory_errors(rows)
-    t.is_true(contains_error(errors, "pr-open: non-terminal row must declare actionable_epoch.source"))
+    t.is_true(contains_error(errors, "ready: non-terminal row must declare actionable_epoch.source"))
 
     errors = core.restart_liveness_inventory_errors(core.restart_transition_table(), {
-      reviewing = {
-        ["reviewing: live-defer row must declare actionable_epoch.source"] = true,
+      thinking = {
+        ["thinking: live-defer row must declare actionable_epoch.source"] = true,
       },
     })
-    t.is_true(contains_error(errors, "reviewing: listed known_liveness_contract_violations entry is stale and must be removed"))
+    t.is_true(contains_error(errors, "thinking: listed known_liveness_contract_violations entry is stale and must be removed"))
   end,
 
   test_inventory_ratchet_rejects_extra_error_on_listed_state = function()
     local rows = copy_rows(core.restart_transition_table())
     local by_state = rows_by_state(rows)
-    by_state.reviewing.liveness_class_id = ""
+    by_state.thinking.liveness_class_id = ""
     local errors = core.restart_liveness_inventory_errors(rows)
-    t.is_true(contains_error(errors, "reviewing: non-terminal row must declare liveness_class_id"))
+    t.is_true(contains_error(errors, "thinking: non-terminal row must declare liveness_class_id"))
   end,
 
   test_dependency_wait_model_fixture_uses_dependency_release_epoch = function()
@@ -371,7 +371,6 @@ return {
   test_live_defer_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
     local heartbeat_expected = {
-      reviewing = "review-converge-round",
       thinking = "converge-round",
     }
     for state, producer in pairs(heartbeat_expected) do

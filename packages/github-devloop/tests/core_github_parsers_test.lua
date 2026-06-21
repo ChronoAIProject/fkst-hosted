@@ -40,9 +40,9 @@ end
 
 return {
   test_command_helper_modules_keep_cohesive_exports = function()
-    local validators = require("core.commands.validators")
-    local observe_lists = require("core.commands.observe_lists")
-    local git_ops = require("core.commands.git_ops")
+    local validators = require("std.devloop_commands.validators")
+    local observe_lists = require("std.devloop_commands.observe_lists")
+    local git_ops = require("std.devloop_commands.git_ops")
 
     local validator_exports = {
       bounded_limit = true,

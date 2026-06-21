@@ -68,6 +68,11 @@ class ForwardDirectRatchetTest(unittest.TestCase):
             'function pipeline(event)\n  core.log_raise("comment_handoff", id, "devloop_ready", payload)\nend\n',
         )
         self.assertEqual(sites, set())
+        pr_sites = forward.source_sites(
+            "packages/github-devloop-pr/departments/comment_handoff/main.lua",
+            'function pipeline(event)\n  core.log_raise("comment_handoff", id, "devloop_fixing", payload)\nend\n',
+        )
+        self.assertEqual(pr_sites, set())
 
     def test_redrive_replayer_is_exempt(self) -> None:
         sites = forward.source_sites(

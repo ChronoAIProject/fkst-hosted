@@ -3,22 +3,6 @@ local S = {}
 function S.install(M)
 local max_login_len = 80
 
-local function issue_author_login(issue)
-  if type(issue) ~= "table" then
-    return nil
-  end
-  if issue.author_login ~= nil and tostring(issue.author_login) ~= "" then
-    return tostring(issue.author_login)
-  end
-  if type(issue.author) == "table" and issue.author.login ~= nil and tostring(issue.author.login) ~= "" then
-    return tostring(issue.author.login)
-  end
-  if type(issue.user) == "table" and issue.user.login ~= nil and tostring(issue.user.login) ~= "" then
-    return tostring(issue.user.login)
-  end
-  return nil
-end
-
 local function safe_marker_attr(value)
   local text = tostring(value or ""):gsub("<!%-%- fkst:[^\n]*%-%->", " ")
   text = text:gsub("&lt;!%-%- fkst:[^\n]*%-%-&gt;", " ")
@@ -28,10 +12,6 @@ local function safe_marker_attr(value)
     text = M.truncate_utf8(text, 240)
   end
   return text
-end
-
-function M.issue_author_login(issue)
-  return issue_author_login(issue)
 end
 
 function M.fork_issue_dedup_key(repo, issue_number)
@@ -178,7 +158,7 @@ function M.build_fork_issue_create_request(repo, issue_number, current, source_r
   if tostring(current and current.state or ""):upper() ~= "OPEN" then
     return nil, "original-closed"
   end
-  local author_login = issue_author_login(current)
+  local author_login = M.issue_author_login(current)
   if author_login == nil or #author_login > max_login_len then
     return nil, "author-unknown"
   end

@@ -243,6 +243,53 @@ class SpanContractRatchetTest(unittest.TestCase):
 
         self.assertEqual(span.spawn_start_messages(transition_sources, department_sources), [])
 
+    def test_declared_start_predecessor_can_bind_marker_through_shared_helper(self) -> None:
+        transition_sources = {
+            "packages/github-devloop/core/restart/transitions/implementing.lua": textwrap.dedent(
+                """\
+                return function(M, h)
+                  local span_contract = h.span_contract
+                  return {
+                    from_state = "implementing",
+                    driving_queue = "devloop_ready",
+                    responsibility_signature = responsibility_signature({
+                      state_kind = "worker",
+                    }),
+                    span_contract = span_contract({
+                      department = "implement",
+                      durable_start_marker = "implement-attempt:v1",
+                      spawn_predecessor = "raise_implementing_state",
+                    }),
+                  }
+                end
+                """
+            )
+        }
+        department_sources = {
+            "packages/github-devloop/departments/implement/main.lua": textwrap.dedent(
+                """\
+                local function raise_implementing_state(repo, issue_number, ready)
+                  local request = core.build_implementing_state_comment_request(repo, issue_number, ready)
+                  raise("github-proxy.github_issue_comment_request", request)
+                end
+
+                raise_implementing_state(repo, issue_number, ready)
+                local result = spawn_codex_sync({ prompt = prompt })
+                """
+            )
+        }
+        support_sources = dict(department_sources)
+        support_sources["std/devloop_requests/lifecycle.lua"] = textwrap.dedent(
+            """\
+            function M.build_implementing_state_comment_request(repo, issue_number, ready)
+              local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
+              return { body = marker }
+            end
+            """
+        )
+
+        self.assertEqual(span.spawn_start_messages(transition_sources, department_sources, support_sources), [])
+
     def test_declared_start_predecessor_must_emit_durable_start_marker(self) -> None:
         transition_sources = {
             "packages/github-devloop/core/restart/transitions/implementing.lua": textwrap.dedent(

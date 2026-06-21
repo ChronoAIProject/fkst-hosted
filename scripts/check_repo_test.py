@@ -175,7 +175,7 @@ local encoded = encode_hex("6769746875622d6465766c6f6f7020e6809de88083")
             for path in root.rglob("*.lua")
             if probe in path.read_text(encoding="utf-8")
         ]
-        self.assertIn(root / "packages/github-devloop/core/strings.lua", hits)
+        self.assertIn(root / "std/devloop_strings.lua", hits)
 
 
 class GhRatePoolSizingGuardTest(unittest.TestCase):

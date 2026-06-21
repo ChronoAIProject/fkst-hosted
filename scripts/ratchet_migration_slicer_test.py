@@ -275,7 +275,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         expected_paths = {
             "packages/github-devloop/departments/pr_freshness_scan/main.lua",
             "packages/github-devloop/departments/reconcile/main.lua",
-            "packages/github-devloop/departments/review_loop/main.lua",
+            "packages/github-devloop-pr/departments/review_loop/main.lua",
         }
         allowlist_entries = {
             line.strip()
@@ -283,7 +283,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             if line.strip() and not line.lstrip().startswith("#")
         }
         expected_entry_keys = {
-            "56025ba59fc33ff3a6c48d4b650eb96a471460eb94464426c2257064b581dd66",
+            "ef2a7b5c6d87abc016a11fa04fd1a04e55ae826259967175c363da002e734acc",
             "a5d78c76cb30e3b341a1ddba5101870076cde9369ec7e458b97af6e4e847effe",
             "d42a3aa103f89e1d69f8fe9191986656fbdbb87e8f3757b7f450b2f6c991502c",
         }

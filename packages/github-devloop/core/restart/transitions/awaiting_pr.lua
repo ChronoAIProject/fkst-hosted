@@ -107,7 +107,7 @@ return function(M, h)
     effects = effect(
       { "github-proxy.github_issue_comment_request", "github-proxy.github_issue_label_request" },
       "awaiting-pr replay polls pr-delegation and child PR state; a child terminal writes one parent CAS, nonterminal child state defers",
-      "replay_awaiting_pr"
+      "replay_awaiting_pr_state"
     ),
     marker_facts = "state:v1 awaiting-pr plus pr-delegation:v1",
     kickoff = "github-proxy.github_entity_changed",

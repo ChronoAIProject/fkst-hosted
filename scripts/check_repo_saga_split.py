@@ -63,7 +63,11 @@ class LeakSite:
         if len(parts) < 6:
             raise ValueError(f"invalid {ALLOWLIST} line: {line}")
         path, kind, token, line_part, spec, why = parts[:6]
-        if not path.startswith("packages/github-devloop/") or not path.endswith(".lua"):
+        if not (
+            path.startswith("packages/github-devloop/")
+            or path.startswith("packages/github-devloop-pr/")
+            or path.startswith("std/devloop")
+        ) or not path.endswith(".lua"):
             raise ValueError(f"invalid {ALLOWLIST} path: {line}")
         if kind not in {"state-marker", "linked-state-promotion"}:
             raise ValueError(f"invalid {ALLOWLIST} kind: {line}")
@@ -94,17 +98,33 @@ class LeakSite:
 
 
 def expected_paths(root: Path) -> set[str]:
-    base = root / "packages" / "github-devloop"
-    paths = {
-        path.relative_to(root).as_posix()
-        for path in sorted((base / "departments").glob("*/main.lua"))
-        if path.is_file()
-    }
+    paths: set[str] = set()
+    for package in ("github-devloop", "github-devloop-pr"):
+        base = root / "packages" / package
+        paths.update(
+            path.relative_to(root).as_posix()
+            for path in sorted((base / "departments").glob("*/main.lua"))
+            if path.is_file()
+        )
+        paths.update(
+            path.relative_to(root).as_posix()
+            for path in sorted((base / "core").rglob("*.lua"))
+            if path.is_file()
+        )
+    std = root / "std"
     paths.update(
         path.relative_to(root).as_posix()
-        for path in sorted((base / "core").rglob("*.lua"))
+        for path in sorted(std.rglob("devloop*.lua"))
         if path.is_file()
     )
+    for directory in sorted(std.glob("devloop_merge_gate")):
+        if not directory.is_dir():
+            continue
+        paths.update(
+            path.relative_to(root).as_posix()
+            for path in sorted(directory.rglob("*.lua"))
+            if path.is_file()
+        )
     return paths
 
 
@@ -300,6 +320,8 @@ def _state_write_leaks(path: str, text: str, pr_phase_states: set[str]) -> set[L
         for literal in LUA_STRING_RE.finditer(state_arg):
             state = literal.group("value")
             if state in pr_phase_states:
+                if _is_allowed_issue_to_pr_boundary_seed(path, clean, call.start(), state):
+                    continue
                 leaks.add(LeakSite(
                     path=path,
                     kind=kind,
@@ -307,6 +329,31 @@ def _state_write_leaks(path: str, text: str, pr_phase_states: set[str]) -> set[L
                     line=_line_number(clean, call.start() + state_arg_start + literal.start()),
                 ))
     return leaks
+
+
+def _enclosing_function_body(text: str, index: int) -> str:
+    function_start = text.rfind("local function ", 0, index)
+    if function_start < 0:
+        function_start = text.rfind("function ", 0, index)
+    if function_start < 0:
+        return ""
+    next_function = text.find("\nlocal function ", function_start + 1)
+    if next_function < 0:
+        next_function = text.find("\nfunction ", function_start + 1)
+    if next_function < 0:
+        next_function = len(text)
+    return text[function_start:next_function]
+
+
+def _is_allowed_issue_to_pr_boundary_seed(path: str, text: str, index: int, state: str) -> bool:
+    if path != "packages/github-devloop/core/pr_delegation.lua" or state != "pr-open":
+        return False
+    body = _enclosing_function_body(text, index)
+    return (
+        "build_pr_open_comment_request" in body
+        and "pr_origin_marker" in body
+        and "state_marker" in body
+    )
 
 
 def source_leaks(path: str, owner: str, text: str, pr_phase_states: set[str]) -> set[LeakSite]:

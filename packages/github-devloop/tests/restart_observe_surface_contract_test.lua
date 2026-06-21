@@ -26,13 +26,8 @@ return {
       thinking = { issue = true, liveness_scan = true },
       ready = { issue = true, liveness_scan = true },
       implementing = { issue = true, liveness_scan = true },
+      ["awaiting-pr"] = { issue = true, liveness_scan = true },
       ["impl-failed"] = { issue = true, liveness_scan = true },
-      ["pr-open"] = { issue = true, pr = true, liveness_scan = true },
-      reviewing = { issue = true, pr = true, liveness_scan = true },
-      ["merge-ready"] = { issue = true, pr = true, liveness_scan = true },
-      merging = { issue = true, pr = true, liveness_scan = true },
-      fixing = { issue = true, pr = true, liveness_scan = true },
-      ["review-meta"] = { issue = true, pr = true, liveness_scan = true },
       blocked = { issue = true, pr = true, liveness_scan = true },
     }
     for state, surfaces in pairs(expected) do
@@ -46,28 +41,13 @@ return {
     t.eq(#core.liveness_contract_errors(), 0)
   end,
 
-  test_pr_not_mergeable_recovery_is_declared_by_restart_rows = function()
-    local by_state = table_by_state()
-    for _, state in ipairs({ "pr-open", "reviewing" }) do
-      local recovery = by_state[state].pr_recovery.not_mergeable
-      t.eq(recovery.to_state, "fixing")
-      t.eq(recovery.queue, "devloop_fixing")
-      t.is_true(has_value(by_state[state].to_states, "fixing"))
-    end
-    t.eq(by_state.fixing.pr_recovery, nil)
-    t.eq(by_state["merge-ready"].pr_recovery, nil)
-  end,
-
   test_timeout_surfaces_are_declared_separately_from_replay_surfaces = function()
     local by_state = table_by_state()
     t.eq(by_state.thinking.timeout_surfaces.issue, true)
     t.eq(by_state.thinking.timeout_surfaces.liveness_scan, true)
-    t.eq(by_state.reviewing.timeout_surfaces.issue, true)
-    t.eq(by_state.reviewing.timeout_surfaces.pr, true)
-    t.eq(by_state["pr-open"].timeout_surfaces.issue, nil)
-    t.eq(by_state["pr-open"].timeout_surfaces.issue_liveness_scan, true)
+    t.eq(by_state["awaiting-pr"].timeout_surfaces.issue, true)
+    t.eq(by_state["awaiting-pr"].timeout_surfaces.issue_liveness_scan, true)
     t.eq(by_state.ready.timeout_surfaces, nil)
-    t.eq(by_state["merge-ready"].timeout_surfaces, nil)
     t.eq(core.restart_observe_timeout_due(by_state.ready, "issue", {
       state = "ready",
       version = "ready/old",

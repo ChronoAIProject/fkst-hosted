@@ -27,9 +27,9 @@ saga_head = check_repo.check_repo_saga_head
 
 class SagaSpecHeadRatchetTest(unittest.TestCase):
     slice_1186_paths = {
-        "packages/github-devloop/departments/review_meta/main.lua",
-        "packages/github-devloop/departments/review_pr/main.lua",
-        "packages/github-devloop/departments/review_result/main.lua",
+        "packages/github-devloop-pr/departments/review_meta/main.lua",
+        "packages/github-devloop-pr/departments/review_pr/main.lua",
+        "packages/github-devloop-pr/departments/review_result/main.lua",
     }
 
     def violations(self, source: str) -> list[str]:

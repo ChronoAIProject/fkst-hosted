@@ -28,18 +28,11 @@ class GithubDevloopNameOnlyPathHelperGuardTest(unittest.TestCase):
     def messages(self, sources: dict[str, str]) -> list[str]:
         return guard.messages(sources, check_repo.strip_lua_comments_and_strings)
 
-    def test_allows_core_export_with_recurrence_api_waiver(self) -> None:
+    def test_allows_std_helper_use(self) -> None:
         sources = {
-            "packages/github-devloop/core.lua": """
--- Recurrence/API waiver: `parse_name_only_paths` is package-root API because the
--- repository guard forbids local copies of this package-local helper.
-function M.parse_name_only_paths(stdout)
-  return {}
-end
-""",
             "packages/github-devloop/core/queue.lua": """
-local core = require("core")
-return core.parse_name_only_paths(stdout)
+local base = require("std.devloop_base")
+return base.parse_name_only_paths(stdout)
 """,
         }
 
@@ -47,13 +40,6 @@ return core.parse_name_only_paths(stdout)
 
     def test_rejects_local_name_only_path_helper_copy(self) -> None:
         sources = {
-            "packages/github-devloop/core.lua": """
--- Recurrence/API waiver: `parse_name_only_paths` is package-root API because the
--- repository guard forbids local copies of this package-local helper.
-function M.parse_name_only_paths(stdout)
-  return {}
-end
-""",
             "packages/github-devloop/core/queue.lua": """
 local function parse_name_only_paths(stdout)
   return {}
@@ -66,19 +52,15 @@ end
         self.assertEqual(len(messages), 1)
         self.assertIn("local parse_name_only_paths helper", messages[0])
 
-    def test_rejects_core_export_without_recurrence_api_waiver(self) -> None:
+    def test_allows_core_without_name_only_path_export(self) -> None:
         sources = {
             "packages/github-devloop/core.lua": """
-function M.parse_name_only_paths(stdout)
-  return {}
-end
+local M = {}
+return M
 """,
         }
 
-        messages = self.messages(sources)
-
-        self.assertEqual(len(messages), 1)
-        self.assertIn("must carry an explicit Recurrence/API waiver", messages[0])
+        self.assertEqual(self.messages(sources), [])
 
 
 if __name__ == "__main__":

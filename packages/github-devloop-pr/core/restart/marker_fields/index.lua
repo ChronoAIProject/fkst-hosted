@@ -1,0 +1,15 @@
+return {
+  { module = "fix_reflection", key = "fix-reflection" },
+  { module = "merge_gate", key = "merge-gate" },
+  { module = "merge_gate_wait", key = "merge-gate-wait" },
+  { module = "merge_ready", key = "merge-ready" },
+  { module = "merged", key = "merged" },
+  { module = "merging", key = "merging" },
+  { module = "pr_delegation", key = "pr-delegation" },
+  { module = "pr_link", key = "pr-link" },
+  { module = "review_carry_over", key = "review-carry-over" },
+  { module = "review_converge_round", key = "review-converge-round" },
+  { module = "review_meta", key = "review-meta" },
+  { module = "review_result", key = "review-result" },
+  { module = "state", key = "state" },
+}

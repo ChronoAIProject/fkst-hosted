@@ -35,7 +35,7 @@ class CompetenceGateTest(unittest.TestCase):
 
     def test_classifier_marks_restart_contract_as_l3(self) -> None:
         classification = competence_gate.classify_paths(
-            ["packages/github-devloop/core/restart/responsibility_contract.lua"],
+            ["std/devloop_restart_responsibility_contract.lua"],
             self.obligations(),
         )
 
@@ -59,7 +59,7 @@ class CompetenceGateTest(unittest.TestCase):
     def test_l3_gate_passes_current_seed_evidence(self) -> None:
         rc, report = competence_gate.run(
             self.repo_root(),
-            ["packages/github-devloop/core/restart/responsibility_contract.lua"],
+            ["std/devloop_restart_responsibility_contract.lua"],
         )
 
         self.assertEqual(rc, 0, report["errors"])
@@ -89,7 +89,7 @@ class CompetenceGateTest(unittest.TestCase):
 
         self.assertEqual(
             invariant["production_evidence_path"],
-            "packages/github-devloop/core/restart/responsibility_contract.lua",
+            "std/devloop_restart_responsibility_contract.lua",
         )
         source = (self.repo_root() / invariant["production_evidence_path"]).read_text(encoding="utf-8")
         self.assertIn(invariant["production_evidence"], source)

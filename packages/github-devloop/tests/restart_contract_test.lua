@@ -63,15 +63,15 @@ local function marker_builder_paths()
   return {
     "std/devloop_state.lua",
     "std/devloop_markers/builders.lua",
-    "packages/github-devloop/core/autonomy_ledger.lua",
+    "std/devloop_autonomy_ledger.lua",
     "packages/github-devloop/core/impl_failure.lua",
-    "packages/github-devloop/core/convergence/rounds.lua",
-    "packages/github-devloop/core/convergence/reconcile.lua",
-    "packages/github-devloop/core/convergence/attempts.lua",
+    "std/devloop_convergence/rounds.lua",
+    "std/devloop_convergence/reconcile.lua",
+    "std/devloop_convergence/attempts.lua",
+    "std/devloop_decompose.lua",
     "packages/github-devloop/core/dependencies.lua",
     "packages/github-devloop/core/decompose.lua",
     "packages/github-devloop/core/implement_attempt.lua",
-    "packages/github-devloop/core/merge_gate_wait.lua",
   }
 end
 
@@ -92,9 +92,7 @@ local function rows_by_state(rows)
 end
 
 local function allowed_extra_transition(state, next_state)
-  return (state == "reviewing" and next_state == "blocked")
-    or (state == "pr-open" and next_state == "fixing")
-    or (state == "impl-failed" and next_state == "implementing")
+  return state == "impl-failed" and next_state == "implementing"
 end
 
 local function capture_raises(fn)
@@ -117,7 +115,7 @@ return {
   end,
 
   test_executable_restart_table_covers_non_terminal_states = function()
-    local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "pr-open", "reviewing", "merge-ready", "merging", "fixing", "review-meta", "blocked", "merged", "closed-unmerged" }
+    local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "blocked", "merged" }
     local by_state = table_by_state()
     t.eq(#core.liveness_contract_errors(), 0)
     for _, state in ipairs(expected) do
@@ -155,9 +153,8 @@ return {
     local errors = core.liveness_contract_errors()
     t.eq(#errors, 0)
     local terminals = core.liveness_terminal_states()
-    t.eq(#terminals, 2)
-    t.eq(terminals[1], "closed-unmerged")
-    t.eq(terminals[2], "merged")
+    t.eq(#terminals, 1)
+    t.eq(terminals[1], "merged")
     local by_state = table_by_state()
     t.eq(by_state["impl-failed"].terminal, false)
     t.eq(by_state["impl-failed"].on_timeout.queue, "devloop_ready")
@@ -192,7 +189,7 @@ return {
     end
     local liveness_scan = file.read("packages/github-devloop/departments/liveness_scan/main.lua")
     local observe_issue = file.read("packages/github-devloop/departments/observe_issue/main.lua")
-    t.is_true(liveness_scan:find("core.restart_transition_row", 1, true) ~= nil)
+    t.is_true(liveness_scan:find("core.liveness_scan_maybe_timeout_action", 1, true) ~= nil)
     t.is_true(liveness_scan:find("should_reinject_state", 1, true) ~= nil)
     t.is_true(observe_issue:find("core.restart_row_observable_on", 1, true) ~= nil)
     t.is_true(observe_issue:find("maybe_reconcile_issue_local_orphaned_pr", 1, true) ~= nil)
@@ -200,10 +197,10 @@ return {
 
   test_issue_marker_liveness_sweep_contract_rejects_missing_non_terminal_state = function()
     local sweep_states = core.issue_marker_liveness_sweep_states()
-    sweep_states["pr-open"] = nil
+    sweep_states.ready = nil
     local errors = core.issue_marker_liveness_sweep_contract_errors(nil, sweep_states)
     t.eq(#errors, 1)
-    t.is_true(errors[1]:find("pr-open", 1, true) ~= nil)
+    t.is_true(errors[1]:find("ready", 1, true) ~= nil)
     t.is_true(errors[1]:find("liveness sweep", 1, true) ~= nil)
   end,
 
@@ -274,12 +271,6 @@ return {
       ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 120 },
       implementing = { mode = "live-defer", family = "implement-attempt", codex_run = true, budget = 120 },
       ["awaiting-pr"] = { mode = "live-defer", family = "state", producer = "child-state", resolver = "child-state", max_age = 1440, budget = 259200 },
-      ["pr-open"] = { mode = "row-budget-bounds-receiver", receiver = 0, budget = 30 },
-      reviewing = { mode = "live-defer", family = "review-converge-round", max_age = 120, budget = 150 },
-      ["merge-ready"] = { mode = "row-budget-bounds-receiver", receiver = 30, external = 360, budget = 390 },
-      merging = { mode = "row-budget-bounds-receiver", receiver = 30, external = 360, budget = 390 },
-      fixing = { mode = "row-budget-bounds-receiver", receiver = 60, budget = 120 },
-      ["review-meta"] = { mode = "row-budget-bounds-receiver", receiver = 60, budget = 90 },
       ["impl-failed"] = { mode = "row-budget-bounds-receiver", receiver = 0, external = 1410, budget = 1440 },
       blocked = { mode = "row-budget-bounds-receiver", receiver = 0, external = 1410, budget = 1440 },
     }
@@ -325,17 +316,17 @@ return {
 
   test_liveness_contract_rejects_under_budget_receiver_bound = function()
     local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows)["merge-ready"]
-    row.budget.minutes = 360
+    local row = rows_by_state(rows).ready
+    row.budget.minutes = 10
     local errors = core.liveness_contract_errors(rows)
     local joined = table.concat(errors, "\n")
-    t.is_true(joined:find("merge-ready", 1, true) ~= nil)
+    t.is_true(joined:find("ready", 1, true) ~= nil)
     t.is_true(joined:find("budget.minutes", 1, true) ~= nil)
   end,
 
   test_liveness_contract_rejects_live_defer_without_resolver_or_existing_family = function()
     local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows).reviewing
+    local row = rows_by_state(rows).thinking
     row.liveness_contract.signal.family = "missing-family"
     row.liveness_contract.signal.resolver = "missing-resolver"
     row.liveness_contract.signal.max_age_minutes = nil
@@ -349,19 +340,19 @@ return {
 
   test_liveness_contract_rejects_live_defer_without_producer_binding = function()
     local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows).reviewing
+    local row = rows_by_state(rows).thinking
     row.liveness_contract.signal.producer = nil
     local errors = core.liveness_contract_errors(rows)
     t.eq(#errors, 1)
-    t.is_true(errors[1]:find("reviewing", 1, true) ~= nil)
+    t.is_true(errors[1]:find("thinking", 1, true) ~= nil)
     t.is_true(errors[1]:find("producer binding", 1, true) ~= nil)
   end,
 
   test_liveness_contract_rejects_live_defer_family_resolver_producer_mismatch = function()
     local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows).reviewing
-    row.liveness_contract.signal.family = "converge-round"
-    row.liveness_contract.signal.producer = "review-converge-round"
+    local row = rows_by_state(rows).thinking
+    row.liveness_contract.signal.family = "dependency-wait"
+    row.liveness_contract.signal.producer = "converge-round"
     local errors = core.liveness_contract_errors(rows)
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("producer binding family mismatch", 1, true) ~= nil)
@@ -490,136 +481,6 @@ return {
     t.eq(raised[1].payload.state, "thinking")
   end,
 
-  test_live_review_converge_round_defers_timeout_count = function()
-    local row = table_by_state().reviewing
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local head_sha = "def456"
-    local source_ref = core.pr_source_ref("owner/repo", 7)
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, head_sha)
-    local raised = capture_raises(function()
-      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
-        repo = "owner/repo",
-        number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
-      }, {
-        state = "reviewing",
-        version = version,
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        marker_created_at = "2026-06-03T00:00:00Z",
-      }, row, {
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        source_ref = source_ref,
-        review_proposal_id = review_proposal_id,
-        head_sha = head_sha,
-        current = {
-          comments = {},
-        },
-        current_pr = {
-          comments = {
-            {
-              body = core.review_converge_round_marker(review_proposal_id, "github-devloop/issue/owner/repo/42", version, head_sha, core.source_ref_digest(source_ref), 1, "consensus:" .. review_proposal_id .. "/review/loop/1", "Still reviewing", {
-                { angle = "minimal", verdict = "continue", digest = "recent" },
-              }),
-              author_login = "fkst-test-bot",
-              created_at = "2026-06-04T00:30:00Z",
-            },
-          },
-        },
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
-      })
-      t.eq(applied, true)
-    end)
-    t.eq(#raised, 0)
-  end,
-
-  test_stale_review_converge_round_climbs_to_blocked_reconcile = function()
-    local row = table_by_state().reviewing
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local head_sha = "def456"
-    local source_ref = core.pr_source_ref("owner/repo", 7)
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, head_sha)
-    local raised = capture_raises(function()
-      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
-        repo = "owner/repo",
-        number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
-      }, {
-        state = "reviewing",
-        version = version .. "/timeout/reviewing/3",
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        marker_created_at = "2026-06-03T00:00:00Z",
-      }, row, {
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        source_ref = source_ref,
-        review_proposal_id = review_proposal_id,
-        head_sha = head_sha,
-        current = {
-          comments = {},
-        },
-        current_pr = {
-          comments = {
-            {
-              body = core.review_converge_round_marker(review_proposal_id, "github-devloop/issue/owner/repo/42", version, head_sha, core.source_ref_digest(source_ref), 1, "consensus:" .. review_proposal_id .. "/review/loop/1", "Stale review", {
-                { angle = "minimal", verdict = "continue", digest = "stale" },
-              }),
-              author_login = "fkst-test-bot",
-              created_at = "2026-06-03T00:00:00Z",
-            },
-          },
-        },
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
-      })
-      t.eq(applied, true)
-    end)
-    t.eq(#raised, 1)
-    t.eq(raised[1].queue, "devloop_timeout_reconcile")
-    t.eq(raised[1].payload.state, "reviewing")
-  end,
-
-  test_merge_ready_within_ci_sla_waits_and_past_sla_climbs = function()
-    local row = table_by_state()["merge-ready"]
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local fresh = capture_raises(function()
-      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
-        repo = "owner/repo",
-        number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
-      }, {
-        state = "merge-ready",
-        version = version,
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        marker_created_at = "2026-06-03T20:00:00Z",
-      }, row, {
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        source_ref = core.pr_source_ref("owner/repo", 7),
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
-      })
-      t.eq(applied, false)
-    end)
-    t.eq(#fresh, 0)
-
-    local stale = capture_raises(function()
-      local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
-        repo = "owner/repo",
-        number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
-      }, {
-        state = "merge-ready",
-        version = version .. "/timeout/merge-ready/3",
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        marker_created_at = "2026-06-03T00:00:00Z",
-      }, row, {
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        source_ref = core.pr_source_ref("owner/repo", 7),
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
-      })
-      t.eq(applied, true)
-    end)
-    t.eq(#stale, 1)
-    t.eq(stale[1].queue, "devloop_timeout_reconcile")
-    t.eq(stale[1].payload.state, "merge-ready")
-  end,
-
   test_liveness_timeout_escalates_thinking_to_timeout_reconcile_event = function()
     local row = table_by_state().thinking
     local base = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -657,48 +518,6 @@ return {
     t.eq(raised[1].payload.dedup_key, "timeout-reconcile:" .. base .. "/timeout/thinking/3/timeout-reconcile/thinking/3")
   end,
 
-  test_liveness_timeout_escalates_reviewing_to_timeout_reconcile_event = function()
-    local row = table_by_state().reviewing
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local head_sha = "def456"
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, head_sha)
-    local raised = {}
-    local original_log_raise = core.log_raise
-    core.log_raise = function(_, _, queue, payload)
-      table.insert(raised, { queue = queue, payload = payload })
-    end
-    local ok, err = pcall(function()
-      local applied = core.maybe_timeout_redrive_from_table("observe_pr", {
-        repo = "owner/repo",
-        number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
-      }, {
-        state = "reviewing",
-        version = version .. "/timeout/reviewing/3",
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        marker_created_at = "2026-06-03T01:02:03Z",
-      }, row, {
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        source_ref = core.pr_source_ref("owner/repo", 7),
-        review_proposal_id = review_proposal_id,
-        head_sha = head_sha,
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
-      })
-      t.eq(applied, true)
-    end)
-    core.log_raise = original_log_raise
-    if not ok then
-      error(err)
-    end
-    t.eq(#raised, 1)
-    t.eq(raised[1].queue, "devloop_timeout_reconcile")
-    t.eq(raised[1].payload.schema, "github-devloop.timeout-reconcile.v1")
-    t.eq(raised[1].payload.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(raised[1].payload.state, "reviewing")
-    t.eq(raised[1].payload.issue_version, version .. "/timeout/reviewing/3")
-    t.eq(raised[1].payload.round, 3)
-  end,
-
   test_restart_table_matches_state_graph_and_stage_rank = function()
     local by_state = table_by_state()
     local expected = {
@@ -707,11 +526,6 @@ return {
       implementing = true,
       ["awaiting-pr"] = true,
       ["impl-failed"] = true,
-      ["pr-open"] = true,
-      reviewing = true,
-      ["merge-ready"] = true,
-      merging = true, fixing = true,
-      ["review-meta"] = true,
       blocked = true, merged = true,
     }
     for state, next_states in pairs(core._state_graph) do
@@ -757,22 +571,10 @@ return {
     t.eq(by_state.ready.effects.intent_count, 1)
     t.eq(by_state.ready.effects.kinds[1], "devloop_ready")
     t.eq(by_state.dependency_wait.effects.completeness_derivation, "dependency_gate_rederive")
+    t.eq(by_state["awaiting-pr"].effects.completeness_derivation, "replay_awaiting_pr_state")
     t.eq(by_state.blocked.effects.intent_count, 2)
     t.eq(by_state.blocked.effects.completeness_derivation, "decompose_children_complete")
     t.eq(#core.restart_effect_contract_errors(), 0)
-  end,
-
-  test_pr_side_rows_declare_pr_state_label_projection = function()
-    local by_state = table_by_state()
-    for _, state in ipairs({ "pr-open", "reviewing", "merge-ready", "merging", "fixing" }) do
-      local row = by_state[state]
-      t.is_true(row ~= nil)
-      t.is_true(has_value(row.effects.kinds, "pr-state-label"), state .. " missing pr-state-label effect")
-      t.is_true(
-        tostring(row.effects.completeness or ""):find("PR-local state label projection", 1, true) ~= nil,
-        state .. " missing PR-local label completeness text"
-      )
-    end
   end,
 
   test_multi_effect_contract_rejects_marker_only_rows = function()
@@ -783,15 +585,6 @@ return {
     t.eq(#errors, 1)
     t.is_true(errors[1]:find("dependency_wait", 1, true) ~= nil)
     t.is_true(errors[1]:find("completeness derivation", 1, true) ~= nil)
-  end,
-
-  test_restart_field_coverage_catches_374_shape_missing_gate_baseline = function()
-    local rows = copy_rows(core.restart_transition_table())
-    rows_by_state(rows).fixing.payload_fields.gate_baseline_sha = nil
-    local errors = core.restart_field_coverage_errors(rows)
-    t.eq(#errors, 1)
-    t.is_true(errors[1]:find("fixing.gate_baseline_sha", 1, true) ~= nil)
-    t.is_true(errors[1]:find("missing required replay payload field", 1, true) ~= nil)
   end,
 
   test_declared_marker_fields_exist_in_marker_builders = function()
@@ -811,129 +604,6 @@ return {
     t.eq(derivations.entity, true)
   end,
 
-  test_replay_payload_fields_resolve_from_declared_table_map = function()
-    local state = {
-      state = "fixing",
-      version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z",
-    }
-    local fields = core.resolve_replay_payload_fields(table_by_state().fixing, state, {
-      issue = {
-        repo = "owner/repo",
-        source_ref = core.issue_source_ref("owner/repo", 42),
-      },
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      link = {
-        pr_number = 7,
-      },
-      feedback = {
-        review_proposal_id = "github-devloop/pr-review/owner/repo/7/v/def456",
-        review_dedup_key = "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review",
-        reviewed_head_sha = "def456",
-        gate_baseline_sha = "abc123",
-      },
-    })
-    t.eq(fields.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(fields.pr_number, 7)
-    t.eq(fields.version, state.version)
-    t.eq(fields.review_proposal_id, "github-devloop/pr-review/owner/repo/7/v/def456")
-    t.eq(fields.review_dedup_key, "consensus:github-devloop/pr-review/owner/repo/7/v/def456/review")
-    t.eq(fields.reviewed_head_sha, "def456")
-    t.eq(fields.gate_baseline_sha, "abc123")
-    t.eq(fields.source_ref.ref, "owner/repo#pr/7")
-  end,
-
-  test_replayer_gathers_fetch_before_compare_pr_facts_from_table = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z"
-    local issue = {
-      repo = "owner/repo",
-      number = 42,
-      source_ref = core.issue_source_ref("owner/repo", 42),
-    }
-    local state = {
-      state = "pr-open",
-      version = version,
-    }
-    local issue_comments = {
-      { body = core.state_marker(proposal_id, "pr-open", version), author_login = "fkst-test-bot" },
-      { body = core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"), author_login = "fkst-test-bot" },
-    }
-    t.mock_command(core.gh_pr_view_observe_cmd("owner/repo", 7), {
-      stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[]}\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    local gathered = core.gather_replay_required_facts(table_by_state()["pr-open"], issue, state, {
-      proposal_id = proposal_id,
-      current = { comments = issue_comments },
-      snapshot = {
-        comments = issue_comments,
-        prs = {
-          {
-            number = 7,
-            current = {
-              head_sha = "stale",
-              head_ref_name = "stale",
-              base_ref_name = "dev",
-              state = "OPEN",
-              comments = {},
-            },
-          },
-        },
-      },
-    })
-    t.eq(gathered.snapshot.prs[1].current.head_sha, "def456")
-    t.eq(#t.command_calls(), 1)
-  end,
-
-  test_replayer_fetch_before_compare_ignores_caller_fresh_flag = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-12T00-00-00Z"
-    local issue = {
-      repo = "owner/repo",
-      number = 42,
-      source_ref = core.issue_source_ref("owner/repo", 42),
-    }
-    local state = {
-      state = "pr-open",
-      version = version,
-    }
-    local issue_comments = {
-      { body = core.state_marker(proposal_id, "pr-open", version), author_login = "fkst-test-bot" },
-      { body = core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"), author_login = "fkst-test-bot" },
-    }
-    t.mock_command(core.gh_pr_view_observe_cmd("owner/repo", 7), {
-      stdout = '{"headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[]}\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    local gathered = core.gather_replay_required_facts(table_by_state()["pr-open"], issue, state, {
-      proposal_id = proposal_id,
-      current = { comments = issue_comments },
-      snapshot = {
-        fresh = true,
-        fetch_before_compare = {
-          ["pr-head"] = true,
-        },
-        comments = issue_comments,
-        prs = {
-          {
-            number = 7,
-            current = {
-              head_sha = "stale",
-              head_ref_name = "stale",
-              base_ref_name = "dev",
-              state = "OPEN",
-              comments = {},
-            },
-          },
-        },
-      },
-    })
-    t.eq(gathered.snapshot.prs[1].current.head_sha, "def456")
-    t.eq(#t.command_calls(), 1)
-  end,
-
   test_observe_issue_replay_is_table_driven = function()
     local text = file.read("packages/github-devloop/departments/observe_issue/main.lua")
     t.is_true(text:find("core.replay_from_table", 1, true) ~= nil)
@@ -943,12 +613,4 @@ return {
     t.eq(text:find("build_devloop_reviewing_payload", 1, true), nil)
   end,
 
-  test_observe_pr_replay_is_table_driven = function()
-    local text = file.read("packages/github-devloop/departments/observe_pr/main.lua")
-    t.is_true(text:find("core.replay_from_table", 1, true) ~= nil)
-    t.eq(text:find("build_replayed_fixing_payload", 1, true), nil)
-    t.eq(text:find("build_decompose_replay_payload", 1, true), nil)
-    t.eq(text:find("build_devloop_merge_ready_payload", 1, true), nil)
-    t.eq(text:find("review_carry_over_marker", 1, true), nil)
-  end,
 }

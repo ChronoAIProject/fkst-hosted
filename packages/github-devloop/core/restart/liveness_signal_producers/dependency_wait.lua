@@ -6,7 +6,7 @@ return {
   producer = "core/ready_split.lua",
   queue = "github-proxy.github_issue_comment_request",
   marker_source = "core/dependencies.lua",
-  request_source = "core/requests/lifecycle.lua",
+  request_source = "std/devloop_requests/lifecycle.lua",
   marker_builder = "dependency_wait_marker",
   request_builder = "build_dependency_hold_comment_request",
 }

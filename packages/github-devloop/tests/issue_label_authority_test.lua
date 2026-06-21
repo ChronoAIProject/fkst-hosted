@@ -77,11 +77,6 @@ return {
   end,
 
   test_pr_open_issue_state_label_authority_stays_in_observe_issue = function()
-    local requests_body = read_source("core/requests.lua")
-    t.eq(requests_body:find("build_pr_open_label_request", 1, true), nil)
-    t.eq(requests_body:find("issue_label_add = add_labels", 1, true), nil)
-    t.eq(requests_body:find("issue_label_remove = remove_labels", 1, true), nil)
-
     for _, path in ipairs(department_main_paths()) do
       local body = read_source(path)
       if path ~= "departments/observe_issue/main.lua" then

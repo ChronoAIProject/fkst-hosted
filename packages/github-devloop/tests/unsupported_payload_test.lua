@@ -320,15 +320,6 @@ local function payload_for_queue(queue)
 end
 
 local function payload_for_department_queue(path, queue)
-  if path == "departments/review_result/main.lua" and queue == "consensus.consensus_reached" then
-    return review_consensus_payload()
-  end
-  if path == "departments/review_loop/main.lua" and queue == "consensus.consensus_converge" then
-    return review_unresolved_payload()
-  end
-  if path == "departments/observe_pr/main.lua" and queue == "github-proxy.github_entity_changed" then
-    return pr_entity_payload()
-  end
   return payload_for_queue(queue)
 end
 
@@ -354,29 +345,9 @@ local cases = {
     queue = "consensus.consensus_converge",
   },
   {
-    dept = "review_loop",
-    path = "departments/review_loop/main.lua",
-    queue = "consensus.consensus_converge",
-  },
-  {
-    dept = "review_result",
-    path = "departments/review_result/main.lua",
-    queue = "consensus.consensus_reached",
-  },
-  {
-    dept = "review_meta",
-    path = "departments/review_meta/main.lua",
-    queue = "devloop_review_meta",
-  },
-  {
     dept = "decompose",
     path = "departments/decompose/main.lua",
     queue = "devloop_decompose",
-  },
-  {
-    dept = "review_pr",
-    path = "departments/review_pr/main.lua",
-    queue = "devloop_reviewing",
   },
   {
     dept = "implement",
@@ -389,24 +360,9 @@ local cases = {
     queue = "consensus.consensus_reached",
   },
   {
-    dept = "fix",
-    path = "departments/fix/main.lua",
-    queue = "devloop_fixing",
-  },
-  {
-    dept = "observe_pr",
-    path = "departments/observe_pr/main.lua",
-    queue = "github-proxy.github_entity_changed",
-  },
-  {
     dept = "intake_judge",
     path = "departments/intake_judge/main.lua",
     queue = "devloop_intake_candidate",
-  },
-  {
-    dept = "merge",
-    path = "departments/merge/main.lua",
-    queue = "devloop_merge_ready",
   },
   {
     dept = "observe_issue",
@@ -422,21 +378,6 @@ local cases = {
     dept = "reconcile",
     path = "departments/reconcile/main.lua",
     queue = "devloop_reconcile",
-  },
-  {
-    dept = "review_reconcile",
-    path = "departments/reconcile/main.lua",
-    queue = "devloop_review_reconcile",
-  },
-  {
-    dept = "fix_reconcile",
-    path = "departments/reconcile/main.lua",
-    queue = "devloop_fix_reconcile",
-  },
-  {
-    dept = "timeout_reconcile",
-    path = "departments/reconcile/main.lua",
-    queue = "devloop_timeout_reconcile",
   },
   {
     dept = "rollup_merge",
@@ -518,7 +459,6 @@ return {
   test_observers_fail_closed_for_declared_but_unrouted_queue = function()
     for _, path in ipairs({
       "departments/observe_issue/main.lua",
-      "departments/observe_pr/main.lua",
     }) do
       local old_pipeline = pipeline
       local module = dofile(package_root() .. "/" .. path)

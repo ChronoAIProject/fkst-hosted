@@ -3,6 +3,4 @@ return {
   { module = "converge_round", key = "converge-round" },
   { module = "dependency_wait", key = "dependency-wait" },
   { module = "implement_attempt", key = "implement-attempt" },
-  { module = "merge_gate_wait", key = "merge-gate-wait" },
-  { module = "review_converge_round", key = "review-converge-round" },
 }

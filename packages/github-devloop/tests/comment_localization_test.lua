@@ -13,68 +13,9 @@ local issue_proposal_id = "github-devloop/issue/owner/repo/42"
 local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
-local pr_source_ref = {
-  kind = "external",
-  ref = "owner/repo#pr/7",
-}
-
-local function review_reached(extra)
-  local value = {
-    schema = "consensus.consensus_reached.v1",
-    proposal_id = review_proposal_id,
-    decision = "approve",
-    body = "Review consensus approves the diff.",
-    dedup_key = review_dedup_key,
-    source_ref = pr_source_ref,
-  }
-  for key, field in pairs(extra or {}) do
-    value[key] = field
-  end
-  return value
-end
-
-local function review_unresolved(extra)
-  local value = {
-    schema = "consensus.consensus_converge.v1",
-    proposal_id = review_proposal_id,
-    dedup_key = review_dedup_key,
-    source_ref = pr_source_ref,
-    pr_number = 7,
-  }
-  for key, field in pairs(extra or {}) do
-    value[key] = field
-  end
-  return value
-end
 
 local function ready_payload()
   return core.build_devloop_ready_payload(reached())
-end
-
-local function merge_ready_payload()
-  return {
-    schema = "github-devloop.merge-ready.v1",
-    proposal_id = issue_proposal_id,
-    version = issue_version,
-    dedup_key = "merge-ready:" .. issue_version,
-    pr_number = 7,
-    review_proposal_id = review_proposal_id,
-    review_dedup_key = review_dedup_key,
-    reviewed_head_sha = "def456",
-    source_ref = pr_source_ref,
-  }
-end
-
-local function review_meta_payload()
-  return {
-    schema = "github-devloop.review-meta.v1",
-    proposal_id = issue_proposal_id,
-    version = issue_version,
-    dedup_key = "review-meta:" .. issue_version,
-    review_proposal_id = review_proposal_id,
-    pr_number = 7,
-    source_ref = pr_source_ref,
-  }
 end
 
 local function collect_markers(body)
@@ -115,42 +56,7 @@ local function comment_cases()
     "Narrow question?",
     { { angle = "minimal", verdict = "abstain", digest = "digest" } }
   )
-  local review_converge_marker = core.review_converge_round_marker(
-    review_proposal_id,
-    issue_proposal_id,
-    issue_version,
-    "def456",
-    core.source_ref_digest(pr_source_ref),
-    2,
-    review_dedup_key .. "/loop/2",
-    "Review question?",
-    { { angle = "minimal", verdict = "abstain", digest = "digest" } }
-  )
   local reconcile = core.build_devloop_reconcile_payload(unresolved(), 3, reached_with_angles.dedup_key)
-  local review_reconcile = core.build_devloop_review_reconcile_payload(review_unresolved(), 3, issue_proposal_id, issue_version, "def456")
-  local fix_reconcile = core.build_devloop_fix_reconcile_payload({
-    proposal_id = issue_proposal_id,
-    review_proposal_id = review_proposal_id,
-    review_dedup_key = review_dedup_key,
-    reviewed_head_sha = "def456",
-    pr_number = 7,
-    source_ref = pr_source_ref,
-  }, issue_version .. "/fix/4")
-  local origin = {
-    proposal_id = issue_proposal_id,
-    impl_version = ready.dedup_key,
-  }
-  local fix = {
-    proposal_id = issue_proposal_id,
-    version = issue_version,
-    review_proposal_id = review_proposal_id,
-    review_dedup_key = review_dedup_key,
-    reviewed_head_sha = "def456",
-    pr_number = 7,
-    fix_summary = "Closed the review gap.",
-    dedup_key = "fix:" .. issue_version,
-    source_ref = pr_source_ref,
-  }
   local gate = { kind = "waiting", reason = "waiting-on-dependency" }
   local dependency_marker = core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }, gate.kind, gate.reason)
   local dependency_void_gate = {
@@ -160,7 +66,6 @@ local function comment_cases()
       { kind = "dependency-void", blocker_number = 7, reason = "not_planned" },
     },
   }
-  local merge_ready = merge_ready_payload()
   local decompose = {
     proposal_id = issue_proposal_id,
     version = issue_version,
@@ -174,32 +79,12 @@ local function comment_cases()
       narrowed_question = "Narrow question?",
       angle_digests = { { angle = "minimal", verdict = "abstain", digest = "digest" } },
     }), 2, converge_marker) },
-    { id = "review-converge-pr", request = core.build_review_converge_round_comment_request("owner/repo", "42", review_unresolved({
-      narrowed_question = "Review question?",
-      angle_digests = { { angle = "minimal", verdict = "abstain", digest = "digest" } },
-    }), issue_proposal_id, 2, review_converge_marker) },
-    { id = "review-converge-issue", request = core.build_issue_review_converge_round_comment_request("owner/repo", "42", review_unresolved({
-      narrowed_question = "Review question?",
-      angle_digests = { { angle = "minimal", verdict = "abstain", digest = "digest" } },
-    }), issue_proposal_id, 2, review_converge_marker) },
     { id = "reconcile", request = core.build_reconcile_comment_request("owner/repo", "42", reconcile, "drop", "no-actionable-framing") },
-    { id = "fix-reconcile", request = core.build_fix_reconcile_comment_request("owner/repo", "42", fix_reconcile, "drop", "fix-loop-max-rounds") },
-    { id = "review-reconcile", request = core.build_review_reconcile_comment_request("owner/repo", "42", review_reconcile, "drop", "review-loop-stalled") },
     { id = "intake", request = core.build_intake_decision_comment_request("owner/repo", "42", { proposal_id = issue_proposal_id, dedup_key = "intake:v1", source_ref = source_ref() }, "enable", "clear code change", "standard") },
     { id = "implementing", request = core.build_implementing_comment_request("owner/repo", "42", ready, "/tmp/worktree", "devloop-owner-repo-42", "abc123", "dev", "abc123") },
     { id = "impl-failure", request = core.build_impl_failure_comment_request("owner/repo", "42", ready, "no-changes", "") },
-    { id = "reviewing", request = core.build_reviewing_comment_request("owner/repo", "42", origin, 7, pr_source_ref) },
-    { id = "review-result-approve", request = core.build_review_result_comment_request("owner/repo", "42", issue_proposal_id, issue_version, review_reached(), pr_source_ref) },
-    { id = "review-result-reject", request = core.build_review_result_comment_request("owner/repo", "42", issue_proposal_id, issue_version .. "/fix/1", review_reached({ decision = "reject", blocking_gap = "missing guard" }), pr_source_ref) },
-    { id = "merge-gate", request = core.build_merge_gate_fix_comment_request("owner/repo", "42", merge_ready, issue_version .. "/fix/1", "rollup-red", "abc123", pr_source_ref) },
-    { id = "fix-reviewing", request = core.build_fix_reviewing_comment_request("owner/repo", "42", fix, "def456", "abc123", issue_version .. "/fix/1") },
-    { id = "merge-head-reviewing", request = core.build_merge_head_reviewing_comment_request("owner/repo", "42", merge_ready, "def456", "abc123", issue_version .. "/head-advanced", pr_source_ref) },
-    { id = "fix-review-meta", request = core.build_fix_review_meta_comment_request("owner/repo", "42", fix, "no-fix", "") },
-    { id = "review-meta", request = core.build_review_meta_comment_request("owner/repo", "42", review_meta_payload(), "fix", "Run another fix pass.", issue_version .. "/fix/1", "missing guard") },
     { id = "dependency-hold", request = core.build_dependency_hold_comment_request("owner/repo", "42", issue_proposal_id, issue_version, gate, dependency_marker, source_ref()) },
     { id = "dependency-release", request = core.build_dependency_release_comment_request("owner/repo", "42", issue_proposal_id, issue_version, dependency_void_gate, source_ref()) },
-    { id = "merging", request = { body = core.build_merging_comment_body(merge_ready) } },
-    { id = "merged", request = { body = core.build_merged_comment_body(merge_ready) } },
     { id = "decomposed", request = { body = core.decomposed_comment_body(decompose, 2) } },
   }
 end
@@ -209,12 +94,9 @@ local audited_english_skeletons = {
   "github-devloop decision: ",
   "Three-angle verdicts: ",
   "github-devloop convergence round ",
-  "github-devloop PR review convergence round ",
   "Narrowed question: ",
   "Angle stances:",
   "github-devloop reconcile action: ",
-  "github-devloop fix reconcile action: ",
-  "github-devloop review reconcile action: ",
   "github-devloop intake decision: ",
   "Reason:",
   "(no reason provided)",
@@ -226,25 +108,9 @@ local audited_english_skeletons = {
   "Base head: ",
   "github-devloop implementation failed: ",
   "(no implementation output)",
-  "github-devloop PR is ready for review",
-  "github-devloop PR review decision: ",
-  "Blocking gap: ",
-  "github-devloop merge gate failed: ",
-  "Reproduce locally with `",
-  "` from the repository root.",
-  "Fix-round summary: ",
-  "github-devloop fix pushed for re-review",
-  "Previous reviewed head: ",
-  "New head: ",
-  "Current head: ",
-  "github-devloop PR head advanced after merge approval; re-entering review",
-  "github-devloop fix escalated to review-meta: ",
-  "github-devloop review-meta action: ",
   "github-devloop dependency hold: ",
   "github-devloop dependency release: ",
   "Acknowledged as a tracking umbrella. Individual waves should enter the pipeline as separate issues; this issue stays open for tracking.",
-  "github-devloop is merging PR #",
-  "github-devloop merged PR #",
   "github-devloop decomposed blocked PR into ",
   " follow-up issue(s)",
 }
