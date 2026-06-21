@@ -44,6 +44,16 @@ return function(M, h)
         surface = "issue-comment-stream",
         version_form = "raw",
       },
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "implement",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+        status = "running",
+        on_error = "fallback-to-marker-budget",
+      },
     }),
     on_timeout = timeout("devloop_ready"),
     responsibility_signature = responsibility_signature({

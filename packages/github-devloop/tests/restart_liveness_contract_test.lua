@@ -155,9 +155,11 @@ return {
     t.eq(sources["codex_run:v1"].durable, true)
     t.eq(sources["codex_run:v1"].opens_generation, "spawn_or_redrive_only")
     t.eq(sources["codex_run:v1"].excludes_deferred_time, false)
-    t.eq(sources["codex_run:v1"].requires_live_marker, true)
+    t.eq(sources["codex_run:v1"].requires_start_marker, true)
     t.eq(sources["codex_run:v1"].requires_producer, true)
     t.eq(sources["codex_run:v1"].requires_exec_ref, true)
+    t.eq(sources["codex_run:v1"].requires_real_execution, true)
+    t.eq(sources["codex_run:v1"].real_execution_primitive, "fkst.codex_runs")
     t.eq(sources["codex_run:v1"].forbids_freshness_ms, true)
     t.eq(sources["child_workflow_wait:v1"].durable, true)
     t.eq(sources["child_workflow_wait:v1"].opens_generation, true)
@@ -395,6 +397,12 @@ return {
     t.eq(implementing.liveness_contract.signal.producer, "implement-attempt")
     t.eq(implementing.liveness_contract.signal.resolver, nil)
     t.eq(implementing.liveness_contract.signal.max_age_minutes, nil)
+    t.eq(implementing.liveness_contract.real_execution.primitive, "fkst.codex_runs")
+    t.eq(implementing.liveness_contract.real_execution.match.role, "implement")
+    t.eq(implementing.liveness_contract.real_execution.match.proposal_id, "state.proposal_id")
+    t.eq(implementing.liveness_contract.real_execution.match.dedup_key, "state.version")
+    t.eq(implementing.liveness_contract.real_execution.status, "running")
+    t.eq(implementing.liveness_contract.real_execution.on_error, "fallback-to-marker-budget")
     t.eq(implementing.watchdog.on_stale.op, "redrive_receiver")
     t.eq(implementing.watchdog.on_stale.producer, "implement-attempt")
     t.eq(#core.strict_restart_liveness_contract_errors({ implementing }), 0, "implementing")
@@ -423,6 +431,30 @@ return {
     local errors = core.strict_restart_liveness_contract_errors({ row })
     t.is_true(contains_error(errors, "implementing: codex_run defer signal must resolve through implement-attempt exec_ref"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer producer must bind the implement-attempt exec_ref resolver"), joined_errors(errors))
+  end,
+
+  test_codex_run_defer_rejects_missing_real_execution = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
+    row.liveness_contract.real_execution = nil
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "implementing: codex_run defer must declare liveness_contract.real_execution"), joined_errors(errors))
+  end,
+
+  test_codex_run_defer_rejects_wrong_real_execution_match = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
+    row.liveness_contract.real_execution.primitive = "marker-age"
+    row.liveness_contract.real_execution.match.role = "review"
+    row.liveness_contract.real_execution.match.proposal_id = "marker.proposal"
+    row.liveness_contract.real_execution.match.dedup_key = "marker.dedup"
+    row.liveness_contract.real_execution.status = "recent"
+    row.liveness_contract.real_execution.on_error = "defer"
+    local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.primitive must be fkst.codex_runs"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.role must be implement"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.proposal_id must be state.proposal_id"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.dedup_key must be state.version"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.status must be running"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.on_error must be fallback-to-marker-budget"), joined_errors(errors))
   end,
 
   test_heartbeat_defer_rejects_clear_fact_shape = function()

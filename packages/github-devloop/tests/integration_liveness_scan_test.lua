@@ -14,6 +14,7 @@ local json_string = h.json_string
 local ready = h.ready
 local mock_issue_reconcile = h.mock_issue_reconcile
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local codex_status = require("tests.codex_status_helpers")
 
 local function run_timeout_reconcile(payload, run_opts)
   return t.run_department("departments/reconcile/main.lua", {
@@ -243,6 +244,53 @@ local function timeout_attempt_comment(state_name, state_version, round, created
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
+end
+
+local function timeout_attempt_v2_comment(row, generation_key, round, created_at)
+  return {
+    body = core.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, round, core.issue_source_ref(repo, 42)),
+    author_login = "fkst-test-bot",
+    created_at = created_at or "2026-06-03T00:00:00Z",
+  }
+end
+
+local function with_codex_runs(fn)
+  local original = fkst.codex_runs
+  local ok, err = pcall(fn)
+  fkst.codex_runs = original
+  if not ok then
+    error(err)
+  end
+end
+
+local function capture_timeout_raises_and_logs(fn)
+  local raised = {}
+  local logs = {}
+  local original_log_raise = core.log_raise
+  local original_log_line = core.log_line
+  core.log_raise = function(_, _, queue, payload)
+    table.insert(raised, { queue = queue, payload = payload })
+  end
+  core.log_line = function(level, dept, proposal, tag, fields)
+    table.insert(logs, { level = level, dept = dept, proposal = proposal, tag = tag, fields = fields })
+  end
+  local ok, err = pcall(fn)
+  core.log_raise = original_log_raise
+  core.log_line = original_log_line
+  if not ok then
+    error(err)
+  end
+  return raised, logs
+end
+
+local function captured_raise(raises, queue, predicate)
+  for _, raised in ipairs(raises or {}) do
+    if raised.queue == queue
+      and (predicate == nil or predicate(raised.payload, raised)) then
+      return raised
+    end
+  end
+  return nil
 end
 
 local function assert_no_observe_reinject(result)
@@ -637,6 +685,145 @@ return {
     t.mock_command(core.git_remote_branch_head_cmd("origin", branch), { stdout = "abc123\n", stderr = "", exit_code = 0 })
     local implemented = h.run_implement(reraised.payload, opts("liveness-scan-implementing-redrive-consumable"))
     t.eq(implemented.exit_code, 0)
+  end,
+
+  test_liveness_scan_drops_stale_implement_attempt_when_codex_run_is_running = function()
+    local event = ready()
+    local run_opts = opts("liveness-scan-live-codex-run-drops-redrive")
+    local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+    local stale = {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201), exec_ref),
+    }
+    codex_status.seed_implement_codex_run(run_opts, event.proposal_id, event.dedup_key)
+    mock_repo()
+    mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
+    h.mock_issue_implement({ "fkst-dev:enabled", "fkst-dev:implementing" }, stale)
+    mock_empty_pr_list()
+
+    local scanned = run_liveness_scan("liveness-scan-live-codex-run-drops-redrive", run_opts)
+    t.eq(scanned.exit_code, 0)
+    t.eq(find_raise(scanned.raises, "devloop_ready"), nil)
+    t.eq(find_raise(scanned.raises, "devloop_timeout_reconcile"), nil)
+    t.eq(find_raise(scanned.raises, "github-proxy.github_issue_comment_request", function(payload)
+      return tostring(payload.body or ""):find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil
+    end), nil)
+  end,
+
+  test_liveness_scan_absent_codex_run_still_force_terminates_after_budget = function()
+    local event = ready()
+    local row = core.restart_transition_row("implementing")
+    local timeout_version = event.dedup_key .. "/timeout/implementing/2"
+    local state = {
+      state = "implementing",
+      version = timeout_version,
+      proposal_id = event.proposal_id,
+      marker_created_at = "2026-06-03T00:00:00Z",
+    }
+    local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+    local attempt_comment = {
+      body = core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 7201), exec_ref),
+      author_login = "fkst-test-bot",
+      created_at = "2026-06-03T00:00:00Z",
+    }
+    local eval
+    with_codex_runs(function()
+      fkst.codex_runs = function()
+        return { running = {}, recent = {} }
+      end
+      eval = core.actionable_epoch_resolve(row, state, {
+        proposal_id = event.proposal_id,
+        current = { comments = { attempt_comment } },
+      }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    end)
+    local comments = {
+      timeout_state_comment("implementing", timeout_version, "2026-06-03T00:00:00Z"),
+      attempt_comment,
+      timeout_attempt_v2_comment(row, eval.generation_key, 1, "2026-06-03T00:01:00Z"),
+      timeout_attempt_v2_comment(row, eval.generation_key, 2, "2026-06-03T00:02:00Z"),
+    }
+
+    mock_repo()
+    mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T03:00:00Z" } })
+    h.mock_issue_implement({ "fkst-dev:enabled", "fkst-dev:implementing" }, comments)
+    mock_empty_pr_list()
+
+    local scanned = run_liveness_scan("liveness-scan-absent-codex-run-escalates")
+    t.eq(scanned.exit_code, 0)
+    t.eq(find_raise(scanned.raises, "devloop_ready"), nil)
+    local reconcile = find_raise(scanned.raises, "devloop_timeout_reconcile")
+    t.is_true(reconcile ~= nil)
+    t.eq(reconcile.payload.state, "implementing")
+    t.eq(reconcile.payload.issue_version, timeout_version)
+    t.eq(reconcile.payload.round, 3)
+
+    h.mock_issue_reconcile({ "fkst-dev:enabled", "fkst-dev:implementing" }, comments)
+    local reconciled = run_timeout_reconcile(reconcile.payload, opts("liveness-scan-absent-codex-run-reconciles-blocked"))
+    t.eq(reconciled.exit_code, 0)
+    local comment = find_raise(reconciled.raises, "github-proxy.github_issue_comment_request")
+    local label = find_raise(reconciled.raises, "github-proxy.github_issue_label_request")
+    t.is_true(comment ~= nil)
+    t.is_true(comment.payload.body:find('state="blocked"', 1, true) ~= nil)
+    t.is_true(comment.payload.body:find("state-output-obligation-timeout", 1, true) ~= nil)
+    t.is_true(label ~= nil)
+    t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
+  end,
+
+  test_codex_runs_error_falls_back_to_budget_decision = function()
+    local event = ready()
+    local row = core.restart_transition_row("implementing")
+    local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+    local state = {
+      state = "implementing",
+      version = event.dedup_key,
+      proposal_id = event.proposal_id,
+      marker_created_at = "2026-06-03T00:00:00Z",
+    }
+    local comments = {
+      {
+        body = core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 60), exec_ref),
+        author_login = "fkst-test-bot",
+        created_at = "2026-06-03T00:00:00Z",
+      },
+    }
+    local facts = {
+      proposal_id = event.proposal_id,
+      source_ref = event.source_ref,
+      current = { comments = comments },
+      fresh_current_state = state,
+      now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
+    }
+
+    with_codex_runs(function()
+      fkst.codex_runs = function()
+        error("synthetic codex_runs failure")
+      end
+      local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
+      t.eq(due, true)
+      t.eq(age, 180)
+      local raised, logs = capture_timeout_raises_and_logs(function()
+        local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
+          repo = repo,
+          number = 42,
+          source_ref = core.issue_source_ref(repo, 42),
+        }, state, row, facts)
+        t.eq(applied, true)
+      end)
+      local reraised = captured_raise(raised, "devloop_ready")
+      t.is_true(reraised ~= nil)
+      t.eq(reraised.payload.proposal_id, event.proposal_id)
+      local attempt = captured_raise(raised, "github-proxy.github_issue_comment_request")
+      t.is_true(attempt ~= nil)
+      t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v2", 1, true) ~= nil)
+      t.eq(captured_raise(raised, "devloop_timeout_reconcile"), nil)
+      local logged_fallback = false
+      for _, log in ipairs(logs) do
+        if log.tag == "CODEX_RUNS" and table.concat(log.fields or {}, " "):find("fallback-to-marker-budget", 1, true) ~= nil then
+          logged_fallback = true
+        end
+      end
+      t.eq(logged_fallback, true)
+    end)
   end,
 
   test_liveness_scan_caps_before_fresh_entity_views = function()

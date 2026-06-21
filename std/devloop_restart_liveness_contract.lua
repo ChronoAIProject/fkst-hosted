@@ -46,9 +46,11 @@ local epoch_sources = {
     opens_generation = "spawn_or_redrive_only",
     -- Deferred time is not yet excluded; bounded by an oversized budget like fixing until a no-live-onset epoch is added.
     excludes_deferred_time = false,
-    requires_live_marker = true,
+    requires_start_marker = true,
     requires_producer = true,
     requires_exec_ref = true,
+    requires_real_execution = true,
+    real_execution_primitive = "fkst.codex_runs",
     forbids_freshness_ms = true,
     forbids_clear_fact = true,
     forbids_observed_fact = true,
@@ -252,8 +254,9 @@ local function validate_codex_run_defer(row, errors)
   local defer = row and row.defer or nil
   local epoch = row and row.actionable_epoch or nil
   local signal = row and row.liveness_contract and row.liveness_contract.signal or nil
+  local real_execution = row and row.liveness_contract and row.liveness_contract.real_execution or nil
   if not non_empty_string(defer.live_marker) then
-    table.insert(errors, state .. ": codex_run defer must declare live_marker")
+    table.insert(errors, state .. ": codex_run defer must declare durable start live_marker")
   end
   if not non_empty_string(defer.producer) then
     table.insert(errors, state .. ": codex_run defer must declare producer")
@@ -299,6 +302,33 @@ local function validate_codex_run_defer(row, errors)
     or nil
   if type(binding) ~= "table" or binding.resolver ~= "implement-attempt" then
     table.insert(errors, state .. ": codex_run defer producer must bind the implement-attempt exec_ref resolver")
+  end
+  if type(real_execution) ~= "table" then
+    table.insert(errors, state .. ": codex_run defer must declare liveness_contract.real_execution")
+    return
+  end
+  if real_execution.primitive ~= "fkst.codex_runs" then
+    table.insert(errors, state .. ": codex_run defer real_execution.primitive must be fkst.codex_runs")
+  end
+  local match = real_execution.match
+  if type(match) ~= "table" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match must declare role, proposal_id, and dedup_key")
+    return
+  end
+  if match.role ~= "implement" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.role must be implement")
+  end
+  if match.proposal_id ~= "state.proposal_id" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.proposal_id must be state.proposal_id")
+  end
+  if match.dedup_key ~= "state.version" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.dedup_key must be state.version")
+  end
+  if real_execution.status ~= "running" then
+    table.insert(errors, state .. ": codex_run defer real_execution.status must be running")
+  end
+  if real_execution.on_error ~= "fallback-to-marker-budget" then
+    table.insert(errors, state .. ": codex_run defer real_execution.on_error must be fallback-to-marker-budget")
   end
 end
 

@@ -12,15 +12,31 @@ function M.implement_exec_ref(proposal_id, dedup_key)
 end
 
 local function codex_runs_status()
+  local function one_line(value)
+    if type(M._one_line) == "function" then
+      return M._one_line(value)
+    end
+    return tostring(value or ""):gsub("[%s\r\n]+", " ")
+  end
+  local function fallback(reason)
+    if type(M.log_line) == "function" then
+      M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
+        "outcome=fallback-to-marker-budget",
+        "error_class=codex-runs-unavailable",
+        "reason=" .. one_line(reason),
+      })
+    end
+    return { running = {}, recent = {}, codex_runs_fallback = true, codex_runs_error = tostring(reason or "unknown") }
+  end
   if type(fkst) ~= "table" or type(fkst.codex_runs) ~= "function" then
-    error("github-devloop: fkst.codex_runs SDK primitive is required for implement liveness")
+    return fallback("fkst.codex_runs SDK primitive is unavailable")
   end
   local ok, status = pcall(fkst.codex_runs)
   if not ok then
-    error("github-devloop: fkst.codex_runs failed for implement liveness: " .. tostring(status))
+    return fallback("fkst.codex_runs failed for implement liveness: " .. tostring(status))
   end
   if type(status) ~= "table" or type(status.running) ~= "table" then
-    error("github-devloop: fkst.codex_runs returned invalid implement liveness status")
+    return fallback("fkst.codex_runs returned invalid implement liveness status")
   end
   return status
 end
