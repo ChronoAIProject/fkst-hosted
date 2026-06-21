@@ -6,7 +6,7 @@ local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/issue-cursor/"
 local spec = {
   consumes = { "devloop_liveness_tick" },
   produces = {
-    "github-proxy.github_entity_changed",
+    "devloop_observe_issue",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_pr_comment_request",
     "consensus.proposal",

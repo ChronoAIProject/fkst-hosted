@@ -15,6 +15,7 @@ local ready = h.ready
 local mock_issue_reconcile = h.mock_issue_reconcile
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local codex_status = require("tests.codex_status_helpers")
+local ISSUE_REDRIVE_QUEUE = "devloop_observe_issue"
 
 local function run_timeout_reconcile(payload, run_opts)
   return t.run_department("departments/reconcile/main.lua", {
@@ -200,13 +201,13 @@ end
 
 local function assert_no_entity_change(result)
   t.eq(result.exit_code, 0)
-  t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
+  t.eq(find_raise(result.raises, ISSUE_REDRIVE_QUEUE), nil)
 end
 
 local function entity_change_issue_numbers(result)
   local numbers = {}
   for _, raised in ipairs(result.raises or {}) do
-    if raised.queue == "github-proxy.github_entity_changed"
+    if raised.queue == ISSUE_REDRIVE_QUEUE
       and raised.payload ~= nil
       and raised.payload.type == "issue" then
       numbers[tonumber(raised.payload.number)] = true
@@ -219,7 +220,7 @@ local function has_liveness_action_for_proposal(result, target_proposal_id)
   for _, raised in ipairs(result.raises or {}) do
     local payload = raised.payload or {}
     if payload.proposal_id == target_proposal_id
-      or (raised.queue == "github-proxy.github_entity_changed"
+      or (raised.queue == ISSUE_REDRIVE_QUEUE
         and payload.type == "issue"
         and core.proposal_id(payload.repo, payload.number) == target_proposal_id) then
       return true
@@ -294,7 +295,7 @@ local function captured_raise(raises, queue, predicate)
 end
 
 local function assert_no_observe_reinject(result)
-  t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
+  t.eq(find_raise(result.raises, ISSUE_REDRIVE_QUEUE), nil)
 end
 
 local function issue_rest_view_number(rendered)
@@ -374,7 +375,7 @@ return {
 
     local result = run_liveness_scan("liveness-scan-ready-dependency-hold")
     t.eq(result.exit_code, 0)
-    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
+    local raised = find_raise(result.raises, ISSUE_REDRIVE_QUEUE)
     t.is_true(raised ~= nil)
     t.eq(raised.payload.type, "issue")
     t.eq(raised.payload.source, "liveness-scan")
@@ -395,7 +396,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, "devloop_timeout_reconcile"), nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
-    local raised = find_raise(result.raises, "github-proxy.github_entity_changed")
+    local raised = find_raise(result.raises, ISSUE_REDRIVE_QUEUE)
     t.is_true(raised ~= nil)
     t.eq(raised.payload.type, "issue")
   end,
@@ -458,7 +459,7 @@ return {
 
     local result = run_liveness_scan("liveness-scan-ready-bare-observe-no-timeout-increment")
     t.eq(result.exit_code, 0)
-    local changed = find_raise(result.raises, "github-proxy.github_entity_changed")
+    local changed = find_raise(result.raises, ISSUE_REDRIVE_QUEUE)
     t.is_true(changed ~= nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
     t.eq(core.version_timeout_round(changed.payload.dedup_key, "ready"), 0)
@@ -842,7 +843,7 @@ return {
 
     local result = run_liveness_scan("liveness-scan-cap-before-views")
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
+    t.eq(find_raise(result.raises, ISSUE_REDRIVE_QUEUE), nil)
     local views = 0
     for _, call in ipairs(t.command_calls()) do
       if issue_rest_view_number(call.rendered) ~= nil then
@@ -928,6 +929,6 @@ return {
 
     local result = run_liveness_scan("liveness-scan-view-timeout-deferred")
     t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "github-proxy.github_entity_changed"), nil)
+    t.eq(find_raise(result.raises, ISSUE_REDRIVE_QUEUE), nil)
   end,
 }

@@ -709,7 +709,7 @@ return {
     )
     local scanned = run_liveness_scan()
     t.eq(scanned.exit_code, 0)
-    local changed = find_raise(scanned.raises, "github-proxy.github_entity_changed")
+    local changed = find_raise(scanned.raises, "devloop_observe_issue")
     t.is_true(changed ~= nil)
 
     mock_observe_issue(
@@ -724,7 +724,7 @@ return {
     mock_blocked_by(53, {})
     mock_blocker_issue(53, "merged")
     local observed = t.run_department("departments/observe_issue/main.lua", {
-      queue = "github-proxy.github_entity_changed",
+      queue = "devloop_observe_issue",
       payload = h.issue({
         dedup_key = changed.payload.dedup_key,
         source_ref = changed.payload.source_ref,

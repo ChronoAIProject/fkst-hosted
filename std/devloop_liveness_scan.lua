@@ -133,6 +133,13 @@ function M.liveness_scan_maybe_timeout_action(entity, state, facts)
   return nil
 end
 
+function M.liveness_scan_observe_queue(kind)
+  if kind == "pr" then
+    return "devloop_observe_pr"
+  end
+  return "devloop_observe_issue"
+end
+
 function M.liveness_scan_list_open_issues(repo, timeout, poll_key)
   local list = M.fetch_shared_issue_observe_list(repo, {
     timeout = timeout or 60,
@@ -187,10 +194,11 @@ end
 function M.liveness_scan_reinject(repo, entity, kind, tick)
   local proposal_id = kind == "pr" and M.pr_proposal_id(repo, entity.number) or M.proposal_id(repo, entity.number)
   local payload = M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
+  local queue = M.liveness_scan_observe_queue(kind)
   M.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
-    "github-proxy.github_entity_changed",
+    queue,
   })
-  M.log_raise("liveness_scan", proposal_id, "github-proxy.github_entity_changed", payload)
+  M.log_raise("liveness_scan", proposal_id, queue, payload)
 end
 
 end

@@ -3,7 +3,7 @@ local saga = require("std.saga")
 local strings = require("std.strings")
 
 local spec = {
-  consumes = { "devloop_decompose" },
+  consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
   produces = {
     "github-proxy.github_issue_create_request",
   },

@@ -5,6 +5,7 @@ local saga = require("std.saga")
 local spec = {
   consumes = { "issue" },
   produces = { "consensus.proposal" },
+  published_seam = { "issue" },
   stall_window = "30s",
 }
 
