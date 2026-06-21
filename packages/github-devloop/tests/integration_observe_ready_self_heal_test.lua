@@ -184,6 +184,29 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
+  test_observe_issue_skips_stale_lineage_thinking_replay = function()
+    local old_event = issue()
+    local event = issue({ updated_at = "2026-06-03T01:02:04Z" })
+    local original = core.build_proposal(old_event)
+    local current = core.build_proposal(event)
+    local sr_digest = core.source_ref_digest(event.source_ref)
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
+      fresh_thinking_marker(current.proposal_id, current.dedup_key),
+      core.converge_round_marker(original.proposal_id, original.dedup_key, sr_digest, 0, original.dedup_key, "Old question", {
+        { angle = "minimal", verdict = "abstain", digest = "old-lineage" },
+      }),
+    })
+
+    local result = run_observe(event, opts("observe-issue-thinking-stale-lineage-replay"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local proposal = find_raise(result.raises, "consensus.proposal").payload
+    t.eq(proposal.dedup_key, current.dedup_key .. "/replay")
+    t.eq(proposal.round, nil)
+    t.eq(proposal.convergence_question, nil)
+    t.eq(count_calls("--json body"), 0)
+  end,
+
   test_observe_issue_replays_thinking_base_proposal_when_converge_marker_is_missing = function()
     local event = issue()
     local original = core.build_proposal(event)

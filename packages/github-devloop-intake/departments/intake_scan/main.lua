@@ -43,6 +43,10 @@ local function handle_pending_reintake(repo, issue, current, proposal_id)
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an existing intake decision")
     return true
   end
+  if core.is_intake_held(current.labels) then
+    core.log_cas_decision("intake_scan", proposal_id, { state = nil, version = nil }, "reintake-command", "candidate", "skip-held", "fkst-dev:hold label is present")
+    return true
+  end
   if core.should_skip_known_intake_issue(current.labels) then
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires no active devloop state")
     return true
