@@ -53,6 +53,15 @@ local function mock_real_write_mode()
   end
 end
 
+local function command_index(needle)
+  for index, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+      return index
+    end
+  end
+  return nil
+end
+
 local function visible_child_comments(event, branch)
   return {
     core.pr_origin_marker(event.proposal_id, 42, branch, event.dedup_key, "dev")
@@ -115,12 +124,20 @@ return {
   test_implement_success_pre_await_missing_child_start_acks_without_parent_awaiting_pr = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
-    mock_issue_implement({ "fkst-dev:implementing" }, {
-      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implementing_marker(event.proposal_id, event.dedup_key, branch, head_sha, "dev", base_sha),
+    mock_issue_implement({ "fkst-dev:ready" }, {
+      core.state_marker(event.proposal_id, "ready", event.dedup_key),
     })
-    mock_existing_implement_branch(head_sha)
-    mock_remote_implementation_branch(branch)
+    mock_existing_empty_implement_worktree()
+    mock_implement_codex(0, "implemented")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit(head_sha, branch)
+    mock_git_push(branch)
+    t.mock_command(core.gh_pr_list_head_base_cmd("owner/repo", branch, "dev"), {
+      stdout = "[]\n",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh pr create", { stdout = "https://github.example/owner/repo/pull/7\n", stderr = "", exit_code = 0 })
     mock_pr_child_adoptable(branch)
     mock_bot_env()
     mock_real_write_mode()
@@ -134,6 +151,11 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
       return payload.add_labels[1] == "fkst-dev:awaiting-pr"
     end), nil)
+    local push_index = command_index("push origin HEAD:refs/heads/" .. branch)
+    local create_index = command_index("gh pr create")
+    t.is_true(push_index ~= nil)
+    t.is_true(create_index ~= nil)
+    t.is_true(push_index < create_index)
   end,
 
   test_implement_liveness_redrive_reaches_awaiting_pr = function()

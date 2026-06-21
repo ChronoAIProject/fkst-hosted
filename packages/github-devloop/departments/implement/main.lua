@@ -60,6 +60,23 @@ local function raise_implement_attempt(repo, issue_number, ready, attempt, start
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
+local function publish_implementation_branch(repo, issue_number, ready, worktree, branch)
+  if core.write_mode() ~= "real" then
+    core.log_line("info", "implement", ready.proposal_id, "OUTBOUND", {
+      "mode=dry-run",
+      "repo=" .. tostring(repo),
+      "issue=" .. tostring(issue_number),
+      "branch=" .. tostring(branch),
+      "reason=would push implementation branch requires FKST_GITHUB_WRITE=1",
+    })
+    return
+  end
+  local push = core.git_push_worktree_branch_update(worktree, branch, 120)
+  if push.exit_code ~= 0 then
+    error("github-devloop: IMPLEMENT_BRANCH_PUSH_FAILED: git implementation branch push failed: " .. tostring(push.stderr))
+  end
+end
+
 local function remote_branch_fact(branch, base_branch, source_fact)
   local fetch_result = core.git_fetch_branch("origin", branch, 60)
   if fetch_result.exit_code ~= 0 then
@@ -488,6 +505,7 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
   end
   raise_implement_attempt(repo, issue_number, outcome.ready, outcome.attempt, outcome.started_at, outcome.exec_ref)
   if outcome.kind == "implementing" then
+    publish_implementation_branch(repo, issue_number, outcome.ready, outcome.worktree, outcome.branch)
     raise_implementing(
       repo,
       issue_number,

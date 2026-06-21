@@ -382,6 +382,11 @@ local function mock_git_push(branch)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command("push origin HEAD:refs/heads/" .. tostring(branch or "branch"), {
+    stdout = "pushed " .. tostring(branch or "branch") .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_existing_devloop_worktree(issue_slug)
