@@ -146,8 +146,9 @@ function M.dedup_key(repo, pr_number)
 end
 
 function M.body_file_path(repo, pr_number, kind)
+  local stem = M.sanitize_key(tostring(repo) .. "-pr-" .. tostring(pr_number), 160):gsub("/", "-")
   return "/tmp/fkst-github-external-pr-intake-"
-    .. M.sanitize_key(tostring(repo) .. "-pr-" .. tostring(pr_number), 160)
+    .. stem
     .. "-"
     .. tostring(kind or "body")
     .. ".md"

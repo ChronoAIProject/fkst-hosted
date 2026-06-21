@@ -350,6 +350,14 @@ local function resume_thread(thread)
 end
 
 return {
+  test_body_file_path_flattens_slash_bearing_repo = function()
+    local core = require("core")
+    local prefix = "/tmp/fkst-github-external-pr-intake-"
+    local path = core.body_file_path("ChronoAIProject/fkst-packages", 1151, "issue")
+    t.eq(path:sub(1, #prefix), prefix)
+    t.is_true(path:sub(#prefix + 1):find("/", 1, true) == nil)
+  end,
+
   test_scan_source_must_be_reliable = function()
     local spec = load_department().spec
     for _, queue in ipairs(spec.ephemeral or {}) do
