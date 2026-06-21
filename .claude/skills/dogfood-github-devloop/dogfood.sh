@@ -70,7 +70,14 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # (root stays website source) — so the trio comes from `$PKGSRC/packages/<pkg>`, a host's own package
 # from `$HOST/.fkst/local-packages/<pkg>`. (`.fkst/` is a tracked+ignored runtime INTERFACE dir, not
 # "all runtime": host repos commit their own Lua there. See fkst-website CLAUDE.md.)
-DEVLOOP_PKGS="github-devloop github-proxy consensus"   # platform trio (same for every target, from PKGSRC)
+# Platform packages this dogfood LOADS + RUNS from PKGSRC/packages/ — a per-DEPLOYMENT value set in
+# dogfood.config.sh (or the DEVLOOP_PKGS env var). dogfood.sh is GENERIC operator tooling and carries
+# NO package names: the list of which packages to run is project config, not tool logic. REQUIRED —
+# `run`/`restart` fail-closed if unset. The supervise loads only the project's platform (not every
+# package in packages/) because it RUNS packages (raisers fire); co-loading independent agents would
+# fight over the same repo's issues. (`test` loads all packages only to validate the graph.) The
+# package list lives in dogfood.config.example.sh (the project template) + each machine's config.
+DEVLOOP_PKGS="${DEVLOOP_PKGS:-}"
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
 # layout across machines); stable durable roots default under it but are commonly PINNED per machine
@@ -247,6 +254,7 @@ start_one() {
   # custom package from the host repo's `.fkst/local-packages/` (host repos are website-source-primary:
   # own Lua committed there, root stays website source — see fkst-website CLAUDE.md).
   local roots=() p
+  [ -n "$DEVLOOP_PKGS" ] || { echo "[$1] DEVLOOP_PKGS unset — set the platform packages to load in dogfood.config.sh (see dogfood.config.example.sh)"; return 1; }
   for p in $DEVLOOP_PKGS; do roots+=( --package-root "$PKGSRC/packages/$p" );            done
   for p in $LOCAL_PKGS;   do roots+=( --package-root "$HOST/.fkst/local-packages/$p" );   done
   BIN="$BIN" FKST_GITHUB_REPO="$REPO" FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN="$BOT" \
@@ -312,7 +320,7 @@ _proc_stale() {
   git -C "$SUBSTRATE_SRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
   pdev=$(git -C "$PKGSRC" rev-parse "origin/$INTEGRATION_BRANCH" 2>/dev/null)
   sdev=$(git -C "$SUBSTRATE_SRC" rev-parse "origin/$UPSTREAM_BRANCH" 2>/dev/null)
-  procpkg=$(grep -aoE 'PKG_VERS=[^ ]*github-devloop@[a-f0-9]+' "$log" 2>/dev/null | grep -oE 'github-devloop@[a-f0-9]+' | tail -1 | cut -d@ -f2)
+  procpkg=$(grep -aoE "${DEVLOOP_PKGS%% *}@[a-f0-9]+" "$log" 2>/dev/null | tail -1 | cut -d@ -f2)   # any platform pkg's commit reflects the running code
   proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
   if [ -n "$proceng" ] && [ "${sdev:0:${#proceng}}" != "$proceng" ]; then echo engine-stale; return; fi
   if [ -n "$procpkg" ] && [ "${pdev:0:${#procpkg}}" != "$procpkg" ]; then
@@ -328,7 +336,7 @@ doctor_one() {
   panic=$(grep -ac panicked "$log" 2>/dev/null); panic=${panic:-0}
   if [ -z "$p" ]; then printf '  %-9s STOPPED (target %s)\n' "$1" "$REPO"; return 0; fi
   st=$(_proc_stale "$1")   # also fetches origin/dev for $PKGSRC + $SUBSTRATE_SRC
-  procpkg=$(grep -aoE 'github-devloop@[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d@ -f2)
+  procpkg=$(grep -aoE "${DEVLOOP_PKGS%% *}@[a-f0-9]+" "$log" 2>/dev/null | tail -1 | cut -d@ -f2)
   proceng=$(grep -aoE 'ENGINE_VER=[a-f0-9]+' "$log" 2>/dev/null | tail -1 | cut -d= -f2)
   case "$st" in
     current)      verdict="pkg-current engine-current" ;;
@@ -458,7 +466,7 @@ cmd_config() {
   printf '  %-18s %s\n' DOGFOOD_ROOT "$DOGFOOD_ROOT" SUBSTRATE_SRC "$SUBSTRATE_SRC" BIN "$BIN" \
     BOT "$BOT" GH_ORG "$GH_ORG" UPSTREAM_BRANCH "$UPSTREAM_BRANCH" INTEGRATION_BRANCH "$INTEGRATION_BRANCH" \
     ROLLUP_MERGE "$ROLLUP_MERGE" RATE_POOL "$RATE_POOL" LOGDIR "$LOGDIR" DOGFOOD_REPOS "$DOGFOOD_REPOS"
-  echo "trio (platform, from each PKGSRC/packages): $DEVLOOP_PKGS"
+  echo "platform pkgs (DEVLOOP_PKGS, from each PKGSRC/packages): $DEVLOOP_PKGS"
   echo "per-repo (HOST | PKGSRC | DURABLE | local pkgs):"
   local n; for n in $DOGFOOD_REPOS; do cfg "$n" && printf '  %-9s %s | %s | %s | %s\n' "$n" "$HOST" "$PKGSRC" "$DUR" "${LOCAL_PKGS:--}"; done
 }

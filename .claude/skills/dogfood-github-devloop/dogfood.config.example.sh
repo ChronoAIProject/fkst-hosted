@@ -36,6 +36,14 @@
 # A machine that only dogfoods two of the three repos lists just those.
 # DOGFOOD_REPOS="packages substrate website"
 
+# The github-devloop PLATFORM packages the supervise loads + runs from PKGSRC/packages/. REQUIRED:
+# dogfood.sh is generic tooling and carries no package names, so this MUST be set here (run/restart
+# fail-closed if unset). NOT every package in packages/ — the supervise RUNS packages (raisers fire),
+# so it loads only the platform; independent agents (autochrono = issue->reply, archaudit = audit)
+# must not co-run and fight over the same repo's issues. Add an extracted package (github-devloop-pr,
+# future github-devloop-integration / -intake) here.
+DEVLOOP_PKGS="github-devloop github-devloop-pr github-proxy consensus"
+
 # STABLE durable roots — the redb persistent delivery store, REUSED across restarts so
 # in-flight events resume. NEVER point these at a fresh path on a normal restart (that wipes
 # the queue and strands mid-state issues). Pin the ACTUAL existing store path on this host:
