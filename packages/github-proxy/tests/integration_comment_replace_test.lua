@@ -47,6 +47,15 @@ local function mock_comment_edit_result(comment_id, exit_code, stderr)
   })
 end
 
+local function timeout_attempt_body(round)
+  return "github-devloop timeout redrive attempt: implementing " .. tostring(round)
+    .. "\n\n"
+    .. '<!-- fkst:github-devloop:timeout-attempt:v2 proposal="github-devloop/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" round="' .. tostring(round) .. '" dedup="timeout-attempt:v2:implementing/producing_revision/gen-1/' .. tostring(round) .. '" source_ref_kind="external" source_ref="owner/x#issue/42" -->'
+    .. "\n"
+    .. '<!-- fkst:github-devloop:timeout-attempt:latest:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" -->'
+    .. "\n⟦AI:FKST⟧"
+end
+
 return {
   test_replace_marker_edits_existing_trusted_comment = function()
     mock_write_env("1")
@@ -151,5 +160,33 @@ return {
     local comments = core.parse_issue_comments('{"comments":[{"id":"IC_kwabc","databaseId":999,"body":"hello","author":{"login":"fkst-test-bot"}}]}')
     t.eq(comments[1].id, "999")
     t.eq(core.trusted_comment_with_fragment(comments, "hello", "fkst-test-bot").id, "999")
+  end,
+
+  test_timeout_attempt_replace_skips_stale_lower_round = function()
+    mock_write_env("1")
+    mock_bot_env()
+    local replace_marker = '<!-- fkst:github-devloop:timeout-attempt:latest:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" -->'
+    mock_pr_comment_view({
+      {
+        databaseId = 123456,
+        body = timeout_attempt_body(3),
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_pr_comment_write()
+
+    local result = t.run_department("departments/github_pr_comment/main.lua", event({
+      body = timeout_attempt_body(2),
+      dedup_key = "timeout-attempt:v2/github-devloop/issue/owner/x/42/implementing/producing_revision/gen-1/2",
+      replace_marker = replace_marker,
+    }), opts("comment-replace-timeout-attempt-stale", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 1)
+    t.eq(count_calls("gh api --method PATCH"), 0)
+    t.eq(count_calls(pr_comment_create), 0)
+    t.eq(#result.raises, 0)
   end,
 }

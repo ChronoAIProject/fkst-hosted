@@ -371,6 +371,8 @@ return {
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
     t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:v1", 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find("fkst:github-devloop:timeout-attempt:latest:v1", 1, true) ~= nil)
+    t.is_true(tostring(attempt.payload.replace_marker):find("fkst:github-devloop:timeout-attempt:latest:v1", 1, true) ~= nil)
     t.is_true(attempt.payload.body:find('state="ready"', 1, true) ~= nil)
     t.is_true(attempt.payload.body:find('round="1"', 1, true) ~= nil)
   end,
