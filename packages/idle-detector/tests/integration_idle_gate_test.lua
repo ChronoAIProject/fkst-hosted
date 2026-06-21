@@ -12,7 +12,7 @@ end
 local function event(ts)
   local slot = ts or "1970-01-01T00:00:00Z"
   return {
-    queue = "idle_tick",
+    queue = "idle-detector.idle_tick",
     ts = slot,
     payload = {
       schema = "idle-detector.idle-tick.v1",
@@ -154,17 +154,6 @@ return {
     local malformed_slot = event("not-a-time")
     local result = t.run_department("departments/idle_gate/main.lua", malformed_slot, opts("malformed-slot"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-  end,
-
-  test_idle_gate_unknown_queue_is_caught_failure = function()
-    local result = t.run_department("departments/idle_gate/main.lua", {
-      queue = "foreign_queue",
-      payload = {
-        source_ref = { kind = "cron", ref = "idle-detector/idle_poll/foreign" },
-      },
-    }, opts("unknown-queue"))
-    t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
   end,
 

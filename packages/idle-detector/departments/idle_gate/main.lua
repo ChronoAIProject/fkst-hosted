@@ -50,10 +50,7 @@ local function slot_is_stale(slot, now_seconds)
   return false, nil
 end
 
-local function idle_done(event)
-  if type(event) ~= "table" or event.queue ~= "idle_tick" then
-    error("idle-detector: unknown-queue: idle_gate consumed unknown queue")
-  end
+local function idle_done(_event)
   return false
 end
 

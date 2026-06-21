@@ -234,6 +234,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_std_dependency_model_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_saga_head_test.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_namespaced_queue_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_span_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_github_devloop_helpers_test.py" || fail=1
