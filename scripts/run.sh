@@ -232,6 +232,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/lua_coverage_to_lcov_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_std_dependency_model_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_saga_head_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_span_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py" || fail=1

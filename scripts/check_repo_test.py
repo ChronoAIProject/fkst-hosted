@@ -406,14 +406,14 @@ class RunScriptContractTest(unittest.TestCase):
 
     def test_python_repository_checks_do_not_write_bytecode_cache(self) -> None:
         source = self.source()
-
         self.assertIn('python3 -B "$ROOT/scripts/check_repo.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/ratchet_base_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_dedup_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_content_truncation_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_test.py"', source)
-        self.assertIn('python3 -B "$ROOT/scripts/check_repo_saga_head_test.py"', source)
+        for path in ("check_repo_std_dependency_model_test.py", "check_repo_saga_head_test.py"):
+            self.assertIn(f'python3 -B "$ROOT/scripts/{path}"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_span_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/bin_cache_test.py"', source)
@@ -421,7 +421,7 @@ class RunScriptContractTest(unittest.TestCase):
         self.assertIn('python3 -B "$ROOT/scripts/run_sh_coverage_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/board_test.py"', source)
         self.assertIn('python3 -B "$ROOT/scripts/doctor_test.py"', source)
-        for path in ("check_repo.py", "ratchet_base_test.py", "check_repo_fkst_layout.py", "check_repo_dedup_test.py", "check_repo_content_truncation_test.py", "check_repo_test.py", "check_repo_saga_head_test.py", "check_repo_span_test.py", "check_repo_fkst_layout_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py"):
+        for path in ("check_repo.py", "ratchet_base_test.py", "check_repo_fkst_layout.py", "check_repo_dedup_test.py", "check_repo_content_truncation_test.py", "check_repo_test.py", "check_repo_std_dependency_model_test.py", "check_repo_saga_head_test.py", "check_repo_span_test.py", "check_repo_fkst_layout_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py"):
             self.assertNotIn(f'python3 "$ROOT/scripts/{path}"', source)
 
     def test_package_runtime_view_is_regenerated_from_source_packages(self) -> None:
@@ -450,9 +450,9 @@ class RunScriptContractTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
-            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_content_truncation.py", "check_repo_coverage.py", "check_repo_dedup.py", "check_repo_forward_direct.py", "check_repo_gh_git_adapter.py", "check_repo_github_devloop_helpers.py", "check_repo_ingress.py", "check_repo_perm.py", "check_repo_saga_head.py", "check_repo_saga_split.py", "check_repo_span.py", "ratchet_base.py"):
+            for name in ("run.sh", "bin_bootstrap.sh", "check_repo.py", "check_repo_content_truncation.py", "check_repo_coverage.py", "check_repo_dedup.py", "check_repo_forward_direct.py", "check_repo_gh_git_adapter.py", "check_repo_github_devloop_helpers.py", "check_repo_ingress.py", "check_repo_perm.py", "check_repo_saga_head.py", "check_repo_saga_split.py", "check_repo_span.py", "check_repo_std_dependency_model.py", "ratchet_base.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
-            for name in ("check_repo_coverage_test.py", "check_repo_dedup_test.py", "check_repo_forward_direct_test.py", "check_repo_content_truncation_test.py", "check_repo_test.py", "check_repo_saga_head_test.py", "check_repo_span_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "check_repo_github_devloop_helpers_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py", "ratchet_base_test.py"):
+            for name in ("check_repo_coverage_test.py", "check_repo_dedup_test.py", "check_repo_forward_direct_test.py", "check_repo_content_truncation_test.py", "check_repo_test.py", "check_repo_std_dependency_model_test.py", "check_repo_saga_head_test.py", "check_repo_span_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "check_repo_github_devloop_helpers_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "run_sh_coverage_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py", "ratchet_base_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
 
             core_lines = [
