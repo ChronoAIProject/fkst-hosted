@@ -126,70 +126,7 @@ local function body_of(case)
   return case.request.body
 end
 
-local function argv_option(argv, name)
-  for index, value in ipairs(argv or {}) do
-    if value == name then
-      return argv[index + 1]
-    end
-  end
-  return nil
-end
-
 return {
-  test_release_notes_pr_create_debug_stamp_is_default_off = function()
-    t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "" })
-    local seen
-    local old_exec_argv = exec_argv
-    exec_argv = function(spec)
-      if spec.argv[1] == "git" then
-        return { stdout = "0123456789ABCDEF\n", stderr = "", exit_code = 0 }
-      end
-      seen = spec
-      return { stdout = "https://github.example/owner/repo/pull/1\n", stderr = "", exit_code = 0 }
-    end
-
-    local ok, err = pcall(function()
-      core.gh_pr_create_body("owner/repo", "integration-x", "dev", "rollup", "Release notes")
-    end)
-    exec_argv = old_exec_argv
-    if not ok then error(err) end
-
-    t.eq(seen.argv[1], "gh")
-    t.is_nil(argv_option(seen.argv, "--body"):find("fkst:debug-stamp:v1", 1, true))
-  end,
-
-  test_release_notes_pr_create_debug_stamp_is_enabled_and_redacted = function()
-    t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "1" })
-    t.mock_command("git rev-parse --verify HEAD", {
-      stdout = "0123456789ABCDEF\n",
-      stderr = "",
-      exit_code = 0,
-    })
-    local seen
-    local old_exec_argv = exec_argv
-    exec_argv = function(spec)
-      if spec.argv[1] == "git" then
-        return { stdout = "0123456789ABCDEF\n", stderr = "", exit_code = 0 }
-      end
-      seen = spec
-      return { stdout = "https://github.example/owner/repo/pull/1\n", stderr = "", exit_code = 0 }
-    end
-
-    local ok, err = pcall(function()
-      core.gh_pr_create_body("owner/repo", "integration-x", "dev", "rollup", "Release notes")
-    end)
-    exec_argv = old_exec_argv
-    if not ok then error(err) end
-
-    local rendered = argv_option(seen.argv, "--body")
-    t.is_true(rendered:find("fkst:debug-stamp:v1", 1, true) ~= nil)
-    t.is_true(rendered:find('emitter="github-devloop.rollup.pr-create"', 1, true) ~= nil)
-    t.is_true(rendered:find('target="pr:owner/repo#new"', 1, true) ~= nil)
-    t.is_true(rendered:find('code_version="0123456789abcdef"', 1, true) ~= nil)
-    t.is_true(rendered:find('dedup_hash="', 1, true) ~= nil)
-    t.is_nil(rendered:find("integration-x->dev", 1, true))
-  end,
-
   test_comment_template_audit_has_complete_language_table = function()
     local en = core.comment_strings("en")
     local zh = core.comment_strings("zh")

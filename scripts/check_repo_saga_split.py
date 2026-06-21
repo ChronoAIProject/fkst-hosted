@@ -66,6 +66,7 @@ class LeakSite:
         if not (
             path.startswith("packages/github-devloop/")
             or path.startswith("packages/github-devloop-pr/")
+            or path.startswith("packages/github-devloop-integration/")
             or path.startswith("std/devloop")
         ) or not path.endswith(".lua"):
             raise ValueError(f"invalid {ALLOWLIST} path: {line}")
@@ -99,7 +100,7 @@ class LeakSite:
 
 def expected_paths(root: Path) -> set[str]:
     paths: set[str] = set()
-    for package in ("github-devloop", "github-devloop-pr"):
+    for package in ("github-devloop", "github-devloop-pr", "github-devloop-integration"):
         base = root / "packages" / package
         paths.update(
             path.relative_to(root).as_posix()

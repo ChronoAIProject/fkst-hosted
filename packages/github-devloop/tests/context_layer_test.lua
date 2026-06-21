@@ -232,21 +232,6 @@ return {
     end
   end,
 
-  test_sync_conflict_prompt_omits_issue_pr_history_directive = function()
-    local prompt = core.build_sync_conflict_prompt({
-      repo = "owner/repo",
-      upstream_branch = "dev",
-      integration_branch = "integration/dev",
-      upstream_sha = "abcdef123456",
-      integration_sha = "123456abcdef",
-    })
-
-    assert_actor_preamble_slots(prompt)
-    t.is_nil(prompt:find("COMPLETE GitHub comment stream of the subject issue/PR", 1, true))
-    t.is_nil(prompt:find("gh issue view --comments / gh pr view --comments", 1, true))
-    t.is_nil(prompt:find("{{", 1, true))
-  end,
-
   test_board_digest_in_thinking_proposal_is_bounded_and_cached_per_tick = function()
     h.mock_bot_env()
     h.mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {})

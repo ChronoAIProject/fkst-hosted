@@ -173,7 +173,6 @@ local function payload_for_queue(queue)
       error = "test error",
       source_ref = { kind = "external", ref = "owner/repo#issue/42" },
     },
-    devloop_branch_tick = branch_tick_payload(),
     devloop_decompose = core.build_devloop_decompose_payload(core.build_devloop_fix_reconcile_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
@@ -263,8 +262,6 @@ local function payload_for_queue(queue)
       dedup_key = "reviewing/github-devloop/issue/owner/repo/42/ready-consensus-github-devloop-issue-owner-repo-42-2026-06-03T01-02-03Z/7",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     },
-    devloop_rollup_ready = core.rollup_ready_payload("owner/repo", "dev", "integration/dev", 7, "def456"),
-    devloop_substrate_ref_tick = { schema = "github-devloop.substrate-ref-tick.v1" },
     board_digest_probe = {
       mode = "block",
       repo = "owner/repo",
@@ -277,16 +274,6 @@ local function payload_for_queue(queue)
     context_bundle_probe = {
       mode = "round_trip",
       root = "/tmp/fkst-packages-test/github-devloop-unsupported-context-bundle",
-    },
-    devloop_sync_conflict = {
-      schema = "github-devloop.v1",
-      repo = "owner/repo",
-      upstream_branch = "dev",
-      integration_branch = "integration/dev",
-      upstream_sha = "abc123",
-      integration_sha = "def456",
-      dedup_key = core.branch_sync_dedup_key("owner/repo", "dev", "integration/dev", "abc123"),
-      source_ref = core.branch_sync_source_ref("owner/repo", "dev", "integration/dev"),
     },
     devloop_timeout_reconcile = core.build_devloop_timeout_reconcile_payload({
       from_state = "ready",
@@ -370,19 +357,9 @@ local cases = {
     queue = "github-proxy.github_entity_changed",
   },
   {
-    dept = "sync_conflict",
-    path = "departments/sync_conflict/main.lua",
-    queue = "devloop_sync_conflict",
-  },
-  {
     dept = "reconcile",
     path = "departments/reconcile/main.lua",
     queue = "devloop_reconcile",
-  },
-  {
-    dept = "rollup_merge",
-    path = "departments/rollup_merge/main.lua",
-    queue = "devloop_rollup_ready",
   },
 }
 

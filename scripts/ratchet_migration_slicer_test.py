@@ -273,7 +273,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         inventory = slicer.load_saga_inventory(REPO_ROOT, spec)
         live_paths = {site.path for site in inventory}
         expected_paths = {
-            "packages/github-devloop/departments/pr_freshness_scan/main.lua",
+            "packages/github-devloop-integration/departments/pr_freshness_scan/main.lua",
             "packages/github-devloop/departments/reconcile/main.lua",
             "packages/github-devloop-pr/departments/review_loop/main.lua",
         }
@@ -285,7 +285,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         expected_entry_keys = {
             "ef2a7b5c6d87abc016a11fa04fd1a04e55ae826259967175c363da002e734acc",
             "a5d78c76cb30e3b341a1ddba5101870076cde9369ec7e458b97af6e4e847effe",
-            "d42a3aa103f89e1d69f8fe9191986656fbdbb87e8f3757b7f450b2f6c991502c",
+            "1d095528477f7caefe22e45bc119725fdfeacd7982ec534a5f9e383d51073192",
         }
         computed_entry_keys = {
             slicer.entry_key(spec.allowlist_path, slicer.InventorySite(path, 1, "already_migrated", path))

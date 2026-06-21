@@ -2,6 +2,17 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 
+local function assert_language_preamble(prompt)
+  t.is_true(prompt:find("Write all output in English; quote code identifiers and cited originals verbatim.", 1, true) ~= nil)
+end
+
+local function assert_actor_preamble_slots(prompt)
+  assert_language_preamble(prompt)
+  t.is_true(prompt:find("Before acting, identify the established theory or industry best practice governing this change", 1, true) ~= nil)
+  t.is_true(prompt:find("surface that blocker explicitly instead of silently improvising or claiming success", 1, true) ~= nil)
+  t.is_nil(prompt:find("grounds for rejection or narrowing", 1, true))
+end
+
 local function conflict(extra)
   local payload = {
     schema = "github-devloop.v1",
@@ -67,5 +78,20 @@ return {
     t.is_true(request.body:find("Fingerprint: " .. fingerprint, 1, true) ~= nil)
     t.is_true(request.body:find("- core.lua", 1, true) ~= nil)
     t.eq(request.source_ref.ref, "owner/repo#branch-sync/dev/integration/dev")
+  end,
+
+  test_sync_conflict_prompt_omits_issue_pr_history_directive = function()
+    local prompt = core.build_sync_conflict_prompt({
+      repo = "owner/repo",
+      upstream_branch = "dev",
+      integration_branch = "integration/dev",
+      upstream_sha = "abcdef123456",
+      integration_sha = "123456abcdef",
+    })
+
+    assert_actor_preamble_slots(prompt)
+    t.is_nil(prompt:find("COMPLETE GitHub comment stream of the subject issue/PR", 1, true))
+    t.is_nil(prompt:find("gh issue view --comments / gh pr view --comments", 1, true))
+    t.is_nil(prompt:find("{{", 1, true))
   end,
 }

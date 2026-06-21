@@ -40,9 +40,8 @@
 # dogfood.sh is generic tooling and carries no package names, so this MUST be set here (run/restart
 # fail-closed if unset). NOT every package in packages/ — the supervise RUNS packages (raisers fire),
 # so it loads only the platform; independent agents (autochrono = issue->reply, archaudit = audit)
-# must not co-run and fight over the same repo's issues. Add an extracted package (github-devloop-pr,
-# future github-devloop-integration / -intake) here.
-DEVLOOP_PKGS="github-devloop github-devloop-pr github-proxy consensus"
+# must not co-run and fight over the same repo's issues. Add extracted packages here.
+DEVLOOP_PKGS="github-devloop github-devloop-pr github-devloop-integration github-proxy consensus"
 
 # STABLE durable roots — the redb persistent delivery store, REUSED across restarts so
 # in-flight events resume. NEVER point these at a fresh path on a normal restart (that wipes

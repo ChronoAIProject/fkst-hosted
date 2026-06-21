@@ -12,23 +12,23 @@
 {"path":"packages/github-devloop/departments/loop/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/observability/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/observe_issue/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop/departments/pr_freshness_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/departments/pr_freshness_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop/departments/reconcile/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop/departments/rollup_merge/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop/departments/rollup_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop/departments/substrate_ref_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop/departments/sync_conflict/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop/departments/sync_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/departments/rollup_merge/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/departments/rollup_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/departments/substrate_ref_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/departments/sync_conflict/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/departments/sync_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop/departments/test_board_digest_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop/departments/test_context_bundle_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-integration/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"std/devloop_autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
 {"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop/core/branches/branch_train.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop/core/branches/git_mechanics.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop/core/branches/pr_freshness.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop/core/branches/shared.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop/core/branches.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches/branch_train.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches/pr_freshness.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches/shared.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop/core/conflict_telemetry.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop/core/decompose.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/dependencies.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
@@ -51,7 +51,7 @@
 {"path":"packages/github-devloop/core/ratchet_slice_ledger.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/ready_split.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/reconcile_requests.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop/core/release_notes.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop-integration/core/release_notes.lua","owner":"integration","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua","owner":"shared","reason":"liveness signal producer is shared by issue wait boundaries."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
@@ -97,12 +97,12 @@
 {"path":"packages/github-devloop/core/restart/transitions/merged.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/ready.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/thinking.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop/core/rollup_health.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/rollup_health.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop/core/saga.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/state_gap.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"packages/github-devloop/core/substrate_ref.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/substrate_ref.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"std/devloop_sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
-{"path":"packages/github-devloop/core/sync_conflict.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/sync_conflict.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-pr/departments/fix/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/comment_handoff/main.lua","owner":"pr","reason":"github-devloop-pr owns PR comment-stream handoff authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/liveness_scan/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}

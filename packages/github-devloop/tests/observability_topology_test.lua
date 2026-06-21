@@ -94,13 +94,13 @@ local function topology_fixture()
   b.raiser("github-proxy.github_poll", "github-proxy.github_poll_tick")
   b.raiser("github-devloop.intake_poll", "github-devloop.devloop_intake_tick")
   b.raiser("github-devloop.intake_probe_poll", "github-devloop.devloop_intake_probe_tick")
-  b.raiser("github-devloop.branch_poll", "github-devloop.devloop_branch_tick")
+  b.raiser("branch-topology.branch_poll", "branch-topology.devloop_branch_tick")
   b.raiser("github-devloop.merge_queue_poll", "github-devloop.devloop_merge_queue_tick")
   b.raiser("github-devloop.observability_poll", "github-devloop.devloop_observe_tick")
   b.raiser("github-devloop.liveness_poll", "github-devloop.devloop_liveness_tick")
   b.raiser("github-devloop.doctor_poll", "github-devloop.devloop_doctor_tick")
   b.raiser("github-devloop.ensure_repo_poll", "github-devloop.devloop_ensure_repo_tick")
-  b.raiser("github-devloop.substrate_ref_poll", "github-devloop.devloop_substrate_ref_tick")
+  b.raiser("branch-topology.substrate_ref_poll", "branch-topology.devloop_substrate_ref_tick")
 
   b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, { "github-proxy.github_entity_changed" })
   b.department("github-proxy.github_comment", { "github-proxy.github_issue_comment_request" }, { "github-proxy.github_comment_written" })
@@ -145,8 +145,8 @@ local function topology_fixture()
     "github-devloop.devloop_fixing",
     "github-devloop.devloop_merge_queue_tick",
   })
-  b.department("github-devloop.rollup_scan", { "github-devloop.devloop_branch_tick" }, { "github-devloop.devloop_rollup_ready" })
-  b.department("github-devloop.rollup_merge", { "github-devloop.devloop_rollup_ready" }, {})
+  b.department("branch-topology.rollup_scan", { "branch-topology.devloop_branch_tick" }, { "branch-topology.devloop_rollup_ready" })
+  b.department("branch-topology.rollup_merge", { "branch-topology.devloop_rollup_ready" }, {})
 
   b.department("github-devloop.dead_letter", { "github-devloop.dead_letter" }, { "github-proxy.github_issue_create_request" })
   b.department("github-devloop.decompose", { "github-devloop.devloop_decompose" }, { "github-proxy.github_issue_create_request" })
@@ -156,7 +156,7 @@ local function topology_fixture()
   b.department("github-devloop.liveness_scan", { "github-devloop.devloop_liveness_tick" }, { "github-proxy.github_entity_changed", "consensus.proposal" })
   b.department("github-devloop.loop", { "consensus.consensus_converge" }, { "consensus.proposal", "github-devloop.devloop_reconcile" })
   b.department("github-devloop.observability", { "github-devloop.devloop_observe_tick" }, { "github-proxy.github_issue_create_request", "github-devloop.devloop_merge_queue_tick" })
-  b.department("github-devloop.pr_freshness_scan", { "github-devloop.devloop_branch_tick" }, { "github-devloop.devloop_sync_conflict" })
+  b.department("branch-topology.pr_freshness_scan", { "branch-topology.devloop_branch_tick" }, { "branch-topology.devloop_sync_conflict" })
   b.department("github-devloop.reconcile", {
     "github-devloop.devloop_reconcile",
     "github-devloop.devloop_review_reconcile",
@@ -172,9 +172,9 @@ local function topology_fixture()
     "github-devloop.devloop_fixing",
     "github-proxy.github_issue_create_request",
   })
-  b.department("github-devloop.substrate_ref_scan", { "github-devloop.devloop_substrate_ref_tick" }, { "github-proxy.github_pr_comment_request" })
-  b.department("github-devloop.sync_conflict", { "github-devloop.devloop_sync_conflict" }, { "github-proxy.github_issue_create_request" })
-  b.department("github-devloop.sync_scan", { "github-devloop.devloop_branch_tick" }, { "github-devloop.devloop_sync_conflict" })
+  b.department("branch-topology.substrate_ref_scan", { "branch-topology.devloop_substrate_ref_tick" }, { "github-proxy.github_pr_comment_request" })
+  b.department("branch-topology.sync_conflict", { "branch-topology.devloop_sync_conflict" }, { "github-proxy.github_issue_create_request" })
+  b.department("branch-topology.sync_scan", { "branch-topology.devloop_branch_tick" }, { "branch-topology.devloop_sync_conflict" })
 
   return b.graph()
 end
@@ -248,6 +248,7 @@ return {
     t.eq(count_literal(mermaid, "[\"github-proxy\"]"), 1)
     t.eq(count_literal(mermaid, "[\"consensus\"]"), 1)
     t.eq(count_literal(mermaid, "[\"github-devloop\"]"), 1)
+    t.eq(count_literal(mermaid, "[\"branch-topology\"]"), 1)
     t.is_true(mermaid:find("[\"github_poll\"]", 1, true) ~= nil)
     t.is_true(mermaid:find("[\"observe_issue\"]", 1, true) ~= nil)
     t.is_true(mermaid:find("[\"consensus_result\"]", 1, true) ~= nil)
