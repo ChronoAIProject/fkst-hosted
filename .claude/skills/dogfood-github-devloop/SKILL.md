@@ -96,6 +96,8 @@ Only after the board sweep, check the running process (`dogfood.sh doctor` rolls
 
 A stall means consensus/review activity stops while only polling continues. A board item stuck or mis-transitioned with the pipeline otherwise flowing is ALSO a defect — diagnose it (often impoverished codex context: truncated input, no code access, or a terminal-reject gate that should converge), file a consensus-rnd-informed issue, and drive it.
 
+**Platform composition is a config edit, never a skill edit.** Which agent packages the supervise loads + runs is `DEVLOOP_PKGS` in the per-machine `dogfood.config.sh` — that one list is where you look and where you change; `dogfood.sh` and this skill carry no package names, so adding a package as `packages/` grows never touches them. To decide what to load: `dogfood.config.example.sh` documents WHERE TO LOOK (each package's role = its `fkst.toml` kind + its depts' `consumes`/`produces`) and the CO-RUN RULE (an issue-PRODUCER agent — consumes a non-issue signal, produces github-proxy issue/comment requests, e.g. an audit agent — co-runs safely and files work into github-devloop's own intake; an issue-CONSUMER agent that claims/manages the issue lifecycle must run as its own separate supervise or it fights github-devloop). When such a producer agent is enabled, observe its filed output like any codex output — correct cadence (not a flood), gated to the right trigger (e.g. firing only when idle, not while the repo is busy), and SUBSTANTIVE (evidence over narrative); a flood of low-value items or output at the wrong time is a defect to diagnose + file.
+
 ## Stall decision tree
 
 1. Pipeline flowing: transitions continue, supervise is alive, and there is no repeated panic/DLQ/stall. Keep observing; do not intervene.
