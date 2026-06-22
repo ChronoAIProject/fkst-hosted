@@ -12,7 +12,6 @@ local function opts(name, env)
     FKST_GITHUB_REPO = "owner/repo",
     FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
     ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
-    ARCHAUDIT_MAX_STALENESS_HOURS = "24",
     FKST_GITHUB_WRITE = "",
   }
   for key, value in pairs(env or {}) do
@@ -62,15 +61,10 @@ local function stale_tick_event(slot)
   }
 end
 
-local function mock_env(repo, max_issues, max_staleness_hours)
+local function mock_env(repo, max_issues)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = repo or "owner/repo", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$ARCHAUDIT_MAX_STALENESS_HOURS"', {
-    stdout = max_staleness_hours or "24",
-    stderr = "",
-    exit_code = 0,
-  })
 end
 
 local function mock_idle_observe()
@@ -236,7 +230,6 @@ return {
       FKST_GITHUB_REPO = true,
       FKST_GITHUB_BOT_LOGIN = true,
       ARCHAUDIT_MAX_ISSUES_PER_IDLE = true,
-      ARCHAUDIT_MAX_STALENESS_HOURS = true,
     }
     local function read_env_command(name)
       if not allowed[name] then
@@ -345,7 +338,7 @@ return {
   end,
 
   test_stale_tick_runs_when_system_is_busy_and_no_durable_audit_exists = function()
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_busy_observe()
     mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Concrete stale audit issue.","suggested_fix":"Small local fix."}]', 0)
     local dept = fake_audit_department("[]")
@@ -359,7 +352,7 @@ return {
   end,
 
   test_stale_tick_zero_findings_records_durable_audit_run_marker = function()
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_busy_observe()
     mock_codex_findings("[]", 0)
     local dept = fake_audit_department("[]")
@@ -373,7 +366,7 @@ return {
   end,
 
   test_stale_tick_malformed_payload_fails_before_durable_search_or_codex = function()
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_busy_observe()
     local dept = fake_audit_department("[]")
     local event = stale_tick_event()
@@ -385,7 +378,7 @@ return {
   end,
 
   test_stale_tick_fails_closed_without_durable_search_port = function()
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_busy_observe()
     local dept = fake_audit_department_with_github({})
     local result = run_fake_failure_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
@@ -395,7 +388,7 @@ return {
 
   test_stale_tick_is_bounded_by_recent_durable_audit_issue = function()
     local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_busy_observe()
     local dept = fake_audit_department_with_search(search_stdout, "[]")
     local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
@@ -405,7 +398,7 @@ return {
 
   test_idle_trigger_is_also_bounded_by_recent_durable_audit_issue = function()
     local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-19T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_idle_observe()
     local dept = fake_audit_department_with_search(search_stdout, "[]")
     local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
@@ -414,7 +407,7 @@ return {
 
   test_stale_tick_ignores_untrusted_durable_audit_issue = function()
     local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"human"},"url":"https://github.com/owner/repo/issues/77"}]'
-    mock_env("owner/repo", "3", "24")
+    mock_env("owner/repo", "3")
     mock_busy_observe()
     mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Concrete stale audit issue.","suggested_fix":"Small local fix."}]', 0)
     local dept = fake_audit_department_with_search(search_stdout, "[]")

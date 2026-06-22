@@ -1,5 +1,7 @@
+local core = require("core")
+
 return {
   type = "cron",
-  interval = "30m",
+  interval = core.audit_poll_interval(),
   produces = "archaudit_tick",
 }
