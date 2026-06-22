@@ -1,56 +1,5 @@
 local M = {}
 
-local forbidden_gate_globals = {
-  "require",
-  "debug",
-  "_G",
-  "load",
-  "loadstring",
-  "dofile",
-  "loadfile",
-  "getfenv",
-  "setfenv",
-  "rawget",
-  "rawset",
-  "rawequal",
-  "setmetatable",
-  "getmetatable",
-  "os",
-  "io",
-  "coroutine",
-  "package",
-}
-
-local safe_string = {
-  byte = string.byte,
-  char = string.char,
-  find = string.find,
-  format = string.format,
-  gmatch = string.gmatch,
-  gsub = string.gsub,
-  len = string.len,
-  lower = string.lower,
-  match = string.match,
-  rep = string.rep,
-  reverse = string.reverse,
-  sub = string.sub,
-  upper = string.upper,
-}
--- Lua's shared string value metatable may still expose string.dump through
--- ("").dump even though the sandbox string table omits it. With require/load nil,
--- dumped bytecode is inert here; making that unreachable requires a host-owned
--- restricted-load primitive or an isolated Lua state.
-
-local safe_table = {
-  concat = table.concat,
-  insert = table.insert,
-  move = table.move,
-  pack = table.pack,
-  remove = table.remove,
-  sort = table.sort,
-  unpack = table.unpack,
-}
-
 local gate_cache = {}
 
 local allowed_lineage_fields = {
@@ -190,6 +139,27 @@ local function copy_dense_gate_list(gates)
   return copied
 end
 
+local function plain_gate_table(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  -- restricted_lua_load preserves dense-array intent with an engine-owned
+  -- metatable; gate specs treat that marker as plain list data.
+  local copied = {}
+  for key, nested in pairs(value) do
+    copied[plain_gate_table(key)] = plain_gate_table(nested)
+  end
+  return copied
+end
+
+local function restricted_require_reached(milestone, opts)
+  return M.require_reached(milestone, plain_gate_table(opts))
+end
+
+local function restricted_all(gates)
+  return M.all(plain_gate_table(gates))
+end
+
 local function assert_spec_shape(spec, seen)
   if type(spec) ~= "table" or getmetatable(spec) ~= nil then
     error("std.devloop_gate: gate spec must be a plain data table")
@@ -243,83 +213,33 @@ local function gate_source_path(name)
   return path, module
 end
 
-local function sandbox_env()
+local function gate_bindings()
   return {
-    require_reached = M.require_reached,
-    all = M.all,
-    pairs = pairs,
-    ipairs = ipairs,
+    require_reached = restricted_require_reached,
+    all = restricted_all,
     type = type,
     tostring = tostring,
     tonumber = tonumber,
     select = select,
     error = error,
     assert = assert,
-    string = {
-      byte = safe_string.byte,
-      char = safe_string.char,
-      find = safe_string.find,
-      format = safe_string.format,
-      gmatch = safe_string.gmatch,
-      gsub = safe_string.gsub,
-      len = safe_string.len,
-      lower = safe_string.lower,
-      match = safe_string.match,
-      rep = safe_string.rep,
-      reverse = safe_string.reverse,
-      sub = safe_string.sub,
-      upper = safe_string.upper,
-    },
-    table = {
-      concat = safe_table.concat,
-      insert = safe_table.insert,
-      move = safe_table.move,
-      pack = safe_table.pack,
-      remove = safe_table.remove,
-      sort = safe_table.sort,
-      unpack = safe_table.unpack,
-    },
   }
-end
-
-local function sandboxed_source(source)
-  local lines = {
-    "local require_reached <const> = require_reached",
-    "local all <const> = all",
-    "local pairs <const> = pairs",
-    "local ipairs <const> = ipairs",
-    "local type <const> = type",
-    "local tostring <const> = tostring",
-    "local tonumber <const> = tonumber",
-    "local select <const> = select",
-    "local error <const> = error",
-    "local assert <const> = assert",
-    "local string <const> = string",
-    "local table <const> = table",
-  }
-  for _, name in ipairs(forbidden_gate_globals) do
-    lines[#lines + 1] = "local " .. name .. " <const> = nil"
-  end
-  lines[#lines + 1] = "local _ENV <const> = nil"
-  lines[#lines + 1] = "return (function()"
-  lines[#lines + 1] = source
-  lines[#lines + 1] = "end)()"
-  return table.concat(lines, "\n")
 end
 
 local function load_gate_source(source, chunk_name)
-  if type(load) ~= "function" then
-    error("std.devloop_gate: Lua load-with-env is required to load gate definitions")
+  if type(restricted_lua_load) ~= "function" then
+    error("std.devloop_gate: restricted_lua_load SDK is required to load gate definitions")
   end
-  local chunk, load_error = load(sandboxed_source(source), chunk_name, "t", sandbox_env())
-  if chunk == nil then
-    error("std.devloop_gate: gate definition compile failed: " .. tostring(load_error))
-  end
-  local ok, spec_or_error = pcall(chunk)
+  local ok, spec_or_error = pcall(restricted_lua_load, {
+    source = source,
+    bindings = gate_bindings(),
+    mode = "text",
+    name = chunk_name,
+  })
   if not ok then
     error("std.devloop_gate: gate definition load failed: " .. tostring(spec_or_error))
   end
-  return assert_loaded_gate_spec(spec_or_error)
+  return assert_loaded_gate_spec(plain_gate_table(spec_or_error))
 end
 
 local function reached_opts_for_facts(opts)

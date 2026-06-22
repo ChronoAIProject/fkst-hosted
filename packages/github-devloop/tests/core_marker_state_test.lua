@@ -370,11 +370,6 @@ return {
         return load("return 1")
       ]],
       [[
-        return string.dump(function()
-          return 1
-        end)
-      ]],
-      [[
         return setmetatable({}, {})
       ]],
     }
@@ -385,41 +380,28 @@ return {
       t.eq(ok, false)
     end
   end,
-  test_devloop_gate_string_dump_value_metatable_is_theoretical_only = function()
-    local spec = gate._load_gate_source_for_test([[
-      return require_reached(("").dump(function()
-        return require, load, loadstring, _G
-      end), {
-        domain = "github-devloop-pr",
-      })
-    ]])
-
-    t.eq(type(spec.milestone), "string")
-    local loaded = load(spec.milestone)
-    t.eq(type(loaded), "function")
-    local require_value, load_value, loadstring_value, global_value = loaded()
-    t.eq(require_value, nil)
-    t.eq(load_value, nil)
-    t.eq(loadstring_value, nil)
-    t.eq(global_value, nil)
-
-    local sandbox_load_ok = pcall(function()
-      gate._load_gate_source_for_test([[
-        return load(("").dump(function()
-          return require
-        end))()
-      ]])
-    end)
-    t.eq(sandbox_load_ok, false)
-
-    local sandbox_require_ok = pcall(function()
-      gate._load_gate_source_for_test([[
-        return require(("").dump(function()
-          return require
-        end))
-      ]])
-    end)
-    t.eq(sandbox_require_ok, false)
+  test_devloop_gate_sandbox_rejects_string_dump_paths = function()
+    local forbidden_sources = {
+      [[
+        return string.dump(function()
+          return 1
+        end)
+      ]],
+      [[
+        return require_reached(("").dump(function()
+          return require, load, loadstring, _G
+        end), {
+          domain = "github-devloop-pr",
+        })
+      ]],
+    }
+    for _, source in ipairs(forbidden_sources) do
+      local ok, err = pcall(function()
+        gate._load_gate_source_for_test(source)
+      end)
+      t.eq(ok, false)
+      t.is_true(tostring(err):find("restricted_lua", 1, true) ~= nil)
+    end
   end,
   test_current_state_uses_stage_rank_for_same_issue_version = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"

@@ -374,7 +374,7 @@ def repository_messages(root: Path, enforce_base: bool = True) -> list[str]:
         if not any(entry.key() == finding.key() for entry in allowlist):
             messages.append(f"{finding.label()} is forbidden in a core/gates DSL definition; gate definitions are loaded by std.devloop_gate.load_gate with injected constructors, must not require modules, must not read raw marker/cursor helpers, and must stay pure positive data construction without reflection, loaders, metatables, raw table access, globals, or monkey-patching")
     for finding in sorted(loader_bypass_findings(root)):
-        messages.append(f"{finding.label()} is forbidden; gate definitions must be loaded only through std.devloop_gate.load_gate so the restricted _ENV sandbox is authoritative")
+        messages.append(f"{finding.label()} is forbidden; gate definitions must be loaded only through std.devloop_gate.load_gate so the restricted_lua_load sandbox is authoritative")
     for entry in sorted(allowlist):
         if not any(finding.key() == entry.key() for finding in current):
             messages.append(f"{entry.label()} no longer matches monotone-gate-dsl debt; prune the stale entry")

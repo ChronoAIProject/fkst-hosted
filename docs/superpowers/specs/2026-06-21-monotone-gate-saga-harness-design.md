@@ -320,24 +320,21 @@ substrate primitive (`MonotoneFactSet` / `CurrentProjection`) is imaginable but 
 EXTRACTED from package policy when a second case appears, never guessed by the engine
 (dependency inversion).
 
-Sandbox-loader status after the gate DSL hardening: gate definitions under
+Sandbox-loader status after the substrate #152 adoption: gate definitions under
 `core/gates/` have exactly one legitimate access path, `std.devloop_gate.load_gate()`.
 `G-MONOTONE-GATE-DSL` makes direct `require("core.gates.<name>")` and direct
 `core/gates/<name>.lua` path loads CI-red outside the loader, including tests. The
-loader runs the gate definition in a restricted `_ENV` with `require`, `load`,
-`loadstring`, `_G`, `debug`, `package`, raw table primitives, and metatable access
-bound to `nil`, then validates that the result is plain positive data.
+loader runs each gate definition through substrate `restricted_lua_load({ source,
+bindings, mode = "text", name })`, which evaluates the source in a fresh
+capability-isolated Lua state with an empty `_ENV` and only the positive gate
+constructors plus minimal scalar helpers explicitly granted. Ambient `require`,
+`load`, `loadstring`, `_G`, `debug`, `package`, raw table primitives, metatable
+access, `string.dump`, and the value-metatable path `("").dump` are unreachable.
+The package still validates that the returned value is plain positive gate data.
 
-Honest residual: Lua's shared string value metatable can expose `string.dump` as
-`("").dump` even when the sandbox's injected `string` table omits `dump`. This is
-theoretical reachability in the current package sandbox, not a practical escape:
-the dumped bytecode cannot be executed inside the sandbox because `load`,
-`loadstring`, and `require` are nil, and a dumped closure that returns those names
-returns nil for each because the sandbox locals are nil. A package-level loader
-cannot make that reachability airtight without mutating VM-global metatables around
-the load, which is not a safe package primitive. The airtight form belongs in
-`fkst-substrate`: a host-owned restricted-load primitive, mlua sandbox mode, a
-host-controlled string metatable, or a fresh Lua state per gate definition.
+The previous honest residual is closed: Lua's shared string value metatable no
+longer exposes `string.dump` to gate definitions, because the sandbox boundary is
+now host-owned and per-load instead of a package-level `_ENV` wrapper.
 
 ## 6. Migration Plan
 
