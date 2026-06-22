@@ -324,6 +324,13 @@ function core.render_observability_dashboard(args)
   append_section(sections, lines)
 
   lines = {}
+  table.insert(lines, "## AVM scoreboard by task level")
+  for _, bucket in ipairs(core.aggregate_avm_scoreboard(core.collect_avm_scoreboard_facts(list, now_seconds))) do
+    table.insert(lines, core.render_avm_scoreboard_bucket(bucket))
+  end
+  append_section(sections, lines)
+
+  lines = {}
   append_state_section(lines, "Ready", "ready", by_state, now_seconds)
   append_section(sections, lines)
   lines = {}
