@@ -39,21 +39,63 @@ local function one_line(value)
   return tostring(value or ""):gsub("%s+", " ")
 end
 
-local function body_text(finding, dedup_key)
-  return table.concat({
+local function audit_run_marker(trigger_reason)
+  if trigger_reason == nil or trigger_reason == "" then
+    return nil
+  end
+  if trigger_reason ~= "idle" and trigger_reason ~= "stale" then
+    error("archaudit: invalid-audit-trigger: " .. tostring(trigger_reason))
+  end
+  return '<!-- fkst:archaudit:audit-run:v1 reason="' .. tostring(trigger_reason) .. '" -->'
+end
+
+local function body_text(finding, dedup_key, trigger_reason)
+  local lines = {
     "Architecture doctrine violation:",
     "",
     "File: " .. tostring(finding.file) .. ":" .. tostring(finding.line),
     "Rule: " .. tostring(finding.rule),
-    "",
-    "Why:",
-    tostring(finding.why),
-    "",
-    "Suggested fix:",
-    tostring(finding.suggested_fix),
-    "",
-    "<!-- archaudit-dedup: " .. tostring(dedup_key) .. " -->",
-  }, "\n")
+  }
+  if trigger_reason ~= nil and trigger_reason ~= "" then
+    table.insert(lines, "Audit trigger: " .. tostring(trigger_reason))
+  end
+  table.insert(lines, "")
+  table.insert(lines, "Why:")
+  table.insert(lines, tostring(finding.why))
+  table.insert(lines, "")
+  table.insert(lines, "Suggested fix:")
+  table.insert(lines, tostring(finding.suggested_fix))
+  table.insert(lines, "")
+  table.insert(lines, "<!-- archaudit-dedup: " .. tostring(dedup_key) .. " -->")
+  local marker = audit_run_marker(trigger_reason)
+  if marker ~= nil then
+    table.insert(lines, marker)
+  end
+  return table.concat(lines, "\n")
+end
+
+function M.audit_tick_payload(slot)
+  return {
+    schema = "archaudit.tick.v1",
+    slot = tostring(slot or ""),
+    source_ref = {
+      kind = "cron",
+      ref = "archaudit/audit_poll/" .. tostring(slot or ""),
+    },
+  }
+end
+
+function M.validate_audit_tick_payload(payload)
+  if type(payload) ~= "table" or payload.schema ~= "archaudit.tick.v1" then
+    return false
+  end
+  if not strings.is_bounded_string(payload.slot, 80) then
+    return false
+  end
+  if type(payload.source_ref) ~= "table" or payload.source_ref.kind ~= "cron" then
+    return false
+  end
+  return payload.source_ref.ref == "archaudit/audit_poll/" .. tostring(payload.slot)
 end
 
 local function required_list(facts, name)
@@ -292,11 +334,11 @@ function M.dedup_key(repo, finding)
   return readable:sub(1, github_proxy_limits.dedup_key)
 end
 
-function M.build_issue_create_request(repo, finding, label_available)
+function M.build_issue_create_request(repo, finding, label_available, trigger_reason)
   assert_request_field(M.validate_repo(repo), "repo")
   local dedup_key = M.dedup_key(repo, finding)
   local title = "Archaudit: " .. tostring(finding.file) .. ":" .. tostring(finding.line) .. " " .. one_line(finding.rule)
-  local body = body_text(finding, dedup_key)
+  local body = body_text(finding, dedup_key, trigger_reason)
   local source_ref_ref = tostring(repo) .. "#" .. tostring(finding.file) .. ":" .. tostring(finding.line) .. "#archaudit-create-intent"
   assert_request_field(strings.is_bounded_string(title, github_proxy_limits.title), "title")
   assert_request_field(strings.is_bounded_string(body, github_proxy_limits.body), "body")
@@ -319,6 +361,92 @@ function M.build_issue_create_request(repo, finding, label_available)
       ref = source_ref_ref,
     },
   }
+end
+
+function M.audit_issue_search_query()
+  return "archaudit-dedup:"
+end
+
+local function issue_author_login(issue)
+  if type(issue) ~= "table" then
+    return nil
+  end
+  if type(issue.author) == "table" and issue.author.login ~= nil then
+    return tostring(issue.author.login)
+  end
+  if type(issue.user) == "table" and issue.user.login ~= nil then
+    return tostring(issue.user.login)
+  end
+  if issue.author_login ~= nil then
+    return tostring(issue.author_login)
+  end
+  return nil
+end
+
+function M.parse_audit_issue_search(stdout)
+  local ok, decoded = pcall(decode_json, stdout or "[]")
+  if not ok or type(decoded) ~= "table" then
+    error("archaudit: audit-search-malformed-json: GitHub audit issue search")
+  end
+  local issues = {}
+  for _, issue in ipairs(decoded) do
+    if type(issue) == "table" then
+      table.insert(issues, {
+        number = issue.number,
+        title = issue.title,
+        state = issue.state,
+        body = tostring(issue.body or ""),
+        created_at = issue.createdAt or issue.created_at,
+        updated_at = issue.updatedAt or issue.updated_at,
+        author_login = issue_author_login(issue),
+        url = issue.url,
+      })
+    end
+  end
+  return issues
+end
+
+local function trusted_audit_issue(issue, trusted_login)
+  if type(issue) ~= "table" then
+    return false
+  end
+  if tostring(issue.body or ""):find("archaudit-dedup:", 1, true) == nil then
+    return false
+  end
+  if trusted_login == nil or trusted_login == "" then
+    return false
+  end
+  return tostring(issue.author_login or "") == tostring(trusted_login)
+end
+
+function M.latest_audit_issue_seconds(issues, trusted_login)
+  local latest = nil
+  for _, issue in ipairs(issues or {}) do
+    if trusted_audit_issue(issue, trusted_login) then
+      local seconds = M.iso_timestamp_epoch_seconds(issue.created_at) or M.iso_timestamp_epoch_seconds(issue.updated_at)
+      if seconds ~= nil and (latest == nil or seconds > latest) then
+        latest = seconds
+      end
+    end
+  end
+  return latest
+end
+
+function M.audit_due_verdict(issues, trusted_login, now_seconds, max_staleness_seconds)
+  if type(now_seconds) ~= "number" or type(max_staleness_seconds) ~= "number" or max_staleness_seconds < 1 then
+    error("archaudit: invalid-audit-staleness-input: timestamps and staleness budget must be numeric")
+  end
+  local latest = M.latest_audit_issue_seconds(issues, trusted_login)
+  if latest == nil then
+    return true, "no durable audit issue marker", nil
+  end
+  if latest > now_seconds then
+    return false, "latest audit issue marker is in the future", latest
+  end
+  if now_seconds - latest >= max_staleness_seconds then
+    return true, "audit max staleness elapsed", latest
+  end
+  return false, "recent audit issue marker", latest
 end
 
 local function days_from_civil(year, month, day)
