@@ -5,6 +5,10 @@ local saga = require("std.saga")
 local spec = {
   consumes = { "idle_tick" },
   produces = { "system_idle" },
+  -- system_idle is a broadcast signal: any number of sibling/host packages may
+  -- subscribe to "system is idle" (archaudit audits, the website board
+  -- re-renders, ...). Declare it fanout so multiple consumers each receive it.
+  fanout = { "system_idle" },
   stall_window = "30s",
   retry = false,
 }
