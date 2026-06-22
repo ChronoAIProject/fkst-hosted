@@ -16,9 +16,29 @@ local github_proxy_limits = {
   source_ref_ref = 200,
 }
 local observe_schema_version = 1
+local audit_due_staleness_seconds = 24 * 60 * 60
 
 function M.persistence_class()
   return "composed_judgment_pipeline"
+end
+
+function M.audit_due_staleness_seconds()
+  return audit_due_staleness_seconds
+end
+
+function M.producer_liveness_contracts()
+  return {
+    {
+      producer_id = "archaudit.audit",
+      trigger_source = "audit_due",
+      output_queues = { "github-proxy.github_issue_create_request" },
+      eligibility_predicate = "overdue",
+      max_staleness_seconds = audit_due_staleness_seconds,
+      max_silence_seconds = audit_due_staleness_seconds,
+      max_skip_budget = 0,
+      progress_output = "github-proxy.github_issue_create_request",
+    },
+  }
 end
 
 local function bounded(value, limit)

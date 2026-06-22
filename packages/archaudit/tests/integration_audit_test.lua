@@ -51,6 +51,20 @@ local function stale_idle_event()
   })
 end
 
+local function audit_due_event()
+  return {
+    queue = "archaudit.audit_due",
+    ts = "2026-06-19T01:00:00Z",
+    payload = {
+      schema = "archaudit.audit-due.v1",
+      source_ref = {
+        kind = "cron",
+        ref = "archaudit/audit_due/2026-06-19T01:00:00Z",
+      },
+    },
+  }
+end
+
 local function mock_env(repo, max_issues)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = repo or "owner/repo", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
@@ -299,6 +313,16 @@ return {
     local dept = fake_audit_department("[]")
     local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
+  end,
+
+  test_fake_due_trigger_runs_under_current_busy_observe = function()
+    mock_env("owner/repo", "3")
+    mock_busy_observe()
+    mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Core has one concrete issue.","suggested_fix":"Move the local helper."}]', 0)
+    local dept = fake_audit_department("[]")
+    local result = run_fake_at(dept, audit_due_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_create_request")
   end,
 
   test_fake_current_truncated_observe_skips_without_issue = function()

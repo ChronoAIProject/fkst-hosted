@@ -6,7 +6,7 @@ local ports_lib = require("std.ports")
 local strings = require("contract.strings")
 
 local spec = {
-  consumes = { "idle-detector.system_idle" },
+  consumes = { "idle-detector.system_idle", "audit_due" },
   produces = { "github-proxy.github_issue_create_request" },
   stall_window = "10m",
   retry = false,
@@ -178,8 +178,18 @@ local function fail_request_error(event, err)
   fail(event, "validation-failure", err)
 end
 
+local function is_due_event(event)
+  return type(event) == "table" and event.queue == "archaudit.audit_due"
+end
+
 local function audit_done(event)
-  if type(event) ~= "table" or event.queue ~= "idle-detector.system_idle" then
+  if type(event) ~= "table" then
+    fail(event, "unknown-queue", "unknown queue")
+  end
+  if is_due_event(event) then
+    return false
+  end
+  if event.queue ~= "idle-detector.system_idle" then
     fail(event, "unknown-queue", "unknown queue")
   end
   local payload = event.payload or {}
@@ -192,6 +202,7 @@ end
 local function make_department(ports)
   local function act_audit(event)
     local payload = event.payload or {}
+    local overdue = is_due_event(event)
     local ok_observe, facts_or_err = observe_result()
     if not ok_observe and stop_observe_error(event, facts_or_err) then
       return
@@ -200,19 +211,21 @@ local function make_department(ports)
     if not ok_time and fail_observe_malformed(event, observe_now_or_err) then
       return
     end
-    local ok_fresh, fresh, fresh_why = pcall(fresh_hint, payload, observe_now_or_err)
-    if not ok_fresh then
-      fail(event, "malformed-idle-hint", fresh)
-    end
-    if not fresh then
-      log_fact("warn", "audit", "SKIP", "terminal-skip", event, fresh_why, true)
-      return
+    if not overdue then
+      local ok_fresh, fresh, fresh_why = pcall(fresh_hint, payload, observe_now_or_err)
+      if not ok_fresh then
+        fail(event, "malformed-idle-hint", fresh)
+      end
+      if not fresh then
+        log_fact("warn", "audit", "SKIP", "terminal-skip", event, fresh_why, true)
+        return
+      end
     end
     local ok_idle, idle, why = idle_observe_result(facts_or_err)
     if not ok_idle and fail_observe_malformed(event, idle) then
       return
     end
-    if not idle then
+    if not idle and not overdue then
       log_fact("warn", "audit", "SKIP", "terminal-skip", event, why or "current system busy", true)
       return
     end

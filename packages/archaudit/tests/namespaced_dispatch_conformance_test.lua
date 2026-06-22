@@ -28,6 +28,15 @@ local function payload_for_queue(_path, queue)
   if queue == "idle-detector.system_idle" then
     return system_idle_payload()
   end
+  if queue == "audit_due" then
+    return {
+      schema = "archaudit.audit-due.v1",
+      source_ref = {
+        kind = "cron",
+        ref = "archaudit/audit_due/2026-06-19T01:00:00Z",
+      },
+    }
+  end
   error("archaudit: no production-shaped queue fixture for " .. tostring(queue))
 end
 

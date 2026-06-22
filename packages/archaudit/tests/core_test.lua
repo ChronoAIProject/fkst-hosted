@@ -28,6 +28,21 @@ return {
     t.eq(core.persistence_class(), "composed_judgment_pipeline")
   end,
 
+  test_producer_liveness_contract_declares_overdue_progress = function()
+    local contracts = core.producer_liveness_contracts()
+    t.eq(#contracts, 1)
+    local contract = contracts[1]
+    t.eq(contract.producer_id, "archaudit.audit")
+    t.eq(contract.trigger_source, "audit_due")
+    t.eq(contract.output_queues[1], "github-proxy.github_issue_create_request")
+    t.eq(contract.escalation_queues, nil)
+    t.eq(contract.eligibility_predicate, "overdue")
+    t.eq(contract.max_staleness_seconds, core.audit_due_staleness_seconds())
+    t.eq(contract.max_silence_seconds, core.audit_due_staleness_seconds())
+    t.eq(contract.max_skip_budget, 0)
+    t.eq(contract.progress_output, "github-proxy.github_issue_create_request")
+  end,
+
   test_parse_findings_accepts_strict_array = function()
     local parsed = core.parse_findings_json(finding_json)
     t.eq(#parsed, 1)
