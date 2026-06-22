@@ -10,7 +10,9 @@ local function opts(name, env)
     FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/archaudit/" .. tostring(name),
     FKST_DURABLE_ROOT = "/tmp/fkst-packages-test/archaudit/durable-" .. tostring(name),
     FKST_GITHUB_REPO = "owner/repo",
+    FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
     ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
+    ARCHAUDIT_MAX_STALENESS_HOURS = "24",
     FKST_GITHUB_WRITE = "",
   }
   for key, value in pairs(env or {}) do
@@ -51,23 +53,24 @@ local function stale_idle_event()
   })
 end
 
-local function audit_due_event()
+local function stale_tick_event(slot)
+  local tick_slot = slot or "2026-06-20T01:00:00Z"
   return {
-    queue = "archaudit.audit_due",
-    ts = "2026-06-19T01:00:00Z",
-    payload = {
-      schema = "archaudit.audit-due.v1",
-      source_ref = {
-        kind = "cron",
-        ref = "archaudit/audit_due/2026-06-19T01:00:00Z",
-      },
-    },
+    queue = "archaudit.archaudit_tick",
+    ts = tick_slot,
+    payload = core.audit_tick_payload(tick_slot),
   }
 end
 
-local function mock_env(repo, max_issues)
+local function mock_env(repo, max_issues, max_staleness_hours)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = repo or "owner/repo", stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$ARCHAUDIT_MAX_STALENESS_HOURS"', {
+    stdout = max_staleness_hours or "24",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_idle_observe()
@@ -145,7 +148,12 @@ end
 local function fake_audit_department(label_stdout)
   local model = github_fake.model()
   local label_calls = {}
+  local search_calls = {}
   local github = github_fake.new(model)
+  function github.issue_search(repo, query, fields, timeout)
+    table.insert(search_calls, { repo = repo, query = query, fields = fields, timeout = timeout })
+    return { stdout = "[]", stderr = "", exit_code = 0 }
+  end
   function github.label_list(repo, timeout)
     table.insert(label_calls, { repo = repo, timeout = timeout })
     return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
@@ -153,6 +161,25 @@ local function fake_audit_department(label_stdout)
   t.eq(type(audit_main.make_department), "function")
   local dept = audit_main.make_department({ github = github, git = nil })
   dept.model = model
+  dept.search_calls = search_calls
+  return dept, model, label_calls
+end
+
+local function fake_audit_department_with_search(search_stdout, label_stdout)
+  local model = github_fake.model()
+  local label_calls = {}
+  local search_calls = {}
+  local github = github_fake.new(model)
+  function github.issue_search(repo, query, fields, timeout)
+    table.insert(search_calls, { repo = repo, query = query, fields = fields, timeout = timeout })
+    return { stdout = search_stdout or "[]", stderr = "", exit_code = 0 }
+  end
+  function github.label_list(repo, timeout)
+    table.insert(label_calls, { repo = repo, timeout = timeout })
+    return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
+  end
+  local dept = audit_main.make_department({ github = github, git = nil })
+  dept.search_calls = search_calls
   return dept, model, label_calls
 end
 
@@ -207,7 +234,9 @@ return {
   test_read_env_command_rejects_invalid_env_name = function()
     local allowed = {
       FKST_GITHUB_REPO = true,
+      FKST_GITHUB_BOT_LOGIN = true,
       ARCHAUDIT_MAX_ISSUES_PER_IDLE = true,
+      ARCHAUDIT_MAX_STALENESS_HOURS = true,
     }
     local function read_env_command(name)
       if not allowed[name] then
@@ -315,14 +344,82 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_fake_due_trigger_runs_under_current_busy_observe = function()
-    mock_env("owner/repo", "3")
+  test_stale_tick_runs_when_system_is_busy_and_no_durable_audit_exists = function()
+    mock_env("owner/repo", "3", "24")
     mock_busy_observe()
-    mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Core has one concrete issue.","suggested_fix":"Move the local helper."}]', 0)
+    mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Concrete stale audit issue.","suggested_fix":"Small local fix."}]', 0)
     local dept = fake_audit_department("[]")
-    local result = run_fake_at(dept, audit_due_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_create_request")
+    t.is_true(result.raises[1].payload.body:find("Audit trigger: stale", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
+    t.eq(#dept.search_calls, 1)
+    t.eq(dept.search_calls[1].query, "fkst:archaudit:audit-run:v1")
+  end,
+
+  test_stale_tick_zero_findings_records_durable_audit_run_marker = function()
+    mock_env("owner/repo", "3", "24")
+    mock_busy_observe()
+    mock_codex_findings("[]", 0)
+    local dept = fake_audit_department("[]")
+    local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_create_request")
+    t.eq(result.raises[1].payload.title, "Archaudit: audit completed with zero findings")
+    t.is_true(result.raises[1].payload.dedup_key:find("archaudit-run/owner/repo/", 1, true) == 1)
+    t.is_true(result.raises[1].payload.body:find("Architecture audit completed with zero findings.", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
+  end,
+
+  test_stale_tick_malformed_payload_fails_before_durable_search_or_codex = function()
+    mock_env("owner/repo", "3", "24")
+    mock_busy_observe()
+    local dept = fake_audit_department("[]")
+    local event = stale_tick_event()
+    event.payload.schema = "wrong"
+    local result = run_fake_failure_at(dept, event, core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
+    t.eq(#result.raises, 0)
+    t.eq(#dept.search_calls, 0)
+    t.is_true(tostring(result.failure.error):find("unknown archaudit_tick schema", 1, true) ~= nil)
+  end,
+
+  test_stale_tick_fails_closed_without_durable_search_port = function()
+    mock_env("owner/repo", "3", "24")
+    mock_busy_observe()
+    local dept = fake_audit_department_with_github({})
+    local result = run_fake_failure_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.failure.error):find("audit-search-failed", 1, true) ~= nil)
+  end,
+
+  test_stale_tick_is_bounded_by_recent_durable_audit_issue = function()
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
+    mock_env("owner/repo", "3", "24")
+    mock_busy_observe()
+    local dept = fake_audit_department_with_search(search_stdout, "[]")
+    local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
+    t.eq(#result.raises, 0)
+    t.eq(#dept.search_calls, 1)
+  end,
+
+  test_idle_trigger_is_also_bounded_by_recent_durable_audit_issue = function()
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-19T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
+    mock_env("owner/repo", "3", "24")
+    mock_idle_observe()
+    local dept = fake_audit_department_with_search(search_stdout, "[]")
+    local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    t.eq(#result.raises, 0)
+  end,
+
+  test_stale_tick_ignores_untrusted_durable_audit_issue = function()
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"human"},"url":"https://github.com/owner/repo/issues/77"}]'
+    mock_env("owner/repo", "3", "24")
+    mock_busy_observe()
+    mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Concrete stale audit issue.","suggested_fix":"Small local fix."}]', 0)
+    local dept = fake_audit_department_with_search(search_stdout, "[]")
+    local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
+    t.eq(#result.raises, 1)
   end,
 
   test_fake_current_truncated_observe_skips_without_issue = function()
@@ -727,18 +824,31 @@ return {
 
   test_run_fake_label_probe_failures_raise_unlabeled_issue = function()
     for _, github in ipairs({
-      {},
       {
+        issue_search = function(_repo, _query, _fields, _timeout)
+          return { stdout = "[]", stderr = "", exit_code = 0 }
+        end,
+      },
+      {
+        issue_search = function(_repo, _query, _fields, _timeout)
+          return { stdout = "[]", stderr = "", exit_code = 0 }
+        end,
         label_list = function(_repo, _timeout)
           return { stdout = "[]", stderr = "no labels", exit_code = 1 }
         end,
       },
       {
+        issue_search = function(_repo, _query, _fields, _timeout)
+          return { stdout = "[]", stderr = "", exit_code = 0 }
+        end,
         label_list = function(_repo, _timeout)
           return { stdout = "{not json", stderr = "", exit_code = 0 }
         end,
       },
       {
+        issue_search = function(_repo, _query, _fields, _timeout)
+          return { stdout = "[]", stderr = "", exit_code = 0 }
+        end,
         label_list = function(_repo, _timeout)
           return { stdout = '"not labels"', stderr = "", exit_code = 0 }
         end,

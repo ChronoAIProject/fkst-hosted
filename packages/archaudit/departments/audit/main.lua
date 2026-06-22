@@ -6,7 +6,7 @@ local ports_lib = require("std.ports")
 local strings = require("contract.strings")
 
 local spec = {
-  consumes = { "idle-detector.system_idle", "audit_due" },
+  consumes = { "idle-detector.system_idle", "archaudit_tick" },
   produces = { "github-proxy.github_issue_create_request" },
   stall_window = "10m",
   retry = false,
@@ -14,9 +14,12 @@ local spec = {
 
 local freshness_budget_seconds = 10 * 60
 local codex_timeout_seconds = 9 * 60
+local default_max_staleness_hours = 24
 local allowed_env = {
   FKST_GITHUB_REPO = true,
+  FKST_GITHUB_BOT_LOGIN = true,
   ARCHAUDIT_MAX_ISSUES_PER_IDLE = true,
+  ARCHAUDIT_MAX_STALENESS_HOURS = true,
 }
 
 local function read_env_command(name)
@@ -72,6 +75,19 @@ local function max_issues()
   return math.floor(value)
 end
 
+local function max_staleness_seconds()
+  local raw = strings.trim(read_env("ARCHAUDIT_MAX_STALENESS_HOURS") or "")
+  local value = tonumber(raw)
+  if value == nil or value < 1 then
+    value = default_max_staleness_hours
+  end
+  return math.floor(value) * 60 * 60
+end
+
+local function bot_login()
+  return strings.trim(read_env("FKST_GITHUB_BOT_LOGIN") or "")
+end
+
 local function repo_from_env()
   local repo = strings.trim(read_env("FKST_GITHUB_REPO") or "")
   if repo == "" then
@@ -103,6 +119,17 @@ local function has_archaudit_label(github, repo)
     end
   end
   return false
+end
+
+local function audit_issues(github, repo)
+  if type(github) ~= "table" or type(github.issue_search) ~= "function" then
+    error("archaudit: audit-search-unavailable: GitHub issue_search port is required")
+  end
+  local result = github.issue_search(repo, core.audit_issue_search_query(), "number,title,state,author,body,url,createdAt,updatedAt", 30)
+  if type(result) ~= "table" or result.exit_code ~= 0 then
+    error("archaudit: audit-search-failed: GitHub audit issue search failed")
+  end
+  return core.parse_audit_issue_search(result.stdout)
 end
 
 local function parser_error_class(err)
@@ -146,8 +173,12 @@ local function codex_result(repo, count)
   return pcall(run_codex, repo, count)
 end
 
-local function issue_request_result(repo, finding, label_available)
-  return pcall(core.build_issue_create_request, repo, finding, label_available)
+local function issue_request_result(repo, finding, label_available, trigger_reason)
+  return pcall(core.build_issue_create_request, repo, finding, label_available, trigger_reason)
+end
+
+local function audit_run_request_result(repo, trigger_reason, label_available, now_seconds, max_staleness)
+  return pcall(core.build_audit_run_issue_create_request, repo, trigger_reason, label_available, now_seconds, max_staleness)
 end
 
 local function stop_observe_error(event, err)
@@ -178,23 +209,28 @@ local function fail_request_error(event, err)
   fail(event, "validation-failure", err)
 end
 
-local function is_due_event(event)
-  return type(event) == "table" and event.queue == "archaudit.audit_due"
+local function trigger_kind(event)
+  local queue = type(event) == "table" and tostring(event.queue or "") or ""
+  if queue == "idle-detector.system_idle" then
+    return "idle"
+  end
+  if queue == "archaudit.archaudit_tick" or queue == "archaudit_tick" then
+    return "stale"
+  end
+  return nil
 end
 
 local function audit_done(event)
-  if type(event) ~= "table" then
-    fail(event, "unknown-queue", "unknown queue")
-  end
-  if is_due_event(event) then
-    return false
-  end
-  if event.queue ~= "idle-detector.system_idle" then
+  local trigger = trigger_kind(event)
+  if trigger == nil then
     fail(event, "unknown-queue", "unknown queue")
   end
   local payload = event.payload or {}
-  if payload.schema ~= "idle-detector.system-idle.v1" then
+  if trigger == "idle" and payload.schema ~= "idle-detector.system-idle.v1" then
     fail(event, "unknown-schema", "unknown system_idle schema")
+  end
+  if trigger == "stale" and not core.validate_audit_tick_payload(payload) then
+    fail(event, "unknown-schema", "unknown archaudit_tick schema")
   end
   return false
 end
@@ -202,7 +238,10 @@ end
 local function make_department(ports)
   local function act_audit(event)
     local payload = event.payload or {}
-    local overdue = is_due_event(event)
+    local trigger = trigger_kind(event)
+    if trigger == nil then
+      fail(event, "unknown-queue", "unknown queue")
+    end
     local ok_observe, facts_or_err = observe_result()
     if not ok_observe and stop_observe_error(event, facts_or_err) then
       return
@@ -211,7 +250,8 @@ local function make_department(ports)
     if not ok_time and fail_observe_malformed(event, observe_now_or_err) then
       return
     end
-    if not overdue then
+
+    if trigger == "idle" then
       local ok_fresh, fresh, fresh_why = pcall(fresh_hint, payload, observe_now_or_err)
       if not ok_fresh then
         fail(event, "malformed-idle-hint", fresh)
@@ -220,19 +260,31 @@ local function make_department(ports)
         log_fact("warn", "audit", "SKIP", "terminal-skip", event, fresh_why, true)
         return
       end
-    end
-    local ok_idle, idle, why = idle_observe_result(facts_or_err)
-    if not ok_idle and fail_observe_malformed(event, idle) then
-      return
-    end
-    if not idle and not overdue then
-      log_fact("warn", "audit", "SKIP", "terminal-skip", event, why or "current system busy", true)
-      return
+      local ok_idle, idle, why = idle_observe_result(facts_or_err)
+      if not ok_idle and fail_observe_malformed(event, idle) then
+        return
+      end
+      if not idle then
+        log_fact("warn", "audit", "SKIP", "terminal-skip", event, why or "current system busy", true)
+        return
+      end
+    elseif not core.validate_audit_tick_payload(payload) then
+      fail(event, "unknown-schema", "unknown archaudit_tick schema")
     end
 
     local repo, repo_error_class, repo_error = repo_from_env()
     if repo == nil then
       fail(event, repo_error_class, repo_error)
+    end
+    local ok_audit_search, issues_or_err = pcall(audit_issues, ports.github, repo)
+    if not ok_audit_search then
+      fail(event, "audit-search-failed", issues_or_err)
+    end
+    local staleness_seconds = max_staleness_seconds()
+    local due, due_why = core.audit_due_verdict(issues_or_err, bot_login(), observe_now_or_err, staleness_seconds)
+    if not due then
+      log_fact("warn", "audit", "SKIP", "terminal-skip", event, due_why, true)
+      return
     end
 
     local count = max_issues()
@@ -243,6 +295,13 @@ local function make_department(ports)
 
     local label_available = has_archaudit_label(ports.github, repo)
     local requests = {}
+    if #findings_or_err == 0 then
+      local ok_request, request_or_err = audit_run_request_result(repo, trigger, label_available, observe_now_or_err, staleness_seconds)
+      if not ok_request and fail_request_error(event, request_or_err) then
+        return
+      end
+      table.insert(requests, request_or_err)
+    end
     for _, finding in ipairs(findings_or_err) do
       if #requests >= count then
         break
@@ -250,7 +309,7 @@ local function make_department(ports)
       if not core.validate_finding(finding) then
         fail(event, "validation-failure", "invalid file or line")
       end
-      local ok_request, request_or_err = issue_request_result(repo, finding, label_available)
+      local ok_request, request_or_err = issue_request_result(repo, finding, label_available, trigger)
       if not ok_request and fail_request_error(event, request_or_err) then
         return
       end

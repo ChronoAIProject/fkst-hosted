@@ -1,4 +1,5 @@
 local conformance = require("contract.namespaced_dispatch_conformance")
+local core = require("core")
 local t = fkst.test
 
 local function load_department(path, module_name)
@@ -28,14 +29,8 @@ local function payload_for_queue(_path, queue)
   if queue == "idle-detector.system_idle" then
     return system_idle_payload()
   end
-  if queue == "audit_due" then
-    return {
-      schema = "archaudit.audit-due.v1",
-      source_ref = {
-        kind = "cron",
-        ref = "archaudit/audit_due/2026-06-19T01:00:00Z",
-      },
-    }
+  if queue == "archaudit_tick" then
+    return core.audit_tick_payload("2026-06-19T01:00:00Z")
   end
   error("archaudit: no production-shaped queue fixture for " .. tostring(queue))
 end
@@ -47,7 +42,9 @@ local function opts_for_case()
         FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/archaudit/namespaced",
         FKST_DURABLE_ROOT = "/tmp/fkst-packages-test/archaudit/namespaced-durable",
         FKST_GITHUB_REPO = "",
+        FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
         ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
+        ARCHAUDIT_MAX_STALENESS_HOURS = "24",
       },
     },
     before_replay = function()
