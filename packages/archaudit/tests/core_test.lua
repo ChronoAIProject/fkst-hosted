@@ -23,6 +23,22 @@ local function observe_idle()
   }
 end
 
+local function copy_contract(contract)
+  local copied = {}
+  for key, value in pairs(contract) do
+    if type(value) == "table" then
+      local nested = {}
+      for nested_key, nested_value in pairs(value) do
+        nested[nested_key] = nested_value
+      end
+      copied[key] = nested
+    else
+      copied[key] = value
+    end
+  end
+  return copied
+end
+
 return {
   test_persistence_class_is_composed_judgment_pipeline = function()
     t.eq(core.persistence_class(), "composed_judgment_pipeline")
@@ -38,9 +54,49 @@ return {
     t.eq(contract.escalation_queues, nil)
     t.eq(contract.eligibility_predicate, "overdue")
     t.eq(contract.max_staleness_seconds, core.audit_due_staleness_seconds())
-    t.eq(contract.max_silence_seconds, core.audit_due_staleness_seconds())
+    t.eq(contract.max_silence_seconds, core.audit_due_silence_seconds())
     t.eq(contract.max_skip_budget, 0)
     t.eq(contract.progress_output, "github-proxy.github_issue_create_request")
+  end,
+
+  test_producer_liveness_contract_reuses_restart_liveness_watchdog = function()
+    local errors = core.producer_liveness_contract_errors()
+    t.eq(table.concat(errors, "\n"), "")
+    local rows = core.producer_liveness_restart_rows()
+    t.eq(#rows, 1)
+    local row = rows[1]
+    t.eq(row.from_state, "archaudit.audit")
+    t.eq(row.driving_queue, "audit_due")
+    t.eq(row.watchdog.mode, "row-budget-bounds-receiver")
+    t.eq(row.watchdog.budget_ms, core.audit_due_staleness_seconds() * 1000)
+    t.eq(row.budget.minutes, core.audit_due_staleness_seconds() / 60)
+    t.eq(row.liveness_contract.mode, "row-budget-bounds-receiver")
+    t.eq(row.liveness_contract.receiver_bound_minutes, core.audit_due_silence_seconds() / 60)
+    t.eq(row.on_timeout.escalate_after_attempts, 1)
+    t.eq(row.on_timeout.queue, "audit_due")
+  end,
+
+  test_producer_liveness_contract_rejects_unbounded_silence = function()
+    local contract = copy_contract(core.producer_liveness_contracts()[1])
+    contract.max_silence_seconds = 0
+    local errors = core.producer_liveness_contract_errors({ contract })
+    t.is_true(table.concat(errors, "\n"):find("max_silence_seconds", 1, true) ~= nil)
+  end,
+
+  test_producer_liveness_contract_rejects_silence_without_watchdog_margin = function()
+    local contract = copy_contract(core.producer_liveness_contracts()[1])
+    contract.max_silence_seconds = contract.max_staleness_seconds
+    local errors = core.producer_liveness_contract_errors({ contract })
+    t.is_true(table.concat(errors, "\n"):find("budget.minutes must be at least", 1, true) ~= nil)
+  end,
+
+  test_audit_due_raiser_interval_is_bounded_by_contract = function()
+    local raiser = require("raisers.audit_due")
+    local contract = core.producer_liveness_contracts()[1]
+    t.eq(raiser.interval, core.audit_due_interval())
+    t.eq(raiser.produces, contract.trigger_source)
+    t.eq(raiser.interval, string.format("%dm", contract.max_silence_seconds / 60))
+    t.is_true(contract.max_silence_seconds < contract.max_staleness_seconds)
   end,
 
   test_parse_findings_accepts_strict_array = function()

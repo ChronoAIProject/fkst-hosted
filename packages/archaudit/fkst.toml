@@ -5,7 +5,7 @@ name = "archaudit"
 root = "."
 
 [lib_deps]
-libraries = ["std", "contract"]
+libraries = ["std", "devloop", "contract"]
 
 [event_deps]
 packages = ["idle-detector", "github-proxy"]
