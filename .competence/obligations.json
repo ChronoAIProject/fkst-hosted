@@ -22,9 +22,9 @@
       "packages/github-devloop-pr/core/validators/",
       "packages/github-devloop-pr/departments/",
       "packages/github-devloop-pr/raisers/",
-      "std/devloop_restart",
-      "std/devloop_validators",
-      "std/devloop_liveness"
+      "libraries/devloop/restart",
+      "libraries/devloop/validators",
+      "libraries/devloop/liveness"
     ],
     "l3_exact_paths": [
       ".competence/obligations.json",
@@ -40,8 +40,8 @@
       "packages/github-devloop/tests/competence_gate_test.lua",
       "scripts/competence_gate.py",
       "scripts/competence_gate_test.py",
-      "std/devloop_restart.lua",
-      "std/devloop_restart_responsibility_contract.lua"
+      "libraries/devloop/restart.lua",
+      "libraries/devloop/restart_responsibility_contract.lua"
     ],
     "l2_path_prefixes": [
       "scripts/",
@@ -79,7 +79,7 @@
       "bug_class": "grader-weakening",
       "surface": "liveness-responsibility-maps",
       "evidence": "competence_gate_report.challenge.002",
-      "production_evidence_path": "std/devloop_restart_responsibility_contract.lua",
+      "production_evidence_path": "libraries/devloop/restart_responsibility_contract.lua",
       "production_evidence": "queue_wait may only add terminal cancel/block successors",
       "expected_error": "ready: queue_wait may only add terminal cancel/block successors"
     },
@@ -113,7 +113,7 @@
       "bug_class": "partition-boundary",
       "surface": "liveness-responsibility-maps",
       "evidence": "competence_gate_report.challenge.006",
-      "production_evidence_path": "std/devloop_restart_responsibility_contract.lua",
+      "production_evidence_path": "libraries/devloop/restart_responsibility_contract.lua",
       "production_evidence": "invariant #6 forbids dependency release_gate defer on actionable ready",
       "expected_error": "ready: invariant #6 forbids dependency release_gate defer on actionable ready",
       "mutation_required": true
@@ -124,7 +124,7 @@
       "bug_class": "partial-write-idempotency",
       "surface": "durable-write-sequences",
       "evidence": "competence_gate_report.challenge.007",
-      "production_evidence_path": "std/devloop_restart.lua",
+      "production_evidence_path": "libraries/devloop/restart.lua",
       "production_evidence": "multi-effect row must declare a completeness derivation",
       "expected_error": "ready: multi-effect row must declare a completeness derivation"
     }

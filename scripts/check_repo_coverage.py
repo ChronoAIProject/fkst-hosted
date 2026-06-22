@@ -271,7 +271,7 @@ def uncovered_from_covered_line_map(
 
 def all_production_lua_paths(root: Path) -> list[str]:
     paths: list[str] = []
-    for base in ("packages", "std"):
+    for base in ("packages", "std", "libraries"):
         start = root / base
         if not start.exists():
             continue

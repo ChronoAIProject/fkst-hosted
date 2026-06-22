@@ -1,6 +1,6 @@
 local S = {}
-local support = require("std.devloop_commands.support")
-local validators = require("std.devloop_commands.validators")
+local support = require("devloop.commands.support")
+local validators = require("devloop.commands.validators")
 
 function S.install(M)
   function M.gh_pr_list_board_digest(repo, timeout)

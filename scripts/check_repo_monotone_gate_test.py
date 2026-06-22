@@ -129,7 +129,7 @@ class MonotoneGateRatchetTest(unittest.TestCase):
                       responsibility_signature = responsibility_signature({
                         state_kind = "gate",
                         gate_kind = "monotone_milestone",
-                        milestone_accessor = "std.devloop_state.reached",
+                        milestone_accessor = "devloop.state.reached",
                         milestone_implementation = "packages/github-devloop/core/synthetic_gate.lua:M.synthetic_gate",
                         milestone = "pr-open",
                         milestone_domain = "github-devloop-pr",
@@ -161,7 +161,7 @@ class MonotoneGateRatchetTest(unittest.TestCase):
             messages = monotone.repository_messages(root, enforce_base=False)
 
         joined = "\n".join(messages)
-        self.assertIn("implementation packages/github-devloop/core/synthetic_gate.lua:M.synthetic_gate does not reference std.devloop_state.reached", joined)
+        self.assertIn("implementation packages/github-devloop/core/synthetic_gate.lua:M.synthetic_gate does not reference devloop.state.reached", joined)
         self.assertIn("reads a transient cursor inside monotone_milestone implementation", joined)
 
 

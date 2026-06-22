@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-require("std.devloop_queue").install(M)
+require("devloop.queue").install(M)
 local strings = require("std.strings")
 
 local active_wip_states = {

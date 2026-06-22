@@ -61,14 +61,14 @@ end
 
 local function marker_builder_paths()
   return {
-    "std/devloop_state.lua",
-    "std/devloop_markers/builders.lua",
-    "std/devloop_autonomy_ledger.lua",
+    "libraries/devloop/state.lua",
+    "libraries/devloop/markers/builders.lua",
+    "libraries/devloop/autonomy_ledger.lua",
     "packages/github-devloop/core/impl_failure.lua",
-    "std/devloop_convergence/rounds.lua",
-    "std/devloop_convergence/reconcile.lua",
-    "std/devloop_convergence/attempts.lua",
-    "std/devloop_decompose.lua",
+    "libraries/devloop/convergence/rounds.lua",
+    "libraries/devloop/convergence/reconcile.lua",
+    "libraries/devloop/convergence/attempts.lua",
+    "libraries/devloop/decompose.lua",
     "packages/github-devloop/core/dependencies.lua",
     "packages/github-devloop/core/implement_attempt.lua",
   }

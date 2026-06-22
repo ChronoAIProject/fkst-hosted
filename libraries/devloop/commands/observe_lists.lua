@@ -1,5 +1,5 @@
 local S = {}
-local support = require("std.devloop_commands.support")
+local support = require("devloop.commands.support")
 
 local observe_list_timeout = 10
 

@@ -1,0 +1,25 @@
+kind = "library"
+name = "devloop"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]
+
+[library]
+name = "devloop"
+stable_id = "fkst.library.devloop"
+version = "workspace"
+
+[exports]
+public = ["devloop.*"]
+
+[visibility]
+allow = [
+  "github-devloop",
+  "github-devloop-decompose",
+  "github-devloop-intake",
+  "github-devloop-integration",
+  "github-devloop-pr",
+]

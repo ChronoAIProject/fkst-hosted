@@ -535,7 +535,7 @@ return {
         driving_queue = "synthetic_gate",
         state_kind = "gate",
         gate_kind = "monotone_milestone",
-        milestone_accessor = "std.devloop_gate.holds",
+        milestone_accessor = "devloop.gate.holds",
         milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child",
         milestone = "pr-open",
         milestone_domain = "github-devloop-pr",
@@ -580,7 +580,7 @@ return {
     row.responsibility_signature.milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child"
     row.responsibility_signature.milestone = "pr-open"
     row.responsibility_signature.milestone_domain = "github-devloop-pr"
-    row.responsibility_signature.current_state_accessor = "std.devloop_state.current_state"
+    row.responsibility_signature.current_state_accessor = "devloop.state.current_state"
     local errors = core.strict_restart_responsibility_contract_errors({ row })
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare an approved positive milestone accessor"), joined_errors(errors))
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must not declare current cursor accessors"), joined_errors(errors))
@@ -588,7 +588,7 @@ return {
   test_monotone_milestone_gate_requires_domain = function()
     local row = copy_value(rows_by_state(core.restart_transition_table())["awaiting-pr"])
     row.responsibility_signature.gate_kind = "monotone_milestone"
-    row.responsibility_signature.milestone_accessor = "std.devloop_state.reached"
+    row.responsibility_signature.milestone_accessor = "devloop.state.reached"
     row.responsibility_signature.milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child"
     row.responsibility_signature.milestone = "pr-open"
     row.responsibility_signature.milestone_domain = nil
@@ -598,7 +598,7 @@ return {
   test_monotone_milestone_gate_requires_bound_implementation = function()
     local row = copy_value(rows_by_state(core.restart_transition_table())["awaiting-pr"])
     row.responsibility_signature.gate_kind = "monotone_milestone"
-    row.responsibility_signature.milestone_accessor = "std.devloop_state.reached"
+    row.responsibility_signature.milestone_accessor = "devloop.state.reached"
     row.responsibility_signature.milestone = "pr-open"
     row.responsibility_signature.milestone_domain = "github-devloop-pr"
     row.responsibility_signature.milestone_implementation = nil

@@ -12,7 +12,7 @@ import ratchet_base
 ALLOWLIST = "migration/monotone-gate-dsl.allowlist"
 PACKAGE_GLOB = "github-devloop*"
 GATE_PARTS = ("core", "gates")
-RAW_MODULES = {"std.devloop_state", "std.devloop_markers", "std.devloop_markers.facts"}
+RAW_MODULES = {"devloop.state", "devloop.markers", "devloop.markers.facts"}
 RAW_TOKENS = (
     "current_state",
     "current_entity_state",
@@ -48,7 +48,7 @@ REQUIRE_RE = re.compile(
 GATE_MODULE_RE = re.compile(r"^core\.gates\.[A-Za-z_][A-Za-z0-9_]*$")
 GATE_PATH_RE = re.compile(r"(?:^|[./\\])core[/\\]gates[/\\][A-Za-z_][A-Za-z0-9_]*(?:\.lua)?$")
 GATE_REQUIRE_BINDING_RE = re.compile(
-    r"""\b(?:local\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*require\s*(?:\(\s*)?(?:"std\.devloop_gate"|'std\.devloop_gate'|\[(=*)\[std\.devloop_gate\]\2\])"""
+    r"""\b(?:local\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*require\s*(?:\(\s*)?(?:"devloop\.gate"|'devloop\.gate'|\[(=*)\[devloop\.gate\]\2\])"""
 )
 GATE_SOURCE_RETURN_RE = re.compile(
     r"""\A\s*return\s*(?:"(?P<double>(?:\\.|[^"\\])*)"|'(?P<single>(?:\\.|[^'\\])*)'|\[(?P<eq>=*)\[(?P<long>.*?)\](?P=eq)\])\s*\Z""",
@@ -270,18 +270,18 @@ def monkey_patch_findings(path: str, source: str, stripped: str) -> set[Finding]
         for match in function_assignment.finditer(stripped):
             findings.add(Finding(path, "monkey-patch", alias, line_number(source, match.start())))
     direct_module_assignment = re.compile(
-        rf"\bstd\s*\.\s*devloop_gate\s*(?:(?:\.|:)\s*{LUA_NAME}|\[[^\]]+\])?\s*="
+        rf"\bdevloop\s*\.\s*gate\s*(?:(?:\.|:)\s*{LUA_NAME}|\[[^\]]+\])?\s*="
     )
     for match in direct_module_assignment.finditer(stripped):
-        findings.add(Finding(path, "monkey-patch", "std.devloop_gate", line_number(source, match.start())))
+        findings.add(Finding(path, "monkey-patch", "devloop.gate", line_number(source, match.start())))
     require_result_assignment = re.compile(rf"^\s*\)?\s*(?:(?:\.|:)\s*{LUA_NAME}|\[[^\]]+\])?\s*=")
     for match in REQUIRE_RE.finditer(source):
-        if required_module(match) != "std.devloop_gate":
+        if required_module(match) != "devloop.gate":
             continue
         if stripped[match.start():match.start() + len("require")] != "require":
             continue
         if require_result_assignment.search(stripped[match.end():]):
-            findings.add(Finding(path, "monkey-patch", "std.devloop_gate", line_number(source, match.start())))
+            findings.add(Finding(path, "monkey-patch", "devloop.gate", line_number(source, match.start())))
     return findings
 
 
@@ -438,14 +438,14 @@ def repository_messages(root: Path, enforce_base: bool = True) -> list[str]:
             messages.append("cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
     for finding in sorted(current):
         if not any(entry.key() == finding.key() for entry in allowlist):
-            messages.append(f"{finding.label()} is forbidden in a core/gates DSL definition; gate definitions are loaded by std.devloop_gate.load_gate with injected constructors, must not require modules, must not read raw marker/cursor helpers, and must stay pure positive data construction without reflection, loaders, metatables, raw table access, globals, or monkey-patching")
+            messages.append(f"{finding.label()} is forbidden in a core/gates DSL definition; gate definitions are loaded by devloop.gate.load_gate with injected constructors, must not require modules, must not read raw marker/cursor helpers, and must stay pure positive data construction without reflection, loaders, metatables, raw table access, globals, or monkey-patching")
     for finding in sorted(loader_bypass_findings(root)):
-        messages.append(f"{finding.label()} is forbidden; gate definitions must be loaded only through std.devloop_gate.load_gate so the restricted_lua_load sandbox is authoritative")
+        messages.append(f"{finding.label()} is forbidden; gate definitions must be loaded only through devloop.gate.load_gate so the restricted_lua_load sandbox is authoritative")
     for entry in sorted(allowlist):
         if not any(finding.key() == entry.key() for finding in current):
             messages.append(f"{entry.label()} no longer matches monotone-gate-dsl debt; prune the stale entry")
     if base_allowlist is not None:
         for entry in sorted(allowlist):
             if not any(base.key() == entry.key() for base in base_allowlist):
-                messages.append(f"{entry.label()} grows monotone-gate-dsl allowlist relative to dev; migrate to std.devloop_gate data specs instead")
+                messages.append(f"{entry.label()} grows monotone-gate-dsl allowlist relative to dev; migrate to devloop.gate data specs instead")
     return messages

@@ -18,7 +18,7 @@ local gate_kinds = {
 }
 
 local milestone_accessors = {
-  ["std.devloop_state.reached"] = true, ["std.devloop_gate.holds"] = true,
+  ["devloop.state.reached"] = true, ["devloop.gate.holds"] = true,
   reached = true,
   holds = true,
 }

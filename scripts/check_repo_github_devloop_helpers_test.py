@@ -31,7 +31,7 @@ class GithubDevloopNameOnlyPathHelperGuardTest(unittest.TestCase):
     def test_allows_std_helper_use(self) -> None:
         sources = {
             "packages/github-devloop/core/queue.lua": """
-local base = require("std.devloop_base")
+local base = require("devloop.base")
 return base.parse_name_only_paths(stdout)
 """,
         }
