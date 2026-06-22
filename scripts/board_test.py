@@ -12,6 +12,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from avm_scoreboard import aggregate_avm_scoreboard
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -109,6 +111,56 @@ fi
 
 
 class BoardScriptTest(unittest.TestCase):
+    def test_avm_aggregation_deduplicates_identity_and_keeps_unclassified(self) -> None:
+        observe = {
+            "avm_facts": [
+                {
+                    "proposal_id": "github-devloop/issue/owner/repo/1",
+                    "pr_number": 11,
+                    "version": "v1",
+                    "head_sha": "abc",
+                    "task_class": "L1",
+                    "avm_rate_numerator": 1,
+                    "avm_rate_denominator": 2,
+                    "codex_calls": 6,
+                    "rounds": 3,
+                    "gates": {"no_revert_reopen": "pass"},
+                    "false_consensus": False,
+                },
+                {
+                    "proposal_id": "github-devloop/issue/owner/repo/1",
+                    "pr_number": 11,
+                    "version": "v1",
+                    "head_sha": "abc",
+                    "task_class": "L1",
+                    "avm_rate_numerator": 1,
+                    "avm_rate_denominator": 2,
+                    "codex_calls": 6,
+                    "rounds": 3,
+                    "gates": {"no_revert_reopen": "pass"},
+                    "false_consensus": False,
+                },
+                {
+                    "proposal_id": "github-devloop/issue/owner/repo/2",
+                    "pr_number": 12,
+                    "version": "v2",
+                    "head_sha": "def",
+                    "risk_tier": "not-a-level",
+                    "valid_autonomous_merge": "false",
+                    "rounds": 4,
+                    "gates": {"no_revert_reopen": "fail"},
+                },
+            ]
+        }
+
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L1"]["merges"], 1)
+        self.assertEqual(buckets["L1"]["avm_numerator"], 1)
+        self.assertEqual(buckets["L1"]["avm_denominator"], 2)
+        self.assertEqual(buckets["unclassified"]["merges"], 1)
+        self.assertEqual(buckets["unclassified"]["avm_denominator"], 1)
+        self.assertEqual(buckets["unclassified"]["revert_numerator"], 1)
+
     def test_refresh_fetches_observe_json_writes_cache_and_renders_stalls(self) -> None:
         h = BoardHarness(
             {
@@ -199,6 +251,68 @@ class BoardScriptTest(unittest.TestCase):
             self.assertIn("outcome=deadline-defer", result.stdout)
             self.assertIn("error_class=marker-lag", result.stdout)
             self.assertNotIn("ANOMALIES NEEDING ATTENTION", result.stdout)
+        finally:
+            h.close()
+
+    def test_board_renders_avm_scoreboard_by_level_without_total_rollup(self) -> None:
+        h = BoardHarness(
+            {
+                "autonomy_facts": [
+                    {
+                        "schema": "github-devloop.autonomy-result.v1",
+                        "proposal_id": "github-devloop/issue/owner/repo/10",
+                        "pr_number": 20,
+                        "version": "v10",
+                        "head_sha": "abc",
+                        "task_class": "L0",
+                        "valid_autonomous_merge": "true",
+                        "codex_calls": 4,
+                        "rounds": 1,
+                        "gates": {"no_revert_reopen": "pass"},
+                        "false_consensus": False,
+                    },
+                    {
+                        "schema": "github-devloop.autonomy-result.v1",
+                        "proposal_id": "github-devloop/issue/owner/repo/11",
+                        "pr_number": 21,
+                        "version": "v11",
+                        "head_sha": "def",
+                        "task_class": "L4",
+                        "valid_autonomous_merge": "false",
+                        "codex_calls": 8,
+                        "rounds": 5,
+                        "gates": {"no_revert_reopen": "fail"},
+                    },
+                    {
+                        "schema": "github-devloop.autonomy-result.v1",
+                        "proposal_id": "github-devloop/issue/owner/repo/12",
+                        "pr_number": 22,
+                        "version": "v12",
+                        "head_sha": "fed",
+                        "task_class": "",
+                        "valid_autonomous_merge": "pending",
+                        "rounds": 2,
+                        "gates": {"no_revert_reopen": "pending"},
+                    },
+                ],
+            }
+        )
+        try:
+            result = h.run_board("--refresh")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("AVM scoreboard by task level", result.stdout)
+            self.assertIn(
+                "- L0 merges=1 AVM-rate=1/1 (100%) cost-per-AVM=4 "
+                "revert-rate=0/1 (0%) median-rounds=1 false-consensus-rate=0/1 (0%)",
+                result.stdout,
+            )
+            self.assertIn(
+                "- L4 merges=1 AVM-rate=0/1 (0%) cost-per-AVM=n/a "
+                "revert-rate=1/1 (100%) median-rounds=5 false-consensus-rate=1/1 (100%)",
+                result.stdout,
+            )
+            self.assertIn("- unclassified merges=1 AVM-rate=0/1 (0%) cost-per-AVM=unknown", result.stdout)
+            self.assertNotIn("TOTAL", result.stdout)
         finally:
             h.close()
 

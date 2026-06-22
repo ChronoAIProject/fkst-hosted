@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from avm_scoreboard import aggregate_avm_scoreboard, render_avm_bucket
+
 
 DEFAULT_TTL_SECONDS = 60
 DEFAULT_STALL_SECONDS = 30 * 60
@@ -562,6 +564,7 @@ def render(
     dead = dlq_count(data)
     anomalies = anomaly_records(data, now, stall_seconds)
     transients = expected_transient_records(data, now)
+    avm_scoreboard = aggregate_avm_scoreboard(data)
     if health_only:
         return health_line(anomalies) + "\n"
 
@@ -589,6 +592,10 @@ def render(
             lines.append(f"- ... {len(transients) - EXPECTED_TRANSIENT_LIMIT} more")
     else:
         lines.append("- none")
+
+    lines.extend(["", "AVM scoreboard by task level"])
+    for bucket in avm_scoreboard:
+        lines.append(render_avm_bucket(bucket))
 
     lines.extend([
         "",
