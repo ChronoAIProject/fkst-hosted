@@ -23,7 +23,7 @@
 {"path":"packages/github-devloop/departments/test_context_bundle_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop-intake/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop-integration/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"std/devloop_autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
+{"path":"libraries/devloop/autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
 {"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop-integration/core/branches/branch_train.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/core/branches/pr_freshness.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
@@ -34,10 +34,10 @@
 {"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}
 {"path":"packages/github-devloop/core/doctor.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/ensure_repo.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"std/devloop_entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
+{"path":"libraries/devloop/entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
 {"path":"packages/github-devloop/core/error_facts.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/failure_triage.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"std/devloop_forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
+{"path":"libraries/devloop/forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
 {"path":"packages/github-devloop/core/gates/child_start_visible.lua","owner":"issue","reason":"issue-side PR child kickoff gate definition; raw PR facts stay outside the gate DSL spec."}
 {"path":"packages/github-devloop-intake/core/github_capabilities.lua","owner":"intake","reason":"core module owns intake trust-gate capability and hostile canary helpers."}
 {"path":"packages/github-devloop/core/github_graphql.lua","owner":"shared","reason":"core module is shared or authority-neutral after extraction."}
@@ -103,7 +103,7 @@
 {"path":"packages/github-devloop-integration/core/devloop_wiring.lua","owner":"integration","reason":"core module resolves integration package-private prompt modules."}
 {"path":"packages/github-devloop/core/state_gap.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop-integration/core/substrate_ref.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"std/devloop_sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
+{"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
 {"path":"packages/github-devloop-integration/core/sync_conflict.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-pr/departments/fix/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/comment_handoff/main.lua","owner":"pr","reason":"github-devloop-pr owns PR comment-stream handoff authority after extraction."}
@@ -115,23 +115,23 @@
 {"path":"packages/github-devloop-pr/departments/review_meta/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/review_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/review_result/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"std/devloop_merge_batch.lua","owner":"shared","reason":"merge batch helpers are used by PR merge and integration tests during R1, so they must not peer-require github-devloop-pr."}
-{"path":"std/devloop_merge_gate/ci_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/reason_classes/index.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/reason_classes/merge_state_unstable_with_failing_checks.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/reason_classes/mergeable_conflicting.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/reason_classes/own_ci_red.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/reason_classes/rollup_red.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/self_heal.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/shared.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate/verified_merge.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"std/devloop_merge_gate_wait.lua","owner":"shared","reason":"merge-gate wait markers are read by shared liveness and PR merge reconciliation."}
+{"path":"libraries/devloop/merge_batch.lua","owner":"shared","reason":"merge batch helpers are used by PR merge and integration tests during R1, so they must not peer-require github-devloop-pr."}
+{"path":"libraries/devloop/merge_gate/ci_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/reason_classes/index.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/reason_classes/merge_state_unstable_with_failing_checks.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/reason_classes/mergeable_conflicting.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/reason_classes/own_ci_red.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/reason_classes/rollup_red.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/self_heal.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/shared.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate/verified_merge.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
+{"path":"libraries/devloop/merge_gate_wait.lua","owner":"shared","reason":"merge-gate wait markers are read by shared liveness and PR merge reconciliation."}
 {"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/devloop_wiring.lua","owner":"pr","reason":"github-devloop-pr resolves PR package-private restart and prompt modules."}
 {"path":"packages/github-devloop-pr/core/pr_review_replayer.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"std/devloop_merge_queue.lua","owner":"shared","reason":"merge queue helpers include WIP admission used by the remaining issue implement department."}
-{"path":"std/devloop_queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}
+{"path":"libraries/devloop/merge_queue.lua","owner":"shared","reason":"merge queue helpers include WIP admission used by the remaining issue implement department."}
+{"path":"libraries/devloop/queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}
 {"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/merge_gate_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/review_converge_round.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
@@ -164,37 +164,37 @@
 {"path":"packages/github-devloop-pr/core/review_carry_over.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/review_meta_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/review_redrive.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"std/devloop_base.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_claims.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_commands.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}
-{"path":"std/devloop_conflict_telemetry.lua","owner":"shared","reason":"conflict telemetry parsing and logging are used by PR fix and issue-side hotspot patrol."}
-{"path":"std/devloop_config.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_context_bundle.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_convergence.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
-{"path":"std/devloop_entity.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
-{"path":"std/devloop_git_mechanics.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_github_proxy_entity_view.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
-{"path":"std/devloop_liveness.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_liveness_scan.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_logging.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_markers.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_operator_commands.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_parsers.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_payloads.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_pr_safety.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_prompts.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_queue.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_replayer.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_requests.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_restart.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_restart_actionable_epoch.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_restart_liveness_contract.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_restart_responsibility_contract.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_rounds.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_state.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_strings.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
-{"path":"std/devloop_validators.lua","owner":"shared","reason":"shared std.devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/base.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/claims.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}
+{"path":"libraries/devloop/conflict_telemetry.lua","owner":"shared","reason":"conflict telemetry parsing and logging are used by PR fix and issue-side hotspot patrol."}
+{"path":"libraries/devloop/config.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/context_bundle.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/convergence.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
+{"path":"libraries/devloop/entity.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
+{"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
+{"path":"libraries/devloop/liveness.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/liveness_scan.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/logging.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/markers.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/operator_commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/parsers.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/payloads.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/pr_safety.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/prompts.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/queue.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart_actionable_epoch.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart_liveness_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart_responsibility_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/rounds.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/state.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/strings.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}

@@ -5,7 +5,7 @@ return {
   surface = "pr-comment-stream",
   version_form = "raw",
   producer = "github-proxy.github_entity_changed",
-  marker_source = "std/devloop_state.lua",
+  marker_source = "libraries/devloop/state.lua",
   request_source = "core/awaiting_pr_replayer.lua",
   marker_builder = "state_marker",
   observe_only = true,

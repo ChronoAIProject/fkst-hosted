@@ -1,7 +1,7 @@
 local core = require("core")
 local saga = require("std.saga")
 local source_refs = require("std.source_ref")
-local handoff_helpers = require("std.devloop_comment_handoff")
+local handoff_helpers = require("devloop.comment_handoff")
 
 local spec = {
   consumes = { "github-proxy.github_comment_written" },

@@ -290,12 +290,9 @@ def sources(root: Path) -> dict[str, str]:
                 continue
             rel = path.relative_to(root).as_posix()
             found[rel] = path.read_text(encoding="utf-8")
-    std = root / "std"
-    if std.exists():
-        for path in sorted(std.rglob("*.lua")):
-            rel = path.relative_to(root).as_posix()
-            if not (rel.startswith("std/devloop_") or rel.startswith("std/devloop/")):
-                continue
+    devloop = root / "libraries" / "devloop"
+    if devloop.exists():
+        for path in sorted(devloop.rglob("*.lua")):
             rel = path.relative_to(root).as_posix()
             found[rel] = path.read_text(encoding="utf-8")
     return found

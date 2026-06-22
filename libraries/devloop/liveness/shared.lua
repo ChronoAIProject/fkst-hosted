@@ -164,7 +164,7 @@ local function source_contains(path, needle)
     return false
   end
   local source_path = path
-  if path:sub(1, 4) ~= "std/" then
+  if path:sub(1, 4) ~= "std/" and path:sub(1, 10) ~= "libraries/" then
     source_path = tostring(M.restart_source_root or "packages/github-devloop/") .. path
   end
   local ok, text = pcall(file.read, source_path)

@@ -5,8 +5,8 @@ return {
   version_form = "safe_version_segment",
   producer = "departments/review_loop/main.lua",
   queue = "github-proxy.github_pr_comment_request",
-  marker_source = "std/devloop_convergence/rounds.lua",
-  request_source = "std/devloop_requests/review.lua",
+  marker_source = "libraries/devloop/convergence/rounds.lua",
+  request_source = "libraries/devloop/requests/review.lua",
   marker_builder = "review_converge_round_marker",
   request_builder = "build_review_converge_round_comment_request",
 }

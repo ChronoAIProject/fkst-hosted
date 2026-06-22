@@ -115,12 +115,12 @@ return {}
     def test_nested_std_devloop_modules_are_inventory_paths(self) -> None:
         tmp, root = self.make_repo()
         with tmp:
-            nested = root / "std" / "devloop_merge_gate" / "reason_classes"
+            nested = root / "libraries" / "devloop" / "merge_gate" / "reason_classes"
             nested.mkdir(parents=True)
             (nested / "index.lua").write_text("return {}\n", encoding="utf-8")
             rows = self.base_rows() + [
                 {
-                    "path": "std/devloop_merge_gate/reason_classes/index.lua",
+                    "path": "libraries/devloop/merge_gate/reason_classes/index.lua",
                     "owner": "shared",
                     "reason": "nested shared std helper",
                 }

@@ -3,12 +3,12 @@ local registry = require("std.registry")
 local check_runs = require("std.github.check_runs")
 local strings = require("std.strings")
 
-local merge_gate_reason_classes_index = require("std.devloop_merge_gate.reason_classes.index")
+local merge_gate_reason_classes_index = require("devloop.merge_gate.reason_classes.index")
 local merge_gate_reason_class_entries = {
-  require("std.devloop_merge_gate.reason_classes.merge_state_unstable_with_failing_checks"),
-  require("std.devloop_merge_gate.reason_classes.mergeable_conflicting"),
-  require("std.devloop_merge_gate.reason_classes.own_ci_red"),
-  require("std.devloop_merge_gate.reason_classes.rollup_red"),
+  require("devloop.merge_gate.reason_classes.merge_state_unstable_with_failing_checks"),
+  require("devloop.merge_gate.reason_classes.mergeable_conflicting"),
+  require("devloop.merge_gate.reason_classes.own_ci_red"),
+  require("devloop.merge_gate.reason_classes.rollup_red"),
 }
 
 function S.install(M)
@@ -65,7 +65,7 @@ local function integration_or_external_red(pr, head_sha, runs)
 end
 
 local merge_gate_reason_classes = registry.build_indexed_map(
-  "std.devloop_merge_gate.reason_classes.index",
+  "devloop.merge_gate.reason_classes.index",
   merge_gate_reason_classes_index,
   merge_gate_reason_class_entries,
   "reason",

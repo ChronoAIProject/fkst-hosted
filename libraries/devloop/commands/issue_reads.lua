@@ -1,6 +1,6 @@
 local S = {}
-local support = require("std.devloop_commands.support")
-local validators = require("std.devloop_commands.validators")
+local support = require("devloop.commands.support")
+local validators = require("devloop.commands.validators")
 
 local issue_view_fields = {
   intake_scan = "title,labels,comments,state,assignees,author",

@@ -49,7 +49,7 @@ class MonotoneGateDslRatchetTest(unittest.TestCase):
                 root,
                 "bad.lua",
                 """\
-                local state = require("std.devloop_state")
+                local state = require("devloop.state")
 
                 return require_reached("pr-open", {
                   domain = "github-devloop-pr",
@@ -61,7 +61,7 @@ class MonotoneGateDslRatchetTest(unittest.TestCase):
             messages = dsl.repository_messages(root, enforce_base=False)
 
         joined = "\n".join(messages)
-        self.assertIn("require std.devloop_state", joined)
+        self.assertIn("require devloop.state", joined)
         self.assertIn("dangerous-global require", joined)
         self.assertIn("raw-token current_state", joined)
         self.assertIn("forbidden in a core/gates DSL definition", joined)
@@ -117,7 +117,7 @@ class MonotoneGateDslRatchetTest(unittest.TestCase):
                 root,
                 "bad_patch.lua",
                 """\
-                local gate = require("std.devloop_gate")
+                local gate = require("devloop.gate")
                 gate.holds = function()
                   return true
                 end
@@ -142,10 +142,10 @@ class MonotoneGateDslRatchetTest(unittest.TestCase):
                 root,
                 "bad_direct_patch.lua",
                 """\
-                require("std.devloop_gate").holds = function()
+                require("devloop.gate").holds = function()
                   return true
                 end
-                local gate = require("std.devloop_gate")
+                local gate = require("devloop.gate")
 
                 return gate.require_reached("pr-open", {
                   domain = "github-devloop-pr",
@@ -157,7 +157,7 @@ class MonotoneGateDslRatchetTest(unittest.TestCase):
 
         joined = "\n".join(messages)
         self.assertIn("dangerous-global require", joined)
-        self.assertIn("monkey-patch std.devloop_gate", joined)
+        self.assertIn("monkey-patch devloop.gate", joined)
         self.assertIn("forbidden in a core/gates DSL definition", joined)
 
     def test_production_code_must_not_require_gate_defs_directly(self) -> None:

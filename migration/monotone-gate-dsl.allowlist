@@ -1,2 +1,2 @@
 # Shrink-only inventory for exceptional core/gates DSL violations.
-# Gate definitions must be loaded through std.devloop_gate.load_gate and must not require modules or read raw marker/cursor helpers.
+# Gate definitions must be loaded through devloop.gate.load_gate and must not require modules or read raw marker/cursor helpers.

@@ -68,7 +68,7 @@ class LeakSite:
             or path.startswith("packages/github-devloop-intake/")
             or path.startswith("packages/github-devloop-pr/")
             or path.startswith("packages/github-devloop-integration/")
-            or path.startswith("std/devloop")
+            or path.startswith("libraries/devloop/")
         ) or not path.endswith(".lua"):
             raise ValueError(f"invalid {ALLOWLIST} path: {line}")
         if kind not in {"state-marker", "linked-state-promotion"}:
@@ -113,13 +113,13 @@ def expected_paths(root: Path) -> set[str]:
             for path in sorted((base / "core").rglob("*.lua"))
             if path.is_file()
         )
-    std = root / "std"
+    devloop = root / "libraries" / "devloop"
     paths.update(
         path.relative_to(root).as_posix()
-        for path in sorted(std.rglob("devloop*.lua"))
+        for path in sorted(devloop.glob("*.lua"))
         if path.is_file()
     )
-    for directory in sorted(std.glob("devloop_merge_gate")):
+    for directory in sorted(devloop.glob("merge_gate")):
         if not directory.is_dir():
             continue
         paths.update(

@@ -2,10 +2,10 @@
 """Broad ratchet for monotone lifecycle gate bypasses.
 
 G-MONOTONE-GATE discovers every raw lifecycle cursor read in github-devloop*
-production packages and shared std/devloop* lifecycle helpers, then requires each
-occurrence to be classified. Legitimate current-routing reads live in the
-shrink-only allowlist; monotone gates use reached() or another approved milestone
-accessor instead.
+production packages and shared devloop library lifecycle helpers, then requires
+each occurrence to be classified. Legitimate current-routing reads live in the
+shrink-only allowlist; monotone gates use reached() or another approved
+milestone accessor instead.
 """
 
 from __future__ import annotations
@@ -20,10 +20,9 @@ import ratchet_base
 
 MANIFEST = "migration/monotone-gate.inventory"
 ALLOWLIST = "migration/monotone-gate.allowlist"
-APPROVED_ACCESSORS = {"std.devloop_state.reached", "std.devloop_gate.holds", "reached", "holds"}
+APPROVED_ACCESSORS = {"devloop.state.reached", "devloop.gate.holds", "reached", "holds"}
 SURFACE_KINDS = {"monotone-gate", "visibility"}
 PACKAGE_GLOB = "github-devloop*"
-STD_DEVLOOP_PREFIX = "devloop"
 PHASES = (
     "thinking",
     "dependency_wait",
@@ -99,6 +98,20 @@ class Violation:
 
     def key(self) -> tuple[str, str, str, str, str]:
         return self.path, self.surface, self.kind, self.token, str(self.line)
+
+    def canonical_key(self) -> tuple[str, str, str, str, str]:
+        # Migration bridge for the no-growth-vs-dev comparison ONLY: this branch
+        # moved std/devloop_* -> libraries/devloop/* (the stdlib split), but dev's
+        # base allowlist still records the old std/devloop_ paths. Canonicalizing
+        # old->new lets the no-growth check see a moved entry as the SAME debt
+        # (not new growth). This is NOT a behavior shim: the branch allowlist is
+        # already fully on the new paths; this only reconciles against the OLD dev
+        # base during the rename window. Remove this once the rename has landed on
+        # dev (then dev's base carries the new paths and the remap is a no-op).
+        path = self.path
+        if path.startswith("std/devloop_"):
+            path = "libraries/devloop/" + path.removeprefix("std/devloop_")
+        return path, self.surface, self.kind, self.token, str(self.line)
 
     def label(self) -> str:
         return f"{self.path}:{self.line} {self.surface} {self.kind} {self.token}"
@@ -342,14 +355,12 @@ def production_sources(root: Path) -> dict[str, str]:
             if "tests" in path.relative_to(package_root).parts:
                 continue
             sources[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
-    std_root = root / "std"
-    if std_root.exists():
-        for path in sorted(std_root.rglob("*.lua")):
+    devloop_root = root / "libraries" / "devloop"
+    if devloop_root.exists():
+        for path in sorted(devloop_root.rglob("*.lua")):
             if not path.is_file():
                 continue
-            relative_parts = path.relative_to(std_root).parts
-            if not relative_parts or not relative_parts[0].startswith(STD_DEVLOOP_PREFIX):
-                continue
+            relative_parts = path.relative_to(devloop_root).parts
             if "tests" in relative_parts:
                 continue
             sources[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
@@ -457,16 +468,16 @@ def ratchet_messages(
 ) -> list[str]:
     messages: list[str] = []
     for violation in sorted(current):
-        if not any(entry.key() == violation.key() for entry in allowlist):
+        if not any(entry.canonical_key() == violation.canonical_key() for entry in allowlist):
             messages.append(
-                f"{violation.label()} is an unclassified transient lifecycle cursor read; migrate monotone gates to std.devloop_state.reached()/approved milestone accessors or classify legitimate current-routing debt in {ALLOWLIST}"
+                f"{violation.label()} is an unclassified transient lifecycle cursor read; migrate monotone gates to devloop.state.reached()/approved milestone accessors or classify legitimate current-routing debt in {ALLOWLIST}"
             )
     for entry in sorted(allowlist):
-        if not any(violation.key() == entry.key() for violation in current):
+        if not any(violation.canonical_key() == entry.canonical_key() for violation in current):
             messages.append(f"{entry.label()} no longer matches monotone-gate debt; prune the stale entry")
     if base_allowlist is not None:
         for entry in sorted(allowlist):
-            if not any(base.key() == entry.key() for base in base_allowlist):
+            if not any(base.canonical_key() == entry.canonical_key() for base in base_allowlist):
                 messages.append(f"{entry.label()} grows monotone-gate allowlist relative to dev; migrate to reached() instead")
     return messages
 

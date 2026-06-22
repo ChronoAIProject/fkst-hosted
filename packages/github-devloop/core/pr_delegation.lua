@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local gate = require("std.devloop_gate")
+local gate = require("devloop.gate")
 local child_start_visible_gate = nil
 
 local function load_child_start_visible_gate()

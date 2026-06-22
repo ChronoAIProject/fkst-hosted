@@ -2,7 +2,7 @@ local t = fkst.test
 
 return {
   test_valid_round_accepts_only_integer_rounds_within_bound = function()
-    local rounds = require("std.devloop_rounds")
+    local rounds = require("devloop.rounds")
 
     t.eq(rounds.valid_round(0), 0)
     t.eq(rounds.valid_round("42"), 42)

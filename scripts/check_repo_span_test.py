@@ -279,7 +279,7 @@ class SpanContractRatchetTest(unittest.TestCase):
             )
         }
         support_sources = dict(department_sources)
-        support_sources["std/devloop_requests/lifecycle.lua"] = textwrap.dedent(
+        support_sources["libraries/devloop/requests/lifecycle.lua"] = textwrap.dedent(
             """\
             function M.build_implementing_state_comment_request(repo, issue_number, ready)
               local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
