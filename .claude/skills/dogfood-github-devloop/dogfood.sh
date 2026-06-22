@@ -61,6 +61,7 @@ LOGDIR="${DOGFOOD_LOGDIR:-${LOGDIR:-$DOGFOOD_ROOT}}"
 UPSTREAM_BRANCH="${FKST_DEVLOOP_UPSTREAM_BRANCH:-${UPSTREAM_BRANCH:-dev}}"
 INTEGRATION_BRANCH="${FKST_DEVLOOP_INTEGRATION_BRANCH:-${INTEGRATION_BRANCH:-integration}}"  # e.g. integration-<device> on a 2nd machine
 ROLLUP_MERGE="${FKST_DEVLOOP_ROLLUP_MERGE:-${ROLLUP_MERGE:-auto}}"
+MANAGED_BOT_LOGINS="${FKST_DEVLOOP_MANAGED_BOT_LOGINS:-${MANAGED_BOT_LOGINS:-}}"  # collaborating managed-bot logins (this device + peers); lets external-pr-intake skip our own automation
 GH_ORG="${GH_ORG:-ChronoAIProject}"
 DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos this host drives ('all' / board default expand here)
 
@@ -259,7 +260,7 @@ start_one() {
   for p in $LOCAL_PKGS;   do roots+=( --package-root "$HOST/.fkst/local-packages/$p" );   done
   BIN="$BIN" FKST_GITHUB_REPO="$REPO" FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN="$BOT" \
     FKST_DEVLOOP_UPSTREAM_BRANCH="$UPSTREAM_BRANCH" FKST_DEVLOOP_INTEGRATION_BRANCH="$INTEGRATION_BRANCH" \
-    FKST_DEVLOOP_ROLLUP_MERGE="$ROLLUP_MERGE" \
+    FKST_DEVLOOP_ROLLUP_MERGE="$ROLLUP_MERGE" FKST_DEVLOOP_MANAGED_BOT_LOGINS="$MANAGED_BOT_LOGINS" \
     FKST_RUNTIME_ROOT="$rt" FKST_DURABLE_ROOT="$DUR" FKST_RATE_POOL_ROOT="$RATE_POOL" \
     nohup "$BIN" supervise --project-root "$HOST" "${roots[@]}" --framework-bin "$BIN" > "$log" 2>&1 &
   local pid=$!
