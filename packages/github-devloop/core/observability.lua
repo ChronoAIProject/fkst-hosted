@@ -1,4 +1,5 @@
 local common = require("departments.observability.common")
+local avm_scoreboard = require("departments.observability.avm_scoreboard")
 local census = require("departments.observability.census")
 local dashboard = require("departments.observability.dashboard")
 local reaper = require("departments.observability.reaper")
@@ -8,6 +9,7 @@ local S = {}
 
 function S.install(M)
 common.install_common(M)
+avm_scoreboard.install_avm_scoreboard(M)
 census.install_census(M)
 reaper.install_reaper(M)
 dashboard.install_dashboard(M)

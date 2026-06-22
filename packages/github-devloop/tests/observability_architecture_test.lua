@@ -31,10 +31,12 @@ return {
     t.is_true(line_count(core_body) < 250)
     t.is_true(core_body:find('require("departments.observability.census")', 1, true) ~= nil)
     t.is_true(core_body:find('require("departments.observability.common")', 1, true) ~= nil)
+    t.is_true(core_body:find('require("departments.observability.avm_scoreboard")', 1, true) ~= nil)
     t.is_true(core_body:find('require("departments.observability.dashboard")', 1, true) ~= nil)
     t.is_true(core_body:find('require("departments.observability.reaper")', 1, true) ~= nil)
 
     assert_module("departments/observability/common.lua", "common")
+    assert_module("departments/observability/avm_scoreboard.lua", "avm_scoreboard")
     assert_module("departments/observability/census.lua", "census")
     assert_module("departments/observability/dashboard.lua", "dashboard")
     assert_module("departments/observability/reaper.lua", "reaper")
