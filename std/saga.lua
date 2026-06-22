@@ -80,6 +80,7 @@ function S.department(spec, handlers)
 
   return {
     spec = spec_from_spec(spec),
+    pipeline = wrapped,
   }
 end
 

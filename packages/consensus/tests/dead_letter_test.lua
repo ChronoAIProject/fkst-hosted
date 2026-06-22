@@ -1,11 +1,6 @@
 local core = require("core")
 local t = fkst.test
 
-local function package_root()
-  local source = package.searchpath("tests.dead_letter_test", package.path)
-  return source:match("(.+)/tests/dead_letter_test%.lua$")
-end
-
 local function capture_logs(event)
   local captured = {}
   local old_log = log
@@ -23,8 +18,14 @@ local function capture_logs(event)
   }
 
   local ok, result = pcall(function()
-    dofile(package_root() .. "/departments/dead_letter/main.lua")
-    pipeline(event)
+    local old_pipeline = pipeline
+    local module = require("departments.dead_letter.main")
+    local run = module.pipeline or pipeline
+    pipeline = old_pipeline
+    if type(run) ~= "function" then
+      error("consensus: dead-letter department pipeline missing")
+    end
+    run(event)
   end)
 
   log = old_log

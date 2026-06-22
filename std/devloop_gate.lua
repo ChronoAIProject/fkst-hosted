@@ -1,7 +1,5 @@
 local M = {}
 
-local gate_cache = {}
-
 local allowed_lineage_fields = {
   proposal_id = true,
   issue_number = true,
@@ -194,23 +192,11 @@ local function assert_loaded_gate_spec(spec)
   return spec
 end
 
-local function gate_module_name(name)
+local function gate_key(name)
   if type(name) ~= "string" or name:match("^[A-Za-z_][A-Za-z0-9_]*$") == nil then
-    error("std.devloop_gate: gate name must be a safe core/gates module segment")
+    error("std.devloop_gate: gate name must be a safe segment")
   end
-  return "core.gates." .. name
-end
-
-local function gate_source_path(name)
-  if package == nil or type(package.searchpath) ~= "function" then
-    error("std.devloop_gate: package.searchpath is required to load gate definitions")
-  end
-  local module = gate_module_name(name)
-  local path, search_error = package.searchpath(module, package.path)
-  if path == nil then
-    error("std.devloop_gate: gate definition not found: " .. module .. tostring(search_error or ""))
-  end
-  return path, module
+  return name
 end
 
 local function gate_bindings()
@@ -299,6 +285,14 @@ local function eval(spec, facts, bindings)
   error("std.devloop_gate: unsupported gate operation")
 end
 
+function M.install(resolved)
+  if type(resolved) ~= "table" then
+    error("std.devloop_gate: resolved gate sources must be a table")
+  end
+  M._resolved_gate_sources = resolved.sources or {}
+  M._resolved_gate_specs = resolved.specs or {}
+end
+
 function M.facts(caps)
   if type(caps) ~= "table" or type(caps.reached) ~= "function" or type(caps.lineage_equals) ~= "function" then
     error("std.devloop_gate: facts requires reached and lineage_equals capabilities")
@@ -330,18 +324,16 @@ function M.all(gates)
 end
 
 function M.load_gate(name)
-  local path, module = gate_source_path(name)
-  local cached = gate_cache[path]
-  if cached ~= nil then
-    return cached
+  local key = gate_key(name)
+  local spec = M._resolved_gate_specs and M._resolved_gate_specs[key]
+  if spec ~= nil then
+    return assert_loaded_gate_spec(spec)
   end
-  if file == nil or type(file.read) ~= "function" then
-    error("std.devloop_gate: file.read SDK is required to load gate definitions")
+  local source = M._resolved_gate_sources and M._resolved_gate_sources[key]
+  if type(source) ~= "string" or source == "" then
+    error("std.devloop_gate: gate definition not resolved: " .. key)
   end
-  local source = file.read(path)
-  local spec = load_gate_source(source, "@" .. module)
-  gate_cache[path] = spec
-  return spec
+  return load_gate_source(source, "@gate:" .. key)
 end
 
 if fkst ~= nil and fkst.test ~= nil then

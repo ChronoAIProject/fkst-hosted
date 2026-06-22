@@ -1,0 +1,11 @@
+kind = "package.composed"
+name = "github-devloop-decompose"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]
+
+[event_deps]
+packages = ["github-proxy"]

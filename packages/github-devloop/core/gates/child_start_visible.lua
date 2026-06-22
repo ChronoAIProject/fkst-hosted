@@ -1,3 +1,4 @@
+return [=[
 return all({
   require_reached("pr-open", {
     domain = "github-devloop-pr",
@@ -10,3 +11,4 @@ return all({
     },
   }),
 })
+]=]

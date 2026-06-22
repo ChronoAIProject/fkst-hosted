@@ -1,0 +1,19 @@
+kind = "library"
+name = "std"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = []
+
+[library]
+name = "std"
+stable_id = "fkst.library.std"
+version = "workspace"
+
+[exports]
+public = ["std.*"]
+
+[visibility]
+public = true

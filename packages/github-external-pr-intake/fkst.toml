@@ -1,0 +1,8 @@
+kind = "package"
+name = "github-external-pr-intake"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]

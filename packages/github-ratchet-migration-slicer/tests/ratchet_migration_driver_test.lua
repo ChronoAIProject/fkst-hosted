@@ -1,13 +1,8 @@
 local t = fkst.test
 
-local function package_root()
-  local source = package.searchpath("tests.ratchet_migration_driver_test", package.path)
-  return source:match("(.+)/tests/ratchet_migration_driver_test%.lua$")
-end
-
 local function load_department()
   local old_pipeline = pipeline
-  local module = dofile(package_root() .. "/departments/ratchet_migration_driver/main.lua")
+  local module = require("departments.ratchet_migration_driver.main")
   pipeline = old_pipeline
   return module
 end

@@ -2,7 +2,6 @@ local t = fkst.test
 
 return {
   test_idle_poll_cron_shape = function()
-    package.loaded["raisers.idle_poll"] = nil
     local raiser = require("raisers.idle_poll")
     t.eq(raiser.type, "cron")
     t.eq(raiser.interval, "30m")

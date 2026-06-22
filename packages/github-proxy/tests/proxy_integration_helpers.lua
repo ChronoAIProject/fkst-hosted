@@ -337,9 +337,12 @@ local function count_calls(needle)
   return #calls_matching(needle)
 end
 
-local function package_root()
-  local source = package.searchpath("tests.proxy_integration_helpers", package.path)
-  return source:match("(.+)/tests/proxy_integration_helpers%.lua$")
+local function module_name_for_department(department_path)
+  local department = tostring(department_path or ""):match("^departments/([^/]+)/main%.lua$")
+  if department == nil then
+    error("github-proxy: unsupported department path " .. tostring(department_path))
+  end
+  return "departments." .. department .. ".main"
 end
 
 local function capture_comment_department_logs(department_path, event, write_env)
@@ -367,8 +370,8 @@ local function capture_comment_department_logs(department_path, event, write_env
   end
 
   local ok, err = pcall(function()
-    dofile(package_root() .. "/" .. department_path)
-    pipeline(event)
+    local department = require(module_name_for_department(department_path))
+    department.pipeline(event)
   end)
 
   core.write_comment_request = old_write_comment_request
@@ -412,8 +415,8 @@ local function capture_label_department_logs(department_path, event, write_env, 
   end
 
   local ok, err = pcall(function()
-    dofile(package_root() .. "/" .. department_path)
-    pipeline(event)
+    local department = require(module_name_for_department(department_path))
+    department.pipeline(event)
   end)
 
   core.apply_issue_labels = old_apply_issue_labels

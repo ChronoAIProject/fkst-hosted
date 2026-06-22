@@ -1,0 +1,69 @@
+[[library]]
+name = "std"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "archaudit"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "autochrono"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "consensus"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-autochrono"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-decompose"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-intake"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-integration"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-pr"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-external-pr-intake"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-proxy"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-ratchet-migration-slicer"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "idle-detector"
+source = "workspace"
+version = "workspace"

@@ -3,6 +3,26 @@ local t = h.t
 local core = h.core
 local conformance = require("std.namespaced_dispatch_conformance")
 
+local function load_department(path, module_name)
+  local old_pipeline = pipeline
+  local module = require(module_name)
+  pipeline = old_pipeline
+  return { path = path, module = module }
+end
+
+local departments = conformance.loaded_departments({
+  load_department("departments/comment_handoff/main.lua", "departments.comment_handoff.main"),
+  load_department("departments/fix/main.lua", "departments.fix.main"),
+  load_department("departments/liveness_scan/main.lua", "departments.liveness_scan.main"),
+  load_department("departments/merge/main.lua", "departments.merge.main"),
+  load_department("departments/observe_pr/main.lua", "departments.observe_pr.main"),
+  load_department("departments/reconcile/main.lua", "departments.reconcile.main"),
+  load_department("departments/review_loop/main.lua", "departments.review_loop.main"),
+  load_department("departments/review_meta/main.lua", "departments.review_meta.main"),
+  load_department("departments/review_pr/main.lua", "departments.review_pr.main"),
+  load_department("departments/review_result/main.lua", "departments.review_result.main"),
+})
+
 local function review_proposal_id(version, head_sha)
   return core.pr_review_proposal_id("owner/repo", 7, version or h.reviewing().version, head_sha or "def456")
 end
@@ -122,7 +142,8 @@ return {
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "github-devloop-pr",
-      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      package_root = "packages/github-devloop-pr",
+      departments = departments,
       payload_for_queue = payload_for_queue,
     })
   end,

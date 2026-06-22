@@ -1,4 +1,4 @@
--- std.registry: sorted/unique indexed-module registry loader shared across packages. The owner label prefixes error messages so each consumer keeps its own diagnostic namespace.
+-- std.registry: sorted/unique indexed registry builders shared across packages. The owner label prefixes error messages so each consumer keeps its own diagnostic namespace.
 local S = {}
 
 local function index_name(index_entry)
@@ -36,9 +36,7 @@ local function assert_sorted_unique(index_module, index, owner)
   end
 end
 
-local function base_module(index_module)
-  return tostring(index_module):gsub("%.index$", "")
-end
+S.assert_sorted_unique = assert_sorted_unique
 
 local function entry_name(entry, module_name, key_field, owner)
   if type(entry) ~= "table" then
@@ -51,29 +49,28 @@ local function entry_name(entry, module_name, key_field, owner)
   return name
 end
 
-local function require_entry(module_name, M, helpers)
-  local loaded = require(module_name)
+local function resolve_entry(loaded, M, helpers)
   if type(loaded) == "function" then
     return loaded(M, helpers or {})
   end
   return loaded
 end
 
-function S.load_indexed_array(index_module, key_field, M, helpers, owner)
+function S.build_indexed_array(index_module, index, entries, key_field, M, helpers, owner)
   owner = owner or "registry"
-  local index = require(index_module)
   assert_sorted_unique(index_module, index, owner)
+  if type(entries) ~= "table" then
+    error(tostring(owner) .. ": registry entries must be a table: " .. tostring(index_module))
+  end
   local rows = {}
   local seen = {}
-  local base = base_module(index_module)
-  for _, index_entry in ipairs(index) do
+  for position, index_entry in ipairs(index) do
     local name, expected_key = index_name(index_entry)
     if type(name) ~= "string" or name == "" then
       error(tostring(owner) .. ": registry index entry must declare a module: " .. tostring(index_module))
     end
-    local module_name = base .. "." .. name
-    local entry = require_entry(module_name, M, helpers)
-    local key = entry_name(entry, module_name, key_field, owner)
+    local entry = resolve_entry(entries[position], M, helpers)
+    local key = entry_name(entry, name, key_field, owner)
     if expected_key == nil then
       expected_key = name
     end
@@ -86,12 +83,15 @@ function S.load_indexed_array(index_module, key_field, M, helpers, owner)
     seen[key] = true
     table.insert(rows, entry)
   end
+  if entries[#index + 1] ~= nil then
+    error(tostring(owner) .. ": registry entries exceed index length: " .. tostring(index_module))
+  end
   return rows
 end
 
-function S.load_indexed_map(index_module, key_field, M, helpers, owner)
+function S.build_indexed_map(index_module, index, entries, key_field, M, helpers, owner)
   owner = owner or "registry"
-  local rows = S.load_indexed_array(index_module, key_field, M, helpers, owner)
+  local rows = S.build_indexed_array(index_module, index, entries, key_field, M, helpers, owner)
   local map = {}
   for _, row in ipairs(rows) do
     local key = row[key_field]
@@ -106,22 +106,25 @@ function S.load_indexed_map(index_module, key_field, M, helpers, owner)
   return map
 end
 
-function S.load_indexed_installers(index_module, M, owner)
+function S.install_indexed_installers(index_module, index, installers, M, owner)
   owner = owner or "registry"
-  local index = require(index_module)
   assert_sorted_unique(index_module, index, owner)
-  local base = base_module(index_module)
-  for _, index_entry in ipairs(index) do
+  if type(installers) ~= "table" then
+    error(tostring(owner) .. ": registry installers must be a table: " .. tostring(index_module))
+  end
+  for position, index_entry in ipairs(index) do
     local name = index_name(index_entry)
     if type(name) ~= "string" or name == "" then
       error(tostring(owner) .. ": registry index entry must declare a module: " .. tostring(index_module))
     end
-    local module_name = base .. "." .. name
-    local installer = require(module_name)
+    local installer = installers[position]
     if type(installer) ~= "function" then
-      error(tostring(owner) .. ": registry installer must return a function: " .. module_name)
+      error(tostring(owner) .. ": registry installer must be a function: " .. tostring(name))
     end
     installer(M)
+  end
+  if installers[#index + 1] ~= nil then
+    error(tostring(owner) .. ": registry installers exceed index length: " .. tostring(index_module))
   end
 end
 

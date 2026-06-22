@@ -1,0 +1,8 @@
+kind = "package"
+name = "github-proxy"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]

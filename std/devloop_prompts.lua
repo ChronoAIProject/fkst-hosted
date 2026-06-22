@@ -1,6 +1,15 @@
 local S = {}
 
-function S.install(M)
+function S.install(M, resolved)
+resolved = resolved or {}
+local prompts = assert(resolved.prompts, "devloop_prompts: missing resolved prompts")
+local function load_prompt(role)
+  local prompt = prompts[role]
+  if prompt == nil then
+    error("devloop_prompts: missing resolved prompt role " .. tostring(role))
+  end
+  return prompt
+end
 function M.output_language(exec)
   local lang = M._trim(M.read_env("FKST_OUTPUT_LANG", exec))
   if lang == "zh" then
@@ -129,7 +138,7 @@ local function issue_ref_from_proposal_id(M, proposal_id)
 end
 
 function M.build_implement_prompt(proposal_id, current, framing, content_manifest)
-  local prompt = require("prompts.implement")
+  local prompt = load_prompt("implement")
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(proposal_id),
     framing = bounded_framing(M, framing),
@@ -140,7 +149,7 @@ function M.build_implement_prompt(proposal_id, current, framing, content_manifes
 end
 
 function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest, merge_context)
-  local prompt = require("prompts.fix")
+  local prompt = load_prompt("fix")
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(fix.proposal_id),
     review_proposal_id = M.neutralize_untrusted_prompt_text(fix.review_proposal_id),
@@ -157,7 +166,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
 end
 
 function M.build_sync_conflict_prompt(conflict)
-  local prompt = require("prompts.sync_conflict")
+  local prompt = load_prompt("sync_conflict")
   return M.render_prompt_template(prompt.template, {
     repo = M.neutralize_untrusted_prompt_text(conflict.repo),
     upstream_branch = M.neutralize_untrusted_prompt_text(conflict.upstream_branch),
@@ -169,8 +178,8 @@ end
 
 function M.build_review_meta_prompt(review_meta, current_issue, content_manifest)
   local prompt = review_meta.mode == "fix-reflection"
-    and require("prompts.fix_reflection")
-    or require("prompts.review_meta")
+    and load_prompt("fix_reflection")
+    or load_prompt("review_meta")
   local comments = table.concat(M.comment_bodies(current_issue.comments), "\n\n--- comment ---\n\n")
   if #comments > M._max_comments_len then
     comments = M.truncate_utf8(comments, M._max_comments_len)
@@ -189,7 +198,7 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
 end
 
 function M.build_intake_prompt(proposal_id, current, content_manifest)
-  local prompt = require("prompts.intake")
+  local prompt = load_prompt("intake")
   local comments = table.concat(M.comment_bodies(current.comments), "\n\n--- comment ---\n\n")
 
   return M.render_prompt_template(prompt.template, {
@@ -203,7 +212,7 @@ function M.build_intake_prompt(proposal_id, current, content_manifest)
 end
 
 function M.build_decompose_prompt(decompose, current_issue, content_manifest)
-  local prompt = require("prompts.decompose")
+  local prompt = load_prompt("decompose")
   return M.render_prompt_template(prompt.template, {
     proposal_id = M.neutralize_untrusted_prompt_text(decompose.proposal_id),
     pr_source_ref = M.neutralize_untrusted_prompt_text(decompose.source_ref and decompose.source_ref.ref or ""),

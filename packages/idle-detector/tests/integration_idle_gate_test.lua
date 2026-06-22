@@ -131,7 +131,6 @@ return {
     log.warn = function(message)
       table.insert(logs, tostring(message))
     end
-    package.loaded["departments.idle_gate.main"] = nil
     local ok, err = pcall(function()
       local dept = require("departments.idle_gate.main")
       dept.pipeline(event("2026-06-19T01:00:00Z"))

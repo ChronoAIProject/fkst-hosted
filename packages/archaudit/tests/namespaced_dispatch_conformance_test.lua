@@ -1,6 +1,17 @@
 local conformance = require("std.namespaced_dispatch_conformance")
 local t = fkst.test
 
+local function load_department(path, module_name)
+  local old_pipeline = pipeline
+  local module = require(module_name)
+  pipeline = old_pipeline
+  return { path = path, module = module }
+end
+
+local departments = conformance.loaded_departments({
+  load_department("departments/audit/main.lua", "departments.audit.main"),
+})
+
 local function system_idle_payload()
   return {
     schema = "idle-detector.system-idle.v1",
@@ -57,7 +68,8 @@ return {
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "archaudit",
-      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      package_root = "packages/archaudit",
+      departments = departments,
       payload_for_queue = payload_for_queue,
       opts_for_case = opts_for_case,
     })

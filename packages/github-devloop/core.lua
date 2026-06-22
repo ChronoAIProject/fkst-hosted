@@ -1,4 +1,5 @@
 local M = {}
+local wiring = require("core.devloop_wiring")
 
 function M.persistence_class()
   return "saga"
@@ -36,6 +37,7 @@ require("core.conflict_telemetry").install(M)
 require("std.devloop_state").install(M)
 require("core.state_gap").install(M)
 require("std.devloop_markers").install(M)
+require("std.devloop_gate").install({ sources = wiring.gate_sources() })
 require("core.pr_delegation").install(M)
 require("core.impl_failure").install(M)
 require("std.devloop_payloads").install(M)
@@ -52,10 +54,6 @@ M.restart_lifecycle_states = {
   "blocked",
   "merged",
 }
-M.restart_marker_fields_index = "core.restart.marker_fields.index"
-M.restart_replay_payload_fields_index = "core.restart.required_replay_payload_fields.index"
-M.restart_transitions_index = "core.restart.transitions.index"
-M.restart_liveness_signal_producers_index = "core.restart.liveness_signal_producers.index"
 M.restart_source_root = "packages/github-devloop/"
 M.restart_consumer_sources = {
   "packages/github-devloop/departments/observe_issue/main.lua",
@@ -64,7 +62,7 @@ M.restart_consumer_sources = {
   "packages/github-devloop/core/ready_split.lua",
   "std/devloop_decompose.lua",
 }
-require("std.devloop_restart").install(M)
+require("std.devloop_restart").install(M, wiring.restart(M))
 require("core.restart.pr_partition_contract").install(M)
 require("std.devloop_restart_liveness_contract").install(M)
 require("std.devloop_restart_responsibility_contract").install(M)
@@ -72,9 +70,9 @@ require("std.devloop_restart_actionable_epoch").install(M)
 require("core.ready_split").install(M)
 require("core.awaiting_pr_replayer").install(M)
 require("std.devloop_replayer").install(M)
-require("std.devloop_liveness").install(M)
+require("std.devloop_liveness").install(M, wiring.liveness(M))
 require("std.devloop_liveness_scan").install(M)
-require("std.devloop_prompts").install(M)
+require("std.devloop_prompts").install(M, wiring.prompts())
 require("std.devloop_requests").install(M)
 require("core.reconcile_requests").install(M)
 require("std.devloop_entity").install(M)

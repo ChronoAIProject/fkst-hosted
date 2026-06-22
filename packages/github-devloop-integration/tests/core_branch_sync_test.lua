@@ -6,10 +6,7 @@ local function shell_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
 end
 
-local function package_root()
-  local source = package.searchpath("tests.devloop_core_helpers", package.path)
-  return source:match("(.+)/tests/devloop_core_helpers%.lua$")
-end
+local package_root = "packages/github-devloop-integration"
 
 local function mkdir_p(path)
   local ok = os.execute("mkdir -p " .. shell_quote(path))
@@ -168,7 +165,7 @@ return {
     mkdir_p(bin_dir)
     write_fetch_probe_git(bin_dir .. "/git")
 
-    local pkg = package_root()
+    local pkg = package_root
     local event = shell_quote('{"queue":"devloop_branch_tick","payload":{"schema":"github-devloop.branch-tick.v1"}}')
     local env = table.concat({
       "env -u FKST_SUPERVISOR_PID",

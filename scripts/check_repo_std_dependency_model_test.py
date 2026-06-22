@@ -62,11 +62,7 @@ class StdDependencyModelGuardTest(unittest.TestCase):
         self.assertIn("std/github.lua:1 requires unresolved module 'std.missing'", violations[0])
         self.assertIn("packages/example/core.lua:1 requires unresolved module 'std.nope.tools'", violations[1])
 
-    def test_reports_std_requiring_a_package_module_as_warning(self) -> None:
-        # std-depends-only-on-std is the ADR-0001 intent, but it is REPORT-ONLY:
-        # a std module requiring package-resolving code is surfaced as a warning
-        # (the codebase deliberately uses std/devloop_prompts.lua -> prompts.<name>
-        # template-method inversion), never a CI-failing violation.
+    def test_flags_std_requiring_a_package_module(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write(root / "packages" / "example" / "core.lua", "return {}\n")
@@ -74,14 +70,14 @@ class StdDependencyModelGuardTest(unittest.TestCase):
 
             violations, warnings = self.run_guard(root)
 
-        self.assertEqual(violations, [])
+        self.assertEqual(warnings, [])
         self.assertIn(
             'G-STD-DEP: std module std/bad.lua:1 requires non-std module "example.core" '
-            "(resolves to consuming-package code; std should ideally depend only on std)",
-            warnings,
+            "(std must receive resolved values from package-owned wiring)",
+            violations,
         )
 
-    def test_reports_std_requiring_bare_package_internal_roots_as_warnings(self) -> None:
+    def test_flags_std_requiring_bare_package_internal_roots(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write(root / "packages" / "example" / "core.lua", "return {}\n")
@@ -92,16 +88,16 @@ class StdDependencyModelGuardTest(unittest.TestCase):
 
             violations, warnings = self.run_guard(root)
 
-        self.assertEqual(violations, [])
+        self.assertEqual(warnings, [])
         self.assertIn(
             'G-STD-DEP: std module std/bad.lua:1 requires non-std module "core" '
-            "(resolves to consuming-package code; std should ideally depend only on std)",
-            warnings,
+            "(std must receive resolved values from package-owned wiring)",
+            violations,
         )
         self.assertIn(
             'G-STD-DEP: std module std/bad.lua:2 requires non-std module "departments.x" '
-            "(resolves to consuming-package code; std should ideally depend only on std)",
-            warnings,
+            "(std must receive resolved values from package-owned wiring)",
+            violations,
         )
 
     def test_ignores_masked_requires_in_std_comments_and_strings(self) -> None:

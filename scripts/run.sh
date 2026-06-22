@@ -346,6 +346,17 @@ check_sdk_primitives() {
   local probe_dir report_file
   probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/fkst-sdk-probe.XXXXXX")"
   mkdir -p "$probe_dir/tests"
+  cat > "$probe_dir/fkst.workspace.toml" <<'TOML'
+[workspace]
+units = ["."]
+TOML
+  cat > "$probe_dir/fkst.toml" <<'TOML'
+kind = "package"
+name = "sdk-probe"
+
+[code]
+root = "."
+TOML
   printf 'return {}\n' > "$probe_dir/core.lua"
   cat > "$probe_dir/tests/sdk_primitives_test.lua" <<'LUA'
 local t = fkst.test
@@ -402,7 +413,7 @@ run_self_test_with_optional_lua_coverage() {
   rm -rf "$coverage_dir"
   mkdir -p "$coverage_dir"
   set +e
-  out="$(cd "$coverage_dir" && "$BIN" --self-test --coverage "$coverage_dir" 2>&1)"
+  out="$(cd "$ROOT" && "$BIN" --self-test --coverage "$coverage_dir" 2>&1)"
   rc=$?
   set -e
   if [ "$rc" -eq 0 ]; then
@@ -631,7 +642,7 @@ collect_composed_package() {
 }
 
 cmd_test_composed() {
-  local pkg name args
+  local pkg name args project_root
   ensure_package_view
   COMPOSED_SEEN=()
   for pkg in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
@@ -646,6 +657,7 @@ cmd_test_composed() {
   fi
 
   args=()
+  project_root="$(package_root_for_name "${COMPOSED_SEEN[0]}")" || return 1
   for name in "${COMPOSED_SEEN[@]}"; do
     pkg="$(package_root_for_name "$name")" || return 1
     args+=(--package-root "$pkg")
@@ -658,7 +670,7 @@ cmd_test_composed() {
     args+=(--package-root "${pkg%/}")
   done
   echo "=== composed conformance ==="
-  run_quiet_pass "$BIN" conformance --project-root "$ROOT" "${args[@]}"
+  run_quiet_pass "$BIN" conformance --project-root "$project_root" "${args[@]}"
 }
 
 cmd_run() {

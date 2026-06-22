@@ -2,6 +2,23 @@ local h = require("tests.proxy_integration_helpers")
 local conformance = require("std.namespaced_dispatch_conformance")
 local t = h.t
 
+local function load_department(path, module_name)
+  local old_pipeline = pipeline
+  local module = require(module_name)
+  pipeline = old_pipeline
+  return { path = path, module = module }
+end
+
+local departments = conformance.loaded_departments({
+  load_department("departments/github_comment/main.lua", "departments.github_comment.main"),
+  load_department("departments/github_issue_blocked_by/main.lua", "departments.github_issue_blocked_by.main"),
+  load_department("departments/github_issue_create/main.lua", "departments.github_issue_create.main"),
+  load_department("departments/github_issue_label/main.lua", "departments.github_issue_label.main"),
+  load_department("departments/github_poll/main.lua", "departments.github_poll.main"),
+  load_department("departments/github_pr_comment/main.lua", "departments.github_pr_comment.main"),
+  load_department("departments/test_entity_view_probe/main.lua", "departments.test_entity_view_probe.main"),
+})
+
 local function source_ref(ref)
   return {
     kind = "external",
@@ -146,7 +163,8 @@ return {
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "github-proxy",
-      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      package_root = "packages/github-proxy",
+      departments = departments,
       payload_for_queue = payload_for_queue,
       opts_for_case = opts_for_case,
     })

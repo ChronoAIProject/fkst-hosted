@@ -1,6 +1,19 @@
 local t = fkst.test
 local conformance = require("std.namespaced_dispatch_conformance")
 
+local function load_department(path, module_name)
+  local old_pipeline = pipeline
+  local module = require(module_name)
+  pipeline = old_pipeline
+  return { path = path, module = module }
+end
+
+local departments = conformance.loaded_departments({
+  load_department("departments/dead_letter/main.lua", "departments.dead_letter.main"),
+  load_department("departments/decide/main.lua", "departments.decide.main"),
+  load_department("departments/test_cache_seed/main.lua", "departments.test_cache_seed.main"),
+})
+
 local function proposal_payload()
   return {
     schema = "consensus.proposal.v1",
@@ -49,7 +62,8 @@ return {
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "consensus",
-      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      package_root = "packages/consensus",
+      departments = departments,
       payload_for_queue = payload_for_queue,
     })
   end,

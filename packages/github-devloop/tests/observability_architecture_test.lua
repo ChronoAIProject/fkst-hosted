@@ -1,13 +1,10 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 
-local function package_root()
-  local source = package.searchpath("tests.devloop_helpers", package.path)
-  return source:match("(.+)/tests/devloop_helpers%.lua$")
-end
+local package_root = "packages/github-devloop"
 
 local function read_source(path)
-  local handle = assert(io.open(package_root() .. "/" .. path, "r"))
+  local handle = assert(io.open(package_root .. "/" .. path, "r"))
   local body = handle:read("*a")
   handle:close()
   return body

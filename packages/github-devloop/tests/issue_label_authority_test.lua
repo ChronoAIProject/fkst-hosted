@@ -9,20 +9,17 @@ local mock_pr_origin_for = h.mock_pr_origin_for
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 
-local function package_root()
-  local source = package.searchpath("tests.devloop_helpers", package.path)
-  return source:match("(.+)/tests/devloop_helpers%.lua$")
-end
+local package_root = "packages/github-devloop"
 
 local function read_source(path)
-  local handle = assert(io.open(package_root() .. "/" .. path, "r"))
+  local handle = assert(io.open(package_root .. "/" .. path, "r"))
   local body = handle:read("*a")
   handle:close()
   return body
 end
 
 local function department_main_paths()
-  local root = package_root()
+  local root = package_root
   local paths = {}
   local find = assert(io.popen("find " .. root .. "/departments -mindepth 2 -maxdepth 2 -name main.lua | sort"))
   for path in find:lines() do

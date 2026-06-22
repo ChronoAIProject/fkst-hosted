@@ -93,8 +93,10 @@ split stable local responsibilities into files beside `main.lua`, such as
 `require("departments.<department>.<module>")`. Packages do not cross-require sibling package code;
 cross-package composition goes through event queues.
 
-Shared repo-root code lives in `std/` and is vendored into each package through
-`packages/<pkg>/std -> ../../std`. Current module families cover saga/oracle helpers, GitHub and git
+Shared repo-root code lives in `std/` and is declared as the workspace library `std` via
+`std/fkst.toml`. Packages declare `lib_deps = ["std"]` in their `fkst.toml`; the engine's scoped
+resolver grants access to public `std.*` modules from that manifest dependency rather than from
+per-package filesystem symlinks. Current module families cover saga/oracle helpers, GitHub and git
 ports, production port wiring, fake-port testing, strings, and GitHub debug stamps. New and migrated
 `gh`/`git` access goes through `std.github`/`std.git` (production wiring via `std.ports`); remaining
 raw call sites are migration debt in `migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet

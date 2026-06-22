@@ -1,0 +1,8 @@
+kind = "package"
+name = "idle-detector"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]

@@ -1,13 +1,10 @@
 local t = fkst.test
 
-local function package_root()
-  local source = package.searchpath("tests.external_pr_intake_test", package.path)
-  return source:match("(.+)/tests/external_pr_intake_test%.lua$")
-end
+local package_root = "packages/github-external-pr-intake"
 
 local function load_department()
   local old_pipeline = pipeline
-  local module = dofile(package_root() .. "/departments/external_pr_intake/main.lua")
+  local module = require("departments.external_pr_intake.main")
   pipeline = old_pipeline
   return module
 end
@@ -32,7 +29,7 @@ local function parent_dir(path)
 end
 
 local function sibling_package_root(name)
-  return parent_dir(package_root()) .. "/" .. tostring(name)
+  return parent_dir(package_root) .. "/" .. tostring(name)
 end
 
 local function write_disk_file(path, body)
@@ -391,8 +388,8 @@ return {
     local devloop_probe_raiser = read_disk_file(sibling_package_root("github-devloop-intake") .. "/raisers/intake_probe_poll.lua")
     local devloop_scan = read_disk_file(sibling_package_root("github-devloop-intake") .. "/departments/intake_scan/main.lua")
     local devloop_probe = read_disk_file(sibling_package_root("github-devloop-intake") .. "/departments/intake_probe/main.lua")
-    local external_scan_raiser = read_disk_file(package_root() .. "/raisers/external_pr_scan.lua")
-    local external_intake = read_disk_file(package_root() .. "/departments/external_pr_intake/main.lua")
+    local external_scan_raiser = read_disk_file(package_root .. "/raisers/external_pr_scan.lua")
+    local external_intake = read_disk_file(package_root .. "/departments/external_pr_intake/main.lua")
 
     -- Necessity proof: `github-proxy` can observe generic PR facts and execute
     -- already-formed issue-create effects, but it has no policy owner for the

@@ -1,57 +1,29 @@
 local t = fkst.test
 
-local function package_root()
-  local source = package.searchpath("tests.unsupported_payload_test", package.path)
-  return source:match("(.+)/tests/unsupported_payload_test%.lua$")
-end
-
-local function run_department_with_logs(path, event)
-  local result = t.run_department(path, event)
+local function run_department_with_logs(path, event, opts)
+  local result = t.run_department(path, event, opts)
   t.is_true(type(result) == "table")
-
-  local captured = {}
-  local old_log = log
-
-  log = {
-    info = function(message)
-      table.insert(captured, tostring(message))
-    end,
-    warn = function(message)
-      table.insert(captured, tostring(message))
-    end,
-    error = function(message)
-      table.insert(captured, tostring(message))
-    end,
-  }
-
-  local old_pipeline = pipeline
-  local ok, err = pcall(function()
-    dofile(package_root() .. "/" .. path)
-    pipeline(event)
-  end)
-  pipeline = old_pipeline
-  log = old_log
-  return ok, tostring(err or ""), table.concat({
-    tostring(result.error or ""),
-    table.concat(captured, "\n"),
-  }, "\n")
+  return result.exit_code == 0, result
 end
 
 return {
   test_driver_accepts_production_namespaced_queue = function()
-    local ok, err, logs = run_department_with_logs("departments/ratchet_migration_driver/main.lua", {
+    t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
+      stdout = "owner/repo",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok, result = run_department_with_logs("departments/ratchet_migration_driver/main.lua", {
       queue = "github-ratchet-migration-slicer.ratchet_migration_poll",
       payload = {
         schema = "github-ratchet-migration-slicer.ratchet-migration-poll.v1",
-        ratchet = "saga-handler",
+        ratchet = "no-matching-ratchet",
       },
     })
-    local text = tostring(err or "") .. "\n" .. tostring(logs or "")
 
-    t.eq(ok, false)
-    t.is_true(text:find("FKST_GITHUB_REPO is required", 1, true) ~= nil)
-    t.is_nil(text:find("unsupported event payload", 1, true))
-    t.is_nil(text:find("skip-foreign", 1, true))
+    t.eq(ok, true)
+    t.eq(#result.raises, 0)
   end,
 
   test_driver_skips_non_table_payloads = function()

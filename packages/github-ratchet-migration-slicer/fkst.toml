@@ -1,0 +1,8 @@
+kind = "package"
+name = "github-ratchet-migration-slicer"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]

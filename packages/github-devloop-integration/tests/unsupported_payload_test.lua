@@ -1,13 +1,10 @@
 local t = fkst.test
 local core = require("core")
 
-local function package_root()
-  local source = package.searchpath("tests.unsupported_payload_test", package.path)
-  return source:match("(.+)/tests/unsupported_payload_test%.lua$")
-end
+local package_root = "packages/github-devloop-integration"
 
 local function department_paths()
-  local root = package_root()
+  local root = package_root
   local result = {}
   local find = assert(io.popen("find " .. root .. "/departments -mindepth 2 -maxdepth 2 -name main.lua | sort"))
   for path in find:lines() do
@@ -23,7 +20,7 @@ end
 
 local function load_department_spec(path)
   local old_pipeline = pipeline
-  local module = dofile(package_root() .. "/" .. path)
+  local module = require(tostring(path):gsub("/", "."):gsub("%.lua$", ""))
   pipeline = old_pipeline
   if type(module) ~= "table" or type(module.spec) ~= "table" then
     error("github-devloop: department spec missing for " .. tostring(path))
@@ -68,31 +65,8 @@ end
 local function run_department_with_logs(path, event)
   local result = t.run_department(path, event)
   t.is_true(type(result) == "table")
-
-  local captured = {}
-  local old_log = log
-  log = {
-    info = function(message)
-      table.insert(captured, tostring(message))
-    end,
-    warn = function(message)
-      table.insert(captured, tostring(message))
-    end,
-    error = function(message)
-      table.insert(captured, tostring(message))
-    end,
-  }
-
-  local old_pipeline = pipeline
-  local ok, err = pcall(function()
-    dofile(package_root() .. "/" .. path)
-    pipeline(event)
-  end)
-  pipeline = old_pipeline
-  log = old_log
-  return ok, tostring(err or ""), table.concat({
+  return result.exit_code == 0, tostring(result.error or ""), table.concat({
     tostring(result.error or ""),
-    table.concat(captured, "\n"),
   }, "\n")
 end
 

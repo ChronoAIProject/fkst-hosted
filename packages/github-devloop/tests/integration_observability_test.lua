@@ -196,9 +196,17 @@ local function calls_matching(needle)
   return calls
 end
 
-local function package_root()
-  local source = package.searchpath("tests.integration_observability_test", package.path)
-  return source:match("(.+)/tests/integration_observability_test%.lua$")
+local observability_pipeline = nil
+
+local function run_observability_pipeline(event)
+  local old_pipeline = pipeline
+  local module = require("departments.observability.main")
+  observability_pipeline = module.pipeline or pipeline or observability_pipeline
+  pipeline = old_pipeline
+  local run = observability_pipeline
+  if type(run) ~= "function" then error("github-devloop: observability department pipeline missing") end
+  event = event or { queue = "devloop_observe_tick", payload = { schema = "github-devloop.observe-tick.v1" } }
+  run(event)
 end
 
 local function capture_observability_logs(event)
@@ -217,11 +225,7 @@ local function capture_observability_logs(event)
   }
 
   local ok, err = pcall(function()
-    dofile(package_root() .. "/departments/observability/main.lua")
-    pipeline(event or {
-      queue = "devloop_observe_tick",
-      payload = { schema = "github-devloop.observe-tick.v1" },
-    })
+    run_observability_pipeline(event)
   end)
 
   log = old_log
@@ -247,11 +251,7 @@ local function try_capture_observability_logs(event)
   }
 
   local ok, err = pcall(function()
-    dofile(package_root() .. "/departments/observability/main.lua")
-    pipeline(event or {
-      queue = "devloop_observe_tick",
-      payload = { schema = "github-devloop.observe-tick.v1" },
-    })
+    run_observability_pipeline(event)
   end)
 
   log = old_log

@@ -31,6 +31,7 @@
 {"path":"packages/github-devloop-integration/core/branches.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop/core/conflict_telemetry.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop/core/dependencies.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}
 {"path":"packages/github-devloop/core/doctor.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/ensure_repo.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"std/devloop_entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
@@ -43,6 +44,7 @@
 {"path":"packages/github-devloop/core/impl_failure.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/implement_attempt.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop-intake/core/intake_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/core/devloop_wiring.lua","owner":"intake","reason":"core module resolves intake package-private prompt modules."}
 {"path":"packages/github-devloop-intake/core/intake_scan.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop-intake/core/intake_service_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop/core/observability.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
@@ -98,6 +100,7 @@
 {"path":"packages/github-devloop/core/restart/transitions/ready.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/transitions/thinking.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop-integration/core/rollup_health.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/devloop_wiring.lua","owner":"integration","reason":"core module resolves integration package-private prompt modules."}
 {"path":"packages/github-devloop/core/state_gap.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop-integration/core/substrate_ref.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"std/devloop_sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
@@ -125,6 +128,7 @@
 {"path":"std/devloop_merge_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
 {"path":"std/devloop_merge_gate_wait.lua","owner":"shared","reason":"merge-gate wait markers are read by shared liveness and PR merge reconciliation."}
 {"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/devloop_wiring.lua","owner":"pr","reason":"github-devloop-pr resolves PR package-private restart and prompt modules."}
 {"path":"packages/github-devloop-pr/core/pr_review_replayer.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"std/devloop_merge_queue.lua","owner":"shared","reason":"merge queue helpers include WIP admission used by the remaining issue implement department."}
 {"path":"std/devloop_queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}

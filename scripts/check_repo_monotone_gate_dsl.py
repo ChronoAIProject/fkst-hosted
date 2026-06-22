@@ -50,6 +50,11 @@ GATE_PATH_RE = re.compile(r"(?:^|[./\\])core[/\\]gates[/\\][A-Za-z_][A-Za-z0-9_]
 GATE_REQUIRE_BINDING_RE = re.compile(
     r"""\b(?:local\s+)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*require\s*(?:\(\s*)?(?:"std\.devloop_gate"|'std\.devloop_gate'|\[(=*)\[std\.devloop_gate\]\2\])"""
 )
+GATE_SOURCE_RETURN_RE = re.compile(
+    r"""\A\s*return\s*(?:"(?P<double>(?:\\.|[^"\\])*)"|'(?P<single>(?:\\.|[^'\\])*)'|\[(?P<eq>=*)\[(?P<long>.*?)\](?P=eq)\])\s*\Z""",
+    re.DOTALL,
+)
+OWNER_GATE_SOURCE_MODULE_RE = re.compile(r"^packages/[^/]+/core/devloop_wiring\.lua$")
 
 
 @dataclass(frozen=True, order=True)
@@ -152,6 +157,40 @@ def lua_string_literals(text: str) -> list[tuple[str, int]]:
     return literals
 
 
+def _decode_quoted_lua_string(content: str) -> str:
+    # The gate source modules in this repository use long bracket strings.
+    # Quoted strings are accepted for completeness; unsupported escapes remain
+    # literal so the DSL checker cannot accidentally hide executable content.
+    replacements = {
+        "\\\\": "\\",
+        "\\n": "\n",
+        "\\r": "\r",
+        "\\t": "\t",
+        '\\"': '"',
+        "\\'": "'",
+    }
+    result = content
+    for escaped, value in replacements.items():
+        result = result.replace(escaped, value)
+    return result
+
+
+def gate_source_module(path: str, module_source: str) -> tuple[str | None, int, str | None]:
+    match = GATE_SOURCE_RETURN_RE.fullmatch(module_source)
+    if match is None:
+        return None, 1, f"{path} must return a literal DSL source string"
+    if match.group("long") is not None:
+        content_start = module_source.find("[", match.start())
+        long_match = _long_bracket_match(module_source, content_start)
+        line_offset = 0
+        if long_match is not None:
+            line_offset = line_number(module_source, long_match[1]) - 1
+        return match.group("long"), line_offset, None
+    if match.group("double") is not None:
+        return _decode_quoted_lua_string(match.group("double")), line_number(module_source, match.start("double")) - 1, None
+    return _decode_quoted_lua_string(match.group("single")), line_number(module_source, match.start("single")) - 1, None
+
+
 def literal_concat_bypass_findings(path: str, source: str) -> set[BypassFinding]:
     literals = lua_string_literals(source)
     findings: set[BypassFinding] = set()
@@ -159,6 +198,8 @@ def literal_concat_bypass_findings(path: str, source: str) -> set[BypassFinding]
         joined = ""
         for end in range(start, min(len(literals), start + 8)):
             joined += literals[end][0]
+            if end == start:
+                continue
             normalized = joined.replace("\\", "/")
             if GATE_MODULE_RE.search(joined) is not None or GATE_PATH_RE.search(normalized) is not None:
                 findings.add(BypassFinding(path, joined, line_number(source, literals[start][1])))
@@ -287,26 +328,29 @@ def loader_scan_sources(root: Path) -> dict[str, str]:
     return sources
 
 
-def source_findings(path: str, source: str) -> set[Finding]:
+def source_findings(path: str, source: str, line_offset: int = 0) -> set[Finding]:
     findings: set[Finding] = set()
     stripped = strip_lua_comments_and_strings(source)
     for match in REQUIRE_RE.finditer(source):
         module = required_module(match)
-        findings.add(Finding(path, "require", module, line_number(source, match.start())))
+        findings.add(Finding(path, "require", module, line_number(source, match.start()) + line_offset))
         if module in RAW_MODULES:
-            findings.add(Finding(path, "require", module, line_number(source, match.start())))
+            findings.add(Finding(path, "require", module, line_number(source, match.start()) + line_offset))
     for token in RAW_TOKENS:
         start = 0
         while True:
             index = stripped.find(token, start)
             if index == -1:
                 break
-            findings.add(Finding(path, "raw-token", token, line_number(source, index)))
+            findings.add(Finding(path, "raw-token", token, line_number(source, index) + line_offset))
             start = index + len(token)
     for token in DANGEROUS_GLOBALS:
         for match in lua_name_re(token).finditer(stripped):
-            findings.add(Finding(path, "dangerous-global", token, line_number(source, match.start())))
-    findings.update(monkey_patch_findings(path, source, stripped))
+            findings.add(Finding(path, "dangerous-global", token, line_number(source, match.start()) + line_offset))
+    findings.update(
+        Finding(finding.path, finding.kind, finding.token, finding.line + line_offset)
+        for finding in monkey_patch_findings(path, source, stripped)
+    )
     return findings
 
 
@@ -319,18 +363,36 @@ def loader_bypass_findings(root: Path) -> set[BypassFinding]:
                 continue
             module = required_module(match)
             if GATE_MODULE_RE.fullmatch(module) is not None:
+                if OWNER_GATE_SOURCE_MODULE_RE.fullmatch(path) is not None:
+                    continue
                 findings.add(BypassFinding(path, module, line_number(source, match.start())))
         for literal, offset in lua_string_literals(source):
             if GATE_MODULE_RE.fullmatch(literal) is not None or GATE_PATH_RE.search(literal) is not None:
+                if OWNER_GATE_SOURCE_MODULE_RE.fullmatch(path) is not None and GATE_MODULE_RE.fullmatch(literal) is not None:
+                    continue
                 findings.add(BypassFinding(path, literal, line_number(source, offset)))
         findings.update(literal_concat_bypass_findings(path, source))
     return findings
 
 
+def gate_source_modules(root: Path) -> tuple[dict[str, tuple[str, int]], list[str]]:
+    sources: dict[str, tuple[str, int]] = {}
+    messages: list[str] = []
+    for path, module_source in gate_sources(root).items():
+        source, line_offset, message = gate_source_module(path, module_source)
+        if message is not None:
+            messages.append(message)
+            continue
+        assert source is not None
+        sources[path] = (source, line_offset)
+    return sources, messages
+
+
 def current_findings(root: Path) -> set[Finding]:
     found: set[Finding] = set()
-    for path, source in gate_sources(root).items():
-        found.update(source_findings(path, source))
+    sources, _messages = gate_source_modules(root)
+    for path, (source, line_offset) in sources.items():
+        found.update(source_findings(path, source, line_offset))
     return found
 
 
@@ -362,9 +424,13 @@ def allowlist_at_dev_base(root: Path) -> tuple[str, set[Finding] | None]:
 
 
 def repository_messages(root: Path, enforce_base: bool = True) -> list[str]:
-    current = current_findings(root)
+    gate_module_sources, gate_module_messages = gate_source_modules(root)
+    current: set[Finding] = set()
+    for path, (source, line_offset) in gate_module_sources.items():
+        current.update(source_findings(path, source, line_offset))
     allowlist = load_allowlist(root / ALLOWLIST)
     messages: list[str] = []
+    messages.extend(gate_module_messages)
     base_allowlist: set[Finding] | None = None
     if enforce_base:
         base_status, base_allowlist = allowlist_at_dev_base(root)

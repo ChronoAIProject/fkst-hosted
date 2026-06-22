@@ -82,18 +82,11 @@ def check_std_dependency_model(
                     std_edges.setdefault(source_module, set()).add(module)
                     continue
                 if module != "std":
-                    # std-depends-only-on-std is the ADR-0001 intent, but the
-                    # codebase deliberately uses a template-method inversion where
-                    # a shared std module (e.g. std/devloop_prompts.lua) requires a
-                    # bare `prompts.<name>` that resolves to the CONSUMING package's
-                    # own module. Surface it as a report-only finding (ratchet: warn
-                    # now, promote to a violation if/when that pattern is removed),
-                    # rather than failing CI on an intentional existing pattern.
                     add(
-                        warnings,
+                        violations,
                         "G-STD-DEP",
                         f'std module {rel(root, path)}:{line} requires non-std module "{module}" '
-                        "(resolves to consuming-package code; std should ideally depend only on std)",
+                        "(std must receive resolved values from package-owned wiring)",
                     )
 
     for package in packages:

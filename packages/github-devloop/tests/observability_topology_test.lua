@@ -210,8 +210,7 @@ end
 
 return {
   test_observability_declares_graph_json_authorization = function()
-    local main_path = package.searchpath("departments.observability.main", package.path)
-    local module = dofile(main_path)
+    local module = require("departments.observability.main")
 
     t.eq(module.spec.graph_json, true)
     t.eq(module.spec.consumes[1], "devloop_observe_tick")

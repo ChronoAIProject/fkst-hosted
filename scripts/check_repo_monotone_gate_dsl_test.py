@@ -28,6 +28,14 @@ dsl = load_module()
 def write_gate(root: Path, name: str, source: str) -> None:
     target = root / "packages" / "github-devloop" / "core" / "gates" / name
     target.parent.mkdir(parents=True)
+    target.write_text("return [=[\n" + textwrap.dedent(source) + "]=]\n", encoding="utf-8")
+    (root / "migration").mkdir(exist_ok=True)
+    (root / dsl.ALLOWLIST).write_text("", encoding="utf-8")
+
+
+def write_raw_gate(root: Path, name: str, source: str) -> None:
+    target = root / "packages" / "github-devloop" / "core" / "gates" / name
+    target.parent.mkdir(parents=True)
     target.write_text(textwrap.dedent(source), encoding="utf-8")
     (root / "migration").mkdir(exist_ok=True)
     (root / dsl.ALLOWLIST).write_text("", encoding="utf-8")
@@ -181,6 +189,57 @@ class MonotoneGateDslRatchetTest(unittest.TestCase):
         joined = "\n".join(messages)
         self.assertIn("loader-bypass core.gates.child_start_visible", joined)
         self.assertIn("restricted_lua_load sandbox is authoritative", joined)
+
+    def test_package_wiring_may_resolve_gate_source_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_gate(
+                root,
+                "child_start_visible.lua",
+                """\
+                return require_reached("pr-open", {
+                  domain = "github-devloop-pr",
+                })
+                """,
+            )
+            wiring = root / "packages" / "github-devloop" / "core" / "devloop_wiring.lua"
+            wiring.parent.mkdir(parents=True, exist_ok=True)
+            wiring.write_text(
+                textwrap.dedent(
+                    """\
+                    local W = {}
+                    function W.gate_sources()
+                      return {
+                        child_start_visible = require("core.gates.child_start_visible"),
+                      }
+                    end
+                    return W
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            messages = dsl.repository_messages(root, enforce_base=False)
+
+        self.assertEqual(messages, [])
+
+    def test_gate_file_must_return_source_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_raw_gate(
+                root,
+                "raw.lua",
+                """\
+                return require_reached("pr-open", {
+                  domain = "github-devloop-pr",
+                })
+                """,
+            )
+
+            messages = dsl.repository_messages(root, enforce_base=False)
+
+        joined = "\n".join(messages)
+        self.assertIn("core/gates/raw.lua must return a literal DSL source string", joined)
 
     def test_any_lua_code_must_not_require_gate_defs_directly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

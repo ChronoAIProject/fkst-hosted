@@ -4,6 +4,17 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local t = fkst.test
 
+local function load_department(path, module_name)
+  local old_pipeline = pipeline
+  local module = require(module_name)
+  pipeline = old_pipeline
+  return { path = path, module = module }
+end
+
+local departments = conformance.loaded_departments({
+  load_department("departments/decompose/main.lua", "departments.decompose.main"),
+})
+
 local function production_decompose_payload()
   return core.build_devloop_decompose_payload(core.build_devloop_fix_reconcile_payload({
     proposal_id = "github-devloop/issue/owner/repo/42",
@@ -64,7 +75,8 @@ return {
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "github-devloop-decompose",
-      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      package_root = "packages/github-devloop-decompose",
+      departments = departments,
       payload_for_queue = payload_for_queue,
       opts_for_case = opts_for_case,
     })

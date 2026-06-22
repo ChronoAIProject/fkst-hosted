@@ -1,24 +1,7 @@
 local C = {}
 
-local function pattern_escape(value)
-  return tostring(value):gsub("([%(%)%.%%%+%-%*%?%[%]%^%$])", "%%%1")
-end
-
 local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
-end
-
-local function package_root_from_test(test_module_name)
-  local source = package.searchpath(test_module_name, package.path)
-  if source == nil then
-    error("namespaced-dispatch: cannot resolve test module " .. tostring(test_module_name))
-  end
-  local relative = tostring(test_module_name):gsub("%.", "/")
-  local root = source:match("(.+)/" .. pattern_escape(relative) .. "%.lua$")
-  if root == nil then
-    error("namespaced-dispatch: cannot infer package root from " .. tostring(source))
-  end
-  return root
 end
 
 local function department_paths(root)
@@ -34,14 +17,28 @@ local function department_paths(root)
   return result
 end
 
-local function load_department_spec(root, path)
-  local old_pipeline = pipeline
-  local module = dofile(root .. "/" .. path)
-  pipeline = old_pipeline
+function C.loaded_departments(entries)
+  local departments = {}
+  for _, entry in ipairs(entries or {}) do
+    if type(entry) == "string" then
+      error("namespaced-dispatch: loaded department entry must include a module")
+    end
+    local path = assert(entry.path, "namespaced-dispatch: loaded department entry missing path")
+    departments[path] = assert(entry.module, "namespaced-dispatch: loaded department entry missing module")
+  end
+  return departments
+end
+
+local function normalize_department(path, module)
   if type(module) ~= "table" or type(module.spec) ~= "table" then
     error("namespaced-dispatch: department spec missing for " .. tostring(path))
   end
-  return module.spec
+  local run = module.pipeline
+  return {
+    path = path,
+    spec = module.spec,
+    pipeline = run,
+  }
 end
 
 local function production_queue_name(package_name, queue)
@@ -83,10 +80,10 @@ local function assert_no_fallthrough(package_name, path, queue, err, logs)
   end
 end
 
-local function run_department_with_logs(t, root, path, event, opts)
+local function run_department_with_logs(t, department, event, opts)
   local config = opts or {}
   local run_opts = config.run_opts or opts
-  local result = t.run_department(path, event, run_opts)
+  local result = t.run_department(department.path, event, run_opts)
   t.is_true(type(result) == "table")
 
   local captured = {}
@@ -132,10 +129,13 @@ local function run_department_with_logs(t, root, path, event, opts)
   local old_pipeline = pipeline
   local ok, err = pcall(function()
     if type(config.before_replay) == "function" then
-      cleanup = config.before_replay(path, event)
+      cleanup = config.before_replay(department.path, event)
     end
-    dofile(root .. "/" .. path)
-    pipeline(event)
+    local run = department.pipeline
+    if type(run) ~= "function" then
+      error("namespaced-dispatch: department pipeline missing for " .. tostring(department.path))
+    end
+    run(event)
   end)
   pipeline = old_pipeline
   log = old_log
@@ -159,13 +159,18 @@ end
 function C.assert_all_consumed_queues_route(config)
   local t = assert(config.t, "namespaced-dispatch: missing fkst.test handle")
   local package_name = assert(config.package_name, "namespaced-dispatch: missing package_name")
-  local root = config.package_root or package_root_from_test(assert(config.test_module_name, "namespaced-dispatch: missing test_module_name"))
+  local root = assert(config.package_root, "namespaced-dispatch: missing package_root")
+  local departments = assert(config.departments, "namespaced-dispatch: missing departments")
   local payload_for_queue = assert(config.payload_for_queue, "namespaced-dispatch: missing payload_for_queue")
   local opts_for_case = config.opts_for_case
 
   for _, path in ipairs(department_paths(root)) do
-    local spec = load_department_spec(root, path)
-    for _, queue in ipairs(spec.consumes or {}) do
+    local module = departments[path]
+    if module == nil then
+      error("namespaced-dispatch: missing loaded department for " .. tostring(path))
+    end
+    local department = normalize_department(path, module)
+    for _, queue in ipairs(department.spec.consumes or {}) do
       local event = {
         queue = production_queue_name(package_name, queue),
         payload = payload_for_queue(path, queue),
@@ -174,7 +179,7 @@ function C.assert_all_consumed_queues_route(config)
       if type(opts_for_case) == "function" then
         opts = opts_for_case(path, queue, event)
       end
-      local _ok, err, logs, activity = run_department_with_logs(t, root, path, event, opts)
+      local _ok, err, logs, activity = run_department_with_logs(t, department, event, opts)
       assert_no_fallthrough(package_name, path, queue, err, logs)
       if activity == 0 then
         error(

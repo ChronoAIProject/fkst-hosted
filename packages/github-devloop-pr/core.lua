@@ -1,4 +1,5 @@
 local M = {}
+local wiring = require("core.devloop_wiring")
 
 function M.persistence_class()
   return "saga"
@@ -48,26 +49,22 @@ M.restart_lifecycle_states = {
   "closed-unmerged",
   "merged",
 }
-M.restart_marker_fields_index = "core.restart.marker_fields.index"
-M.restart_replay_payload_fields_index = "core.restart.required_replay_payload_fields.index"
-M.restart_transitions_index = "core.restart.transitions.index"
-M.restart_liveness_signal_producers_index = "core.restart.liveness_signal_producers.index"
 M.restart_source_root = "packages/github-devloop-pr/"
 M.restart_consumer_sources = {
   "packages/github-devloop-pr/departments/observe_pr/main.lua",
   "packages/github-devloop-pr/departments/merge/main.lua",
 }
-require("std.devloop_restart").install(M)
+require("std.devloop_restart").install(M, wiring.restart(M))
 require("std.devloop_restart_liveness_contract").install(M)
 require("std.devloop_restart_responsibility_contract").install(M)
 require("std.devloop_restart_actionable_epoch").install(M)
 require("core.review_redrive").install(M)
 require("core.pr_review_replayer").install(M)
 require("std.devloop_replayer").install(M)
-require("std.devloop_liveness").install(M)
+require("std.devloop_liveness").install(M, wiring.liveness(M))
 require("std.devloop_sweep_bounds").install(M)
 require("std.devloop_liveness_scan").install(M)
-require("std.devloop_prompts").install(M)
+require("std.devloop_prompts").install(M, wiring.prompts())
 require("std.devloop_requests").install(M)
 require("core.pr_label_requests").install(M)
 require("core.review_meta_requests").install(M)

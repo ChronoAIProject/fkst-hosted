@@ -1,0 +1,8 @@
+kind = "package"
+name = "consensus"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["std"]

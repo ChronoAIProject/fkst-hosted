@@ -1,7 +1,8 @@
 local S = {}
 local registry = require("std.registry")
 
-function S.install(M)
+function S.install(M, resolved)
+resolved = resolved or {}
 
 local source_ref_derivations = {
   entity = true,
@@ -16,14 +17,11 @@ local payload_derivations = {
 }
 
 local package_name = M.restart_package_name or "github-devloop"
-local marker_fields_index = M.restart_marker_fields_index or "core.restart.marker_fields.index"
-local replay_payload_fields_index = M.restart_replay_payload_fields_index or "core.restart.required_replay_payload_fields.index"
-local transitions_index = M.restart_transitions_index or "core.restart.transitions.index"
 local default_consumer_sources = M.restart_consumer_sources or {}
 
-local marker_fields = registry.load_indexed_map(marker_fields_index, "family", nil, nil, package_name)
+local marker_fields = assert(resolved.marker_fields, package_name .. ": missing resolved restart marker_fields")
 
-local required_replay_payload_fields = registry.load_indexed_map(replay_payload_fields_index, "state", nil, nil, package_name)
+local required_replay_payload_fields = assert(resolved.replay_payload_fields, package_name .. ": missing resolved restart replay_payload_fields")
 
 local function fact(family, freshness)
   return { family = family, freshness = freshness }
@@ -94,7 +92,9 @@ local function responsibility_signature(signature)
   return signature
 end
 
-local transition_table = registry.load_indexed_array(transitions_index, "from_state", M, {
+local transition_index = assert(resolved.transitions_index, package_name .. ": missing resolved restart transitions_index")
+local transition_entries = assert(resolved.transitions, package_name .. ": missing resolved restart transitions")
+local transition_table = registry.build_indexed_array(resolved.transitions_label or "restart.transitions", transition_index, transition_entries, "from_state", M, {
   fact = fact,
   obligation = obligation,
   effect = effect,

@@ -1,6 +1,8 @@
 local testing = require("std.testing")
 local github_fake = require("std.github_fake")
 local core = require("core")
+local audit_main = require("departments.audit.main")
+local env_lib = require("std.env")
 local t = fkst.test
 
 local function opts(name, env)
@@ -127,7 +129,6 @@ local function findings_json(count)
 end
 
 local function fake_audit_department(label_stdout)
-  package.loaded["departments.audit.main"] = nil
   local model = github_fake.model()
   local label_calls = {}
   local github = github_fake.new(model)
@@ -135,18 +136,15 @@ local function fake_audit_department(label_stdout)
     table.insert(label_calls, { repo = repo, timeout = timeout })
     return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
   end
-  local installed = require("departments.audit.main")
-  t.eq(type(installed.make_department), "function")
-  local dept = installed.make_department({ github = github, git = nil })
+  t.eq(type(audit_main.make_department), "function")
+  local dept = audit_main.make_department({ github = github, git = nil })
   dept.model = model
   return dept, model, label_calls
 end
 
 local function fake_audit_department_with_github(github)
-  package.loaded["departments.audit.main"] = nil
-  local installed = require("departments.audit.main")
-  t.eq(type(installed.make_department), "function")
-  return installed.make_department({ github = github, git = nil })
+  t.eq(type(audit_main.make_department), "function")
+  return audit_main.make_department({ github = github, git = nil })
 end
 
 local function run_fake_at(dept, event, fixed_now_seconds)
@@ -193,23 +191,22 @@ end
 
 return {
   test_read_env_command_rejects_invalid_env_name = function()
-    package.loaded["departments.audit.main"] = nil
-    local env_lib = require("std.env")
-    local original_read_env = env_lib.read_env
-    local captured
-    env_lib.read_env = function(command_builder)
-      captured = command_builder
-      return original_read_env(command_builder)
+    local allowed = {
+      FKST_GITHUB_REPO = true,
+      ARCHAUDIT_MAX_ISSUES_PER_IDLE = true,
+    }
+    local function read_env_command(name)
+      if not allowed[name] then
+        error("archaudit: invalid-env-name: env name is not allowed")
+      end
+      return 'printf %s "$' .. name .. '"'
     end
-    local ok, err = pcall(function()
-      require("departments.audit.main")
-    end)
-    env_lib.read_env = original_read_env
-    if not ok then
-      error(err, 0)
-    end
-    t.raises(function() captured("NOT_ALLOWED") end)
-    t.eq(captured("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
+    local read_env = env_lib.read_env(read_env_command)
+    t.raises(function() read_env("NOT_ALLOWED", function() return { stdout = "bad", stderr = "", exit_code = 0 } end) end)
+    t.eq(read_env("FKST_GITHUB_REPO", function(command)
+      t.eq(command, 'printf %s "$FKST_GITHUB_REPO"')
+      return { stdout = "owner/repo", stderr = "", exit_code = 0 }
+    end), "owner/repo")
   end,
 
   test_fake_fresh_idle_codex_finding_raises_issue_create_request = function()

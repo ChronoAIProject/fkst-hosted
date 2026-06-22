@@ -4,11 +4,6 @@ local core = h.core
 local run_id = tostring({}):gsub("[^%w._-]", "_")
 local runtime_roots = {}
 
-local function package_root()
-  local source = package.searchpath("tests.dead_letter_test", package.path)
-  return source:match("(.+)/tests/dead_letter_test%.lua$")
-end
-
 local function run_opts(name)
   if runtime_roots[name] == nil then
     runtime_roots[name] = "/tmp/fkst-packages-test/github-devloop/dead-letter-" .. run_id .. "/" .. tostring(name)
@@ -40,8 +35,14 @@ local function capture_logs(event)
   }
 
   local ok, result = pcall(function()
-    dofile(package_root() .. "/departments/dead_letter/main.lua")
-    pipeline(event)
+    local old_pipeline = pipeline
+    local module = require("departments.dead_letter.main")
+    local run = module.pipeline or pipeline
+    pipeline = old_pipeline
+    if type(run) ~= "function" then
+      error("github-devloop: dead-letter department pipeline missing")
+    end
+    run(event)
   end)
 
   log = old_log

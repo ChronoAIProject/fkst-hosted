@@ -1,6 +1,17 @@
 local conformance = require("std.namespaced_dispatch_conformance")
 local t = fkst.test
 
+local function load_department(path, module_name)
+  local old_pipeline = pipeline
+  local module = require(module_name)
+  pipeline = old_pipeline
+  return { path = path, module = module }
+end
+
+local departments = conformance.loaded_departments({
+  load_department("departments/external_pr_intake/main.lua", "departments.external_pr_intake.main"),
+})
+
 local function payload_for_queue(_path, queue)
   local payloads = {
     external_pr_scan = {
@@ -30,7 +41,8 @@ return {
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "github-external-pr-intake",
-      test_module_name = "tests.namespaced_dispatch_conformance_test",
+      package_root = "packages/github-external-pr-intake",
+      departments = departments,
       payload_for_queue = payload_for_queue,
     })
   end,

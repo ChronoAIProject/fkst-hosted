@@ -1,4 +1,5 @@
 local M = {}
+local wiring = require("core.devloop_wiring")
 
 function M.persistence_class()
   return "saga"
@@ -23,7 +24,7 @@ require("std.devloop_markers").install(M)
 require("std.devloop_payloads").install(M)
 require("std.devloop_convergence").install(M)
 require("std.devloop_decompose").install(M)
-require("std.devloop_prompts").install(M)
+require("std.devloop_prompts").install(M, wiring.prompts())
 require("std.devloop_entity").install(M)
 require("std.devloop_validators").install(M)
 require("std.devloop_context_bundle").install(M)

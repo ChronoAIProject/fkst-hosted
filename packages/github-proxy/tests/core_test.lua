@@ -24,10 +24,7 @@ local function mock_command(command, response)
   end
 end
 
-local function package_root()
-  local source = package.searchpath("tests.core_test", package.path)
-  return source:match("(.+)/tests/core_test%.lua$")
-end
+local package_root = "packages/github-proxy"
 
 local function read_file(path)
   local handle = assert(io.open(path, "r"))
@@ -287,7 +284,7 @@ return {
   end,
 
   test_core_shared_helper_surface_is_the_narrowest_owner_boundary = function()
-    local root = package_root()
+    local root = package_root
     local source = read_file(root .. "/core.lua")
 
     t.eq(count_literal(source, "M.strip_bot_login_suffix = strings.strip_bot_login_suffix"), 1)
