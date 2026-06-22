@@ -201,7 +201,7 @@ local function blocker_merged(repo, blocker_number)
 
   local link = core.pr_link_fact(current.comments, blocker_proposal_id)
   if link == nil then
-    return false, nil
+    return core.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)
   end
 
   local pr_result = core.gh_pr_view_observe(repo, link.pr_number, 30)
@@ -664,6 +664,51 @@ function M.dependency_wait_fact(comments, proposal_id)
     end
   end
   return nil
+end
+
+function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)
+  local core = root()
+  if type(state) ~= "table" or state.version == nil then
+    return false, nil
+  end
+  if not core.reached(current and current.comments, blocker_proposal_id, "awaiting-pr", {
+    lineage_base = state.version,
+  }) then
+    return false, nil
+  end
+  local delegation = core.pr_delegation_fact(current.comments, blocker_proposal_id, state.version)
+  if delegation == nil then
+    return false, nil
+  end
+  local pr_repo, pr_number = core.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
+  if tostring(pr_repo or "") ~= tostring(repo)
+    or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
+    return nil, "pr-delegation-mismatch"
+  end
+
+  local pr_result = core.gh_pr_view_observe(repo, delegation.pr_number, 30)
+  if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
+    return nil, "gh-pr-failed"
+  end
+  local pr_ok, pr_current = pcall(core.parse_pr_view_origin, pr_result.stdout)
+  if not pr_ok or type(pr_current) ~= "table" then
+    return nil, "malformed-pr-json"
+  end
+  local origin = core.pr_origin_fact(pr_current.comments)
+  if origin == nil
+    or tostring(origin.proposal_id or "") ~= blocker_proposal_id
+    or tostring(origin.repo or "") ~= tostring(repo)
+    or tostring(origin.issue_number or "") ~= tostring(blocker_number)
+    or tostring(origin.impl_version or "") ~= tostring(delegation.version or "") then
+    return nil, "pr-origin-mismatch"
+  end
+  if not core.reached(pr_current.comments, blocker_proposal_id, "merged", {
+    lineage_base = delegation.version,
+  }) then
+    return false, nil
+  end
+  local merged = core.merged_fact(pr_current.comments, blocker_proposal_id, delegation.pr_number, delegation.version)
+  return merged ~= nil, nil
 end
 
 function M.install(root_module)
