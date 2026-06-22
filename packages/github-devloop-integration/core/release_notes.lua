@@ -113,7 +113,7 @@ function M.release_notes_publish_policy(cfg)
 end
 
 function M.gh_pr_create_body_cmd(repo, head, base, title, body)
-  error("github-devloop: release notes PR create uses std.github adapter")
+  error("github-devloop: release notes PR create uses forge.github adapter")
 end
 
 function M.gh_pr_create_body(repo, head, base, title, body, timeout)
@@ -130,7 +130,7 @@ function M.gh_pr_create_body(repo, head, base, title, body, timeout)
     dedup_key = tostring(head) .. "->" .. tostring(base),
   })
   local ok, result_or_error = pcall(function()
-    return require("std.github").new(exec_argv).pr_create_body(repo, head, base, title, normalized_body, timeout or 60)
+    return require("forge.github").new(exec_argv).pr_create_body(repo, head, base, title, normalized_body, timeout or 60)
   end)
   if ok then
     return result_or_error

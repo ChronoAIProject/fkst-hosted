@@ -2,7 +2,7 @@ local S = {}
 
 function S.install(M)
 local strings = require("contract.strings")
-local github_view = require("std.github_view")
+local github_view = require("forge.github_view")
 local label_names = github_view.label_names
 
 local function each_paginated_item(decoded, callback)

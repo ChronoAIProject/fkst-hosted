@@ -1,7 +1,7 @@
-local github = require("std.github")
-local github_fake = require("std.github_fake")
-local git = require("std.git")
-local git_fake = require("std.git_fake")
+local github = require("forge.github")
+local github_fake = require("forge.github_fake")
+local git = require("forge.git")
+local git_fake = require("forge.git_fake")
 
 local function sorted_public_methods(handle)
   local names = {}
@@ -81,12 +81,12 @@ return {
     assert_list_equal(
       sorted_public_methods(github.new(noop_exec)),
       sorted_public_methods(github_fake.new(github_fake.model({}))),
-      "std.github methods"
+      "forge.github methods"
     )
     assert_list_equal(
       sorted_public_methods(git.new(noop_exec)),
       sorted_public_methods(git_fake.new(git_fake.model({}))),
-      "std.git methods"
+      "forge.git methods"
     )
   end,
 }

@@ -24,7 +24,7 @@ end
 
 local function comment_update_argv(repo, comment_id, body_file)
   if comment_id == nil or tostring(comment_id) == "" then
-    error("std.github.comments: invalid comment id")
+    error("forge.github.comments: invalid comment id")
   end
   return {
     "gh",
@@ -39,7 +39,7 @@ end
 
 local function comment_get_argv(repo, comment_id)
   if comment_id == nil or tostring(comment_id) == "" then
-    error("std.github.comments: invalid comment id")
+    error("forge.github.comments: invalid comment id")
   end
   return {
     "gh",

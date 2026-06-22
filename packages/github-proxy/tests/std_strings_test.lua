@@ -2,6 +2,7 @@
 -- the strictest single-root conformance gate) because the engine test runner
 -- only scans package tests and department tests.
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 local t = fkst.test
 
 return {
@@ -11,43 +12,43 @@ return {
   end,
 
   test_strip_bot_login_suffix_normalizes_app_author_logins = function()
-    t.eq(strings.strip_bot_login_suffix("fkst-test-bot[bot]"), "fkst-test-bot")
-    t.eq(strings.strip_bot_login_suffix("fkst-test-bot"), "fkst-test-bot")
-    t.eq(strings.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
-    t.is_nil(strings.strip_bot_login_suffix(nil))
+    t.eq(forge_strings.strip_bot_login_suffix("fkst-test-bot[bot]"), "fkst-test-bot")
+    t.eq(forge_strings.strip_bot_login_suffix("fkst-test-bot"), "fkst-test-bot")
+    t.eq(forge_strings.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
+    t.is_nil(forge_strings.strip_bot_login_suffix(nil))
   end,
 
   test_split_repo_accepts_single_owner_name_separator = function()
-    local owner, name = strings.split_repo("owner/repo")
+    local owner, name = forge_strings.split_repo("owner/repo")
     t.eq(owner, "owner")
     t.eq(name, "repo")
   end,
 
   test_split_repo_rejects_missing_or_extra_separator = function()
-    local owner, name = strings.split_repo("owner")
+    local owner, name = forge_strings.split_repo("owner")
     t.is_nil(owner)
     t.is_nil(name)
 
-    owner, name = strings.split_repo("owner/repo/extra")
+    owner, name = forge_strings.split_repo("owner/repo/extra")
     t.is_nil(owner)
     t.is_nil(name)
 
-    owner, name = strings.split_repo(nil)
+    owner, name = forge_strings.split_repo(nil)
     t.is_nil(owner)
     t.is_nil(name)
   end,
 
   test_comment_body_normalizes_table_string_and_nil = function()
-    t.eq(strings.comment_body({ body = "hello" }), "hello")
-    t.eq(strings.comment_body({ body = nil }), "")
-    t.eq(strings.comment_body("plain"), "plain")
-    t.eq(strings.comment_body(nil), "")
+    t.eq(forge_strings.comment_body({ body = "hello" }), "hello")
+    t.eq(forge_strings.comment_body({ body = nil }), "")
+    t.eq(forge_strings.comment_body("plain"), "plain")
+    t.eq(forge_strings.comment_body(nil), "")
   end,
 
   test_empty_string_helpers_return_empty = function()
     t.eq(strings.trim(""), "")
-    t.eq(strings.strip_bot_login_suffix(""), "")
-    t.eq(strings.comment_body(""), "")
+    t.eq(forge_strings.strip_bot_login_suffix(""), "")
+    t.eq(forge_strings.comment_body(""), "")
   end,
 
   test_json_string_wraps_and_escapes_json_string_boundaries = function()
@@ -81,15 +82,22 @@ return {
   end,
 
   test_git_ref_safe_rejects_unsafe_boundaries_and_accepts_normal_ref = function()
-    t.is_true(strings.is_git_ref_safe("feat/x"))
-    t.eq(strings.is_git_ref_safe("-feat/x"), false)
-    t.eq(strings.is_git_ref_safe("/feat/x"), false)
-    t.eq(strings.is_git_ref_safe("feat/../x"), false)
-    t.eq(strings.is_git_ref_safe("feat//x"), false)
-    t.eq(strings.is_git_ref_safe("feat/@{x"), false)
-    t.eq(strings.is_git_ref_safe("feat/x/"), false)
-    t.eq(strings.is_git_ref_safe("feat/x."), false)
-    t.eq(strings.is_git_ref_safe(("a"):rep(161)), false)
+    t.is_true(forge_strings.is_git_ref_safe("feat/x"))
+    t.eq(forge_strings.is_git_ref_safe("-feat/x"), false)
+    t.eq(forge_strings.is_git_ref_safe("/feat/x"), false)
+    t.eq(forge_strings.is_git_ref_safe("feat/../x"), false)
+    t.eq(forge_strings.is_git_ref_safe("feat//x"), false)
+    t.eq(forge_strings.is_git_ref_safe("feat/@{x"), false)
+    t.eq(forge_strings.is_git_ref_safe("feat/x/"), false)
+    t.eq(forge_strings.is_git_ref_safe("feat/x."), false)
+    t.eq(forge_strings.is_git_ref_safe(("a"):rep(161)), false)
+  end,
+
+  test_contract_strings_excludes_forge_specific_helpers = function()
+    t.is_nil(strings.strip_bot_login_suffix)
+    t.is_nil(strings.split_repo)
+    t.is_nil(strings.comment_body)
+    t.is_nil(strings.is_git_ref_safe)
   end,
 
   test_decimal_checksum_matches_existing_package_algorithm = function()

@@ -93,17 +93,19 @@ split stable local responsibilities into files beside `main.lua`, such as
 `require("departments.<department>.<module>")`. Packages do not cross-require sibling package code;
 cross-package composition goes through event queues.
 
-Shared repo-root code is split by library boundary. Pure substrate-facing helpers live in
-`libraries/contract/` and are declared as the workspace library `contract`; forge-facing GitHub,
-git, ports, fakes, and debug helpers remain in `std/` and are declared as the workspace library
-`std`. Packages declare direct `lib_deps` such as `["contract"]`, `["std", "contract"]`, or
-`["std", "devloop", "contract"]` in their `fkst.toml`; the engine's scoped resolver grants access
-to public modules from those manifest dependencies rather than from per-package filesystem symlinks.
-Current `contract.*` modules cover saga/oracle helpers, payload/source-ref helpers, registry,
-strings, testing, and error-fact helpers. New and migrated `gh`/`git` access goes through
-`std.github`/`std.git` (production wiring via `std.ports`); remaining raw call sites are migration
-debt in `migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet shrinks. Tests use
-`contract.testing` with `std.github_fake` / `std.git_fake`.
+Shared repo-root code is split by positive library boundary. `libraries/contract/` contains only
+publishable value/protocol primitives (`contract.source_ref`, `contract.payload`,
+`contract.error_facts`, and scalar `contract.strings`). Runtime orchestration helpers live in
+`libraries/workflow/`, test and conformance tooling in `libraries/testkit/`, forge-facing GitHub/Git
+adapters in `libraries/forge/`, and the github-devloop product kernel in `libraries/devloop/`.
+Packages declare direct `lib_deps` such as `["contract", "workflow", "testkit"]`,
+`["contract", "workflow", "testkit", "forge"]`, or
+`["contract", "workflow", "testkit", "forge", "devloop"]` in their `fkst.toml`; the engine's scoped
+resolver grants access to modules from those manifest dependencies rather than from per-package
+filesystem symlinks. New and migrated `gh`/`git` access goes through `forge.github`/`forge.git`
+(production wiring via `forge.ports`); remaining raw call sites are migration debt in
+`migration/gh-git-adapter.allowlist` that the G-ADAPTER ratchet shrinks. Tests use
+`testkit.testing` with `forge.github_fake` / `forge.git_fake`.
 
 Runtime package roots live only under `.fkst/`. In this library repository, `.fkst/local-packages`
 is a regenerated relative symlink to `packages/` and represents this repo's own packages.
@@ -180,10 +182,11 @@ under `packages/` and `scripts/`; package test naming rules; helper reachability
 selected repository-shape checks. Engine tests remain the authority for real package behavior.
 
 Repository-shape guards include G9, which forbids peer cross-package `require` and keeps sharing on
-workspace libraries; G10, which shrinks the saga-handler allowlist toward `contract.saga.department`; and G-ADAPTER,
-which shrinks the `gh`/`git` command-construction allowlist toward `std.github` / `std.git`.
-Ports-using `gh`/`git` business tests use injected fakes through `contract.testing`; existing/adapter-contract
-tests may still use `fkst.test.mock_command` while the migration proceeds. Other external CLIs such
+workspace libraries; G10, which shrinks the saga-handler allowlist toward `workflow.saga.department`;
+G-LIB-DEP, which locks the library dependency DAG and contract publishable surface; and G-ADAPTER,
+which shrinks the `gh`/`git` command-construction allowlist toward `forge.github` / `forge.git`.
+Ports-using `gh`/`git` business tests use injected fakes through `testkit.testing`;
+existing/adapter-contract tests may still use `fkst.test.mock_command` while the migration proceeds. Other external CLIs such
 as `codex` still use the engine command mock; no fake `gh`/`git`/`codex` binaries are generated,
 and unmocked external commands fail closed.
 
@@ -214,7 +217,8 @@ need host-stable runtime, durable, and rate-pool roots:
 - [`docs/dev/scaffold-install-upgrade-design.md`](docs/dev/scaffold-install-upgrade-design.md):
   scaffold install, upgrade, and package-reference update design.
 - [`docs/superpowers/specs/2026-06-15-ports-adapters-design.md`](docs/superpowers/specs/2026-06-15-ports-adapters-design.md):
-  deeper ports/adapters rationale for `std.github`, `std.git`, port wiring, and fake-port tests.
+  historical ports/adapters rationale, now implemented through `forge.github`, `forge.git`, port
+  wiring, and fake-port tests.
 
 The authoritative engine-package contract lives in `fkst-substrate` at
 `docs/package-repo-contract.md`.

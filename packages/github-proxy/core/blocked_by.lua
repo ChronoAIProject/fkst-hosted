@@ -3,6 +3,7 @@ local S = {}
 function S.install(M, deps)
 local shared = deps or M
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 local max_dedup_len = 512
 local max_repo_len = 200
 
@@ -43,7 +44,7 @@ function M.validate_issue_blocked_by_payload(payload)
   if payload.schema ~= "github-proxy.issue-blocked-by.v1" then
     return false
   end
-  if not strings.is_bounded_string(payload.repo, max_repo_len) or strings.split_repo(payload.repo) == nil then
+  if not strings.is_bounded_string(payload.repo, max_repo_len) or forge_strings.split_repo(payload.repo) == nil then
     return false
   end
   if not shared.is_positive_integer(payload.blocked_issue_number)
@@ -87,7 +88,7 @@ function M.parse_issue_node_id(stdout)
 end
 
 function M.gh_issue_blocked_by_cmd(repo, issue_number)
-  local owner, name = strings.split_repo(repo)
+  local owner, name = forge_strings.split_repo(repo)
   if owner == nil or not shared.is_positive_integer(issue_number) then
     error("github-proxy: invalid blockedBy query target")
   end

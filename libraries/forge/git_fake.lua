@@ -19,7 +19,7 @@ function M.model(seed)
 end
 
 function M.new(model)
-  assert(type(model) == "table", "std.git_fake.new requires a model")
+  assert(type(model) == "table", "forge.git_fake.new requires a model")
   local handle = { _model = model }
   function handle._exec(argv, timeout, context)
     table.insert(model.writes, {
@@ -30,7 +30,7 @@ function M.new(model)
     })
     return { stdout = "", stderr = "", exit_code = 0 }
   end
-  require("std.git.refs").install(handle)
+  require("forge.git.refs").install(handle)
   return handle
 end
 

@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
-local saga_conformance = require("contract.saga_conformance")
+local saga_conformance = require("testkit.saga_conformance")
+local forge_saga_conformance = require("forge.saga_conformance")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -214,6 +215,7 @@ return {
   test_123_decompose_saga_progress_and_idempotency = function()
     local event = h.decompose_event()
     saga_conformance.assert_progress(t, {
+      is_write_class = forge_saga_conformance.is_write_class,
       first = function()
         mock_first_delivery(event)
         return run_decompose(event, "decompose-saga-progress")
@@ -221,6 +223,7 @@ return {
     })
 
     saga_conformance.assert_idempotent(t, {
+      is_write_class = forge_saga_conformance.is_write_class,
       first = function()
         mock_first_delivery(event)
         local result = run_decompose(event, "decompose-saga-first")

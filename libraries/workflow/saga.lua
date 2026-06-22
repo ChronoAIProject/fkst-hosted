@@ -1,4 +1,4 @@
--- contract.saga: shared department shape for event-level idempotent sagas.
+-- workflow.saga: shared department shape for event-level idempotent sagas.
 -- Contract: done(event) must be cheap, side-effect-free, and re-derived from
 -- the durable fact source. It may cache immutable event decoding, but it must
 -- never cache mutable durable facts for act(event).
@@ -15,26 +15,26 @@ end
 
 local function validate_consumes(consumes)
   if type(consumes) ~= "table" or #consumes == 0 then
-    error("contract.saga: department requires non-empty consumes")
+    error("workflow.saga: department requires non-empty consumes")
   end
 end
 
 local function validate_spec(spec)
   if type(spec) ~= "table" then
-    error("contract.saga: department requires spec")
+    error("workflow.saga: department requires spec")
   end
   validate_consumes(spec.consumes)
 end
 
 local function validate_handlers(handlers)
   if type(handlers) ~= "table" then
-    error("contract.saga: department requires handlers")
+    error("workflow.saga: department requires handlers")
   end
   if type(handlers.done) ~= "function" then
-    error("contract.saga: department requires done")
+    error("workflow.saga: department requires done")
   end
   if type(handlers.act) ~= "function" then
-    error("contract.saga: department requires act")
+    error("workflow.saga: department requires act")
   end
 end
 
@@ -71,7 +71,7 @@ function S.department(spec, handlers)
     return handlers.act(event)
   end
 
-  local name = handlers.name or "contract.saga"
+  local name = handlers.name or "workflow.saga"
   local wrapped = raw
   if type(handlers.wrap) == "function" then
     wrapped = handlers.wrap(name, raw)

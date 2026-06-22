@@ -1,7 +1,8 @@
-local env = require("contract.env")
+local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
-local logging = require("contract.logging")
+local logging = require("workflow.logging")
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 
 local M = {}
 
@@ -29,7 +30,7 @@ end
 
 M.read_env = env.read_env(read_env_command)
 
-M.strip_bot_login_suffix = strings.strip_bot_login_suffix
+M.strip_bot_login_suffix = forge_strings.strip_bot_login_suffix
 
 function M.iso_timestamp_epoch_seconds(timestamp)
   local year, month, day, hour, minute, second = tostring(timestamp or ""):match(

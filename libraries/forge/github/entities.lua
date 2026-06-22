@@ -1,5 +1,5 @@
 local M = {}
-local shell = require("std.github.shell")
+local shell = require("forge.github.shell")
 
 local function repo_owner(repo)
   return tostring(repo or ""):match("^([^/]+)/")
@@ -305,7 +305,7 @@ function M.install(handle)
   function handle.issue_list_recent_closed(repo, limit, timeout)
     local bounded_limit = tonumber(limit or 30)
     if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
-      error("std.github.entities: invalid closed issue list limit")
+      error("forge.github.entities: invalid closed issue list limit")
     end
     return handle.issue_list_cli(repo, "closed", math.floor(bounded_limit), "number,title,closedAt,labels", timeout)
   end

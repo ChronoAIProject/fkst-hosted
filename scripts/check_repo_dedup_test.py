@@ -174,7 +174,7 @@ class DedupRatchetTest(unittest.TestCase):
                 "packages/one/tests/core_test.lua",
                 "packages/two/helper_helpers.lua",
                 "packages/two/github_fake.lua",
-                "std/example.lua",
+                "libraries/forge/example.lua",
             ):
                 path = root / relpath
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,7 +182,7 @@ class DedupRatchetTest(unittest.TestCase):
 
             sources = dedup.sources(root, root / "packages", check_repo.read_text, check_repo.rel)
 
-        self.assertEqual(set(sources), {"packages/one/core.lua", "std/example.lua"})
+        self.assertEqual(set(sources), {"packages/one/core.lua", "libraries/forge/example.lua"})
 
     def test_check_repo_wrapper_loads_allowlist_and_prefixes_violations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

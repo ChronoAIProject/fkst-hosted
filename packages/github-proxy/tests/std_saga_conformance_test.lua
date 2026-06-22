@@ -1,4 +1,5 @@
-local conformance = require("contract.saga_conformance")
+local conformance = require("testkit.saga_conformance")
+local forge_conformance = require("forge.saga_conformance")
 local t = fkst.test
 
 local function run_write()
@@ -77,40 +78,40 @@ return {
   end,
 
   test_write_class_classifier_is_explicit = function()
-    t.eq(conformance.is_write_class({ argv = { "gh", "issue", "comment", "42", "--repo", "owner/x" } }), true)
-    t.eq(conformance.is_write_class({ argv = { "gh", "issue", "view", "42", "--repo", "owner/x" } }), false)
-    t.eq(conformance.is_write_class({
+    t.eq(forge_conformance.is_write_class({ argv = { "gh", "issue", "comment", "42", "--repo", "owner/x" } }), true)
+    t.eq(forge_conformance.is_write_class({ argv = { "gh", "issue", "view", "42", "--repo", "owner/x" } }), false)
+    t.eq(forge_conformance.is_write_class({
       argv = { "gh", "api", "graphql" },
       stdin = "mutation { addLabelsToLabelable(input: {}) { clientMutationId } }",
     }), true)
-    t.eq(conformance.is_write_class({
+    t.eq(forge_conformance.is_write_class({
       argv = { "gh", "api", "graphql" },
       stdin = "query { viewer { login } }",
     }), false)
-    t.eq(conformance.is_write_class({ argv = { "git", "-C", "/tmp/std-saga-worktree", "push", "origin", "HEAD:branch" } }), true)
-    t.eq(conformance.is_write_class({ argv = { "git", "-C", "/tmp/std-saga-worktree", "status", "--short" } }), false)
-    t.eq(conformance.is_write_class("gh issue comment 42 --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh issue reopen '42' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh pr merge '7' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh pr close '7' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh pr ready '7' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh pr reopen '7' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh label create 'fkst-dev:ready' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("gh workflow run 'ci.yml' --repo owner/x"), true)
-    t.eq(conformance.is_write_class("git push origin HEAD:branch"), true)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' push origin HEAD:branch"), true)
-    t.eq(conformance.is_write_class("gh api --method POST repos/owner/x/issues/42/comments"), true)
-    t.eq(conformance.is_write_class("gh api graphql\nmutation { addLabelsToLabelable(input: {}) { clientMutationId } }"), true)
-    t.eq(conformance.is_write_class("gh issue view '42' --repo owner/x"), false)
-    t.eq(conformance.is_write_class("gh pr diff '7' --repo owner/x"), false)
-    t.eq(conformance.is_write_class("gh api repos/owner/x/issues/42"), false)
-    t.eq(conformance.is_write_class("gh api graphql\nquery { viewer { login } }"), false)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' log --oneline"), false)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' show HEAD"), false)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' rev-parse HEAD"), false)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' status --short"), false)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' diff --stat"), false)
-    t.eq(conformance.is_write_class("git -C '/tmp/std-saga-worktree' cat-file -t HEAD"), false)
+    t.eq(forge_conformance.is_write_class({ argv = { "git", "-C", "/tmp/std-saga-worktree", "push", "origin", "HEAD:branch" } }), true)
+    t.eq(forge_conformance.is_write_class({ argv = { "git", "-C", "/tmp/std-saga-worktree", "status", "--short" } }), false)
+    t.eq(forge_conformance.is_write_class("gh issue comment 42 --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh issue reopen '42' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh pr merge '7' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh pr close '7' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh pr ready '7' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh pr reopen '7' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh label create 'fkst-dev:ready' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh workflow run 'ci.yml' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("git push origin HEAD:branch"), true)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' push origin HEAD:branch"), true)
+    t.eq(forge_conformance.is_write_class("gh api --method POST repos/owner/x/issues/42/comments"), true)
+    t.eq(forge_conformance.is_write_class("gh api graphql\nmutation { addLabelsToLabelable(input: {}) { clientMutationId } }"), true)
+    t.eq(forge_conformance.is_write_class("gh issue view '42' --repo owner/x"), false)
+    t.eq(forge_conformance.is_write_class("gh pr diff '7' --repo owner/x"), false)
+    t.eq(forge_conformance.is_write_class("gh api repos/owner/x/issues/42"), false)
+    t.eq(forge_conformance.is_write_class("gh api graphql\nquery { viewer { login } }"), false)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' log --oneline"), false)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' show HEAD"), false)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' rev-parse HEAD"), false)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' status --short"), false)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' diff --stat"), false)
+    t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' cat-file -t HEAD"), false)
   end,
 
   test_assert_progress_passes_when_first_writes = function()
@@ -122,6 +123,7 @@ return {
 
     conformance.assert_progress(t, {
       first = run_write,
+      is_write_class = forge_conformance.is_write_class,
     })
   end,
 
@@ -135,6 +137,7 @@ return {
     t.raises(function()
       conformance.assert_progress(t, {
         first = run_read,
+        is_write_class = forge_conformance.is_write_class,
       })
     end)
   end,
@@ -154,6 +157,7 @@ return {
     conformance.assert_idempotent(t, {
       first = run_write,
       second = run_read,
+      is_write_class = forge_conformance.is_write_class,
     })
   end,
 
@@ -173,6 +177,7 @@ return {
       conformance.assert_idempotent(t, {
         first = run_write,
         second = run_write,
+        is_write_class = forge_conformance.is_write_class,
       })
     end)
     t.eq(ok, false)
@@ -192,6 +197,7 @@ return {
         second = function()
           error("replay exploded before write")
         end,
+        is_write_class = forge_conformance.is_write_class,
       })
     end)
 
@@ -207,6 +213,7 @@ return {
         second = function()
           error("replay exploded before write")
         end,
+        is_write_class = forge_conformance.is_write_class,
       })
     end)
     t.eq(ok, false)
@@ -229,6 +236,7 @@ return {
       conformance.assert_idempotent(t, {
         first = run_write,
         second = run_git_push,
+        is_write_class = forge_conformance.is_write_class,
       })
     end)
     t.eq(ok, false)

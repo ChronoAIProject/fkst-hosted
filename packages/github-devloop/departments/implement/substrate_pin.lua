@@ -1,5 +1,5 @@
 local core = require("core")
-local git_adapter = require("std.git")
+local git_adapter = require("forge.git")
 
 local M = {}
 

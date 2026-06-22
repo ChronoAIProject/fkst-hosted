@@ -74,9 +74,9 @@ def sources(root: Path, packages: Path, read_text, rel) -> dict[str, str]:
     paths: list[Path] = []
     if packages.exists():
         paths.extend(path for path in sorted(packages.rglob("*.lua")) if path.is_file())
-    std = root / "std"
-    if std.exists():
-        paths.extend(path for path in sorted(std.rglob("*.lua")) if path.is_file())
+    forge = root / "libraries" / "forge"
+    if forge.exists():
+        paths.extend(path for path in sorted(forge.rglob("*.lua")) if path.is_file())
     return {rel(root, path): read_text(path) for path in paths if is_production_lua_path(path)}
 
 

@@ -1,7 +1,8 @@
 local M = {}
-local env = require("contract.env")
+local env = require("workflow.env")
 local source_ref = require("contract.source_ref")
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 
 require("core.error_facts").install(M)
 
@@ -13,7 +14,7 @@ end
 -- "<slug>" via GraphQL. Strip the suffix so callers comparing against a
 -- configured bot login match regardless of which API populated the field.
 -- No-op for ordinary user logins (which never end in "[bot]").
-M.strip_bot_login_suffix = strings.strip_bot_login_suffix
+M.strip_bot_login_suffix = forge_strings.strip_bot_login_suffix
 
 function M.is_positive_integer(value)
   local n = tonumber(value)
@@ -26,8 +27,8 @@ local shared_helpers = {
 }
 
 -- Narrowest-surface proof for these shared helpers:
--- surface_proof = "std-shared-domain-helper"
--- std_status = "shared-with-ratchet-migration-slicer"
+-- surface_proof = "forge-shared-domain-helper"
+-- forge_status = "shared-with-ratchet-migration-slicer"
 -- collapse_status = "multi-call-site-behavioral-reuse"
 
 require("core.issue_create").install(M, shared_helpers)
@@ -64,7 +65,7 @@ local state_stage_rank = {
   merged = 900,
 }
 
-local is_git_ref_safe = strings.is_git_ref_safe
+local is_git_ref_safe = forge_strings.is_git_ref_safe
 
 local function is_safe_marker_value(value)
   return type(value) == "string" and value ~= "" and #value <= max_marker_value_len
@@ -130,7 +131,7 @@ function M.devloop_replay_budget(exec)
   return parsed
 end
 
-require("std.github_debug_stamp").install(M)
+require("forge.github_debug_stamp").install(M)
 
 function M.log_line(level, dept, tag, fields)
   local parts = {

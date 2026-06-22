@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M, shared)
-local strings = shared.strings
+local strings = require("forge.strings")
 local each_paginated_item = shared.each_paginated_item
 
 function M.comments_from_json(comments_json)

@@ -1,6 +1,7 @@
 local M = {}
 
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 local error_facts = require("contract.error_facts")
 
 local file_limit = 240
@@ -185,8 +186,9 @@ function M.producer_liveness_restart_rows(contracts)
 end
 
 local function liveness_model(rows)
-  local devloop_liveness = require("devloop.liveness")
-  local restart_liveness_contract = require("devloop.restart_liveness_contract")
+  local workflow_liveness_shared = require("workflow.liveness.shared")
+  local workflow_liveness_contract = require("workflow.liveness.contract")
+  local restart_liveness_contract = require("workflow.restart_liveness_contract")
   local model = {
     restart_package_name = "archaudit",
     restart_lifecycle_states = {},
@@ -206,7 +208,8 @@ local function liveness_model(rows)
     model._label_by_state[row.from_state] = true
   end
   restart_liveness_contract.install(model)
-  devloop_liveness.install(model, { liveness_signal_producers = {} })
+  local shared = workflow_liveness_shared.install(model, { liveness_signal_producers = {} })
+  workflow_liveness_contract.install(model, shared)
   return model
 end
 
@@ -371,7 +374,7 @@ function M.validate_repo(repo)
   if not strings.is_bounded_string(repo, github_proxy_limits.repo) then
     return false
   end
-  if strings.split_repo(repo) == nil then
+  if forge_strings.split_repo(repo) == nil then
     return false
   end
   return tostring(repo):find("^[%w._-]+/[%w._-]+$") ~= nil

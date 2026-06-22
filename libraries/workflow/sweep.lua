@@ -1,6 +1,6 @@
 -- contract.sweep: pure leaf utilities (bounds, rotation offset, cursor batching,
 -- deferred-result shapes) shared across packages. Only genuine leaves live here:
--- functions whose original github-devloop bodies contained no late-bound `M.*`
+-- functions whose original package bodies contained no late-bound `M.*`
 -- call into another facade function. The `rotate`/`batch` orchestrators stay in
 -- the package facade so their `M.sweep_rotate -> M.sweep_rotation_offset` and
 -- `M.sweep_batch -> M.sweep_rotate` late-binding remains byte-for-byte observable.

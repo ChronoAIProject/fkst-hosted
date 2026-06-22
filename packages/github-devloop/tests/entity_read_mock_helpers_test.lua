@@ -10,7 +10,7 @@ local function decode(text)
 end
 
 local function github()
-  return require("std.github").new(exec_argv)
+  return require("forge.github").new(exec_argv)
 end
 
 local function first(value)

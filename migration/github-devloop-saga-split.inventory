@@ -192,7 +192,6 @@
 {"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart_actionable_epoch.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/restart_liveness_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart_responsibility_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/rounds.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/state.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}

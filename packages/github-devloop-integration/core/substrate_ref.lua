@@ -22,14 +22,14 @@ end
 
 local function git()
   if git_handle == nil then
-    git_handle = require("std.git").new(exec_argv)
+    git_handle = require("forge.git").new(exec_argv)
   end
   return git_handle
 end
 
 local function github()
   if github_handle == nil then
-    github_handle = require("std.github").new(exec_argv)
+    github_handle = require("forge.github").new(exec_argv)
   end
   return github_handle
 end

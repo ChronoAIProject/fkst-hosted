@@ -85,7 +85,7 @@ class RunShCoverageRatchetHarness:
         self.pkg_coverage = self.runtime / "package-lua-coverage" / "example"
         self.pkg_coverage.mkdir(parents=True)
         self.check_env_log = self.root / "check-env.log"
-        (self.repo / "std").mkdir()
+        (self.repo / "libraries" / "forge").mkdir(parents=True)
         (self.pkg / "core.lua").write_text(
             "local M = {}\nfunction M.covered()\n  return 1\nend\nreturn M\n",
             encoding="utf-8",

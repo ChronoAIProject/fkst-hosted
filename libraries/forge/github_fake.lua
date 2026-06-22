@@ -1,5 +1,5 @@
 local M = {}
-local issue = require("std.github.issue")
+local issue = require("forge.github.issue")
 
 local function copy(value)
   if type(value) ~= "table" then
@@ -20,7 +20,7 @@ function M.model(seed)
 end
 
 function M.new(model)
-  assert(type(model) == "table", "std.github_fake.new requires a model")
+  assert(type(model) == "table", "forge.github_fake.new requires a model")
   local handle = { _model = model }
   function handle._exec(argv, timeout, context)
     table.insert(model.writes, {
@@ -38,9 +38,9 @@ function M.new(model)
     end
     return copy(issue.normalize_issue(fixture, source_ref))
   end
-  require("std.github.entities").install(handle)
-  require("std.github.comments").install(handle)
-  require("std.github.workflows").install(handle)
+  require("forge.github.entities").install(handle)
+  require("forge.github.comments").install(handle)
+  require("forge.github.workflows").install(handle)
   function handle.issue_view(repo, issue_number, fields, timeout)
     return handle._exec({
       "gh",
@@ -142,7 +142,7 @@ function M.new(model)
       "sub_issue_id=" .. tostring(sub_issue_number),
     }, timeout, "gh issue add sub-issue")
   end
-  require("std.github.graphql").install(handle)
+  require("forge.github.graphql").install(handle)
   return handle
 end
 

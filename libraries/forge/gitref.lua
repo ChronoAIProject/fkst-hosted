@@ -1,14 +1,12 @@
--- std.gitref: project-agnostic git ref/sha/PR-number safety predicates and validators. The owner label namespaces validator error messages.
+-- forge.gitref: git ref/sha/PR-number safety predicates and validators.
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 
 local S = {}
 
 local max_sha_len = 64
 
--- is_git_ref_safe is the canonical contract.strings primitive (also consumed by
--- github-proxy and std.github.shell); reference it rather than duplicating the
--- body, so the two cannot drift.
-S.is_git_ref_safe = strings.is_git_ref_safe
+S.is_git_ref_safe = forge_strings.is_git_ref_safe
 
 function S.is_git_sha(value)
   return strings.is_bounded_string(value, max_sha_len) and tostring(value):find("^%x+$") ~= nil

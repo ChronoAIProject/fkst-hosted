@@ -16,7 +16,7 @@ local function production_github()
     if type(exec_argv) ~= "function" then
       error("github-proxy: gh adapter requires exec_argv")
     end
-    github_handle = require("std.github").new(exec_argv)
+    github_handle = require("forge.github").new(exec_argv)
   end
   return github_handle
 end
@@ -26,7 +26,7 @@ local function production_git()
     if type(exec_argv) ~= "function" then
       error("github-proxy: git adapter requires exec_argv")
     end
-    git_handle = require("std.git").new(exec_argv)
+    git_handle = require("forge.git").new(exec_argv)
   end
   return git_handle
 end

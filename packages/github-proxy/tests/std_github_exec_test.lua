@@ -1,5 +1,5 @@
-local gh = require("std.github")
-local git = require("std.git")
+local gh = require("forge.github")
+local git = require("forge.git")
 
 local function assert_argv_equal(actual, expected, context)
   assert(type(actual) == "table", context .. " argv must be a table")

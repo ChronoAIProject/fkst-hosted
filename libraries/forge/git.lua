@@ -1,14 +1,14 @@
-local exec_wrap = require("std.git.exec")
+local exec_wrap = require("forge.git.exec")
 
 local M = {}
 
 function M.new(exec)
-  assert(type(exec) == "function", "std.git.new requires an exec function")
+  assert(type(exec) == "function", "forge.git.new requires an exec function")
   local handle = {}
   function handle._exec(argv, timeout, context)
     return exec_wrap.run(exec, argv, timeout, context)
   end
-  require("std.git.refs").install(handle)
+  require("forge.git.refs").install(handle)
   return handle
 end
 

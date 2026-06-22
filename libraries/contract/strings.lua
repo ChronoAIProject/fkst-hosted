@@ -5,28 +5,6 @@ function S.trim(value)
   return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
-function S.strip_bot_login_suffix(login)
-  if login == nil then
-    return nil
-  end
-  return (tostring(login):gsub("%[bot%]$", ""))
-end
-
-function S.split_repo(repo)
-  local owner, name = tostring(repo or ""):match("^([^/]+)/([^/]+)$")
-  if owner == nil or owner == "" or name == nil or name == "" then
-    return nil, nil
-  end
-  return owner, name
-end
-
-function S.comment_body(comment)
-  if type(comment) == "table" then
-    return tostring(comment.body or "")
-  end
-  return tostring(comment or "")
-end
-
 -- contract.strings.json_string is a temporary byte-identical stopgap for #976 only:
 -- canonical JSON encoding remains deferred to a dedicated encoder boundary.
 -- Keep this body matched to the folded github-devloop encode_json_string copies;
@@ -48,34 +26,6 @@ end
 
 function S.is_bounded_string(value, limit)
   return type(value) == "string" and value ~= "" and #value <= limit
-end
-
-function S.is_git_ref_safe(value)
-  local max_branch_len = 160
-  if not S.is_bounded_string(value, max_branch_len) then
-    return false
-  end
-  local text = tostring(value)
-  if text:sub(1, 1) == "-" or text:sub(1, 1) == "/" then
-    return false
-  end
-  if text:find("%.%.", 1, true) ~= nil
-    or text:find("//", 1, true) ~= nil
-    or text:find("@{", 1, true) ~= nil
-    or text:sub(-1) == "/"
-    or text:sub(-1) == "."
-    or text:sub(-5) == ".lock" then
-    return false
-  end
-  if text:find("[%s~^:?%[%]\\*]") ~= nil then
-    return false
-  end
-  for segment in text:gmatch("[^/]+") do
-    if segment == "." or segment == ".." or segment:sub(1, 1) == "." then
-      return false
-    end
-  end
-  return text:find("^[%w%._%-%/]+$") ~= nil
 end
 
 function S.decimal_checksum(value)

@@ -14,7 +14,7 @@ local function github()
   if type(exec_argv) ~= "function" then
     error("github-devloop: GitHub adapter requires exec_argv")
   end
-  github_handle = require("std.github").new(exec_argv)
+  github_handle = require("forge.github").new(exec_argv)
   return github_handle
 end
 

@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local env = require("contract.env")
+local env = require("workflow.env")
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_CLAIM_MODE = true,
@@ -164,7 +164,7 @@ local function current_checkout_branch(exec)
   if type(run) ~= "function" then
     error("github-devloop: branch config requires exec_argv")
   end
-  local git = require("std.git").new(run)
+  local git = require("forge.git").new(run)
   local ok, out = pcall(function()
     return git.current_branch(30)
   end)

@@ -1,7 +1,7 @@
 local core = require("core")
-local dead_letter = require("contract.dead_letter")
+local dead_letter = require("workflow.dead_letter")
 local error_facts = require("contract.error_facts")
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "dead_letter" },

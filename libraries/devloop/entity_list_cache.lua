@@ -2,7 +2,7 @@ local S = {}
 
 function S.install(M)
 local strings = require("contract.strings")
-local github_view = require("std.github_view")
+local github_view = require("forge.github_view")
 
 local json_string = github_view.json_string
 

@@ -1,7 +1,8 @@
-local env = require("contract.env")
+local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
-local logging = require("contract.logging")
+local logging = require("workflow.logging")
 local strings = require("contract.strings")
+local forge_strings = require("forge.strings")
 
 local M = {}
 
@@ -26,7 +27,7 @@ end
 
 M.read_env_command = read_env_command
 M.read_env = env.read_env(read_env_command)
-M.strip_bot_login_suffix = strings.strip_bot_login_suffix
+M.strip_bot_login_suffix = forge_strings.strip_bot_login_suffix
 M.trim = strings.trim
 M.json_string = strings.json_string
 M.sanitize_key = strings.sanitize_key
@@ -38,7 +39,7 @@ end
 
 function M.required_repo()
   local repo = M.trim(M.read_env("FKST_GITHUB_REPO") or "")
-  if repo == "" or strings.split_repo(repo) == nil then
+  if repo == "" or forge_strings.split_repo(repo) == nil then
     error("github-external-pr-intake: repo-required: FKST_GITHUB_REPO is required")
   end
   return repo
@@ -487,7 +488,7 @@ function M.bridge_issue_body(repo, pr)
     "- Task: implement/complete the change BASED ON the existing code in PR #" .. tostring(number)
       .. " - fetch `refs/pull/" .. tostring(number)
       .. "/head`, build ON the contributor's work, do NOT rewrite from scratch. Re-derive the full diff from source_ref.",
-    "- MUST comply with project conventions (CLAUDE.md): file <= 1000 lines; source-internal text English; all gh/git via std.github/std.git adapters; saga-shaped departments; `scripts/run.sh test` green; ports/adapters; no compat/legacy shim; outward text English.",
+    "- MUST comply with project conventions (CLAUDE.md): file <= 1000 lines; source-internal text English; all gh/git via forge.github/forge.git adapters; saga-shaped departments; `scripts/run.sh test` green; ports/adapters; no compat/legacy shim; outward text English.",
     "- If PR #" .. tostring(number) .. "'s base is not a managed branch (current base: `"
       .. tostring(pr.base_ref_name or "") .. "`), implement against `dev`.",
     "- On completion, the resulting devloop PR supersedes external PR #" .. tostring(number)

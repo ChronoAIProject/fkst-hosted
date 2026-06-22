@@ -1,9 +1,9 @@
 local S = {}
 
 function S.install(M)
-local codex = require("contract.codex")
+local codex = require("workflow.codex")
 local error_facts = require("contract.error_facts")
-local gitref = require("std.gitref")
+local gitref = require("forge.gitref")
 local source_refs = require("contract.source_ref")
 local strings = require("contract.strings")
 

@@ -8,13 +8,13 @@ function S.github(run)
     if type(run) ~= "function" then
       error("github-devloop: GitHub adapter requires an exec function")
     end
-    return require("std.github").new(run)
+    return require("forge.github").new(run)
   end
   if github_handle == nil then
     if type(exec_argv) ~= "function" then
       error("github-devloop: GitHub adapter requires exec_argv")
     end
-    github_handle = require("std.github").new(exec_argv)
+    github_handle = require("forge.github").new(exec_argv)
   end
   return github_handle
 end
@@ -35,7 +35,7 @@ function S.git()
     if type(exec_argv) ~= "function" then
       error("github-devloop: git adapter requires exec_argv")
     end
-    git_handle = require("std.git").new(exec_argv)
+    git_handle = require("forge.git").new(exec_argv)
   end
   return git_handle
 end

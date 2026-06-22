@@ -1,5 +1,5 @@
 kind = "library"
-name = "std"
+name = "forge"
 
 [code]
 root = "."
@@ -8,12 +8,12 @@ root = "."
 libraries = ["contract"]
 
 [library]
-name = "std"
-stable_id = "fkst.library.std"
+name = "forge"
+stable_id = "fkst.library.forge"
 version = "workspace"
 
 [exports]
-public = ["std.*"]
+public = ["forge.*"]
 
 [visibility]
-public = true
+public = false

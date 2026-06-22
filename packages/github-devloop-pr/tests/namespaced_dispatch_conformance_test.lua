@@ -1,7 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
-local conformance = require("contract.namespaced_dispatch_conformance")
+local conformance = require("testkit.namespaced_dispatch_conformance")
 
 local function load_department(path, module_name)
   local old_pipeline = pipeline

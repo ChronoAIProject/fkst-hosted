@@ -96,7 +96,7 @@ local function production_git()
   if type(exec_argv) ~= "function" then
     return nil
   end
-  return require("std.git").new(exec_argv)
+  return require("forge.git").new(exec_argv)
 end
 
 function S.install(M, read_env, git)

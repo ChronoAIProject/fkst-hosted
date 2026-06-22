@@ -1,4 +1,4 @@
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 local helper = require("tests.board_digest_probe_helpers")
 
 local spec = {

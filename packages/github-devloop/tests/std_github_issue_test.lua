@@ -1,5 +1,5 @@
-local gh = require("std.github")
-local issue_adapter = require("std.github.issue")
+local gh = require("forge.github")
+local issue_adapter = require("forge.github.issue")
 local core = require("core")
 
 local function argv_equal(left, right)

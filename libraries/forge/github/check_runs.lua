@@ -1,4 +1,4 @@
-local gitref = require("std.gitref")
+local gitref = require("forge.gitref")
 
 local C = {}
 

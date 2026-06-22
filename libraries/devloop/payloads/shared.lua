@@ -2,7 +2,7 @@ local S = {}
 local github_handle = nil
 
 function S.install(M)
-local github_view = require("std.github_view")
+local github_view = require("forge.github_view")
 local label_names = github_view.label_names
 local function github()
   if github_handle ~= nil then
@@ -11,7 +11,7 @@ local function github()
   if type(exec_argv) ~= "function" then
     error("github-devloop: GitHub adapter requires exec_argv")
   end
-  github_handle = require("std.github").new(exec_argv)
+  github_handle = require("forge.github").new(exec_argv)
   return github_handle
 end
 

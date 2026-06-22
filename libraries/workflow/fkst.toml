@@ -1,0 +1,19 @@
+kind = "library"
+name = "workflow"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract"]
+
+[library]
+name = "workflow"
+stable_id = "fkst.library.workflow"
+version = "workspace"
+
+[exports]
+public = ["workflow.*"]
+
+[visibility]
+public = false

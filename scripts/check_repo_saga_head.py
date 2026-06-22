@@ -1,10 +1,10 @@
-"""G-SAGA-HEAD guard for contract.saga department spec placement."""
+"""G-SAGA-HEAD guard for workflow.saga department spec placement."""
 
 from __future__ import annotations
 
 import re
 
-SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']contract\.saga["']""")
+SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']workflow\.saga["']""")
 SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*[({]")
 SAGA_DEPARTMENT_CALL_RE = re.compile(r"\bsaga\s*\.\s*department\s*(?P<form>[({])")
 SAGA_DEPARTMENT_NAMED_SPEC_RE = re.compile(

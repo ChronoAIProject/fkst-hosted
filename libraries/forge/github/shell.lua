@@ -1,5 +1,5 @@
 local M = {}
-local strings = require("contract.strings")
+local strings = require("forge.strings")
 
 function M.url_encode(value)
   return (tostring(value or ""):gsub("([^%w%-%._~])", function(char)

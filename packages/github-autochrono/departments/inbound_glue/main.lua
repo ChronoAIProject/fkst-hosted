@@ -1,5 +1,5 @@
 local core = require("core")
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed" },

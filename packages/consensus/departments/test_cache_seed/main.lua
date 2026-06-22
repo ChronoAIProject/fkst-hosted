@@ -1,4 +1,4 @@
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 local helper = require("tests.cache_seed_helpers")
 
 local spec = {

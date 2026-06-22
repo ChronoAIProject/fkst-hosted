@@ -1,4 +1,4 @@
-local codex = require("contract.codex")
+local codex = require("workflow.codex")
 local t = fkst.test
 
 return {

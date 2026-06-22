@@ -192,7 +192,7 @@ class PermissionControlGuardTest(unittest.TestCase):
         self.assertIn("G-PERM", chmod_violations[0])
 
         mode_violations = self.run_check(
-            "std/probe.py",
+            "libraries/forge/probe.py",
             "mode = 0o444\n",
         )
         self.assertEqual(len(mode_violations), 1)
@@ -589,7 +589,7 @@ class CrossPackageRequireTest(unittest.TestCase):
 
     def test_allows_std_core_departments_fkst(self) -> None:
         src = (
-            'require("contract.saga") require("core") require("core.markers") '
+            'require("workflow.saga") require("core") require("core.markers") '
             'require("departments.foo") require("fkst")\n'
         )
         self.assertEqual(self.names(src, ["github-proxy", "consensus"], "consensus"), [])
@@ -666,7 +666,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
         }, allowlist)
 
     def test_saga_shaped_department_not_on_allowlist_passes(self) -> None:
-        source = 'local saga = require("contract.saga")\nlocal spec = {consumes = {"q"}}\nreturn saga.department(spec, {done = d, act = a})\n'
+        source = 'local saga = require("workflow.saga")\nlocal spec = {consumes = {"q"}}\nreturn saga.department(spec, {done = d, act = a})\n'
         self.assertEqual(self.violations(source, set()), [])
 
     def test_free_form_department_on_allowlist_passes(self) -> None:
@@ -680,18 +680,18 @@ class SagaHandlerRatchetTest(unittest.TestCase):
         self.assertIn("free-form department not on saga-handler allowlist", self.violations(source, set())[0])
 
     def test_saga_shaped_department_on_allowlist_fails(self) -> None:
-        source = 'return require("contract.saga").department{done = d, act = a, consumes = {"q"}}\n'
+        source = 'return require("workflow.saga").department{done = d, act = a, consumes = {"q"}}\n'
         allowlist = {"packages/example/departments/dept/main.lua"}
         self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
 
     def test_saga_shaped_department_with_leftover_pipeline_fails(self) -> None:
-        source = 'local saga = require("contract.saga")\nlocal spec = {consumes = {"q"}}\npipeline = function() end\nreturn saga.department(spec, {done = d, act = a})\n'
+        source = 'local saga = require("workflow.saga")\nlocal spec = {consumes = {"q"}}\npipeline = function() end\nreturn saga.department(spec, {done = d, act = a})\n'
         self.assertIn("still defines free-form top-level pipeline", self.violations(source, set())[0])
 
     def test_paren_call_saga_department_is_detected(self) -> None:
         # `.department(...)` (paren spelling) must be recognized as saga-shaped so a
         # paren-form migration cannot silently remain on the allowlist and false-pass.
-        source = 'local saga = require("contract.saga")\nreturn saga.department({done = d, act = a, consumes = {"q"}})\n'
+        source = 'local saga = require("workflow.saga")\nreturn saga.department({done = d, act = a, consumes = {"q"}})\n'
         allowlist = {"packages/example/departments/dept/main.lua"}
         self.assertIn("saga-shaped department remains on saga-handler allowlist", self.violations(source, allowlist)[0])
 
@@ -710,7 +710,7 @@ class SagaHandlerRatchetTest(unittest.TestCase):
 
     def test_allowlist_equal_or_shrunk_relative_to_base_passes(self) -> None:
         free_form = 'function pipeline(event)\n  return event\nend\n'
-        saga_shaped = 'local saga = require("contract.saga")\nlocal spec = {consumes = {"q"}}\nreturn saga.department(spec, {done = d, act = a})\n'
+        saga_shaped = 'local saga = require("workflow.saga")\nlocal spec = {consumes = {"q"}}\nreturn saga.department(spec, {done = d, act = a})\n'
         base = {
             "packages/example/departments/dept/main.lua",
             "packages/example/departments/old/main.lua",
@@ -905,15 +905,15 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
 
     def test_root_std_non_adapter_flagged_and_std_github_exempt(self) -> None:
         sources = {
-            "std/helpers.lua": 'return "git status"\n',
-            "std/github/exec.lua": 'return "gh issue list"\n',
-            "std/github.lua": 'return "gh pr view"\n',
+            "libraries/forge/helpers.lua": 'return "git status"\n',
+            "libraries/forge/github/exec.lua": 'return "gh issue list"\n',
+            "libraries/forge/github.lua": 'return "gh pr view"\n',
         }
 
         messages = self.messages(sources)
 
         self.assertEqual(len(messages), 1)
-        self.assertIn("std/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
+        self.assertIn("libraries/forge/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
 
     def test_exec_argv_raw_heads_are_flagged_outside_adapters(self) -> None:
         source = (
@@ -926,13 +926,13 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
 
     def test_exec_argv_raw_heads_respect_adapter_exemption(self) -> None:
         messages = self.messages({
-            "std/github/issue.lua": 'exec_argv({ argv = { "gh", "issue", "view", "1" } })\n',
-            "std/git/exec.lua": 'exec_argv({ argv = { "git", "status" } })\n',
-            "std/helpers.lua": 'exec_argv({ argv = { "git", "status" } })\n',
+            "libraries/forge/github/issue.lua": 'exec_argv({ argv = { "gh", "issue", "view", "1" } })\n',
+            "libraries/forge/git/exec.lua": 'exec_argv({ argv = { "git", "status" } })\n',
+            "libraries/forge/helpers.lua": 'exec_argv({ argv = { "git", "status" } })\n',
         })
 
         self.assertEqual(len(messages), 1)
-        self.assertIn("std/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
+        self.assertIn("libraries/forge/helpers.lua constructs a new gh/git command head 'git status'", messages[0])
 
     def test_check_repo_wrapper_loads_allowlist_and_prefixes_violations(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

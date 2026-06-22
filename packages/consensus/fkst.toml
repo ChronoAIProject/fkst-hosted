@@ -5,4 +5,4 @@ name = "consensus"
 root = "."
 
 [lib_deps]
-libraries = ["contract"]
+libraries = ["contract", "workflow", "testkit"]

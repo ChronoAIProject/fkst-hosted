@@ -1,5 +1,5 @@
 local S = {}
-local github_view = require("std.github_view")
+local github_view = require("forge.github_view")
 
 function S.install(M)
 local json_value = github_view.json_value

@@ -1,4 +1,4 @@
-local oracle = require("contract.oracle")
+local oracle = require("workflow.oracle")
 
 return {
   test_effect_set_unions_writes_and_raises = function()

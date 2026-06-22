@@ -1,5 +1,5 @@
 local S = {}
-local github_view = require("std.github_view")
+local github_view = require("forge.github_view")
 
 function S.install(M)
 local parse_view_updated_at = github_view.parse_view_updated_at

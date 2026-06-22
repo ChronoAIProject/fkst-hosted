@@ -8,7 +8,7 @@ from typing import Callable
 
 
 SOURCE_SUFFIXES = {".lua", ".sh", ".py"}
-SCAN_DIRS = ("packages", "std", "libraries", "scripts")
+SCAN_DIRS = ("packages", "libraries", "scripts")
 RESTRICTIVE_MODE_RE = re.compile(r"(?<![0-9A-Za-z_])(?:0o(?:555|444|500|400)|0(?:555|444|500|400))(?![0-9A-Za-z_])")
 CHMOD_COMMAND_RE = re.compile(r"(?<![\w.-])chmod\s+(?!\+)")
 

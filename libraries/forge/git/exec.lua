@@ -5,7 +5,7 @@ local function misuse_error(argv, context)
   if type(argv) == "table" then
     bad_program = argv[1]
   end
-  local message = "std.git: " .. tostring(context) .. " adapter misuse: expected git argv, got "
+  local message = "forge.git: " .. tostring(context) .. " adapter misuse: expected git argv, got "
     .. tostring(bad_program)
   error(setmetatable({
     class = "git-adapter-misuse",
@@ -25,7 +25,7 @@ function M.run(exec, argv, timeout, context)
   end
   local result = exec({ argv = argv, timeout = timeout })
   if type(result) ~= "table" then
-    error("std.git: " .. tostring(context) .. " failed: missing result")
+    error("forge.git: " .. tostring(context) .. " failed: missing result")
   end
   return result
 end

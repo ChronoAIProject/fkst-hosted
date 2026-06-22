@@ -1,5 +1,5 @@
 local core = require("core")
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/issue-cursor/"
 

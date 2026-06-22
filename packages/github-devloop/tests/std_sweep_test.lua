@@ -4,7 +4,7 @@
 -- (and any further extraction) cannot drift it silently. The package M.sweep_*
 -- facade -- including the package-local rotate/batch orchestrators -- is covered
 -- through the observability/liveness suites; this file pins the contract.
-local sweep = require("contract.sweep")
+local sweep = require("workflow.sweep")
 local t = fkst.test
 
 local function eq_list(actual, expected)

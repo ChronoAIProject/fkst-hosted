@@ -222,7 +222,7 @@ class CoverageRatchetTest(unittest.TestCase):
                     "schema": "fkst.lua.coverage.v1",
                     "files": [
                         {
-                            "file": "std/zeta.lua",
+                            "file": "libraries/forge/zeta.lua",
                             "missing_lines": [{
                                 "line": 7,
                                 "normalized_line_hash": "bbbbbbbb",
@@ -277,15 +277,15 @@ class CoverageRatchetTest(unittest.TestCase):
                     "reason": "baseline",
                 },
                 {
-                    "file": "packages/example/core.lua",
-                    "line": 2,
-                    "normalized_line_hash": "abcdef12",
+                    "file": "libraries/forge/zeta.lua",
+                    "line": 7,
+                    "normalized_line_hash": "bbbbbbbb",
                     "reason": "baseline",
                 },
                 {
-                    "file": "std/zeta.lua",
-                    "line": 7,
-                    "normalized_line_hash": "bbbbbbbb",
+                    "file": "packages/example/core.lua",
+                    "line": 2,
+                    "normalized_line_hash": "abcdef12",
                     "reason": "baseline",
                 },
             ],
@@ -351,13 +351,13 @@ class CoverageRatchetTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "packages" / "example").mkdir(parents=True)
-            (root / "std").mkdir()
+            (root / "libraries" / "forge").mkdir(parents=True)
             (root / "libraries" / "contract").mkdir(parents=True)
             (root / "packages" / "example" / "core.lua").write_text(
                 "local M = {}\nfunction M.covered()\n  return 1\nend\nreturn M\n",
                 encoding="utf-8",
             )
-            (root / "std" / "shared.lua").write_text("return {}\n", encoding="utf-8")
+            (root / "libraries" / "forge" / "shared.lua").write_text("return {}\n", encoding="utf-8")
             (root / "libraries" / "contract" / "strings.lua").write_text("return {}\n", encoding="utf-8")
             output = root / "coverage.json"
 
@@ -365,7 +365,7 @@ class CoverageRatchetTest(unittest.TestCase):
                 {
                     "libraries/contract/strings.lua": {1},
                     "packages/example/core.lua": {1, 2, 3, 5},
-                    "std/shared.lua": {1},
+                    "libraries/forge/shared.lua": {1},
                 },
                 output,
                 root,
@@ -376,7 +376,7 @@ class CoverageRatchetTest(unittest.TestCase):
             self.assertEqual(data["schema"], "fkst.lua.coverage.v1")
             self.assertEqual(
                 [item["file"] for item in data["files"]],
-                ["libraries/contract/strings.lua", "packages/example/core.lua", "std/shared.lua"],
+                ["libraries/contract/strings.lua", "libraries/forge/shared.lua", "packages/example/core.lua"],
             )
             files_by_path = {item["file"]: item for item in data["files"]}
             core_lines = files_by_path["packages/example/core.lua"]["coverable_lines"]

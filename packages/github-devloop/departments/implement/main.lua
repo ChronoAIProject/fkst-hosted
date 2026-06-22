@@ -1,5 +1,5 @@
 local core = require("core")
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 local pr_child_handoff = require("departments.implement.pr_child_handoff")
 local slice_gate = require("departments.implement.slice_gate")
 local substrate_pin = require("departments.implement.substrate_pin")

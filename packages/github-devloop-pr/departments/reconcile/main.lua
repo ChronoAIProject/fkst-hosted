@@ -1,6 +1,6 @@
 local core = require("core")
 
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "devloop_review_reconcile", "devloop_fix_reconcile", "devloop_timeout_reconcile" },

@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("contract.registry")
+local registry = require("workflow.registry")
 
 function S.install(M, resolved)
 resolved = resolved or {}

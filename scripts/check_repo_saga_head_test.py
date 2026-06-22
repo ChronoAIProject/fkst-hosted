@@ -42,7 +42,7 @@ class SagaSpecHeadRatchetTest(unittest.TestCase):
         source = textwrap.dedent(
             """\
             local core = require("core")
-            local saga = require("contract.saga")
+            local saga = require("workflow.saga")
 
             local spec = {
               consumes = { "q" },
@@ -72,7 +72,7 @@ class SagaSpecHeadRatchetTest(unittest.TestCase):
     def test_spec_at_bottom_fails(self) -> None:
         source = textwrap.dedent(
             """\
-            local saga = require("contract.saga")
+            local saga = require("workflow.saga")
 
             local function done(_event)
               return false
@@ -100,7 +100,7 @@ class SagaSpecHeadRatchetTest(unittest.TestCase):
     def test_inline_spec_fails(self) -> None:
         source = textwrap.dedent(
             """\
-            local saga = require("contract.saga")
+            local saga = require("workflow.saga")
 
             local function done(_event)
               return false

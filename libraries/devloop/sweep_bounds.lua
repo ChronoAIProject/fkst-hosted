@@ -1,5 +1,5 @@
 local S = {}
-local sweep = require("contract.sweep")
+local sweep = require("workflow.sweep")
 
 function S.install(M)
 local default_call_timeout = 10

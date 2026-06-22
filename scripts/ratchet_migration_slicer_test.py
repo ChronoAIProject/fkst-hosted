@@ -181,7 +181,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             source.write_text(
                 textwrap.dedent(
                     """\
-                    local saga = require("contract.saga")
+                    local saga = require("workflow.saga")
                     local spec = { consumes = { "q" } }
                     return saga.department(spec, { done = done, act = act })
                     """
@@ -710,7 +710,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             first = root / "packages/example/a.lua"
-            second = root / "std/b.lua"
+            second = root / "libraries/forge/b.lua"
             first.parent.mkdir(parents=True)
             second.parent.mkdir(parents=True)
             body = textwrap.dedent(
@@ -731,7 +731,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             migration.mkdir()
             source_map = {
                 "packages/example/a.lua": first.read_text(encoding="utf-8"),
-                "std/b.lua": second.read_text(encoding="utf-8"),
+                "libraries/forge/b.lua": second.read_text(encoding="utf-8"),
             }
             entry = next(iter(slicer.code_dedup.duplicate_groups(source_map)))
             (migration / "code-dedup.allowlist").write_text(entry.allowlist_line() + "\n", encoding="utf-8")
@@ -740,8 +740,8 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             inventory = slicer.load_code_dedup_inventory(root, spec)
 
             self.assertEqual([site.site_ref() for site in inventory], [
+                "libraries/forge/b.lua:1",
                 "packages/example/a.lua:1",
-                "std/b.lua:1",
             ])
             self.assertEqual([site.detail for site in inventory], [
                 f"duplicate_function: repeated {entry.body_hash}",

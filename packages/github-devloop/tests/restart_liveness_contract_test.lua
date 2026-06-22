@@ -121,6 +121,31 @@ local function synthetic_heartbeat_row()
   }
 end
 
+local function install_generic_restart_liveness_model(row)
+  local model = {
+    restart_package_name = "synthetic",
+    restart_lifecycle_states = { row.from_state },
+    _label_by_state = {
+      [row.from_state] = true,
+      blocked = true,
+    },
+    restart_transition_table = function()
+      return { row }
+    end,
+    restart_durable_marker_fields = function()
+      return {
+        ["implement-attempt"] = true,
+        state = true,
+      }
+    end,
+    restart_responsibility_inventory_errors = function()
+      return {}
+    end,
+  }
+  require("workflow.restart_liveness_contract").install(model)
+  return model
+end
+
 return {
   test_primitive_epoch_source_registry_matches_contract = function()
     local sources = core.restart_liveness_epoch_sources()
@@ -485,5 +510,25 @@ return {
     row.watchdog.on_stale = nil
     local errors = core.strict_restart_liveness_contract_errors({ row })
     t.is_true(contains_error(errors, "synthetic-heartbeat: heartbeat defer must declare watchdog.on_stale.op=redrive_receiver"))
+  end,
+
+  test_generic_restart_liveness_requires_injected_policy_for_product_defer_kinds = function()
+    local codex_row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
+    codex_row.from_state = "synthetic-codex-run"
+    local codex_model = install_generic_restart_liveness_model(codex_row)
+    local codex_errors = codex_model.strict_restart_liveness_contract_errors({ codex_row })
+    t.is_true(
+      contains_error(codex_errors, "synthetic-codex-run: policy not injected for defer kind codex_run field family"),
+      joined_errors(codex_errors)
+    )
+
+    local child_row = copy_value(rows_by_state(core.restart_transition_table())["awaiting-pr"])
+    child_row.from_state = "synthetic-child-wait"
+    local child_model = install_generic_restart_liveness_model(child_row)
+    local child_errors = child_model.strict_restart_liveness_contract_errors({ child_row })
+    t.is_true(
+      contains_error(child_errors, "synthetic-child-wait: policy not injected for defer kind child_workflow_wait field live_marker"),
+      joined_errors(child_errors)
+    )
   end,
 }

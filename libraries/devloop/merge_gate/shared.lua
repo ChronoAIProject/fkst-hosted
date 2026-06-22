@@ -1,6 +1,6 @@
 local S = {}
-local registry = require("contract.registry")
-local check_runs = require("std.github.check_runs")
+local registry = require("workflow.registry")
+local check_runs = require("forge.github.check_runs")
 local strings = require("contract.strings")
 
 local merge_gate_reason_classes_index = require("devloop.merge_gate.reason_classes.index")

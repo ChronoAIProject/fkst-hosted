@@ -1,6 +1,6 @@
 local core = require("core")
-local ports_seam = require("std.ports")
-local saga = require("contract.saga")
+local ports_seam = require("forge.ports")
+local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },

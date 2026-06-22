@@ -5,7 +5,7 @@ name = "devloop"
 root = "."
 
 [lib_deps]
-libraries = ["std", "contract"]
+libraries = ["contract", "workflow", "forge"]
 
 [library]
 name = "devloop"
@@ -22,5 +22,4 @@ allow = [
   "github-devloop-intake",
   "github-devloop-integration",
   "github-devloop-pr",
-  "archaudit",
 ]

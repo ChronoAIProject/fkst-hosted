@@ -43,7 +43,7 @@ function S.install(M)
       error("github-devloop: GitHub GraphQL adapter requires exec_argv")
     end
     return github_result(function()
-      return require("std.github").new(run).graphql(query, nil, timeout or 30)
+      return require("forge.github").new(run).graphql(query, nil, timeout or 30)
     end)
   end
 end

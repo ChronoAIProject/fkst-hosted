@@ -1,7 +1,7 @@
-local testing = require("contract.testing")
+local testing = require("testkit.testing")
 local run_fake = testing.run_fake
 local run_fake_expecting_failure = testing.run_fake_expecting_failure
-local gh_fake = require("std.github_fake")
+local gh_fake = require("forge.github_fake")
 
 local function failing_department()
   return {

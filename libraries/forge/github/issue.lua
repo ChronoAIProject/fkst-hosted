@@ -1,5 +1,5 @@
 local M = {}
-local github_view = require("std.github_view")
+local github_view = require("forge.github_view")
 local append_comments = github_view.append_comments
 local rest_state = github_view.rest_state
 local json_string = github_view.json_string
@@ -51,7 +51,7 @@ end
 local function gh_issue_view_argv(repo, issue_number, fields)
   local selected_fields = tostring(fields or "")
   if selected_fields == "" or selected_fields:match("[^%w_,]") or selected_fields:match("^,") or selected_fields:match(",$") or selected_fields:match(",,") then
-    error("std.github: invalid issue view fields")
+    error("forge.github: invalid issue view fields")
   end
   return { "gh", "issue", "view", tostring(issue_number), "--repo", tostring(repo), "--json", selected_fields }
 end
@@ -166,7 +166,7 @@ local function comments_from_json(comments_json)
         created_at = comment.createdAt or comment.created_at,
       })
     elseif type(comment) == "string" then
-      error("std.github: issue comments must be gh-shaped objects")
+      error("forge.github: issue comments must be gh-shaped objects")
     end
   end
   return comments
@@ -185,14 +185,14 @@ local function parse_json_object(stdout, context)
   if ok and type(decoded) == "table" then
     return decoded
   end
-  error("std.github: " .. tostring(context) .. " response is not valid JSON")
+  error("forge.github: " .. tostring(context) .. " response is not valid JSON")
 end
 
 local function issue_database_id(stdout, context)
   local decoded = parse_json_object(stdout, context)
   local id = tonumber(decoded.id)
   if id == nil then
-    error("std.github: " .. tostring(context) .. " response is missing issue id")
+    error("forge.github: " .. tostring(context) .. " response is missing issue id")
   end
   return id
 end

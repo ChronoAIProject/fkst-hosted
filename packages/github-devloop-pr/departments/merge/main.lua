@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("contract.saga")
+local core, saga = require("core"), require("workflow.saga")
 local runtime_files = require("departments.merge.runtime_files")
 local ci_wait = require("departments.merge.ci_wait")
 

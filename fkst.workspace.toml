@@ -1,9 +1,9 @@
 [workspace]
 # The current engine consumes `units`; `packages` and `libraries` keep the
 # workspace split explicit for the library-dependency contract.
-units = ["packages/*", "std", "libraries/*"]
+units = ["packages/*", "libraries/*"]
 packages = ["packages/*"]
-libraries = ["std", "libraries/*"]
+libraries = ["libraries/*"]
 
 [registries]
 workspace = "workspace"

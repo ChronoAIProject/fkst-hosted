@@ -1,6 +1,6 @@
 local M = {}
-local codex = require("contract.codex")
-local env = require("contract.env")
+local codex = require("workflow.codex")
+local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
 

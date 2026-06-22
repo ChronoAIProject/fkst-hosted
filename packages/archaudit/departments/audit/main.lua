@@ -1,8 +1,8 @@
 local core = require("core")
-local codex = require("contract.codex")
-local env = require("contract.env")
-local saga = require("contract.saga")
-local ports_lib = require("std.ports")
+local codex = require("workflow.codex")
+local env = require("workflow.env")
+local saga = require("workflow.saga")
+local ports_lib = require("forge.ports")
 local strings = require("contract.strings")
 
 local spec = {

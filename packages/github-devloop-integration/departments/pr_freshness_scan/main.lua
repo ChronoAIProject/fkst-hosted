@@ -1,6 +1,6 @@
 local core = require("core")
 
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "devloop_branch_tick" },

@@ -1,4 +1,4 @@
-local registry = require("contract.registry")
+local registry = require("workflow.registry")
 local t = fkst.test
 
 local function expect_error_contains(fn, needle)

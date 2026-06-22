@@ -1,4 +1,4 @@
-local env = require("contract.env")
+local env = require("workflow.env")
 local t = fkst.test
 
 local allowed_env = {

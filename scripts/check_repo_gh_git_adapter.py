@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 ALLOWLIST = "migration/gh-git-adapter.allowlist"
-ENTRY_FILES = {"std/github.lua", "std/git.lua", "std/github_fake.lua", "std/git_fake.lua"}
-DIR_PREFIXES = ("std/github/", "std/git/")
+ENTRY_FILES = {"libraries/forge/github.lua", "libraries/forge/git.lua", "libraries/forge/github_fake.lua", "libraries/forge/git_fake.lua"}
+DIR_PREFIXES = ("libraries/forge/github/", "libraries/forge/git/")
 ENV_ASSIGN_RE = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)+")
 CD_RE = re.compile(r"^cd\s+(?:'[^']*'|\"[^\"]*\"|[^\s;&]+)\s*(?:&&|;)\s*")
 SHELL_C_RE = re.compile(
@@ -54,22 +54,16 @@ class CallContext:
 
 
 def is_adapter_path(relpath: str) -> bool:
-    if relpath in ENTRY_FILES or relpath.startswith(DIR_PREFIXES):
-        return True
-    parts = relpath.split("/")
-    if len(parts) < 4 or parts[0] != "packages" or parts[2] != "std":
-        return False
-    std_relpath = "/".join(parts[2:])
-    return std_relpath in ENTRY_FILES or std_relpath.startswith(DIR_PREFIXES)
+    return relpath in ENTRY_FILES or relpath.startswith(DIR_PREFIXES)
 
 
 def sources(root: Path, packages: Path, read_text, rel) -> dict[str, str]:
     paths: list[Path] = []
     if packages.exists():
         paths.extend(path for path in sorted(packages.rglob("*.lua")) if path.is_file())
-    std = root / "std"
-    if std.exists():
-        paths.extend(path for path in sorted(std.rglob("*.lua")) if path.is_file())
+    forge = root / "libraries" / "forge"
+    if forge.exists():
+        paths.extend(path for path in sorted(forge.rglob("*.lua")) if path.is_file())
     return {rel(root, path): read_text(path) for path in paths}
 
 
@@ -592,7 +586,7 @@ def command_heads_by_file(sources: dict[str, str]) -> dict[str, set[str]]:
     for path, source in sorted(sources.items()):
         if not path.endswith(".lua") or "/tests/" in path or is_adapter_path(path):
             continue
-        if not (path.startswith("packages/") or path.startswith("std/")):
+        if not (path.startswith("packages/") or path.startswith("libraries/forge/")):
             continue
         heads = command_heads(source)
         if heads:
@@ -612,7 +606,7 @@ def ratchet_messages(sources: dict[str, str], allowlist: dict[str, set[str]], lu
             )
         for head in sorted(current_heads - allowlisted_heads):
             messages.append(
-                f"{path} constructs a new gh/git command head '{head}' not in the allowlist baseline; migrate it to std.github/std.git"
+                f"{path} constructs a new gh/git command head '{head}' not in the allowlist baseline; migrate it to forge.github/forge.git"
             )
         for head in sorted(allowlisted_heads - current_heads):
             messages.append(

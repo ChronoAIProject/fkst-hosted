@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("contract.registry")
+local registry = require("workflow.registry")
 
 local validators_index = require("devloop.validators.index")
 local validators = {

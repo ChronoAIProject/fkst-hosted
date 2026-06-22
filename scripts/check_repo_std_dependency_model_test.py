@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for the std dependency-model repository guard."""
+"""Unit tests for the positive library dependency-model repository guard."""
 
 from __future__ import annotations
 
@@ -30,180 +30,65 @@ def write(path: Path, source: str) -> None:
     path.write_text(source, encoding="utf-8")
 
 
+def manifest(path: Path, name: str, deps: list[str], *, public: bool | None = None, allow: list[str] | None = None) -> None:
+    visibility = ""
+    if public is not None:
+        visibility = f"\n[visibility]\npublic = {'true' if public else 'false'}\n"
+    if allow is not None:
+        quoted = ", ".join(f'"{item}"' for item in allow)
+        visibility = f"\n[visibility]\nallow = [{quoted}]\n"
+    quoted_deps = ", ".join(f'"{item}"' for item in deps)
+    write(
+        path,
+        f'kind = "library"\nname = "{name}"\n\n[lib_deps]\nlibraries = [{quoted_deps}]\n{visibility}',
+    )
+
+
+def package_manifest(path: Path, deps: list[str]) -> None:
+    quoted_deps = ", ".join(f'"{item}"' for item in deps)
+    write(path, f'kind = "package"\nname = "{path.parent.name}"\n\n[lib_deps]\nlibraries = [{quoted_deps}]\n')
+
+
 def inventory_line(path: str, module: str) -> str:
     return f'{{"path":"{path}","module":"{module}"}}\n'
 
 
-class StdDependencyModelGuardTest(unittest.TestCase):
+class LibraryDependencyModelGuardTest(unittest.TestCase):
+    def seed_contract(self, root: Path) -> None:
+        manifest(root / "libraries" / "contract" / "fkst.toml", "contract", [], public=True)
+        for module in ("error_facts", "payload", "source_ref", "strings"):
+            write(root / "libraries" / "contract" / f"{module}.lua", "return {}\n")
+
+    def seed_devloop_manifest(self, root: Path, allow: list[str] | None = None) -> None:
+        manifest(
+            root / "libraries" / "devloop" / "fkst.toml",
+            "devloop",
+            ["contract", "workflow", "forge"],
+            allow=allow
+            or [
+                "github-devloop",
+                "github-devloop-decompose",
+                "github-devloop-intake",
+                "github-devloop-integration",
+                "github-devloop-pr",
+            ],
+        )
+
     def run_guard(self, root: Path) -> tuple[list[str], list[str]]:
+        self.seed_contract(root)
+        self.seed_devloop_manifest(root)
         violations: list[str] = []
         warnings: list[str] = []
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
 
-    def test_allows_resolved_package_and_std_dependencies_and_reports_usage(self) -> None:
+    def test_allows_declared_package_library_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            write(root / "std" / "github.lua", 'local git = require("std.git")\nreturn {}\n')
-            write(root / "std" / "git.lua", "return {}\n")
-            write(root / "packages" / "example" / "core.lua", 'local github = require("std.github")\n')
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(violations, [])
-        self.assertIn("G-STD-DEP: package example uses std.github", warnings)
-        self.assertIn("G-STD-DEP: std internal edge std.github -> std.git", warnings)
-
-    def test_flags_unresolved_std_require_from_package_and_std_source(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "std" / "github.lua", 'local missing = require("std.missing")\n')
-            write(root / "packages" / "example" / "core.lua", "local missing = require('std.nope.tools')\n")
-
-            violations, _warnings = self.run_guard(root)
-
-        self.assertEqual(len(violations), 2)
-        self.assertTrue(all(message.startswith("G-STD-DEP: ") for message in violations))
-        self.assertIn("std/github.lua:1 requires unresolved module 'std.missing'", violations[0])
-        self.assertIn("packages/example/core.lua:1 requires unresolved module 'std.nope.tools'", violations[1])
-
-    def test_flags_std_requiring_a_package_module(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "packages" / "example" / "core.lua", "return {}\n")
-            write(root / "std" / "bad.lua", 'local core = require("example.core")\n')
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(warnings, [])
-        self.assertIn(
-            'G-STD-DEP: std module std/bad.lua:1 requires non-std module "example.core" '
-            "(std must receive resolved values from package-owned wiring)",
-            violations,
-        )
-
-    def test_flags_std_requiring_bare_package_internal_roots(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "packages" / "example" / "core.lua", "return {}\n")
-            write(
-                root / "std" / "bad.lua",
-                'local core = require("core")\nlocal dept = require("departments.x")\n',
-            )
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(warnings, [])
-        self.assertIn(
-            'G-STD-DEP: std module std/bad.lua:1 requires non-std module "core" '
-            "(std must receive resolved values from package-owned wiring)",
-            violations,
-        )
-        self.assertIn(
-            'G-STD-DEP: std module std/bad.lua:2 requires non-std module "departments.x" '
-            "(std must receive resolved values from package-owned wiring)",
-            violations,
-        )
-
-    def test_ignores_masked_requires_in_std_comments_and_strings(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(
-                root / "std" / "ok.lua",
-                '-- local missing = require("std.bogus")\nlocal text = "require(\\"core\\")"\nreturn {}\n',
-            )
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(violations, [])
-        self.assertEqual(warnings, [])
-
-    def test_resolves_nested_std_init_modules(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "std" / "a" / "b" / "init.lua", "return {}\n")
-            write(root / "packages" / "example" / "core.lua", 'local nested = require("std.a.b")\n')
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(violations, [])
-        self.assertEqual(warnings, ["G-STD-DEP: package example uses std.a.b"])
-
-    def test_package_scan_excludes_std_symlink_subtree(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "std" / "ok.lua", "return {}\n")
-            package = root / "packages" / "example"
-            write(package / "core.lua", 'local ok = require("std.ok")\n')
-            (package / "std").symlink_to("../../std")
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(violations, [])
-        self.assertEqual(warnings, ["G-STD-DEP: package example uses std.ok"])
-
-    def test_contract_allows_only_contract_internal_requires(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "libraries" / "contract" / "strings.lua", "return {}\n")
-            write(
-                root / "libraries" / "contract" / "payload.lua",
-                'local strings = require("contract.strings")\nreturn {}\n',
-            )
-            write(root / "packages" / "example" / "core.lua", 'local payload = require("contract.payload")\n')
-
-            violations, warnings = self.run_guard(root)
-
-        self.assertEqual(violations, [])
-        self.assertEqual(warnings, ["G-STD-DEP: package example uses contract.payload"])
-
-    def test_contract_rejects_std_devloop_and_other_requires(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(
-                root / "libraries" / "contract" / "bad.lua",
-                "\n".join([
-                    'local github = require("std.github")',
-                    'local devloop = require("devloop.state")',
-                    'local core = require("core")',
-                ]) + "\n",
-            )
-
-            violations, _warnings = self.run_guard(root)
-
-        self.assertIn("G-STD-DEP: libraries/contract/bad.lua:1 contract must not require 'std.github'", violations)
-        self.assertIn("G-STD-DEP: libraries/contract/bad.lua:2 contract must not require 'devloop.state'", violations)
-        self.assertIn(
-            'G-STD-DEP: contract module libraries/contract/bad.lua:3 requires non-contract module "core" '
-            "(contract must be a pure base library)",
-            violations,
-        )
-
-    def test_std_forge_may_require_contract_but_not_devloop(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "libraries" / "contract" / "strings.lua", "return {}\n")
-            write(
-                root / "std" / "github.lua",
-                "\n".join([
-                    'local strings = require("contract.strings")',
-                    'local devloop = require("devloop.state")',
-                ]) + "\n",
-            )
-
-            violations, _warnings = self.run_guard(root)
-
-        self.assertEqual(violations, ["G-STD-DEP: std/github.lua:2 std/forge must not require 'devloop.state'"])
-
-    def test_devloop_std_imports_must_match_inventory(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "std" / "github.lua", "return {}\n")
-            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("std.github")\nreturn {}\n')
-            write(
-                root / "migration" / "devloop-std-imports.inventory",
-                inventory_line("libraries/devloop/claims.lua", "std.github"),
-            )
+            write(root / "libraries" / "forge" / "github.lua", "return {}\n")
+            package_manifest(root / "packages" / "example" / "fkst.toml", ["contract", "forge"])
+            write(root / "packages" / "example" / "core.lua", 'local gh = require("forge.github")\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
             with mock.patch.object(
                 check_repo.check_repo_std_dependency_model.ratchet_base,
                 "file_at_base",
@@ -212,14 +97,14 @@ class StdDependencyModelGuardTest(unittest.TestCase):
                 violations, warnings = self.run_guard(root)
 
         self.assertEqual(violations, [])
-        self.assertEqual(warnings, [])
+        self.assertIn("G-LIB-DEP: package example uses forge.github", warnings)
 
-    def test_devloop_std_import_missing_from_inventory_fails(self) -> None:
+    def test_package_require_must_match_declared_lib_deps_and_resolve(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            write(root / "std" / "github.lua", "return {}\n")
-            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("std.github")\nreturn {}\n')
-            write(root / "migration" / "devloop-std-imports.inventory", "")
+            package_manifest(root / "packages" / "example" / "fkst.toml", ["contract"])
+            write(root / "packages" / "example" / "core.lua", 'local gh = require("forge.missing")\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
             with mock.patch.object(
                 check_repo.check_repo_std_dependency_model.ratchet_base,
                 "file_at_base",
@@ -227,23 +112,74 @@ class StdDependencyModelGuardTest(unittest.TestCase):
             ):
                 violations, _warnings = self.run_guard(root)
 
-        self.assertEqual(
+        self.assertIn("G-LIB-DEP: packages/example/core.lua:1 requires unresolved module 'forge.missing'", violations)
+        self.assertIn(
+            "G-LIB-DEP: packages/example/core.lua:1 package example requires 'forge.missing' but fkst.toml does not declare lib_dep 'forge'",
             violations,
-            [
-                "G-STD-DEP: libraries/devloop/claims.lua imports std.github "
-                "but is not listed in migration/devloop-std-imports.inventory",
-            ],
         )
 
-    def test_devloop_std_import_stale_inventory_fails(self) -> None:
+    def test_contract_surface_is_value_only_and_dependency_free(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            write(root / "std" / "github.lua", "return {}\n")
-            write(root / "libraries" / "devloop" / "claims.lua", "return {}\n")
+            self.seed_contract(root)
+            write(root / "libraries" / "contract" / "saga.lua", "return {}\n")
+            manifest(root / "libraries" / "contract" / "fkst.toml", "contract", ["workflow"], public=True)
+            self.seed_devloop_manifest(root)
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard_without_seed(root)
+
+        self.assertIn("G-LIB-DEP: contract must declare zero outgoing lib_deps", violations)
+        self.assertTrue(any("contract modules must be exactly" in message for message in violations))
+
+    def run_guard_without_seed(self, root: Path) -> tuple[list[str], list[str]]:
+        violations: list[str] = []
+        warnings: list[str] = []
+        check_repo.check_std_dependency_model(root, violations, warnings)
+        return violations, warnings
+
+    def test_library_direction_rules_reject_wrong_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "workflow" / "bad.lua", 'local gh = require("forge.github")\n')
+            write(root / "libraries" / "forge" / "bad.lua", 'local testkit = require("testkit.saga_conformance")\n')
+            write(root / "libraries" / "testkit" / "ok.lua", 'local c = require("contract.strings")\nreturn {}\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertIn("G-LIB-DEP: libraries/workflow/bad.lua:1 workflow must not require 'forge.github'", violations)
+        self.assertIn("G-LIB-DEP: libraries/forge/bad.lua:1 forge must not require 'testkit.saga_conformance'", violations)
+
+    def test_workflow_policy_guard_blocks_product_and_forge_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
             write(
-                root / "migration" / "devloop-std-imports.inventory",
-                inventory_line("libraries/devloop/claims.lua", "std.github"),
+                root / "libraries" / "workflow" / "bad.lua",
+                "\n".join(
+                    [
+                        'local a = "github-devloop"',
+                        'local b = "forge.github"',
+                        'local c = "gh issue view"',
+                        'local d = "state:v1"',
+                        'local e = "pr-delegation:v1"',
+                        'local f = "pr-comment-stream"',
+                        'local g = "implement-attempt"',
+                        'local h = "devloop_fixing"',
+                        'local i = "fkst-dev:ready"',
+                    ]
+                )
+                + "\n",
             )
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
             with mock.patch.object(
                 check_repo.check_repo_std_dependency_model.ratchet_base,
                 "file_at_base",
@@ -251,21 +187,80 @@ class StdDependencyModelGuardTest(unittest.TestCase):
             ):
                 violations, _warnings = self.run_guard(root)
 
-        self.assertEqual(
-            violations,
-            [
-                "G-STD-DEP: migration/devloop-std-imports.inventory lists stale import "
-                "libraries/devloop/claims.lua std.github",
-            ],
-        )
+        self.assertTrue(any("contains product/forge policy string 'github-devloop'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'forge.github'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'state:v1'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'pr-delegation:v1'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'pr-comment-stream'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'implement-attempt'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'devloop_fixing'" in message for message in violations))
+        self.assertTrue(any("contains product/forge policy string 'fkst-dev:'" in message for message in violations))
+        self.assertTrue(any("contains raw gh/git command text" in message for message in violations))
 
-    def test_devloop_std_import_inventory_growth_relative_to_base_fails(self) -> None:
-        current = inventory_line("libraries/devloop/claims.lua", "std.github")
+    def test_non_devloop_family_package_cannot_depend_on_devloop(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            write(root / "std" / "github.lua", "return {}\n")
-            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("std.github")\nreturn {}\n')
-            write(root / "migration" / "devloop-std-imports.inventory", current)
+            write(root / "libraries" / "devloop" / "liveness.lua", "return {}\n")
+            package_manifest(root / "packages" / "archaudit" / "fkst.toml", ["contract", "workflow", "devloop"])
+            write(root / "packages" / "archaudit" / "core.lua", 'local liveness = require("devloop.liveness")\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertTrue(
+            any("package archaudit must not declare lib_dep 'devloop'" in message for message in violations),
+            violations,
+        )
+        self.assertTrue(
+            any("packages/archaudit/core.lua:1 package archaudit must not require 'devloop.liveness'" in message for message in violations),
+            violations,
+        )
+
+    def test_devloop_visibility_excludes_non_family_packages(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.seed_contract(root)
+            self.seed_devloop_manifest(root, allow=["github-devloop", "archaudit"])
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard_without_seed(root)
+
+        self.assertTrue(any("devloop visibility must list only" in message and "archaudit" in message for message in violations))
+
+    def test_devloop_forge_import_inventory_matches_current_and_legacy_base(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("forge.github")\nreturn {}\n')
+            current = inventory_line("libraries/devloop/claims.lua", "forge.github")
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                side_effect=[
+                    ("absent", None),
+                    ("present", inventory_line("libraries/devloop/claims.lua", "std.github")),
+                ],
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(violations, [])
+
+    def test_devloop_forge_import_inventory_is_shrink_only(self) -> None:
+        current = inventory_line("libraries/devloop/claims.lua", "forge.github")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("forge.github")\nreturn {}\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
             with mock.patch.object(
                 check_repo.check_repo_std_dependency_model.ratchet_base,
                 "file_at_base",
@@ -276,10 +271,26 @@ class StdDependencyModelGuardTest(unittest.TestCase):
         self.assertEqual(
             violations,
             [
-                "G-STD-DEP: migration/devloop-std-imports.inventory grows relative to dev: "
-                "libraries/devloop/claims.lua std.github",
+                "G-LIB-DEP: migration/devloop-forge-imports.inventory grows relative to dev: "
+                "libraries/devloop/claims.lua forge.github",
             ],
         )
+
+    def test_devloop_forge_import_inventory_accepts_strings_split_path_follow(self) -> None:
+        current = inventory_line("libraries/devloop/parsers/misc.lua", "forge.strings")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "strings.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "parsers" / "misc.lua", 'local strings = require("forge.strings")\nreturn {}\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("present", ""),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

@@ -287,10 +287,10 @@ return {
     local root = package_root
     local source = read_file(root .. "/core.lua")
 
-    t.eq(count_literal(source, "M.strip_bot_login_suffix = strings.strip_bot_login_suffix"), 1)
+    t.eq(count_literal(source, "M.strip_bot_login_suffix = forge_strings.strip_bot_login_suffix"), 1)
     t.eq(count_literal(source, "function M.is_positive_integer("), 1)
-    t.is_true(source:find('surface_proof = "std-shared-domain-helper"', 1, true) ~= nil)
-    t.is_true(source:find('std_status = "shared-with-ratchet-migration-slicer"', 1, true) ~= nil)
+    t.is_true(source:find('surface_proof = "forge-shared-domain-helper"', 1, true) ~= nil)
+    t.is_true(source:find('forge_status = "shared-with-ratchet-migration-slicer"', 1, true) ~= nil)
     t.is_true(source:find('collapse_status = "multi-call-site-behavioral-reuse"', 1, true) ~= nil)
   end,
 

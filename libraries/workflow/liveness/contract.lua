@@ -1,15 +1,19 @@
 local S = {}
 
-function S.install(M, shared)
+function S.install(M, shared, resolved)
+resolved = resolved or {}
 local has_required_table = shared.has_required_table
 local valid_budget = shared.valid_budget
 local reachable_lifecycle_states = shared.reachable_lifecycle_states
 local valid_timeout = shared.valid_timeout
 local liveness_resolver_families = shared.liveness_resolver_families
 local liveness_signal_producers = shared.liveness_signal_producers
+local allowed_signal_surfaces = shared.allowed_signal_surfaces
+local signal_max_age_optional_resolvers = shared.signal_max_age_optional_resolvers
 local numeric_minutes = shared.numeric_minutes
 local liveness_bound_minutes = shared.liveness_bound_minutes
 local source_contains = shared.source_contains
+local pr_recovery_policy = resolved.pr_recovery or {}
 
 local function validate_restart_totality(M, rows, errors)
   local reachable = reachable_lifecycle_states(M)
@@ -92,14 +96,14 @@ local function validate_liveness_signal_shape(M, state, signal, label, errors)
     table.insert(errors, state .. ": " .. label .. " has no resolver: " .. tostring(resolver))
   end
   local resolver = signal.resolver or signal.family
-  if resolver == "implement-attempt" then
+  if signal_max_age_optional_resolvers[resolver] == true then
     if signal.max_age_minutes ~= nil then
       table.insert(errors, state .. ": " .. label .. " must not declare max_age_minutes for codex-run liveness")
     end
   elseif numeric_minutes(signal.max_age_minutes) == nil then
     table.insert(errors, state .. ": " .. label .. " must declare finite max_age_minutes")
   end
-  if signal.surface ~= "issue-comment-stream" and signal.surface ~= "pr-comment-stream" then
+  if allowed_signal_surfaces[signal.surface] ~= true then
     table.insert(errors, state .. ": " .. label .. " must declare surface")
   end
   if signal.version_form ~= "raw" and signal.version_form ~= "safe_version_segment" then
@@ -189,13 +193,15 @@ function M.liveness_contract_errors(rows)
         if type(row.pr_recovery) ~= "table" then
           table.insert(errors, tostring(row.from_state or "?") .. ": pr_recovery must be a table")
         else
+          local allowed = pr_recovery_policy.allowed or {}
           for name, recovery in pairs(row.pr_recovery) do
-            if name ~= "not_mergeable" then
+            local policy = allowed[name]
+            if policy == nil then
               table.insert(errors, tostring(row.from_state or "?") .. ": unsupported pr_recovery " .. tostring(name))
             elseif type(recovery) ~= "table"
-              or recovery.to_state ~= "fixing"
-              or recovery.queue ~= "devloop_fixing" then
-              table.insert(errors, tostring(row.from_state or "?") .. ": not_mergeable pr_recovery must target fixing via devloop_fixing")
+              or recovery.to_state ~= policy.to_state
+              or recovery.queue ~= policy.queue then
+              table.insert(errors, tostring(row.from_state or "?") .. ": " .. tostring(name) .. " pr_recovery must target " .. tostring(policy.to_state) .. " via " .. tostring(policy.queue))
             end
           end
         end

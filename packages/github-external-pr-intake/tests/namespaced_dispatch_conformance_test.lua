@@ -1,4 +1,4 @@
-local conformance = require("contract.namespaced_dispatch_conformance")
+local conformance = require("testkit.namespaced_dispatch_conformance")
 local t = fkst.test
 
 local function load_department(path, module_name)

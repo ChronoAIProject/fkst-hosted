@@ -30,7 +30,7 @@ flags:
   lua:
     paths:
       - packages/
-      - std/
+      - libraries/
     carryforward: true
 
 # Defensive restatement of scripts/check_repo_coverage.py is_production_lua_path:

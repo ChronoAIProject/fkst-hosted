@@ -1,6 +1,6 @@
 local core = require("core")
 local mapping = require("departments.propose.mapping")
-local saga = require("contract.saga")
+local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "issue" },

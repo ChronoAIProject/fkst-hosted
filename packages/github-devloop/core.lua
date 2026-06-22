@@ -11,7 +11,7 @@ end
 
 require("devloop.base").install(M)
 require("devloop.config").install(M)
-require("std.github_debug_stamp").install(M)
+require("forge.github_debug_stamp").install(M)
 require("devloop.strings").install(M)
 require("core.github_graphql").install(M)
 require("devloop.commands").install(M)
@@ -64,7 +64,13 @@ M.restart_consumer_sources = {
 }
 require("devloop.restart").install(M, wiring.restart(M))
 require("core.restart.pr_partition_contract").install(M)
-require("devloop.restart_liveness_contract").install(M)
+require("workflow.restart_liveness_contract").install(M, require("devloop.liveness").with_restart_policy({
+  runtime_provenance = {
+    proposal_id = "github-devloop/issue/provenance/repo/1",
+    version = "restart-liveness-provenance",
+    marker_created_at = "2026-06-03T00:00:00Z",
+  },
+}))
 require("devloop.restart_responsibility_contract").install(M)
 require("devloop.restart_actionable_epoch").install(M)
 require("core.ready_split").install(M)

@@ -47,7 +47,7 @@ function Shared.install(M)
       if type(exec_argv) ~= "function" then
         error("github-devloop: git adapter requires exec_argv")
       end
-      git_handle = require("std.git").new(exec_argv)
+      git_handle = require("forge.git").new(exec_argv)
     end
     return git_handle
   end

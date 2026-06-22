@@ -1,0 +1,19 @@
+kind = "library"
+name = "testkit"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract"]
+
+[library]
+name = "testkit"
+stable_id = "fkst.library.testkit"
+version = "workspace"
+
+[exports]
+public = ["testkit.*"]
+
+[visibility]
+public = false

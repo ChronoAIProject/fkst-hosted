@@ -3,11 +3,11 @@ local core = require("core")
 local gh_argv = require("tests.gh_argv_mock_helpers")
 gh_argv.install(t, core)
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local testing = require("contract.testing")
+local testing = require("testkit.testing")
 local run_fake = testing.run_fake
 local run_fake_expecting_failure = testing.run_fake_expecting_failure
-local gh_fake = require("std.github_fake")
-local git_fake = require("std.git_fake")
+local gh_fake = require("forge.github_fake")
+local git_fake = require("forge.git_fake")
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 

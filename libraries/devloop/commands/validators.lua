@@ -1,5 +1,5 @@
 local S = {}
-local gitref = require("std.gitref")
+local gitref = require("forge.gitref")
 
 function S.bounded_limit(value, fallback, minimum, maximum, message)
   local n = tonumber(value or fallback)

@@ -1,6 +1,6 @@
 local S = {}
 local error_facts = require("contract.error_facts")
-local logging = require("contract.logging")
+local logging = require("workflow.logging")
 
 function S.install(M)
 

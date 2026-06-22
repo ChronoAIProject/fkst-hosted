@@ -5,7 +5,7 @@ name = "github-devloop"
 root = "."
 
 [lib_deps]
-libraries = ["std", "devloop", "contract"]
+libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
 packages = ["github-proxy", "consensus", "github-devloop-decompose"]
