@@ -1,5 +1,5 @@
 local W = {}
-local registry = require("std.registry")
+local registry = require("contract.registry")
 
 local package_name = "github-devloop"
 

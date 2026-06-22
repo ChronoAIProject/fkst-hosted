@@ -1,8 +1,8 @@
-local testing = require("std.testing")
+local testing = require("contract.testing")
 local github_fake = require("std.github_fake")
 local core = require("core")
 local audit_main = require("departments.audit.main")
-local env_lib = require("std.env")
+local env_lib = require("contract.env")
 local t = fkst.test
 
 local function opts(name, env)

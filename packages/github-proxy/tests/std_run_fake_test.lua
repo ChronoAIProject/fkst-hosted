@@ -1,4 +1,4 @@
-local testing = require("std.testing")
+local testing = require("contract.testing")
 local run_fake = testing.run_fake
 local run_fake_expecting_failure = testing.run_fake_expecting_failure
 local gh_fake = require("std.github_fake")

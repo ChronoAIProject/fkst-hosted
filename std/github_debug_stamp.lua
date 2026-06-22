@@ -1,5 +1,5 @@
 local S = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local marker_prefix = "<!-- fkst:debug-stamp:v1"
 local max_attr_len = 120

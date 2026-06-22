@@ -1,7 +1,7 @@
 -- std module behavior tests are hosted in github-proxy (a flat package, the
 -- strictest single-root conformance gate) because the engine test runner only
 -- scans <root>/tests and <root>/departments/* (no recursion into std/tests).
-local facts = require("std.error_facts")
+local facts = require("contract.error_facts")
 local t = fkst.test
 
 return {

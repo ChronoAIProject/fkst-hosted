@@ -1,5 +1,5 @@
--- std.dead_letter: dependency-free extractors for dead-letter delivery payloads.
-local error_facts = require("std.error_facts")
+-- contract.dead_letter: dependency-free extractors for dead-letter delivery payloads.
+local error_facts = require("contract.error_facts")
 
 local D = {}
 

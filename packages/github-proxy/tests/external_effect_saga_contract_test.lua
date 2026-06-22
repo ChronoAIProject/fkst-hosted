@@ -1,5 +1,5 @@
 local h = require("tests.proxy_integration_helpers")
-local conformance = require("std.saga_conformance")
+local conformance = require("contract.saga_conformance")
 local t = h.t
 local core = h.core
 

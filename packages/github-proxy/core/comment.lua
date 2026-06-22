@@ -2,7 +2,7 @@ local S = {}
 
 function S.install(M, deps)
 local shared = deps or M
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local max_runtime_id_len = 180
 local stale_comment_target_error_class = "stale-comment-target"
 

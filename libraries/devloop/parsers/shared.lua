@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local github_view = require("std.github_view")
 local label_names = github_view.label_names
 

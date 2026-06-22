@@ -1,4 +1,4 @@
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local M = {}
 

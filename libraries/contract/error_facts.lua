@@ -1,4 +1,4 @@
--- std.error_facts: dependency-free primitives for stable failure fingerprints.
+-- contract.error_facts: dependency-free primitives for stable failure fingerprints.
 local F = {}
 
 function F.one_line(value)

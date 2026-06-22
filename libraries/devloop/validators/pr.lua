@@ -1,4 +1,4 @@
-local source_refs = require("std.source_ref")
+local source_refs = require("contract.source_ref")
 
 return function(M)
 function M.is_supported_pr(payload)

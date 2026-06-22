@@ -2,7 +2,7 @@ local S = {}
 
 function S.new(M)
 local shared = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local ai_sentinel = "⟦AI:FKST⟧"
 local display_separator = " — "
 local max_display_question_len = 2000

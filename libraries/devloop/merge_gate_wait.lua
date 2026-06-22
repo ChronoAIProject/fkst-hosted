@@ -1,5 +1,5 @@
 local S = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 function S.install(M)
 local wait_bucket_seconds = 1800

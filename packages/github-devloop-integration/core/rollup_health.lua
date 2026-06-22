@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local detector = "rollup-health"
 local default_red_window_minutes = 30
 

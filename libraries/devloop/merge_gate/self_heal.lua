@@ -1,5 +1,5 @@
 local S = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 function S.install(M, shared)
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)

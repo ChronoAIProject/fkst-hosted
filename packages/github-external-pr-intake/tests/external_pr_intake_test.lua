@@ -10,7 +10,7 @@ local function load_department()
 end
 
 local function json_string(value)
-  return require("std.strings").json_string(value)
+  return require("contract.strings").json_string(value)
 end
 
 local function shell_quote(value)

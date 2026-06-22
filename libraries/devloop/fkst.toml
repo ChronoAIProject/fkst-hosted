@@ -5,7 +5,7 @@ name = "devloop"
 root = "."
 
 [lib_deps]
-libraries = ["std"]
+libraries = ["std", "contract"]
 
 [library]
 name = "devloop"

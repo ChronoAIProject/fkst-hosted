@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local error_facts = require("std.error_facts")
+local error_facts = require("contract.error_facts")
 
 function M.error_fingerprint(error_class, queue, dept, message)
   return error_facts.error_fingerprint(error_class, queue, dept, message)

@@ -1,8 +1,8 @@
 local core = require("core")
 local ports_seam = require("std.ports")
 local ratchets = require("departments.ratchet_migration_driver.ratchets")
-local saga = require("std.saga")
-local strings = require("std.strings")
+local saga = require("contract.saga")
+local strings = require("contract.strings")
 
 local M = {}
 

@@ -1,11 +1,11 @@
 local S = {}
 
 function S.install(M)
-local codex = require("std.codex")
-local error_facts = require("std.error_facts")
+local codex = require("contract.codex")
+local error_facts = require("contract.error_facts")
 local gitref = require("std.gitref")
-local source_refs = require("std.source_ref")
-local strings = require("std.strings")
+local source_refs = require("contract.source_ref")
+local strings = require("contract.strings")
 
 local max_key_len = 200
 local max_dedup_len = 512

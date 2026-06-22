@@ -1,5 +1,5 @@
-local source_refs = require("std.source_ref")
-local strings = require("std.strings")
+local source_refs = require("contract.source_ref")
+local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 local valid_round = require("devloop.rounds").valid_round
 

@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("std.registry")
+local registry = require("contract.registry")
 
 local validators_index = require("devloop.validators.index")
 local validators = {

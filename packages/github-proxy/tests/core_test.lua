@@ -1,5 +1,5 @@
 local core = require("core")
-local error_facts = require("std.error_facts")
+local error_facts = require("contract.error_facts")
 local t = fkst.test
 
 local raw_mock_command = t.mock_command

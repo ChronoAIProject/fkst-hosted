@@ -5,4 +5,4 @@ name = "idle-detector"
 root = "."
 
 [lib_deps]
-libraries = ["std"]
+libraries = ["contract"]

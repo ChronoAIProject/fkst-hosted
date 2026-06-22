@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 def load_check_repo():
@@ -27,6 +28,10 @@ check_repo = load_check_repo()
 def write(path: Path, source: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
+
+
+def inventory_line(path: str, module: str) -> str:
+    return f'{{"path":"{path}","module":"{module}"}}\n'
 
 
 class StdDependencyModelGuardTest(unittest.TestCase):
@@ -136,6 +141,145 @@ class StdDependencyModelGuardTest(unittest.TestCase):
 
         self.assertEqual(violations, [])
         self.assertEqual(warnings, ["G-STD-DEP: package example uses std.ok"])
+
+    def test_contract_allows_only_contract_internal_requires(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "contract" / "strings.lua", "return {}\n")
+            write(
+                root / "libraries" / "contract" / "payload.lua",
+                'local strings = require("contract.strings")\nreturn {}\n',
+            )
+            write(root / "packages" / "example" / "core.lua", 'local payload = require("contract.payload")\n')
+
+            violations, warnings = self.run_guard(root)
+
+        self.assertEqual(violations, [])
+        self.assertEqual(warnings, ["G-STD-DEP: package example uses contract.payload"])
+
+    def test_contract_rejects_std_devloop_and_other_requires(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(
+                root / "libraries" / "contract" / "bad.lua",
+                "\n".join([
+                    'local github = require("std.github")',
+                    'local devloop = require("devloop.state")',
+                    'local core = require("core")',
+                ]) + "\n",
+            )
+
+            violations, _warnings = self.run_guard(root)
+
+        self.assertIn("G-STD-DEP: libraries/contract/bad.lua:1 contract must not require 'std.github'", violations)
+        self.assertIn("G-STD-DEP: libraries/contract/bad.lua:2 contract must not require 'devloop.state'", violations)
+        self.assertIn(
+            'G-STD-DEP: contract module libraries/contract/bad.lua:3 requires non-contract module "core" '
+            "(contract must be a pure base library)",
+            violations,
+        )
+
+    def test_std_forge_may_require_contract_but_not_devloop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "contract" / "strings.lua", "return {}\n")
+            write(
+                root / "std" / "github.lua",
+                "\n".join([
+                    'local strings = require("contract.strings")',
+                    'local devloop = require("devloop.state")',
+                ]) + "\n",
+            )
+
+            violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(violations, ["G-STD-DEP: std/github.lua:2 std/forge must not require 'devloop.state'"])
+
+    def test_devloop_std_imports_must_match_inventory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "std" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("std.github")\nreturn {}\n')
+            write(
+                root / "migration" / "devloop-std-imports.inventory",
+                inventory_line("libraries/devloop/claims.lua", "std.github"),
+            )
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, warnings = self.run_guard(root)
+
+        self.assertEqual(violations, [])
+        self.assertEqual(warnings, [])
+
+    def test_devloop_std_import_missing_from_inventory_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "std" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("std.github")\nreturn {}\n')
+            write(root / "migration" / "devloop-std-imports.inventory", "")
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(
+            violations,
+            [
+                "G-STD-DEP: libraries/devloop/claims.lua imports std.github "
+                "but is not listed in migration/devloop-std-imports.inventory",
+            ],
+        )
+
+    def test_devloop_std_import_stale_inventory_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "std" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "claims.lua", "return {}\n")
+            write(
+                root / "migration" / "devloop-std-imports.inventory",
+                inventory_line("libraries/devloop/claims.lua", "std.github"),
+            )
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(
+            violations,
+            [
+                "G-STD-DEP: migration/devloop-std-imports.inventory lists stale import "
+                "libraries/devloop/claims.lua std.github",
+            ],
+        )
+
+    def test_devloop_std_import_inventory_growth_relative_to_base_fails(self) -> None:
+        current = inventory_line("libraries/devloop/claims.lua", "std.github")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "std" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "claims.lua", 'local github = require("std.github")\nreturn {}\n')
+            write(root / "migration" / "devloop-std-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("present", ""),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(
+            violations,
+            [
+                "G-STD-DEP: migration/devloop-std-imports.inventory grows relative to dev: "
+                "libraries/devloop/claims.lua std.github",
+            ],
+        )
 
 
 if __name__ == "__main__":

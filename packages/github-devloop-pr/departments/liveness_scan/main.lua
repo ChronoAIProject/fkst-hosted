@@ -1,5 +1,5 @@
 local core = require("core")
-local saga = require("std.saga")
+local saga = require("contract.saga")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
 

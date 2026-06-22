@@ -1,5 +1,5 @@
 local S = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"

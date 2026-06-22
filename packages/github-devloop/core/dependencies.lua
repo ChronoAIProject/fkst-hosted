@@ -1,6 +1,6 @@
 local M = {}
 local root_ref = nil
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local max_dependency_depth = 32
 

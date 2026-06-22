@@ -181,7 +181,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
             source.write_text(
                 textwrap.dedent(
                     """\
-                    local saga = require("std.saga")
+                    local saga = require("contract.saga")
                     local spec = { consumes = { "q" } }
                     return saga.department(spec, { done = done, act = act })
                     """

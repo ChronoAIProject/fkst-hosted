@@ -1,5 +1,5 @@
 local S = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 function S.install(M)
 local previous_transition_lock_key = M.transition_lock_key

@@ -1,4 +1,4 @@
--- std.payload: small, dependency-free payload validators shared across packages.
+-- contract.payload: small, dependency-free payload validators shared across packages.
 local P = {}
 
 function P.require_field(payload, name, ctx)

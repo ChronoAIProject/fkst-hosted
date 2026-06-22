@@ -1,5 +1,5 @@
 local S = {}
-local source_refs = require("std.source_ref")
+local source_refs = require("contract.source_ref")
 
 function S.install(M)
 local max_decompose_issues = 3

@@ -850,7 +850,7 @@ def check_persistence_classes(root: Path, violations: list[str]) -> None:
 REQUIRE_RE = re.compile(
     r"""\brequire\s*(?:\(\s*)?(?:"([A-Za-z0-9_.\-]+)"|'([A-Za-z0-9_.\-]+)'|\[(=*)\[([A-Za-z0-9_.\-]+)\]\3\])"""
 )
-SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']std\.saga["']""")
+SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']contract\.saga["']""")
 SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*[({]")
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 
@@ -938,7 +938,7 @@ def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str]
         if saga_shaped and FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None:
             violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
         if not saga_shaped and path not in allowlist:
-            violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to std.saga.department or (only for pre-existing) keep listed")
+            violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to contract.saga.department or (only for pre-existing) keep listed")
     for path in sorted(allowlist - set(sources)):
         violations.append(f"G10: {path} listed in saga-handler allowlist but does not exist")
     if base_allowlist is not None:

@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local max_evidence_len = 600
 local ai_sentinel = "⟦AI:FKST⟧"
 

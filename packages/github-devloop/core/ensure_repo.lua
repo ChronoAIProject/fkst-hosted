@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local dashboard_title = "fkst-dev board"
 local dashboard_label = "fkst-dashboard"
 local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"

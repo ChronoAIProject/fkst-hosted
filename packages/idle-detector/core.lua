@@ -1,6 +1,6 @@
 local M = {}
 
-local error_facts = require("std.error_facts")
+local error_facts = require("contract.error_facts")
 
 local observe_schema_version = 1
 

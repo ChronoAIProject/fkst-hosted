@@ -62,7 +62,7 @@ class UncoveredLine:
 def is_production_lua_path(path: str) -> bool:
     if not path.endswith(".lua"):
         return False
-    if not (path.startswith("packages/") or path.startswith("std/")):
+    if not (path.startswith("packages/") or path.startswith("std/") or path.startswith("libraries/")):
         return False
     parts = path.split("/")
     if "tests" in parts:
@@ -241,7 +241,7 @@ def repository_coverage_path(file: str, package_name: str | None = None) -> str:
         return file
     if package_name is None or file.startswith("../") or file.startswith("/"):
         return file
-    if file.startswith("std/"):
+    if file.startswith("std/") or file.startswith("libraries/"):
         return file
     return f"packages/{package_name}/{file}"
 

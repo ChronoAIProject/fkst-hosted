@@ -1,5 +1,5 @@
 local core = require("core")
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local t = fkst.test
 
 local function issue(extra)

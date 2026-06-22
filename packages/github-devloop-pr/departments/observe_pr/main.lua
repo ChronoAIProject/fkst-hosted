@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("std.saga")
+local core, saga = require("core"), require("contract.saga")
 
 local M = {}
 

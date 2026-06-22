@@ -2,7 +2,7 @@ local S = {}
 local github_handle = nil
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
 local recent_closed_limit = 30

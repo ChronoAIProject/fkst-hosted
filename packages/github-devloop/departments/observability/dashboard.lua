@@ -1,5 +1,5 @@
 local common = require("departments.observability.common")
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 
 local M = {}

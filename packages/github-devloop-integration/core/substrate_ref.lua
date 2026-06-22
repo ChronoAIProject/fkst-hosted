@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local substrate_ref_path = ".fkst/substrate-ref"
 local substrate_remote = "https://github.com/ChronoAIProject/fkst-substrate.git"
 local substrate_branch = "dev"

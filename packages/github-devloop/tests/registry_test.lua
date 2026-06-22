@@ -1,4 +1,4 @@
-local registry = require("std.registry")
+local registry = require("contract.registry")
 local t = fkst.test
 
 local function expect_error_contains(fn, needle)

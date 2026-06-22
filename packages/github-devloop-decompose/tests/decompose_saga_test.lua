@@ -1,5 +1,5 @@
 local h = require("tests.devloop_helpers")
-local saga_conformance = require("std.saga_conformance")
+local saga_conformance = require("contract.saga_conformance")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")

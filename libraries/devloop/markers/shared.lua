@@ -1,7 +1,7 @@
 local S = {}
 
 S.valid_round = require("devloop.rounds").valid_round
-S.strings = require("std.strings")
+S.strings = require("contract.strings")
 S.max_attr_len = 240
 
 function S.marker_attr(marker, name)

@@ -1,5 +1,5 @@
 local h = require("tests.proxy_integration_helpers")
-local conformance = require("std.namespaced_dispatch_conformance")
+local conformance = require("contract.namespaced_dispatch_conformance")
 local t = h.t
 
 local function load_department(path, module_name)

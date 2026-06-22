@@ -1,5 +1,5 @@
 local PrFreshness = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 
 function PrFreshness.install(M, shared)

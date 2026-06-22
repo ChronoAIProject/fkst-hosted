@@ -1,5 +1,5 @@
 local S = {}
-local source_refs = require("std.source_ref")
+local source_refs = require("contract.source_ref")
 
 function S.install(M, shared)
 local max_timeout_attempts = shared.max_timeout_attempts

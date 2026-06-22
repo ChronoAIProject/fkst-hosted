@@ -1,4 +1,4 @@
-local conformance = require("std.saga_conformance")
+local conformance = require("contract.saga_conformance")
 local t = fkst.test
 
 local function run_write()

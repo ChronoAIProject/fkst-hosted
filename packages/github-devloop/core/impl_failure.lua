@@ -1,5 +1,5 @@
 local S = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local max_impl_auto_retry_attempts = 2
 local max_impl_retry_attempts = 100000

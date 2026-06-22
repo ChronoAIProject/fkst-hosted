@@ -1,5 +1,5 @@
 local core = require("core")
-local conformance = require("std.namespaced_dispatch_conformance")
+local conformance = require("contract.namespaced_dispatch_conformance")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local t = fkst.test

@@ -1,6 +1,6 @@
 local core = require("core")
 local ports_seam = require("std.ports")
-local saga = require("std.saga")
+local saga = require("contract.saga")
 
 local M = {}
 

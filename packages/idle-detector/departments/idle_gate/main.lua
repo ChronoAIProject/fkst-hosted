@@ -1,6 +1,6 @@
 local core = require("core")
-local error_facts = require("std.error_facts")
-local saga = require("std.saga")
+local error_facts = require("contract.error_facts")
+local saga = require("contract.saga")
 
 local spec = {
   consumes = { "idle_tick" },

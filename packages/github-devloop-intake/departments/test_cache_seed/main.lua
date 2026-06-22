@@ -1,4 +1,4 @@
-local saga = require("std.saga")
+local saga = require("contract.saga")
 local helper = require("tests.cache_seed_helpers")
 
 local spec = {

@@ -102,7 +102,7 @@ class LuaCoverageToLcovTest(unittest.TestCase):
             self.artifact(
                 [
                     {
-                        "file": "std/strings.lua",
+                        "file": "libraries/contract/strings.lua",
                         "coverable_lines": [
                             {
                                 "line": 3,
@@ -128,13 +128,13 @@ class LuaCoverageToLcovTest(unittest.TestCase):
         )
 
         self.assertIn("SF:packages/example/core.lua\n", rendered)
-        self.assertIn("SF:std/strings.lua\n", rendered)
+        self.assertIn("SF:libraries/contract/strings.lua\n", rendered)
 
     def test_output_is_byte_for_byte_deterministic_and_sorted(self) -> None:
         data = self.artifact(
             [
                 {
-                    "file": "std/strings.lua",
+                    "file": "libraries/contract/strings.lua",
                     "coverable_lines": [
                         {
                             "line": 9,
@@ -168,7 +168,7 @@ class LuaCoverageToLcovTest(unittest.TestCase):
         second = lcov.render_lcov(data)
 
         self.assertEqual(first, second)
-        self.assertLess(first.index("SF:packages/example/core.lua"), first.index("SF:std/strings.lua"))
+        self.assertLess(first.index("SF:libraries/contract/strings.lua"), first.index("SF:packages/example/core.lua"))
         self.assertLess(first.index("DA:4,0"), first.index("DA:9,1"))
 
     def test_invalid_schema_raises_narrow_value_error(self) -> None:
@@ -221,7 +221,7 @@ class MainCliTest(unittest.TestCase):
             "schema": "fkst.lua.coverage.v1",
             "files": [
                 {
-                    "file": "std/strings.lua",
+                    "file": "libraries/contract/strings.lua",
                     "coverable_lines": [
                         {"line": 3, "normalized_line_hash": "a1", "text": "x()", "covered": True},
                         {"line": 5, "normalized_line_hash": "b2", "text": "y()", "covered": False},

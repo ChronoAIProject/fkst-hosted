@@ -2,7 +2,7 @@ local S = {}
 
 function S.install(M, deps)
 local shared = deps or M
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local max_dedup_len = 512
 local max_repo_len = 200
 

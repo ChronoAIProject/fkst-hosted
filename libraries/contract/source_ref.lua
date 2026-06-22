@@ -1,5 +1,5 @@
--- std.source_ref: structural helpers for stable {kind, ref} source pointers.
-local strings = require("std.strings")
+-- contract.source_ref: structural helpers for stable {kind, ref} source pointers.
+local strings = require("contract.strings")
 
 local R = {}
 

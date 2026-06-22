@@ -1,8 +1,8 @@
 local M = {}
-local codex = require("std.codex")
-local env = require("std.env")
-local error_facts = require("std.error_facts")
-local strings = require("std.strings")
+local codex = require("contract.codex")
+local env = require("contract.env")
+local error_facts = require("contract.error_facts")
+local strings = require("contract.strings")
 
 function M.persistence_class()
   return "judgment_pipeline"

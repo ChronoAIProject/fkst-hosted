@@ -1,10 +1,10 @@
--- Direct contract test for the std.sweep shared module extracted from
+-- Direct contract test for the contract.sweep shared module extracted from
 -- core/sweep_bounds. Pins the pure leaf behavior (bounds, rotation offset,
 -- cursor batching, deferred-result shapes) so future cross-package consumers
 -- (and any further extraction) cannot drift it silently. The package M.sweep_*
 -- facade -- including the package-local rotate/batch orchestrators -- is covered
--- through the observability/liveness suites; this file pins the std contract.
-local sweep = require("std.sweep")
+-- through the observability/liveness suites; this file pins the contract.
+local sweep = require("contract.sweep")
 local t = fkst.test
 
 local function eq_list(actual, expected)

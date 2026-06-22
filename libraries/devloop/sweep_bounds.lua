@@ -1,5 +1,5 @@
 local S = {}
-local sweep = require("std.sweep")
+local sweep = require("contract.sweep")
 
 function S.install(M)
 local default_call_timeout = 10
@@ -100,7 +100,7 @@ M.sweep_rotation_offset = sweep.rotation_offset
 -- rotate/batch stay package-local so their facade call graph
 -- (M.sweep_rotate -> M.sweep_rotation_offset, M.sweep_batch -> M.sweep_rotate)
 -- is preserved exactly; only the leaf rotation_offset/positive_integer math is
--- shared from std.sweep.
+-- shared from contract.sweep.
 function M.sweep_rotate(items, seed)
   local source = items or {}
   local count = #source

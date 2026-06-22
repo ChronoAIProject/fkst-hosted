@@ -1,7 +1,7 @@
 local M = {}
-local env = require("std.env")
-local source_ref = require("std.source_ref")
-local strings = require("std.strings")
+local env = require("contract.env")
+local source_ref = require("contract.source_ref")
+local strings = require("contract.strings")
 
 require("core.error_facts").install(M)
 

@@ -1,4 +1,4 @@
--- std.strings: small, dependency-free string utilities shared across packages.
+-- contract.strings: small, dependency-free string utilities shared across packages.
 local S = {}
 
 function S.trim(value)
@@ -27,7 +27,7 @@ function S.comment_body(comment)
   return tostring(comment or "")
 end
 
--- std.strings.json_string is a temporary byte-identical stopgap for #976 only:
+-- contract.strings.json_string is a temporary byte-identical stopgap for #976 only:
 -- canonical JSON encoding remains deferred to a dedicated encoder boundary.
 -- Keep this body matched to the folded github-devloop encode_json_string copies;
 -- do not extend it into a partial general JSON serializer.

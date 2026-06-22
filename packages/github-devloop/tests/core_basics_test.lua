@@ -1,6 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
-local error_facts = require("std.error_facts")
+local error_facts = require("contract.error_facts")
 local t = h.t
 local source_ref = h.source_ref
 local issue = h.issue

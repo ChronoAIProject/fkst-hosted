@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local env = require("std.env")
+local env = require("contract.env")
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_CLAIM_MODE = true,

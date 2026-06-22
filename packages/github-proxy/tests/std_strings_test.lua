@@ -1,7 +1,7 @@
 -- std module behavior tests are hosted in github-proxy (a flat package, the
 -- strictest single-root conformance gate) because the engine test runner only
 -- scans <root>/tests and <root>/departments/* (no recursion into std/tests).
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local t = fkst.test
 
 return {
@@ -61,8 +61,8 @@ return {
   end,
 
   test_json_string_documents_temporary_canonical_encoder_waiver = function()
-    local source = file.read("std/strings.lua")
-    t.is_true(source:find("std.strings.json_string is a temporary byte-identical stopgap", 1, true) ~= nil)
+    local source = file.read("libraries/contract/strings.lua")
+    t.is_true(source:find("contract.strings.json_string is a temporary byte-identical stopgap", 1, true) ~= nil)
     t.is_true(source:find("canonical JSON encoding remains deferred to a dedicated encoder boundary", 1, true) ~= nil)
   end,
 

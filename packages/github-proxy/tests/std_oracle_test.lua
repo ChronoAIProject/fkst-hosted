@@ -1,4 +1,4 @@
-local oracle = require("std.oracle")
+local oracle = require("contract.oracle")
 
 return {
   test_effect_set_unions_writes_and_raises = function()

@@ -1,5 +1,5 @@
 local BranchTrain = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 
 function BranchTrain.install(M, shared)

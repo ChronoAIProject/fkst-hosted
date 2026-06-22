@@ -1,6 +1,6 @@
 local core = require("core")
-local saga = require("std.saga")
-local source_refs = require("std.source_ref")
+local saga = require("contract.saga")
+local source_refs = require("contract.source_ref")
 local valid_round = require("devloop.rounds").valid_round
 local handoff_helpers = require("devloop.comment_handoff")
 

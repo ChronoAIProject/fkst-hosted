@@ -1,7 +1,7 @@
-local env = require("std.env")
-local error_facts = require("std.error_facts")
-local logging = require("std.logging")
-local strings = require("std.strings")
+local env = require("contract.env")
+local error_facts = require("contract.error_facts")
+local logging = require("contract.logging")
+local strings = require("contract.strings")
 
 local M = {}
 

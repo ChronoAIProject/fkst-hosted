@@ -311,7 +311,7 @@ def specs() -> dict[str, MigrationSpec]:
             migration_kind="allowlist",
             allowlist_path="migration/saga-handler.allowlist",
             title="saga handler allowlist migration slice",
-            reference_shape="Use the existing std.saga.department(spec, handlers) shape from migrated departments.",
+            reference_shape="Use the existing contract.saga.department(spec, handlers) shape from migrated departments.",
             allowlist_contract=(
                 "A `saga-handler` slice is single-flight by stable `dedup_key`: at most one live issue or PR surface may own the same `dedup_key`.",
                 "Before opening or implementing a duplicate slice, prove the prior surface is stale, cancelled, invalid, or explicitly waived as a duplicate run.",

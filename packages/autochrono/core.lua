@@ -1,8 +1,8 @@
 local M = {}
-local error_facts = require("std.error_facts")
-local payload_validator = require("std.payload")
-local source_refs = require("std.source_ref")
-local strings = require("std.strings")
+local error_facts = require("contract.error_facts")
+local payload_validator = require("contract.payload")
+local source_refs = require("contract.source_ref")
+local strings = require("contract.strings")
 
 function M.persistence_class()
   return "judgment_pipeline"

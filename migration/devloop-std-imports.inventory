@@ -1,0 +1,16 @@
+{"path":"libraries/devloop/base.lua","module":"std.gitref"}
+{"path":"libraries/devloop/claims.lua","module":"std.github"}
+{"path":"libraries/devloop/claims.lua","module":"std.github_view"}
+{"path":"libraries/devloop/commands/support.lua","module":"std.git"}
+{"path":"libraries/devloop/commands/support.lua","module":"std.github"}
+{"path":"libraries/devloop/commands/validators.lua","module":"std.gitref"}
+{"path":"libraries/devloop/config.lua","module":"std.git"}
+{"path":"libraries/devloop/entity_list_cache.lua","module":"std.github_view"}
+{"path":"libraries/devloop/git_mechanics.lua","module":"std.git"}
+{"path":"libraries/devloop/github_proxy_entity_view.lua","module":"std.github"}
+{"path":"libraries/devloop/github_proxy_entity_view.lua","module":"std.github_view"}
+{"path":"libraries/devloop/merge_gate/shared.lua","module":"std.github.check_runs"}
+{"path":"libraries/devloop/parsers/shared.lua","module":"std.github_view"}
+{"path":"libraries/devloop/payloads/shared.lua","module":"std.github"}
+{"path":"libraries/devloop/payloads/shared.lua","module":"std.github_view"}
+{"path":"libraries/devloop/queue_starvation.lua","module":"std.github"}

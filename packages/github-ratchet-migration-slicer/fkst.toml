@@ -5,4 +5,4 @@ name = "github-ratchet-migration-slicer"
 root = "."
 
 [lib_deps]
-libraries = ["std"]
+libraries = ["std", "contract"]

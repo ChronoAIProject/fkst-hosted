@@ -1,11 +1,11 @@
 -- std.gitref: project-agnostic git ref/sha/PR-number safety predicates and validators. The owner label namespaces validator error messages.
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local S = {}
 
 local max_sha_len = 64
 
--- is_git_ref_safe is the canonical std.strings primitive (also consumed by
+-- is_git_ref_safe is the canonical contract.strings primitive (also consumed by
 -- github-proxy and std.github.shell); reference it rather than duplicating the
 -- body, so the two cannot drift.
 S.is_git_ref_safe = strings.is_git_ref_safe

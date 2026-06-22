@@ -1,7 +1,7 @@
 local M = {}
 
-local strings = require("std.strings")
-local error_facts = require("std.error_facts")
+local strings = require("contract.strings")
+local error_facts = require("contract.error_facts")
 
 local file_limit = 240
 local rule_limit = 80

@@ -1,5 +1,5 @@
 local S = {}
-local registry = require("std.registry")
+local registry = require("contract.registry")
 
 function S.install(M, resolved)
 resolved = resolved or {}

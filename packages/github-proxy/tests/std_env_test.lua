@@ -1,4 +1,4 @@
-local env = require("std.env")
+local env = require("contract.env")
 local t = fkst.test
 
 local allowed_env = {

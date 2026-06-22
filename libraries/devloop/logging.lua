@@ -1,6 +1,6 @@
 local S = {}
-local error_facts = require("std.error_facts")
-local logging = require("std.logging")
+local error_facts = require("contract.error_facts")
+local logging = require("contract.logging")
 
 function S.install(M)
 

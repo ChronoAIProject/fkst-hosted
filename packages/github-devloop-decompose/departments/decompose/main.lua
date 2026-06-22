@@ -1,6 +1,6 @@
 local core = require("core")
-local saga = require("std.saga")
-local strings = require("std.strings")
+local saga = require("contract.saga")
+local strings = require("contract.strings")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },

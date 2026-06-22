@@ -1,4 +1,4 @@
-local saga = require("std.saga")
+local saga = require("contract.saga")
 local t = fkst.test
 
 local function event(extra)

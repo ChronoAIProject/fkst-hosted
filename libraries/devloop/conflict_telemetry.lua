@@ -1,7 +1,7 @@
 local S = {}
 
 function S.install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 local conflict_hotspot_threshold = 3
 local conflict_hotspot_window_days = 7

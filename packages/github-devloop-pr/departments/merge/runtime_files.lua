@@ -1,5 +1,5 @@
 local M = {}
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local MAX_RUNTIME_ID_LEN = 180
 

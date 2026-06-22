@@ -2,7 +2,7 @@ local S = {}
 
 function S.install(M)
 require("devloop.queue").install(M)
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local active_wip_states = {
   implementing = true,

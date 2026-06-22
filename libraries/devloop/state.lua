@@ -1,5 +1,5 @@
 local S = {}
-local source_ref = require("std.source_ref")
+local source_ref = require("contract.source_ref")
 
 function S.install(M)
 function M.has_label(labels, expected)

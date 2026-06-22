@@ -1,5 +1,5 @@
 local core = require("core")
-local saga = require("std.saga")
+local saga = require("contract.saga")
 
 local spec = {
   consumes = { "github_pr_comment_request" },

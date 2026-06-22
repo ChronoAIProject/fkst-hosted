@@ -1,5 +1,5 @@
 local M = {}
-local payload_validator = require("std.payload")
+local payload_validator = require("contract.payload")
 
 local require_field = payload_validator.require_field
 local error_context = "github-autochrono glue"

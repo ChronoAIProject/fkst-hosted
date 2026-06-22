@@ -1,4 +1,4 @@
-local codex = require("std.codex")
+local codex = require("contract.codex")
 local t = fkst.test
 
 return {

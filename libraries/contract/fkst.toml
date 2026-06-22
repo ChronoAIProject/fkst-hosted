@@ -1,19 +1,19 @@
 kind = "library"
-name = "std"
+name = "contract"
 
 [code]
 root = "."
 
 [lib_deps]
-libraries = ["contract"]
+libraries = []
 
 [library]
-name = "std"
-stable_id = "fkst.library.std"
+name = "contract"
+stable_id = "fkst.library.contract"
 version = "workspace"
 
 [exports]
-public = ["std.*"]
+public = ["contract.*"]
 
 [visibility]
 public = true

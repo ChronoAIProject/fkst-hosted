@@ -1,9 +1,9 @@
 local core = require("core")
-local codex = require("std.codex")
-local env = require("std.env")
-local saga = require("std.saga")
+local codex = require("contract.codex")
+local env = require("contract.env")
+local saga = require("contract.saga")
 local ports_lib = require("std.ports")
-local strings = require("std.strings")
+local strings = require("contract.strings")
 
 local spec = {
   consumes = { "idle-detector.system_idle" },

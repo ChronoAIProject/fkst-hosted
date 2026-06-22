@@ -1,8 +1,8 @@
 local core = require("core")
 
-local dead_letter = require("std.dead_letter")
-local error_facts = require("std.error_facts")
-local saga = require("std.saga")
+local dead_letter = require("contract.dead_letter")
+local error_facts = require("contract.error_facts")
+local saga = require("contract.saga")
 
 local spec = {
   consumes = { "dead_letter" },

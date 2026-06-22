@@ -230,6 +230,14 @@ class CoverageRatchetTest(unittest.TestCase):
                             }],
                         },
                         {
+                            "file": "libraries/contract/strings.lua",
+                            "missing_lines": [{
+                                "line": 3,
+                                "normalized_line_hash": "dddddddd",
+                                "text": "return shared()",
+                            }],
+                        },
+                        {
                             "file": "packages/example/tests/core_test.lua",
                             "missing_lines": [{
                                 "line": 1,
@@ -256,12 +264,18 @@ class CoverageRatchetTest(unittest.TestCase):
             count_again = coverage.write_current_uncovered(artifact, allowlist)
             second = allowlist.read_text(encoding="utf-8")
 
-        self.assertEqual(count, 2)
-        self.assertEqual(count_again, 2)
+        self.assertEqual(count, 3)
+        self.assertEqual(count_again, 3)
         self.assertEqual(first, second)
         self.assertEqual(
             [json.loads(line) for line in first.splitlines()],
             [
+                {
+                    "file": "libraries/contract/strings.lua",
+                    "line": 3,
+                    "normalized_line_hash": "dddddddd",
+                    "reason": "baseline",
+                },
                 {
                     "file": "packages/example/core.lua",
                     "line": 2,
@@ -338,15 +352,18 @@ class CoverageRatchetTest(unittest.TestCase):
             root = Path(tmp)
             (root / "packages" / "example").mkdir(parents=True)
             (root / "std").mkdir()
+            (root / "libraries" / "contract").mkdir(parents=True)
             (root / "packages" / "example" / "core.lua").write_text(
                 "local M = {}\nfunction M.covered()\n  return 1\nend\nreturn M\n",
                 encoding="utf-8",
             )
             (root / "std" / "shared.lua").write_text("return {}\n", encoding="utf-8")
+            (root / "libraries" / "contract" / "strings.lua").write_text("return {}\n", encoding="utf-8")
             output = root / "coverage.json"
 
             count = coverage.write_canonical_coverage_json(
                 {
+                    "libraries/contract/strings.lua": {1},
                     "packages/example/core.lua": {1, 2, 3, 5},
                     "std/shared.lua": {1},
                 },
@@ -355,10 +372,14 @@ class CoverageRatchetTest(unittest.TestCase):
             )
             data = json.loads(output.read_text(encoding="utf-8"))
 
-            self.assertEqual(count, 2)
+            self.assertEqual(count, 3)
             self.assertEqual(data["schema"], "fkst.lua.coverage.v1")
-            self.assertEqual([item["file"] for item in data["files"]], ["packages/example/core.lua", "std/shared.lua"])
-            core_lines = data["files"][0]["coverable_lines"]
+            self.assertEqual(
+                [item["file"] for item in data["files"]],
+                ["libraries/contract/strings.lua", "packages/example/core.lua", "std/shared.lua"],
+            )
+            files_by_path = {item["file"]: item for item in data["files"]}
+            core_lines = files_by_path["packages/example/core.lua"]["coverable_lines"]
             self.assertIn(
                 {
                     "line": 3,
