@@ -49,6 +49,14 @@ local function audit_run_marker(trigger_reason)
   return '<!-- fkst:archaudit:audit-run:v1 reason="' .. tostring(trigger_reason) .. '" -->'
 end
 
+local function require_audit_run_marker(trigger_reason)
+  local marker = audit_run_marker(trigger_reason)
+  if marker == nil then
+    error("archaudit: invalid-audit-trigger: missing trigger reason")
+  end
+  return marker
+end
+
 local function body_text(finding, dedup_key, trigger_reason)
   local lines = {
     "Architecture doctrine violation:",
@@ -72,6 +80,16 @@ local function body_text(finding, dedup_key, trigger_reason)
     table.insert(lines, marker)
   end
   return table.concat(lines, "\n")
+end
+
+local function audit_run_body(trigger_reason)
+  return table.concat({
+    "Architecture audit completed with zero findings.",
+    "",
+    "Audit trigger: " .. tostring(trigger_reason),
+    "",
+    require_audit_run_marker(trigger_reason),
+  }, "\n")
 end
 
 function M.audit_tick_payload(slot)
@@ -334,6 +352,21 @@ function M.dedup_key(repo, finding)
   return readable:sub(1, github_proxy_limits.dedup_key)
 end
 
+function M.audit_run_dedup_key(repo, now_seconds, max_staleness_seconds)
+  if type(now_seconds) ~= "number" or type(max_staleness_seconds) ~= "number" or max_staleness_seconds < 1 then
+    error("archaudit: invalid-audit-run-dedup-input: timestamps and staleness budget must be numeric")
+  end
+  local bucket = math.floor(now_seconds / max_staleness_seconds)
+  local seed = tostring(repo) .. "|" .. tostring(bucket)
+  local readable = table.concat({
+    "archaudit-run",
+    strings.sanitize_key(repo, 120),
+    tostring(bucket),
+    strings.decimal_checksum(seed),
+  }, "/")
+  return readable:sub(1, github_proxy_limits.dedup_key)
+end
+
 function M.build_issue_create_request(repo, finding, label_available, trigger_reason)
   assert_request_field(M.validate_repo(repo), "repo")
   local dedup_key = M.dedup_key(repo, finding)
@@ -363,8 +396,37 @@ function M.build_issue_create_request(repo, finding, label_available, trigger_re
   }
 end
 
+function M.build_audit_run_issue_create_request(repo, trigger_reason, label_available, now_seconds, max_staleness_seconds)
+  assert_request_field(M.validate_repo(repo), "repo")
+  local dedup_key = M.audit_run_dedup_key(repo, now_seconds, max_staleness_seconds)
+  local title = "Archaudit: audit completed with zero findings"
+  local body = audit_run_body(trigger_reason)
+  local source_ref_ref = strings.sanitize_key(repo, 120) .. "#archaudit-run/" .. strings.decimal_checksum(dedup_key)
+  assert_request_field(strings.is_bounded_string(title, github_proxy_limits.title), "title")
+  assert_request_field(strings.is_bounded_string(body, github_proxy_limits.body), "body")
+  assert_request_field(strings.is_bounded_string(dedup_key, github_proxy_limits.dedup_key) and marker_safe(dedup_key), "dedup_key")
+  assert_request_field(strings.is_bounded_string("repo-site", github_proxy_limits.source_ref_kind), "source_ref.kind")
+  assert_request_field(strings.is_bounded_string(source_ref_ref, github_proxy_limits.source_ref_ref), "source_ref.ref")
+  local labels = {}
+  if label_available then
+    labels = { "archaudit" }
+  end
+  return {
+    schema = "github-proxy.issue-create.v1",
+    repo = tostring(repo),
+    title = title,
+    body = body,
+    labels = labels,
+    dedup_key = dedup_key,
+    source_ref = {
+      kind = "repo-site",
+      ref = source_ref_ref,
+    },
+  }
+end
+
 function M.audit_issue_search_query()
-  return "archaudit-dedup:"
+  return "fkst:archaudit:audit-run:v1"
 end
 
 local function issue_author_login(issue)
@@ -410,7 +472,7 @@ local function trusted_audit_issue(issue, trusted_login)
   if type(issue) ~= "table" then
     return false
   end
-  if tostring(issue.body or ""):find("archaudit-dedup:", 1, true) == nil then
+  if tostring(issue.body or ""):find("fkst:archaudit:audit-run:v1", 1, true) == nil then
     return false
   end
   if trusted_login == nil or trusted_login == "" then

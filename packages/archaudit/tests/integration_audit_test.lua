@@ -355,7 +355,21 @@ return {
     t.is_true(result.raises[1].payload.body:find("Audit trigger: stale", 1, true) ~= nil)
     t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
     t.eq(#dept.search_calls, 1)
-    t.eq(dept.search_calls[1].query, "archaudit-dedup:")
+    t.eq(dept.search_calls[1].query, "fkst:archaudit:audit-run:v1")
+  end,
+
+  test_stale_tick_zero_findings_records_durable_audit_run_marker = function()
+    mock_env("owner/repo", "3", "24")
+    mock_busy_observe()
+    mock_codex_findings("[]", 0)
+    local dept = fake_audit_department("[]")
+    local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_create_request")
+    t.eq(result.raises[1].payload.title, "Archaudit: audit completed with zero findings")
+    t.is_true(result.raises[1].payload.dedup_key:find("archaudit-run/owner/repo/", 1, true) == 1)
+    t.is_true(result.raises[1].payload.body:find("Architecture audit completed with zero findings.", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
   end,
 
   test_stale_tick_malformed_payload_fails_before_durable_search_or_codex = function()
@@ -380,7 +394,7 @@ return {
   end,
 
   test_stale_tick_is_bounded_by_recent_durable_audit_issue = function()
-    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- archaudit-dedup: archaudit/owner/repo/packages/archaudit/core.lua/1/SRP/x -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
     mock_env("owner/repo", "3", "24")
     mock_busy_observe()
     local dept = fake_audit_department_with_search(search_stdout, "[]")
@@ -390,7 +404,7 @@ return {
   end,
 
   test_idle_trigger_is_also_bounded_by_recent_durable_audit_issue = function()
-    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- archaudit-dedup: archaudit/owner/repo/packages/archaudit/core.lua/1/SRP/x -->","createdAt":"2026-06-19T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-19T00:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
     mock_env("owner/repo", "3", "24")
     mock_idle_observe()
     local dept = fake_audit_department_with_search(search_stdout, "[]")
@@ -399,7 +413,7 @@ return {
   end,
 
   test_stale_tick_ignores_untrusted_durable_audit_issue = function()
-    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- archaudit-dedup: forged -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"human"},"url":"https://github.com/owner/repo/issues/77"}]'
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"human"},"url":"https://github.com/owner/repo/issues/77"}]'
     mock_env("owner/repo", "3", "24")
     mock_busy_observe()
     mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Concrete stale audit issue.","suggested_fix":"Small local fix."}]', 0)

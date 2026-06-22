@@ -177,6 +177,10 @@ local function issue_request_result(repo, finding, label_available, trigger_reas
   return pcall(core.build_issue_create_request, repo, finding, label_available, trigger_reason)
 end
 
+local function audit_run_request_result(repo, trigger_reason, label_available, now_seconds, max_staleness)
+  return pcall(core.build_audit_run_issue_create_request, repo, trigger_reason, label_available, now_seconds, max_staleness)
+end
+
 local function stop_observe_error(event, err)
   local message = tostring(err)
   if message:find("observe%-unreadable") ~= nil then
@@ -276,7 +280,8 @@ local function make_department(ports)
     if not ok_audit_search then
       fail(event, "audit-search-failed", issues_or_err)
     end
-    local due, due_why = core.audit_due_verdict(issues_or_err, bot_login(), observe_now_or_err, max_staleness_seconds())
+    local staleness_seconds = max_staleness_seconds()
+    local due, due_why = core.audit_due_verdict(issues_or_err, bot_login(), observe_now_or_err, staleness_seconds)
     if not due then
       log_fact("warn", "audit", "SKIP", "terminal-skip", event, due_why, true)
       return
@@ -290,6 +295,13 @@ local function make_department(ports)
 
     local label_available = has_archaudit_label(ports.github, repo)
     local requests = {}
+    if #findings_or_err == 0 then
+      local ok_request, request_or_err = audit_run_request_result(repo, trigger, label_available, observe_now_or_err, staleness_seconds)
+      if not ok_request and fail_request_error(event, request_or_err) then
+        return
+      end
+      table.insert(requests, request_or_err)
+    end
     for _, finding in ipairs(findings_or_err) do
       if #requests >= count then
         break

@@ -210,6 +210,19 @@ return {
     t.eq(#payload.labels, 0)
   end,
 
+  test_zero_finding_audit_run_request_carries_durable_marker = function()
+    local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z")
+    local payload = core.build_audit_run_issue_create_request("owner/repo", "stale", true, now_seconds, 24 * 60 * 60)
+    t.eq(payload.schema, "github-proxy.issue-create.v1")
+    t.eq(payload.repo, "owner/repo")
+    t.eq(payload.title, "Archaudit: audit completed with zero findings")
+    t.eq(payload.labels[1], "archaudit")
+    t.is_true(payload.dedup_key:find("archaudit-run/owner/repo/", 1, true) == 1)
+    t.is_true(payload.body:find("Architecture audit completed with zero findings.", 1, true) ~= nil)
+    t.is_true(payload.body:find("Audit trigger: stale", 1, true) ~= nil)
+    t.is_true(payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
+  end,
+
   test_audit_tick_payload_is_small_and_source_referenced = function()
     local payload = core.audit_tick_payload("2026-06-20T01:00:00Z")
     t.eq(payload.schema, "archaudit.tick.v1")
@@ -222,7 +235,7 @@ return {
   end,
 
   test_audit_search_parses_and_trusts_bot_authored_marker_issues = function()
-    local issues = core.parse_audit_issue_search('[{"number":7,"title":"Archaudit: x","state":"OPEN","body":"<!-- archaudit-dedup: one -->","createdAt":"2026-06-20T00:00:00Z","author":{"login":"fkst-test-bot"}},{"number":8,"body":"<!-- archaudit-dedup: two -->","updatedAt":"2026-06-20T01:00:00Z","author":{"login":"human"}}]')
+    local issues = core.parse_audit_issue_search('[{"number":7,"title":"Archaudit: x","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-20T00:00:00Z","author":{"login":"fkst-test-bot"}},{"number":8,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","updatedAt":"2026-06-20T01:00:00Z","author":{"login":"human"}}]')
     t.eq(#issues, 2)
     t.eq(core.latest_audit_issue_seconds(issues, "fkst-test-bot"), core.iso_timestamp_epoch_seconds("2026-06-20T00:00:00Z"))
     t.eq(core.latest_audit_issue_seconds(issues, "human"), core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
@@ -231,12 +244,12 @@ return {
 
   test_audit_due_verdict_uses_durable_marker_window = function()
     local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z")
-    local issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- archaudit-dedup: one -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
+    local issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
     local due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, 24 * 60 * 60)
     t.eq(due, false)
     t.eq(why, "recent audit issue marker")
 
-    issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- archaudit-dedup: one -->","createdAt":"2026-06-18T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
+    issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-18T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
     due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, 24 * 60 * 60)
     t.eq(due, true)
     t.eq(why, "audit max staleness elapsed")
