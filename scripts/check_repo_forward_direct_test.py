@@ -125,6 +125,30 @@ end
             {"packages/github-devloop/departments/observe_pr/main.lua|maybe_redrive_not_mergeable_pr|devloop_fixing"},
         )
 
+    def test_repository_scan_covers_pr_package_forward_direct_sites(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dept = root / "packages" / "github-devloop-pr" / "departments" / "observe_pr"
+            dept.mkdir(parents=True)
+            (dept / "main.lua").write_text(
+                'function pipeline(event)\n  core.log_raise("observe_pr", id, "devloop_reviewing", payload)\nend\n',
+                encoding="utf-8",
+            )
+            migration = root / "migration"
+            migration.mkdir()
+            (migration / "forward-direct-raise.allowlist").write_text("", encoding="utf-8")
+
+            messages = forward.repository_messages(root)
+            self.assertEqual(len(messages), 1)
+            self.assertIn("packages/github-devloop-pr/departments/observe_pr/main.lua::pipeline -> devloop_reviewing", messages[0])
+
+    def test_pr_review_replayer_redrive_is_exempt(self) -> None:
+        sites = forward.source_sites(
+            "packages/github-devloop-pr/core/pr_review_replayer.lua",
+            'return raise_effects(dept, id, nil, nil, {}, {{ queue = "devloop_reviewing", payload = payload }})\n',
+        )
+        self.assertEqual(sites, set())
+
     def test_repository_messages_loads_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

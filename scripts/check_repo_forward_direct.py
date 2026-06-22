@@ -19,6 +19,7 @@ REDRIVE_PATHS = {
     "packages/github-devloop/core/pr_review_replayer.lua",
     "packages/github-devloop/core/ready_split.lua",
     "packages/github-devloop/core/replayer.lua",
+    "packages/github-devloop-pr/core/pr_review_replayer.lua",
     "packages/github-devloop/departments/observe_issue/main.lua",
 }
 CAUSAL_PATHS = {
@@ -123,15 +124,16 @@ def source_sites(path: str, text: str) -> set[ForwardDirectSite]:
 
 
 def sources(root: Path) -> dict[str, str]:
-    base = root / "packages" / "github-devloop"
-    if not base.exists():
-        return {}
     found: dict[str, str] = {}
-    for path in sorted(base.rglob("*.lua")):
-        if "/tests/" in path.as_posix():
+    for package in ("github-devloop", "github-devloop-pr"):
+        base = root / "packages" / package
+        if not base.exists():
             continue
-        rel = path.relative_to(root).as_posix()
-        found[rel] = path.read_text(encoding="utf-8")
+        for path in sorted(base.rglob("*.lua")):
+            if "/tests/" in path.as_posix():
+                continue
+            rel = path.relative_to(root).as_posix()
+            found[rel] = path.read_text(encoding="utf-8")
     return found
 
 

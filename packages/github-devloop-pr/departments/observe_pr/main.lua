@@ -8,7 +8,7 @@ local spec = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
     "github-devloop-decompose.devloop_decompose",
-    "devloop_reviewing",
+    -- devloop_reviewing is emitted only after github_comment_written via comment_handoff.
     "devloop_fixing",
     "devloop_review_meta",
     "devloop_merge_ready",
