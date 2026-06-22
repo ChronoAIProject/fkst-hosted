@@ -283,7 +283,7 @@ return {
 
   test_zero_finding_audit_run_request_carries_durable_marker = function()
     local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z")
-    local payload = core.build_audit_run_issue_create_request("owner/repo", "stale", true, now_seconds, 24 * 60 * 60)
+    local payload = core.build_audit_run_issue_create_request("owner/repo", "stale", true, now_seconds, core.audit_due_staleness_seconds())
     t.eq(payload.schema, "github-proxy.issue-create.v1")
     t.eq(payload.repo, "owner/repo")
     t.eq(payload.title, "Archaudit: audit completed with zero findings")
@@ -316,16 +316,16 @@ return {
   test_audit_due_verdict_uses_durable_marker_window = function()
     local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z")
     local issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
-    local due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, 24 * 60 * 60)
+    local due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, core.audit_due_staleness_seconds())
     t.eq(due, false)
     t.eq(why, "recent audit issue marker")
 
     issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-18T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
-    due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, 24 * 60 * 60)
+    due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, core.audit_due_staleness_seconds())
     t.eq(due, true)
     t.eq(why, "audit max staleness elapsed")
 
-    due, why = core.audit_due_verdict({}, "fkst-test-bot", now_seconds, 24 * 60 * 60)
+    due, why = core.audit_due_verdict({}, "fkst-test-bot", now_seconds, core.audit_due_staleness_seconds())
     t.eq(due, true)
     t.eq(why, "no durable audit issue marker")
   end,
