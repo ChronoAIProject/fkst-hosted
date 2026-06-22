@@ -157,12 +157,14 @@ local function state_marker_comment_verified(M, repo, hand_off)
     return false, "comment-json-invalid"
   end
   local comment = {
+    id = decoded.databaseId or decoded.database_id or decoded.id,
     body = decoded.body,
-    author = decoded.author,
-    author_login = decoded.author_login,
-    user = decoded.user,
+    author_login = M._comment_author_login(decoded),
     created_at = decoded.createdAt or decoded.created_at,
   }
+  if comment.id ~= nil and tostring(comment.id) ~= tostring(hand_off.comment_id) then
+    return false, "comment-id-mismatch"
+  end
   if not M._is_trusted_comment(comment) then
     return false, "comment-author-untrusted"
   end
