@@ -199,6 +199,16 @@ function M.bridge_marker(repo, pr_number, issue_number)
   return marker .. " -->"
 end
 
+function M.handled_marker(repo, pr_number, issue_number)
+  return '<!-- fkst:github-external-pr-intake:external-pr-handled:v1 repo="'
+    .. tostring(repo)
+    .. '" pr="'
+    .. tostring(M.safe_number(pr_number, "handled marker pr"))
+    .. '" issue="'
+    .. tostring(M.safe_number(issue_number, "handled marker issue"))
+    .. '" -->'
+end
+
 function M.bridge_search_query(repo, pr_number)
   return 'fkst:github-external-pr-intake:external-pr-bridge:v1 repo="'
     .. tostring(repo)
@@ -281,6 +291,18 @@ local function author_login(pr)
   return nil
 end
 
+local function label_names(record)
+  local labels = {}
+  for _, label in ipairs(record.labels or {}) do
+    if type(label) == "table" and label.name ~= nil then
+      table.insert(labels, tostring(label.name))
+    elseif type(label) == "string" then
+      table.insert(labels, label)
+    end
+  end
+  return labels
+end
+
 local function assignee_logins(pr)
   local logins = {}
   for _, assignee in ipairs(pr.assignees or {}) do
@@ -344,6 +366,23 @@ function M.normalize_pr(pr, repo)
   }
 end
 
+function M.normalize_issue(issue)
+  assert(type(issue) == "table", "normalize_issue requires a table")
+  local state = tostring(issue.state or "")
+  if state ~= "" then
+    state = state:upper()
+  end
+  return {
+    number = tonumber(issue.number),
+    title = tostring(issue.title or ""),
+    state = state,
+    url = issue.url or issue.html_url,
+    labels = label_names(issue),
+    comments = comments(issue),
+    author_login = author_login(issue),
+  }
+end
+
 function M.is_external_candidate(pr, managed, now_seconds)
   if type(pr) ~= "table" or pr.number == nil then
     return false
@@ -375,6 +414,42 @@ function M.bridge_marker_issue_number(body)
   return nil
 end
 
+local function marker_attr(marker, name)
+  return tostring(marker or ""):match(tostring(name) .. '="([^"]*)"')
+end
+
+function M.bridge_issue_proposal_id(repo, issue_number)
+  return "github-devloop/issue/" .. tostring(repo) .. "/" .. tostring(M.safe_number(issue_number, "proposal issue"))
+end
+
+function M.find_bridge_issue_merged_signal(issue, repo, issue_number, managed)
+  local expected_proposal = M.bridge_issue_proposal_id(repo, issue_number)
+  local signal = nil
+  for _, comment in ipairs((issue and issue.comments) or {}) do
+    if M.trusted_author(comment, managed) then
+      local body = tostring(comment.body or "")
+      for marker in body:gmatch("<!%-%- fkst:github%-devloop:merged:v1.-%-%->") do
+        if marker_attr(marker, "proposal") == expected_proposal then
+          signal = {
+            proposal_id = expected_proposal,
+            pr_number = tonumber(marker_attr(marker, "pr")),
+            source = "merged-marker",
+          }
+        end
+      end
+      for marker in body:gmatch("<!%-%- fkst:github%-devloop:state:v1.-%-%->") do
+        if marker_attr(marker, "proposal") == expected_proposal and marker_attr(marker, "state") == "merged" then
+          signal = signal or {
+            proposal_id = expected_proposal,
+            source = "state-marker",
+          }
+        end
+      end
+    end
+  end
+  return signal
+end
+
 function M.find_pr_bridge_marker(comments, repo, pr_number, managed)
   local expected = M.bridge_search_query(repo, pr_number)
   for _, comment in ipairs(comments or {}) do
@@ -382,6 +457,19 @@ function M.find_pr_bridge_marker(comments, repo, pr_number, managed)
       return {
         issue_number = M.bridge_marker_issue_number(comment.body),
         source = "pr-marker",
+      }
+    end
+  end
+  return nil
+end
+
+function M.find_pr_handled_marker(comments, repo, pr_number, issue_number, managed)
+  local expected = M.handled_marker(repo, pr_number, issue_number)
+  for _, comment in ipairs(comments or {}) do
+    if M.trusted_author(comment, managed) and tostring(comment.body or ""):find(expected, 1, true) ~= nil then
+      return {
+        issue_number = M.safe_number(issue_number, "handled marker issue"),
+        source = "handled-marker",
       }
     end
   end
@@ -410,6 +498,36 @@ end
 
 function M.bridge_issue_title(pr)
   return "Integrate external PR #" .. tostring(M.safe_number(pr.number, "issue title pr")) .. ": " .. tostring(pr.title or "")
+end
+
+function M.issue_url(repo, issue_number, issue)
+  if type(issue) == "table" and issue.url ~= nil and tostring(issue.url) ~= "" then
+    return tostring(issue.url)
+  end
+  return "https://github.com/" .. tostring(repo) .. "/issues/" .. tostring(M.safe_number(issue_number, "issue url"))
+end
+
+function M.pr_url(repo, pr_number)
+  return "https://github.com/" .. tostring(repo) .. "/pull/" .. tostring(M.safe_number(pr_number, "pr url"))
+end
+
+function M.handled_comment_body(repo, pr, issue, signal)
+  local pr_number = M.safe_number(pr.number, "handled comment pr")
+  local issue_number = M.safe_number(issue.number, "handled comment issue")
+  local lines = {
+    "Thanks for the contribution. This change has been handled internally.",
+    "",
+    "Internal resolution:",
+    "- Issue: " .. M.issue_url(repo, issue_number, issue),
+  }
+  if signal ~= nil and signal.pr_number ~= nil then
+    table.insert(lines, "- PR: " .. M.pr_url(repo, signal.pr_number))
+  end
+  table.insert(lines, "")
+  table.insert(lines, "Closing this external PR so the queue reflects that the content is already resolved.")
+  table.insert(lines, "")
+  table.insert(lines, M.handled_marker(repo, pr_number, issue_number))
+  return table.concat(lines, "\n")
 end
 
 M.error_fingerprint = error_facts.error_fingerprint
