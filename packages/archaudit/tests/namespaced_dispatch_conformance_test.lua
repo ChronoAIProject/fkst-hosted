@@ -44,7 +44,6 @@ local function opts_for_case()
         FKST_GITHUB_REPO = "",
         FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
         ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
-        ARCHAUDIT_MAX_STALENESS_HOURS = "24",
       },
     },
     before_replay = function()

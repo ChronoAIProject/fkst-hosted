@@ -16,9 +16,210 @@ local github_proxy_limits = {
   source_ref_ref = 200,
 }
 local observe_schema_version = 1
+local audit_due_staleness_seconds = 24 * 60 * 60
+local audit_poll_interval_seconds = 30 * 60
+local audit_poll_interval = tostring(math.floor(audit_poll_interval_seconds / 60)) .. "m"
 
 function M.persistence_class()
   return "composed_judgment_pipeline"
+end
+
+function M.audit_due_staleness_seconds()
+  return audit_due_staleness_seconds
+end
+
+function M.audit_poll_interval_seconds()
+  return audit_poll_interval_seconds
+end
+
+function M.audit_poll_interval()
+  return audit_poll_interval
+end
+
+function M.producer_liveness_contracts()
+  return {
+    {
+      producer_id = "archaudit.audit",
+      trigger_source = "archaudit_tick",
+      output_queues = { "github-proxy.github_issue_create_request" },
+      eligibility_predicate = "overdue",
+      max_staleness_seconds = audit_due_staleness_seconds,
+      max_silence_seconds = audit_poll_interval_seconds,
+      max_skip_budget = 0,
+      progress_output = "github-proxy.github_issue_create_request",
+    },
+  }
+end
+
+local function append_error(errors, message)
+  table.insert(errors, "producer-liveness: " .. tostring(message))
+end
+
+local function positive_minute_seconds(contract, field, errors)
+  local value = tonumber(contract and contract[field])
+  if value == nil or value <= 0 or math.floor(value) ~= value then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": " .. field .. " must be positive integer seconds")
+    return nil
+  end
+  if value % 60 ~= 0 then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": " .. field .. " must be minute-aligned for restart liveness")
+    return nil
+  end
+  return value / 60
+end
+
+local function non_negative_integer(contract, field, errors)
+  local value = tonumber(contract and contract[field])
+  if value == nil or value < 0 or math.floor(value) ~= value then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": " .. field .. " must be a non-negative integer")
+    return nil
+  end
+  return value
+end
+
+local function non_empty_string(contract, field, errors)
+  local value = contract and contract[field]
+  if type(value) ~= "string" or value == "" then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": " .. field .. " must be a non-empty string")
+    return nil
+  end
+  return value
+end
+
+local function output_queues(contract, errors)
+  local queues = contract and contract.output_queues
+  if type(queues) ~= "table" or #queues == 0 then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": output_queues must be a non-empty list")
+    return nil
+  end
+  local copied = {}
+  for index, queue in ipairs(queues) do
+    if type(queue) ~= "string" or queue == "" then
+      append_error(errors, tostring(contract.producer_id or "?") .. ": output_queues[" .. tostring(index) .. "] must be a non-empty string")
+      return nil
+    end
+    table.insert(copied, queue)
+  end
+  return copied
+end
+
+local function producer_liveness_row(contract, errors)
+  if type(contract) ~= "table" then
+    append_error(errors, "contract must be a table")
+    return nil
+  end
+  local producer_id = non_empty_string(contract, "producer_id", errors)
+  local trigger_source = non_empty_string(contract, "trigger_source", errors)
+  non_empty_string(contract, "eligibility_predicate", errors)
+  local progress_output = non_empty_string(contract, "progress_output", errors)
+  local outputs = output_queues(contract, errors)
+  local staleness_minutes = positive_minute_seconds(contract, "max_staleness_seconds", errors)
+  local silence_minutes = positive_minute_seconds(contract, "max_silence_seconds", errors)
+  local skip_budget = non_negative_integer(contract, "max_skip_budget", errors)
+  if producer_id == nil or trigger_source == nil or progress_output == nil or outputs == nil
+    or staleness_minutes == nil or silence_minutes == nil or skip_budget == nil then
+    return nil
+  end
+  local progress_listed = false
+  for _, queue in ipairs(outputs) do
+    if queue == progress_output then
+      progress_listed = true
+      break
+    end
+  end
+  if not progress_listed then
+    append_error(errors, producer_id .. ": progress_output must be listed in output_queues")
+    return nil
+  end
+  return {
+    from_state = producer_id,
+    liveness_class_id = producer_id .. ".positive-output",
+    terminal = false,
+    to_states = { producer_id },
+    driving_queue = trigger_source,
+    observe_surfaces = { liveness_scan = true },
+    output_obligation = {
+      kinds = outputs,
+      exits = { producer_id },
+    },
+    budget = {
+      minutes = staleness_minutes,
+      receiver_max_work_justification = "Producer must emit or escalate the declared progress output within max_staleness_seconds.",
+    },
+    liveness_contract = {
+      mode = "row-budget-bounds-receiver",
+      receiver_bound_minutes = silence_minutes,
+      external_wait_bound_minutes = 0,
+    },
+    on_timeout = {
+      action = "redrive",
+      queue = trigger_source,
+      escalate_after_attempts = skip_budget + 1,
+      on_escalate = {
+        action = "force-terminate",
+        terminal_state = "blocked",
+        reason = "producer-output-obligation-timeout",
+      },
+    },
+    watchdog = {
+      mode = "row-budget-bounds-receiver",
+      budget_ms = staleness_minutes * 60 * 1000,
+    },
+    actionable_epoch = {
+      source = "state_entry:v1",
+      generation_source = "same_as_actionable_epoch",
+    },
+  }
+end
+
+function M.producer_liveness_restart_rows(contracts)
+  local errors = {}
+  local rows = {}
+  for _, contract in ipairs(contracts or M.producer_liveness_contracts()) do
+    local row = producer_liveness_row(contract, errors)
+    if row ~= nil then
+      table.insert(rows, row)
+    end
+  end
+  return rows, errors
+end
+
+local function liveness_model(rows)
+  local devloop_liveness = require("devloop.liveness")
+  local restart_liveness_contract = require("devloop.restart_liveness_contract")
+  local model = {
+    restart_package_name = "archaudit",
+    restart_lifecycle_states = {},
+    _label_by_state = {},
+    restart_transition_table = function()
+      return rows
+    end,
+    restart_durable_marker_fields = function()
+      return {}
+    end,
+    restart_responsibility_inventory_errors = function()
+      return {}
+    end,
+  }
+  for _, row in ipairs(rows or {}) do
+    table.insert(model.restart_lifecycle_states, row.from_state)
+    model._label_by_state[row.from_state] = true
+  end
+  restart_liveness_contract.install(model)
+  devloop_liveness.install(model, { liveness_signal_producers = {} })
+  return model
+end
+
+function M.producer_liveness_contract_errors(contracts)
+  local rows, errors = M.producer_liveness_restart_rows(contracts)
+  if #rows == 0 then
+    return errors
+  end
+  local model = liveness_model(rows)
+  for _, err in ipairs(model.liveness_contract_errors(rows)) do
+    table.insert(errors, err)
+  end
+  return errors
 end
 
 local function bounded(value, limit)

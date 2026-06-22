@@ -14,12 +14,10 @@ local spec = {
 
 local freshness_budget_seconds = 10 * 60
 local codex_timeout_seconds = 9 * 60
-local default_max_staleness_hours = 24
 local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,
   ARCHAUDIT_MAX_ISSUES_PER_IDLE = true,
-  ARCHAUDIT_MAX_STALENESS_HOURS = true,
 }
 
 local function read_env_command(name)
@@ -73,15 +71,6 @@ local function max_issues()
     return 3
   end
   return math.floor(value)
-end
-
-local function max_staleness_seconds()
-  local raw = strings.trim(read_env("ARCHAUDIT_MAX_STALENESS_HOURS") or "")
-  local value = tonumber(raw)
-  if value == nil or value < 1 then
-    value = default_max_staleness_hours
-  end
-  return math.floor(value) * 60 * 60
 end
 
 local function bot_login()
@@ -280,7 +269,7 @@ local function make_department(ports)
     if not ok_audit_search then
       fail(event, "audit-search-failed", issues_or_err)
     end
-    local staleness_seconds = max_staleness_seconds()
+    local staleness_seconds = core.audit_due_staleness_seconds()
     local due, due_why = core.audit_due_verdict(issues_or_err, bot_login(), observe_now_or_err, staleness_seconds)
     if not due then
       log_fact("warn", "audit", "SKIP", "terminal-skip", event, due_why, true)
