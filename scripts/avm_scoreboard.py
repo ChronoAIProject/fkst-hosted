@@ -272,10 +272,6 @@ def aggregate_avm_scoreboard(data: Any) -> list[dict[str, Any]]:
         if false_parts is not None:
             bucket["false_consensus_numerator"] += false_parts[0]
             bucket["false_consensus_denominator"] += false_parts[1]
-        elif revert_state in {"pass", "fail"}:
-            bucket["false_consensus_denominator"] += 1
-            if revert_state == "fail":
-                bucket["false_consensus_numerator"] += 1
 
     return [buckets[level] for level in TASK_LEVELS]
 

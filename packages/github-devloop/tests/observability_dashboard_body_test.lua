@@ -132,9 +132,13 @@ return {
     t.eq(by_level.L1.merges, 1)
     t.eq(by_level.L1.avm_numerator, 1)
     t.eq(by_level.L1.avm_denominator, 2)
+    t.eq(by_level.L1.false_consensus_numerator, 0)
+    t.eq(by_level.L1.false_consensus_denominator, 1)
     t.eq(by_level.unclassified.merges, 1)
     t.eq(by_level.unclassified.avm_denominator, 1)
     t.eq(by_level.unclassified.revert_numerator, 1)
+    t.eq(by_level.unclassified.false_consensus_numerator, 0)
+    t.eq(by_level.unclassified.false_consensus_denominator, 0)
     t.eq(core.render_avm_scoreboard_bucket(by_level.L1):find("TOTAL", 1, true), nil)
   end,
 
@@ -205,7 +209,7 @@ return {
 
     t.is_true(dashboard.body:find("## AVM scoreboard by task level", 1, true) ~= nil)
     t.is_true(dashboard.body:find(
-      "- L4 merges=1 AVM-rate=0/2 (0%) cost-per-AVM=n/a revert-rate=1/1 (100%) median-rounds=2 false-consensus-rate=1/1 (100%)",
+      "- L4 merges=1 AVM-rate=0/2 (0%) cost-per-AVM=n/a revert-rate=1/1 (100%) median-rounds=2 false-consensus-rate=n/a",
       1,
       true
     ) ~= nil)

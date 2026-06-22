@@ -157,9 +157,13 @@ class BoardScriptTest(unittest.TestCase):
         self.assertEqual(buckets["L1"]["merges"], 1)
         self.assertEqual(buckets["L1"]["avm_numerator"], 1)
         self.assertEqual(buckets["L1"]["avm_denominator"], 2)
+        self.assertEqual(buckets["L1"]["false_consensus_numerator"], 0)
+        self.assertEqual(buckets["L1"]["false_consensus_denominator"], 1)
         self.assertEqual(buckets["unclassified"]["merges"], 1)
         self.assertEqual(buckets["unclassified"]["avm_denominator"], 1)
         self.assertEqual(buckets["unclassified"]["revert_numerator"], 1)
+        self.assertEqual(buckets["unclassified"]["false_consensus_numerator"], 0)
+        self.assertEqual(buckets["unclassified"]["false_consensus_denominator"], 0)
 
     def test_refresh_fetches_observe_json_writes_cache_and_renders_stalls(self) -> None:
         h = BoardHarness(
@@ -308,7 +312,7 @@ class BoardScriptTest(unittest.TestCase):
             )
             self.assertIn(
                 "- L4 merges=1 AVM-rate=0/1 (0%) cost-per-AVM=n/a "
-                "revert-rate=1/1 (100%) median-rounds=5 false-consensus-rate=1/1 (100%)",
+                "revert-rate=1/1 (100%) median-rounds=5 false-consensus-rate=n/a",
                 result.stdout,
             )
             self.assertIn("- unclassified merges=1 AVM-rate=0/1 (0%) cost-per-AVM=unknown", result.stdout)

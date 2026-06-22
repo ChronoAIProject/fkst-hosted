@@ -348,11 +348,6 @@ function core.aggregate_avm_scoreboard(facts)
         if false_numerator ~= nil and false_denominator ~= nil then
           bucket.false_consensus_numerator = bucket.false_consensus_numerator + false_numerator
           bucket.false_consensus_denominator = bucket.false_consensus_denominator + false_denominator
-        elseif revert_state == "pass" or revert_state == "fail" then
-          bucket.false_consensus_denominator = bucket.false_consensus_denominator + 1
-          if revert_state == "fail" then
-            bucket.false_consensus_numerator = bucket.false_consensus_numerator + 1
-          end
         end
       end
     end
