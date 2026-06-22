@@ -2,6 +2,29 @@ local base = require("tests.devloop_base_helpers")
 local t = base.t
 local core = base.core
 local gh_argv = require("tests.gh_argv_mock_helpers")
+local default_runtime_root = "/tmp/fkst-packages-test/github-devloop/runtime"
+local default_repo = "owner/repo"
+local default_issue_number = 42
+local default_ready_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+
+local function worktree_options(path)
+  if type(path) == "table" then
+    local opts = path
+    local runtime = opts.runtime or opts.path or default_runtime_root
+    return runtime, opts
+  end
+  return path or default_runtime_root, {}
+end
+
+local function implement_worktree_for(runtime, opts)
+  return core.implement_worktree_path(
+    runtime,
+    opts.repo or default_repo,
+    opts.issue_number or opts.issue or default_issue_number,
+    opts.impl_version or default_ready_version
+  )
+end
+
 local function mock_setup_worktree(path)
   t.mock_command("git -C", {
     stdout = "dev\n",
@@ -47,7 +70,50 @@ local function mock_worktree_parent_mkdir()
   })
 end
 
-local function mock_fresh_implement_worktree(path)
+local function shell_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function ensure_dir(path)
+  local ok = os.execute("mkdir -p " .. shell_quote(path))
+  if ok ~= true and ok ~= 0 then
+    error("github-devloop test: mkdir failed for " .. tostring(path))
+  end
+end
+
+local function mock_substrate_pin_refresh(worktree, base_pin, branch_pin)
+  local pin = base_pin or "2222222222222222222222222222222222222222"
+  local stale = branch_pin or "1111111111111111111111111111111111111111"
+  t.mock_command("git show abc123:.fkst/substrate-ref", {
+    stdout = pin .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git show", {
+    stdout = stale .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  if worktree ~= nil then
+    ensure_dir(tostring(worktree):gsub("/+$", "") .. "/.fkst")
+  end
+  t.mock_command("add -A", {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("commit -m 'chore: refresh fkst-substrate pin'", {
+    stdout = "[devloop-owner-repo-42-01HY 9999999] chore: refresh fkst-substrate pin\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_fresh_implement_worktree(path, base_pin, branch_pin)
+  local runtime, opts = worktree_options(path)
+  local worktree = implement_worktree_for(runtime, opts)
+  base_pin = opts.base_pin or base_pin
+  branch_pin = opts.branch_pin or branch_pin
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
     stderr = "",
@@ -64,7 +130,7 @@ local function mock_fresh_implement_worktree(path)
     exit_code = 1,
   })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
-    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stdout = runtime,
     stderr = "",
     exit_code = 0,
   })
@@ -90,9 +156,15 @@ local function mock_fresh_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  mock_substrate_pin_refresh(worktree, base_pin, branch_pin)
+  return worktree
 end
 
-local function mock_existing_empty_implement_worktree(path)
+local function mock_existing_empty_implement_worktree(path, base_pin, branch_pin)
+  local runtime, opts = worktree_options(path)
+  local worktree = implement_worktree_for(runtime, opts)
+  base_pin = opts.base_pin or base_pin
+  branch_pin = opts.branch_pin or branch_pin
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
     stderr = "",
@@ -114,7 +186,7 @@ local function mock_existing_empty_implement_worktree(path)
     exit_code = 0,
   })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
-    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stdout = runtime,
     stderr = "",
     exit_code = 0,
   })
@@ -145,11 +217,12 @@ local function mock_existing_empty_implement_worktree(path)
     stderr = "",
     exit_code = 0,
   })
+  mock_substrate_pin_refresh(worktree, base_pin, branch_pin)
 end
 
 local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_count)
-  local worktree = (path or "/tmp/fkst-packages-test/github-devloop/runtime")
-    .. "/worktrees/devloop-owner-repo-42-01HY"
+  local runtime = path or default_runtime_root
+  local worktree = implement_worktree_for(runtime, {})
   t.mock_command("git fetch 'origin' 'dev'", {
     stdout = "",
     stderr = "",
@@ -171,7 +244,7 @@ local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_
     exit_code = 0,
   })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
-    stdout = path or "/tmp/fkst-packages-test/github-devloop/runtime",
+    stdout = runtime,
     stderr = "",
     exit_code = 0,
   })
@@ -186,6 +259,7 @@ local function mock_existing_empty_implement_worktree_reuse(path, branch, ahead_
     stderr = "",
     exit_code = 0,
   })
+  mock_substrate_pin_refresh(worktree)
   return worktree
 end
 
@@ -258,6 +332,7 @@ local function mock_outside_runtime_implement_worktree_rebuild(runtime_root, bra
     stderr = "",
     exit_code = 0,
   })
+  mock_substrate_pin_refresh(runtime .. "/worktrees/devloop-owner-repo-42-01HY")
   return runtime .. "/worktrees/devloop-owner-repo-42-01HY"
 end
 
@@ -330,6 +405,7 @@ local function mock_multiple_outside_runtime_implement_worktrees_rebuild(runtime
     stderr = "",
     exit_code = 0,
   })
+  mock_substrate_pin_refresh(runtime .. "/worktrees/devloop-owner-repo-42-01HY")
   return runtime .. "/worktrees/devloop-owner-repo-42-01HY"
 end
 
@@ -412,6 +488,14 @@ local function mock_git_status(stdout, exit_code, stderr)
     stdout = stdout or "",
     stderr = stderr or "",
     exit_code = exit_code or 0,
+  })
+end
+
+local function mock_branch_diff_paths(stdout)
+  t.mock_command("diff --name-only", {
+    stdout = stdout or "",
+    stderr = "",
+    exit_code = 0,
   })
 end
 
@@ -684,6 +768,7 @@ return {
   mock_existing_devloop_worktree = mock_existing_devloop_worktree,
   mock_implement_codex = mock_implement_codex,
   mock_git_status = mock_git_status,
+  mock_branch_diff_paths = mock_branch_diff_paths,
   mock_existing_fix_worktree = mock_existing_fix_worktree,
   mock_missing_fix_worktree = mock_missing_fix_worktree,
   mock_outside_runtime_fix_worktree = mock_outside_runtime_fix_worktree,

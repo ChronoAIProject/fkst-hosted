@@ -571,7 +571,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    h.mock_fresh_implement_worktree()
+    h.mock_fresh_implement_worktree({ impl_version = ready.payload.dedup_key })
     h.mock_implement_codex(0, "implemented")
     h.mock_git_status(" M packages/github-devloop/core/ready_split.lua\n")
     h.mock_git_commit("def456", branch)

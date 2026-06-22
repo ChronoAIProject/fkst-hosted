@@ -13,6 +13,9 @@ local mock_git_commit = h.mock_git_commit
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 
+local current_base_pin = "2222222222222222222222222222222222222222"
+local stale_queue_pin = "1111111111111111111111111111111111111111"
+
 local function find_comment_with(raises, text)
   return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
     return tostring(payload.body or ""):find(text, 1, true) ~= nil
@@ -66,11 +69,49 @@ return {
     end
     t.eq(saw_worktree_prefix, true)
     t.eq(saw_prompt, true)
-    t.eq(count_calls("git -C"), 8)
+    t.eq(count_calls("git -C"), 10)
     t.eq(count_calls("git worktree add -b"), 1)
     t.eq(count_calls("codex exec"), 1)
     t.eq(count_calls("status --porcelain"), 1)
-    t.eq(count_calls("add -A"), 1)
-    t.eq(count_calls("commit -m"), 1)
+    t.eq(count_calls("add -A"), 2)
+    t.eq(count_calls("commit -m"), 2)
+  end,
+
+  test_implement_refreshes_substrate_ref_to_current_base_before_codex = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:ready", "fkst-dev:thinking" })
+    local worktree = mock_fresh_implement_worktree(nil, current_base_pin, stale_queue_pin)
+    mock_implement_codex(0, "implemented after current substrate pin")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+
+    local result = run_implement(event, opts("implement-refreshes-substrate-pin"))
+    t.eq(result.exit_code, 0)
+    t.eq(file.read(worktree .. "/.fkst/substrate-ref"), current_base_pin .. "\n")
+
+    local base_pin_read_index = nil
+    local branch_pin_read_index = nil
+    local pin_commit_index = nil
+    local codex_index = nil
+    for index, call in ipairs(t.command_calls()) do
+      if call.rendered:find("git show abc123:.fkst/substrate-ref", 1, true) ~= nil then
+        base_pin_read_index = base_pin_read_index or index
+      elseif call.rendered:find("git show", 1, true) ~= nil
+        and call.rendered:find(":.fkst/substrate-ref", 1, true) ~= nil then
+        branch_pin_read_index = branch_pin_read_index or index
+      elseif call.rendered:find("commit -m 'chore: refresh fkst-substrate pin'", 1, true) ~= nil then
+        pin_commit_index = index
+      elseif call.rendered:find("codex exec", 1, true) ~= nil then
+        codex_index = index
+      end
+    end
+    t.is_true(base_pin_read_index ~= nil)
+    t.is_true(branch_pin_read_index ~= nil)
+    t.is_true(pin_commit_index ~= nil)
+    t.is_true(codex_index ~= nil)
+    t.is_true(base_pin_read_index < codex_index)
+    t.is_true(branch_pin_read_index < codex_index)
+    t.is_true(pin_commit_index < codex_index)
   end,
 }

@@ -12,6 +12,7 @@ local deterministic_branch_for = h.deterministic_branch_for
 local mock_fresh_implement_worktree = h.mock_fresh_implement_worktree
 local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
+local mock_branch_diff_paths = h.mock_branch_diff_paths
 local mock_git_commit = h.mock_git_commit
 local count_calls = h.count_calls
 local find_raise = h.find_raise
@@ -286,6 +287,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
 
     local result = run_implement(event, opts("implement-liveness-local-progress-at-budget"))
     t.eq(result.exit_code, 0)

@@ -188,7 +188,9 @@ return {
       core.state_marker(event.proposal_id, "impl-failed", ready.dedup_key),
       core.impl_failure_marker(event.proposal_id, ready.dedup_key, "codex-failed", 1),
     })
-    mock_existing_empty_implement_worktree()
+    mock_existing_empty_implement_worktree({
+      impl_version = ready.dedup_key .. "/reimplement/2",
+    })
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit(nil, core.implement_branch("owner/repo", "42", ready.dedup_key))
@@ -225,7 +227,9 @@ return {
       core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
       core.state_marker(event.proposal_id, "blocked", blocked_version),
     })
-    mock_existing_empty_implement_worktree()
+    mock_existing_empty_implement_worktree({
+      impl_version = ready.dedup_key .. "/reimplement/2",
+    })
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit(nil, core.implement_branch("owner/repo", "42", ready.dedup_key))

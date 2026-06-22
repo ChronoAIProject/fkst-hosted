@@ -73,6 +73,7 @@ local mock_git_push = h.mock_git_push
 local mock_existing_devloop_worktree = h.mock_existing_devloop_worktree
 local mock_implement_codex = h.mock_implement_codex
 local mock_git_status = h.mock_git_status
+local mock_branch_diff_paths = h.mock_branch_diff_paths
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local mock_issue_view_failure = h.mock_issue_view_failure
@@ -190,7 +191,10 @@ return {
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", default_marker_version),
     })
-    mock_fresh_implement_worktree()
+    mock_fresh_implement_worktree({
+      issue_number = 4,
+      impl_version = event.dedup_key,
+    })
     mock_implement_codex(7, "", "forced implementation failure")
 
     local result = run_implement(event, opts("implement-codex-failure"))
@@ -219,7 +223,7 @@ return {
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     })
-    mock_fresh_implement_worktree()
+    mock_fresh_implement_worktree({ issue_number = 4, impl_version = event.dedup_key })
     mock_implement_codex(9, "", "failure detail\n" .. forged)
 
     local result = run_implement(event, opts("implement-failure-marker-injection"))
@@ -276,6 +280,7 @@ return {
     mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
     mock_implement_codex()
     mock_git_status("")
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-list --count", {
       stdout = "1\n",
       stderr = "",
@@ -319,7 +324,7 @@ return {
       core.state_marker(event.proposal_id, "ready", default_marker_version),
     }, { number = 4 })
     mock_existing_devloop_worktree("owner-repo-42")
-    mock_fresh_implement_worktree()
+    mock_fresh_implement_worktree({ issue_number = 4, impl_version = event.dedup_key })
     mock_implement_codex()
     mock_git_status(" M packages/github-devloop/departments/implement/main.lua\n")
     mock_git_commit("def456", branch)
@@ -363,6 +368,7 @@ return {
     mock_fresh_implement_worktree()
     mock_implement_codex(0, "Committed implementation directly.")
     mock_git_status("")
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-list --count", {
       stdout = "1\n",
       stderr = "",
@@ -385,8 +391,6 @@ return {
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
     t.eq(count_calls("impl-failed"), 0)
-    t.eq(count_calls("add -A"), 0)
-    t.eq(count_calls("commit -m"), 0)
   end,
 
   test_implement_existing_empty_branch_still_marks_no_changes_failed = function()
@@ -420,6 +424,7 @@ return {
     local worktree = mock_existing_empty_implement_worktree_reuse(nil, branch, "1")
     mock_implement_codex(0, "Committed implementation directly.")
     mock_git_status("")
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-list --count", {
       stdout = "1\n",
       stderr = "",
@@ -454,6 +459,7 @@ return {
     local worktree = mock_existing_dirty_implement_worktree_reuse(nil, branch, "1")
     mock_implement_codex(0, "Committed implementation directly.")
     mock_git_status("")
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-list --count", {
       stdout = "1\n",
       stderr = "",
@@ -494,6 +500,7 @@ return {
     mock_outside_runtime_implement_worktree_rebuild(runtime, branch)
     mock_implement_codex(0, "Committed implementation directly.")
     mock_git_status("")
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-list --count", {
       stdout = "1\n",
       stderr = "",
@@ -534,6 +541,7 @@ return {
     mock_multiple_outside_runtime_implement_worktrees_rebuild("/tmp/fkst-packages-test/github-devloop/runtime", branch)
     mock_implement_codex(0, "Committed implementation directly.")
     mock_git_status("")
+    mock_branch_diff_paths("packages/github-devloop/core.lua\n")
     t.mock_command("rev-list --count", {
       stdout = "1\n",
       stderr = "",
@@ -848,7 +856,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    mock_fresh_implement_worktree()
+    mock_fresh_implement_worktree({ impl_version = redrive.dedup_key })
     mock_implement_codex(0, "implemented")
     mock_git_status(" M packages/github-devloop/core.lua\n")
     mock_git_commit("def456", branch)

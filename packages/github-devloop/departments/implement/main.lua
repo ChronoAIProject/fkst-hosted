@@ -2,12 +2,12 @@ local core = require("core")
 local saga = require("std.saga")
 local pr_child_handoff = require("departments.implement.pr_child_handoff")
 local slice_gate = require("departments.implement.slice_gate")
+local substrate_pin = require("departments.implement.substrate_pin")
 local transitions = require("departments.implement.transitions")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
-
 local spec = {
   consumes = { "devloop_ready" },
   produces = {
@@ -118,7 +118,7 @@ local function local_branch_fact(base_head, branch, base_branch, dedup_key)
     error("github-devloop: git branch ref check failed: " .. tostring(branch_ref.stderr))
   end
   local head_sha = implemented_branch_head(base_head, branch)
-  if head_sha == nil then
+  if head_sha == nil or substrate_pin.is_only_pin_delta(base_head, branch) then
     return nil
   end
   return {
@@ -229,20 +229,20 @@ end
 
 local function merge_integration_for_implementation(worktree, integration_branch, base_head)
   local merge_result = core.git_worktree_merge_no_edit(worktree, base_head, 120)
-  if merge_result.exit_code ~= 0 then
-    local unmerged_result = core.git_unmerged_paths(worktree, 30)
-    if unmerged_result.exit_code ~= 0 then
-      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
-    end
-    if tostring(unmerged_result.stdout or "") == "" then
-      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
-    end
-    core.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
-      "integration_branch=" .. tostring(integration_branch),
-      "integration_sha=" .. tostring(base_head),
-      "reason=integration merge requires codex conflict resolution",
-    })
+  if merge_result.exit_code == 0 then return true end
+  local unmerged_result = core.git_unmerged_paths(worktree, 30)
+  if unmerged_result.exit_code ~= 0 then
+    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
+  if tostring(unmerged_result.stdout or "") == "" then
+    error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+  end
+  core.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
+    "integration_branch=" .. tostring(integration_branch),
+    "integration_sha=" .. tostring(base_head),
+    "reason=integration merge requires codex conflict resolution",
+  })
+  return false
 end
 
 local function prepare_base(branches)
@@ -351,7 +351,7 @@ end
 
 local function prepare_attempt(repo, issue_number, ready, branches, branch, base_head, attempt)
   local worktree = prepare_worktree(repo, issue_number, ready, branch, base_head)
-  merge_integration_for_implementation(worktree, branches.integration, base_head)
+  substrate_pin.refresh(worktree, branch, base_head, merge_integration_for_implementation(worktree, branches.integration, base_head))
 
   local codex_started_at = now()
   local exec_ref = core.implement_exec_ref(ready.proposal_id, ready.dedup_key)
@@ -404,7 +404,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   if tostring(status.stdout or "") == "" then
     local head_sha = implemented_branch_head(base_head, branch)
-    if head_sha ~= nil then
+    if head_sha ~= nil and not substrate_pin.is_only_pin_delta(base_head, branch) then
       core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
         "branch=" .. tostring(branch),
         "head_sha=" .. tostring(head_sha),
