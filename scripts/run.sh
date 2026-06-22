@@ -53,13 +53,18 @@
 #       observe dedup), else uses .fkst/run/runtime. Never sets FKST_GITHUB_WRITE, so
 #       a read-only inbound dogfood stays read-only.
 #
+#   scripts/run.sh supervise --project-root <HOST> --platform-root <PKGSRC> --platform-packages "<names>" [--host-packages "<names>"] --durable-root <path> [--runtime-root <fresh-scratch-root>] [--restart]
+#       Start the real fkst-framework supervise event loop for one host. Runtime
+#       root is scratch and defaults to a fresh temp dir; explicit --runtime-root
+#       is used as the fresh scratch root for this launch.
+#       Durable root is mandatory and reused. --restart SIGKILLs the prior host-run supervise
+#       recorded for that durable root. FKST_GITHUB_WRITE passes through
+#       (unset = dry-run).
+#
 #   scripts/run.sh supervise <package>
-#       Start the real fkst-framework supervise event loop for one package.
-#       Uses .fkst/run/runtime and .fkst/run/durable by default and requires
-#       FKST_RATE_POOL_ROOT from the host so named external-command
-#       rate pools are shared across supervise instances. Runs in the foreground
-#       until Ctrl-C. FKST_PROJECT_ROOT can override the default project root of
-#       .fkst/local-packages/<package>.
+#       Backward-compatible package-local supervise wrapper. Uses .fkst/run/runtime
+#       and .fkst/run/durable by default and requires FKST_RATE_POOL_ROOT from the
+#       host so named external-command rate pools are shared across instances.
 #
 #   scripts/run.sh build
 #       Local-only helper: update the fkst-substrate dev checkout and build
@@ -81,6 +86,8 @@ DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 
 # shellcheck source=scripts/bin_bootstrap.sh
 . "$ROOT/scripts/bin_bootstrap.sh"
+# shellcheck source=scripts/host_run.sh
+. "$ROOT/scripts/host_run.sh"
 
 resolve_bin() {
   if ! resolve_bin_contract "$ROOT" "bootstrap"; then
@@ -243,6 +250,8 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_github_devloop_helpers_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
+  python3 -B "$ROOT/scripts/host_run_test.py" || fail=1
+  python3 -B "$ROOT/scripts/host_run_equivalence_test.py" || fail=1
   python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
@@ -850,7 +859,7 @@ cmd_ratchet_migration_dry_run() {
   python3 -B "$ROOT/scripts/ratchet_migration_slicer.py" --repo-root "$ROOT" "$@"
 }
 
-cmd_supervise() {
+cmd_supervise_old() {
   local pkg="${1:-}"
   if [ -z "$pkg" ]; then
     echo "usage: scripts/run.sh supervise <package>" >&2; exit 1
@@ -898,6 +907,13 @@ cmd_supervise() {
   args+=(--framework-bin "$BIN")
   echo "exec: ${args[*]}"
   exec "${args[@]}"
+}
+
+cmd_supervise() {
+  case "${1:-}" in
+    --*) host_run_supervise_contract "$@" ;;
+    *) cmd_supervise_old "$@" ;;
+  esac
 }
 
 cmd_build() {

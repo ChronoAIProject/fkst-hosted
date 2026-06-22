@@ -979,6 +979,7 @@ def main() -> int:
     check_code_dedup_ratchet(root, violations)
     check_std_dependency_model(root, violations, warnings)
     for message in check_repo_content_truncation.repository_messages(root, packages_root(root), read_text, rel): add(violations, "G-CONTENT-TRUNCATION", message)
+    if (root / ".claude/skills/dogfood-github-devloop/dogfood.sh").exists(): __import__("check_repo_dogfood_boundary").check(root, violations, add)
     for message in check_repo_coverage.repository_messages(root): add(violations, "G-COVERAGE", message)
     for message in check_repo_forward_direct.repository_messages(root): add(violations, "G-FORWARD-DIRECT", message)
     # G-NAMESPACED-QUEUE is only a narrow regression guard for direct bare own-queue event.queue compares, not a complete #551 class harness.

@@ -10,35 +10,28 @@
 #   substrate : target fkst-substrate  (host = substrate engine worktree, packages from a sibling fkst-packages clone)
 #   website   : target fkst-website    (host = website worktree + its own site-board package)
 #
-# Package layout: `.fkst/` is RUNTIME/build only (gitignored: runtime, durable, substrate-src, board
-# cache) — never committed code. The Lua-primary platform repo (fkst-packages) commits package source
-# at repo-root `packages/<pkg>`; a website-source-primary host repo (e.g. fkst-website) commits its OWN
-# custom Lua under `.fkst/local-packages/<pkg>` (root stays website source). The engine BIN + shared
-# devloop trio are the PLATFORM (like GitHub runners + marketplace actions). So --package-root is the
-# trio from `$PKGSRC/packages/<pkg>` (platform) + the host's own package from `$HOST/.fkst/local-packages/<pkg>`.
-# (The old `.fkst/packages` symlink is obsolete and unused; `.fkst/` is a tracked+ignored interface dir.)
+# Package layout: `.fkst/` is RUNTIME/build only (gitignored: runtime, durable,
+# substrate-src, board cache) except host repos that intentionally commit their own
+# local package source under `.fkst/local-packages/<pkg>`. The engine BIN + shared
+# devloop packages are the PLATFORM, loaded by delegating the resolved topology to
+# the host-run contract in `$PKGSRC/scripts/run.sh supervise`.
 #
 # Commands:
 #   ./dogfood.sh status  [name|all]            pid/uptime/code-version/panic per supervise
 #   ./dogfood.sh doctor  [name|all]            health roll-up: supervises + BIN freshness + code currency + graphql
 #   ./dogfood.sh board   [name|all] [stale_h]  GitHub board sweep: which issues/PRs flow vs are stuck (default stale 6h)
 #   ./dogfood.sh bin                           ensure engine BIN == substrate origin/dev; rebuild if stale (no restart)
-#   ./dogfood.sh start   [name|all]            launch (ensures BIN fresh first)
+#   ./dogfood.sh start   [name|all]            launch via host-run contract
 #   ./dogfood.sh stop    [name|all]            SIGKILL (releases the redb lock)
-#   ./dogfood.sh restart [name|all]            BIN-fresh + sync run checkouts to origin/<integration> + SIGKILL + relaunch (unconditional)
+#   ./dogfood.sh restart [name|all]            sync run checkouts to origin/<integration> + relaunch (unconditional)
 #   ./dogfood.sh sync    [name|all]            auto-deploy: ff pinned operator checkouts to dev, rebuild BIN,
 #                                              and restart ONLY supervises whose running code is a real
 #                                              package/engine change (skill/docs-only skew is left running)
 #   ./dogfood.sh logs    [name] [lines]        tail the latest log (default packages, 40 lines)
 #
-# Two invariants this script encodes so each dogfood wake is a few clean calls, not ad-hoc bash:
-#  - Restart-to-deploy (CLAUDE.md): FKST_RUNTIME_ROOT is scratch (fresh each launch);
-#    FKST_DURABLE_ROOT is the redb persistent store and is REUSED across restarts so
-#    durable in-flight events resume. A fresh durable root would strand mid-state issues.
-#  - BIN freshness: a direct `BIN supervise` launch does NOT auto-build like
-#    `scripts/run.sh` does, so the BIN silently goes stale when substrate dev moves (an
-#    engine .rs fix merges). start/restart ensure BIN == substrate origin/dev first.
-#    BIN is exported (not only --framework-bin) so spawned implement/fix codex can run the suite.
+# Dogfood resolves per-machine topology and delegates one-host launch invariants
+# (fresh runtime scratch, stable durable reuse, package loading, and restart) to
+# `scripts/run.sh supervise`.
 set -uo pipefail
 
 # ---- per-machine config ----
@@ -211,7 +204,7 @@ bin_freshness_report() {
   fi
 }
 
-# Rebuild the BIN from substrate origin/dev if stale — used by start/restart/bin (mutating).
+# Rebuild the BIN from substrate origin/dev if stale — used by bin/sync (mutating).
 bin_ensure_fresh() {
   git -C "$SUBSTRATE_SRC" rev-parse --git-dir >/dev/null 2>&1 \
     || { echo "BIN: $SUBSTRATE_SRC not a substrate checkout — skipping freshness check"; return 0; }
@@ -232,7 +225,7 @@ bin_ensure_fresh() {
 }
 
 # Prune worktrees + scratch dirs from OLD runtime roots of this dogfood (implement/fix
-# depts create worktrees under FKST_RUNTIME_ROOT, registered in the shared .git; each
+# depts create worktrees under the launch runtime scratch, registered in the shared .git; each
 # restart makes a fresh runtime root, orphaning the old registrations — registry leak #500).
 clean_stale_runtime_worktrees() { # $1 name, $2 current-rt-to-keep
   local name="$1" keep="$2" wt d
@@ -245,32 +238,44 @@ clean_stale_runtime_worktrees() { # $1 name, $2 current-rt-to-keep
   done
 }
 
+launch_one() { # $1 name, $2 restart flag (0|1)
+  local name="$1" restart="${2:-0}" ts log rt args=()
+  ts=$(date +%s); log="$LOGDIR/${name}-sv-${ts}.log"; rt="$LOGDIR/dogfood-rt-${name}.${ts}"
+  clean_stale_runtime_worktrees "$name" "$rt"
+  [ -n "$DEVLOOP_PKGS" ] || { echo "[$name] DEVLOOP_PKGS unset — set the platform packages to load in dogfood.config.sh (see dogfood.config.example.sh)"; return 1; }
+  [ -x "$PKGSRC/scripts/run.sh" ] || { echo "[$name] missing host-run contract: $PKGSRC/scripts/run.sh"; return 1; }
+
+  args=(
+    "$PKGSRC/scripts/run.sh" supervise
+    --project-root "$HOST"
+    --platform-root "$PKGSRC"
+    --platform-packages "$DEVLOOP_PKGS"
+    --durable-root "$DUR"
+    --runtime-root "$rt"
+  )
+  [ -n "$LOCAL_PKGS" ] && args+=(--host-packages "$LOCAL_PKGS")
+  [ "$restart" = "1" ] && args+=(--restart)
+
+  BIN="$BIN" FKST_GITHUB_REPO="$REPO" FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN="$BOT" \
+    FKST_DEVLOOP_UPSTREAM_BRANCH="$UPSTREAM_BRANCH" FKST_DEVLOOP_INTEGRATION_BRANCH="$INTEGRATION_BRANCH" \
+    FKST_DEVLOOP_ROLLUP_MERGE="$ROLLUP_MERGE" FKST_DEVLOOP_MANAGED_BOT_LOGINS="$MANAGED_BOT_LOGINS" \
+    FKST_RATE_POOL_ROOT="$RATE_POOL" \
+    nohup "${args[@]}" > "$log" 2>&1 &
+  local pid=$!
+  ln -sf "$log" "$LOGDIR/${name}-sv.log"
+  sleep 3
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "[$name] started pid $pid  panic=$(grep -ac panicked "$log" 2>/dev/null)  log=$log"
+  else
+    echo "[$name] FAILED to start; tail:"; tail -6 "$log" | sed 's/\x1b\[[0-9;]*m//g'
+  fi
+}
+
 start_one() {
   cfg "$1" || return 1
   local existing; existing=$(pidof_df)
   if [ -n "$existing" ]; then echo "[$1] already running (pid $existing) — use restart"; return 0; fi
-  local ts log rt; ts=$(date +%s); log="$LOGDIR/${1}-sv-${ts}.log"; rt="$LOGDIR/dogfood-rt-${1}.${ts}"
-  clean_stale_runtime_worktrees "$1" "$rt"
-  # Package roots: the platform trio from PKGSRC (Lua-primary) repo-root packages/; each host's own
-  # custom package from the host repo's `.fkst/local-packages/` (host repos are website-source-primary:
-  # own Lua committed there, root stays website source — see fkst-website CLAUDE.md).
-  local roots=() p
-  [ -n "$DEVLOOP_PKGS" ] || { echo "[$1] DEVLOOP_PKGS unset — set the platform packages to load in dogfood.config.sh (see dogfood.config.example.sh)"; return 1; }
-  for p in $DEVLOOP_PKGS; do roots+=( --package-root "$PKGSRC/packages/$p" );            done
-  for p in $LOCAL_PKGS;   do roots+=( --package-root "$HOST/.fkst/local-packages/$p" );   done
-  BIN="$BIN" FKST_GITHUB_REPO="$REPO" FKST_GITHUB_WRITE=1 FKST_GITHUB_BOT_LOGIN="$BOT" \
-    FKST_DEVLOOP_UPSTREAM_BRANCH="$UPSTREAM_BRANCH" FKST_DEVLOOP_INTEGRATION_BRANCH="$INTEGRATION_BRANCH" \
-    FKST_DEVLOOP_ROLLUP_MERGE="$ROLLUP_MERGE" FKST_DEVLOOP_MANAGED_BOT_LOGINS="$MANAGED_BOT_LOGINS" \
-    FKST_RUNTIME_ROOT="$rt" FKST_DURABLE_ROOT="$DUR" FKST_RATE_POOL_ROOT="$RATE_POOL" \
-    nohup "$BIN" supervise --project-root "$HOST" "${roots[@]}" --framework-bin "$BIN" > "$log" 2>&1 &
-  local pid=$!
-  ln -sf "$log" "$LOGDIR/${1}-sv.log"
-  sleep 3
-  if kill -0 "$pid" 2>/dev/null; then
-    echo "[$1] started pid $pid  panic=$(grep -ac panicked "$log" 2>/dev/null)  log=$log"
-  else
-    echo "[$1] FAILED to start; tail:"; tail -6 "$log" | sed 's/\x1b\[[0-9;]*m//g'
-  fi
+  launch_one "$1" 0
 }
 
 stop_one() {
@@ -289,8 +294,10 @@ restart_one() {
   [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
   sync_to_run_branch "$PKGSRC"
   [ "$HOST" != "$PKGSRC" ] && sync_to_run_branch "$HOST"
-  stop_one "$1"; sleep 1
-  start_one "$1"
+  # One migration bridge: a supervise launched before the host-run contract has no
+  # durable pidfile yet, so --restart has nothing to kill on the first upgraded run.
+  [ ! -f "$DUR/.fkst-supervise.pid" ] && { stop_one "$1"; sleep 1; }
+  launch_one "$1" 1
 }
 
 status_one() {
@@ -485,9 +492,9 @@ cmd_board() {
 cmd="${1:-status}"; arg2="${2:-}"; arg3="${3:-}"
 case "$cmd" in
   bin)     bin_ensure_fresh ;;
-  start)   bin_ensure_fresh; for n in $(expand "${arg2:-all}"); do start_one   "$n"; done ;;
+  start)   for n in $(expand "${arg2:-all}"); do start_one   "$n"; done ;;
   stop)    for n in $(expand "${arg2:-all}"); do stop_one "$n"; done ;;
-  restart) bin_ensure_fresh; for n in $(expand "${arg2:-all}"); do restart_one "$n"; done ;;
+  restart) for n in $(expand "${arg2:-all}"); do restart_one "$n"; done ;;
   sync)    cmd_sync "$arg2" ;;
   status)  for n in $(expand "${arg2:-all}"); do status_one "$n"; done ;;
   doctor)  cmd_doctor "${arg2:-all}" ;;

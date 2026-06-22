@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""Behavior tests for scripts/host_run.sh."""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import tempfile
+import textwrap
+import time
+import unittest
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+class HostRunHarness:
+    def __init__(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.packages_host = self.root / "packages-host"
+        self.substrate_host = self.root / "substrate-host"
+        self.website_host = self.root / "website-host"
+        self.platform = self.root / "platform"
+        self.durable = self.root / "durable"
+        self.runtime = self.root / "runtime"
+        for pkg in ("github-proxy", "consensus"):
+            (self.platform / "packages" / pkg).mkdir(parents=True, exist_ok=True)
+            (self.packages_host / "packages" / pkg).mkdir(parents=True, exist_ok=True)
+        (self.packages_host / "packages" / "autochrono").mkdir(parents=True)
+        (self.website_host / ".fkst" / "local-packages" / "site-board").mkdir(parents=True)
+        self.substrate_host.mkdir()
+
+    def close(self) -> None:
+        self.tmp.cleanup()
+
+    def run_helper(self, body: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["/bin/bash", "-c", body],
+            cwd=REPO_ROOT,
+            env=os.environ.copy(),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def package_roots(self, command_args: list[str]) -> subprocess.CompletedProcess[str]:
+        quoted = " ".join(shell_quote(arg) for arg in command_args)
+        return self.run_helper(
+            textwrap.dedent(
+                f"""\
+                set -euo pipefail
+                source scripts/host_run.sh
+                host_run_parse_supervise_args {quoted}
+                host_run_validate_shape
+                host_run_build_package_roots
+                host_run_print_package_roots
+                """
+            )
+        )
+
+
+def shell_quote(value: str | Path) -> str:
+    text = str(value)
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def pid_is_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def wait_for_dead(pid: int, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not pid_is_alive(pid):
+            return True
+        time.sleep(0.05)
+    return not pid_is_alive(pid)
+
+
+def start_orphan_sleep(seconds: int = 60) -> int:
+    result = subprocess.run(
+        ["/bin/sh", "-c", f"sleep {seconds} >/dev/null 2>&1 & echo $!"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return int(result.stdout.strip())
+
+
+def kill_if_alive(pid: int) -> None:
+    if not pid_is_alive(pid):
+        return
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    wait_for_dead(pid)
+
+
+class HostRunTest(unittest.TestCase):
+    def test_packages_host_uses_project_packages_for_host_packages(self) -> None:
+        h = HostRunHarness()
+        try:
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.packages_host),
+                    "--platform-root",
+                    str(h.packages_host),
+                    "--platform-packages",
+                    "github-proxy consensus",
+                    "--host-packages",
+                    "autochrono",
+                    "--durable-root",
+                    str(h.durable),
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str(h.packages_host / "packages" / "github-proxy"),
+                    str(h.packages_host / "packages" / "consensus"),
+                    str(h.packages_host / "packages" / "autochrono"),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_substrate_host_has_only_platform_packages(self) -> None:
+        h = HostRunHarness()
+        try:
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.substrate_host),
+                    "--platform-root",
+                    str(h.platform),
+                    "--platform-packages",
+                    "github-proxy consensus",
+                    "--durable-root",
+                    str(h.durable),
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str(h.platform / "packages" / "github-proxy"),
+                    str(h.platform / "packages" / "consensus"),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_website_host_uses_fkst_local_packages_for_host_packages(self) -> None:
+        h = HostRunHarness()
+        try:
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.website_host),
+                    "--platform-root",
+                    str(h.platform),
+                    "--platform-packages",
+                    "github-proxy consensus",
+                    "--host-packages",
+                    "site-board",
+                    "--durable-root",
+                    str(h.durable),
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str(h.platform / "packages" / "github-proxy"),
+                    str(h.platform / "packages" / "consensus"),
+                    str(h.website_host / ".fkst" / "local-packages" / "site-board"),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_missing_durable_root_fails_closed(self) -> None:
+        h = HostRunHarness()
+        try:
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.substrate_host),
+                    "--platform-root",
+                    str(h.platform),
+                    "--platform-packages",
+                    "github-proxy",
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--durable-root is required", result.stderr)
+        finally:
+            h.close()
+
+    def test_restart_kills_pid_file_process_without_command_text_matching(self) -> None:
+        h = HostRunHarness()
+        pid = start_orphan_sleep()
+        try:
+            h.durable.mkdir()
+            (h.durable / ".fkst-supervise.pid").write_text(str(pid) + "\n", encoding="utf-8")
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.substrate_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)} --restart
+                    host_run_validate_shape
+                    host_run_restart_prior
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(wait_for_dead(pid), f"pid {pid} still alive")
+            self.assertFalse((h.durable / ".fkst-supervise.pid").exists())
+            self.assertIn("killing prior supervise pid", result.stderr)
+        finally:
+            kill_if_alive(pid)
+            h.close()
+
+    def test_restart_fails_closed_when_prior_cannot_be_killed(self) -> None:
+        h = HostRunHarness()
+        pid = start_orphan_sleep()
+        try:
+            h.durable.mkdir()
+            pidfile = h.durable / ".fkst-supervise.pid"
+            pidfile.write_text(str(pid) + "\n", encoding="utf-8")
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    kill() {{
+                      if [ "${{1:-}}" = "-9" ]; then
+                        return 1
+                      fi
+                      command kill "$@"
+                    }}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.substrate_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)} --restart
+                    host_run_validate_shape
+                    host_run_restart_prior
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(pid_is_alive(pid), f"pid {pid} should not have been killed")
+            self.assertEqual(pidfile.read_text(encoding="utf-8").strip(), str(pid))
+            self.assertIn("failed to SIGKILL prior supervise pid", result.stderr)
+        finally:
+            kill_if_alive(pid)
+            h.close()
+
+    def test_launch_without_restart_fails_closed_when_pidfile_is_live(self) -> None:
+        h = HostRunHarness()
+        pid = start_orphan_sleep()
+        try:
+            h.durable.mkdir()
+            (h.durable / ".fkst-supervise.pid").write_text(str(pid) + "\n", encoding="utf-8")
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.substrate_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_claim_supervise_slot
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertTrue(pid_is_alive(pid), f"pid {pid} should still be alive")
+            self.assertIn("is still running for durable root", result.stderr)
+        finally:
+            kill_if_alive(pid)
+            h.close()
+
+    def test_explicit_runtime_root_is_used_exactly_for_launch(self) -> None:
+        h = HostRunHarness()
+        try:
+            args = (
+                f"--project-root {shell_quote(h.substrate_host)} "
+                f"--platform-root {shell_quote(h.platform)} "
+                f"--platform-packages 'github-proxy' "
+                f"--durable-root {shell_quote(h.durable)} "
+                f"--runtime-root {shell_quote(h.runtime)}"
+            )
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args {args}
+                    host_run_validate_shape
+                    first="$HOST_RUN_RUNTIME_ROOT"
+                    [ "$first" = {shell_quote(h.runtime)} ]
+                    [ -d "$first" ]
+                    host_run_parse_supervise_args {args}
+                    host_run_validate_shape
+                    second="$HOST_RUN_RUNTIME_ROOT"
+                    [ "$second" = {shell_quote(h.runtime)} ]
+                    printf '%s\\n%s\\n' "$first" "$second"
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            first, second = result.stdout.splitlines()
+            self.assertEqual(first, str(h.runtime))
+            self.assertEqual(second, str(h.runtime))
+        finally:
+            h.close()
+
+
+if __name__ == "__main__":
+    unittest.main()
