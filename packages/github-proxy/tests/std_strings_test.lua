@@ -1,6 +1,6 @@
--- std module behavior tests are hosted in github-proxy (a flat package, the
--- strictest single-root conformance gate) because the engine test runner only
--- scans <root>/tests and <root>/departments/* (no recursion into std/tests).
+-- contract library behavior tests are hosted in github-proxy (a flat package,
+-- the strictest single-root conformance gate) because the engine test runner
+-- only scans package tests and department tests.
 local strings = require("contract.strings")
 local t = fkst.test
 
@@ -53,6 +53,13 @@ return {
   test_json_string_wraps_and_escapes_json_string_boundaries = function()
     t.eq(strings.json_string(nil), '""')
     t.eq(strings.json_string('a"b\\c'), '"a\\"b\\\\c"')
+  end,
+
+  test_json_string_escapes_quote_backslash_and_newline_together = function()
+    local encoded = strings.json_string('a"b\\c\nd')
+
+    t.eq(encoded, '"a\\"b\\\\c\\nd"')
+    t.is_nil(encoded:find("\n", 1, true))
   end,
 
   test_json_string_escapes_c0_control_characters = function()
