@@ -13,6 +13,7 @@ local spec = {
 }
 
 local pr_view_fields = "title,headRefName,baseRefName,state,createdAt,updatedAt,author,comments,assignees"
+local bridge_issue_view_fields = "number,title,state,url,labels,comments,author"
 
 local function bare_queue(queue)
   return tostring(queue or ""):match("%.([^%.]+)$") or tostring(queue or "")
@@ -48,14 +49,46 @@ local function search_open_bridge_issues(github, repo, pr_number, managed)
   return found
 end
 
+local function search_all_bridge_issues(github, repo, pr_number, managed)
+  local result = github.issue_search(repo, core.bridge_search_query(repo, pr_number), "number,title,state,author,body,url", 30)
+  local issues = core.decode_json_list(result and result.stdout or "[]", "bridge issue search")
+  local found = {}
+  for _, issue in ipairs(issues) do
+    if core.trusted_author(issue, managed)
+      and tostring(issue.body or ""):find(core.bridge_search_query(repo, pr_number), 1, true) ~= nil then
+      local normalized = core.normalize_issue(issue)
+      if normalized.number ~= nil then
+        table.insert(found, normalized)
+      end
+    end
+  end
+  table.sort(found, function(left, right)
+    return tonumber(left.number or 0) < tonumber(right.number or 0)
+  end)
+  return found
+end
+
 local function search_bridge_issues(github, repo, pr_number, managed)
   return search_open_bridge_issues(github, repo, pr_number, managed)[1]
+end
+
+local function read_bridge_issue(github, repo, issue_number)
+  local result = github.issue_view(repo, issue_number, bridge_issue_view_fields, 30)
+  local decoded = core.decode_json_object(result and result.stdout or "{}", "bridge issue view")
+  decoded.number = decoded.number or issue_number
+  return core.normalize_issue(decoded)
 end
 
 local function write_comment(github, repo, pr_number, pr, issue_number)
   local path = core.body_file_path(repo, pr_number, "marker")
   file.write(path, core.bridge_marker(repo, pr_number, issue_number) .. "\n")
   return github.pr_comment(repo, pr_number, path, 30)
+end
+
+local function write_handled_comment(github, repo, pr, issue, signal)
+  local path = core.body_file_path(repo, pr.number, "handled")
+  file.write(path, core.handled_comment_body(repo, pr, issue, signal) .. "\n")
+  return github.pr_comment(repo, pr.number, path, 30)
 end
 
 local function create_bridge_issue(github, repo, pr)
@@ -140,6 +173,64 @@ local function maybe_record_missing_pr_marker(github, repo, pr, bridge, managed,
   end
 end
 
+local function bridge_issue_is_handled(issue, repo, managed)
+  if issue == nil or issue.number == nil then
+    return nil
+  end
+  return core.find_bridge_issue_merged_signal(issue, repo, issue.number, managed)
+end
+
+local function acknowledge_handled_bridge(github, repo, pr, issue, signal, managed)
+  if pr == nil or issue == nil or issue.number == nil or signal == nil then
+    return "skip-unhandled"
+  end
+  if core.find_pr_handled_marker(pr.comments, repo, pr.number, issue.number, managed) ~= nil then
+    if tostring(pr.state or ""):upper() == "OPEN" and core.write_enabled() then
+      github.pr_close(repo, pr.number, 30)
+      return "closed-after-existing-ack"
+    end
+    return "deduped-handled"
+  end
+  if not core.write_enabled() then
+    return "would-acknowledge-handled"
+  end
+  write_handled_comment(github, repo, pr, issue, signal)
+  if tostring(pr.state or ""):upper() == "OPEN" then
+    github.pr_close(repo, pr.number, 30)
+  end
+  return "acknowledged-handled"
+end
+
+local function maybe_acknowledge_existing_bridge(github, repo, pr, bridge, managed)
+  if bridge == nil or bridge.issue_number == nil then
+    return nil
+  end
+  local issue = read_bridge_issue(github, repo, bridge.issue_number)
+  local signal = bridge_issue_is_handled(issue, repo, managed)
+  if signal == nil then
+    return nil
+  end
+  return acknowledge_handled_bridge(github, repo, pr, issue, signal, managed)
+end
+
+local function maybe_acknowledge_bridge_from_scan(github, repo, pr, managed)
+  if not core.is_external_candidate(pr, managed, now()) then
+    return nil
+  end
+  local fresh_pr = read_pr(github, repo, pr.number)
+  if not core.is_external_candidate(fresh_pr, managed, now()) then
+    return nil
+  end
+  for _, candidate in ipairs(search_all_bridge_issues(github, repo, fresh_pr.number, managed)) do
+    local issue = read_bridge_issue(github, repo, candidate.number)
+    local signal = bridge_issue_is_handled(issue, repo, managed)
+    if signal ~= nil then
+      return acknowledge_handled_bridge(github, repo, fresh_pr, issue, signal, managed)
+    end
+  end
+  return nil
+end
+
 local function handle_candidate(github, payload)
   local source_repo, source_pr = core.parse_source_ref(payload and payload.source_ref)
   local repo = tostring(payload.repo or source_repo)
@@ -159,7 +250,8 @@ local function handle_candidate(github, payload)
 
     local bridge = existing_bridge(github, repo, pr, managed)
     if bridge ~= nil then
-      action = "deduped-" .. tostring(bridge.source)
+      action = maybe_acknowledge_existing_bridge(github, repo, pr, bridge, managed)
+        or ("deduped-" .. tostring(bridge.source))
       return
     end
 
@@ -183,7 +275,8 @@ local function handle_candidate(github, payload)
     bridge = existing_bridge(github, repo, pr, managed)
     if bridge ~= nil then
       maybe_record_missing_pr_marker(github, repo, pr, bridge, managed, self_login)
-      action = "deduped-after-claim-" .. tostring(bridge.source)
+      action = maybe_acknowledge_existing_bridge(github, repo, pr, bridge, managed)
+        or ("deduped-after-claim-" .. tostring(bridge.source))
       return
     end
 
@@ -217,18 +310,28 @@ local function handle_scan(github, event)
   for _, raw in ipairs(core.parse_pr_list(result and result.stdout or "[]")) do
     local pr = core.normalize_pr(raw, repo)
     if core.is_external_candidate(pr, managed, now()) then
-      local payload = {
-        schema = "github-external-pr-intake.v1",
-        repo = repo,
-        number = pr.number,
-        updated_at = pr.updated_at,
-        dedup_key = core.dedup_key(repo, pr.number),
-        source_ref = core.source_ref(repo, pr.number),
-      }
-      core.log_line("info", "external_pr_intake", payload.dedup_key, "RAISE", {
-        "queue=external_pr_candidate",
-      })
-      raise("external_pr_candidate", payload)
+      local handled_action = nil
+      with_lock(core.bridge_lock_key(repo, pr.number), function()
+        handled_action = maybe_acknowledge_bridge_from_scan(github, repo, pr, managed)
+      end)
+      if handled_action ~= nil then
+        core.log_line("info", "external_pr_intake", core.dedup_key(repo, pr.number), "ACTION", {
+          "action=" .. tostring(handled_action),
+        })
+      else
+        local payload = {
+          schema = "github-external-pr-intake.v1",
+          repo = repo,
+          number = pr.number,
+          updated_at = pr.updated_at,
+          dedup_key = core.dedup_key(repo, pr.number),
+          source_ref = core.source_ref(repo, pr.number),
+        }
+        core.log_line("info", "external_pr_intake", payload.dedup_key, "RAISE", {
+          "queue=external_pr_candidate",
+        })
+        raise("external_pr_candidate", payload)
+      end
     end
   end
 end

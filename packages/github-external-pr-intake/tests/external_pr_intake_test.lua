@@ -100,6 +100,22 @@ local function issue_json(issue)
   return '{"number":' .. tostring(issue.number or 77)
     .. ',"title":' .. json_string(issue.title or "Bridge")
     .. ',"state":' .. json_string(issue.state or "OPEN")
+    .. ',"url":' .. json_string(issue.url or "https://github.com/owner/repo/issues/" .. tostring(issue.number or 77))
+    .. ',"labels":[' .. table.concat((function()
+      local labels = {}
+      for _, label in ipairs(issue.labels or {}) do
+        table.insert(labels, '{"name":' .. json_string(label) .. "}")
+      end
+      return labels
+    end)(), ",") .. "]"
+    .. ',"comments":[' .. table.concat((function()
+      local comments = {}
+      for _, comment in ipairs(issue.comments or {}) do
+        table.insert(comments, '{"body":' .. json_string(comment.body or "")
+          .. ',"author":{"login":' .. json_string(comment.author_login or "fkst-test-bot") .. "}}")
+      end
+      return comments
+    end)(), ",") .. "]"
     .. ',"author":{"login":' .. json_string(issue.author_login or "fkst-test-bot")
     .. '},"body":' .. json_string(issue.body or "") .. "}"
 end
@@ -169,6 +185,15 @@ local function new_fake_github(opts)
       end
     end
     return { stdout = "[" .. table.concat(parts, ",") .. "]\n", stderr = "", exit_code = 0 }
+  end
+  function handle.issue_view(repo, issue_number, fields, timeout)
+    table.insert(model.writes, { kind = "issue_view", repo = repo, issue_number = issue_number, fields = fields, timeout = timeout })
+    for _, issue in ipairs(model.issues or {}) do
+      if tonumber(issue.number) == tonumber(issue_number) then
+        return { stdout = issue_json(issue), stderr = "", exit_code = 0 }
+      end
+    end
+    error("fake: unknown issue " .. tostring(issue_number))
   end
   function handle.issue_assign(repo, issue_number, login, timeout)
     table.insert(model.writes, { kind = "issue_assign", repo = repo, issue_number = issue_number, login = login, timeout = timeout })
