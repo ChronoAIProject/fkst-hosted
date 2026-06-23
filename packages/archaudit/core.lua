@@ -19,6 +19,11 @@ local github_proxy_limits = {
 local observe_schema_version = 1
 local audit_due_staleness_seconds = 24 * 60 * 60
 local audit_poll_interval_seconds = 30 * 60
+-- Starting at the raw staleness deadline is too late: cron dispatch, durable
+-- admission, audit codex runtime, and handoff/retry slack must all complete
+-- before max staleness. Budget two poll intervals for schedule/admission jitter
+-- plus 15 minutes for the current sub-10-minute audit runtime and downstream slack.
+local audit_due_completion_budget_seconds = 2 * audit_poll_interval_seconds + 15 * 60
 local audit_poll_interval = tostring(math.floor(audit_poll_interval_seconds / 60)) .. "m"
 
 function M.persistence_class()
@@ -33,6 +38,20 @@ function M.audit_poll_interval_seconds()
   return audit_poll_interval_seconds
 end
 
+function M.audit_due_completion_budget_seconds()
+  return audit_due_completion_budget_seconds
+end
+
+function M.audit_due_force_at_seconds(max_staleness_seconds, completion_budget_seconds)
+  local staleness = max_staleness_seconds or audit_due_staleness_seconds
+  local completion_budget = completion_budget_seconds or audit_due_completion_budget_seconds
+  if type(staleness) ~= "number" or type(completion_budget) ~= "number"
+    or staleness < 1 or completion_budget < 1 or completion_budget >= staleness then
+    error("archaudit: invalid-audit-force-at-input: staleness and completion budget must be numeric and bounded")
+  end
+  return staleness - completion_budget
+end
+
 function M.audit_poll_interval()
   return audit_poll_interval
 end
@@ -45,9 +64,13 @@ function M.producer_liveness_contracts()
       output_queues = { "github-proxy.github_issue_create_request" },
       eligibility_predicate = "overdue",
       max_staleness_seconds = audit_due_staleness_seconds,
+      completion_budget_seconds = audit_due_completion_budget_seconds,
+      force_at_seconds = M.audit_due_force_at_seconds(audit_due_staleness_seconds, audit_due_completion_budget_seconds),
       max_silence_seconds = audit_poll_interval_seconds,
       max_skip_budget = 0,
       progress_output = "github-proxy.github_issue_create_request",
+      runtime_gate = "idle_when_not_overdue",
+      adversarial_fixture = "busy_overdue",
     },
   }
 end
@@ -87,6 +110,18 @@ local function non_empty_string(contract, field, errors)
   return value
 end
 
+local function optional_non_empty_string(contract, field, errors)
+  local value = contract and contract[field]
+  if value == nil then
+    return nil
+  end
+  if type(value) ~= "string" or value == "" then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": " .. field .. " must be a non-empty string when declared")
+    return nil
+  end
+  return value
+end
+
 local function output_queues(contract, errors)
   local queues = contract and contract.output_queues
   if type(queues) ~= "table" or #queues == 0 then
@@ -113,10 +148,16 @@ local function producer_liveness_row(contract, errors)
   local trigger_source = non_empty_string(contract, "trigger_source", errors)
   non_empty_string(contract, "eligibility_predicate", errors)
   local progress_output = non_empty_string(contract, "progress_output", errors)
+  local runtime_gate = optional_non_empty_string(contract, "runtime_gate", errors)
+  local adversarial_fixture = optional_non_empty_string(contract, "adversarial_fixture", errors)
   local outputs = output_queues(contract, errors)
   local staleness_minutes = positive_minute_seconds(contract, "max_staleness_seconds", errors)
   local silence_minutes = positive_minute_seconds(contract, "max_silence_seconds", errors)
   local skip_budget = non_negative_integer(contract, "max_skip_budget", errors)
+  if runtime_gate ~= nil and adversarial_fixture == nil then
+    append_error(errors, tostring(contract and contract.producer_id or "?") .. ": runtime_gate must declare adversarial_fixture")
+    return nil
+  end
   if producer_id == nil or trigger_source == nil or progress_output == nil or outputs == nil
     or staleness_minutes == nil or silence_minutes == nil or skip_budget == nil then
     return nil
@@ -169,6 +210,10 @@ local function producer_liveness_row(contract, errors)
     actionable_epoch = {
       source = "state_entry:v1",
       generation_source = "same_as_actionable_epoch",
+    },
+    producer_liveness = {
+      runtime_gate = runtime_gate,
+      adversarial_fixture = adversarial_fixture,
     },
   }
 end
@@ -590,6 +635,23 @@ function M.audit_run_dedup_key(repo, now_seconds, max_staleness_seconds)
   return readable:sub(1, github_proxy_limits.dedup_key)
 end
 
+function M.audit_run_dedup_bucket(now_seconds, max_staleness_seconds)
+  if type(now_seconds) ~= "number" or type(max_staleness_seconds) ~= "number" or max_staleness_seconds < 1 then
+    error("archaudit: invalid-audit-run-dedup-input: timestamps and staleness budget must be numeric")
+  end
+  return math.floor(now_seconds / max_staleness_seconds)
+end
+
+function M.audit_run_current_window_seen(latest_seconds, now_seconds, max_staleness_seconds)
+  if latest_seconds == nil then
+    return false
+  end
+  if type(latest_seconds) ~= "number" or latest_seconds > now_seconds then
+    return true
+  end
+  return M.audit_run_dedup_bucket(latest_seconds, max_staleness_seconds) == M.audit_run_dedup_bucket(now_seconds, max_staleness_seconds)
+end
+
 function M.build_issue_create_request(repo, finding, label_available, trigger_reason)
   assert_request_field(M.validate_repo(repo), "repo")
   local dedup_key = M.dedup_key(repo, finding)
@@ -717,10 +779,11 @@ function M.latest_audit_issue_seconds(issues, trusted_login)
   return latest
 end
 
-function M.audit_due_verdict(issues, trusted_login, now_seconds, max_staleness_seconds)
+function M.audit_due_verdict(issues, trusted_login, now_seconds, max_staleness_seconds, completion_budget_seconds)
   if type(now_seconds) ~= "number" or type(max_staleness_seconds) ~= "number" or max_staleness_seconds < 1 then
     error("archaudit: invalid-audit-staleness-input: timestamps and staleness budget must be numeric")
   end
+  local force_at_seconds = M.audit_due_force_at_seconds(max_staleness_seconds, completion_budget_seconds)
   local latest = M.latest_audit_issue_seconds(issues, trusted_login)
   if latest == nil then
     return true, "no durable audit issue marker", nil
@@ -728,8 +791,12 @@ function M.audit_due_verdict(issues, trusted_login, now_seconds, max_staleness_s
   if latest > now_seconds then
     return false, "latest audit issue marker is in the future", latest
   end
-  if now_seconds - latest >= max_staleness_seconds then
+  local age_seconds = now_seconds - latest
+  if age_seconds >= max_staleness_seconds then
     return true, "audit max staleness elapsed", latest
+  end
+  if age_seconds >= force_at_seconds then
+    return true, "audit completion budget threshold elapsed", latest
   end
   return false, "recent audit issue marker", latest
 end

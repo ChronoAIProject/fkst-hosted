@@ -114,6 +114,10 @@ local function mock_stale_observe()
   mock_observe(observe_json({ generated_at_ms = 1781831461000 }), 0)
 end
 
+local function mock_idle_observe_at(generated_at_ms)
+  mock_observe(observe_json({ generated_at_ms = generated_at_ms }), 0)
+end
+
 local function mock_codex_findings(stdout, exit_code)
   t.mock_command("codex exec", {
     stdout = stdout,
@@ -400,6 +404,33 @@ return {
     t.eq(#result.raises, 0)
   end,
 
+  test_idle_trigger_can_run_early_once_per_staleness_window = function()
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-19T23:30:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
+    mock_env("owner/repo", "3")
+    mock_idle_observe_at(1781917260000)
+    mock_codex_findings("[]", 0)
+    local dept = fake_audit_department_with_search(search_stdout, "[]")
+    local result = run_fake_at(dept, idle_event({
+      detected_at = "2026-06-20T01:00:00Z",
+      expires_at = "2026-06-20T01:10:00Z",
+    }), core.iso_timestamp_epoch_seconds("2026-06-20T01:01:00Z"))
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.title, "Archaudit: audit completed with zero findings")
+    t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="idle"', 1, true) ~= nil)
+  end,
+
+  test_stale_tick_not_overdue_can_run_early_only_when_idle = function()
+    local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-19T02:00:00Z","author":{"login":"fkst-test-bot"},"url":"https://github.com/owner/repo/issues/77"}]'
+    mock_env("owner/repo", "3")
+    mock_idle_observe_at(1781917260000)
+    mock_codex_findings("[]", 0)
+    local dept = fake_audit_department_with_search(search_stdout, "[]")
+    local result = run_fake_at(dept, stale_tick_event(), core.iso_timestamp_epoch_seconds("2026-06-20T01:01:00Z"))
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].payload.title, "Archaudit: audit completed with zero findings")
+    t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
+  end,
+
   test_stale_tick_ignores_untrusted_durable_audit_issue = function()
     local search_stdout = '[{"number":77,"title":"Archaudit: packages/archaudit/core.lua:1 SRP","state":"OPEN","body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"human"},"url":"https://github.com/owner/repo/issues/77"}]'
     mock_env("owner/repo", "3")
@@ -417,7 +448,7 @@ return {
     }) do
       mock_env("owner/repo", "3")
       mock_observe(observe_json({ truncated_json = truncated_json }), 0)
-      local dept = fake_audit_department("[]")
+      local dept = fake_audit_department_with_search("[]", "[]")
       local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
       t.eq(#result.raises, 0)
     end
@@ -558,31 +589,11 @@ return {
     t.is_true(tostring(result.failure.error):find("observe-malformed", 1, true) ~= nil)
   end,
 
-  test_fake_core_idle_check_failure_is_structured_failure_no_issue = function()
-    local result = with_core_patch({
-      observe = function()
-        return {
-          schema_version = 1,
-          generated_at_ms = 1781830860000,
-          source = {},
-          limits = { max_deliveries = 500, max_dead_letters = 500 },
-          truncated = { deliveries = false, dead_letters = false },
-          queues = {},
-          deliveries = {},
-          dead_letters = {},
-        }
-      end,
-      observe_now_seconds = function(_facts)
-        return 1781830860
-      end,
-      is_idle_observe = function(_facts)
-        error("archaudit: observe-malformed-facts: synthetic idle predicate failure")
-      end,
-    }, function()
-      mock_env("owner/repo", "3")
-      local dept = fake_audit_department("[]")
-      return run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
-    end)
+  test_fake_current_observe_idle_check_malformed_queue_is_structured_failure_no_issue = function()
+    mock_env("owner/repo", "3")
+    mock_observe(observe_json({ queues_json = '[{"queue":"proposal","depth":"bad","pending":0,"in_flight":0,"retrying":0}]' }), 0)
+    local dept = fake_audit_department("[]")
+    local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
     t.is_true(tostring(result.failure.error):find("observe-malformed", 1, true) ~= nil)
   end,

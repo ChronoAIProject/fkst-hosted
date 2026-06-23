@@ -42,6 +42,10 @@ local function fail(event, error_class, message)
   error(("archaudit: " .. tostring(error_class) .. ": " .. tostring(message)), 0)
 end
 
+local function fail_observe_malformed(event, err)
+  fail(event, "observe-malformed", tostring(err))
+end
+
 local function fresh_hint(payload, now_seconds)
   local detected = core.iso_timestamp_epoch_seconds(payload.detected_at)
   if detected == nil then
@@ -144,6 +148,18 @@ local function idle_observe_result(facts)
   return pcall(core.is_idle_observe, facts)
 end
 
+local function require_idle(event, facts)
+  local ok_idle, idle, why = idle_observe_result(facts)
+  if not ok_idle and fail_observe_malformed(event, idle) then
+    return false
+  end
+  if not idle then
+    log_fact("warn", "audit", "SKIP", "terminal-skip", event, why or "current system busy", true)
+    return false
+  end
+  return true
+end
+
 local function run_codex(repo, max_count)
   local opts = codex.judgment_codex_opts(core.build_prompt(repo, max_count), ".")
   opts.timeout = codex_timeout_seconds
@@ -177,10 +193,6 @@ local function stop_observe_error(event, err)
     return true
   end
   fail(event, "observe-malformed", message)
-end
-
-local function fail_observe_malformed(event, err)
-  fail(event, "observe-malformed", tostring(err))
 end
 
 local function fail_codex_error(event, err)
@@ -249,12 +261,7 @@ local function make_department(ports)
         log_fact("warn", "audit", "SKIP", "terminal-skip", event, fresh_why, true)
         return
       end
-      local ok_idle, idle, why = idle_observe_result(facts_or_err)
-      if not ok_idle and fail_observe_malformed(event, idle) then
-        return
-      end
-      if not idle then
-        log_fact("warn", "audit", "SKIP", "terminal-skip", event, why or "current system busy", true)
+      if not require_idle(event, facts_or_err) then
         return
       end
     elseif core.normalize_audit_tick_event(event) == nil then
@@ -270,10 +277,22 @@ local function make_department(ports)
       fail(event, "audit-search-failed", issues_or_err)
     end
     local staleness_seconds = core.audit_due_staleness_seconds()
-    local due, due_why = core.audit_due_verdict(issues_or_err, bot_login(), observe_now_or_err, staleness_seconds)
+    local completion_budget_seconds = core.audit_due_completion_budget_seconds()
+    local due, due_why, latest_audit = core.audit_due_verdict(
+      issues_or_err,
+      bot_login(),
+      observe_now_or_err,
+      staleness_seconds,
+      completion_budget_seconds
+    )
     if not due then
-      log_fact("warn", "audit", "SKIP", "terminal-skip", event, due_why, true)
-      return
+      if core.audit_run_current_window_seen(latest_audit, observe_now_or_err, staleness_seconds) then
+        log_fact("warn", "audit", "SKIP", "terminal-skip", event, due_why, true)
+        return
+      end
+      if trigger == "stale" and not require_idle(event, facts_or_err) then
+        return
+      end
     end
 
     local count = max_issues()

@@ -54,9 +54,13 @@ return {
     t.eq(contract.escalation_queues, nil)
     t.eq(contract.eligibility_predicate, "overdue")
     t.eq(contract.max_staleness_seconds, core.audit_due_staleness_seconds())
+    t.eq(contract.completion_budget_seconds, core.audit_due_completion_budget_seconds())
+    t.eq(contract.force_at_seconds, core.audit_due_force_at_seconds())
     t.eq(contract.max_silence_seconds, core.audit_poll_interval_seconds())
     t.eq(contract.max_skip_budget, 0)
     t.eq(contract.progress_output, "github-proxy.github_issue_create_request")
+    t.eq(contract.runtime_gate, "idle_when_not_overdue")
+    t.eq(contract.adversarial_fixture, "busy_overdue")
   end,
 
   test_producer_liveness_contract_reuses_restart_liveness_watchdog = function()
@@ -74,6 +78,8 @@ return {
     t.eq(row.liveness_contract.receiver_bound_minutes, core.audit_poll_interval_seconds() / 60)
     t.eq(row.on_timeout.escalate_after_attempts, 1)
     t.eq(row.on_timeout.queue, "archaudit_tick")
+    t.eq(row.producer_liveness.runtime_gate, "idle_when_not_overdue")
+    t.eq(row.producer_liveness.adversarial_fixture, "busy_overdue")
   end,
 
   test_producer_liveness_contract_rejects_unbounded_silence = function()
@@ -97,6 +103,14 @@ return {
     t.eq(raiser.produces, contract.trigger_source)
     t.eq(raiser.interval, string.format("%dm", contract.max_silence_seconds / 60))
     t.is_true(contract.max_silence_seconds < contract.max_staleness_seconds)
+  end,
+
+  test_audit_due_force_at_leads_raw_deadline_by_completion_budget = function()
+    local staleness = core.audit_due_staleness_seconds()
+    local completion_budget = core.audit_due_completion_budget_seconds()
+    t.eq(completion_budget, 2 * core.audit_poll_interval_seconds() + 15 * 60)
+    t.eq(core.audit_due_force_at_seconds(staleness, completion_budget), staleness - completion_budget)
+    t.is_true(core.audit_due_force_at_seconds() < staleness)
   end,
 
   test_parse_findings_accepts_strict_array = function()
@@ -294,6 +308,17 @@ return {
     t.is_true(payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
   end,
 
+  test_audit_run_dedup_key_is_one_per_staleness_window = function()
+    local staleness = core.audit_due_staleness_seconds()
+    local first = core.iso_timestamp_epoch_seconds("2026-06-19T01:00:00Z")
+    local same_window = core.iso_timestamp_epoch_seconds("2026-06-19T23:59:59Z")
+    local next_window = core.iso_timestamp_epoch_seconds("2026-06-20T00:00:00Z")
+    t.eq(core.audit_run_dedup_key("owner/repo", first, staleness), core.audit_run_dedup_key("owner/repo", same_window, staleness))
+    t.is_true(core.audit_run_dedup_key("owner/repo", first, staleness) ~= core.audit_run_dedup_key("owner/repo", next_window, staleness))
+    t.eq(core.audit_run_current_window_seen(first, same_window, staleness), true)
+    t.eq(core.audit_run_current_window_seen(first, next_window, staleness), false)
+  end,
+
   test_audit_tick_event_normalizes_real_namespaced_cron_payload = function()
     local trigger = core.normalize_audit_tick_event({
       queue = "archaudit.archaudit_tick",
@@ -348,17 +373,33 @@ return {
 
   test_audit_due_verdict_uses_durable_marker_window = function()
     local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z")
+    local staleness = core.audit_due_staleness_seconds()
+    local completion_budget = core.audit_due_completion_budget_seconds()
+    local force_at = core.audit_due_force_at_seconds(staleness, completion_budget)
     local issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"idle\\" -->","createdAt":"2026-06-20T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
-    local due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, core.audit_due_staleness_seconds())
+    local due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, staleness, completion_budget)
     t.eq(due, false)
     t.eq(why, "recent audit issue marker")
 
+    issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-19T02:15:00Z","author":{"login":"fkst-test-bot"}}]')
+    due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, staleness, completion_budget)
+    t.eq(due, true)
+    t.eq(why, "audit completion budget threshold elapsed")
+    t.is_true(now_seconds - core.latest_audit_issue_seconds(issues, "fkst-test-bot") >= force_at)
+    t.is_true(now_seconds - core.latest_audit_issue_seconds(issues, "fkst-test-bot") < staleness)
+
+    issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-19T02:17:00Z","author":{"login":"fkst-test-bot"}}]')
+    due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, staleness, completion_budget)
+    t.eq(due, false)
+    t.eq(why, "recent audit issue marker")
+    t.is_true(now_seconds - core.latest_audit_issue_seconds(issues, "fkst-test-bot") < force_at)
+
     issues = core.parse_audit_issue_search('[{"number":7,"body":"<!-- fkst:archaudit:audit-run:v1 reason=\\"stale\\" -->","createdAt":"2026-06-18T00:30:00Z","author":{"login":"fkst-test-bot"}}]')
-    due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, core.audit_due_staleness_seconds())
+    due, why = core.audit_due_verdict(issues, "fkst-test-bot", now_seconds, staleness, completion_budget)
     t.eq(due, true)
     t.eq(why, "audit max staleness elapsed")
 
-    due, why = core.audit_due_verdict({}, "fkst-test-bot", now_seconds, core.audit_due_staleness_seconds())
+    due, why = core.audit_due_verdict({}, "fkst-test-bot", now_seconds, staleness, completion_budget)
     t.eq(due, true)
     t.eq(why, "no durable audit issue marker")
   end,

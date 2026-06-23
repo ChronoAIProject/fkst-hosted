@@ -51,6 +51,14 @@ class ProducerRaiser:
         return f"{self.key()} ({self.path} -> {queues})"
 
 
+@dataclass(frozen=True, order=True)
+class ProducerLivenessContract:
+    package: str
+    producer_id: str
+    trigger_source: str
+    runtime_gate: str
+    adversarial_fixture: str
+
 def mask_span(chars: list[str], start: int, end: int) -> None:
     for index in range(start, min(end, len(chars))):
         if chars[index] != "\n":
@@ -309,26 +317,154 @@ def embedded_fire_raiser_child_sources(source: str) -> list[str]:
 
 
 def covered_raisers_in_source(source: str) -> set[str]:
+    return set().union(*covered_raiser_tests_in_source(source).values())
+
+
+def covered_raiser_tests_in_source(source: str) -> dict[str, set[str]]:
     covered: set[str] = set()
+    by_fixture: dict[str, set[str]] = {}
     for candidate in [source, *embedded_fire_raiser_child_sources(source)]:
         for block in test_blocks(candidate):
+            test_name_match = re.search(r"\b(test_[A-Za-z0-9_]+)\b", block)
+            test_name = test_name_match.group(1) if test_name_match is not None else ""
             searchable = strip_lua_comments(block)
             masked = mask_lua_comments_and_strings(block)
             for match in FIRE_RAISER_RE.finditer(searchable):
                 if visible_fire_raiser_call(masked, match) and call_asserts_trace(block, match):
-                    covered.add(match.group("raiser"))
-    return covered
+                    raiser = match.group("raiser")
+                    covered.add(raiser)
+                    for token in fixture_tokens(test_name):
+                        by_fixture.setdefault(token, set()).add(raiser)
+    by_fixture.setdefault("", set()).update(covered)
+    return by_fixture
+
+
+def fixture_tokens(test_name: str) -> set[str]:
+    words = re.findall(r"[A-Za-z0-9]+", test_name.lower())
+    tokens = set(words)
+    for start in range(len(words)):
+        current: list[str] = []
+        for word in words[start:]:
+            current.append(word)
+            tokens.add("_".join(current))
+    return tokens
 
 
 def package_test_coverage(package: Path) -> set[str]:
+    by_fixture = package_test_fixture_coverage(package)
+    return set().union(*by_fixture.values()) if by_fixture else set()
+
+
+def package_test_fixture_coverage(package: Path) -> dict[str, set[str]]:
     tests = package / "tests"
     if not tests.exists():
-        return set()
-    covered: set[str] = set()
+        return {}
+    covered: dict[str, set[str]] = {}
     for path in sorted(tests.rglob("*_test.lua")):
         if path.is_file():
-            covered.update(covered_raisers_in_source(path.read_text(encoding="utf-8")))
+            for fixture, raisers in covered_raiser_tests_in_source(path.read_text(encoding="utf-8")).items():
+                covered.setdefault(fixture, set()).update(raisers)
     return covered
+
+
+def bracket_body(source: str, start: int) -> str | None:
+    cursor = start
+    while cursor < len(source) and source[cursor] != "{":
+        cursor += 1
+    if cursor >= len(source):
+        return None
+    depth = 0
+    body_start = cursor + 1
+    while cursor < len(source):
+        char = source[cursor]
+        if char in ("'", '"'):
+            cursor = end_of_quoted_string(source, cursor)
+            continue
+        if char == "[":
+            bracket = long_bracket_at(source, cursor)
+            if bracket is not None:
+                opener_len, closer = bracket
+                cursor = end_of_long_bracket(source, cursor + opener_len, closer)
+                continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[body_start:cursor]
+        cursor += 1
+    return None
+
+
+def top_level_table_bodies(source: str) -> list[str]:
+    bodies: list[str] = []
+    cursor = 0
+    while cursor < len(source):
+        char = source[cursor]
+        if char in ("'", '"'):
+            cursor = end_of_quoted_string(source, cursor)
+            continue
+        if char == "[":
+            bracket = long_bracket_at(source, cursor)
+            if bracket is not None:
+                opener_len, closer = bracket
+                cursor = end_of_long_bracket(source, cursor + opener_len, closer)
+                continue
+        if char != "{":
+            cursor += 1
+            continue
+        body = bracket_body(source, cursor)
+        if body is None:
+            cursor += 1
+            continue
+        bodies.append(body)
+        cursor += len(body) + 2
+    return bodies
+
+
+def producer_liveness_contracts(path: Path, root: Path) -> set[ProducerLivenessContract]:
+    source = strip_lua_comments(path.read_text(encoding="utf-8"))
+    function_match = re.search(r"\bfunction\s+M\s*\.\s*producer_liveness_contracts\s*\(", source)
+    if function_match is None:
+        return set()
+    body = bracket_body(source, function_match.end())
+    if body is None:
+        return set()
+    package = path.parent.name
+    contracts: set[ProducerLivenessContract] = set()
+    for entry_body in top_level_table_bodies(body):
+        if "runtime_gate" not in entry_body or "adversarial_fixture" not in entry_body:
+            continue
+        fields = {
+            match.group("name"): match.group("value")
+            for match in re.finditer(
+                r"\b(?P<name>producer_id|trigger_source|runtime_gate|adversarial_fixture)\s*=\s*(?P<quote>[\"'])(?P<value>[A-Za-z0-9_.-]+)(?P=quote)",
+                entry_body,
+            )
+        }
+        if {"producer_id", "trigger_source", "runtime_gate", "adversarial_fixture"} <= set(fields):
+            contracts.add(
+                ProducerLivenessContract(
+                    package=package,
+                    producer_id=fields["producer_id"],
+                    trigger_source=fields["trigger_source"],
+                    runtime_gate=fields["runtime_gate"],
+                    adversarial_fixture=fields["adversarial_fixture"].replace("-", "_").lower(),
+                )
+            )
+    return contracts
+
+
+def declared_liveness_contracts(root: Path) -> set[ProducerLivenessContract]:
+    packages = root / "packages"
+    if not packages.exists():
+        return set()
+    return {
+        contract
+        for path in sorted(packages.glob("*/core.lua"))
+        if path.is_file()
+        for contract in producer_liveness_contracts(path, root)
+    }
 
 
 def declared_raiser(path: Path, root: Path) -> ProducerRaiser:
@@ -387,6 +523,8 @@ def ratchet_messages(
     coverage_by_package: dict[str, set[str]],
     allowlist: set[str],
     base_allowlist: set[str] | None = None,
+    fixture_coverage_by_package: dict[str, dict[str, set[str]]] | None = None,
+    contracts: set[ProducerLivenessContract] | None = None,
 ) -> list[str]:
     messages: list[str] = []
     declared_by_key = {raiser.key(): raiser for raiser in raisers}
@@ -407,20 +545,46 @@ def ratchet_messages(
     if base_allowlist is not None:
         for key in sorted(allowlist - base_allowlist):
             messages.append(f"{key} grows {ALLOWLIST} relative to dev; add a fire_raiser trace assertion instead")
+    fixture_coverage_by_package = fixture_coverage_by_package or {}
+    for contract in sorted(contracts or set()):
+        matching_raisers = [
+            raiser
+            for raiser in sorted(raisers)
+            if raiser.package == contract.package and contract.trigger_source in raiser.produces
+        ]
+        if not matching_raisers:
+            messages.append(f"{contract.producer_id} declares producer-liveness trigger_source={contract.trigger_source} but no matching raiser exists")
+            continue
+        if len(matching_raisers) > 1:
+            labels = ", ".join(raiser.key() for raiser in matching_raisers)
+            messages.append(f"{contract.producer_id} declares producer-liveness trigger_source={contract.trigger_source} but multiple raisers produce it: {labels}")
+            continue
+        raiser = matching_raisers[0]
+        if raiser.key() in allowlist:
+            continue
+        fixture_token = contract.adversarial_fixture
+        if raiser.name not in fixture_coverage_by_package.get(contract.package, {}).get(fixture_token, set()):
+            messages.append(
+                f"{raiser.label()} is runtime-gated by {contract.runtime_gate}; add a trace-asserting fire_raiser(\"{raiser.name}\") test whose test name includes {fixture_token}"
+            )
     return messages
 
 
 def repository_messages(root: Path) -> list[str]:
     raisers = declared_raisers(root)
-    coverage = {
-        package.name: package_test_coverage(package)
+    fixture_coverage = {
+        package.name: package_test_fixture_coverage(package)
         for package in sorted((root / "packages").iterdir())
         if package.is_dir()
     } if (root / "packages").exists() else {}
+    coverage = {
+        package: set().union(*by_fixture.values()) if by_fixture else set()
+        for package, by_fixture in fixture_coverage.items()
+    }
     allowlist = load_allowlist(root / ALLOWLIST)
     base_status, base_allowlist = allowlist_at_dev_base(root)
     messages: list[str] = []
     if base_status == "unresolved":
         messages.append("cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
-    messages.extend(ratchet_messages(raisers, coverage, allowlist, base_allowlist))
+    messages.extend(ratchet_messages(raisers, coverage, allowlist, base_allowlist, fixture_coverage, declared_liveness_contracts(root)))
     return messages

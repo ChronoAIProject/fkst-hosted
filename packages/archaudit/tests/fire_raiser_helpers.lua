@@ -106,12 +106,28 @@ local function mock_env(repo, max_issues)
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
 end
 
-local function mock_idle_observe()
+local function mock_idle_observe_at(generated_at_ms)
   t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
-    stdout = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}],"deliveries":[],"dead_letters":[]}',
+    stdout = '{"schema_version":1,"generated_at_ms":' .. tostring(generated_at_ms or 1781830860000) .. ',"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}],"deliveries":[],"dead_letters":[]}',
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function mock_idle_observe()
+  mock_idle_observe_at(1781830860000)
+end
+
+local function mock_busy_observe_at(generated_at_ms)
+  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+    stdout = '{"schema_version":1,"generated_at_ms":' .. tostring(generated_at_ms or 1781830860000) .. ',"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":1,"pending":1,"in_flight":0,"retrying":0,"oldest_pending_age_ms":1000}],"deliveries":[],"dead_letters":[]}',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_busy_observe()
+  mock_busy_observe_at(1781830860000)
 end
 
 local function mock_production_github(search_stdout, label_stdout)
