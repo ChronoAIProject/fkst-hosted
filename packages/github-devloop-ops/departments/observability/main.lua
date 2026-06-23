@@ -1,4 +1,10 @@
 local core, saga = require("core"), require("workflow.saga")
+local common = require("departments.observability.common")
+local avm_scoreboard = require("departments.observability.avm_scoreboard")
+local census = require("departments.observability.census")
+local dashboard = require("departments.observability.dashboard")
+local reaper = require("departments.observability.reaper")
+local topology = require("departments.observability.topology")
 
 
 local spec = {
@@ -8,6 +14,58 @@ local spec = {
   retry = false,
   stall_window = "2m",
 }
+
+common.install_common(core)
+avm_scoreboard.install_avm_scoreboard(core)
+census.install_census(core)
+reaper.install_reaper(core)
+dashboard.install_dashboard(core)
+
+function core.observability_topology_mermaid()
+  if type(graph_json) ~= "function" then
+    return nil
+  end
+  local ok, result = pcall(function()
+    local decoded = json.decode(graph_json())
+    return topology.render_mermaid(decoded)
+  end)
+  if not ok then
+    local reason = core._one_line and core._one_line(result) or tostring(result or "")
+    log.warn("github-devloop dept=observability tag=TOPOLOGY_UNAVAILABLE reason=" .. tostring(reason))
+    return nil
+  end
+  return result
+end
+
+function core.observe_devloop_entities(event)
+  common.require_observe_bot(core)
+  local repo = common.require_observe_repo(core)
+  local limits = core.observability_limits()
+  local deadline = core.observability_deadline(now(), limits)
+  local observed = core.collect_observability_entities(event, repo, limits, deadline)
+
+  core.reap_orphan_prs(repo, observed.list)
+  local queue_starvation = core.observe_queue_starvation(repo, observed.list, limits, deadline, observed.now_seconds)
+  local conflict_hotspot = core.observe_conflict_hotspots(repo, core.observability_call_timeout(limits, deadline))
+  local rendered_dashboard = core.render_observability_dashboard({
+    entities = observed.list,
+    counts = observed.counts,
+    stalls = observed.stalls,
+    state_gap_report = observed.state_gap_report,
+    now_seconds = observed.now_seconds,
+    topology_mermaid = core.observability_topology_mermaid(),
+  })
+  core.publish_observability_dashboard(repo, rendered_dashboard, limits, deadline)
+
+  return {
+    entity_count = #observed.list,
+    counts = observed.counts,
+    queue_starvation = queue_starvation,
+    conflict_hotspot = conflict_hotspot,
+    state_gap_report = observed.state_gap_report,
+    dashboard_hash = rendered_dashboard.hash,
+  }
+end
 
 local department = saga.department(spec, { done = function() return false end, act = function(event)
   core.log_entry("observability", event, "github-devloop/observability", "tick")
