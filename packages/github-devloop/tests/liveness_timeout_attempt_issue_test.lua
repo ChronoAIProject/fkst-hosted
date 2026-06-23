@@ -151,6 +151,25 @@ return {
     t.is_true(attempt.payload.body:find('state="implementing"', 1, true) ~= nil)
   end,
 
+  test_timeout_attempt_not_counted_after_implement_delegates_to_pr_child = function()
+    local event = h.ready()
+    local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
+    local pr_proposal = core.pr_proposal_id(repo, 7)
+    local comments = {
+      state_comment("implementing", event.dedup_key, "2026-06-03T00:00:00Z"),
+      issue_comment(core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 60), exec_ref)),
+      issue_comment(core.pr_delegation_marker(event.proposal_id, pr_proposal, 7, event.dedup_key, "g1")),
+    }
+    mock_repo()
+    mock_issue_list("2026-06-03T01:02:05Z")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, comments, "2026-06-03T01:02:05Z")
+    mock_empty_pr_list()
+
+    local scanned = run_liveness_scan("liveness-delegated-implement-attempt-no-timeout-count")
+    t.eq(scanned.exit_code, 0)
+    assert_no_timeout_progress(scanned)
+  end,
+
   test_blocked_decompose_exhaustion_reaches_non_recycling_terminal_stop = function()
     local review_proposal = core.pr_review_proposal_id(repo, 7, version, "def456")
     local comments = {
