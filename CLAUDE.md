@@ -286,6 +286,16 @@ dogfood 中发现**运行的系统在流血**（storm / 资源耗尽 / churn / �
 
 **纪律**：建 harness 时，问题不止「prior art 是什么」，更是「**这件事的唯一规范写法是什么、我如何让其他每一种写法在机械上不可表示（CI 红）**」。同一目的存在多种并存写法本身就是 smell——**先收敛成一种，再锁死旁路**。新增能力时同步给出「唯一写法 + 旁路禁止的不变式」，否则旁路迟早重新长出来、悄悄收回隐形税（实证：竞态旁路一年都没人发现，因为它「能用」）。
 
+## 有问题不可怕：要有「发现问题的机制」+ 把每个发现「做成 harness」（bug 不是失败，缺这两者才是·discover→harness-ify）
+
+**自驱系统永远会有 bug——目标从来不是「零 bug」（不可能），而是两件事：① 有持续发现问题的机制；② 把每个发现的问题做成 harness，让它那一整类在机械上不可能复发。** 有问题不可怕、不必焦虑或藏掖；真正的失败是「**没有机制发现它**」（它静默地烂在生产里）或「**发现了却只点修一次**」（同类必复发）。这条不是新增第 N 条，是把已有的 harness / liveness / competence / 实事求是 doctrine **统一成一个 bug 生命周期的心法：discover → root-cause → harness-ify**。
+
+- **① 发现机制（多条独立、专攻静默盲区）**：最危险的 bug 不是「报错的」（safety 网抓得到），而是**静默成功地做错事**（liveness 盲区）、**测试绿但生产红**（harness 保真盲区）、**plausible-but-wrong**（competence 盲区）、**叙事建在未核实前提上**（实事求是盲区）。所以发现机制必须**多条独立、各攻一类盲区**：dogfood loop（真实运营暴露 dark/卡死）、对抗 review（sshx triplet + 跨模型 GPT Pro + user-as-oracle，找单视角漏的）、`fire_raiser`（测真 producer→consumer 接线而非注入理想 payload）、board / dev-push CI 扫（monitoring 盲区）、回源核实（叙事 vs 真值）。一条机制漏的，另一条独立机制兜——**冗余且异构是特性，不是浪费**。
+- **② harness 化（把每个发现做成机械 PREVENT，不是点修）**：发现一个 bug，先过「**这是一次性，还是一个类？**」一次性 → 修了走人、不建 harness；一个类（三次法则 / 明显可泛化）→ **把它做成 harness**，按强度梯度落到 ④capability / ③runtime-guard / ②schema-conformance / ①scan-ratchet（见「Harness 的本质」），让那一类**构造上不可表示**或 **CI 直接红**。point-fix 让同类复发（实证：#1361 修复**自己又复发** namespaced 同类，被对抗 review 抓）；harness 化让那一**类**绝迹。
+- **本会话三个活证（每个 bug 都走 discover→harness-ify）**：审计 #1361 dark（dogfood loop + `fire_raiser` **发现** → producer-liveness conformance **harness 化**）· 修复又复发 namespaced harness-fidelity（对抗 review **发现** → `fire_raiser` 发真 namespaced payload **harness 化**）· dev-push CI 红（board / `gh run` 扫 **发现** → hermetic golden-master 等价测试 **harness 化**）。**三个 bug 都不可怕——都被某条机制发现了、都在做成 harness。**
+
+**心法落地**：不为「这次有 bug」自责或掩盖；为「**这个 bug 有没有被某条机制发现**」「**发现了有没有做成 harness、让它那一类绝迹**」负责。发现机制越多越独立、harness 化越机械，系统在「bug 不可避免」下越逼近「**同类 bug 不复发**」。这正是「让问题都在测试解决」「美 = 真理探测器」「competence 轴」「活性 ⟂ 安全」「实事求是」的**同一张脸**：不追求无 bug，追求**发现 + 永久 harness 化**。新代码 / 新 review / 事故响应据此自检：「我用了哪条发现机制？这个发现是一次性还是一类？一类的话，我把它做成了哪一档 harness？」⟦AI:FKST⟧
+
 ## 按架构原则自主决策，不为技术选择请示（decide by principle, don't ask）
 
 **禁止使用 `AskUserQuestion`**（用户裁定 2026-06-14，硬规则、不设例外）——任何分叉都不 pop up、不请示、不阻塞等待。技术选择（哪种实现 / 哪种数据源 / 归属哪层 / 是否跨仓）有架构最优解，自己定、直接做。需要的信息先从已有上下文、代码、git/GitHub、用户既往裁定里自取；遇到真正属于用户的取舍（产品方向、不可逆的业务/运营决策）也**不弹窗**——选最符合架构原则、最保守可逆的默认推进，并在正常回复里**明确说出所做选择与理由**，让用户在对话里纠正。按既有原则选最优并落地：
