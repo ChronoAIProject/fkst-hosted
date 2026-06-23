@@ -8,6 +8,9 @@ Docs are split by audience:
     fkst package/host repo scaffold.
   - [`user/github-devloop-dogfood-topology.md`](user/github-devloop-dogfood-topology.md) —
     reproduce the per-device `github-devloop` dogfood branch topology on another machine.
+  - [`user/control-planes-and-host-repo-composition.md`](user/control-planes-and-host-repo-composition.md) —
+    the three control planes (product / host-run / dogfood-operator), how a host repo composes the
+    platform via `.fkst-*-ref` pins + `.fkst/local-packages/`, and host-repo conformance with zero rebuild.
 
 - **[`dev/`](dev/)** — for **contributors** developing the system: design specs, architecture, and
   methodology. Read these to *change* fkst.
