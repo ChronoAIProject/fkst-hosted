@@ -13,7 +13,10 @@ local spec = {
 }
 
 local freshness_budget_seconds = 10 * 60
-local codex_timeout_seconds = 9 * 60
+-- Match the engine's default codex wall-clock cap for long repository audits.
+-- This may exceed stall_window: fkst-substrate renews running delivery leases
+-- in supervise/consumer.rs, and stall_window is not a child kill deadline.
+local codex_timeout_seconds = 60 * 60
 local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,

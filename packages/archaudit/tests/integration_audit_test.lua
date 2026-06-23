@@ -269,6 +269,26 @@ return {
     t.is_true(result.raises[1].payload.body:find("archaudit-dedup: " .. result.raises[1].payload.dedup_key, 1, true) ~= nil)
   end,
 
+  test_fake_audit_codex_uses_engine_default_timeout = function()
+    local captured_timeout = nil
+    local previous_spawn_codex_sync = spawn_codex_sync
+    spawn_codex_sync = function(opts)
+      captured_timeout = opts.timeout
+      return { stdout = "[]", stderr = "", exit_code = 0 }
+    end
+    local ok, err = pcall(function()
+      mock_env("owner/repo", "3")
+      mock_idle_observe()
+      local dept = fake_audit_department("[]")
+      run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    end)
+    spawn_codex_sync = previous_spawn_codex_sync
+    if not ok then
+      error(err, 0)
+    end
+    t.eq(captured_timeout, 3600)
+  end,
+
   test_fake_caps_distinct_valid_findings_to_first_three = function()
     mock_env("owner/repo", "3")
     mock_idle_observe()
