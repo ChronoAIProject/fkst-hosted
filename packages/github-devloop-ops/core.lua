@@ -4,24 +4,8 @@ function M.persistence_class()
   return "saga"
 end
 
-local lifecycle_rows = {
-  ["awaiting-pr"] = { from_state = "awaiting-pr", terminal = false, driving_queue = "devloop_observe_redrive", budget = { minutes = 180 * 24 * 60 } },
-  blocked = { from_state = "blocked", terminal = false, driving_queue = "github-devloop-decompose.devloop_decompose", budget = { minutes = 1440 } },
-  dependency_wait = { from_state = "dependency_wait", terminal = false, driving_queue = "devloop_observe_redrive", budget = { minutes = 525600 } },
-  ["impl-failed"] = { from_state = "impl-failed", terminal = false, driving_queue = "devloop_ready", budget = { minutes = 1440 } },
-  implementing = { from_state = "implementing", terminal = false, driving_queue = "devloop_ready", budget = { minutes = 120 } },
-  merged = { from_state = "merged", terminal = true, driving_queue = "none", budget = nil },
-  ready = { from_state = "ready", terminal = false, driving_queue = "devloop_ready", budget = { minutes = 120 } },
-  thinking = { from_state = "thinking", terminal = false, driving_queue = "consensus.proposal", budget = { minutes = 150 } },
-}
-
-function M.lifecycle_transition_row(state_name)
-  return lifecycle_rows[state_name]
-end
-
-function M.liveness_budget_minutes(state_name)
-  local row = M.lifecycle_transition_row(state_name)
-  return row and row.budget and tonumber(row.budget.minutes) or nil
+function M.decompose_package_queue()
+  return "github-devloop-decompose.devloop_decompose"
 end
 
 function M.liveness_state_age_minutes(state, now_seconds)
@@ -68,10 +52,11 @@ require("devloop.parsers").install(M)
 require("devloop.autonomy_ledger").install(M)
 require("devloop.logging").install(M)
 require("devloop.conflict_telemetry").install(M)
+require("devloop.state").install(M)
+require("devloop.restart.issue_lifecycle").install(M)
 require("core.error_facts").install(M)
 require("core.failure_triage").install(M)
 require("core.conflict_telemetry").install(M)
-require("devloop.state").install(M)
 require("core.dependency_wait").install(M)
 require("core.state_gap").install(M)
 require("devloop.markers").install(M)

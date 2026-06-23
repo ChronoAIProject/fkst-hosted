@@ -1,5 +1,6 @@
 local W = {}
 local registry = require("workflow.registry")
+local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 
 local package_name = "github-devloop"
 
@@ -32,15 +33,13 @@ end
 function W.restart(M)
   local marker_fields = issue_registry_map("core.restart.marker_fields", "family", M)
   local replay_payload_fields = issue_registry_map("core.restart.required_replay_payload_fields", "state", M)
-  local transitions_base = "core.restart.transitions"
-  local transitions_index = require(index_module(transitions_base))
-  local transitions = load_entries(transitions_base, transitions_index)
+  local transition_sources = issue_lifecycle.transition_sources()
   return {
     marker_fields = marker_fields,
     replay_payload_fields = replay_payload_fields,
-    transitions_index = transitions_index,
-    transitions = transitions,
-    transitions_label = index_module(transitions_base),
+    transitions_index = transition_sources.transitions_index,
+    transitions = transition_sources.transitions,
+    transitions_label = transition_sources.transitions_label,
   }
 end
 

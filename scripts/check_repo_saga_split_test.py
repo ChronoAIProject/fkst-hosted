@@ -49,7 +49,7 @@ class SagaSplitRatchetTest(unittest.TestCase):
         (root / "packages" / "github-devloop" / "departments" / "observe_issue").mkdir(parents=True)
         (root / "packages" / "github-devloop" / "departments" / "review_result").mkdir(parents=True)
         (root / "packages" / "github-devloop" / "core").mkdir(parents=True)
-        (root / "packages" / "github-devloop" / "core" / "restart").mkdir(parents=True)
+        (root / "libraries" / "devloop" / "restart" / "issue").mkdir(parents=True)
         (root / "packages" / "github-devloop" / "departments" / "observe_issue" / "main.lua").write_text(
             "local core = require('core')\nreturn {}\n",
             encoding="utf-8",
@@ -62,7 +62,7 @@ class SagaSplitRatchetTest(unittest.TestCase):
             "local M = {}\nreturn M\n",
             encoding="utf-8",
         )
-        (root / "packages" / "github-devloop" / "core" / "restart" / "pr_partition_contract.lua").write_text(
+        (root / "libraries" / "devloop" / "restart" / "issue" / "pr_partition_contract.lua").write_text(
             """local PR_PHASE_STATES = {
   "pr-open",
   "reviewing",
@@ -95,7 +95,7 @@ return {}
                 "reason": "linked entity migration debt",
             },
             {
-                "path": "packages/github-devloop/core/restart/pr_partition_contract.lua",
+                "path": "libraries/devloop/restart/issue/pr_partition_contract.lua",
                 "owner": "shared",
                 "reason": "inert partition contract",
             },
@@ -118,11 +118,19 @@ return {}
             nested = root / "libraries" / "devloop" / "merge_gate" / "reason_classes"
             nested.mkdir(parents=True)
             (nested / "index.lua").write_text("return {}\n", encoding="utf-8")
+            restart_nested = root / "libraries" / "devloop" / "restart" / "issue" / "transitions"
+            restart_nested.mkdir(parents=True)
+            (restart_nested / "index.lua").write_text("return {}\n", encoding="utf-8")
             rows = self.base_rows() + [
                 {
                     "path": "libraries/devloop/merge_gate/reason_classes/index.lua",
                     "owner": "shared",
                     "reason": "nested shared std helper",
+                },
+                {
+                    "path": "libraries/devloop/restart/issue/transitions/index.lua",
+                    "owner": "shared",
+                    "reason": "nested shared restart helper",
                 }
             ]
             self.write_manifest(root, rows)

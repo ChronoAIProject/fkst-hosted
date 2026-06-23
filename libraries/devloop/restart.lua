@@ -1,9 +1,6 @@
 local S = {}
 local registry = require("workflow.registry")
 
-function S.install(M, resolved)
-resolved = resolved or {}
-
 local source_ref_derivations = {
   entity = true,
   issue = true,
@@ -15,13 +12,6 @@ local payload_derivations = {
   ["dedup:replayed-fixing"] = true,
   ["comment_body:fix-feedback"] = true,
 }
-
-local package_name = M.restart_package_name or "github-devloop"
-local default_consumer_sources = M.restart_consumer_sources or {}
-
-local marker_fields = assert(resolved.marker_fields, package_name .. ": missing resolved restart marker_fields")
-
-local required_replay_payload_fields = assert(resolved.replay_payload_fields, package_name .. ": missing resolved restart replay_payload_fields")
 
 local function fact(family, freshness)
   return { family = family, freshness = freshness }
@@ -92,9 +82,7 @@ local function responsibility_signature(signature)
   return signature
 end
 
-local transition_index = assert(resolved.transitions_index, package_name .. ": missing resolved restart transitions_index")
-local transition_entries = assert(resolved.transitions, package_name .. ": missing resolved restart transitions")
-local transition_table = registry.build_indexed_array(resolved.transitions_label or "restart.transitions", transition_index, transition_entries, "from_state", M, {
+local transition_helpers = {
   fact = fact,
   obligation = obligation,
   effect = effect,
@@ -104,7 +92,27 @@ local transition_table = registry.build_indexed_array(resolved.transitions_label
   watchdog = watchdog,
   actionable_epoch = actionable_epoch,
   responsibility_signature = responsibility_signature, span_contract = responsibility_signature,
-}, package_name)
+}
+
+function S.transition_table(M, resolved)
+resolved = resolved or {}
+local package_name = M.restart_package_name or "github-devloop"
+local transition_index = assert(resolved.transitions_index, package_name .. ": missing resolved restart transitions_index")
+local transition_entries = assert(resolved.transitions, package_name .. ": missing resolved restart transitions")
+return registry.build_indexed_array(resolved.transitions_label or "restart.transitions", transition_index, transition_entries, "from_state", M, transition_helpers, package_name)
+end
+
+function S.install(M, resolved)
+resolved = resolved or {}
+
+local package_name = M.restart_package_name or "github-devloop"
+local default_consumer_sources = M.restart_consumer_sources or {}
+
+local marker_fields = assert(resolved.marker_fields, package_name .. ": missing resolved restart marker_fields")
+
+local required_replay_payload_fields = assert(resolved.replay_payload_fields, package_name .. ": missing resolved restart replay_payload_fields")
+
+local transition_table = S.transition_table(M, resolved)
 
 local audit_by_state = {}
 for _, row in ipairs(transition_table) do

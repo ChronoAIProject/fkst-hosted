@@ -59,7 +59,7 @@ M.restart_consumer_sources = {
   "libraries/devloop/decompose.lua",
 }
 require("devloop.restart").install(M, wiring.restart(M))
-require("core.restart.pr_partition_contract").install(M)
+require("devloop.restart.issue.pr_partition_contract").install(M)
 require("workflow.restart_liveness_contract").install(M, require("devloop.liveness").with_restart_policy({
   runtime_provenance = {
     proposal_id = "github-devloop/issue/provenance/repo/1",
