@@ -57,6 +57,44 @@ return function(M, h)
         },
       },
     }),
+    guard_boundaries = {
+      {
+        name = "merge_gate",
+        kind = "guard_table",
+        gate_kind = "decision",
+        input_fact_family = "head-bound-merge-authorization",
+        output_postcondition_family = "merge_eligibility_decided",
+        decision_type = "MergeEligibility",
+        successors = {
+          {
+            state = "reviewing",
+            output_variant = "approval_stale",
+            decision_type = "MergeEligibility",
+            bump = true,
+          },
+          {
+            state = "merging",
+            output_variant = "eligible_now",
+            decision_type = "MergeEligibility",
+            monotonic = true,
+          },
+          {
+            state = "fixing",
+            output_variant = "code_repair_needed",
+            decision_type = "MergeEligibility",
+            failure = true,
+            bump = true,
+          },
+          {
+            state = "blocked",
+            output_variant = "watchdog_reconcile_terminal",
+            failure = true,
+            terminal = true,
+            monotonic = true,
+          },
+        },
+      },
+    },
     payload_builder = M.build_devloop_merge_ready_payload,
     dedup_shape = "merge-ready/<proposal_id>/<version>/<pr>/<review_dedup>/<current_head>",
     required_facts = {
