@@ -1,0 +1,19 @@
+# Existing producer-liveness fire_raiser migration debt.
+# Format: package.raiser
+# New entries fail CI after this ratchet lands. Remove entries only when the
+# package has a trace-asserting fire_raiser("<raiser>") test that inspects
+# consumer_result, source_payload, or raised.
+fkst-substrate-ref-maintainer.substrate_ref_poll
+github-devloop-intake.intake_poll
+github-devloop-intake.intake_probe_poll
+github-devloop-integration.branch_poll
+github-devloop-pr.liveness_poll
+github-devloop-pr.merge_queue_poll
+github-devloop.doctor_poll
+github-devloop.ensure_repo_poll
+github-devloop.liveness_poll
+github-devloop.observability_poll
+github-external-pr-intake.external_pr_scan
+github-proxy.github_poll
+github-ratchet-migration-slicer.ratchet_migration_slicer
+idle-detector.idle_poll
