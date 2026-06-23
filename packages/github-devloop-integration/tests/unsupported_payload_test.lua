@@ -43,7 +43,6 @@ local function payload_for_queue(queue)
     },
     devloop_branch_tick = { schema = "github-devloop.branch-tick.v1" },
     devloop_rollup_ready = core.rollup_ready_payload("owner/repo", "dev", "integration/dev", 7, "def456"),
-    devloop_substrate_ref_tick = { schema = "github-devloop.substrate-ref-tick.v1" },
     devloop_sync_conflict = {
       schema = "github-devloop.v1",
       repo = "owner/repo",

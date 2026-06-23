@@ -22,6 +22,7 @@ FORGE_STRINGS_SPLIT_IMPORTS = {
 LIBRARIES = ("contract", "workflow", "testkit", "forge", "devloop")
 CONTRACT_MODULES = {"error_facts", "payload", "source_ref", "strings"}
 DEVLOOP_FAMILY = {
+    "fkst-substrate-ref-maintainer",
     "github-devloop",
     "github-devloop-decompose",
     "github-devloop-intake",

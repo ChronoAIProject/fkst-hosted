@@ -100,7 +100,7 @@ local function topology_fixture()
   b.raiser("github-devloop.liveness_poll", "github-devloop.devloop_liveness_tick")
   b.raiser("github-devloop.doctor_poll", "github-devloop.devloop_doctor_tick")
   b.raiser("github-devloop.ensure_repo_poll", "github-devloop.devloop_ensure_repo_tick")
-  b.raiser("branch-topology.substrate_ref_poll", "branch-topology.devloop_substrate_ref_tick")
+  b.raiser("fkst-substrate-ref-maintainer.substrate_ref_poll", "fkst-substrate-ref-maintainer.devloop_substrate_ref_tick")
 
   b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, { "github-proxy.github_entity_changed" })
   b.department("github-proxy.github_comment", { "github-proxy.github_issue_comment_request" }, { "github-proxy.github_comment_written" })
@@ -172,7 +172,7 @@ local function topology_fixture()
     "github-devloop.devloop_fixing",
     "github-proxy.github_issue_create_request",
   })
-  b.department("branch-topology.substrate_ref_scan", { "branch-topology.devloop_substrate_ref_tick" }, { "github-proxy.github_pr_comment_request" })
+  b.department("fkst-substrate-ref-maintainer.substrate_ref_scan", { "fkst-substrate-ref-maintainer.devloop_substrate_ref_tick" }, { "github-proxy.github_pr_comment_request" })
   b.department("branch-topology.sync_conflict", { "branch-topology.devloop_sync_conflict" }, { "github-proxy.github_issue_create_request" })
   b.department("branch-topology.sync_scan", { "branch-topology.devloop_branch_tick" }, { "branch-topology.devloop_sync_conflict" })
 
@@ -249,6 +249,7 @@ return {
     t.eq(count_literal(mermaid, "[\"github-devloop\"]"), 1)
     t.eq(count_literal(mermaid, "[\"github-devloop-intake\"]"), 1)
     t.eq(count_literal(mermaid, "[\"branch-topology\"]"), 1)
+    t.eq(count_literal(mermaid, "[\"fkst-substrate-ref-maintainer\"]"), 1)
     t.is_true(mermaid:find("[\"github_poll\"]", 1, true) ~= nil)
     t.is_true(mermaid:find("[\"observe_issue\"]", 1, true) ~= nil)
     t.is_true(mermaid:find("[\"consensus_result\"]", 1, true) ~= nil)

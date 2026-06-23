@@ -864,7 +864,7 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
                 "packages/github-devloop-integration/departments/rollup_scan/main.lua",
                 "packages/github-proxy/core/blocked_by.lua",
                 "packages/github-devloop/core/ensure_repo.lua",
-                "packages/github-devloop-integration/core/substrate_ref.lua",
+                "packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua",
             )
         }
         heads_by_file = check_repo.gh_git_adapter.command_heads_by_file(sources)
@@ -873,9 +873,9 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
         self.assertNotIn("gh rollup", heads_by_file.get("packages/github-devloop-integration/departments/rollup_scan/main.lua", set()))
         self.assertNotIn("gh blockedBy", heads_by_file.get("packages/github-proxy/core/blocked_by.lua", set()))
         self.assertNotIn("git integration", heads_by_file.get("packages/github-devloop/core/ensure_repo.lua", set()))
-        self.assertNotIn("gh substrate-ref", heads_by_file.get("packages/github-devloop-integration/core/substrate_ref.lua", set()))
-        self.assertNotIn("git substrate-ref", heads_by_file.get("packages/github-devloop-integration/core/substrate_ref.lua", set()))
-        self.assertNotIn("git stale", heads_by_file.get("packages/github-devloop-integration/core/substrate_ref.lua", set()))
+        self.assertNotIn("gh substrate-ref", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
+        self.assertNotIn("git substrate-ref", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
+        self.assertNotIn("git stale", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
 
     def test_env_cd_absolute_path_shell_c_and_concat_are_normalized(self) -> None:
         source = (

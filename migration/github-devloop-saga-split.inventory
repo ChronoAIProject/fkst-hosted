@@ -15,7 +15,6 @@
 {"path":"packages/github-devloop/departments/reconcile/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop-integration/departments/rollup_merge/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/rollup_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop-integration/departments/substrate_ref_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/sync_conflict/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/sync_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop/departments/test_board_digest_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
@@ -102,7 +101,6 @@
 {"path":"packages/github-devloop-integration/core/rollup_health.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/core/devloop_wiring.lua","owner":"integration","reason":"core module resolves integration package-private prompt modules."}
 {"path":"packages/github-devloop/core/state_gap.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"packages/github-devloop-integration/core/substrate_ref.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
 {"path":"packages/github-devloop-integration/core/sync_conflict.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-pr/departments/fix/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
