@@ -126,7 +126,7 @@ local function pr_delegation_child_state_proposal_id(M, facts, parent_proposal_i
   )
 end
 
-local function implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version)
+local function implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version, facts)
   local attempt = M.latest_implement_attempt_fact(comments, proposal_id, signal_version)
   if attempt == nil then
     return {
@@ -151,6 +151,18 @@ local function implement_attempt_liveness_signal(M, signal_contract, comments, p
       reason = "codex-run-running",
       attempt = attempt.attempt,
       exec_ref = attempt.exec_ref,
+      family = signal_contract.family,
+      resolver = signal_contract.resolver or signal_contract.family,
+    }
+  end
+  local delegated_proposal_id = pr_delegation_child_state_proposal_id(M, facts, proposal_id, signal_version)
+  if delegated_proposal_id ~= nil then
+    return {
+      live = true,
+      reason = "pr-delegation-visible",
+      attempt = attempt.attempt,
+      exec_ref = attempt.exec_ref,
+      delegated_proposal_id = delegated_proposal_id,
       family = signal_contract.family,
       resolver = signal_contract.resolver or signal_contract.family,
     }
@@ -275,7 +287,7 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
     local comments = live_signal_comments(signal_contract, facts)
     local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
     local signal_version = live_signal_version(M, signal_contract, state and state.version)
-    return implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version)
+    return implement_attempt_liveness_signal(M, signal_contract, comments, proposal_id, signal_version, facts)
   end
   local max_age = numeric_minutes(signal_contract.max_age_minutes)
   if max_age == nil then

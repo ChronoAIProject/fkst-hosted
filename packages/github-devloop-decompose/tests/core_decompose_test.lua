@@ -19,6 +19,17 @@ local function assert_github_entity_history(prompt)
 end
 
 return {
+  test_decompose_package_installs_only_decompose_prompt_role = function()
+    t.eq(type(core.build_decompose_prompt), "function")
+    t.is_nil(core.build_implement_prompt)
+    t.is_nil(core.build_fix_prompt)
+    t.is_nil(core.build_intake_prompt)
+    t.is_nil(core.build_sync_conflict_prompt)
+    t.is_nil(core.build_review_meta_prompt)
+    t.is_nil(core.parse_intake_action)
+    t.is_nil(core.parse_review_meta_action)
+  end,
+
   test_decompose_prompt_includes_scoped_github_history = function()
     local prompt = core.build_decompose_prompt({
       proposal_id = "github-devloop/issue/owner/repo/42",

@@ -22,7 +22,11 @@ require("core.intake_service_class").install(M)
 require("core.intake_scan").install(M)
 require("devloop.payloads").install(M)
 require("devloop.decompose").install(M)
-require("devloop.prompts").install(M, wiring.prompts())
+local prompts = require("devloop.prompts")
+prompts.install(M, wiring.prompts(), {
+  intake = true,
+  intake_parser = true,
+})
 require("core.intake_class").install(M)
 require("devloop.requests").install(M)
 require("devloop.entity").install(M)

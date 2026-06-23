@@ -3,6 +3,17 @@ local core = h.core
 local t = h.t
 
 return {
+  test_intake_package_installs_only_intake_prompt_role = function()
+    t.eq(type(core.build_intake_prompt), "function")
+    t.eq(type(core.parse_intake_action), "function")
+    t.is_nil(core.build_implement_prompt)
+    t.is_nil(core.build_fix_prompt)
+    t.is_nil(core.build_decompose_prompt)
+    t.is_nil(core.build_sync_conflict_prompt)
+    t.is_nil(core.build_review_meta_prompt)
+    t.is_nil(core.parse_review_meta_action)
+  end,
+
   test_intake_marker_fact_trusts_only_bot_comments = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local marker = core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1", "background")

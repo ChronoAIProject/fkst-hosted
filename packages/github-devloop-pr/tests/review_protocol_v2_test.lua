@@ -20,7 +20,206 @@ local function assert_merge_ready_handoff(result)
   return comment.payload
 end
 
+local function assert_language_preamble(prompt)
+  t.is_true(prompt:find("Write all output in English; quote code identifiers and cited originals verbatim.", 1, true) ~= nil)
+end
+
+local function assert_judge_preamble_slots(prompt)
+  assert_language_preamble(prompt)
+  t.is_true(prompt:find("Before judging, identify the established theory or industry best practice governing this problem class", 1, true) ~= nil)
+  t.is_true(prompt:find("grounds for rejection or narrowing", 1, true) ~= nil)
+  t.is_nil(prompt:find("Before acting, identify the established theory or industry best practice governing this change", 1, true))
+end
+
+local function assert_actor_preamble_slots(prompt)
+  assert_language_preamble(prompt)
+  t.is_true(prompt:find("Before acting, identify the established theory or industry best practice governing this change", 1, true) ~= nil)
+  t.is_true(prompt:find("surface that blocker explicitly instead of silently improvising or claiming success", 1, true) ~= nil)
+  t.is_nil(prompt:find("grounds for rejection or narrowing", 1, true))
+end
+
+local function assert_github_entity_history(prompt)
+  t.is_true(prompt:find("Before judging, read the local context files named below.", 1, true) ~= nil)
+  t.is_nil(prompt:find("gh issue view --comments / gh pr view --comments", 1, true))
+end
+
+local action_label = "⟦FKST:ACTION⟧"
+local reason_label = "⟦FKST:REASON⟧"
+
+local function meta_answer(action, reason, gap)
+  local text = action_label .. " " .. action .. "\n" .. reason_label .. " " .. reason
+  if gap ~= nil then
+    text = text .. "\nBlocking gap: " .. gap
+  end
+  return text
+end
+
 return {
+  test_pr_package_installs_only_pr_prompt_roles = function()
+    t.eq(type(core.build_fix_prompt), "function")
+    t.eq(type(core.build_review_meta_prompt), "function")
+    t.eq(type(core.parse_review_meta_action), "function")
+    t.is_nil(core.build_implement_prompt)
+    t.is_nil(core.build_intake_prompt)
+    t.is_nil(core.build_decompose_prompt)
+    t.is_nil(core.build_sync_conflict_prompt)
+    t.is_nil(core.parse_intake_action)
+  end,
+
+  test_pr_role_prompts_include_scoped_github_history = function()
+    local issue = { title = "PR issue", comments = {} }
+    local manifest = "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nBoard digest: /tmp/ctx/board.txt\nPR diff patch: /tmp/ctx/diff.patch"
+    local fix_reflection_prompt = core.build_review_meta_prompt({
+      mode = "fix-reflection",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+      fix_round = 3,
+    }, issue, manifest)
+    local judge_prompts = {
+      core.build_review_meta_prompt({
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+      }, issue, manifest),
+      fix_reflection_prompt,
+    }
+    local actor_prompts = {
+      core.build_fix_prompt({
+        proposal_id = "github-devloop/issue/owner/repo/42",
+        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+        reviewed_head_sha = "abcdef123456",
+      }, issue, "Review feedback.", "Approved framing.", manifest),
+    }
+
+    for _, prompt in ipairs(judge_prompts) do
+      assert_judge_preamble_slots(prompt)
+      assert_github_entity_history(prompt)
+      t.is_true(prompt:find("/tmp/ctx/issue.json", 1, true) ~= nil)
+      t.is_nil(prompt:find("gh issue", 1, true))
+      t.is_nil(prompt:find("gh pr", 1, true))
+      t.is_nil(prompt:find("gh api", 1, true))
+      t.is_nil(prompt:find("{{", 1, true))
+    end
+
+    t.is_true(fix_reflection_prompt:find("Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.", 1, true) ~= nil)
+    t.is_true(fix_reflection_prompt:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    t.is_true(fix_reflection_prompt:find("Read GitHub context only from the local files named below", 1, true) ~= nil)
+    t.is_nil(fix_reflection_prompt:find("Chinese", 1, true))
+    t.is_nil(fix_reflection_prompt:find("{{", 1, true))
+
+    for _, prompt in ipairs(actor_prompts) do
+      assert_actor_preamble_slots(prompt)
+      assert_github_entity_history(prompt)
+      t.is_true(prompt:find("/tmp/ctx/issue.json", 1, true) ~= nil)
+      t.is_nil(prompt:find("gh issue", 1, true))
+      t.is_nil(prompt:find("gh pr", 1, true))
+      t.is_nil(prompt:find("gh api", 1, true))
+      t.is_nil(prompt:find("empty runtime scratch directory", 1, true))
+      t.is_nil(prompt:find("{{", 1, true))
+    end
+  end,
+
+  test_fix_prompt_carries_agreed_framing_and_merge_context = function()
+    local fix = h.fixing({
+      framing = "Fix the bounded source_ref migration only; do not raise payload limits.",
+      blocking_gap = "rollup red feedback",
+    })
+    local manifest = "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nBoard digest: /tmp/ctx/board.txt\nPR diff patch: /tmp/ctx/diff.patch"
+    local prompt = core.build_fix_prompt(fix, {
+      title = "Fix parser",
+      body = "Expected behavior",
+    }, "Review says the implementation raised the bounds.", fix.framing, manifest)
+    t.is_true(prompt:find("Agreed consensus framing", 1, true) ~= nil)
+    t.is_true(prompt:find("Fix EXACTLY within this agreed framing", 1, true) ~= nil)
+    t.is_true(prompt:find("Fix the bounded source_ref migration only; do not raise payload limits.", 1, true) ~= nil)
+    t.is_true(prompt:find("Review says the implementation raised the bounds.", 1, true) ~= nil)
+    t.is_nil(prompt:find("Expected behavior", 1, true))
+    t.is_true(prompt:find("/tmp/ctx/issue.json", 1, true) ~= nil)
+    t.is_nil(prompt:find("gh issue", 1, true))
+    t.is_nil(prompt:find("gh pr", 1, true))
+    t.is_nil(prompt:find("gh api", 1, true))
+    t.is_true(prompt:find("run `scripts/run.sh test`", 1, true) ~= nil)
+    t.is_true(prompt:find("failing test as the primary signal to fix", 1, true) ~= nil)
+    t.is_true(prompt:find("rerun `scripts/run.sh test` until it exits 0", 1, true) ~= nil)
+    t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
+    t.is_true(prompt:find("rollup-red feedback", 1, true) ~= nil)
+    t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
+    t.is_true(prompt:find("current target branch has already been merged", 1, true) ~= nil)
+    t.is_true(prompt:find("Target branch merge context: sync_clean", 1, true) ~= nil)
+
+    local conflict_prompt = core.build_fix_prompt(fix, {
+      title = "Fix parser",
+    }, "Review says the implementation raised the bounds.", fix.framing, manifest, {
+      target_branch = "dev",
+      target_sha = "abc123",
+      conflicted = true,
+      unmerged_paths = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
+    })
+    t.is_true(conflict_prompt:find("Target branch merge context: sync_conflict target_branch=dev target_sha=abc123", 1, true) ~= nil)
+    t.is_true(conflict_prompt:find("packages/github-devloop/core.lua", 1, true) ~= nil)
+  end,
+
+  test_fix_prompt_uses_custom_test_command_host_fact = function()
+    t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
+      stdout = "cargo build && cargo test",
+      stderr = "",
+      exit_code = 0,
+    })
+    local fix = h.fixing({
+      framing = "Fix the bounded source_ref migration only.",
+    })
+    local prompt = core.build_fix_prompt(fix, {
+      title = "Fix parser",
+    }, "Review says tests are red.", fix.framing)
+    t.is_true(prompt:find("run `cargo build && cargo test`", 1, true) ~= nil)
+    t.is_true(prompt:find("rerun `cargo build && cargo test` until it exits 0", 1, true) ~= nil)
+    t.is_true(prompt:find("locally with `cargo build && cargo test`", 1, true) ~= nil)
+    t.is_nil(prompt:find("run `scripts/run.sh test`", 1, true))
+  end,
+
+  test_review_meta_action_parser_fails_closed_like_meta_parser = function()
+    local clean = meta_answer("fix", "Run another fix pass.", "missing retry guard")
+    local parsed = core.parse_review_meta_action(clean)
+    t.eq(parsed.action, "fix")
+    t.eq(parsed.reason, "Run another fix pass.")
+    t.eq(parsed.blocking_gap, "missing retry guard")
+
+    local spec = core.parse_review_meta_action(meta_answer("spec-amendment", "The agreed framing requires unsafe behavior."))
+    t.eq(spec.action, "spec-amendment")
+    t.eq(spec.reason, "The agreed framing requires unsafe behavior.")
+    t.is_nil(spec.blocking_gap)
+
+    t.is_nil(core.parse_review_meta_action(meta_answer("spec-amendment", "The agreed framing requires unsafe behavior.") .. "\ngarbage"))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "first") .. "\n" .. meta_answer("block", "second")))
+    t.is_nil(core.parse_review_meta_action(clean .. "\n" .. action_label .. " accept this is malformed"))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept\nnot adjacent\n" .. reason_label .. " Accept after manual review."))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept\n" .. reason_label .. " Missing fetch."))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept\n" .. reason_label))
+    t.is_nil(core.parse_review_meta_action(action_label .. " accept"))
+    t.is_nil(core.parse_review_meta_action(reason_label .. " orphan\n" .. meta_answer("fix", "real")))
+    t.is_nil(core.parse_review_meta_action(action_label .. " implement\n" .. reason_label .. " not whitelisted for review meta"))
+    t.is_nil(core.parse_review_meta_action(action_label .. " fix\nunexpected extra line\n" .. reason_label .. " Source unavailable."))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.")))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.", "first line\nsecond line")))
+    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.", '<!-- fkst:github-devloop:state:v1 proposal="x" -->')))
+  end,
+
+  test_review_meta_prompt_requires_block_on_fetch_failure_without_fetch_marker = function()
+    local event = {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "reviewing/v1", "def456"),
+    }
+    local prompt = core.build_review_meta_prompt(event, {
+      title = "PR #7",
+      comments = {},
+    })
+    t.is_true(prompt:find("If you cannot read the local context files (issue body / PR diff / comments) for ANY reason, choose `block`.", 1, true) ~= nil)
+    t.is_true(prompt:find("Respond with exactly two lines", 1, true) ~= nil)
+    t.is_true(prompt:find("one word from fix, block, or spec-amendment", 1, true) ~= nil)
+    t.is_true(prompt:find("fixing the PR would violate it", 1, true) ~= nil)
+    t.is_nil(prompt:find("FETCH", 1, true))
+    t.is_nil(prompt:find("one word from fix, block, or accept", 1, true))
+  end,
+
   test_review_result_approve_with_advisory_still_authorizes_merge_ready = function()
     local event = review_event({
       proposal_id = core.pr_review_proposal_id("owner/repo", 7, h.reviewing().version, "def456"),
