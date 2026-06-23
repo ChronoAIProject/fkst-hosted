@@ -1,0 +1,94 @@
+{
+  "packages": {
+    "argv": [
+      "$ROOT/fake-fkst-framework",
+      "supervise",
+      "--project-root",
+      "$ROOT/dogfood/pkgs-dogfood",
+      "--package-root",
+      "$ROOT/dogfood/pkgs-dogfood/packages/github-proxy",
+      "--package-root",
+      "$ROOT/dogfood/pkgs-dogfood/packages/consensus",
+      "--package-root",
+      "$ROOT/dogfood/pkgs-dogfood/packages/github-devloop",
+      "--framework-bin",
+      "$ROOT/fake-fkst-framework"
+    ],
+    "cwd": "$ROOT",
+    "env": {
+      "BIN": "$ROOT/fake-fkst-framework",
+      "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+      "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "test-bot,peer-bot",
+      "FKST_DEVLOOP_ROLLUP_MERGE": "auto",
+      "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
+      "FKST_DURABLE_ROOT": "$ROOT/dogfood/stable-durable-packages",
+      "FKST_GITHUB_BOT_LOGIN": "test-bot",
+      "FKST_GITHUB_REPO": "ExampleOrg/fkst-packages",
+      "FKST_GITHUB_WRITE": "1",
+      "FKST_RATE_POOL_ROOT": "$ROOT/dogfood/rate-pools",
+      "FKST_RUNTIME_ROOT": "$ROOT/dogfood/dogfood-rt-packages.1760000000"
+    }
+  },
+  "substrate": {
+    "argv": [
+      "$ROOT/fake-fkst-framework",
+      "supervise",
+      "--project-root",
+      "$ROOT/dogfood/substrate-dogfood/sub",
+      "--package-root",
+      "$ROOT/dogfood/substrate-dogfood/pkgs/packages/github-proxy",
+      "--package-root",
+      "$ROOT/dogfood/substrate-dogfood/pkgs/packages/consensus",
+      "--package-root",
+      "$ROOT/dogfood/substrate-dogfood/pkgs/packages/github-devloop",
+      "--framework-bin",
+      "$ROOT/fake-fkst-framework"
+    ],
+    "cwd": "$ROOT",
+    "env": {
+      "BIN": "$ROOT/fake-fkst-framework",
+      "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+      "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "test-bot,peer-bot",
+      "FKST_DEVLOOP_ROLLUP_MERGE": "auto",
+      "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
+      "FKST_DURABLE_ROOT": "$ROOT/dogfood/stable-durable-substrate",
+      "FKST_GITHUB_BOT_LOGIN": "test-bot",
+      "FKST_GITHUB_REPO": "ExampleOrg/fkst-substrate",
+      "FKST_GITHUB_WRITE": "1",
+      "FKST_RATE_POOL_ROOT": "$ROOT/dogfood/rate-pools",
+      "FKST_RUNTIME_ROOT": "$ROOT/dogfood/dogfood-rt-substrate.1760000000"
+    }
+  },
+  "website": {
+    "argv": [
+      "$ROOT/fake-fkst-framework",
+      "supervise",
+      "--project-root",
+      "$ROOT/dogfood/website-dogfood/site",
+      "--package-root",
+      "$ROOT/dogfood/website-dogfood/pkgs/packages/github-proxy",
+      "--package-root",
+      "$ROOT/dogfood/website-dogfood/pkgs/packages/consensus",
+      "--package-root",
+      "$ROOT/dogfood/website-dogfood/pkgs/packages/github-devloop",
+      "--package-root",
+      "$ROOT/dogfood/website-dogfood/site/.fkst/local-packages/site-board",
+      "--framework-bin",
+      "$ROOT/fake-fkst-framework"
+    ],
+    "cwd": "$ROOT",
+    "env": {
+      "BIN": "$ROOT/fake-fkst-framework",
+      "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+      "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "test-bot,peer-bot",
+      "FKST_DEVLOOP_ROLLUP_MERGE": "auto",
+      "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
+      "FKST_DURABLE_ROOT": "$ROOT/dogfood/stable-durable-website",
+      "FKST_GITHUB_BOT_LOGIN": "test-bot",
+      "FKST_GITHUB_REPO": "ExampleOrg/fkst-website",
+      "FKST_GITHUB_WRITE": "1",
+      "FKST_RATE_POOL_ROOT": "$ROOT/dogfood/rate-pools",
+      "FKST_RUNTIME_ROOT": "$ROOT/dogfood/dogfood-rt-website.1760000000"
+    }
+  }
+}

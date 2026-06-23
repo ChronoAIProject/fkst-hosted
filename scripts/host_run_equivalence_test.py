@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OLD_DOGFOOD_REF = "6c77b5eb:.claude/skills/dogfood-github-devloop/dogfood.sh"
+GOLDEN_PATH = REPO_ROOT / "scripts" / "host_run_equivalence_golden.json"
 TARGETS = ("packages", "substrate", "website")
 PLATFORM_PACKAGES = "github-proxy consensus github-devloop"
 FIXED_TS = "1760000000"
@@ -24,22 +24,6 @@ FIXED_TS = "1760000000"
 def write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
-
-
-def load_old_dogfood() -> str:
-    result = subprocess.run(
-        ["git", "show", OLD_DOGFOOD_REF],
-        cwd=REPO_ROOT,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise AssertionError(
-            f"cannot read old dogfood launch source {OLD_DOGFOOD_REF}: {result.stderr.strip()}"
-        )
-    return result.stdout
 
 
 def make_fake_bin(path: Path) -> None:
@@ -153,36 +137,30 @@ class DogfoodLayout:
         )
 
     def env(self, target: str) -> dict[str, str]:
-        env = os.environ.copy()
-        env.update(
-            {
-                "PATH": f"{self.bin_dir}:{env.get('PATH', '')}",
-                "DOGFOOD_ROOT": str(self.dogfood_root),
-                "DOGFOOD_REPOS": " ".join(TARGETS),
-                "DOGFOOD_CONFIG": str(self.root / "missing-config.sh"),
-                "SUBSTRATE_SRC": str(self.substrate_src),
-                "BIN": str(self.fake_bin),
-                "DEVLOOP_PKGS": PLATFORM_PACKAGES,
-                "BOT": "test-bot",
-                "GH_ORG": "ExampleOrg",
-                "UPSTREAM_BRANCH": "dev",
-                "INTEGRATION_BRANCH": "integration-test",
-                "ROLLUP_MERGE": "auto",
-                "MANAGED_BOT_LOGINS": "test-bot,peer-bot",
-                "RATE_POOL": str(self.dogfood_root / "rate-pools"),
-                "LOGDIR": str(self.dogfood_root),
-                "CAPTURE_FILE": str(self.capture),
-                "FKST_NO_AUTOBUILD": "1",
-                "FKST_GITHUB_WRITE": "0",
-                "DUR_PACKAGES": str(self.dogfood_root / "stable-durable-packages"),
-                "DUR_SUBSTRATE": str(self.dogfood_root / "stable-durable-substrate"),
-                "DUR_WEBSITE": str(self.dogfood_root / "stable-durable-website"),
-            }
-        )
-        env.pop("FKST_RUNTIME_ROOT", None)
-        env.pop("FKST_DURABLE_ROOT", None)
-        env.pop("FKST_RATE_POOL_ROOT", None)
-        env.pop("FKST_DEVLOOP_BOARD_CMD", None)
+        base_path = os.environ.get("PATH", "")
+        env = {
+            "PATH": f"{self.bin_dir}:{base_path}",
+            "DOGFOOD_ROOT": str(self.dogfood_root),
+            "DOGFOOD_REPOS": target,
+            "DOGFOOD_CONFIG": str(self.root / "missing-config.sh"),
+            "SUBSTRATE_SRC": str(self.substrate_src),
+            "BIN": str(self.fake_bin),
+            "DEVLOOP_PKGS": PLATFORM_PACKAGES,
+            "BOT": "test-bot",
+            "GH_ORG": "ExampleOrg",
+            "UPSTREAM_BRANCH": "dev",
+            "INTEGRATION_BRANCH": "integration-test",
+            "ROLLUP_MERGE": "auto",
+            "MANAGED_BOT_LOGINS": "test-bot,peer-bot",
+            "RATE_POOL": str(self.dogfood_root / "rate-pools"),
+            "LOGDIR": str(self.dogfood_root),
+            "CAPTURE_FILE": str(self.capture),
+            "FKST_NO_AUTOBUILD": "1",
+            "FKST_GITHUB_WRITE": "0",
+            "DUR_PACKAGES": str(self.dogfood_root / "stable-durable-packages"),
+            "DUR_SUBSTRATE": str(self.dogfood_root / "stable-durable-substrate"),
+            "DUR_WEBSITE": str(self.dogfood_root / "stable-durable-website"),
+        }
         env["DOGFOOD_REPOS"] = target
         return env
 
@@ -209,10 +187,18 @@ class DogfoodLayout:
         raise AssertionError(f"dogfood start {target} did not invoke fake supervise\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
 
+def load_golden_launches() -> dict[str, object]:
+    return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+
+
 def normalize(record: dict[str, object], root: Path) -> dict[str, object]:
+    root_markers = sorted({str(root), str(root.resolve())}, key=len, reverse=True)
+
     def norm(value: object) -> object:
         if isinstance(value, str):
-            return value.replace(str(root), "$ROOT")
+            for marker in root_markers:
+                value = value.replace(marker, "$ROOT")
+            return value
         if isinstance(value, list):
             return [norm(item) for item in value]
         if isinstance(value, dict):
@@ -225,21 +211,20 @@ def normalize(record: dict[str, object], root: Path) -> dict[str, object]:
 class HostRunEquivalenceTest(unittest.TestCase):
     maxDiff = None
 
-    def test_delegated_dogfood_launch_matches_old_launch_for_all_targets(self) -> None:
-        old_script = load_old_dogfood()
+    def test_delegated_dogfood_launch_matches_committed_golden_for_all_targets(self) -> None:
+        golden = load_golden_launches()
+        self.assertEqual(set(golden), set(TARGETS))
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
             encoding="utf-8"
         )
         with tempfile.TemporaryDirectory() as tmp:
             tmp_root = Path(tmp)
-            old_layout = DogfoodLayout(tmp_root / "old", old_script)
             new_layout = DogfoodLayout(tmp_root / "new", new_script)
 
             for target in TARGETS:
                 with self.subTest(target=target):
-                    old_record = normalize(old_layout.launch(target), old_layout.root)
                     new_record = normalize(new_layout.launch(target), new_layout.root)
-                    self.assertEqual(new_record, old_record)
+                    self.assertEqual(new_record, golden[target])
                     env = new_record["env"]  # type: ignore[index]
                     self.assertEqual(env["FKST_GITHUB_WRITE"], "1")  # type: ignore[index]
                     self.assertEqual(
