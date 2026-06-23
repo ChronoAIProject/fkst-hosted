@@ -1,0 +1,15 @@
+# Declarative conformance pack OWNED BY the idle-detector package.
+# Interpreted by the engine's generic DeclarativeRulePack (no arbitrary code).
+# Scope is fenced to this package's own tree; it cannot read host or sibling files.
+schema = 1
+runner_protocol = "fkst-declarative-rulepack@1"
+owner_package = "idle-detector"
+
+[[rules]]
+id = "source.max-lines"
+severity = "error"
+kind = "max_line_count"
+include = ["**/*.lua"]
+exclude = ["tests/**", "**/*_test.lua"]
+max = 1000
+message = "idle-detector source files must stay under the 1000-line limit"

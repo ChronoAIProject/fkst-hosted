@@ -6,3 +6,10 @@ root = "."
 
 [lib_deps]
 libraries = ["contract", "workflow", "testkit"]
+
+# Package-owned conformance: these rules travel WITH this package. The engine
+# (fkst-framework conformance) runs them whenever idle-detector is an active
+# package root — in fkst-packages self-conformance AND in any host repo
+# (e.g. fkst-website) that references idle-detector. No host harness rebuild.
+[conformance]
+pack = "conformance/pack.toml"
