@@ -1,15 +1,18 @@
 local S = {}
 
-function S.install(M, resolved)
-resolved = resolved or {}
-local prompts = assert(resolved.prompts, "devloop_prompts: missing resolved prompts")
-local function load_prompt(role)
-  local prompt = prompts[role]
-  if prompt == nil then
-    error("devloop_prompts: missing resolved prompt role " .. tostring(role))
+local function prompt_loader(resolved)
+  resolved = resolved or {}
+  local prompts = assert(resolved.prompts, "devloop_prompts: missing resolved prompts")
+  return function(role)
+    local prompt = prompts[role]
+    if prompt == nil then
+      error("devloop_prompts: missing resolved prompt role " .. tostring(role))
+    end
+    return prompt
   end
-  return prompt
 end
+
+local function install_shared(M)
 function M.output_language(exec)
   local lang = M._trim(M.read_env("FKST_OUTPUT_LANG", exec))
   if lang == "zh" then
@@ -68,6 +71,7 @@ function M.render_prompt_template(template, vars, exec, opts)
     table.insert(lines, github_entity_history_line())
   end
   return table.concat(lines, "\n") .. "\n\n" .. M.render_template(template, vars)
+end
 end
 
 local function bounded_framing(M, framing)
@@ -137,6 +141,8 @@ local function issue_ref_from_proposal_id(M, proposal_id)
   return nil, nil
 end
 
+local function install_implement(M, resolved)
+  local load_prompt = prompt_loader(resolved)
 function M.build_implement_prompt(proposal_id, current, framing, content_manifest)
   local prompt = load_prompt("implement")
   return M.render_prompt_template(prompt.template, {
@@ -147,7 +153,10 @@ function M.build_implement_prompt(proposal_id, current, framing, content_manifes
     content_fetch_block = local_context_block(M, content_manifest),
   }, nil, { role = "actor", entity_history = true })
 end
+end
 
+local function install_fix(M, resolved)
+  local load_prompt = prompt_loader(resolved)
 function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_manifest, merge_context)
   local prompt = load_prompt("fix")
   return M.render_prompt_template(prompt.template, {
@@ -164,7 +173,10 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     review_observation_boundary = M.review_observation_boundary_clause(),
   }, nil, { role = "actor", entity_history = true })
 end
+end
 
+local function install_sync_conflict(M, resolved)
+  local load_prompt = prompt_loader(resolved)
 function M.build_sync_conflict_prompt(conflict)
   local prompt = load_prompt("sync_conflict")
   return M.render_prompt_template(prompt.template, {
@@ -175,7 +187,10 @@ function M.build_sync_conflict_prompt(conflict)
     integration_sha = M.neutralize_untrusted_prompt_text(conflict.integration_sha),
   }, nil, { role = "actor" })
 end
+end
 
+local function install_review_meta(M, resolved)
+  local load_prompt = prompt_loader(resolved)
 function M.build_review_meta_prompt(review_meta, current_issue, content_manifest)
   local prompt = review_meta.mode == "fix-reflection"
     and load_prompt("fix_reflection")
@@ -196,7 +211,10 @@ function M.build_review_meta_prompt(review_meta, current_issue, content_manifest
     execution_boundary = M.execution_boundary_clause("Read GitHub context only from the local files named below."),
   }, nil, { entity_history = true })
 end
+end
 
+local function install_intake(M, resolved)
+  local load_prompt = prompt_loader(resolved)
 function M.build_intake_prompt(proposal_id, current, content_manifest)
   local prompt = load_prompt("intake")
   local comments = table.concat(M.comment_bodies(current.comments), "\n\n--- comment ---\n\n")
@@ -210,7 +228,10 @@ function M.build_intake_prompt(proposal_id, current, content_manifest)
     execution_boundary = M.execution_boundary_clause("Judge only from the local context files and issue data provided in this prompt."),
   }, nil, { entity_history = true })
 end
+end
 
+local function install_decompose(M, resolved)
+  local load_prompt = prompt_loader(resolved)
 function M.build_decompose_prompt(decompose, current_issue, content_manifest)
   local prompt = load_prompt("decompose")
   return M.render_prompt_template(prompt.template, {
@@ -222,7 +243,9 @@ function M.build_decompose_prompt(decompose, current_issue, content_manifest)
     execution_boundary = M.execution_boundary_clause("Read GitHub context only from the local files named below."),
   }, nil, { entity_history = true })
 end
+end
 
+local function install_intake_parser(M)
 local function is_intake_action(value)
   return value == "enable" or value == "track" or value == "decline" or value == "escalate-to-class"
 end
@@ -270,7 +293,9 @@ function M.parse_intake_action(stdout)
     reason = M._trim(reason),
   }
 end
+end
 
+local function install_review_meta_parser(M)
 function M.parse_review_meta_action(stdout)
   local text = tostring(stdout or "")
   local lines = {}
@@ -327,6 +352,50 @@ function M.parse_review_meta_action(stdout)
     blocking_gap = gap,
   }
 end
+end
+
+local role_installers = {
+  implement = install_implement,
+  fix = install_fix,
+  sync_conflict = install_sync_conflict,
+  review_meta = install_review_meta,
+  intake = install_intake,
+  decompose = install_decompose,
+  intake_parser = install_intake_parser,
+  review_meta_parser = install_review_meta_parser,
+}
+
+local role_order = {
+  "implement",
+  "fix",
+  "sync_conflict",
+  "review_meta",
+  "intake",
+  "decompose",
+  "intake_parser",
+  "review_meta_parser",
+}
+
+function S.install(M, resolved, roles)
+  if type(roles) ~= "table" then
+    error("devloop_prompts: missing role install options")
+  end
+
+  install_shared(M)
+  for role, enabled in pairs(roles) do
+    local installer = role_installers[role]
+    if installer == nil then
+      error("devloop_prompts: unknown install role " .. tostring(role))
+    end
+    if enabled ~= true and enabled ~= false then
+      error("devloop_prompts: install role " .. tostring(role) .. " must be boolean")
+    end
+  end
+  for _, role in ipairs(role_order) do
+    if roles[role] == true then
+      role_installers[role](M, resolved)
+    end
+  end
 end
 
 return S

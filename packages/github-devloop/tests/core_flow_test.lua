@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local prompt_installers = require("devloop.prompts")
 local has_value = h.has_value
 local source_ref = h.source_ref
 local reached = h.reached
@@ -47,6 +48,33 @@ local function copy_table(value, extra)
 end
 
 return {
+  test_prompt_library_exposes_single_role_scoped_installer_surface = function()
+    t.eq(type(prompt_installers.install), "function")
+    local ok, err = pcall(prompt_installers.install, {}, { prompts = {} })
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("missing role install options", 1, true) ~= nil)
+    t.is_nil(prompt_installers.install_shared)
+    t.is_nil(prompt_installers.install_implement)
+    t.is_nil(prompt_installers.install_fix)
+    t.is_nil(prompt_installers.install_intake)
+    t.is_nil(prompt_installers.install_decompose)
+    t.is_nil(prompt_installers.install_sync_conflict)
+    t.is_nil(prompt_installers.install_review_meta)
+    t.is_nil(prompt_installers.install_intake_parser)
+    t.is_nil(prompt_installers.install_review_meta_parser)
+  end,
+
+  test_issue_package_installs_only_issue_prompt_roles = function()
+    t.eq(type(core.build_implement_prompt), "function")
+    t.is_nil(core.build_fix_prompt)
+    t.is_nil(core.build_intake_prompt)
+    t.is_nil(core.build_decompose_prompt)
+    t.is_nil(core.build_sync_conflict_prompt)
+    t.is_nil(core.build_review_meta_prompt)
+    t.is_nil(core.parse_intake_action)
+    t.is_nil(core.parse_review_meta_action)
+  end,
+
   test_restart_completeness_audit_covers_non_terminal_states = function()
     local expected = {
       "thinking",
@@ -647,7 +675,7 @@ return {
     t.is_true(prompt:find("No local context bundle is available", 1, true) ~= nil)
   end,
 
-  test_fixing_payload_and_prompt_carry_agreed_framing = function()
+  test_fixing_payload_carries_agreed_framing = function()
     local fix = core.build_devloop_fixing_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
@@ -664,40 +692,6 @@ return {
     }, source_ref())
     t.eq(fix.framing, "Fix the bounded source_ref migration only; do not raise payload limits.")
     t.eq(core.is_supported_fixing(fix), true)
-
-    local manifest = "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nBoard digest: /tmp/ctx/board.txt\nPR diff patch: /tmp/ctx/diff.patch"
-    local prompt = core.build_fix_prompt(fix, {
-      title = "Fix parser",
-      body = "Expected behavior",
-    }, "Review says the implementation raised the bounds.", fix.framing, manifest)
-    t.is_true(prompt:find("Agreed consensus framing", 1, true) ~= nil)
-    t.is_true(prompt:find("Fix EXACTLY within this agreed framing", 1, true) ~= nil)
-    t.is_true(prompt:find("Fix the bounded source_ref migration only; do not raise payload limits.", 1, true) ~= nil)
-    t.is_true(prompt:find("Review says the implementation raised the bounds.", 1, true) ~= nil)
-    t.is_nil(prompt:find("Expected behavior", 1, true))
-    t.is_true(prompt:find("/tmp/ctx/issue.json", 1, true) ~= nil)
-    t.is_nil(prompt:find("gh issue", 1, true))
-    t.is_nil(prompt:find("gh pr", 1, true))
-    t.is_nil(prompt:find("gh api", 1, true))
-    t.is_true(prompt:find("run `scripts/run.sh test`", 1, true) ~= nil)
-    t.is_true(prompt:find("failing test as the primary signal to fix", 1, true) ~= nil)
-    t.is_true(prompt:find("rerun `scripts/run.sh test` until it exits 0", 1, true) ~= nil)
-    t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
-    t.is_true(prompt:find("rollup-red feedback", 1, true) ~= nil)
-    t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
-    t.is_true(prompt:find("current target branch has already been merged", 1, true) ~= nil)
-    t.is_true(prompt:find("Target branch merge context: sync_clean", 1, true) ~= nil)
-
-    local conflict_prompt = core.build_fix_prompt(fix, {
-      title = "Fix parser",
-    }, "Review says the implementation raised the bounds.", fix.framing, manifest, {
-      target_branch = "dev",
-      target_sha = "abc123",
-      conflicted = true,
-      unmerged_paths = "100644 abc123 1\tpackages/github-devloop/core.lua\n",
-    })
-    t.is_true(conflict_prompt:find("Target branch merge context: sync_conflict target_branch=dev target_sha=abc123", 1, true) ~= nil)
-    t.is_true(conflict_prompt:find("packages/github-devloop/core.lua", 1, true) ~= nil)
   end,
 
   test_replayed_fixing_dedup_binds_merge_gate_fact_identity = function()
@@ -730,79 +724,6 @@ return {
     t.eq(core.is_supported_fixing(defective), true)
     t.eq(core.is_supported_fixing(corrected), true)
     t.eq(core.is_supported_fixing(new_predecessors), true)
-  end,
-
-  test_fix_prompt_uses_custom_test_command_host_fact = function()
-    t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
-      stdout = "cargo build && cargo test",
-      stderr = "",
-      exit_code = 0,
-    })
-    local fix = core.build_devloop_fixing_payload({
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
-    }, 7, {
-      review_proposal_id = core.pr_review_proposal_id(
-        "owner/repo",
-        7,
-        "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
-        "def456"
-      ),
-      review_dedup_key = "consensus:github-devloop/review/owner/repo/7/ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/def456/review",
-      reviewed_head_sha = "def456",
-      framing = "Fix the bounded source_ref migration only.",
-    }, source_ref())
-    local prompt = core.build_fix_prompt(fix, {
-      title = "Fix parser",
-    }, "Review says tests are red.", fix.framing)
-    t.is_true(prompt:find("run `cargo build && cargo test`", 1, true) ~= nil)
-    t.is_true(prompt:find("rerun `cargo build && cargo test` until it exits 0", 1, true) ~= nil)
-    t.is_true(prompt:find("locally with `cargo build && cargo test`", 1, true) ~= nil)
-    t.is_nil(prompt:find("run `scripts/run.sh test`", 1, true))
-  end,
-
-  test_review_meta_action_parser_fails_closed_like_meta_parser = function()
-    local clean = meta_answer("fix", "Run another fix pass.", "missing retry guard")
-    local parsed = core.parse_review_meta_action(clean)
-    t.eq(parsed.action, "fix")
-    t.eq(parsed.reason, "Run another fix pass.")
-    t.eq(parsed.blocking_gap, "missing retry guard")
-
-    local spec = core.parse_review_meta_action(meta_answer("spec-amendment", "The agreed framing requires unsafe behavior."))
-    t.eq(spec.action, "spec-amendment")
-    t.eq(spec.reason, "The agreed framing requires unsafe behavior.")
-    t.is_nil(spec.blocking_gap)
-
-    t.is_nil(core.parse_review_meta_action(meta_answer("spec-amendment", "The agreed framing requires unsafe behavior.") .. "\ngarbage"))
-    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "first") .. "\n" .. meta_answer("block", "second")))
-    t.is_nil(core.parse_review_meta_action(clean .. "\n" .. action_label .. " accept this is malformed"))
-    t.is_nil(core.parse_review_meta_action(action_label .. " accept\nnot adjacent\n" .. reason_label .. " Accept after manual review."))
-    t.is_nil(core.parse_review_meta_action(action_label .. " accept\n" .. reason_label .. " Missing fetch."))
-    t.is_nil(core.parse_review_meta_action(action_label .. " accept\n" .. reason_label))
-    t.is_nil(core.parse_review_meta_action(action_label .. " accept"))
-    t.is_nil(core.parse_review_meta_action(reason_label .. " orphan\n" .. meta_answer("fix", "real")))
-    t.is_nil(core.parse_review_meta_action(action_label .. " implement\n" .. reason_label .. " not whitelisted for review meta"))
-    t.is_nil(core.parse_review_meta_action(action_label .. " fix\nunexpected extra line\n" .. reason_label .. " Source unavailable."))
-    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.")))
-    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.", "first line\nsecond line")))
-    t.is_nil(core.parse_review_meta_action(meta_answer("fix", "Run another fix pass.", '<!-- fkst:github-devloop:state:v1 proposal="x" -->')))
-  end,
-
-  test_review_meta_prompt_requires_block_on_fetch_failure_without_fetch_marker = function()
-    local event = {
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "reviewing/v1", "def456"),
-    }
-    local prompt = core.build_review_meta_prompt(event, {
-      title = "PR #7",
-      comments = {},
-    })
-    t.is_true(prompt:find("If you cannot read the local context files (issue body / PR diff / comments) for ANY reason, choose `block`.", 1, true) ~= nil)
-    t.is_true(prompt:find("Respond with exactly two lines", 1, true) ~= nil)
-    t.is_true(prompt:find("one word from fix, block, or spec-amendment", 1, true) ~= nil)
-    t.is_true(prompt:find("fixing the PR would violate it", 1, true) ~= nil)
-    t.is_nil(prompt:find("FETCH", 1, true))
-    t.is_nil(prompt:find("one word from fix, block, or accept", 1, true))
   end,
 
   test_parse_pr_view_origin_falls_back_on_empty_name_with_owner = function()
