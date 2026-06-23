@@ -48,7 +48,6 @@
 {"path":"packages/github-devloop-intake/core/intake_scan.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop-intake/core/intake_service_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop/core/liveness_bounds.lua","owner":"issue","reason":"issue lifecycle liveness fallback and operator rereview thresholds remain in the parent issue saga."}
-{"path":"packages/github-devloop-ops/core/observability.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop-ops/core/observability_bounds.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/pr_delegation.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/ratchet_slice_ledger.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}

@@ -26,14 +26,20 @@ local function assert_module(path, install_name)
 end
 
 return {
-  test_observability_core_is_split_into_department_local_responsibility_modules = function()
-    local core_body = read_source("core/observability.lua")
-    t.is_true(line_count(core_body) < 250)
-    t.is_true(core_body:find('require("departments.observability.census")', 1, true) ~= nil)
-    t.is_true(core_body:find('require("departments.observability.common")', 1, true) ~= nil)
-    t.is_true(core_body:find('require("departments.observability.avm_scoreboard")', 1, true) ~= nil)
-    t.is_true(core_body:find('require("departments.observability.dashboard")', 1, true) ~= nil)
-    t.is_true(core_body:find('require("departments.observability.reaper")', 1, true) ~= nil)
+  test_observability_core_does_not_depend_on_department_private_modules = function()
+    local core_body = read_source("core.lua")
+    t.eq(core_body:find('require("core.observability")', 1, true), nil)
+
+    local core_observability = io.open(package_root .. "/core/observability.lua", "r")
+    t.eq(core_observability, nil)
+
+    local main_body = read_source("departments/observability/main.lua")
+    t.is_true(line_count(main_body) < 250)
+    t.is_true(main_body:find('require("departments.observability.census")', 1, true) ~= nil)
+    t.is_true(main_body:find('require("departments.observability.common")', 1, true) ~= nil)
+    t.is_true(main_body:find('require("departments.observability.avm_scoreboard")', 1, true) ~= nil)
+    t.is_true(main_body:find('require("departments.observability.dashboard")', 1, true) ~= nil)
+    t.is_true(main_body:find('require("departments.observability.reaper")', 1, true) ~= nil)
 
     assert_module("departments/observability/common.lua", "common")
     assert_module("departments/observability/avm_scoreboard.lua", "avm_scoreboard")

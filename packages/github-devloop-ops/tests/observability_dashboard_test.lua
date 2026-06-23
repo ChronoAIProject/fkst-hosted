@@ -1,6 +1,7 @@
 local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
+require("departments.observability.main")
 local unpack_results = table.unpack or unpack
 
 local function mock_env(write_mode)

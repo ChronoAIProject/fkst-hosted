@@ -543,11 +543,14 @@ class ObservabilitySplitArchitectureTest(unittest.TestCase):
                 f"{path} must stay below the line-limit warning threshold",
             )
 
-        core_observability = package_root / "core" / "observability.lua"
+        core_source = (package_root / "core.lua").read_text(encoding="utf-8")
+        self.assertNotIn('require("core.observability")', core_source)
+        self.assertFalse((package_root / "core" / "observability.lua").exists())
+        observability_main = module_dir / "main.lua"
         self.assertLess(
-            check_repo.line_count(core_observability),
+            check_repo.line_count(observability_main),
             check_repo.LINE_LIMIT - check_repo.LINE_WARNING_MARGIN,
-            "core/observability.lua must remain an orchestration layer, not a near-limit monolith",
+            "departments/observability/main.lua must remain a thin orchestration layer",
         )
 
 
