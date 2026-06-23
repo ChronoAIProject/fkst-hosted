@@ -28,6 +28,12 @@ local function log_skip(reason, event)
   log.warn(core.skip_fact("idle_gate", event, reason, true))
 end
 
+local function is_unresolved_observe_config_error(err)
+  local message = tostring(err)
+  return message:find("observe%-bin%-unresolved", 1, false) ~= nil
+    or message:find("observe%-durable%-root%-unresolved", 1, false) ~= nil
+end
+
 local function wrap_pipeline_failure(dept, fn)
   return function(event)
     local ok, result = pcall(fn, event)
@@ -61,6 +67,9 @@ end
 local function act_idle(event)
   local slot = tick_slot(event)
   local ok_observe, facts_or_err = pcall(core.observe)
+  if not ok_observe and is_unresolved_observe_config_error(facts_or_err) then
+    error(tostring(facts_or_err), 0)
+  end
   local observe_error = not ok_observe and ("unreadable observe facts: " .. tostring(facts_or_err)) or nil
   if observe_error ~= nil then return log_skip(observe_error, event) end
   local observe_now = core.observe_now_seconds(facts_or_err)

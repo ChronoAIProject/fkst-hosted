@@ -164,56 +164,137 @@ return {
   end,
 
   test_observe_wrapper_parses_real_json = function()
-    local observed = core.observe(function(cmd)
-      t.eq(cmd.cmd, 'fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json')
-      t.eq(cmd.timeout, 30)
-      return {
-        stdout = observe_idle_json(),
-        stderr = "",
-        exit_code = 0,
-      }
-    end)
+    local observed = core.observe({
+      exec_sync = function(cmd)
+        if cmd == 'printf %s "$BIN"' then
+          return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
+        end
+        if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
+          return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
+        end
+        error("unexpected env command: " .. tostring(cmd))
+      end,
+      exec_argv = function(cmd)
+        t.eq(cmd.timeout, 30)
+        t.eq(cmd.argv[1], "/tmp/fkst-framework")
+        t.eq(cmd.argv[2], "observe")
+        t.eq(cmd.argv[3], "--durable-root")
+        t.eq(cmd.argv[4], "/tmp/fkst-durable")
+        t.eq(cmd.argv[5], "--json")
+        t.is_nil(cmd.cmd)
+        return {
+          stdout = observe_idle_json(),
+          stderr = "",
+          exit_code = 0,
+        }
+      end,
+    })
     t.eq(observed.schema_version, 1)
     t.eq(observed.generated_at_ms, 1781830860000)
   end,
 
   test_observe_wrapper_fails_closed_on_unknown_schema_version = function()
     t.raises(function()
-      core.observe(function(_cmd)
-        return {
-          stdout = '{"schema_version":2,"generated_at_ms":1781830860000,"queues":[],"deliveries":[],"dead_letters":[]}',
-          stderr = "",
-          exit_code = 0,
-        }
-      end)
+      core.observe({
+        exec_sync = function(cmd)
+          if cmd == 'printf %s "$BIN"' then
+            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
+          end
+          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
+            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
+          end
+          error("unexpected env command: " .. tostring(cmd))
+        end,
+        exec_argv = function(_cmd)
+          return {
+            stdout = '{"schema_version":2,"generated_at_ms":1781830860000,"queues":[],"deliveries":[],"dead_letters":[]}',
+            stderr = "",
+            exit_code = 0,
+          }
+        end,
+      })
     end)
   end,
 
   test_observe_wrapper_fails_closed_on_command_failure = function()
     t.raises(function()
-      core.observe(function(_cmd)
-        return { stdout = "", stderr = "boom", exit_code = 1 }
-      end)
+      core.observe({
+        exec_sync = function(cmd)
+          if cmd == 'printf %s "$BIN"' then
+            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
+          end
+          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
+            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
+          end
+          error("unexpected env command: " .. tostring(cmd))
+        end,
+        exec_argv = function(_cmd)
+          return { stdout = "", stderr = "boom", exit_code = 1 }
+        end,
+      })
     end)
   end,
 
   test_observe_wrapper_requires_exec_and_rejects_malformed_json = function()
     t.raises(function() core.observe("not a function") end)
     t.raises(function()
-      core.observe(function(_cmd)
-        return { stdout = "{not json", stderr = "", exit_code = 0 }
-      end)
+      core.observe({
+        exec_sync = function(cmd)
+          if cmd == 'printf %s "$BIN"' then
+            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
+          end
+          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
+            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
+          end
+          error("unexpected env command: " .. tostring(cmd))
+        end,
+        exec_argv = function(_cmd)
+          return { stdout = "{not json", stderr = "", exit_code = 0 }
+        end,
+      })
     end)
   end,
 
   test_observe_wrapper_reports_malformed_json_error_class = function()
     local ok, err = pcall(function()
-      core.observe(function(_cmd)
-        return { stdout = "{not json", stderr = "", exit_code = 0 }
-      end)
+      core.observe({
+        exec_sync = function(cmd)
+          if cmd == 'printf %s "$BIN"' then
+            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
+          end
+          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
+            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
+          end
+          error("unexpected env command: " .. tostring(cmd))
+        end,
+        exec_argv = function(_cmd)
+          return { stdout = "{not json", stderr = "", exit_code = 0 }
+        end,
+      })
     end)
     t.eq(ok, false)
     t.is_true(tostring(err):find("idle-detector: malformed-observe-json", 1, true) ~= nil)
+  end,
+
+  test_observe_wrapper_fails_loud_when_resolved_bin_is_unset = function()
+    local called_argv = false
+    local ok, err = pcall(function()
+      core.observe({
+        exec_sync = function(cmd)
+          if cmd == 'printf %s "$BIN"' then
+            return { stdout = "", stderr = "", exit_code = 0 }
+          end
+          error("unexpected env command: " .. tostring(cmd))
+        end,
+        exec_argv = function(_cmd)
+          called_argv = true
+          return { stdout = observe_idle_json(), stderr = "", exit_code = 0 }
+        end,
+      })
+    end)
+    t.eq(ok, false)
+    t.eq(called_argv, false)
+    t.is_true(tostring(err):find("idle-detector: observe-bin-unresolved", 1, true) ~= nil)
   end,
 
   test_system_idle_payload_is_small_and_source_ref_backed = function()

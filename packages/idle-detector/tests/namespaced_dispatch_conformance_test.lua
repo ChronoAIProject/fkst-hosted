@@ -1,5 +1,7 @@
 local conformance = require("testkit.namespaced_dispatch_conformance")
 local t = fkst.test
+local observe_bin = "/tmp/fkst-framework"
+local observe_durable_root = "/tmp/fkst-durable"
 
 local function load_department(path, module_name)
   local old_pipeline = pipeline
@@ -46,7 +48,9 @@ local function payload_for_queue(_path, queue)
 end
 
 local function mock_observe()
-  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+  t.mock_command('printf %s "$BIN"', { stdout = observe_bin, stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_DURABLE_ROOT"', { stdout = observe_durable_root, stderr = "", exit_code = 0 })
+  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
     stdout = observe_json(),
     stderr = "",
     exit_code = 0,

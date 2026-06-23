@@ -1,12 +1,31 @@
 local M = {}
 
 local error_facts = require("contract.error_facts")
+local strings = require("contract.strings")
+local env = require("workflow.env")
 
 local observe_schema_version = 1
+local observe_env = {
+  BIN = true,
+  FKST_DURABLE_ROOT = true,
+}
 
 function M.persistence_class()
   return "stateless_adapter"
 end
+
+local function read_env_command(name)
+  if not observe_env[name] then
+    error("idle-detector: invalid-env-name: env name is not allowed")
+  end
+  return 'printf %s "$' .. name .. '"'
+end
+
+M.read_env_command = read_env_command
+M.read_env = env.read_env(read_env_command, {
+  missing_exec_error = "idle-detector: missing-exec: observe requires exec_sync",
+  propagate_exec_errors = true,
+})
 
 local function required_list(facts, name)
   local value = facts[name]
@@ -95,11 +114,31 @@ function M.observe_now_seconds(facts)
 end
 
 function M.observe(exec)
-  local run = exec or exec_sync
-  if type(run) ~= "function" then
+  local run_sync = nil
+  local run_argv = nil
+  if exec == nil then
+    run_sync, run_argv = exec_sync, exec_argv
+  elseif type(exec) == "table" then
+    run_sync, run_argv = exec.exec_sync, exec.exec_argv
+  end
+  if type(run_sync) ~= "function" then
     error("idle-detector: missing-exec: observe requires exec_sync")
   end
-  local result = run({ cmd = 'fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', timeout = 30 })
+  if type(run_argv) ~= "function" then
+    error("idle-detector: missing-exec: observe requires exec_argv")
+  end
+  local bin = strings.trim(M.read_env("BIN", run_sync))
+  if bin == "" then
+    error("idle-detector: observe-bin-unresolved: BIN is unset")
+  end
+  local durable_root = strings.trim(M.read_env("FKST_DURABLE_ROOT", run_sync))
+  if durable_root == "" then
+    error("idle-detector: observe-durable-root-unresolved: FKST_DURABLE_ROOT is unset")
+  end
+  local ok_run, result = pcall(run_argv, { argv = { bin, "observe", "--durable-root", durable_root, "--json" }, timeout = 30 })
+  if not ok_run then
+    error("idle-detector: observe-bin-unresolved: " .. tostring(result))
+  end
   if type(result) ~= "table" or result.exit_code ~= 0 then
     error("idle-detector: observe-failed: " .. tostring(result and result.stderr or "no result"))
   end

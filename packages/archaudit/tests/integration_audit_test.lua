@@ -4,6 +4,8 @@ local core = require("core")
 local audit_main = require("departments.audit.main")
 local env_lib = require("workflow.env")
 local t = fkst.test
+local observe_bin = "/tmp/fkst-framework"
+local observe_durable_root = "/tmp/fkst-durable"
 
 local function run_department_opts()
   return {
@@ -62,8 +64,14 @@ local function mock_env(repo, max_issues)
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
 end
 
+local function mock_observe_env()
+  t.mock_command('printf %s "$BIN"', { stdout = observe_bin, stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_DURABLE_ROOT"', { stdout = observe_durable_root, stderr = "", exit_code = 0 })
+end
+
 local function mock_idle_observe()
-  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+  mock_observe_env()
+  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
     stdout = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}],"deliveries":[],"dead_letters":[]}',
     stderr = "",
     exit_code = 0,
@@ -71,7 +79,8 @@ local function mock_idle_observe()
 end
 
 local function mock_busy_observe()
-  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+  mock_observe_env()
+  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
     stdout = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":1,"pending":1,"in_flight":0,"retrying":0,"oldest_pending_age_ms":1000}],"deliveries":[],"dead_letters":[]}',
     stderr = "",
     exit_code = 0,
@@ -79,7 +88,8 @@ local function mock_busy_observe()
 end
 
 local function mock_observe(stdout, exit_code)
-  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+  mock_observe_env()
+  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
     stdout = stdout,
     stderr = exit_code == 0 and "" or "observe failed",
     exit_code = exit_code or 0,
@@ -489,6 +499,16 @@ return {
       return run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     end)
     t.eq(#result.raises, 0)
+  end,
+
+  test_observe_bin_unresolved_is_loud_failure_not_terminal_skip = function()
+    mock_env("owner/repo", "3")
+    t.mock_command('printf %s "$BIN"', { stdout = "", stderr = "", exit_code = 0 })
+    local dept = fake_audit_department("[]")
+    local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    t.eq(#result.raises, 0)
+    t.is_true(tostring(result.failure.error):find("observe-bin-unresolved", 1, true) ~= nil)
+    t.is_true(tostring(result.failure.error):find("terminal-skip", 1, true) == nil)
   end,
 
   test_fake_current_observe_malformed_json_is_structured_failure_no_issue = function()

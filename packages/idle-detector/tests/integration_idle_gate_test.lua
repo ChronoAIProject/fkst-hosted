@@ -1,4 +1,6 @@
 local t = fkst.test
+local observe_bin = "/tmp/fkst-framework"
+local observe_durable_root = "/tmp/fkst-durable"
 
 local function opts(name)
   return {
@@ -23,7 +25,9 @@ local function event(ts)
 end
 
 local function mock_observe(stdout, exit_code)
-  t.mock_command('fkst-framework observe --durable-root "$FKST_DURABLE_ROOT" --json', {
+  t.mock_command('printf %s "$BIN"', { stdout = observe_bin, stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_DURABLE_ROOT"', { stdout = observe_durable_root, stderr = "", exit_code = 0 })
+  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
     stdout = stdout or "",
     stderr = exit_code == 0 and "" or "observe failed",
     exit_code = exit_code or 0,
@@ -122,6 +126,30 @@ return {
 
   test_idle_gate_skips_observe_read_failure = function()
     assert_skip_with_observe("observe-failure", "", 1)
+  end,
+
+  test_idle_gate_fails_loud_when_observe_bin_unresolved = function()
+    t.mock_command('printf %s "$BIN"', { stdout = "", stderr = "", exit_code = 0 })
+    local previous_warn = log.warn
+    local previous_error = log.error
+    local warns = {}
+    local errors = {}
+    log.warn = function(message)
+      table.insert(warns, tostring(message))
+    end
+    log.error = function(message)
+      table.insert(errors, tostring(message))
+    end
+    local ok, err = pcall(function()
+      local dept = require("departments.idle_gate.main")
+      dept.pipeline(event("2026-06-19T01:00:00Z"))
+    end)
+    log.warn = previous_warn
+    log.error = previous_error
+    t.eq(ok, false)
+    t.eq(#warns, 0)
+    t.is_true(tostring(err):find("observe-bin-unresolved", 1, true) ~= nil)
+    t.is_true(tostring(errors[1] or ""):find("caught-failure", 1, true) ~= nil)
   end,
 
   test_idle_gate_logs_terminal_skip_on_observe_read_failure = function()
