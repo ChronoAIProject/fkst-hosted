@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_content_truncation, check_repo_coverage, check_repo_dedup, check_repo_forward_direct, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_monotone_gate, check_repo_monotone_gate_dsl, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_saga_split, check_repo_span, check_repo_std_dependency_model, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_std_dependency_model, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -69,17 +69,22 @@ class LuaStringLiteral:
     content: str
 
 def repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return check_repo_config.default_project_root()
+
+def allowlist_path(root: Path, relpath: str, allowlist_dir: Path | None = None) -> Path:
+    return check_repo_config.allowlist_path(root, allowlist_dir, relpath)
 
 def rel(root: Path, path: Path) -> str:
-    packages_view = packages_root(root)
-    try:
-        return "packages/" + path.relative_to(packages_view).as_posix()
-    except ValueError:
-        return path.relative_to(root).as_posix()
+    for packages_view in package_roots(root):
+        try:
+            return "packages/" + path.relative_to(packages_view).as_posix()
+        except ValueError:
+            pass
+    return path.relative_to(root).as_posix()
 
 def read_text(path: Path) -> str: return path.read_text(encoding="utf-8")
-def packages_root(root: Path) -> Path: return root / "packages"
+def package_roots(root: Path) -> list[Path]: return check_repo_config.package_roots(root)
+def packages_root(root: Path) -> Path: return check_repo_config.package_root(root)
 def line_count(path: Path) -> int: return len(read_text(path).splitlines())
 def add(violations: list[str], rule: str, message: str) -> None: violations.append(f"{rule}: {message}")
 
@@ -440,7 +445,7 @@ def line_warning_threshold() -> int:
 
 def check_line_limit(root: Path, violations: list[str], warnings: list[str]) -> None:
     warning_threshold = line_warning_threshold()
-    for scan_root in (packages_root(root), root / "scripts"):
+    for scan_root in (*package_roots(root), root / "scripts"):
         if not scan_root.exists():
             continue
         for path in sorted(scan_root.rglob("*")):
@@ -454,10 +459,23 @@ def check_line_limit(root: Path, violations: list[str], warnings: list[str]) -> 
 
 
 def package_dirs(root: Path) -> list[Path]:
-    packages = packages_root(root)
-    if not packages.exists():
-        return []
-    return [path for path in sorted(packages.iterdir()) if path.is_dir()]
+    return [
+        path
+        for packages in package_roots(root)
+        if packages.exists()
+        for path in sorted(packages.iterdir())
+        if path.is_dir()
+    ]
+
+
+def package_lua_files(root: Path) -> list[tuple[Path, Path]]:
+    return [
+        (packages, path)
+        for packages in package_roots(root)
+        if packages.exists()
+        for path in sorted(packages.rglob("*.lua"))
+        if path.is_file()
+    ]
 
 
 def test_files(pkg: Path) -> list[Path]:
@@ -699,12 +717,7 @@ def check_helper_reachability(root: Path, violations: list[str]) -> None:
 
 
 def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
-    packages = packages_root(root)
-    if not packages.exists():
-        return
-    for path in sorted(packages.rglob("*.lua")):
-        if not path.is_file():
-            continue
+    for _packages, path in package_lua_files(root):
         for line in unguarded_graphql_first_connection_lines(read_text(path)):
             add(
                 warnings,
@@ -714,12 +727,7 @@ def check_graphql_connection_guards(root: Path, warnings: list[str]) -> None:
 
 
 def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
-    packages = packages_root(root)
-    if not packages.exists():
-        return
-    for path in sorted(packages.rglob("*.lua")):
-        if not path.is_file():
-            continue
+    for _packages, path in package_lua_files(root):
         for line in unguarded_rest_per_page_lines(read_text(path)):
             add(
                 warnings,
@@ -729,10 +737,7 @@ def check_rest_pagination_guards(root: Path, warnings: list[str]) -> None:
 
 
 def check_hidden_text_encoded_literals(root: Path, violations: list[str]) -> None:
-    packages = packages_root(root)
-    if not packages.exists():
-        return
-    for path in sorted(packages.rglob("*.lua")):
+    for packages, path in package_lua_files(root):
         if not path.is_file() or "tests" in path.relative_to(packages).parts:
             continue
         for line in hidden_text_encoded_literal_lines(read_text(path)):
@@ -760,10 +765,7 @@ def gh_rate_pool_sizing_lines(text: str) -> list[int]:
 
 
 def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
-    packages = packages_root(root)
-    if not packages.exists():
-        return
-    for path in sorted(packages.rglob("*.lua")):
+    for packages, path in package_lua_files(root):
         if not path.is_file() or "tests" in path.relative_to(packages).parts:
             continue
         for line in gh_rate_pool_sizing_lines(read_text(path)):
@@ -780,10 +782,7 @@ def check_github_devloop_name_only_path_helper(root: Path, violations: list[str]
 
 
 def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
-    packages = root / "packages"
-    if not packages.exists():
-        return
-    for path in sorted(packages.rglob("*.lua")):
+    for packages, path in package_lua_files(root):
         if not path.is_file() or "tests" in path.relative_to(packages).parts:
             continue
         for line in unclassified_error_call_lines(read_text(path)):
@@ -913,14 +912,22 @@ def check_convergence_budget_caps(root: Path, violations: list[str]) -> None:
         if f"core.{helper}(" not in source: add(violations, "G12", f"{rel(root, path)} convergence cap must use boundary-preserving core.{helper}() budget")
         if stable_fact_helper is not None and f"core.{stable_fact_helper}(" not in source: add(violations, "G12", f"{rel(root, path)} convergence round counter must derive from stable boundary-preserving core.{stable_fact_helper}() facts")
 
-def check_gh_git_adapter_ratchet(root: Path, violations: list[str]) -> None:
-    sources = gh_git_adapter.sources(root, packages_root(root), read_text, rel)
-    allowlist = gh_git_adapter.load_allowlist(root / gh_git_adapter.ALLOWLIST)
+def check_gh_git_adapter_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None) -> None:
+    sources = {}
+    for packages in package_roots(root):
+        sources.update(gh_git_adapter.sources(root, packages, read_text, rel))
+    allowlist = gh_git_adapter.load_allowlist(allowlist_path(root, gh_git_adapter.ALLOWLIST, allowlist_dir))
     for message in gh_git_adapter.ratchet_messages(sources, allowlist, lua_string_literals):
         add(violations, "G-ADAPTER", message)
 
-def check_code_dedup_ratchet(root: Path, violations: list[str]) -> None:
-    for message in check_repo_dedup.repository_messages(root, packages_root(root), read_text, rel):
+def check_code_dedup_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
+    source_map = {}
+    for packages in package_roots(root):
+        source_map.update(check_repo_dedup.sources(root, packages, read_text, rel))
+    allowlist = check_repo_dedup.load_allowlist(allowlist_path(root, check_repo_dedup.ALLOWLIST, allowlist_dir))
+    base_status, base_allowlist = check_repo_dedup.allowlist_at_dev_base(root) if enforce_base else ("absent", None)
+    if base_status == "unresolved": add(violations, "G-DEDUP", "cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
+    for message in check_repo_dedup.ratchet_messages(source_map, allowlist, base_allowlist):
         add(violations, "G-DEDUP", message)
 
 def check_std_dependency_model(root: Path, violations: list[str], warnings: list[str]) -> None: check_repo_std_dependency_model.check_std_dependency_model(root, violations, warnings, packages=package_dirs(root), read_text=read_text, rel=rel, add=add, strip_lua_comments_and_strings=strip_lua_comments_and_strings, is_unmasked_range=is_unmasked_range)
@@ -955,40 +962,17 @@ def saga_allowlist_at_dev_base(root: Path) -> tuple[str, set[str] | None]:
     except Exception:
         return "unresolved", None
 
-def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list[str]) -> None:
-    allow_path = root / "migration" / "saga-handler.allowlist"
+def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
+    allow_path = allowlist_path(root, "migration/saga-handler.allowlist", allowlist_dir)
     allowlist = set() if not allow_path.exists() else {line.strip() for line in read_text(allow_path).splitlines() if line.strip() and not line.lstrip().startswith("#")}
-    sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
-    base_status, base_allowlist = saga_allowlist_at_dev_base(root)
+    sources = {rel(root, path): read_text(path) for packages in package_roots(root) for path in sorted(packages.glob("*/departments/*/main.lua")) if path.is_file()}
+    base_status, base_allowlist = saga_allowlist_at_dev_base(root) if enforce_base else ("absent", None)
     if base_status == "unresolved": violations.append("G10: cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
     violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist))
 
-def main() -> int:
-    root = repo_root(); violations: list[str] = []; warnings: list[str] = []
-    check_line_limit(root, violations, warnings); check_test_shape(root, violations, warnings)
-    check_helper_reachability(root, violations); check_graphql_connection_guards(root, warnings)
-    check_rest_pagination_guards(root, warnings); check_hidden_text_encoded_literals(root, violations)
-    check_gh_rate_pool_sizing(root, violations); check_error_class_prefixes(root, warnings)
-    check_ownership_gate_claim_owner(root, violations); check_persistence_classes(root, violations)
-    check_cross_package_require(root, violations); check_entity_read_count_assertions(root, violations)
-    check_convergence_budget_caps(root, violations); check_github_devloop_name_only_path_helper(root, violations)
-    for message in check_repo_ingress.scoped_file_watch_ingress_messages(root, packages_root(root), read_text, rel):
-        add(violations, "G13", message)
-    check_no_permission_control(root, violations)
-    check_gh_git_adapter_ratchet(root, violations)
-    check_code_dedup_ratchet(root, violations)
-    check_std_dependency_model(root, violations, warnings)
-    for message in check_repo_content_truncation.repository_messages(root, packages_root(root), read_text, rel): add(violations, "G-CONTENT-TRUNCATION", message)
-    if (root / ".claude/skills/dogfood-github-devloop/dogfood.sh").exists(): __import__("check_repo_dogfood_boundary").check(root, violations, add)
-    for message in check_repo_coverage.repository_messages(root): add(violations, "G-COVERAGE", message)
-    for message in check_repo_forward_direct.repository_messages(root): add(violations, "G-FORWARD-DIRECT", message)
-    for message in check_repo_producer_liveness.repository_messages(root): add(violations, "G-PRODUCER-LIVENESS", message)
-    for message in check_repo_namespaced_queue.repository_messages(root, packages_root(root), read_text, rel, strip_lua_comments_and_strings, is_unmasked_range): add(violations, "G-NAMESPACED-QUEUE", message)
-    for message in check_repo_saga_split.repository_messages(root): add(violations, "G-SAGA-SPLIT", message)
-    for rule, message in [("G-SPAN", m) for m in check_repo_span.repository_messages(root)] + [("G-MONOTONE-GATE", m) for m in check_repo_monotone_gate.repository_messages(root)] + [("G-MONOTONE-GATE-DSL", m) for m in check_repo_monotone_gate_dsl.repository_messages(root)]: add(violations, rule, message)
-    check_saga_handler_ratchet(root, violations, warnings)
-    sources = {rel(root, path): read_text(path) for path in sorted(packages_root(root).glob("*/departments/*/main.lua")) if path.is_file()}
-    for message in check_repo_saga_head.violations(sources, strip_lua_comments_and_strings): add(violations, "G-SAGA-HEAD", message)
+def main(argv: list[str] | None = None) -> int:
+    config = check_repo_config.parse_args(argv); violations: list[str] = []; warnings: list[str] = []
+    __import__("check_repo_runner").run(sys.modules[__name__], config, violations, warnings)
     for warning in warnings: print(f"warning: {warning}", file=sys.stderr)
     if violations:
         print("repository check failed:", file=sys.stderr)
