@@ -1,6 +1,7 @@
 local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local t = h.t
+require("departments.observability.main")
 local topology = require("departments.observability.topology")
 
 local function split_id(canonical)
