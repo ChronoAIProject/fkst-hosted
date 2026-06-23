@@ -300,6 +300,10 @@ def sources(root: Path) -> dict[str, str]:
 
 def repository_messages(root: Path) -> list[str]:
     source_map = sources(root)
-    transition_sources = {path: text for path, text in source_map.items() if "/core/restart/transitions/" in path}
+    transition_sources = {
+        path: text
+        for path, text in source_map.items()
+        if "/core/restart/transitions/" in path or "/restart/issue/transitions/" in path
+    }
     department_sources = {path: text for path, text in source_map.items() if "/departments/" in path}
     return completion_fact_name_messages(source_map) + spawn_start_messages(transition_sources, department_sources, source_map)
