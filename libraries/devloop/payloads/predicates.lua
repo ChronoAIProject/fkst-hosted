@@ -169,17 +169,24 @@ local function state_marker_comment_verified(M, repo, hand_off)
     return false, "comment-author-untrusted"
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
+  local saw_proposal_marker = false
   for marker in M._comment_body(comment):gmatch(marker_pattern) do
     local marker_proposal = marker:match('proposal="([^"]+)"')
     local marker_state = marker:match('state="([^"]+)"')
     local marker_version = marker:match('version="([^"]*)"')
     local marker_stage_rank = marker:match('stage_rank="([^"]+)"')
+    if marker_proposal == hand_off.proposal_id then
+      saw_proposal_marker = true
+    end
     if marker_proposal == hand_off.proposal_id
       and marker_state == hand_off.state
       and marker_version == hand_off.marker_version
       and tonumber(marker_stage_rank) == M.stage_rank(hand_off.state) then
       return true, "verified"
     end
+  end
+  if saw_proposal_marker then
+    return false, "state-marker-mismatch"
   end
   return false, "state-marker-missing"
 end

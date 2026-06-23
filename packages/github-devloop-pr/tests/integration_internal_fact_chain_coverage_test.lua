@@ -401,6 +401,11 @@ return {
     local approve_comment = find_raise(approved.raises, "github-proxy.github_pr_comment_request").payload
     t.eq(find_raise(approved.raises, "devloop_merge_ready"), nil)
     t.eq(approve_comment.handoff.kind, "github-devloop.merge_ready")
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_internal_chain_merge_ready'", {
+      stdout = '{"body":"' .. h.json_string(core.state_marker(approve_comment.handoff.proposal_id, "merge-ready", approve_comment.handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
     local acknowledged = t.run_department("departments/comment_handoff/main.lua", {
       queue = "github-proxy.github_comment_written",
       payload = {

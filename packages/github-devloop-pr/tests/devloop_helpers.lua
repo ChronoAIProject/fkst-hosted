@@ -223,6 +223,25 @@ function helpers.run_comment_handoff_from_request(request, comment_id, name)
   if entity ~= nil and entity.issue_number ~= nil then
     mock_default_issue_claim(entity.repo, entity.issue_number)
   end
+  if request ~= nil
+    and request.handoff ~= nil
+    and (request.handoff.kind == "github-devloop.reviewing"
+      or request.handoff.kind == "github-devloop.fixing"
+      or request.handoff.kind == "github-devloop.merge_ready"
+      or request.handoff.kind == "github-devloop.blocked"
+      or request.handoff.kind == "github-devloop.closed_unmerged") then
+    local selected_comment_id = comment_id or "IC_handoff_1"
+    local state = request.handoff.kind == "github-devloop.merge_ready" and "merge-ready"
+      or request.handoff.kind == "github-devloop.fixing" and "fixing"
+      or request.handoff.kind == "github-devloop.blocked" and "blocked"
+      or request.handoff.kind == "github-devloop.closed_unmerged" and "closed-unmerged"
+      or "reviewing"
+    helpers.t.mock_command("gh api --method GET 'repos/" .. tostring(request.repo) .. "/issues/comments/" .. tostring(selected_comment_id) .. "'", {
+      stdout = '{"body":"' .. helpers.json_string(helpers.core.state_marker(request.handoff.proposal_id, state, request.handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   return helpers.t.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
     payload = {

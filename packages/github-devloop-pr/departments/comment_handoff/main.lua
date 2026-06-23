@@ -9,6 +9,7 @@ local spec = {
     "devloop_merge_ready",
     "devloop_fixing",
     "devloop_reviewing",
+    "github-proxy.github_issue_label_request",
   },
   fanout = { "github-proxy.github_comment_written" },
   stall_window = "30s",
@@ -23,6 +24,20 @@ local function supported_handoff(payload)
   end
   local handoff = payload.handoff
   if handoff.kind == "github-devloop.reviewing"
+    and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
+    and core.is_safe_pr_number(handoff.pr_number)
+    and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
+    return handoff
+  end
+  if handoff.kind == "github-devloop.blocked"
+    and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
+    and core.is_safe_pr_number(handoff.pr_number)
+    and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
+    return handoff
+  end
+  if handoff.kind == "github-devloop.closed_unmerged"
     and core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
     and core.is_safe_pr_number(handoff.pr_number)
     and core._is_bounded_string(handoff.version, core._max_dedup_len)
@@ -81,6 +96,96 @@ local function issue_claim_ok(payload, handoff)
   return core.verify_pr_review_issue_claim("comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id)
 end
 
+local function verified_pr_state(repo, handoff, comment_id, state)
+  local expected = {
+    proposal_id = handoff.proposal_id,
+    state = state,
+    marker_version = handoff.version,
+    event_version = handoff.version,
+  }
+  local marker_hand_off = {
+    kind = "own-state-marker",
+    proposal_id = handoff.proposal_id,
+    state = state,
+    marker_version = handoff.version,
+    event_version = handoff.version,
+    stage_rank = core.stage_rank(state),
+    comment_id = comment_id,
+  }
+  return core.verified_hand_off_state(repo, marker_hand_off, expected)
+end
+
+local function retryable_visibility_reason(reason)
+  return reason == "state-marker-missing" or reason == "comment-get-failed"
+end
+
+local function handoff_state(handoff)
+  if handoff.kind == "github-devloop.reviewing" then
+    return "reviewing"
+  end
+  if handoff.kind == "github-devloop.blocked" then
+    return "blocked"
+  end
+  if handoff.kind == "github-devloop.closed_unmerged" then
+    return "closed-unmerged"
+  end
+  if handoff.kind == "github-devloop.fixing" then
+    return "fixing"
+  end
+  if handoff.kind == "github-devloop.merge_ready" then
+    return "merge-ready"
+  end
+  return nil
+end
+
+local function issue_number_for_label(payload, handoff, repo)
+  if payload.issue_number ~= nil then
+    return payload.issue_number
+  end
+  local entity = core.parse_entity_proposal_id(handoff.proposal_id)
+  if entity ~= nil and entity.kind == "issue" and entity.repo == repo then
+    return entity.issue_number
+  end
+  return nil
+end
+
+local function maybe_raise_pr_label(payload, handoff)
+  local state = handoff_state(handoff)
+  if state == nil then
+    return
+  end
+  local repo = payload.repo
+  if repo == nil then
+    repo = select(1, core.parse_pr_source_ref(handoff.source_ref))
+  end
+  if repo == nil then
+    error("github-devloop: PR label handoff missing repo")
+  end
+  local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, state)
+  if verified_state == nil then
+    if retryable_visibility_reason(reason) then
+      core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "retry-pending(" .. tostring(state) .. " marker not visible)", tostring(state) .. " marker comment write was acknowledged but exact marker is not visible")
+      error("github-devloop: " .. tostring(state) .. " marker not visible for PR label handoff; retrying")
+    end
+    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR label precondition")
+    return
+  end
+
+  local label_request = core.build_reconcile_pr_state_label_request(
+    repo,
+    issue_number_for_label(payload, handoff, repo),
+    handoff.pr_number,
+    handoff.proposal_id,
+    verified_state.state,
+    verified_state.version,
+    handoff.source_ref
+  )
+  core.log_apply("comment_handoff", handoff.proposal_id, verified_state.state, verified_state.version, { add = label_request.add_labels, remove = label_request.remove_labels }, {
+    "github-proxy.github_issue_label_request",
+  })
+  core.log_raise("comment_handoff", handoff.proposal_id, "github-proxy.github_issue_label_request", label_request)
+end
+
 local function act_handoff(event)
   local payload = event.payload or {}
   local handoff = supported_handoff(payload)
@@ -99,6 +204,7 @@ local function act_handoff(event)
     }, handoff.source_ref)
     core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "merge-ready", version = handoff.version }, "comment-written", "devloop_merge_ready", "applied(own-write-comment-id)", "merge-ready marker comment write was acknowledged")
     core.log_raise("comment_handoff", handoff.proposal_id, "devloop_merge_ready", merge_ready)
+    maybe_raise_pr_label(payload, handoff)
     return
   end
 
@@ -121,6 +227,23 @@ local function act_handoff(event)
     end
     core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "fixing", version = handoff.version }, "comment-written", "devloop_fixing", "applied(own-write-comment-id)", "fixing marker comment write was acknowledged")
     core.log_raise("comment_handoff", handoff.proposal_id, "devloop_fixing", fixing)
+    maybe_raise_pr_label(payload, handoff)
+    return
+  end
+
+  if handoff.kind == "github-devloop.blocked" then
+    if not issue_claim_ok(payload, handoff) then
+      return
+    end
+    maybe_raise_pr_label(payload, handoff)
+    return
+  end
+
+  if handoff.kind == "github-devloop.closed_unmerged" then
+    if not issue_claim_ok(payload, handoff) then
+      return
+    end
+    maybe_raise_pr_label(payload, handoff)
     return
   end
 
@@ -134,6 +257,7 @@ local function act_handoff(event)
   }, handoff.pr_number, handoff.source_ref, handoff.version)
   core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "reviewing", version = handoff.version }, "comment-written", "devloop_reviewing", "applied(own-write-comment-id)", "reviewing marker comment write was acknowledged")
   core.log_raise("comment_handoff", handoff.proposal_id, "devloop_reviewing", reviewing)
+  maybe_raise_pr_label(payload, handoff)
 end
 
 return saga.department(spec, {

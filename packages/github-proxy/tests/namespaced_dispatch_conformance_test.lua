@@ -68,7 +68,7 @@ local function label_payload()
     repo = "owner/x",
     target_kind = "issue",
     issue_number = 42,
-    add_labels = { "fkst-dev:enabled" },
+    add_labels = { "adapter-enabled" },
     remove_labels = {},
     dedup_key = "github-proxy/namespaced/label",
     source_ref = source_ref(),
@@ -116,7 +116,7 @@ end
 local function mock_env()
   h.mock_repo_env("owner/x")
   h.mock_write_env("")
-  h.mock_replay_budget_env("")
+  h.mock_proxy_replay_budget_env("")
 end
 
 local function mock_issue_view(title)
@@ -149,7 +149,7 @@ local function opts_for_case(path, queue)
         FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/github-proxy/namespaced-" .. tostring(queue):gsub("[^%w._-]", "_"),
         FKST_GITHUB_REPO = "owner/x",
         FKST_GITHUB_WRITE = "",
-        FKST_DEVLOOP_REPLAY_BUDGET = "",
+        FKST_GITHUB_PROXY_REPLAY_BUDGET = "",
       },
     },
     before_replay = function()

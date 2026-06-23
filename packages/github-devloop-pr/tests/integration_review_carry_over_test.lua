@@ -10,7 +10,22 @@ local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
 local count_calls = h.count_calls
 
+local function handoff_state(handoff)
+  if handoff.kind == "github-devloop.merge_ready" then
+    return "merge-ready"
+  end
+  if handoff.kind == "github-devloop.fixing" then
+    return "fixing"
+  end
+  return "reviewing"
+end
+
 local function run_comment_handoff_from_request(request, comment_id, name)
+  t.mock_command("gh api --method GET 'repos/" .. tostring(request.repo) .. "/issues/comments/" .. tostring(comment_id) .. "'", {
+    stdout = '{"body":"' .. h.json_string(core.state_marker(request.handoff.proposal_id, handoff_state(request.handoff), request.handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
   return t.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
     payload = {

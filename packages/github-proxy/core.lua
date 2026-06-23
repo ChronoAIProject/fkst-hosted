@@ -1,7 +1,5 @@
 local M = {}
 local env = require("workflow.env")
-local source_ref = require("contract.source_ref")
-local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
 
 require("core.error_facts").install(M)
@@ -39,37 +37,20 @@ require("core.rest_view").install(M)
 require("core.entity_view").install(M)
 require("core.gh_rate").install(M)
 require("core.comment").install(M, shared_helpers)
+require("core.marker_guard").install(M)
 require("core.claims").install(M)
 
 local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,
   FKST_GITHUB_WRITE = true,
-  FKST_DEVLOOP_REPLAY_BUDGET = true,
+  FKST_GITHUB_PROXY_POLL_LABEL_PREFIX = true,
+  FKST_GITHUB_PROXY_REPLAY_BUDGET = true,
   FKST_DEBUG_STAMP = true,
 }
 local trusted_bot_login = nil
-local max_marker_value_len = 300
-local state_stage_rank = {
-  thinking = 100,
-  ready = 500,
-  implementing = 600,
-  ["pr-open"] = 650,
-  reviewing = 675,
-  ["merge-ready"] = 690,
-  merging = 695,
-  fixing = 700,
-  ["review-meta"] = 710,
-  ["impl-failed"] = 750,
-  blocked = 800,
-  merged = 900,
-}
 
 local is_git_ref_safe = forge_strings.is_git_ref_safe
-
-local function is_safe_marker_value(value)
-  return type(value) == "string" and value ~= "" and #value <= max_marker_value_len
-end
 
 local function is_git_sha(value)
   return type(value) == "string" and value:find("^[0-9A-Fa-f]+$") ~= nil and #value >= 6 and #value <= 64
@@ -115,8 +96,8 @@ function M.write_with_outbound_log(payload, target, log_outbound)
   return written, repo
 end
 
-function M.devloop_replay_budget(exec)
-  local ok, value = pcall(M.read_env, "FKST_DEVLOOP_REPLAY_BUDGET", exec)
+function M.github_proxy_replay_budget(exec)
+  local ok, value = pcall(M.read_env, "FKST_GITHUB_PROXY_REPLAY_BUDGET", exec)
   if not ok then
     return 10
   end
@@ -126,9 +107,26 @@ function M.devloop_replay_budget(exec)
   value = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
   local parsed = tonumber(value)
   if parsed == nil or parsed ~= math.floor(parsed) or parsed < 1 or parsed > 100 then
-    error("github-proxy: invalid FKST_DEVLOOP_REPLAY_BUDGET")
+    error("github-proxy: invalid FKST_GITHUB_PROXY_REPLAY_BUDGET")
   end
   return parsed
+end
+
+function M.github_proxy_poll_label_prefixes(exec)
+  local ok, value = pcall(M.read_env, "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX", exec)
+  if not ok or value == nil then
+    return {}
+  end
+  local prefixes = {}
+  local seen = {}
+  for raw in tostring(value):gmatch("[^,]+") do
+    local prefix = raw:gsub("^%s+", ""):gsub("%s+$", "")
+    if prefix ~= "" and not seen[prefix] then
+      seen[prefix] = true
+      table.insert(prefixes, prefix)
+    end
+  end
+  return prefixes
 end
 
 require("forge.github_debug_stamp").install(M)
@@ -355,186 +353,6 @@ function M.parse_issue_state(gh_json_stdout)
   }
 end
 
-local function trusted_comments(comments, bot_login)
-  local result = {}
-  if type(comments) ~= "table" then
-    return result
-  end
-  for _, comment in ipairs(comments) do
-    if M._comment_author_login(comment) == bot_login then
-      table.insert(result, comment)
-    end
-  end
-  return result
-end
-
-local function version_updated_at(version)
-  local updated_at = ""
-  for found in tostring(version or ""):gmatch("(%d%d%d%d%-%d%d%-%d%dT%d%d[%-:]%d%d[%-:]%d%dZ)") do
-    updated_at = found:gsub(":", "-")
-  end
-  return updated_at
-end
-
-local function version_loop_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]loop[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
-end
-
-local function version_fix_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("/fix/(%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
-end
-
-local function version_review_meta_action_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("/review%-meta%-action/(%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
-end
-
-local function version_primary_key(version)
-  local updated_at = version_updated_at(version)
-  if updated_at ~= "" then
-    return updated_at
-  end
-  return source_ref.version_order_key(version)
-end
-
-local function version_sort_key(version, stage_rank)
-  return {
-    primary = version_primary_key(version),
-    loop_n = version_loop_round(version),
-    fix_n = version_fix_round(version),
-    review_meta_action_n = version_review_meta_action_round(version),
-    stage_rank = tonumber(stage_rank) or 0,
-  }
-end
-
-local function marker_stage_rank(marker, state)
-  return tonumber(marker:match('stage_rank="(%d+)"')) or state_stage_rank[state] or 0
-end
-
-local function compare_state_marker(current, candidate)
-  if current == nil then
-    return true
-  end
-  local current_key = version_sort_key(current.version, current.stage_rank)
-  local candidate_key = version_sort_key(candidate.version, candidate.stage_rank)
-  if candidate_key.primary ~= current_key.primary then
-    return candidate_key.primary > current_key.primary
-  end
-  if candidate_key.loop_n ~= current_key.loop_n then
-    return candidate_key.loop_n > current_key.loop_n
-  end
-  if candidate_key.fix_n ~= current_key.fix_n then
-    return candidate_key.fix_n > current_key.fix_n
-  end
-  if candidate_key.review_meta_action_n ~= current_key.review_meta_action_n then
-    return candidate_key.review_meta_action_n > current_key.review_meta_action_n
-  end
-  if candidate.version == current.version
-    and ((current.state == "ready" and candidate.state == "blocked") or (current.state == "blocked" and candidate.state == "ready")) then
-    return candidate.state == "blocked"
-  end
-  if candidate_key.stage_rank ~= current_key.stage_rank then
-    return candidate_key.stage_rank > current_key.stage_rank
-  end
-  return false
-end
-
-function M.current_devloop_state(comments, proposal_id, bot_login)
-  if not is_safe_marker_value(proposal_id) then
-    return { state = nil, version = nil, stage_rank = 0 }
-  end
-  local current = nil
-  local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(trusted_comments(comments, bot_login)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_state = marker:match('state="([^"]+)"')
-      local marker_version = marker:match('version="([^"]*)"')
-      if marker_proposal == proposal_id and state_stage_rank[marker_state] ~= nil then
-        local candidate = {
-          state = marker_state,
-          version = marker_version,
-          stage_rank = marker_stage_rank(marker, marker_state),
-        }
-        if compare_state_marker(current, candidate) then
-          current = candidate
-        end
-      end
-    end
-  end
-  return current or { state = nil, version = nil, stage_rank = 0 }
-end
-
-function M.devloop_implementing_fact(comments, proposal_id, impl_version, bot_login)
-  if not is_safe_marker_value(proposal_id) or not is_safe_marker_value(impl_version) then
-    return nil
-  end
-  local marker_pattern = "<!%-%- fkst:github%-devloop:implementing:v1.-%-%->"
-  for _, comment in ipairs(trusted_comments(comments, bot_login)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_dedup = marker:match('dedup="([^"]*)"')
-      local marker_branch = marker:match('branch="([^"]+)"')
-      local marker_head_sha = marker:match('head_sha="([^"]+)"')
-      local marker_base_branch = marker:match('base_branch="([^"]+)"')
-      local marker_base_sha = marker:match('base_sha="([^"]+)"')
-      if marker_proposal == proposal_id
-        and marker_dedup == tostring(impl_version)
-        and is_git_ref_safe(marker_branch)
-        and is_git_sha(marker_head_sha)
-        and is_git_ref_safe(marker_base_branch)
-        and (marker_base_sha == nil or is_git_sha(marker_base_sha)) then
-        return {
-          proposal_id = marker_proposal,
-          impl_version = marker_dedup,
-          branch = marker_branch,
-          head_sha = marker_head_sha,
-          base_branch = marker_base_branch,
-          base_sha = marker_base_sha,
-        }
-      end
-    end
-  end
-  return nil
-end
-
-function M.has_devloop_pr_open_marker(comments, proposal_id, impl_version, bot_login)
-  if not is_safe_marker_value(proposal_id) or not is_safe_marker_value(impl_version) then
-    return false
-  end
-  local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(trusted_comments(comments, bot_login)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
-      if marker:match('proposal="([^"]+)"') == proposal_id
-        and marker:match('state="([^"]+)"') == "pr-open"
-        and marker:match('version="([^"]*)"') == tostring(impl_version) then
-        return true
-      end
-    end
-  end
-  return false
-end
-
 function M.parse_issue_list(gh_json_stdout)
   return M.parse_entity_list(gh_json_stdout, "issue")
 end
@@ -726,26 +544,21 @@ function M.github_label_list(repo, timeout)
   return M.github().label_list(repo, timeout or 30)
 end
 
-local fkst_dev_label_colors = {
-  ["fkst-dev:enabled"] = "1D76DB",
-  ["fkst-dev:tracking"] = "C5DEF5",
-  ["fkst-dev:thinking"] = "8250DF",
-  ["fkst-dev:ready"] = "0E8A16",
-  ["fkst-dev:implementing"] = "FBCA04",
-  ["fkst-dev:pr-open"] = "006B75",
-  ["fkst-dev:reviewing"] = "5319E7",
-  ["fkst-dev:fixing"] = "D93F0B",
-  ["fkst-dev:merge-ready"] = "2EA44F",
-  ["fkst-dev:merging"] = "C2E0C6",
-  ["fkst-dev:merged"] = "8957E5",
-  ["fkst-dev:impl-failed"] = "B60205",
-  ["fkst-dev:blocked"] = "1B1F23",
-  ["fkst-dev:blocked-on-dependency"] = "E99695",
-  ["fkst-dev:review-meta"] = "BFD4F2",
-}
+local default_label_color = "ededed"
 
-function M.github_label_create(repo, label, timeout)
-  local color = fkst_dev_label_colors[label] or "ededed"
+local function normalize_label_color(value)
+  if type(value) ~= "string" then
+    return default_label_color
+  end
+  local color = value:gsub("^%s+", ""):gsub("%s+$", ""):gsub("^#", "")
+  if color:match("^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$") ~= nil then
+    return color:upper()
+  end
+  return default_label_color
+end
+
+function M.github_label_create(repo, label, timeout, color)
+  color = normalize_label_color(color)
   return M.github().label_create(repo, label, color, timeout or 30)
 end
 
@@ -824,13 +637,14 @@ function M.is_gh_label_already_exists(result)
     or lower:find("name already exists", 1, true) ~= nil
 end
 
-function M.ensure_repo_label(repo, label, existing_labels)
+function M.ensure_repo_label(repo, label, existing_labels, label_colors)
   if existing_labels[label] then
     return true
   end
 
   local ok, result_or_error = M.gh_exec_result(function(timeout)
-    return M.github_label_create(repo, label, timeout)
+    local color = type(label_colors) == "table" and label_colors[label] or nil
+    return M.github_label_create(repo, label, timeout, color)
   end, 30, "label create")
   if not ok then
     local raw_result = result_or_error.result
@@ -850,7 +664,7 @@ function M.github_pr_edit_labels(repo, pr_number, add_labels, remove_labels, tim
   return M.github().pr_edit_labels(repo, pr_number, add_labels, remove_labels, timeout or 30)
 end
 
-function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_labels)
+function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_labels, label_colors)
   local add = normalized_unique_labels(add_labels)
   local remove = normalized_unique_labels(remove_labels)
   if #add == 0 and #remove == 0 then
@@ -863,7 +677,7 @@ function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_lab
   local existing = label_set(M.parse_repo_labels(listed.stdout))
 
   for _, label in ipairs(add) do
-    M.ensure_repo_label(repo, label, existing)
+    M.ensure_repo_label(repo, label, existing, label_colors)
   end
 
   local safe_remove = {}
@@ -905,8 +719,8 @@ function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_lab
   return true
 end
 
-function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels)
-  return M.apply_entity_labels(repo, "issue", issue_number, add_labels, remove_labels)
+function M.apply_issue_labels(repo, issue_number, add_labels, remove_labels, label_colors)
+  return M.apply_entity_labels(repo, "issue", issue_number, add_labels, remove_labels, label_colors)
 end
 
 return M

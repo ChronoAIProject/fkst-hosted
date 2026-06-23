@@ -17,6 +17,17 @@ function M.attach_reviewing_handoff(request, proposal_id, pr_number, version, so
   return request
 end
 
+function M.attach_blocked_handoff(request, proposal_id, pr_number, version, source_ref)
+  request.handoff = {
+    kind = "github-devloop.blocked",
+    proposal_id = proposal_id,
+    pr_number = pr_number,
+    version = version,
+    source_ref = M.normalize_source_ref(source_ref),
+  }
+  return request
+end
+
 function M.attach_fixing_handoff(request, proposal_id, pr_number, version, review_fact, source_ref)
   local normalized = M.build_devloop_fixing_payload({
     proposal_id = proposal_id,
@@ -132,7 +143,7 @@ function M.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, inte
   local blocked_version = M.pr_base_unmanaged_blocked_version(origin.impl_version)
   local state_marker = M.state_marker(origin.proposal_id, "blocked", blocked_version)
   local reason_marker = M.pr_base_unmanaged_marker(origin.proposal_id, pr_number, origin.base_branch, integration_branch)
-  return M.build_entity_comment_request({
+  return M.attach_blocked_handoff(M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -151,7 +162,7 @@ function M.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, inte
     tostring(pr_number),
     tostring(origin.base_branch),
     tostring(integration_branch),
-  }), source_ref)
+  }), source_ref), origin.proposal_id, pr_number, blocked_version, source_ref)
 end
 
 function M.build_review_result_comment_request(repo, issue_number, issue_proposal_id, issue_version, reached, source_ref)

@@ -23,7 +23,7 @@ return {
     t.eq(source_ref.version_order_key("consensus:plain-version"), "plain-version")
     t.eq(source_ref.version_order_key("ready/consensus-plain-version"), "plain-version")
     t.eq(
-      source_ref.version_order_key("consensus:github-devloop/issue/1/intake/2026-06-17T22:18:19Z"),
+      source_ref.version_order_key("consensus:generic-workflow/issue/1/intake/2026-06-17T22:18:19Z"),
       "2026-06-17T22-18-19Z/loop/000000000000"
     )
     t.eq(
@@ -40,8 +40,19 @@ return {
     )
     t.eq(
       source_ref.version_order_key("2026-06-17T22:18:19Z/review-meta-action/2"),
-      "2026-06-17T22-18-19Z/loop/000000000000/review-meta-action/2"
+      "2026-06-17T22-18-19Z/loop/000000000000/review-meta-action/000000000002"
     )
     t.eq(source_ref.version_order_key(nil), "")
+  end,
+
+  test_version_order_key_pads_every_numeric_run_generically = function()
+    local fix_9 = source_ref.version_order_key("2026-06-17T22:18:19Z/fix/9")
+    local fix_10 = source_ref.version_order_key("2026-06-17T22:18:19Z/fix/10")
+    local review_loop_2 = source_ref.version_order_key("2026-06-17T22:18:19Z/review-loop/2")
+
+    t.eq(fix_9, "2026-06-17T22-18-19Z/loop/000000000000/fix/000000000009")
+    t.eq(fix_10, "2026-06-17T22-18-19Z/loop/000000000000/fix/000000000010")
+    t.eq(review_loop_2, "2026-06-17T22-18-19Z/loop/000000000000/review-loop/000000000002")
+    t.is_true(fix_10 > fix_9)
   end,
 }

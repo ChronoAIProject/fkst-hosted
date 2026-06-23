@@ -24,6 +24,7 @@ The package does not derive or create the integration branch. Host env supplies 
 FKST_GITHUB_REPO=ChronoAIProject/fkst-packages
 FKST_GITHUB_WRITE=1
 FKST_GITHUB_BOT_LOGIN=ElonSG                       # this host's bot login = the <device> identity
+FKST_GITHUB_PROXY_POLL_LABEL_PREFIX=fkst-dev:       # let the generic adapter replay lifecycle-managed labels
 FKST_DEVLOOP_UPSTREAM_BRANCH=dev
 FKST_DEVLOOP_INTEGRATION_BRANCH=integration-ElonSG  # integration-<bot-login>, one per machine
 FKST_DEVLOOP_ROLLUP_MERGE=auto
@@ -57,6 +58,7 @@ Run these steps once on each additional machine:
    export FKST_GITHUB_REPO=ChronoAIProject/fkst-packages
    export FKST_GITHUB_WRITE=1
    export FKST_GITHUB_BOT_LOGIN="$DEVICE"
+   export FKST_GITHUB_PROXY_POLL_LABEL_PREFIX=fkst-dev:
    export FKST_DEVLOOP_UPSTREAM_BRANCH=dev
    export FKST_DEVLOOP_INTEGRATION_BRANCH="integration-$DEVICE"
    export FKST_DEVLOOP_ROLLUP_MERGE=auto

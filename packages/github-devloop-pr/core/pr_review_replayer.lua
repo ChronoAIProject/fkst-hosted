@@ -28,20 +28,17 @@ local function mark_child_closed_unmerged(dept, issue, state, proposal_id, link,
     tostring(version),
     tostring(pr_number),
   }), source_ref)
-  local label_request = M.build_reconcile_pr_state_label_request(
-    issue.repo,
-    issue.number,
-    pr_number,
-    proposal_id,
-    "closed-unmerged",
-    version,
-    source_ref
-  )
+  comment_request.handoff = {
+    kind = "github-devloop.closed_unmerged",
+    proposal_id = proposal_id,
+    pr_number = pr_number,
+    version = version,
+    source_ref = source_ref,
+  }
   M.log_cas_decision(dept, proposal_id, state, state and state.state or "pr-open", "closed-unmerged", outcome, reason)
   local add_labels, remove_labels = M.state_label_changes("closed-unmerged")
   return tools.raise_effects(dept, proposal_id, "closed-unmerged", version, { add = add_labels, remove = remove_labels }, {
     { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
-    { queue = "github-proxy.github_issue_label_request", payload = label_request },
   })
 end
 

@@ -211,23 +211,46 @@ local function marker_attr(marker, name)
   return tostring(marker or ""):match(name .. '="([^"]*)"')
 end
 
-local function timeout_attempt_marker_round(body)
+local function marker_name(marker)
+  return tostring(marker or ""):match("^%s*<!%-%-%s*([^%s>]+)")
+end
+
+local function round_marker_family(replace_marker)
+  local name = marker_name(replace_marker)
+  if name == nil then
+    return nil
+  end
+  local family = name:gsub(":latest:v%d+$", ":")
+  if family == name then
+    return nil
+  end
+  return family
+end
+
+local function marker_round(body, family)
+  if family == nil then
+    return nil
+  end
   local max_seen = nil
-  for marker in tostring(body or ""):gmatch("<!%-%- fkst:github%-devloop:timeout%-attempt:v[12].-%-%->") do
-    local round = tonumber(marker_attr(marker, "round"))
-    if round ~= nil and round >= 1 and (max_seen == nil or round > max_seen) then
-      max_seen = round
+  for marker in tostring(body or ""):gmatch("<!%-%-%s*.-%-%->") do
+    local name = marker_name(marker)
+    if name ~= nil and name:sub(1, #family) == family then
+      local round = tonumber(marker_attr(marker, "round"))
+      if round ~= nil and round >= 1 and (max_seen == nil or round > max_seen) then
+        max_seen = round
+      end
     end
   end
   return max_seen
 end
 
-local function stale_timeout_attempt_replace(existing, next_body)
+local function stale_round_marker_replace(existing, next_body, replace_marker)
   if existing == nil then
     return false
   end
-  local existing_round = timeout_attempt_marker_round(M._comment_body(existing))
-  local next_round = timeout_attempt_marker_round(next_body)
+  local family = round_marker_family(replace_marker)
+  local existing_round = marker_round(M._comment_body(existing), family)
+  local next_round = marker_round(next_body, family)
   return existing_round ~= nil and next_round ~= nil and existing_round >= next_round
 end
 
@@ -388,8 +411,8 @@ function M.write_comment_request(payload, target)
     end
 
     local body = tostring(payload.body) .. "\n\n" .. M.comment_marker(payload.dedup_key) .. "\n"
-    if stale_timeout_attempt_replace(existing, body) then
-      log.info("github-proxy: timeout-attempt replacement is stale; keeping newer visible attempt")
+    if stale_round_marker_replace(existing, body, replace_marker) then
+      log.info("github-proxy: round-marker replacement is stale; keeping newer visible marker")
       return
     end
     body = M.with_github_debug_stamp(body, {

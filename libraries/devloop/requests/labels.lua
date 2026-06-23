@@ -1,6 +1,19 @@
 local S = {}
 
 function S.install(M, shared)
+  local function label_colors_for(add_labels)
+    local colors = {}
+    local has_color = false
+    for _, label in ipairs(add_labels or {}) do
+      local color = M._label_colors and M._label_colors[tostring(label)]
+      if color ~= nil then
+        colors[tostring(label)] = color
+        has_color = true
+      end
+    end
+    return has_color and colors or nil
+  end
+
 function M.build_label_request(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
   return M.attach_issue_claim({
     schema = "github-proxy.label.v1",
@@ -10,6 +23,7 @@ function M.build_label_request(repo, issue_number, add_labels, remove_labels, de
     issue_number = issue_number,
     add_labels = add_labels or {},
     remove_labels = remove_labels or {},
+    label_colors = label_colors_for(add_labels),
     dedup_key = dedup_key,
     source_ref = M.normalize_source_ref(source_ref),
   }, source_ref)

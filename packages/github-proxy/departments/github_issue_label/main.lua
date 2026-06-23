@@ -5,7 +5,6 @@ local spec = {
   consumes = { "github_issue_label_request" },
   published_seam = { "github_issue_label_request" },
   produces = {},
-  published_seam = { "github_issue_label_request" },
   stall_window = "30s",
 }
 
@@ -78,29 +77,22 @@ local function log_skip(payload, repo, add_labels, remove_labels, reason)
   core.log_line("info", "github_issue_label", "SKIP", fields)
 end
 
-local function guarded_pr_label_view(repo, pr_number, payload)
-  if payload.expected_proposal_id == nil
-    or payload.expected_state == nil
-    or payload.expected_version == nil then
-    log_skip(payload, repo, {}, {}, "missing-pr-state-guard")
-    return nil
+local function marker_guard_allows_write(payload, repo, kind, number, add_labels, remove_labels)
+  if payload.marker_guard == nil then
+    if payload.require_marker_guard == true or kind == "pr" then
+      log_skip(payload, repo, add_labels, remove_labels, "marker-guard-required")
+      return false
+    end
+    return true
   end
   local bot_login = core.assert_trusted_bot_configured()
-  local current = core.fetch_pr_view(repo, pr_number, nil, { fresh = true, marker_bearing = true })
-  if current.exit_code ~= 0 then
-    error("github-proxy: gh PR REST label guard failed")
+  local comments = core.fetch_marker_guard_comments(repo, kind, number)
+  local ok, reason = core.marker_guard_current(comments, payload.marker_guard, bot_login)
+  if not ok then
+    log_skip(payload, repo, add_labels, remove_labels, reason or "marker-guard-failed")
+    return false
   end
-  current = core.parse_entity_label_view(current.stdout)
-  local state = core.current_devloop_state(current.comments, tostring(payload.expected_proposal_id), bot_login)
-  if state.state == nil then
-    error("github-proxy: PR state marker not yet visible for label guard")
-  end
-  if tostring(state.state or "") ~= tostring(payload.expected_state)
-    or tostring(state.version or "") ~= tostring(payload.expected_version) then
-    log_skip(payload, repo, {}, {}, "pr-state-guard-mismatch")
-    return nil
-  end
-  return current
+  return true
 end
 
 local function act(event)
@@ -146,10 +138,10 @@ local function act(event)
       and not core.verify_issue_claim_before_write(payload, repo, number, "github_issue_label") then
       return
     end
+    if not marker_guard_allows_write(payload, repo, kind, number, add_labels, remove_labels) then
+      return
+    end
     if kind == "pr" then
-      if guarded_pr_label_view(repo, number, payload) == nil then
-        return
-      end
       if payload.issue_number ~= nil
         and not core.verify_issue_claim_before_write(payload, repo, payload.issue_number, "github_issue_label") then
         return
@@ -157,8 +149,8 @@ local function act(event)
     end
 
     local changed = kind == "pr"
-      and core.apply_entity_labels(repo, kind, number, add_labels, remove_labels)
-      or core.apply_issue_labels(repo, number, add_labels, remove_labels)
+      and core.apply_entity_labels(repo, kind, number, add_labels, remove_labels, payload.label_colors)
+      or core.apply_issue_labels(repo, number, add_labels, remove_labels, payload.label_colors)
     if changed ~= true then
       log_skip(payload, repo, add_labels, remove_labels, "no-effective-label-change")
     end

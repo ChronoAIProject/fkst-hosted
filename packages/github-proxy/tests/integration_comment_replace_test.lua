@@ -14,9 +14,9 @@ local function event(extra)
     schema = "github-proxy.v1",
     repo = "owner/x",
     pr_number = 7,
-    body = "Working: fix\n\n<!-- fkst:github-devloop:work-card:v1 proposal=\"github-devloop/issue/owner/x/42\" -->",
-    dedup_key = "work-card/github-devloop/issue/owner/x/42/fix/v1/running",
-    replace_marker = "<!-- fkst:github-devloop:work-card:v1 proposal=\"github-devloop/issue/owner/x/42\" -->",
+    body = "Working: fix\n\n<!-- fkst:generic-workflow:work-card:v1 proposal=\"generic-workflow/issue/owner/x/42\" -->",
+    dedup_key = "work-card/generic-workflow/issue/owner/x/42/fix/v1/running",
+    replace_marker = "<!-- fkst:generic-workflow:work-card:v1 proposal=\"generic-workflow/issue/owner/x/42\" -->",
     source_ref = {
       kind = "external",
       ref = "owner/x#pr/7",
@@ -48,11 +48,11 @@ local function mock_comment_edit_result(comment_id, exit_code, stderr)
 end
 
 local function timeout_attempt_body(round)
-  return "github-devloop timeout redrive attempt: implementing " .. tostring(round)
+  return "generic-workflow timeout redrive attempt: implementing " .. tostring(round)
     .. "\n\n"
-    .. '<!-- fkst:github-devloop:timeout-attempt:v2 proposal="github-devloop/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" round="' .. tostring(round) .. '" dedup="timeout-attempt:v2:implementing/producing_revision/gen-1/' .. tostring(round) .. '" source_ref_kind="external" source_ref="owner/x#issue/42" -->'
+    .. '<!-- fkst:generic-workflow:timeout-attempt:v2 proposal="generic-workflow/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" round="' .. tostring(round) .. '" dedup="timeout-attempt:v2:implementing/producing_revision/gen-1/' .. tostring(round) .. '" source_ref_kind="external" source_ref="owner/x#issue/42" -->'
     .. "\n"
-    .. '<!-- fkst:github-devloop:timeout-attempt:latest:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" -->'
+    .. '<!-- fkst:generic-workflow:timeout-attempt:latest:v1 proposal="generic-workflow/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" -->'
     .. "\n⟦AI:FKST⟧"
 end
 
@@ -165,7 +165,7 @@ return {
   test_timeout_attempt_replace_skips_stale_lower_round = function()
     mock_write_env("1")
     mock_bot_env()
-    local replace_marker = '<!-- fkst:github-devloop:timeout-attempt:latest:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" -->'
+    local replace_marker = '<!-- fkst:generic-workflow:timeout-attempt:latest:v1 proposal="generic-workflow/issue/owner/x/42" state="implementing" liveness_class_id="producing_revision" generation_key="gen-1" -->'
     mock_pr_comment_view({
       {
         databaseId = 123456,
@@ -177,7 +177,7 @@ return {
 
     local result = t.run_department("departments/github_pr_comment/main.lua", event({
       body = timeout_attempt_body(2),
-      dedup_key = "timeout-attempt:v2/github-devloop/issue/owner/x/42/implementing/producing_revision/gen-1/2",
+      dedup_key = "timeout-attempt:v2/generic-workflow/issue/owner/x/42/implementing/producing_revision/gen-1/2",
       replace_marker = replace_marker,
     }), opts("comment-replace-timeout-attempt-stale", {
       FKST_GITHUB_WRITE = "1",

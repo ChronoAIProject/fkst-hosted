@@ -95,8 +95,8 @@ return {
         body = "fkst reply",
         dedup_key = dedup_key,
         handoff = {
-          kind = "github-devloop.ready",
-          proposal_id = "github-devloop/issue/owner/x/42",
+          kind = "generic-workflow.ready",
+          proposal_id = "generic-workflow/issue/owner/x/42",
           version = "v1",
           source_ref = {
             kind = "external",

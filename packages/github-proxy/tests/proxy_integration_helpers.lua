@@ -44,7 +44,7 @@ end
 
 local function issue_list_json(updated_at, state)
   return string.format(
-    '[[{"number":42,"title":"Bridge issue","html_url":"https://github.example/owner/x/issues/42","updated_at":"%s","state":"%s","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]]\n',
+    '[[{"number":42,"title":"Bridge issue","html_url":"https://github.example/owner/x/issues/42","updated_at":"%s","state":"%s","labels":[{"name":"adapter-enabled"},{"name":"bug"}]}]]\n',
     updated_at or "2026-06-03T01:02:03Z",
     state or "open"
   )
@@ -83,8 +83,12 @@ local function mock_repo_env(value)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = value or "owner/x" })
 end
 
-local function mock_replay_budget_env(value)
-  t.mock_command('printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"', { stdout = value or "" })
+local function mock_proxy_replay_budget_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_PROXY_REPLAY_BUDGET"', { stdout = value or "" })
+end
+
+local function mock_poll_label_prefix_env(value)
+  t.mock_command('printf %s "$FKST_GITHUB_PROXY_POLL_LABEL_PREFIX"', { stdout = value or "adapter-" })
 end
 
 local function mock_write_env(value)
@@ -113,6 +117,7 @@ end
 
 local function mock_poll(issue_stdout, pr_stdout)
   mock_repo_env()
+  mock_poll_label_prefix_env()
   mock_issue_list(issue_stdout)
   mock_pr_list(pr_stdout)
 end
@@ -177,9 +182,9 @@ local function mock_comment_view(comments, author)
   if type(comments) ~= "table" then
     rendered = rendered
       .. ","
-      .. rest_comment_json('<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="implementing" version="v1" stage_rank="600" -->')
+      .. rest_comment_json('<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="implementing" version="v1" stage_rank="600" -->')
       .. ","
-      .. rest_comment_json('<!-- fkst:github-devloop:implementing:v1 proposal="github-devloop/issue/owner/x/42" dedup="v1" branch="devloop-owner-x-42-01HY" head_sha="abc123" base_branch="dev" base_sha="abc123" -->')
+      .. rest_comment_json('<!-- fkst:generic-workflow:implementing:v1 proposal="generic-workflow/issue/owner/x/42" dedup="v1" branch="generic-owner-x-42-01HY" head_sha="abc123" base_branch="dev" base_sha="abc123" -->')
   end
   t.mock_command("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100", {
     stdout = "[[" .. rendered .. "]]\n",
@@ -207,23 +212,6 @@ local function mock_label_view(labels)
   })
 end
 
-local function mock_pr_label_guard(labels, comments)
-  local rendered_labels = {}
-  for _, label in ipairs(labels or {}) do
-    table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
-  end
-  t.mock_command("gh api repos/owner/x/pulls/7", {
-    stdout = '{"head":{"ref":"devloop-owner-x-42-01HY","sha":"abc123","repo":{"full_name":"owner/x","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/x","owner":{"login":"owner"}}},"state":"open","updated_at":"2026-06-03T02:03:04Z","labels":[' .. table.concat(rendered_labels, ",") .. "]}\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100", {
-    stdout = "[[" .. render_rest_comments(comments or {}) .. "]]\n",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
 local function mock_comment_write()
   t.mock_command("gh api --method POST repos/owner/x/issues/42/comments --field body=/tmp/fkst-github-proxy-comment-owner_x-issue-42.md", {
     stdout = '{"id":123456,"body":"created","user":{"login":"fkst-test-bot"}}\n',
@@ -244,17 +232,17 @@ local function label_list_json(labels)
 end
 
 local default_repo_labels = {
-  "fkst-dev:enabled",
-  "fkst-dev:thinking",
-  "fkst-dev:ready",
-  "fkst-dev:implementing",
-  "fkst-dev:pr-open",
-  "fkst-dev:reviewing",
-  "fkst-dev:merge-ready",
-  "fkst-dev:fixing",
-  "fkst-dev:blocked",
-  "fkst-dev:blocked-on-dependency",
-  "fkst-dev:impl-failed",
+  "adapter-enabled",
+  "adapter-thinking",
+  "adapter-ready",
+  "adapter-implementing",
+  "adapter-pr-open",
+  "adapter-reviewing",
+  "adapter-merge-ready",
+  "adapter-fixing",
+  "adapter-blocked",
+  "adapter-blocked-on-dependency",
+  "adapter-impl-failed",
 }
 
 local function mock_repo_label_list(labels)
@@ -296,27 +284,27 @@ local function mock_pr_comment_write()
     stdout = "",
     exit_code = 0,
   })
-  t.mock_command("gh pr comment 7 --repo owner/x --body-file /tmp/fkst-github-proxy-intent-issue-create-decompose_github-devloop_issue_owner_x_42_v1_1_123.md", {
+  t.mock_command("gh pr comment 7 --repo owner/x --body-file /tmp/fkst-github-proxy-intent-issue-create-decompose_generic-workflow_issue_owner_x_42_v1_1_123.md", {
     stdout = "",
     exit_code = 0,
   })
-  t.mock_command("gh pr comment 7 --repo owner/x --body-file /tmp/fkst-github-proxy-created-issue-create-decompose_github-devloop_issue_owner_x_42_v1_1_123.md", {
+  t.mock_command("gh pr comment 7 --repo owner/x --body-file /tmp/fkst-github-proxy-created-issue-create-decompose_generic-workflow_issue_owner_x_42_v1_1_123.md", {
     stdout = "",
     exit_code = 0,
   })
-  t.mock_command("gh pr comment 7 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md", {
+  t.mock_command("gh pr comment 7 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-generic-owner-x-42-01HY-pr-comment.md", {
     stdout = "",
     exit_code = 0,
   })
-  t.mock_command("gh pr comment 9 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md", {
+  t.mock_command("gh pr comment 9 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-generic-owner-x-42-01HY-pr-comment.md", {
     stdout = "",
     exit_code = 0,
   })
-  t.mock_command("gh pr comment 10 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md", {
+  t.mock_command("gh pr comment 10 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-generic-owner-x-42-01HY-pr-comment.md", {
     stdout = "",
     exit_code = 0,
   })
-  t.mock_command("gh pr comment 11 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-devloop-owner-x-42-01HY-pr-comment.md", {
+  t.mock_command("gh pr comment 11 --repo owner/x --body-file /tmp/fkst-github-proxy-pr-open-owner_x-generic-owner-x-42-01HY-pr-comment.md", {
     stdout = "",
     exit_code = 0,
   })
@@ -430,12 +418,12 @@ local function capture_label_department_logs(department_path, event, write_env, 
 end
 
 local function long_dedup(suffix, total_len)
-  local prefix = "github-devloop/issue/owner/x/42/result/"
+  local prefix = "generic-workflow/issue/owner/x/42/result/"
   return prefix .. string.rep("v", total_len - #prefix - #suffix) .. suffix
 end
 
 local function reviewing_marker()
-  return '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="reviewing" version="v1" stage_rank="675" -->'
+  return '<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="reviewing" version="v1" stage_rank="675" -->'
 end
 
 
@@ -447,7 +435,8 @@ return {
   runtime_root = runtime_root,
   opts = opts,
   mock_repo_env = mock_repo_env,
-  mock_replay_budget_env = mock_replay_budget_env,
+  mock_proxy_replay_budget_env = mock_proxy_replay_budget_env,
+  mock_poll_label_prefix_env = mock_poll_label_prefix_env,
   mock_write_env = mock_write_env,
   mock_bot_env = mock_bot_env,
   mock_issue_list = mock_issue_list,
@@ -459,7 +448,6 @@ return {
   mock_comment_view = mock_comment_view,
   mock_comment_view_failure = mock_comment_view_failure,
   mock_label_view = mock_label_view,
-  mock_pr_label_guard = mock_pr_label_guard,
   mock_comment_write = mock_comment_write,
   mock_repo_label_list = mock_repo_label_list,
   mock_label_create = mock_label_create,

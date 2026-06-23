@@ -510,6 +510,7 @@ return {
 
     local label = core.build_implementing_label_request("owner/repo", "42", ready)
     t.eq(label.add_labels[1], "fkst-dev:implementing")
+    t.eq(label.label_colors["fkst-dev:implementing"], "FBCA04")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(label.remove_labels[2], "fkst-dev:ready")
     t.eq(label.remove_labels[3], "fkst-dev:pr-open")
@@ -530,6 +531,7 @@ return {
 
     local failed_label = core.build_impl_failed_label_request("owner/repo", "42", ready, "no-changes")
     t.eq(failed_label.add_labels[1], "fkst-dev:impl-failed")
+    t.eq(failed_label.label_colors["fkst-dev:impl-failed"], "B60205")
     t.eq(failed_label.remove_labels[1], "fkst-dev:thinking")
     t.eq(failed_label.remove_labels[2], "fkst-dev:ready")
     t.eq(failed_label.remove_labels[3], "fkst-dev:implementing")

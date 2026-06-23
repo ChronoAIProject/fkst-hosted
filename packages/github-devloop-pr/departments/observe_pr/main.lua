@@ -79,10 +79,10 @@ local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_
     return
   end
   local add_labels, remove_labels = core.state_label_reconcile_changes(current_pr.labels, state.state)
-  if #add_labels == 0 and #remove_labels == 0 then
+  local label_request = core.build_reconcile_pr_state_label_request(origin.repo, origin.issue_number, pr_number, origin.proposal_id, state.state, state.version, source_ref, current_pr.labels)
+  if (#add_labels == 0 and #remove_labels == 0) or not core.pr_state_label_request_guard_visible(current_pr.comments, label_request) then
     return
   end
-  local label_request = core.build_reconcile_pr_state_label_request(origin.repo, origin.issue_number, pr_number, origin.proposal_id, state.state, state.version, source_ref, current_pr.labels)
   core.log_apply("observe_pr", origin.proposal_id, state.state, state.version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_label_request",
   })
@@ -506,9 +506,7 @@ local function process_pr_event(event)
       return
     end
     if state.state == "pr-open" and tostring(current_pr.state or ""):lower() ~= "open" then
-      if replay_pr_local_state(origin, pr.number, current_pr, state, source_ref) then
-        maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
-      end
+      replay_pr_local_state(origin, pr.number, current_pr, state, source_ref)
       return
     end
     if transition ~= "apply" and transition ~= "idempotent" then
@@ -529,7 +527,6 @@ local function process_pr_event(event)
     }
     core.log_apply("observe_pr", origin.proposal_id, "reviewing", origin.impl_version, { add = {}, remove = {} }, raised)
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-    maybe_label_hints(origin, pr.number, current_pr, { state = "reviewing", version = origin.impl_version }, source_ref)
   end)
 end
 

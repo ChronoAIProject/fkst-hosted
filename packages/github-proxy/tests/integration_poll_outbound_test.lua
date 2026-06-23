@@ -6,7 +6,8 @@ local pr_list_json = h.pr_list_json
 local runtime_root = h.runtime_root
 local opts = h.opts
 local mock_repo_env = h.mock_repo_env
-local mock_replay_budget_env = h.mock_replay_budget_env
+local mock_proxy_replay_budget_env = h.mock_proxy_replay_budget_env
+local mock_poll_label_prefix_env = h.mock_poll_label_prefix_env
 local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local mock_issue_list = h.mock_issue_list
@@ -31,6 +32,14 @@ local long_dedup = h.long_dedup
 local reviewing_marker = h.reviewing_marker
 local issue_comment_create = "gh api --method POST repos/owner/x/issues/42/comments"
 
+local function mock_poll_env(replay_budget)
+  mock_repo_env()
+  mock_poll_label_prefix_env("adapter-")
+  if replay_budget ~= nil then
+    mock_proxy_replay_budget_env(replay_budget)
+  end
+end
+
 local function pr_json(number, updated_at, state)
   return string.format(
     '{"number":%d,"title":"PR %d","html_url":"https://github.example/owner/x/pull/%d","updated_at":"%s","state":"%s","labels":[{"name":"review"}]}',
@@ -53,7 +62,7 @@ end
 
 local function issue_json(number, updated_at)
   return string.format(
-    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"fkst-dev:enabled"}]}',
+    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"adapter-enabled"}]}',
     number, number, number, updated_at
   )
 end
@@ -103,7 +112,7 @@ return {
     t.eq(first.raises[1].payload.number, 42)
     t.eq(first.raises[1].payload.title, "Bridge issue")
     t.eq(first.raises[1].payload.updated_at, "2026-06-03T01:02:03Z")
-    t.eq(first.raises[1].payload.labels[1], "fkst-dev:enabled")
+    t.eq(first.raises[1].payload.labels[1], "adapter-enabled")
     t.eq(first.raises[1].payload.labels[2], "bug")
     t.eq(first.raises[1].payload.dedup_key, "owner/x#issue#42@2026-06-03T01:02:03Z")
     t.eq(first.raises[1].payload.source_ref.kind, "external")
@@ -179,12 +188,11 @@ return {
   test_inbound_poll_open_pr_coverage_is_not_limited_by_terminal_volume = function()
     local event = { queue = "github_poll_tick", payload = {} }
 
-    mock_repo_env()
-    mock_replay_budget_env("100")
+    mock_poll_env("100")
     mock_issue_list("[]\n")
     mock_pr_list(pr_list_many_json(35, 12, "2026-06-02T00:00:00Z"))
     local result = t.run_department("departments/github_poll/main.lua", event, opts("open-pr-coverage", {
-      FKST_DEVLOOP_REPLAY_BUDGET = "100",
+      FKST_GITHUB_PROXY_REPLAY_BUDGET = "100",
     }))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 36)
@@ -201,7 +209,7 @@ return {
   test_inbound_poll_paces_cold_replay_and_continues_next_cycle = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local run_opts = opts("replay-budget", {
-      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+      FKST_GITHUB_PROXY_REPLAY_BUDGET = "2",
     })
     local issues = issue_list_from({
       issue_json(44, "2026-06-03T01:04:00Z"),
@@ -209,8 +217,7 @@ return {
       issue_json(43, "2026-06-03T01:03:00Z"),
     })
 
-    mock_repo_env()
-    mock_replay_budget_env("2")
+    mock_poll_env("2")
     mock_issue_list(issues)
     mock_pr_list("[]\n")
     local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -218,8 +225,7 @@ return {
     t.eq(#first.raises, 2)
     t.eq(numbers(first.raises), "42,43")
 
-    mock_repo_env()
-    mock_replay_budget_env("2")
+    mock_poll_env("2")
     mock_issue_list(issues)
     mock_pr_list("[]\n")
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -231,7 +237,7 @@ return {
   test_inbound_poll_replay_budget_is_shared_across_issue_and_pr_lanes = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local run_opts = opts("shared-replay-budget", {
-      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+      FKST_GITHUB_PROXY_REPLAY_BUDGET = "2",
     })
     local issues = issue_list_from({
       issue_json(42, "2026-06-03T01:02:00Z"),
@@ -242,8 +248,7 @@ return {
       pr_json(8, "2026-06-03T01:05:00Z"),
     })
 
-    mock_repo_env()
-    mock_replay_budget_env("2")
+    mock_poll_env("2")
     mock_issue_list(issues)
     mock_pr_list(prs)
     local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -254,8 +259,7 @@ return {
     t.eq(first.raises[2].payload.type, "pr")
     t.eq(first.raises[2].payload.number, 7)
 
-    mock_repo_env()
-    mock_replay_budget_env("2")
+    mock_poll_env("2")
     mock_issue_list(issues)
     mock_pr_list(prs)
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -270,7 +274,7 @@ return {
   test_inbound_poll_replay_budget_tie_breaks_shared_lanes_deterministically = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local run_opts = opts("shared-replay-budget-tie", {
-      FKST_DEVLOOP_REPLAY_BUDGET = "2",
+      FKST_GITHUB_PROXY_REPLAY_BUDGET = "2",
     })
     local timestamp = "2026-06-03T01:02:00Z"
     local issues = issue_list_from({
@@ -282,8 +286,7 @@ return {
       pr_json(43, timestamp),
     })
 
-    mock_repo_env()
-    mock_replay_budget_env("2")
+    mock_poll_env("2")
     mock_issue_list(issues)
     mock_pr_list(prs)
     local first = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -294,8 +297,7 @@ return {
     t.eq(first.raises[2].payload.type, "pr")
     t.eq(first.raises[2].payload.number, 42)
 
-    mock_repo_env()
-    mock_replay_budget_env("2")
+    mock_poll_env("2")
     mock_issue_list(issues)
     mock_pr_list(prs)
     local second = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -314,8 +316,7 @@ return {
       table.insert(items, issue_json(number, string.format("2026-06-03T01:%02d:00Z", number)))
     end
 
-    mock_repo_env()
-    mock_replay_budget_env("")
+    mock_poll_env("")
     mock_issue_list(issue_list_from(items))
     mock_pr_list("[]\n")
     local result = t.run_department("departments/github_poll/main.lua", event, opts("default-replay-budget"))
@@ -328,11 +329,10 @@ return {
   test_inbound_poll_prioritizes_cached_fresh_changes_over_replay_budget = function()
     local event = { queue = "github_poll_tick", payload = {} }
     local run_opts = opts("fresh-before-replay", {
-      FKST_DEVLOOP_REPLAY_BUDGET = "1",
+      FKST_GITHUB_PROXY_REPLAY_BUDGET = "1",
     })
 
-    mock_repo_env()
-    mock_replay_budget_env("1")
+    mock_poll_env("1")
     mock_issue_list(issue_list_from({
       issue_json(42, "2026-06-03T01:02:00Z"),
     }))
@@ -341,8 +341,7 @@ return {
     t.eq(seeded.exit_code, 0)
     t.eq(#seeded.raises, 1)
 
-    mock_repo_env()
-    mock_replay_budget_env("1")
+    mock_poll_env("1")
     mock_issue_list(issue_list_from({
       issue_json(43, "2026-06-03T01:03:00Z"),
       issue_json(42, "2026-06-03T01:05:00Z"),
@@ -357,8 +356,8 @@ return {
 
   test_inbound_poll_prioritizes_cold_intake_candidates_over_replay_budget = function()
     local event = { queue = "github_poll_tick", payload = {} }
-    local run_opts = opts("cold-intake-before-replay", { FKST_DEVLOOP_REPLAY_BUDGET = "1" })
-    mock_repo_env() mock_replay_budget_env("1")
+    local run_opts = opts("cold-intake-before-replay", { FKST_GITHUB_PROXY_REPLAY_BUDGET = "1" })
+    mock_poll_env("1")
     local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}]}'
     mock_issue_list(issue_list_from({ issue_json(42, "2026-06-03T01:02:00Z"), issue_json(43, "2026-06-03T01:03:00Z"), intake }))
     mock_pr_list("[]\n")
@@ -368,13 +367,12 @@ return {
   end,
 
   test_inbound_poll_rejects_invalid_replay_budget = function()
-    mock_repo_env()
-    mock_replay_budget_env("0")
+    mock_poll_env("0")
     mock_issue_list()
     mock_pr_list()
 
     local result = t.run_department("departments/github_poll/main.lua", { queue = "github_poll_tick", payload = {} }, opts("invalid-replay-budget", {
-      FKST_DEVLOOP_REPLAY_BUDGET = "0",
+      FKST_GITHUB_PROXY_REPLAY_BUDGET = "0",
     }))
     t.eq(result.exit_code, 1)
   end,
@@ -435,13 +433,13 @@ return {
   end,
 
   test_same_version_meta_comment_marker_dedups_opposite_action = function()
-    local dedup = "meta/comment/github-devloop/issue/owner/x/42/blocked/3/consensus-github-devloop/issue/owner/x/42/v1"
+    local dedup = "meta/comment/generic-workflow/issue/owner/x/42/blocked/3/consensus-generic-workflow/issue/owner/x/42/v1"
     local event = {
       queue = "github_issue_comment_request",
       payload = {
         repo = "owner/x",
         issue_number = 42,
-        body = 'github-devloop meta action: implement\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="ready" version="v1" -->',
+        body = 'generic-workflow meta action: implement\n\n<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="ready" version="v1" -->',
         dedup_key = dedup,
       },
     }
@@ -456,7 +454,7 @@ return {
     }))
     t.eq(first.exit_code, 0)
 
-    event.payload.body = 'github-devloop meta action: block\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v1" -->'
+    event.payload.body = 'generic-workflow meta action: block\n\n<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="blocked" version="v1" -->'
     mock_repo_env()
     mock_write_env("1")
     mock_bot_env()
@@ -468,20 +466,20 @@ return {
 
     t.eq(count_calls(issue_comment_create), 1)
     local written = file.read("/tmp/fkst-github-proxy-comment-owner_x-issue-42.md")
-    t.is_true(written:find("github-devloop meta action: implement", 1, true) ~= nil)
-    t.eq(written:find("github-devloop meta action: block", 1, true), nil)
+    t.is_true(written:find("generic-workflow meta action: implement", 1, true) ~= nil)
+    t.eq(written:find("generic-workflow meta action: block", 1, true), nil)
     t.is_true(written:find(core.comment_marker(dedup), 1, true) ~= nil)
   end,
 
   test_forged_proxy_comment_marker_does_not_suppress_bot_state_marker_comment = function()
-    local dedup = "meta/comment/github-devloop/issue/owner/x/42/blocked/3/consensus-github-devloop/issue/owner/x/42/v1"
-    local state_marker = '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v1" -->'
+    local dedup = "meta/comment/generic-workflow/issue/owner/x/42/blocked/3/consensus-generic-workflow/issue/owner/x/42/v1"
+    local state_marker = '<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="blocked" version="v1" -->'
     local event = {
       queue = "github_issue_comment_request",
       payload = {
         repo = "owner/x",
         issue_number = 42,
-        body = "github-devloop meta action: block\n\n" .. state_marker,
+        body = "generic-workflow meta action: block\n\n" .. state_marker,
         dedup_key = dedup,
       },
     }
@@ -508,14 +506,14 @@ return {
   end,
 
   test_neutralized_forged_proxy_comment_marker_does_not_suppress_later_real_comment = function()
-    local dedup = "meta/comment/github-devloop/issue/owner/x/42/blocked/3/consensus-github-devloop/issue/owner/x/42/v2"
-    local state_marker = '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/x/42" state="blocked" version="v2" -->'
+    local dedup = "meta/comment/generic-workflow/issue/owner/x/42/blocked/3/consensus-generic-workflow/issue/owner/x/42/v2"
+    local state_marker = '<!-- fkst:generic-workflow:state:v1 proposal="generic-workflow/issue/owner/x/42" state="blocked" version="v2" -->'
     local event = {
       queue = "github_issue_comment_request",
       payload = {
         repo = "owner/x",
         issue_number = 42,
-        body = "github-devloop meta action: block\n\n" .. state_marker,
+        body = "generic-workflow meta action: block\n\n" .. state_marker,
         dedup_key = dedup,
       },
     }
@@ -705,9 +703,9 @@ return {
         schema = "github-proxy.label.v1",
         repo = "owner/x",
         issue_number = 42,
-        add_labels = { "fkst-dev:ready" },
-        remove_labels = { "fkst-dev:thinking" },
-        dedup_key = "github-devloop/issue/owner/x/42/result",
+        add_labels = { "adapter-ready" },
+        remove_labels = { "adapter-thinking" },
+        dedup_key = "generic-workflow/issue/owner/x/42/result",
         source_ref = {
           kind = "external",
           ref = "owner/x#issue/42",
@@ -722,7 +720,7 @@ return {
       ""
     )
     t.eq(dry_write_requests, 0)
-    t.eq(dry_logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=dry-run repo=owner/x issue=42 add=fkst-dev:ready remove=fkst-dev:thinking dedup_key=github-devloop/issue/owner/x/42/result reason=FKST_GITHUB_WRITE!=1")
+    t.eq(dry_logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=dry-run repo=owner/x issue=42 add=adapter-ready remove=adapter-thinking dedup_key=generic-workflow/issue/owner/x/42/result reason=FKST_GITHUB_WRITE!=1")
 
     local dry = t.run_department("departments/github_issue_label/main.lua", event, opts("label-dry-run"))
     t.eq(dry.exit_code, 0)
@@ -737,7 +735,7 @@ return {
       "1"
     )
     t.eq(real_write_requests, 1)
-    t.eq(real_logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=real repo=owner/x issue=42 add=fkst-dev:ready remove=fkst-dev:thinking dedup_key=github-devloop/issue/owner/x/42/result")
+    t.eq(real_logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=real repo=owner/x issue=42 add=adapter-ready remove=adapter-thinking dedup_key=generic-workflow/issue/owner/x/42/result")
 
     mock_write_env("1")
     mock_label_write()
@@ -747,8 +745,8 @@ return {
     t.eq(count_calls("gh label create"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit_calls = calls_matching("gh issue edit")
-    t.is_true(has_arg_pair(edit_calls[1].rendered, "--add-label", "fkst-dev:ready"))
-    t.is_true(has_arg_pair(edit_calls[1].rendered, "--remove-label", "fkst-dev:thinking"))
+    t.is_true(has_arg_pair(edit_calls[1].rendered, "--add-label", "adapter-ready"))
+    t.is_true(has_arg_pair(edit_calls[1].rendered, "--remove-label", "adapter-thinking"))
 
     mock_write_env("1")
     mock_label_write()
@@ -766,9 +764,9 @@ return {
         schema = "github-proxy.label.v1",
         repo = "owner/x",
         issue_number = 42,
-        add_labels = { "fkst-dev:fresh" },
+        add_labels = { "adapter-fresh" },
         remove_labels = {},
-        dedup_key = "github-devloop/issue/owner/x/42/fresh-label",
+        dedup_key = "generic-workflow/issue/owner/x/42/fresh-label",
         source_ref = {
           kind = "external",
           ref = "owner/x#issue/42",
@@ -777,7 +775,7 @@ return {
     }
 
     mock_write_env("1")
-    mock_repo_label_list({ "fkst-dev:ready" })
+    mock_repo_label_list({ "adapter-ready" })
     mock_label_create()
     t.mock_command("gh issue edit", { stdout = "", exit_code = 0 })
     local result = t.run_department("departments/github_issue_label/main.lua", event, opts("label-create-missing", {
@@ -789,10 +787,10 @@ return {
     t.eq(count_calls("gh label create"), 1)
     t.eq(count_calls("gh issue edit"), 1)
     local create = calls_matching("gh label create")[1]
-    t.is_true(create.rendered:find("fkst-dev:fresh", 1, true) ~= nil)
+    t.is_true(create.rendered:find("adapter-fresh", 1, true) ~= nil)
     t.is_true(create.rendered:find("--repo owner/x", 1, true) ~= nil)
     local edit = calls_matching("gh issue edit")[1]
-    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:fresh"))
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "adapter-fresh"))
   end,
 
   test_label_request_skips_remove_when_repo_label_is_missing = function()
@@ -803,8 +801,8 @@ return {
         repo = "owner/x",
         issue_number = 42,
         add_labels = {},
-        remove_labels = { "fkst-dev:gone" },
-        dedup_key = "github-devloop/issue/owner/x/42/remove-gone-label",
+        remove_labels = { "adapter-gone" },
+        dedup_key = "generic-workflow/issue/owner/x/42/remove-gone-label",
         source_ref = {
           kind = "external",
           ref = "owner/x#issue/42",
@@ -813,7 +811,7 @@ return {
     }
 
     mock_write_env("1")
-    mock_repo_label_list({ "fkst-dev:ready" })
+    mock_repo_label_list({ "adapter-ready" })
     local result = t.run_department("departments/github_issue_label/main.lua", event, opts("label-remove-missing", {
       FKST_GITHUB_WRITE = "1",
     }))
@@ -830,8 +828,8 @@ return {
       false
     )
     t.eq(write_requests, 1)
-    t.eq(logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=real repo=owner/x issue=42 add= remove=fkst-dev:gone dedup_key=github-devloop/issue/owner/x/42/remove-gone-label")
-    t.eq(logs[2], "github-proxy dept=github_issue_label tag=SKIP reason=no-effective-label-change repo=owner/x issue=42 add= remove=fkst-dev:gone dedup_key=github-devloop/issue/owner/x/42/remove-gone-label")
+    t.eq(logs[1], "github-proxy dept=github_issue_label tag=OUTBOUND mode=real repo=owner/x issue=42 add= remove=adapter-gone dedup_key=generic-workflow/issue/owner/x/42/remove-gone-label")
+    t.eq(logs[2], "github-proxy dept=github_issue_label tag=SKIP reason=no-effective-label-change repo=owner/x issue=42 add= remove=adapter-gone dedup_key=generic-workflow/issue/owner/x/42/remove-gone-label")
   end,
 
   test_long_label_dedup_uses_bounded_lock_key = function()
@@ -841,7 +839,7 @@ return {
         schema = "github-proxy.label.v1",
         repo = "owner/x",
         issue_number = 42,
-        add_labels = { "fkst-dev:ready" },
+        add_labels = { "adapter-ready" },
         remove_labels = {},
         dedup_key = long_dedup("-label", 430),
         source_ref = {
@@ -868,9 +866,9 @@ return {
         schema = "github-proxy.label.v1",
         repo = "owner/x",
         issue_number = 42,
-        add_labels = { "fkst-dev:ready" },
-        remove_labels = { "fkst-dev:thinking" },
-        dedup_key = "github-devloop/issue/owner/x/42/ready-hint",
+        add_labels = { "adapter-ready" },
+        remove_labels = { "adapter-thinking" },
+        dedup_key = "generic-workflow/issue/owner/x/42/ready-hint",
         source_ref = {
           kind = "external",
           ref = "owner/x#issue/42",
@@ -889,8 +887,8 @@ return {
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local current_edit = calls_matching("gh issue edit")[1]
-    t.is_true(has_arg_pair(current_edit.rendered, "--add-label", "fkst-dev:ready"))
-    t.is_true(has_arg_pair(current_edit.rendered, "--remove-label", "fkst-dev:thinking"))
+    t.is_true(has_arg_pair(current_edit.rendered, "--add-label", "adapter-ready"))
+    t.is_true(has_arg_pair(current_edit.rendered, "--remove-label", "adapter-thinking"))
   end,
 
   test_label_request_applies_exclusive_hint_without_state_precondition = function()
@@ -900,9 +898,9 @@ return {
         schema = "github-proxy.label.v1",
         repo = "owner/x",
         issue_number = 42,
-        add_labels = { "fkst-dev:blocked" },
-        remove_labels = { "fkst-dev:blocked", "fkst-dev:thinking", "fkst-dev:ready" },
-        dedup_key = "github-devloop/issue/owner/x/42/blocked-hint",
+        add_labels = { "adapter-blocked" },
+        remove_labels = { "adapter-blocked", "adapter-thinking", "adapter-ready" },
+        dedup_key = "generic-workflow/issue/owner/x/42/blocked-hint",
         source_ref = {
           kind = "external",
           ref = "owner/x#issue/42",
@@ -920,8 +918,8 @@ return {
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue edit"), 1)
     local edit = calls_matching("gh issue edit")[1]
-    t.is_true(has_arg_pair(edit.rendered, "--add-label", "fkst-dev:blocked"))
-    t.is_true(has_arg_pair(edit.rendered, "--remove-label", "fkst-dev:ready"))
+    t.is_true(has_arg_pair(edit.rendered, "--add-label", "adapter-blocked"))
+    t.is_true(has_arg_pair(edit.rendered, "--remove-label", "adapter-ready"))
   end,
 
 }

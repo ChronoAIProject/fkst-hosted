@@ -55,6 +55,24 @@ local blocked_label = "fkst-dev:blocked"
 local blocked_on_dependency_label = "fkst-dev:blocked-on-dependency"
 local gh_program = table.concat({ "g", "h" })
 
+local label_colors = {
+  [enabled_label] = "1D76DB",
+  [tracking_label] = "C5DEF5",
+  [thinking_label] = "8250DF",
+  [ready_label] = "0E8A16",
+  [implementing_label] = "FBCA04",
+  [pr_open_label] = "006B75",
+  [reviewing_label] = "5319E7",
+  [merge_ready_label] = "2EA44F",
+  [merging_label] = "C2E0C6",
+  [merged_label] = "8957E5",
+  [fixing_label] = "D93F0B",
+  [review_meta_label] = "BFD4F2",
+  [impl_failed_label] = "B60205",
+  [blocked_label] = "1B1F23",
+  [blocked_on_dependency_label] = "E99695",
+}
+
 local state_labels = {
   [thinking_label] = true,
   [ready_label] = true,
@@ -930,6 +948,7 @@ M._review_meta_label = review_meta_label
 M._impl_failed_label = impl_failed_label
 M._blocked_label = blocked_label
 M._blocked_on_dependency_label = blocked_on_dependency_label
+M._label_colors = label_colors
 M._state_labels = state_labels
 M._label_by_state = label_by_state
 M._state_graph = state_graph

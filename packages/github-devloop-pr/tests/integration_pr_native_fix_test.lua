@@ -110,6 +110,11 @@ return {
     t.eq(comment_raise.payload.handoff.proposal_id, event.proposal_id)
     t.eq(comment_raise.payload.handoff.pr_number, event.pr_number)
     t.eq(comment_raise.payload.handoff.version, expected_version)
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_pr_native_fix_reviewing_1'", {
+      stdout = '{"body":"' .. json_string(core.state_marker(event.proposal_id, "reviewing", expected_version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
     local handoff = t.run_department("departments/comment_handoff/main.lua", {
       queue = "github-proxy.github_comment_written",
       payload = {
@@ -128,6 +133,7 @@ return {
     local handoff_reviewing = find_raise(handoff.raises, "devloop_reviewing")
     t.eq(handoff_reviewing.payload.proposal_id, event.proposal_id)
     t.eq(handoff_reviewing.payload.version, expected_version)
+    t.eq(find_raise(handoff.raises, "github-proxy.github_issue_label_request").payload.expected_state, "reviewing")
     t.eq(count_calls("git push origin"), 1)
   end,
 

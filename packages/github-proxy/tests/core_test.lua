@@ -50,7 +50,7 @@ return {
   test_env_command_whitelist = function()
 	    t.eq(core.read_env_command("FKST_GITHUB_REPO"), 'printf %s "$FKST_GITHUB_REPO"')
 	    t.eq(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), 'printf %s "$FKST_GITHUB_BOT_LOGIN"')
-	    t.eq(core.read_env_command("FKST_DEVLOOP_REPLAY_BUDGET"), 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
+	    t.eq(core.read_env_command("FKST_GITHUB_PROXY_REPLAY_BUDGET"), 'printf %s "$FKST_GITHUB_PROXY_REPLAY_BUDGET"')
 	    t.eq(core.read_env_command("FKST_DEBUG_STAMP"), 'printf %s "$FKST_DEBUG_STAMP"')
 	    t.raises(function()
 	      core.read_env_command("HOME")
@@ -173,34 +173,34 @@ return {
     t.eq(logged[1].write_env, "1")
   end,
 
-  test_devloop_replay_budget_defaults_to_ten = function()
-    local value = core.devloop_replay_budget(function(_cmd)
+  test_github_proxy_replay_budget_defaults_to_ten = function()
+    local value = core.github_proxy_replay_budget(function(_cmd)
       return { stdout = "", stderr = "", exit_code = 0 }
     end)
     t.eq(value, 10)
   end,
 
-  test_devloop_replay_budget_parses_bounded_positive_integer = function()
-    local value = core.devloop_replay_budget(function(cmd)
-      t.eq(cmd, 'printf %s "$FKST_DEVLOOP_REPLAY_BUDGET"')
+  test_github_proxy_replay_budget_parses_bounded_positive_integer = function()
+    local value = core.github_proxy_replay_budget(function(cmd)
+      t.eq(cmd, 'printf %s "$FKST_GITHUB_PROXY_REPLAY_BUDGET"')
       return { stdout = " 7 ", stderr = "", exit_code = 0 }
     end)
     t.eq(value, 7)
   end,
 
-  test_devloop_replay_budget_rejects_invalid_values = function()
+  test_github_proxy_replay_budget_rejects_invalid_values = function()
     t.raises(function()
-      core.devloop_replay_budget(function(_cmd)
+      core.github_proxy_replay_budget(function(_cmd)
         return { stdout = "0", stderr = "", exit_code = 0 }
       end)
     end)
     t.raises(function()
-      core.devloop_replay_budget(function(_cmd)
+      core.github_proxy_replay_budget(function(_cmd)
         return { stdout = "101", stderr = "", exit_code = 0 }
       end)
     end)
     t.raises(function()
-      core.devloop_replay_budget(function(_cmd)
+      core.github_proxy_replay_budget(function(_cmd)
         return { stdout = "1.5", stderr = "", exit_code = 0 }
       end)
     end)
@@ -544,110 +544,15 @@ return {
     core.configure_trusted_bot_login("") -- reset shared state to its initial nil
   end,
 
-  test_current_devloop_state_default_rank_converges_review_conflict_to_fixing = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
-    local comments = core.parse_issue_comments(
-      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"merge-ready\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"fixing\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}}]}'
-    )
-
-    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
-    t.eq(current.state, "fixing")
-  end,
-
-  test_current_devloop_state_default_rank_converges_fixing_to_review_meta = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
-    local comments = core.parse_issue_comments(
-      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"fixing\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"review-meta\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}}]}'
-    )
-
-    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
-    t.eq(current.state, "review-meta")
-  end,
-
-  test_current_devloop_state_trailing_fix_suffix_keeps_loop_round = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
-    local comments = core.parse_issue_comments(
-      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"pr-open\\" version=\\"'
-        .. base
-        .. '/loop/2\\" stage_rank=\\"650\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"reviewing\\" version=\\"'
-        .. base
-        .. '/loop/2\\" stage_rank=\\"675\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"fixing\\" version=\\"'
-        .. base
-        .. '/loop/2/fix/1\\" stage_rank=\\"700\\" -->","author":{"login":"fkst-test-bot"}}]}'
-    )
-
-    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
-    t.eq(current.state, "fixing")
-  end,
-
-  test_current_devloop_state_recognizes_merging = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
-    local comments = core.parse_issue_comments(
-      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"merging\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}}]}'
-    )
-
-    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
-    t.eq(current.state, "merging")
-  end,
-
-  test_current_devloop_state_default_rank_converges_merging_to_merged = function()
-    local proposal_id = "github-devloop/issue/owner/repo/42"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
-    local comments = core.parse_issue_comments(
-      '{"comments":[{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"merging\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}},{"body":"<!-- fkst:github-devloop:state:v1 proposal=\\"'
-        .. proposal_id
-        .. '\\" state=\\"merged\\" version=\\"'
-        .. version
-        .. '\\" -->","author":{"login":"fkst-test-bot"}}]}'
-    )
-
-    local current = core.current_devloop_state(comments, proposal_id, "fkst-test-bot")
-    t.eq(current.state, "merged")
-  end,
-
   test_parse_entity_list = function()
-    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix \\"x\\"","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}]}]]')
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix \\"x\\"","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","labels":[{"name":"adapter-enabled"},{"name":"bug"}]}]]')
     t.eq(#entities, 1)
     t.eq(entities[1].number, 7)
     t.eq(entities[1].title, 'Fix "x"')
     t.eq(entities[1].updated_at, "2026-06-03T00:00:00Z")
     t.eq(entities[1].state, "OPEN")
     t.eq(#entities[1].labels, 2)
-    t.eq(entities[1].labels[1], "fkst-dev:enabled")
+    t.eq(entities[1].labels[1], "adapter-enabled")
     t.eq(entities[1].labels[2], "bug")
   end,
 
@@ -829,21 +734,21 @@ return {
 
   test_github_proxy_parsers_and_rest_command_builders_are_quoted = function()
     t.eq(
-      core.parse_git_show_ref_head("abc123 refs/heads/devloop-owner-repo-42-01HY\n", "devloop-owner-repo-42-01HY"),
+      core.parse_git_show_ref_head("abc123 refs/heads/generic-owner-repo-42-01HY\n", "generic-owner-repo-42-01HY"),
       "abc123"
     )
     t.eq(
-      core.parse_git_show_ref_head("abc123 refs/tags/devloop-owner-repo-42-01HY\n", "devloop-owner-repo-42-01HY"),
+      core.parse_git_show_ref_head("abc123 refs/tags/generic-owner-repo-42-01HY\n", "generic-owner-repo-42-01HY"),
       nil
     )
-    local listed = core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","baseRefName":"dev","state":"OPEN"}]', "devloop-owner-repo-42-01HY")
+    local listed = core.parse_pr_list_for_head('[{"number":7,"headRefName":"generic-owner-repo-42-01HY","baseRefName":"dev","state":"OPEN"}]', "generic-owner-repo-42-01HY")
     t.eq(listed.number, 7)
     t.eq(listed.base_ref_name, "dev")
-    local rest_listed = core.parse_pr_list_for_head('[[{"number":8,"html_url":"https://example.test/8","head":{"ref":"devloop-owner-repo-42-01HY"},"base":{"ref":"dev"},"state":"open"}]]', "devloop-owner-repo-42-01HY")
+    local rest_listed = core.parse_pr_list_for_head('[[{"number":8,"html_url":"https://example.test/8","head":{"ref":"generic-owner-repo-42-01HY"},"base":{"ref":"dev"},"state":"open"}]]', "generic-owner-repo-42-01HY")
     t.eq(rest_listed.number, 8)
     t.eq(rest_listed.url, "https://example.test/8")
     t.eq(rest_listed.base_ref_name, "dev")
-    t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"devloop-owner-repo-42-01HY","state":"CLOSED"}]', "devloop-owner-repo-42-01HY"), nil)
+    t.eq(core.parse_pr_list_for_head('[{"number":7,"headRefName":"generic-owner-repo-42-01HY","state":"CLOSED"}]', "generic-owner-repo-42-01HY"), nil)
     local same_repo_pr = core.parse_pr_view_head_state(
       '{"head":{"ref":"feature","sha":"ABC123","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"base":{"ref":"dev","repo":{"full_name":"owner/repo","owner":{"login":"owner"}}},"state":"open","merged":false}',
       "owner/repo"

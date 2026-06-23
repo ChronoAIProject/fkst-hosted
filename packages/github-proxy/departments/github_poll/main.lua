@@ -24,22 +24,28 @@ local function replay_sort_key(entity)
     .. tostring(entity.type or "")
 end
 
-local function has_devloop_label(labels)
+local function has_configured_label_prefix(labels, prefixes)
+  if #prefixes == 0 then
+    return false
+  end
   for _, label in ipairs(labels or {}) do
-    if tostring(label):match("^fkst%-dev:") ~= nil then
-      return true
+    local text = tostring(label)
+    for _, prefix in ipairs(prefixes) do
+      if text:sub(1, #prefix) == prefix then
+        return true
+      end
     end
   end
   return false
 end
 
-local function is_intake_candidate_snapshot(entity_type, entity)
+local function is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
   return entity_type == "issue"
     and tostring(entity.state or ""):upper() == "OPEN"
-    and not has_devloop_label(entity.labels)
+    and not has_configured_label_prefix(entity.labels, poll_label_prefixes)
 end
 
-local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates)
+local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, poll_label_prefixes)
   for _, entity in ipairs(entities) do
     local key = core.entity_cache_key(repo, entity_type, entity.number)
     local cached_updated_at = cache_get(key)
@@ -51,7 +57,7 @@ local function collect_changed(repo, entity_type, entities, fresh_changes, repla
         replay = cached_updated_at == nil,
       }
       item.entity.type = entity_type
-      if item.replay and not is_intake_candidate_snapshot(entity_type, entity) then
+      if item.replay and not is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes) then
         table.insert(replay_candidates, item)
       else
         table.insert(fresh_changes, item)
@@ -110,7 +116,7 @@ local function raise_changed(repo, fresh_changes, replay_changes)
   end
 end
 
-local function poll_entities(repo, event, fresh_changes, replay_candidates)
+local function poll_entities(repo, event, fresh_changes, replay_candidates, poll_label_prefixes)
   for _, entity_type in ipairs(entity_types) do
     local ok, result_or_err = core.gh_exec_result(function(timeout)
       return entity_type.read(repo, timeout)
@@ -125,7 +131,7 @@ local function poll_entities(repo, event, fresh_changes, replay_candidates)
         error(result_or_err.message)
       end
     else
-      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates)
+      collect_changed(repo, entity_type.type, core.parse_entity_list(result_or_err.stdout, entity_type.type), fresh_changes, replay_candidates, poll_label_prefixes)
     end
   end
 end
@@ -137,10 +143,11 @@ local function act(event)
     return
   end
 
-  local replay_budget = core.devloop_replay_budget()
+  local replay_budget = core.github_proxy_replay_budget()
+  local poll_label_prefixes = core.github_proxy_poll_label_prefixes()
   local fresh_changes = {}
   local replay_candidates = {}
-  poll_entities(repo, event, fresh_changes, replay_candidates)
+  poll_entities(repo, event, fresh_changes, replay_candidates, poll_label_prefixes)
   raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget))
 end
 

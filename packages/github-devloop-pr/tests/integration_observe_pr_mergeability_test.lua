@@ -74,16 +74,30 @@ local function assert_conflict_redrive(result, expected_from_state)
   local issue_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
     return tostring(payload.target_kind or "issue") == "issue"
   end)
-  local pr_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
-    return tostring(payload.target_kind or "") == "pr"
-  end)
+  local pr_label_raise = nil
   local fixing_raise = find_causal_raise(result, "devloop_fixing")
   t.is_true(comment_raise ~= nil)
   t.is_true(issue_label_raise ~= nil)
-  t.is_true(pr_label_raise ~= nil)
   t.is_true(fixing_raise ~= nil)
+  pr_label_raise = find_raise(
+    h.run_comment_handoff_from_request(
+      comment_raise.payload,
+      "IC_conflict_fixing_1",
+      "observe-pr-conflict-fixing-handoff"
+    ).raises,
+    "github-proxy.github_issue_label_request",
+    function(payload)
+      return tostring(payload.target_kind or "") == "pr"
+    end
+  )
+  t.is_true(pr_label_raise ~= nil)
   t.eq(issue_label_raise.payload.add_labels[1], "fkst-dev:fixing")
+  t.eq(issue_label_raise.payload.label_colors["fkst-dev:fixing"], "D93F0B")
+  t.eq(pr_label_raise.payload.add_labels[1], "fkst-dev:fixing")
+  t.eq(pr_label_raise.payload.label_colors["fkst-dev:fixing"], "D93F0B")
+  t.eq(pr_label_raise.payload.expected_proposal_id, proposal_id)
   t.eq(pr_label_raise.payload.expected_state, "fixing")
+  t.eq(pr_label_raise.payload.expected_version, version .. "/fix/1")
   t.eq(fixing_raise.payload.proposal_id, proposal_id)
   t.eq(fixing_raise.payload.pr_number, 7)
   t.eq(fixing_raise.payload.version, version .. "/fix/1")
@@ -166,10 +180,20 @@ return {
     local fixing_raise = find_causal_raise(result, "devloop_fixing")
     t.is_true(fixing_raise ~= nil)
     t.eq(fixing_raise.payload.version, fix_version)
-    local pr_label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment_raise ~= nil)
+    local pr_label_raise = find_raise(h.run_comment_handoff_from_request(
+      comment_raise.payload,
+      "IC_conflict_idempotent_fixing_1",
+      "observe-pr-conflict-idempotent-handoff"
+    ).raises, "github-proxy.github_issue_label_request", function(payload)
       return tostring(payload.target_kind or "") == "pr"
     end)
     t.is_true(pr_label_raise ~= nil)
+    t.eq(pr_label_raise.payload.add_labels[1], "fkst-dev:fixing")
+    t.eq(pr_label_raise.payload.label_colors["fkst-dev:fixing"], "D93F0B")
+    t.eq(pr_label_raise.payload.expected_proposal_id, proposal_id)
     t.eq(pr_label_raise.payload.expected_state, "fixing")
+    t.eq(pr_label_raise.payload.expected_version, fix_version)
   end,
 }

@@ -150,8 +150,8 @@ return {
 
     local result = t.run_department("departments/github_pr_comment/main.lua", event({
       handoff = {
-        kind = "github-devloop.reviewing",
-        proposal_id = "github-devloop/issue/owner/x/42",
+        kind = "generic-workflow.reviewing",
+        proposal_id = "generic-workflow/issue/owner/x/42",
         version = "v1",
         pr_number = 7,
       },

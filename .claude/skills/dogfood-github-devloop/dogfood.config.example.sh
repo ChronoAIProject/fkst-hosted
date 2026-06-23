@@ -29,6 +29,9 @@
 #   machine B:  INTEGRATION_BRANCH=integration-elonsg
 # INTEGRATION_BRANCH=integration
 
+# Label prefix replayed by the generic github-proxy poller for this devloop deployment.
+# GITHUB_PROXY_POLL_LABEL_PREFIX=fkst-dev:
+
 # GitHub org owning the three repos.  default: ChronoAIProject
 # GH_ORG=ChronoAIProject
 

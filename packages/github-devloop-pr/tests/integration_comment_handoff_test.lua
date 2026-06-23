@@ -3,12 +3,21 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local find_raise = h.find_raise
+local json_string = h.json_string
 
 local function run_handoff(payload, name)
   return t.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
     payload = payload,
   }, opts(name))
+end
+
+local function mock_marker_comment(comment_id, body, author_login)
+  t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/" .. tostring(comment_id) .. "'", {
+    stdout = '{"body":"' .. json_string(body or "") .. '","user":{"login":"' .. tostring(author_login or "fkst-test-bot") .. '"}}\n',
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 return {
@@ -20,6 +29,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
+    mock_marker_comment("IC_reviewing_1", core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", version))
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",
       repo = "owner/repo",
@@ -39,13 +49,17 @@ return {
     }, "comment-handoff-reviewing")
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local reviewing = find_raise(result.raises, "devloop_reviewing").payload
     t.eq(reviewing.schema, "github-devloop.reviewing.v1")
     t.eq(reviewing.reviewing_hand_off.comment_id, "IC_reviewing_1")
     t.eq(reviewing.reviewing_hand_off.marker_version, version)
     t.eq(reviewing.reviewing_hand_off.event_version, version)
     t.eq(core.is_supported_reviewing(reviewing), true)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(label.expected_proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(label.expected_state, "reviewing")
+    t.eq(label.expected_version, version)
   end,
 
   test_comment_written_reviewing_ack_skips_other_owned_issue = function()
@@ -83,6 +97,7 @@ return {
     local source_ref = core.pr_source_ref("owner/repo", 7)
     local version = "pr-native-version/fix/1"
     local proposal_id = core.pr_proposal_id("owner/repo", 7)
+    mock_marker_comment("IC_pr_native_reviewing_1", core.state_marker(proposal_id, "reviewing", version))
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",
       repo = "owner/repo",
@@ -102,13 +117,17 @@ return {
     }, "comment-handoff-pr-native-reviewing")
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local reviewing = find_raise(result.raises, "devloop_reviewing").payload
     t.eq(reviewing.proposal_id, proposal_id)
     t.eq(reviewing.pr_number, 7)
     t.eq(reviewing.version, version)
     t.eq(reviewing.reviewing_hand_off.comment_id, "IC_pr_native_reviewing_1")
     t.eq(core.is_supported_reviewing(reviewing), true)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(label.expected_proposal_id, proposal_id)
+    t.eq(label.expected_state, "reviewing")
+    t.eq(label.expected_version, version)
   end,
 
   test_comment_written_fixing_ack_raises_byte_equivalent_payload = function()
@@ -129,6 +148,7 @@ return {
       predecessor_set = "pred-a",
       review_reason = "rollup-red",
     }, source_ref)
+    mock_marker_comment("IC_fixing_1", core.state_marker(proposal_id, "fixing", version))
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",
       repo = "owner/repo",
@@ -157,7 +177,7 @@ return {
     }, "comment-handoff-fixing")
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local fixing = find_raise(result.raises, "devloop_fixing").payload
     local expected = core.build_devloop_fixing_payload({
       proposal_id = proposal_id,
@@ -187,6 +207,10 @@ return {
     t.eq(fixing.source_ref.kind, expected.source_ref.kind)
     t.eq(fixing.source_ref.ref, expected.source_ref.ref)
     t.eq(core.is_supported_fixing(fixing), true)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(label.expected_proposal_id, proposal_id)
+    t.eq(label.expected_state, "fixing")
+    t.eq(label.expected_version, version)
   end,
 
   test_comment_written_merge_ready_ack_raises_byte_equivalent_payload = function()
@@ -194,6 +218,7 @@ return {
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
+    mock_marker_comment("IC_merge_ready_1", core.state_marker("github-devloop/issue/owner/repo/42", "merge-ready", version))
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",
       repo = "owner/repo",
@@ -217,7 +242,7 @@ return {
     }, "comment-handoff-merge-ready")
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
+    t.eq(#result.raises, 2)
     local merge_ready = find_raise(result.raises, "devloop_merge_ready").payload
     local expected = core.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42", 7, version, {
       review_proposal_id = review_proposal_id,
@@ -236,5 +261,9 @@ return {
     t.eq(merge_ready.source_ref.kind, expected.source_ref.kind)
     t.eq(merge_ready.source_ref.ref, expected.source_ref.ref)
     t.eq(core.is_supported_merge_ready(merge_ready), true)
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
+    t.eq(label.expected_proposal_id, "github-devloop/issue/owner/repo/42")
+    t.eq(label.expected_state, "merge-ready")
+    t.eq(label.expected_version, version)
   end,
 }

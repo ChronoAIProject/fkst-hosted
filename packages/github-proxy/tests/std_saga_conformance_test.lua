@@ -96,7 +96,7 @@ return {
     t.eq(forge_conformance.is_write_class("gh pr close '7' --repo owner/x"), true)
     t.eq(forge_conformance.is_write_class("gh pr ready '7' --repo owner/x"), true)
     t.eq(forge_conformance.is_write_class("gh pr reopen '7' --repo owner/x"), true)
-    t.eq(forge_conformance.is_write_class("gh label create 'fkst-dev:ready' --repo owner/x"), true)
+    t.eq(forge_conformance.is_write_class("gh label create 'adapter-ready' --repo owner/x"), true)
     t.eq(forge_conformance.is_write_class("gh workflow run 'ci.yml' --repo owner/x"), true)
     t.eq(forge_conformance.is_write_class("git push origin HEAD:branch"), true)
     t.eq(forge_conformance.is_write_class("git -C '/tmp/std-saga-worktree' push origin HEAD:branch"), true)

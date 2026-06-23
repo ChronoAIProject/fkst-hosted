@@ -201,8 +201,8 @@ return {
     handle.issue_unassign("owner/repo", 42, "bot-user", 23)
     handle.graphql("query { viewer { login } }", nil, 24)
     handle.label_list("owner/repo", 25)
-    handle.label_create("owner/repo", "fkst-dev:ready", "0E8A16", 26)
-    handle.issue_edit_labels("owner/repo", 42, { "fkst-dev:ready" }, { "fkst-dev:thinking" }, 27)
+    handle.label_create("owner/repo", "adapter-ready", "0E8A16", 26)
+    handle.issue_edit_labels("owner/repo", 42, { "adapter-ready" }, { "adapter-thinking" }, 27)
     handle.pr_edit_labels("owner/repo", 7, { "review" }, { "draft" }, 28)
 
     assert_argv_equal(
@@ -278,12 +278,12 @@ return {
     )
     assert_argv_equal(
       calls[16].argv,
-      { "gh", "label", "create", "fkst-dev:ready", "--repo", "owner/repo", "--color", "0E8A16" },
+      { "gh", "label", "create", "adapter-ready", "--repo", "owner/repo", "--color", "0E8A16" },
       "label_create"
     )
     assert_argv_equal(
       calls[17].argv,
-      { "gh", "issue", "edit", "42", "--repo", "owner/repo", "--add-label", "fkst-dev:ready", "--remove-label", "fkst-dev:thinking" },
+      { "gh", "issue", "edit", "42", "--repo", "owner/repo", "--add-label", "adapter-ready", "--remove-label", "adapter-thinking" },
       "issue_edit_labels"
     )
     assert_argv_equal(

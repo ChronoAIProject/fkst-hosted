@@ -53,6 +53,11 @@ return {
     local fixing_handoff = comment_raise.payload.handoff
     t.eq(fixing_handoff.kind, "github-devloop.fixing")
     t.eq(fixing_handoff.blocking_gap, nil)
+    t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/IC_merge_ci_red_fixing_1'", {
+      stdout = '{"body":"' .. h.json_string(core.state_marker(fixing_handoff.proposal_id, "fixing", fixing_handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+      stderr = "",
+      exit_code = 0,
+    })
     local handoff_result = t.run_department("departments/comment_handoff/main.lua", {
       queue = "github-proxy.github_comment_written",
       payload = {

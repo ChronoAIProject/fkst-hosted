@@ -38,7 +38,7 @@ local function assert_deep_equal(left, right, path)
 end
 
 local function canonical_issue_stdout()
-  return [[{"number":42,"title":"Implement decision recorder","body":"the issue body","url":"https://github.com/owner/repo/issues/42","updatedAt":"2026-06-15T00:00:00Z","state":"OPEN","labels":[{"name":"fkst-dev:thinking"},{"name":"bug"}],"comments":[{"id":101,"body":"state marker","author":{"login":"fkst-test-bot"},"createdAt":"2026-06-14T01:02:03Z"},{"id":102,"body":"human note","user":{"login":"human"},"created_at":"2026-06-14T02:03:04Z"}],"assignees":[{"login":"dev1"},{"login":"dev2"}],"author":{"login":"author"}}]]
+  return [[{"number":42,"title":"Implement decision recorder","body":"the issue body","url":"https://github.com/owner/repo/issues/42","updatedAt":"2026-06-15T00:00:00Z","state":"OPEN","labels":[{"name":"adapter-thinking"},{"name":"bug"}],"comments":[{"id":101,"body":"state marker","author":{"login":"fkst-test-bot"},"createdAt":"2026-06-14T01:02:03Z"},{"id":102,"body":"human note","user":{"login":"human"},"created_at":"2026-06-14T02:03:04Z"}],"assignees":[{"login":"dev1"},{"login":"dev2"}],"author":{"login":"author"}}]]
 end
 
 return {
@@ -64,7 +64,7 @@ return {
     assert(real_issue.source_ref.ref == "owner/repo#issue/42")
     assert(real_issue.body == "the issue body")
     assert(real_issue.url == "https://github.com/owner/repo/issues/42")
-    assert_list_equal(real_issue.labels, { "fkst-dev:thinking", "bug" }, "labels")
+    assert_list_equal(real_issue.labels, { "adapter-thinking", "bug" }, "labels")
     assert(real_issue.comments[1].id == 101)
     assert(real_issue.comments[1].body == "state marker")
     assert(real_issue.comments[1].author_login == "fkst-test-bot")

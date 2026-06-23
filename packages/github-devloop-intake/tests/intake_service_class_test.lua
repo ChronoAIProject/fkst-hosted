@@ -31,6 +31,7 @@ return {
     t.eq(request.add_labels[1], "fkst-class:background")
     t.eq(request.remove_labels[1], "fkst-class:expedite")
     t.eq(request.remove_labels[2], "fkst-class:standard")
+    t.is_nil(request.label_colors)
     t.is_true(request.dedup_key:find("class-label", 1, true) ~= nil)
     t.eq(request.source_ref.ref, "owner/repo#issue/42")
   end,

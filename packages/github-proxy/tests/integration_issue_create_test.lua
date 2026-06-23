@@ -13,7 +13,7 @@ local function event(extra)
     title = "Split blocked PR into smaller work",
     body = "Parent: #42\n\nScope: implement the smallest viable slice.",
     labels = { "triage" },
-    dedup_key = "decompose/github-devloop/issue/owner/x/42/v1/1/123",
+    dedup_key = "decompose/generic-workflow/issue/owner/x/42/v1/1/123",
     parent_comment_target = {
       repo = "owner/x",
       pr_number = 7,
@@ -308,7 +308,7 @@ return {
       },
       post_create_blocked_by = {
         blocked_issue_number = 42,
-        dedup_key = "decompose/github-devloop/issue/owner/x/42/v1/1/123/blocked-by",
+        dedup_key = "decompose/generic-workflow/issue/owner/x/42/v1/1/123/blocked-by",
       },
     }).payload
     mock_write_env("1")
@@ -349,7 +349,7 @@ return {
       },
       post_create_blocked_by = {
         blocked_issue_number = 42,
-        dedup_key = "decompose/github-devloop/issue/owner/x/42/v1/1/123/blocked-by",
+        dedup_key = "decompose/generic-workflow/issue/owner/x/42/v1/1/123/blocked-by",
       },
     }).payload
     mock_write_env("1")

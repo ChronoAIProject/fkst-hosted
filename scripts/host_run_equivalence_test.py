@@ -47,6 +47,7 @@ def make_fake_bin(path: Path) -> None:
                 "FKST_DEVLOOP_INTEGRATION_BRANCH",
                 "FKST_DEVLOOP_ROLLUP_MERGE",
                 "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+                "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX",
                 "FKST_RUNTIME_ROOT",
                 "FKST_DURABLE_ROOT",
                 "FKST_RATE_POOL_ROOT",

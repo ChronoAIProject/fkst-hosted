@@ -12,7 +12,7 @@ local function event(extra)
     repo = "owner/x",
     blocked_issue_number = 42,
     blocking_issue_number = 99,
-    dedup_key = "github-devloop/fork/owner/x/issue/42/v1/blocked-by",
+    dedup_key = "generic-workflow/fork/owner/x/issue/42/v1/blocked-by",
     source_ref = {
       kind = "external",
       ref = "owner/x#issue/42",

@@ -170,7 +170,11 @@ return {
       return tostring(payload.target_kind or "issue") == "issue"
     end)
     t.eq(issue_label, nil)
-    local label = h.find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
+    local label = h.find_raise(h.run_comment_handoff_from_request(
+      comment.payload,
+      "IC_unmanaged_base_blocked_1",
+      "observe-pr-self-unmanaged-base-handoff"
+    ).raises, "github-proxy.github_issue_label_request", function(payload)
       return tostring(payload.target_kind or "issue") == "pr"
     end)
     t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
