@@ -148,7 +148,7 @@ local function findings_json(count)
   return "[" .. table.concat(rows, ",") .. "]"
 end
 
-local function fake_audit_department(label_stdout)
+local function fake_audit_department(label_stdout, extra_ports)
   local model = github_fake.model()
   local label_calls = {}
   local search_calls = {}
@@ -162,13 +162,17 @@ local function fake_audit_department(label_stdout)
     return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
   end
   t.eq(type(audit_main.make_department), "function")
-  local dept = audit_main.make_department({ github = github, git = nil })
+  local ports = { github = github, git = nil }
+  for key, value in pairs(extra_ports or {}) do
+    ports[key] = value
+  end
+  local dept = audit_main.make_department(ports)
   dept.model = model
   dept.search_calls = search_calls
   return dept, model, label_calls
 end
 
-local function fake_audit_department_with_search(search_stdout, label_stdout)
+local function fake_audit_department_with_search(search_stdout, label_stdout, extra_ports)
   local model = github_fake.model()
   local label_calls = {}
   local search_calls = {}
@@ -181,14 +185,32 @@ local function fake_audit_department_with_search(search_stdout, label_stdout)
     table.insert(label_calls, { repo = repo, timeout = timeout })
     return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
   end
-  local dept = audit_main.make_department({ github = github, git = nil })
+  local ports = { github = github, git = nil }
+  for key, value in pairs(extra_ports or {}) do
+    ports[key] = value
+  end
+  local dept = audit_main.make_department(ports)
   dept.search_calls = search_calls
   return dept, model, label_calls
 end
 
-local function fake_audit_department_with_github(github)
+local function fake_audit_department_with_github(github, extra_ports)
   t.eq(type(audit_main.make_department), "function")
-  return audit_main.make_department({ github = github, git = nil })
+  local ports = { github = github, git = nil }
+  for key, value in pairs(extra_ports or {}) do
+    ports[key] = value
+  end
+  return audit_main.make_department(ports)
+end
+
+local function fake_audit_department_with_observe(observe_facts)
+  return fake_audit_department("[]", {
+    observe = {
+      facts = function()
+        return observe_facts()
+      end,
+    },
+  })
 end
 
 local function run_fake_at(dept, event, fixed_now_seconds)
@@ -508,16 +530,12 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_fake_core_observe_unreadable_skips_without_issue = function()
-    local result = with_core_patch({
-      observe = function()
-        error("archaudit: observe-unreadable: synthetic observe failure")
-      end,
-    }, function()
-      mock_env("owner/repo", "3")
-      local dept = fake_audit_department("[]")
-      return run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+  test_fake_observe_port_unreadable_skips_without_issue = function()
+    mock_env("owner/repo", "3")
+    local dept = fake_audit_department_with_observe(function()
+      error("archaudit: observe-unreadable: synthetic observe failure")
     end)
+    local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
   end,
 
@@ -539,29 +557,21 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_fake_core_observe_malformed_is_structured_failure_no_issue = function()
-    local result = with_core_patch({
-      observe = function()
-        error("archaudit: observe-malformed-json: synthetic malformed observe")
-      end,
-    }, function()
-      mock_env("owner/repo", "3")
-      local dept = fake_audit_department("[]")
-      return run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+  test_fake_observe_port_malformed_is_structured_failure_no_issue = function()
+    mock_env("owner/repo", "3")
+    local dept = fake_audit_department_with_observe(function()
+      error("archaudit: observe-malformed-json: synthetic malformed observe")
     end)
+    local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
     t.is_true(tostring(result.failure.error):find("observe-malformed", 1, true) ~= nil)
   end,
 
   test_fake_current_observe_mutates_between_observe_time_and_idle_checks = function()
-    local original_observe = core.observe
     local original_observe_now_seconds = core.observe_now_seconds
     local original_is_idle_observe = core.is_idle_observe
     mock_env("owner/repo", "3")
     local facts = { schema_version = 1, generated_at_ms = 1781830860000 }
-    core.observe = function()
-      return facts
-    end
     core.observe_now_seconds = function(_facts)
       return 1781830860
     end
@@ -569,10 +579,11 @@ return {
       error("archaudit: observe-malformed-facts: mutated after time")
     end
     local ok, result_or_err = pcall(function()
-      local dept = fake_audit_department("[]")
+      local dept = fake_audit_department_with_observe(function()
+        return facts
+      end)
       return run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     end)
-    core.observe = original_observe
     core.observe_now_seconds = original_observe_now_seconds
     core.is_idle_observe = original_is_idle_observe
     if not ok then
@@ -582,20 +593,17 @@ return {
   end,
 
   test_fake_current_observe_time_check_failure_is_structured_failure_no_issue = function()
-    local original_observe = core.observe
     local original_observe_now_seconds = core.observe_now_seconds
     mock_env("owner/repo", "3")
-    core.observe = function()
-      return { schema_version = 1, generated_at_ms = 1781830860000 }
-    end
     core.observe_now_seconds = function(_facts)
       error("archaudit: observe-malformed-facts: mutated before time")
     end
     local ok, result_or_err = pcall(function()
-      local dept = fake_audit_department("[]")
+      local dept = fake_audit_department_with_observe(function()
+        return { schema_version = 1, generated_at_ms = 1781830860000 }
+      end)
       return run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     end)
-    core.observe = original_observe
     core.observe_now_seconds = original_observe_now_seconds
     if not ok then
       error(result_or_err, 0)
@@ -603,9 +611,14 @@ return {
     t.eq(#result_or_err.raises, 0)
   end,
 
-  test_fake_core_observe_time_check_failure_is_structured_failure_no_issue = function()
+  test_fake_observe_port_time_check_failure_is_structured_failure_no_issue = function()
     local result = with_core_patch({
-      observe = function()
+      observe_now_seconds = function(_facts)
+        error("archaudit: observe-malformed-facts: synthetic time failure")
+      end,
+    }, function()
+      mock_env("owner/repo", "3")
+      local dept = fake_audit_department_with_observe(function()
         return {
           schema_version = 1,
           generated_at_ms = 1781830860000,
@@ -616,13 +629,7 @@ return {
           deliveries = {},
           dead_letters = {},
         }
-      end,
-      observe_now_seconds = function(_facts)
-        error("archaudit: observe-malformed-facts: synthetic time failure")
-      end,
-    }, function()
-      mock_env("owner/repo", "3")
-      local dept = fake_audit_department("[]")
+      end)
       return run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     end)
     t.eq(#result.raises, 0)
