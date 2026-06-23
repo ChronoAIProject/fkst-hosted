@@ -5,54 +5,6 @@ local t = h.t
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
-local function authoritative_transition_index()
-  local rows = {}
-  local body = file.read("packages/github-devloop/core/restart/transitions/index.lua")
-  for module, key in body:gmatch('{%s*module%s*=%s*"([^"]+)"%s*,%s*key%s*=%s*"([^"]+)"%s*}') do
-    rows[#rows + 1] = { module = module, key = key }
-  end
-  return rows
-end
-
-local authoritative_transition_modules = {}
-local authoritative_transition_count = 0
-for _, row in ipairs(authoritative_transition_index()) do
-  authoritative_transition_count = authoritative_transition_count + 1
-  authoritative_transition_modules[row.key] =
-    "packages/github-devloop/core/restart/transitions/" .. row.module .. ".lua"
-end
-
-local function parse_minutes_expression(expr)
-  if expr == nil then
-    return nil
-  end
-  local product = 1
-  local found = false
-  for number in tostring(expr):gmatch("%d+") do
-    product = product * tonumber(number)
-    found = true
-  end
-  if not found then
-    return nil
-  end
-  return product
-end
-
-local function authoritative_lifecycle_row(state)
-  local body = file.read(assert(authoritative_transition_modules[state], "missing authoritative transition path"))
-  local decompose_queue_name = body:match("local%s+decompose_queue%s*=%s*M%.decompose_package_queue%(%)") ~= nil
-  local driving_queue = body:match('driving_queue%s*=%s*"([^"]+)"')
-  if driving_queue == nil and decompose_queue_name then
-    driving_queue = "github-devloop-decompose.devloop_decompose"
-  end
-  return {
-    from_state = body:match('from_state%s*=%s*"([^"]+)"'),
-    terminal = body:match("terminal%s*=%s*(%a+)") == "true",
-    driving_queue = driving_queue,
-    budget_minutes = parse_minutes_expression(body:match("budget%s*=%s*budget%(([%d%s%*]+),")),
-  }
-end
-
 local function bot_comment(body, created_at)
   return {
     body = body,
@@ -101,18 +53,25 @@ return {
   end,
 
   test_core_doctor_lifecycle_rows_match_authoritative_restart_rows = function()
+    local provider = require("devloop.restart.issue_lifecycle")
+    local rows = provider.lifecycle_rows(core)
     local seen = 0
-    for state, _ in pairs(authoritative_transition_modules) do
+    for _, expected in ipairs(rows) do
       seen = seen + 1
-      local expected = authoritative_lifecycle_row(state)
-      local actual = core.lifecycle_transition_row(state)
+      local actual = core.lifecycle_transition_row(expected.from_state)
       t.is_true(actual ~= nil)
       t.eq(actual.from_state, expected.from_state)
       t.eq(actual.terminal, expected.terminal)
       t.eq(actual.driving_queue, expected.driving_queue)
-      t.eq(actual.budget and tonumber(actual.budget.minutes) or nil, expected.budget_minutes)
+      t.eq(actual.budget and tonumber(actual.budget.minutes) or nil, expected.budget and tonumber(expected.budget.minutes) or nil)
     end
-    t.eq(seen, authoritative_transition_count)
+    t.eq(seen, #rows)
+  end,
+
+  test_core_doctor_uses_provider_not_local_lifecycle_rows = function()
+    local body = file.read("packages/github-devloop-ops/core.lua")
+    t.is_nil(body:find("local lifecycle_rows", 1, true))
+    t.is_true(body:find('require("devloop.restart.issue_lifecycle").install(M)', 1, true) ~= nil)
   end,
 
   test_core_doctor_classifies_stuck_past_budget = function()

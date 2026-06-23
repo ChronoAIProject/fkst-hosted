@@ -21,7 +21,7 @@ import ratchet_base
 MANIFEST = "migration/github-devloop-saga-split.inventory"
 ALLOWLIST = "migration/github-devloop-saga-split-authority.allowlist"
 SPEC_REF = "docs/superpowers/specs/2026-06-20-issue-pr-saga-split-design.md"
-CONTRACT = "packages/github-devloop/core/restart/pr_partition_contract.lua"
+CONTRACT = "libraries/devloop/restart/issue/pr_partition_contract.lua"
 OWNERS = {"issue", "pr", "shared", "integration", "cross-cutting", "intake"}
 CALL_SCAN_MAX_CHARS = 12000
 CALL_SCAN_MAX_LINES = 120
@@ -120,7 +120,7 @@ def expected_paths(root: Path) -> set[str]:
         for path in sorted(devloop.glob("*.lua"))
         if path.is_file()
     )
-    for directory in sorted(devloop.glob("merge_gate")):
+    for directory in sorted([devloop / "merge_gate", devloop / "restart"]):
         if not directory.is_dir():
             continue
         paths.update(

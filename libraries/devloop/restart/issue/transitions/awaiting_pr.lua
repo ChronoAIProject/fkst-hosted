@@ -6,7 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local responsibility_signature = h.responsibility_signature
-  local contract = require("core.restart.pr_partition_contract").awaiting_pr_contract()
+  local contract = require("devloop.restart.issue.pr_partition_contract").awaiting_pr_contract()
   local terminal_states = contract.child_terminal_states
   return {
     from_state = "awaiting-pr",
