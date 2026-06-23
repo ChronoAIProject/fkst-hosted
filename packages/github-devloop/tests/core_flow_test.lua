@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local prompt_installers = require("devloop.prompts")
 local has_value = h.has_value
 local source_ref = h.source_ref
 local reached = h.reached
@@ -47,6 +48,22 @@ local function copy_table(value, extra)
 end
 
 return {
+  test_prompt_library_exposes_single_role_scoped_installer_surface = function()
+    t.eq(type(prompt_installers.install), "function")
+    local ok, err = pcall(prompt_installers.install, {}, { prompts = {} })
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("missing role install options", 1, true) ~= nil)
+    t.is_nil(prompt_installers.install_shared)
+    t.is_nil(prompt_installers.install_implement)
+    t.is_nil(prompt_installers.install_fix)
+    t.is_nil(prompt_installers.install_intake)
+    t.is_nil(prompt_installers.install_decompose)
+    t.is_nil(prompt_installers.install_sync_conflict)
+    t.is_nil(prompt_installers.install_review_meta)
+    t.is_nil(prompt_installers.install_intake_parser)
+    t.is_nil(prompt_installers.install_review_meta_parser)
+  end,
+
   test_issue_package_installs_only_issue_prompt_roles = function()
     t.eq(type(core.build_implement_prompt), "function")
     t.is_nil(core.build_fix_prompt)

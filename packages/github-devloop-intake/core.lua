@@ -23,9 +23,10 @@ require("core.intake_scan").install(M)
 require("devloop.payloads").install(M)
 require("devloop.decompose").install(M)
 local prompts = require("devloop.prompts")
-prompts.install_shared(M)
-prompts.install_intake(M, wiring.prompts())
-prompts.install_intake_parser(M)
+prompts.install(M, wiring.prompts(), {
+  intake = true,
+  intake_parser = true,
+})
 require("core.intake_class").install(M)
 require("devloop.requests").install(M)
 require("devloop.entity").install(M)

@@ -71,10 +71,11 @@ require("devloop.liveness").install(M, wiring.liveness(M))
 require("devloop.sweep_bounds").install(M)
 require("devloop.liveness_scan").install(M)
 local prompts = require("devloop.prompts")
-prompts.install_shared(M)
-prompts.install_fix(M, wiring.prompts())
-prompts.install_review_meta(M, wiring.prompts())
-prompts.install_review_meta_parser(M)
+prompts.install(M, wiring.prompts(), {
+  fix = true,
+  review_meta = true,
+  review_meta_parser = true,
+})
 require("devloop.requests").install(M)
 require("core.pr_label_requests").install(M)
 require("core.review_meta_requests").install(M)
