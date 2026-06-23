@@ -1,7 +1,7 @@
-local h = require("tests.devloop_helpers")
+local h = require("tests.devloop_ops_helpers")
 local t = h.t
 
-local package_root = "packages/github-devloop"
+local package_root = "packages/github-devloop-ops"
 
 local function read_source(path)
   local handle = assert(io.open(package_root .. "/" .. path, "r"))

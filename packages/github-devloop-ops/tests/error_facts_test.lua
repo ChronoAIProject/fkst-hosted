@@ -1,4 +1,4 @@
-local h = require("tests.devloop_core_helpers")
+local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local t = h.t
 

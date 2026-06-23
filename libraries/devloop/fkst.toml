@@ -21,6 +21,7 @@ allow = [
   "github-devloop-decompose",
   "github-devloop-intake",
   "github-devloop-integration",
+  "github-devloop-ops",
   "github-devloop-pr",
   "fkst-substrate-ref-maintainer",
 ]

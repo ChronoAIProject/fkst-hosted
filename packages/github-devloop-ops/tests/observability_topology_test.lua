@@ -1,4 +1,4 @@
-local h = require("tests.devloop_core_helpers")
+local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local t = h.t
 local topology = require("departments.observability.topology")
@@ -96,10 +96,10 @@ local function topology_fixture()
   b.raiser("github-devloop-intake.intake_probe_poll", "github-devloop-intake.devloop_intake_probe_tick")
   b.raiser("branch-topology.branch_poll", "branch-topology.devloop_branch_tick")
   b.raiser("github-devloop.merge_queue_poll", "github-devloop.devloop_merge_queue_tick")
-  b.raiser("github-devloop.observability_poll", "github-devloop.devloop_observe_tick")
+  b.raiser("github-devloop-ops.observability_poll", "github-devloop-ops.devloop_observe_tick")
   b.raiser("github-devloop.liveness_poll", "github-devloop.devloop_liveness_tick")
-  b.raiser("github-devloop.doctor_poll", "github-devloop.devloop_doctor_tick")
-  b.raiser("github-devloop.ensure_repo_poll", "github-devloop.devloop_ensure_repo_tick")
+  b.raiser("github-devloop-ops.doctor_poll", "github-devloop-ops.devloop_doctor_tick")
+  b.raiser("github-devloop-ops.ensure_repo_poll", "github-devloop-ops.devloop_ensure_repo_tick")
   b.raiser("fkst-substrate-ref-maintainer.substrate_ref_poll", "fkst-substrate-ref-maintainer.devloop_substrate_ref_tick")
 
   b.department("github-proxy.github_poll", { "github-proxy.github_poll_tick" }, { "github-proxy.github_entity_changed" })
@@ -148,14 +148,14 @@ local function topology_fixture()
   b.department("branch-topology.rollup_scan", { "branch-topology.devloop_branch_tick" }, { "branch-topology.devloop_rollup_ready" })
   b.department("branch-topology.rollup_merge", { "branch-topology.devloop_rollup_ready" }, {})
 
-  b.department("github-devloop.dead_letter", { "github-devloop.dead_letter" }, { "github-proxy.github_issue_create_request" })
+  b.department("github-devloop-ops.dead_letter", { "github-devloop-ops.dead_letter" }, { "github-proxy.github_issue_create_request" })
   b.department("github-devloop-decompose.decompose", { "github-devloop-decompose.devloop_decompose" }, { "github-proxy.github_issue_create_request" })
-  b.department("github-devloop.doctor", { "github-devloop.devloop_doctor_tick" }, {})
-  b.department("github-devloop.ensure_repo", { "github-devloop.devloop_ensure_repo_tick" }, {})
+  b.department("github-devloop-ops.doctor", { "github-devloop-ops.devloop_doctor_tick" }, {})
+  b.department("github-devloop-ops.ensure_repo", { "github-devloop-ops.devloop_ensure_repo_tick" }, {})
   b.department("github-devloop.fix", { "github-devloop.devloop_fixing" }, { "github-devloop.devloop_reviewing", "github-devloop.devloop_review_meta" })
   b.department("github-devloop.liveness_scan", { "github-devloop.devloop_liveness_tick" }, { "github-devloop.devloop_observe_redrive", "consensus.proposal" })
   b.department("github-devloop.loop", { "consensus.consensus_converge" }, { "consensus.proposal", "github-devloop.devloop_reconcile" })
-  b.department("github-devloop.observability", { "github-devloop.devloop_observe_tick" }, { "github-proxy.github_issue_create_request", "github-devloop.devloop_merge_queue_tick" })
+  b.department("github-devloop-ops.observability", { "github-devloop-ops.devloop_observe_tick" }, { "github-proxy.github_issue_create_request" })
   b.department("branch-topology.pr_freshness_scan", { "branch-topology.devloop_branch_tick" }, { "branch-topology.devloop_sync_conflict" })
   b.department("github-devloop.reconcile", {
     "github-devloop.devloop_reconcile",
@@ -208,6 +208,16 @@ local function count_literal(haystack, needle)
   end
 end
 
+local function assert_ops_departments_do_not_produce_devloop_lifecycle_queues(graph)
+  for _, node in ipairs(graph.nodes or {}) do
+    if node.kind == "department" and node.package == "github-devloop-ops" then
+      for _, produced in ipairs(node.produces or {}) do
+        t.is_true(tostring(produced):match("^github%-devloop%.devloop_") == nil)
+      end
+    end
+  end
+end
+
 return {
   test_observability_declares_graph_json_authorization = function()
     local module = require("departments.observability.main")
@@ -239,6 +249,7 @@ return {
 
   test_topology_mermaid_is_deterministic_and_derived = function()
     local graph = topology_fixture()
+    assert_ops_departments_do_not_produce_devloop_lifecycle_queues(graph)
     local mermaid = topology.render_mermaid(graph)
     local permuted = topology.render_mermaid(permuted_graph(graph))
 
@@ -265,6 +276,19 @@ return {
     t.eq(mermaid:find("#42", 1, true), nil)
     t.eq(mermaid:find("quota", 1, true), nil)
     t.eq(mermaid:find("queue depth", 1, true), nil)
+  end,
+
+  test_ops_observability_fixture_matches_real_published_outputs = function()
+    local graph = topology_fixture()
+    assert_ops_departments_do_not_produce_devloop_lifecycle_queues(graph)
+    for _, node in ipairs(graph.nodes or {}) do
+      if node.kind == "department" and node.id == "department:github-devloop-ops.observability" then
+        t.eq(#node.produces, 1)
+        t.eq(node.produces[1], "github-proxy.github_issue_create_request")
+        return
+      end
+    end
+    error("missing github-devloop-ops observability department fixture")
   end,
 
   test_topology_mermaid_normalizes_ids_and_escapes_labels = function()

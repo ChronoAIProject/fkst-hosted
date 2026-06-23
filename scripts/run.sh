@@ -20,7 +20,7 @@
 #       Run read-only preflight checks for git/cargo/rustc, fkst-framework BIN,
 #       codex, gh auth, and relevant FKST_* host facts.
 #
-#   scripts/run.sh doctor github-devloop
+#   scripts/run.sh doctor github-devloop-ops
 #       Run the read-only package-side saga doctor against the configured
 #       running GitHub repository. Exact engine queue/DLQ depths remain
 #       unavailable here and need fkst-framework doctor support.
@@ -805,16 +805,16 @@ cmd_doctor() {
   local pkg="${1:-}"
   shift
   case "$pkg" in
-    github-devloop)
+    github-devloop-ops)
       if [ "$#" -ne 0 ]; then
-        echo "usage: scripts/run.sh doctor github-devloop" >&2
+        echo "usage: scripts/run.sh doctor github-devloop-ops" >&2
         exit 2
       fi
       resolve_bin
       ensure_fresh_bin
       ensure_package_view
       local pkgdir rootdir args
-      pkgdir="$(package_root_for_name github-devloop)" || { echo "error: no package named github-devloop" >&2; exit 1; }
+      pkgdir="$(package_root_for_name github-devloop-ops)" || { echo "error: no package named github-devloop-ops" >&2; exit 1; }
       local lua="$pkgdir/departments/doctor/main.lua"
       [ -f "$lua" ] || { echo "error: no saga doctor at $lua" >&2; exit 1; }
       args=("$BIN" run "$lua" --project-root "$ROOT")
@@ -822,20 +822,20 @@ cmd_doctor() {
         [ -d "$rootdir" ] || continue
         args+=(--package-root "${rootdir%/}")
       done
-      args+=(--owner-namespace github-devloop --event '{"queue":"devloop_doctor_tick","payload":{}}')
+      args+=(--owner-namespace github-devloop-ops --event '{"queue":"devloop_doctor_tick","payload":{}}')
       "${args[@]}" \
         | grep -vE '^RAISED:'
       ;;
     --running|--system)
-      if [ "${1:-}" != "github-devloop" ]; then
-        echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+      if [ "${1:-}" != "github-devloop-ops" ]; then
+        echo "usage: scripts/run.sh doctor [github-devloop-ops|--running github-devloop-ops|--system github-devloop-ops]" >&2
         exit 2
       fi
       shift
-      cmd_doctor github-devloop "$@"
+      cmd_doctor github-devloop-ops "$@"
       ;;
     *)
-      echo "usage: scripts/run.sh doctor [github-devloop|--running github-devloop|--system github-devloop]" >&2
+      echo "usage: scripts/run.sh doctor [github-devloop-ops|--running github-devloop-ops|--system github-devloop-ops]" >&2
       exit 2
       ;;
   esac

@@ -639,33 +639,6 @@ function M.ready_split_version(version)
   return tostring(base) .. "/ready-split/" .. tostring(next_n)
 end
 
-function M.dependency_wait_fact(comments, proposal_id)
-  local core = root()
-  if type(comments) ~= "table" then
-    return nil
-  end
-  local current = core.current_state(comments, proposal_id)
-  if type(current) ~= "table" or current.version == nil then
-    return nil
-  end
-  local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
-  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
-    for marker in core._comment_body(comment):gmatch(marker_pattern) do
-      local marker_proposal = marker:match('proposal="([^"]+)"')
-      local marker_version = marker:match('version="([^"]*)"')
-      if marker_proposal == tostring(proposal_id)
-        and marker_version == tostring(current.version) then
-        return {
-          proposal_id = marker_proposal,
-          version = marker_version,
-          comment_created_at = core._comment_created_at(comment),
-        }
-      end
-    end
-  end
-  return nil
-end
-
 function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)
   local core = root()
   if type(state) ~= "table" or state.version == nil then

@@ -164,6 +164,29 @@ class MonotoneGateRatchetTest(unittest.TestCase):
         self.assertIn("implementation packages/github-devloop/core/synthetic_gate.lua:M.synthetic_gate does not reference devloop.state.reached", joined)
         self.assertIn("reads a transient cursor inside monotone_milestone implementation", joined)
 
+    def test_ops_package_extraction_does_not_grow_existing_allowlist_debt(self) -> None:
+        current = {
+            monotone.Violation(
+                "packages/github-devloop-ops/departments/observability/census.lua",
+                "put_issue_entity",
+                "cursor-read",
+                "current_state(",
+                18,
+            )
+        }
+        allowlist = set(current)
+        base = {
+            monotone.Violation(
+                "packages/github-devloop/departments/observability/census.lua",
+                "put_issue_entity",
+                "cursor-read",
+                "current_state(",
+                18,
+            )
+        }
+
+        self.assertEqual(monotone.ratchet_messages(current, allowlist, base), [])
+
 
 if __name__ == "__main__":
     unittest.main()

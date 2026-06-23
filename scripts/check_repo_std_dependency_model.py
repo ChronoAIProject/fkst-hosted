@@ -27,6 +27,7 @@ DEVLOOP_FAMILY = {
     "github-devloop-decompose",
     "github-devloop-intake",
     "github-devloop-integration",
+    "github-devloop-ops",
     "github-devloop-pr",
 }
 WORKFLOW_FORBIDDEN_STRINGS = (

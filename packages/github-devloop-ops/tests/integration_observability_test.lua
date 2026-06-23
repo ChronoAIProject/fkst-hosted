@@ -1,4 +1,4 @@
-local h = require("tests.devloop_helpers")
+local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -17,14 +17,12 @@ local function opts(name, extra)
   end
   return { env = env }
 end
-
 local function run_observability(run_opts)
   return t.run_department("departments/observability/main.lua", {
     queue = "devloop_observe_tick",
     payload = { schema = "github-devloop.observe-tick.v1" },
   }, run_opts or opts("observability"))
 end
-
 local function mock_env(bot_login, write_mode)
   for _ = 1, 16 do
     t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
@@ -53,27 +51,21 @@ local function mock_env(bot_login, write_mode)
     })
   end
 end
-
 local function encode_json_string(value)
   return tostring(value or ""):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n")
 end
-
 local function observe_issue_list_command(label, page)
   return core.gh_issue_list_observe_cmd("owner/repo", label, page or 1)
 end
-
 local function observe_issue_list_first_command(label)
   return core.gh_issue_list_observe_cmd("owner/repo", label, 1, true)
 end
-
 local function observe_pr_list_command(page)
   return core.gh_pr_list_observe_cmd("owner/repo", page or 1)
 end
-
 local function observe_pr_list_first_command()
   return core.gh_pr_list_observe_cmd("owner/repo", 1, true)
 end
-
 local function render_comment(body, author, created_at)
   return string.format(
     '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
@@ -82,7 +74,16 @@ local function render_comment(body, author, created_at)
     encode_json_string(created_at or "2026-06-03T01:02:03Z")
   )
 end
-
+local function wait_marker(proposal_id, version, unmet)
+  local items = {}
+  for _, number in ipairs(unmet or {}) do
+    table.insert(items, tostring(number))
+  end
+  return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" hold_kind="waiting" reason="waiting-on-dependency" unmet="' .. table.concat(items, ",")
+    .. '" -->'
+end
 local function mock_all_issue_lists(items)
   local rendered = {}
   for _, item in ipairs(items or {}) do
@@ -104,11 +105,7 @@ local function mock_all_issue_lists(items)
     })
   end
   for _, state in ipairs(core._issue_state_order) do
-    t.mock_command(observe_issue_list_first_command(core.state_label(state)), {
-      stdout = "[]\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    t.mock_command(observe_issue_list_first_command(core.state_label(state)), { stdout = "[]\n", stderr = "", exit_code = 0 })
   end
 end
 
@@ -119,17 +116,9 @@ local function mock_pr_list(items)
     local state = type(item) == "table" and item.state or "open"
     table.insert(rendered, string.format('{"number":%d,"state":"%s"}', number, encode_json_string(state)))
   end
-  t.mock_command(observe_pr_list_first_command(), {
-    stdout = "[" .. table.concat(rendered, ",") .. "]\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  t.mock_command(observe_pr_list_first_command(), { stdout = "[" .. table.concat(rendered, ",") .. "]\n", stderr = "", exit_code = 0 })
   if #rendered >= 100 then
-    t.mock_command(observe_pr_list_command(2), {
-      stdout = "[]\n",
-      stderr = "",
-      exit_code = 0,
-    })
+    t.mock_command(observe_pr_list_command(2), { stdout = "[]\n", stderr = "", exit_code = 0 })
   end
 end
 
@@ -321,27 +310,15 @@ local function mock_reaper_pr(proposal_id, issue_number, pr_number, comments)
 end
 
 local function mock_pr_comment_write()
-  t.mock_command("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-", {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
+  t.mock_command("gh pr comment '7' --repo 'owner/repo' --body-file '/tmp/fkst-github-devloop-reap-", { stdout = "", stderr = "", exit_code = 0 })
 end
 
 local function mock_pr_close()
-  t.mock_command("gh pr close '7' --repo 'owner/repo'", {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
+  t.mock_command("gh pr close '7' --repo 'owner/repo'", { stdout = "", stderr = "", exit_code = 0 })
 end
 
 local function mock_pr_close_failure()
-  t.mock_command("gh pr close '7' --repo 'owner/repo'", {
-    stdout = "",
-    stderr = "close failed",
-    exit_code = 1,
-  })
+  t.mock_command("gh pr close '7' --repo 'owner/repo'", { stdout = "", stderr = "close failed", exit_code = 1 })
 end
 
 local function mock_dashboard_label_exists()
@@ -691,7 +668,7 @@ return {
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "ready", version), "fkst-test-bot"),
-      render_comment(core.dependency_wait_marker(proposal_id, version, { 7 }), "fkst-test-bot"),
+      render_comment(wait_marker(proposal_id, version, { 7 }), "fkst-test-bot"),
     })
 
     local logs = stall_suspect_logs(capture_observability_logs())

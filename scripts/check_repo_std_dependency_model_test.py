@@ -70,6 +70,7 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
                 "github-devloop-decompose",
                 "github-devloop-intake",
                 "github-devloop-integration",
+                "github-devloop-ops",
                 "github-devloop-pr",
                 "fkst-substrate-ref-maintainer",
             ],
@@ -235,6 +236,25 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
                 violations, _warnings = self.run_guard_without_seed(root)
 
         self.assertTrue(any("devloop visibility must list only" in message and "archaudit" in message for message in violations))
+
+    def test_github_devloop_ops_is_devloop_family(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.seed_contract(root)
+            family = sorted(check_repo.check_repo_std_dependency_model.DEVLOOP_FAMILY)
+            self.seed_devloop_manifest(root, allow=family)
+            write(root / "libraries" / "devloop" / "state.lua", "return {}\n")
+            package_manifest(root / "packages" / "github-devloop-ops" / "fkst.toml", ["contract", "workflow", "testkit", "forge", "devloop"])
+            write(root / "packages" / "github-devloop-ops" / "core.lua", 'local state = require("devloop.state")\nreturn state\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", "")
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("absent", None),
+            ):
+                violations, _warnings = self.run_guard_without_seed(root)
+
+        self.assertEqual(violations, [])
 
     def test_devloop_forge_import_inventory_matches_current_and_legacy_base(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -9,10 +9,7 @@ github-devloop-intake.intake_probe_poll
 github-devloop-integration.branch_poll
 github-devloop-pr.liveness_poll
 github-devloop-pr.merge_queue_poll
-github-devloop.doctor_poll
-github-devloop.ensure_repo_poll
 github-devloop.liveness_poll
-github-devloop.observability_poll
 github-external-pr-intake.external_pr_scan
 github-proxy.github_poll
 github-ratchet-migration-slicer.ratchet_migration_slicer

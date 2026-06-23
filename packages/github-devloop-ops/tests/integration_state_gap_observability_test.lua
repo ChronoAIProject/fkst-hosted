@@ -1,4 +1,4 @@
-local h = require("tests.devloop_helpers")
+local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -64,6 +64,17 @@ local function render_comment(body, author, created_at)
     encode_json_string(author or "fkst-test-bot"),
     encode_json_string(created_at or "2026-06-03T01:02:03Z")
   )
+end
+
+local function wait_marker(proposal_id, version, unmet)
+  local items = {}
+  for _, number in ipairs(unmet or {}) do
+    table.insert(items, tostring(number))
+  end
+  return '<!-- fkst:github-devloop:dependency-wait:v1 proposal="' .. tostring(proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" hold_kind="waiting" reason="waiting-on-dependency" unmet="' .. table.concat(items, ",")
+    .. '" -->'
 end
 
 local function mock_all_issue_lists(numbers)
@@ -192,15 +203,15 @@ return {
     t.is_true(logs:find("ready->blocked", 1, true) == nil)
   end,
 
-  test_attributes_dependency_gate_wait_from_trusted_marker_stream = function()
+  test_attributes_dependency_wait_from_trusted_marker_stream = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     mock_env()
     mock_all_issue_lists({ 42 })
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "ready", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
-      render_comment(core.dependency_wait_marker(proposal_id, "v1", { 7 }), "fkst-test-bot", "2026-06-03T01:05:00Z"),
-      render_comment(core.dependency_wait_marker(proposal_id, "v1", { 8 }), "mallory", "2026-06-03T01:06:00Z"),
+      render_comment(wait_marker(proposal_id, "v1", { 7 }), "fkst-test-bot", "2026-06-03T01:05:00Z"),
+      render_comment(wait_marker(proposal_id, "v1", { 8 }), "mallory", "2026-06-03T01:06:00Z"),
       render_comment(core.state_marker(proposal_id, "implementing", "v1"), "fkst-test-bot", "2026-06-03T01:50:00Z"),
     })
 

@@ -111,7 +111,18 @@ class Violation:
         path = self.path
         if path.startswith("std/devloop_"):
             path = "libraries/devloop/" + path.removeprefix("std/devloop_")
-        return path, self.surface, self.kind, self.token, str(self.line)
+        moved_paths = {
+            "packages/github-devloop/core/doctor.lua": "packages/github-devloop-ops/core/doctor.lua",
+            "packages/github-devloop/core/state_gap.lua": "packages/github-devloop-ops/core/state_gap.lua",
+            "packages/github-devloop/departments/observability/census.lua": "packages/github-devloop-ops/departments/observability/census.lua",
+            "packages/github-devloop/departments/observability/reaper.lua": "packages/github-devloop-ops/departments/observability/reaper.lua",
+        }
+        if path == "packages/github-devloop/core/dependencies.lua" and self.surface == "M.dependency_wait_fact":
+            path = "packages/github-devloop-ops/core/dependency_wait.lua"
+        else:
+            path = moved_paths.get(path, path)
+        line = "dependency_wait_fact" if path == "packages/github-devloop-ops/core/dependency_wait.lua" and self.surface == "M.dependency_wait_fact" else str(self.line)
+        return path, self.surface, self.kind, self.token, line
 
     def label(self) -> str:
         return f"{self.path}:{self.line} {self.surface} {self.kind} {self.token}"

@@ -469,7 +469,7 @@ Operations:
 Diagnosis:
   scripts/run.sh doctor
       Host-preflight: read-only git/cargo/rustc, fkst-framework BIN, codex, gh auth, and FKST_* host facts.
-  scripts/run.sh doctor github-devloop
+  scripts/run.sh doctor github-devloop-ops
       Saga-doctor: read-only package-side saga/liveness doctor for the configured running GitHub repository.
 ```
 
@@ -560,7 +560,7 @@ Operations:
 
 Diagnosis:
 - `scripts/run.sh doctor` as host-preflight.
-- `scripts/run.sh doctor github-devloop` as saga-doctor.
+- `scripts/run.sh doctor github-devloop-ops` as saga-doctor.
 
 Preserve the actual command syntax and existing operational caveats: `run` stays read-only by default, `supervise` remains the real foreground event loop, and `build` remains local-only.
 

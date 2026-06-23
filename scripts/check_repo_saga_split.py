@@ -66,6 +66,7 @@ class LeakSite:
         if not (
             path.startswith("packages/github-devloop/")
             or path.startswith("packages/github-devloop-intake/")
+            or path.startswith("packages/github-devloop-ops/")
             or path.startswith("packages/github-devloop-pr/")
             or path.startswith("packages/github-devloop-integration/")
             or path.startswith("libraries/devloop/")
@@ -101,7 +102,7 @@ class LeakSite:
 
 def expected_paths(root: Path) -> set[str]:
     paths: set[str] = set()
-    for package in ("github-devloop", "github-devloop-intake", "github-devloop-pr", "github-devloop-integration"):
+    for package in ("github-devloop", "github-devloop-intake", "github-devloop-ops", "github-devloop-pr", "github-devloop-integration"):
         base = root / "packages" / package
         paths.update(
             path.relative_to(root).as_posix()

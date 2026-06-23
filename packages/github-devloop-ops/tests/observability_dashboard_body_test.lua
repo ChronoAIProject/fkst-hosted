@@ -1,4 +1,4 @@
-local h = require("tests.devloop_core_helpers")
+local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local t = h.t
 
@@ -38,6 +38,18 @@ local function untrusted_comment(body, created_at, id)
     author_login = "mallory",
     created_at = created_at or "2026-06-03T01:00:00Z",
   }
+end
+
+local function attempt_marker(proposal_id, dedup_key, attempt, started_at, exec_ref)
+  local marker = '<!-- fkst:github-devloop:implement-attempt:v1 proposal="' .. tostring(proposal_id)
+    .. '" dedup="' .. tostring(dedup_key)
+    .. '" attempt="' .. tostring(attempt)
+    .. '" started_at="' .. tostring(started_at or "")
+    .. '"'
+  if exec_ref ~= nil and exec_ref ~= "" then
+    marker = marker .. ' exec_ref="' .. tostring(exec_ref) .. '"'
+  end
+  return marker .. " -->"
 end
 
 local function autonomy_record(fields)
@@ -165,9 +177,9 @@ return {
       },
     })
     local comments = {
-      trusted_comment(core.implement_attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
+      trusted_comment(attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
       trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
-      trusted_comment(core.implement_attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
+      trusted_comment(attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
       trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, record), "2026-06-03T01:30:00Z", 1004),
       untrusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, record), "2026-06-03T01:31:00Z", 1005),
     }

@@ -120,7 +120,7 @@ function M.saga_doctor_classify_entity(entity, opts)
   local options = opts or {}
   local now_seconds = tonumber(options.now_seconds) or now()
   local state = entity.current_state
-  local row = M.restart_transition_row(state and state.state)
+  local row = M.lifecycle_transition_row(state and state.state)
 
   -- NOTE: a label-vs-marker mismatch check (MIS-LABELED) is intentionally NOT done
   -- here. An issue's fkst-dev label legitimately mirrors its linked PR's downstream
@@ -145,7 +145,7 @@ function M.saga_doctor_classify_entity(entity, opts)
   end
 
   if row == nil then
-    return diagnosis(entity, state, row, "STUCK", "trusted marker state is not present in the restart transition table", "update the package transition table or repair the marker")
+    return diagnosis(entity, state, row, "STUCK", "trusted marker state is not present in the lifecycle transition table", "update the package transition table or repair the marker")
   end
   if row.terminal == true then
     return diagnosis(entity, state, row, "OK", ok_reason(row, state), "none")

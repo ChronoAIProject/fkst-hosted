@@ -454,7 +454,7 @@ class LineLimitGuardTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as tmp:
             probe = Path(tmp) / "repo"
-            module_dir = probe / "packages" / "github-devloop" / "departments" / "observability"
+            module_dir = probe / "packages" / "github-devloop-ops" / "departments" / "observability"
             module_dir.mkdir(parents=True)
             (module_dir / "dashboard.lua").write_text("-- filler\n" * (check_repo.LINE_LIMIT + 1), encoding="utf-8")
 
@@ -465,7 +465,7 @@ class LineLimitGuardTest(unittest.TestCase):
         self.assertEqual(
             violations,
             [
-                "G1: packages/github-devloop/departments/observability/dashboard.lua has 1001 lines; limit is 1000",
+                "G1: packages/github-devloop-ops/departments/observability/dashboard.lua has 1001 lines; limit is 1000",
             ],
         )
         self.assertEqual(warnings, [])
@@ -525,7 +525,7 @@ class LineLimitGuardTest(unittest.TestCase):
 class ObservabilitySplitArchitectureTest(unittest.TestCase):
     def test_observability_source_is_split_into_department_responsibilities(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        package_root = root / "packages" / "github-devloop"
+        package_root = root / "packages" / "github-devloop-ops"
         module_dir = package_root / "departments" / "observability"
         expected_modules = {
             "common.lua",
@@ -887,7 +887,7 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
             for rel in (
                 "packages/github-devloop-integration/departments/rollup_scan/main.lua",
                 "packages/github-proxy/core/blocked_by.lua",
-                "packages/github-devloop/core/ensure_repo.lua",
+                "packages/github-devloop-ops/core/ensure_repo.lua",
                 "packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua",
             )
         }
@@ -896,7 +896,7 @@ class GhGitAdapterRatchetTest(unittest.TestCase):
         self.assertNotIn("git rollup", heads_by_file.get("packages/github-devloop-integration/departments/rollup_scan/main.lua", set()))
         self.assertNotIn("gh rollup", heads_by_file.get("packages/github-devloop-integration/departments/rollup_scan/main.lua", set()))
         self.assertNotIn("gh blockedBy", heads_by_file.get("packages/github-proxy/core/blocked_by.lua", set()))
-        self.assertNotIn("git integration", heads_by_file.get("packages/github-devloop/core/ensure_repo.lua", set()))
+        self.assertNotIn("git integration", heads_by_file.get("packages/github-devloop-ops/core/ensure_repo.lua", set()))
         self.assertNotIn("gh substrate-ref", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
         self.assertNotIn("git substrate-ref", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
         self.assertNotIn("git stale", heads_by_file.get("packages/fkst-substrate-ref-maintainer/core/substrate_ref.lua", set()))
