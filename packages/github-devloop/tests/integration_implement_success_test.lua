@@ -1,6 +1,8 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local git_fake = require("forge.git_fake")
+local substrate_pin = require("departments.implement.substrate_pin")
 local opts = h.opts
 local ready = h.ready
 local run_implement = h.run_implement
@@ -16,6 +18,55 @@ local find_raise = h.find_raise
 local current_base_pin = "2222222222222222222222222222222222222222"
 local stale_queue_pin = "1111111111111111111111111111111111111111"
 
+local function shell_quote(value)
+  return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function ensure_dir(path)
+  local ok = os.execute("mkdir -p " .. shell_quote(path))
+  if ok ~= true and ok ~= 0 then
+    error("github-devloop test: mkdir failed for " .. tostring(path))
+  end
+end
+
+local function copy(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  local result = {}
+  for key, field in pairs(value) do
+    result[copy(key)] = copy(field)
+  end
+  return result
+end
+
+local function substrate_pin_git(files)
+  local model = git_fake.model({})
+  local handle = git_fake.new(model)
+  handle.show_file = function(ref, path, timeout)
+    table.insert(model.writes, {
+      kind = "show_file",
+      ref = tostring(ref),
+      path = tostring(path),
+      timeout = timeout,
+    })
+    local by_ref = files[tostring(ref)]
+    local value = type(by_ref) == "table" and by_ref[tostring(path)] or nil
+    if value == nil then
+      return {
+        stdout = "",
+        stderr = "fatal: path '" .. tostring(path) .. "' does not exist in '" .. tostring(ref) .. "'\n",
+        exit_code = 128,
+      }
+    end
+    if type(value) == "table" then
+      return copy(value)
+    end
+    return { stdout = tostring(value), stderr = "", exit_code = 0 }
+  end
+  return handle, model
+end
+
 local function find_comment_with(raises, text)
   return find_raise(raises, "github-proxy.github_issue_comment_request", function(payload)
     return tostring(payload.body or ""):find(text, 1, true) ~= nil
@@ -23,6 +74,73 @@ local function find_comment_with(raises, text)
 end
 
 return {
+  test_substrate_pin_refresh_skips_missing_base_pin_with_git_fake = function()
+    local git = substrate_pin_git({})
+    substrate_pin.refresh("/tmp/fkst-packages-test/github-devloop/no-pin-worktree", "devloop-owner-repo-42-01HY", "abc123", true, { git = git })
+
+    t.eq(#git._model.writes, 1)
+    t.eq(git._model.writes[1].kind, "show_file")
+    t.eq(git._model.writes[1].ref, "abc123")
+    t.eq(git._model.writes[1].path, ".fkst/substrate-ref")
+  end,
+
+  test_substrate_pin_refresh_propagates_git_error_with_git_fake = function()
+    local git = substrate_pin_git({
+      abc123 = { [".fkst/substrate-ref"] = { stdout = "", stderr = "", exit_code = 128 } },
+    })
+
+    local ok, err = pcall(function()
+      substrate_pin.refresh("/tmp/fkst-packages-test/github-devloop/git-error-pin-worktree", "devloop-owner-repo-42-01HY", "abc123", true, { git = git })
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("implement-substrate-pin-read-failed", 1, true) ~= nil)
+    t.eq(#git._model.writes, 1)
+    t.eq(git._model.writes[1].ref, "abc123")
+  end,
+
+  test_substrate_pin_refresh_keeps_pinned_repo_behavior_with_git_fake = function()
+    local worktree = "/tmp/fkst-packages-test/github-devloop/pinned-worktree"
+    ensure_dir(worktree .. "/.fkst")
+    local branch = "devloop-owner-repo-42-01HY"
+    local git = substrate_pin_git({
+      abc123 = { [".fkst/substrate-ref"] = current_base_pin .. "\n" },
+      [branch] = { [".fkst/substrate-ref"] = stale_queue_pin .. "\n" },
+    })
+    t.mock_command("add -A", {
+      stdout = "",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("commit -m 'chore: refresh fkst-substrate pin'", {
+      stdout = "[devloop-owner-repo-42-01HY 9999999] chore: refresh fkst-substrate pin\n",
+      stderr = "",
+      exit_code = 0,
+    })
+
+    substrate_pin.refresh(worktree, branch, "abc123", true, { git = git })
+
+    t.eq(file.read(worktree .. "/.fkst/substrate-ref"), current_base_pin .. "\n")
+    t.eq(#git._model.writes, 2)
+    t.eq(git._model.writes[1].ref, "abc123")
+    t.eq(git._model.writes[2].ref, branch)
+    t.eq(count_calls("commit -m 'chore: refresh fkst-substrate pin'"), 1)
+  end,
+
+  test_substrate_pin_refresh_errors_on_present_malformed_base_pin = function()
+    local git = substrate_pin_git({
+      abc123 = { [".fkst/substrate-ref"] = "not-a-sha\n" },
+    })
+
+    local ok, err = pcall(function()
+      substrate_pin.refresh("/tmp/fkst-packages-test/github-devloop/malformed-pin-worktree", "devloop-owner-repo-42-01HY", "abc123", true, { git = git })
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("implement-substrate-pin-invalid", 1, true) ~= nil)
+    t.eq(#git._model.writes, 1)
+  end,
+
   test_implement_ready_runs_codex_in_worktree_and_marks_implementing = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
@@ -75,6 +193,28 @@ return {
     t.eq(count_calls("status --porcelain"), 1)
     t.eq(count_calls("add -A"), 2)
     t.eq(count_calls("commit -m"), 2)
+  end,
+
+  test_implement_missing_substrate_ref_still_spawns_codex = function()
+    local event = ready()
+    local branch = deterministic_branch_for(event)
+    mock_issue_implement({ "fkst-dev:ready", "fkst-dev:thinking" })
+    mock_fresh_implement_worktree({
+      base_pin = {
+        stdout = "",
+        stderr = "fatal: path '.fkst/substrate-ref' does not exist in 'abc123'\n",
+        exit_code = 128,
+      },
+    })
+    mock_implement_codex(0, "implemented without substrate pin")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("def456", branch)
+
+    local result = run_implement(event, opts("implement-missing-substrate-pin"))
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    t.eq(count_calls("commit -m 'chore: refresh fkst-substrate pin'"), 0)
+    t.eq(#result.raises, 4)
   end,
 
   test_implement_refreshes_substrate_ref_to_current_base_before_codex = function()

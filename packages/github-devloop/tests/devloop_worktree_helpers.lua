@@ -81,19 +81,22 @@ local function ensure_dir(path)
   end
 end
 
+local function git_show_pin_result(value, fallback)
+  if type(value) == "table" then
+    return value
+  end
+  return {
+    stdout = tostring(value or fallback) .. "\n",
+    stderr = "",
+    exit_code = 0,
+  }
+end
+
 local function mock_substrate_pin_refresh(worktree, base_pin, branch_pin)
   local pin = base_pin or "2222222222222222222222222222222222222222"
   local stale = branch_pin or "1111111111111111111111111111111111111111"
-  t.mock_command("git show abc123:.fkst/substrate-ref", {
-    stdout = pin .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("git show", {
-    stdout = stale .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  t.mock_command("git show abc123:.fkst/substrate-ref", git_show_pin_result(pin))
+  t.mock_command("git show", git_show_pin_result(stale))
   if worktree ~= nil then
     ensure_dir(tostring(worktree):gsub("/+$", "") .. "/.fkst")
   end

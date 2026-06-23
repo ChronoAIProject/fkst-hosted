@@ -6,7 +6,10 @@ local M = {}
 local substrate_ref_path = ".fkst/substrate-ref"
 local git_handle = nil
 
-local function git()
+local function git(opts)
+  if opts ~= nil and opts.git ~= nil then
+    return opts.git
+  end
   if git_handle == nil then
     if type(exec_argv) ~= "function" then
       error("github-devloop: implement-substrate-pin-git-adapter-unavailable: exec_argv is required")
@@ -20,13 +23,28 @@ local function trim(value)
   return tostring(value or ""):gsub("%s+$", "")
 end
 
-local function show_pin(ref, missing_ok)
-  local result = git().show_file(ref, substrate_ref_path, 30)
-  if result.exit_code ~= 0 then
-    if missing_ok then
+local function is_substrate_ref_absent_in_tree(result)
+  if type(result) ~= "table" then
+    return false
+  end
+  if result.exit_code ~= 128 or trim(result.stdout) ~= "" then
+    return false
+  end
+  local stderr = tostring(result.stderr or "")
+  local absent = "fatal: path '" .. substrate_ref_path .. "' does not exist in '"
+  local absent_but_on_disk = "fatal: path '" .. substrate_ref_path .. "' exists on disk, but not in '"
+  return stderr:find(absent, 1, true) ~= nil
+    or stderr:find(absent_but_on_disk, 1, true) ~= nil
+end
+
+local function show_pin(ref, opts)
+  opts = opts or {}
+  local result = git(opts).show_file(ref, substrate_ref_path, 30)
+  if result == nil or result.exit_code ~= 0 then
+    if opts.missing_ok and is_substrate_ref_absent_in_tree(result) then
       return nil
     end
-    error("github-devloop: implement-substrate-pin-read-failed: " .. tostring(result.stderr))
+    error("github-devloop: implement-substrate-pin-read-failed: " .. tostring(result and result.stderr or "nil git result"))
   end
   local pin = trim(result.stdout)
   if not core._is_git_sha(pin) then
@@ -43,15 +61,22 @@ local function write_pin(worktree, pin)
   file.write(root .. "/" .. substrate_ref_path, tostring(pin) .. "\n")
 end
 
-function M.refresh(worktree, branch, base_head, merge_clean)
+function M.refresh(worktree, branch, base_head, merge_clean, opts)
   if not core.is_safe_head_sha(base_head) then
     error("github-devloop: implement-substrate-pin-base-unsafe: unsafe implementation base head")
   end
   if not core._is_git_ref_safe(branch) then
     error("github-devloop: implement-substrate-pin-branch-unsafe: unsafe implementation branch")
   end
-  local base_pin = show_pin(base_head, false)
-  local branch_pin = show_pin(branch, true)
+  local base_pin = show_pin(base_head, { missing_ok = true, git = opts and opts.git })
+  if base_pin == nil then
+    core.log_line("info", "implement", "substrate-pin", "IMPLEMENT", {
+      "reason=substrate-pin: .fkst/substrate-ref absent — repo does not pin substrate, nothing to refresh",
+      "base_head=" .. tostring(base_head),
+    })
+    return
+  end
+  local branch_pin = show_pin(branch, { missing_ok = true, git = opts and opts.git })
   if branch_pin == base_pin then
     return
   end
