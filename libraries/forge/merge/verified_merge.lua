@@ -19,7 +19,7 @@ function M.run_verified_pr_merge(request)
   for attempt = 1, max_attempts do
     local pr_recheck = M.gh_pr_view_merge(repo, pr_number, 30)
     if pr_recheck.exit_code ~= 0 then
-      error("github-devloop: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
+      error("forge.merge: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
     end
     local rechecked_pr = M.parse_pr_view_merge(pr_recheck.stdout)
     rechecked_pr.number = pr_number
@@ -65,14 +65,14 @@ function M.run_verified_pr_merge(request)
           "reason=head-branch-modified",
         })
       else
-        error("github-devloop: gh pr merge failed: " .. tostring(merge_result.stderr))
+        error("forge.merge: gh pr merge failed: " .. tostring(merge_result.stderr))
       end
     else
       M.invalidate_entity_after_write(repo, "pr", pr_number)
 
       local merged_view = M.gh_pr_view_merge(repo, pr_number, 30)
       if merged_view.exit_code ~= 0 then
-        error("github-devloop: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
+        error("forge.merge: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
       end
       local merged_pr = M.parse_pr_view_merge(merged_view.stdout)
       merged_pr.number = pr_number
@@ -88,7 +88,7 @@ function M.run_verified_pr_merge(request)
       return true, "merged", merged_pr
     end
   end
-  error("github-devloop: gh pr merge failed: Head branch was modified after bounded retry")
+  error("forge.merge: gh pr merge failed: Head branch was modified after bounded retry")
 end
 end
 

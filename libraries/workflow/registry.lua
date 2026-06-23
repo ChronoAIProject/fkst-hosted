@@ -1,4 +1,4 @@
--- contract.registry: sorted/unique indexed registry builders shared across packages. The owner label prefixes error messages so each consumer keeps its own diagnostic namespace.
+-- workflow.registry: sorted/unique indexed registry builders for workflow-sized registries.
 local S = {}
 
 local function index_name(index_entry)

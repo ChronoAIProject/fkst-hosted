@@ -37,7 +37,7 @@ end
 function M.commit_check_runs_merge_gate(repo, head_sha, opts)
   local result = M.gh_commit_check_runs(repo, head_sha, 30)
   if result.exit_code ~= 0 then
-    error("github-devloop: gh commit check-runs failed: " .. tostring(result.stderr))
+    error("forge.merge: gh commit check-runs failed: " .. tostring(result.stderr))
   end
   local runs = M.parse_commit_check_runs(result.stdout)
   local green, reason = M.commit_check_runs_green(runs)

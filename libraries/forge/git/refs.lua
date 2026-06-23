@@ -1,4 +1,5 @@
 local M = {}
+local argv_render = require("forge.argv")
 
 local function push_branch_argv(branch)
   return { "git", "push", "-u", "origin", tostring(branch) }
@@ -30,6 +31,10 @@ end
 
 local function fetch_ref_argv(remote, ref)
   return { "git", "fetch", tostring(remote), tostring(ref) }
+end
+
+local function fetch_pr_merge_ref_argv(remote, pr_number)
+  return fetch_ref_argv(remote, "refs/pull/" .. tostring(pr_number) .. "/merge")
 end
 
 local function ls_remote_ref_argv(remote, ref)
@@ -341,6 +346,18 @@ function M.install(handle)
     return exec_result(handle, fetch_ref_argv(remote, ref), timeout, "git fetch ref")
   end
 
+  function handle.fetch_ref_cmd(remote, ref)
+    return "git fetch " .. argv_render.shell_single_quote(remote) .. " " .. argv_render.shell_single_quote(ref)
+  end
+
+  function handle.fetch_pr_merge_ref(remote, pr_number, timeout)
+    return exec_result(handle, fetch_pr_merge_ref_argv(remote, pr_number), timeout, "git fetch PR merge ref")
+  end
+
+  function handle.fetch_pr_merge_ref_cmd(remote, pr_number)
+    return handle.fetch_ref_cmd(remote, "refs/pull/" .. tostring(pr_number) .. "/merge")
+  end
+
   function handle.ls_remote_ref(remote, ref, timeout)
     return exec_result(handle, ls_remote_ref_argv(remote, ref), timeout, "git ls-remote ref")
   end
@@ -407,6 +424,10 @@ function M.install(handle)
 
   function handle.merge_no_edit(worktree, sha, timeout)
     return exec_result(handle, merge_no_edit_argv(worktree, sha), timeout, "git merge --no-edit")
+  end
+
+  function handle.merge_no_edit_cmd(worktree, sha)
+    return "git -C " .. argv_render.shell_single_quote(worktree) .. " merge --no-edit " .. argv_render.shell_single_quote(sha)
   end
 
   function handle.fast_forward(worktree, sha, timeout)

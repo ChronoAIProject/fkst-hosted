@@ -120,7 +120,7 @@ def expected_paths(root: Path) -> set[str]:
         for path in sorted(devloop.glob("*.lua"))
         if path.is_file()
     )
-    for directory in sorted([devloop / "merge_gate", devloop / "restart"]):
+    for directory in sorted([devloop / "restart"]):
         if not directory.is_dir():
             continue
         paths.update(

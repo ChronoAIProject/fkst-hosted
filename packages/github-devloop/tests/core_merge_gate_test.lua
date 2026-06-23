@@ -102,6 +102,8 @@ return {
     t.eq(core.merge_gate_reason_requires_pr_merge_product("mergeable-conflicting"), false)
     t.eq(core.merge_gate_reason_requires_pr_merge_product("rollup-pending"), false)
     t.eq(core.merge_gate_reason_class("own-ci-red"), "own-ci-red")
+    t.eq(core.merge_gate_reason_class("rollup-red"), "ci-wait")
+    t.eq(core.merge_gate_reason_class("mergeable-conflicting"), "mergeable-conflicting")
   end,
 
   test_unstable_with_completed_failure_routes_to_ci_red = function()

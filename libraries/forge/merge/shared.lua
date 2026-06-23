@@ -1,14 +1,24 @@
 local S = {}
-local registry = require("workflow.registry")
 local check_runs = require("forge.github.check_runs")
 local strings = require("contract.strings")
 
-local merge_gate_reason_classes_index = require("devloop.merge_gate.reason_classes.index")
 local merge_gate_reason_class_entries = {
-  require("devloop.merge_gate.reason_classes.merge_state_unstable_with_failing_checks"),
-  require("devloop.merge_gate.reason_classes.mergeable_conflicting"),
-  require("devloop.merge_gate.reason_classes.own_ci_red"),
-  require("devloop.merge_gate.reason_classes.rollup_red"),
+  {
+    key = "merge-state-unstable-with-failing-checks",
+    row = require("forge.merge.reason_classes.merge_state_unstable_with_failing_checks"),
+  },
+  {
+    key = "mergeable-conflicting",
+    row = require("forge.merge.reason_classes.mergeable_conflicting"),
+  },
+  {
+    key = "own-ci-red",
+    row = require("forge.merge.reason_classes.own_ci_red"),
+  },
+  {
+    key = "rollup-red",
+    row = require("forge.merge.reason_classes.rollup_red"),
+  },
 }
 
 function S.install(M)
@@ -64,15 +74,32 @@ local function integration_or_external_red(pr, head_sha, runs)
   return ci_classification("EXTERNAL_CI_RED", "external-ci-red", { check_runs = runs })
 end
 
-local merge_gate_reason_classes = registry.build_indexed_map(
-  "devloop.merge_gate.reason_classes.index",
-  merge_gate_reason_classes_index,
-  merge_gate_reason_class_entries,
-  "reason",
-  nil,
-  nil,
-  "github-devloop"
-)
+local function build_reason_class_map(entries)
+  local map = {}
+  for _, entry in ipairs(entries) do
+    local key = entry.key
+    local row = entry.row
+    if type(key) ~= "string" or key == "" then
+      error("forge.merge: reason class key must be a non-empty string")
+    end
+    if type(row) ~= "table" then
+      error("forge.merge: reason class row must be a table: " .. key)
+    end
+    if row.reason ~= key then
+      error("forge.merge: reason class key " .. key .. " does not match row reason " .. tostring(row.reason))
+    end
+    if map[key] ~= nil then
+      error("forge.merge: duplicate reason class key " .. key)
+    end
+    map[key] = {
+      class = row.class,
+      requires_pr_merge_product = row.requires_pr_merge_product,
+    }
+  end
+  return map
+end
+
+local merge_gate_reason_classes = build_reason_class_map(merge_gate_reason_class_entries)
 
 local function merge_gate_reason_row(reason)
   local text = tostring(reason or "")

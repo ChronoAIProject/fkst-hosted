@@ -112,21 +112,13 @@ return {}
             self.write_allowlist(root, [])
             self.assertEqual(self.repository_messages(root), [])
 
-    def test_nested_std_devloop_modules_are_inventory_paths(self) -> None:
+    def test_nested_std_devloop_restart_modules_are_inventory_paths(self) -> None:
         tmp, root = self.make_repo()
         with tmp:
-            nested = root / "libraries" / "devloop" / "merge_gate" / "reason_classes"
-            nested.mkdir(parents=True)
-            (nested / "index.lua").write_text("return {}\n", encoding="utf-8")
             restart_nested = root / "libraries" / "devloop" / "restart" / "issue" / "transitions"
             restart_nested.mkdir(parents=True)
             (restart_nested / "index.lua").write_text("return {}\n", encoding="utf-8")
             rows = self.base_rows() + [
-                {
-                    "path": "libraries/devloop/merge_gate/reason_classes/index.lua",
-                    "owner": "shared",
-                    "reason": "nested shared std helper",
-                },
                 {
                     "path": "libraries/devloop/restart/issue/transitions/index.lua",
                     "owner": "shared",

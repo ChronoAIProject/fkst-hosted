@@ -1,4 +1,5 @@
 local M = {}
+local argv_render = require("forge.argv")
 local shell = require("forge.github.shell")
 
 local function repo_owner(repo)
@@ -148,6 +149,22 @@ local function pr_merge_argv(repo, pr_number, head_sha)
     "--match-head-commit",
     tostring(head_sha),
   }
+end
+
+local function render_gh_argv(argv, quote_positions)
+  local quoted = {}
+  for _, position in ipairs(quote_positions or {}) do
+    quoted[position] = true
+  end
+  local parts = {}
+  for index, value in ipairs(argv or {}) do
+    if quoted[index] then
+      table.insert(parts, argv_render.shell_single_quote(value))
+    else
+      table.insert(parts, tostring(value))
+    end
+  end
+  return table.concat(parts, " ")
 end
 
 local function entity_updated_at_argv(repo, kind, number)
@@ -342,12 +359,20 @@ function M.install(handle)
     return handle._exec(pr_list_merge_queue_argv(repo, base), timeout, "gh pr merge queue list")
   end
 
+  function handle.pr_list_merge_queue_cmd(repo, base)
+    return render_gh_argv(pr_list_merge_queue_argv(repo, base), { 5 })
+  end
+
   function handle.pr_view(repo, pr_number, timeout)
     return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST head repository/headRefOid/state")
   end
 
   function handle.pr_cli_view(repo, pr_number, fields, timeout)
     return handle._exec(pr_view_cli_argv(repo, pr_number, fields), timeout, "gh pr view")
+  end
+
+  function handle.pr_cli_view_cmd(repo, pr_number, fields)
+    return render_gh_argv(pr_view_cli_argv(repo, pr_number, fields), { 4, 6 })
   end
 
   function handle.pr_rest_view(repo, pr_number, timeout)
@@ -376,6 +401,10 @@ function M.install(handle)
 
   function handle.pr_merge(repo, pr_number, head_sha, timeout)
     return handle._exec(pr_merge_argv(repo, pr_number, head_sha), timeout, "gh pr merge")
+  end
+
+  function handle.pr_merge_cmd(repo, pr_number, head_sha)
+    return render_gh_argv(pr_merge_argv(repo, pr_number, head_sha), { 4, 6, 9 })
   end
 
   function handle.pr_updated_at(repo, pr_number, timeout)

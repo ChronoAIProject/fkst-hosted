@@ -9,7 +9,6 @@
 {"path":"libraries/devloop/git_mechanics.lua","module":"forge.git"}
 {"path":"libraries/devloop/github_proxy_entity_view.lua","module":"forge.github"}
 {"path":"libraries/devloop/github_proxy_entity_view.lua","module":"forge.github_view"}
-{"path":"libraries/devloop/merge_gate/shared.lua","module":"forge.github.check_runs"}
 {"path":"libraries/devloop/parsers/misc.lua","module":"forge.strings"}
 {"path":"libraries/devloop/parsers/shared.lua","module":"forge.github_view"}
 {"path":"libraries/devloop/payloads/shared.lua","module":"forge.github"}

@@ -25,6 +25,36 @@ local function with_exec_argv(fn)
 end
 
 return {
+  test_forge_owns_merge_mechanics_and_command_builders = function()
+    local forge_merge = require("forge.merge")
+    t.eq(type(forge_merge.install), "function")
+
+    t.eq(
+      core.gh_pr_list_merge_queue_cmd("owner/repo", "release/2026"),
+      "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&base=release%2F2026&per_page=100'"
+    )
+    t.eq(
+      core.gh_issue_view_merge_cmd("owner/repo", 42),
+      "gh issue view '42' --repo 'owner/repo' --json title,labels,comments,state,assignees"
+    )
+    t.eq(
+      core.gh_pr_view_merge_cmd("owner/repo", 7),
+      "gh pr view '7' --repo 'owner/repo' --json headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
+    )
+    t.eq(
+      core.gh_pr_merge_cmd("owner/repo", 7, "def456"),
+      "gh pr merge '7' --repo 'owner/repo' --merge --match-head-commit 'def456'"
+    )
+    t.eq(
+      core.git_fetch_pr_merge_ref_cmd("origin", 7),
+      "git fetch 'origin' 'refs/pull/7/merge'"
+    )
+    t.eq(
+      core.git_worktree_merge_no_edit_cmd("/tmp/wt", "abc123"),
+      "git -C '/tmp/wt' merge --no-edit 'abc123'"
+    )
+  end,
+
   test_generic_gh_exec_uses_github_argv_adapter = function()
     local calls = with_exec_argv(function()
       core.gh_exec({ argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 })

@@ -1,5 +1,6 @@
 local M = {}
 local issue = require("forge.github.issue")
+local argv_render = require("forge.argv")
 
 local function copy(value)
   if type(value) ~= "table" then
@@ -67,6 +68,18 @@ function M.new(model)
       "--json",
       tostring(fields),
     }, timeout, "gh issue view")
+  end
+  function handle.issue_view_cmd(repo, issue_number, fields)
+    return table.concat({
+      "gh",
+      "issue",
+      "view",
+      argv_render.shell_single_quote(issue_number),
+      "--repo",
+      argv_render.shell_single_quote(repo),
+      "--json",
+      tostring(fields),
+    }, " ")
   end
   function handle.issue_updated_at(repo, issue_number, timeout)
     return handle._exec({

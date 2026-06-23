@@ -5,11 +5,11 @@ function S.install(M, shared)
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
   local runtime_result = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
-    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
+    error("forge.merge: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
   local runtime_root = M._trim(runtime_result.stdout)
   if runtime_root == "" or runtime_root:find("[\r\n]") ~= nil then
-    error("github-devloop: invalid FKST_RUNTIME_ROOT")
+    error("forge.merge: invalid FKST_RUNTIME_ROOT")
   end
   return runtime_root:gsub("/+$", "")
     .. "/worktrees/merge-ci-selfheal-"
@@ -28,7 +28,7 @@ local function rerequest_head_check_runs(repo, pr_number, head_sha, runs, propos
   for _, id in ipairs(ids) do
     local result = M.gh_check_run_rerequest(repo, id, 30)
     if result.exit_code ~= 0 then
-      error("github-devloop: check-run rerequest failed: " .. tostring(result.stderr))
+      error("forge.merge: check-run rerequest failed: " .. tostring(result.stderr))
     end
   end
   M.log_line("info", "merge", proposal_id, "ci-selfheal-rerequest", {
@@ -58,32 +58,32 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   local worktree = merge_ci_selfheal_worktree(repo, pr_number, head_sha)
   local remove_result = M.git_worktree_remove_if_present(worktree, 60)
   if remove_result.exit_code ~= 0 then
-    error("github-devloop: merge CI self-heal worktree cleanup failed: " .. tostring(remove_result.stderr))
+    error("forge.merge: merge CI self-heal worktree cleanup failed: " .. tostring(remove_result.stderr))
   end
   local plan = M.git_worktree_add_detached_plan(worktree, head_sha)
   local mkdir_result = exec_sync({ cmd = M.mkdir_p_cmd(plan.parent_dir), timeout = 30 })
   if mkdir_result.exit_code ~= 0 then
-    error("github-devloop: merge CI self-heal worktree parent setup failed: " .. tostring(mkdir_result.stderr))
+    error("forge.merge: merge CI self-heal worktree parent setup failed: " .. tostring(mkdir_result.stderr))
   end
   local add_result = M.git_worktree_add_detached(plan.worktree, plan.sha, 60)
   if add_result.exit_code ~= 0 then
-    error("github-devloop: merge CI self-heal worktree add failed: " .. tostring(add_result.stderr))
+    error("forge.merge: merge CI self-heal worktree add failed: " .. tostring(add_result.stderr))
   end
   local commit_result = M.git_empty_commit(worktree, "chore: nudge PR CI", 60)
   if commit_result.exit_code ~= 0 then
-    error("github-devloop: merge CI self-heal empty commit failed: " .. tostring(commit_result.stderr))
+    error("forge.merge: merge CI self-heal empty commit failed: " .. tostring(commit_result.stderr))
   end
   local push_result = M.git_push_worktree_branch_update_with_lease(worktree, head_ref, head_sha, 120)
   if push_result.exit_code ~= 0 then
-    error("github-devloop: merge CI self-heal push failed: " .. tostring(push_result.stderr))
+    error("forge.merge: merge CI self-heal push failed: " .. tostring(push_result.stderr))
   end
   local pushed_head = M.git_head_sha(worktree, 30)
   if pushed_head.exit_code ~= 0 then
-    error("github-devloop: merge CI self-heal head read failed: " .. tostring(pushed_head.stderr))
+    error("forge.merge: merge CI self-heal head read failed: " .. tostring(pushed_head.stderr))
   end
   local new_head_sha = tostring(pushed_head.stdout or ""):gsub("%s+$", "")
   if not M.is_safe_head_sha(new_head_sha) or new_head_sha == head_sha then
-    error("github-devloop: merge CI self-heal did not create a fresh head")
+    error("forge.merge: merge CI self-heal did not create a fresh head")
   end
   M.invalidate_entity_after_write(repo, "pr", pr_number)
   M.log_line("info", "merge", proposal_id, "ci-selfheal-head-nudge", {
@@ -156,7 +156,7 @@ function M.ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds, run
     end
     local nudged, nudge_reason = nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_seconds, age_seconds, key)
     if not nudged then
-      error("github-devloop: CI self-heal failed: " .. tostring(rerequest_reason) .. "; " .. tostring(nudge_reason))
+      error("forge.merge: CI self-heal failed: " .. tostring(rerequest_reason) .. "; " .. tostring(nudge_reason))
     end
   end)
   if not ran then

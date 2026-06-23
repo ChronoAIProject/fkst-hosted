@@ -115,16 +115,6 @@
 {"path":"packages/github-devloop-pr/departments/review_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/review_result/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"libraries/devloop/merge_batch.lua","owner":"shared","reason":"merge batch helpers are used by PR merge and integration tests during R1, so they must not peer-require github-devloop-pr."}
-{"path":"libraries/devloop/merge_gate/ci_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/reason_classes/index.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/reason_classes/merge_state_unstable_with_failing_checks.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/reason_classes/mergeable_conflicting.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/reason_classes/own_ci_red.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/reason_classes/rollup_red.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/self_heal.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/shared.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate/verified_merge.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
-{"path":"libraries/devloop/merge_gate.lua","owner":"shared","reason":"merge gate helpers are used by PR merge and remaining integration departments during R1."}
 {"path":"libraries/devloop/merge_gate_wait.lua","owner":"shared","reason":"merge-gate wait markers are read by shared liveness and PR merge reconciliation."}
 {"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/core/devloop_wiring.lua","owner":"pr","reason":"github-devloop-pr resolves PR package-private restart and prompt modules."}

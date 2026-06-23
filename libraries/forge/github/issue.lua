@@ -1,4 +1,5 @@
 local M = {}
+local argv_render = require("forge.argv")
 local github_view = require("forge.github_view")
 local append_comments = github_view.append_comments
 local rest_state = github_view.rest_state
@@ -58,6 +59,19 @@ end
 
 local function gh_issue_view_full_argv(repo, issue_number)
   return gh_issue_view_argv(repo, issue_number, issue_view_fields)
+end
+
+local function render_issue_view_argv(argv)
+  return table.concat({
+    tostring(argv[1]),
+    tostring(argv[2]),
+    tostring(argv[3]),
+    argv_render.shell_single_quote(argv[4]),
+    tostring(argv[5]),
+    argv_render.shell_single_quote(argv[6]),
+    tostring(argv[7]),
+    tostring(argv[8]),
+  }, " ")
 end
 
 local function gh_issue_rest_argv(repo, issue_number)
@@ -300,6 +314,10 @@ end
 function M.install(handle)
   function handle.issue_view(repo, issue_number, fields, timeout)
     return handle._exec(gh_issue_view_argv(repo, issue_number, fields), timeout, "gh issue view")
+  end
+
+  function handle.issue_view_cmd(repo, issue_number, fields)
+    return render_issue_view_argv(gh_issue_view_argv(repo, issue_number, fields))
   end
 
   local function fetch_issue_view_stdout(repo, number, timeout, opts)
