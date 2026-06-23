@@ -285,46 +285,48 @@ def monkey_patch_findings(path: str, source: str, stripped: str) -> set[Finding]
     return findings
 
 
-def gate_sources(root: Path) -> dict[str, str]:
+def gate_sources(root: Path, package_roots: list[Path] | None = None) -> dict[str, str]:
     sources: dict[str, str] = {}
-    for package in sorted((root / "packages").glob(PACKAGE_GLOB)):
-      gate_root = package.joinpath(*GATE_PARTS)
-      if not gate_root.is_dir():
-        continue
-      for path in sorted(gate_root.rglob("*.lua")):
-        if path.is_file():
-          sources[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
+    for packages in (package_roots or [root / "packages"]):
+        for package in sorted(packages.glob(PACKAGE_GLOB)):
+            gate_root = package.joinpath(*GATE_PARTS)
+            if not gate_root.is_dir():
+                continue
+            for path in sorted(gate_root.rglob("*.lua")):
+                if path.is_file():
+                    sources["packages/" + path.relative_to(packages).as_posix()] = path.read_text(encoding="utf-8")
     return sources
 
 
-def production_sources(root: Path) -> dict[str, str]:
+def production_sources(root: Path, package_roots: list[Path] | None = None) -> dict[str, str]:
     sources: dict[str, str] = {}
-    for package in sorted((root / "packages").glob(PACKAGE_GLOB)):
-      if not package.is_dir():
-        continue
-      for path in sorted(package.rglob("*.lua")):
-        if not path.is_file():
-          continue
-        rel = path.relative_to(root).as_posix()
-        parts = rel.split("/")
-        if "/tests/" in f"/{rel}/" or "/core/gates/" in f"/{rel}/":
-          continue
-        sources[rel] = path.read_text(encoding="utf-8")
+    for packages in (package_roots or [root / "packages"]):
+        for package in sorted(packages.glob(PACKAGE_GLOB)):
+            if not package.is_dir():
+                continue
+            for path in sorted(package.rglob("*.lua")):
+                if not path.is_file():
+                    continue
+                rel = "packages/" + path.relative_to(packages).as_posix()
+                if "/tests/" in f"/{rel}/" or "/core/gates/" in f"/{rel}/":
+                    continue
+                sources[rel] = path.read_text(encoding="utf-8")
     return sources
 
 
-def loader_scan_sources(root: Path) -> dict[str, str]:
+def loader_scan_sources(root: Path, package_roots: list[Path] | None = None) -> dict[str, str]:
     sources: dict[str, str] = {}
-    for package in sorted((root / "packages").glob(PACKAGE_GLOB)):
-      if not package.is_dir():
-        continue
-      for path in sorted(package.rglob("*.lua")):
-        if not path.is_file():
-          continue
-        rel = path.relative_to(root).as_posix()
-        if "/core/gates/" in f"/{rel}/":
-          continue
-        sources[rel] = path.read_text(encoding="utf-8")
+    for packages in (package_roots or [root / "packages"]):
+        for package in sorted(packages.glob(PACKAGE_GLOB)):
+            if not package.is_dir():
+                continue
+            for path in sorted(package.rglob("*.lua")):
+                if not path.is_file():
+                    continue
+                rel = "packages/" + path.relative_to(packages).as_posix()
+                if "/core/gates/" in f"/{rel}/":
+                    continue
+                sources[rel] = path.read_text(encoding="utf-8")
     return sources
 
 
@@ -354,9 +356,9 @@ def source_findings(path: str, source: str, line_offset: int = 0) -> set[Finding
     return findings
 
 
-def loader_bypass_findings(root: Path) -> set[BypassFinding]:
+def loader_bypass_findings(root: Path, package_roots: list[Path] | None = None) -> set[BypassFinding]:
     findings: set[BypassFinding] = set()
-    for path, source in loader_scan_sources(root).items():
+    for path, source in loader_scan_sources(root, package_roots).items():
         stripped = strip_lua_comments_and_strings(source)
         for match in REQUIRE_RE.finditer(source):
             if stripped[match.start():match.start() + len("require")] != "require":
@@ -375,10 +377,10 @@ def loader_bypass_findings(root: Path) -> set[BypassFinding]:
     return findings
 
 
-def gate_source_modules(root: Path) -> tuple[dict[str, tuple[str, int]], list[str]]:
+def gate_source_modules(root: Path, package_roots: list[Path] | None = None) -> tuple[dict[str, tuple[str, int]], list[str]]:
     sources: dict[str, tuple[str, int]] = {}
     messages: list[str] = []
-    for path, module_source in gate_sources(root).items():
+    for path, module_source in gate_sources(root, package_roots).items():
         source, line_offset, message = gate_source_module(path, module_source)
         if message is not None:
             messages.append(message)

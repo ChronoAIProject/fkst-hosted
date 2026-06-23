@@ -123,17 +123,18 @@ def source_sites(path: str, text: str) -> set[ForwardDirectSite]:
     return sites
 
 
-def sources(root: Path) -> dict[str, str]:
+def sources(root: Path, package_roots: list[Path] | None = None) -> dict[str, str]:
     found: dict[str, str] = {}
-    for package in ("github-devloop", "github-devloop-pr"):
-        base = root / "packages" / package
-        if not base.exists():
-            continue
-        for path in sorted(base.rglob("*.lua")):
-            if "/tests/" in path.as_posix():
+    for packages in (package_roots or [root / "packages"]):
+        for package in ("github-devloop", "github-devloop-pr"):
+            base = packages / package
+            if not base.exists():
                 continue
-            rel = path.relative_to(root).as_posix()
-            found[rel] = path.read_text(encoding="utf-8")
+            for path in sorted(base.rglob("*.lua")):
+                if "/tests/" in path.as_posix():
+                    continue
+                rel = "packages/" + path.relative_to(packages).as_posix()
+                found[rel] = path.read_text(encoding="utf-8")
     return found
 
 

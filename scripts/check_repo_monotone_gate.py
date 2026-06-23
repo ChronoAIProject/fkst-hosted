@@ -354,18 +354,18 @@ def source_violations(path: str, source: str) -> set[Violation]:
     return violations
 
 
-def production_sources(root: Path) -> dict[str, str]:
+def production_sources(root: Path, package_roots: list[Path] | None = None) -> dict[str, str]:
     sources: dict[str, str] = {}
-    packages = root / "packages"
-    for package_root in sorted(packages.glob(PACKAGE_GLOB)):
-        if not package_root.is_dir():
-            continue
-        for path in sorted(package_root.rglob("*.lua")):
-            if not path.is_file():
+    for packages in (package_roots or [root / "packages"]):
+        for package_root in sorted(packages.glob(PACKAGE_GLOB)):
+            if not package_root.is_dir():
                 continue
-            if "tests" in path.relative_to(package_root).parts:
-                continue
-            sources[path.relative_to(root).as_posix()] = path.read_text(encoding="utf-8")
+            for path in sorted(package_root.rglob("*.lua")):
+                if not path.is_file():
+                    continue
+                if "tests" in path.relative_to(package_root).parts:
+                    continue
+                sources["packages/" + path.relative_to(packages).as_posix()] = path.read_text(encoding="utf-8")
     devloop_root = root / "libraries" / "devloop"
     if devloop_root.exists():
         for path in sorted(devloop_root.rglob("*.lua")):
@@ -437,8 +437,8 @@ def responsibility_binding_messages(sources: dict[str, str]) -> list[str]:
     return messages
 
 
-def current_violations(root: Path) -> tuple[set[Violation], list[str]]:
-    sources = production_sources(root)
+def current_violations(root: Path, package_roots: list[Path] | None = None) -> tuple[set[Violation], list[str]]:
+    sources = production_sources(root, package_roots)
     found: set[Violation] = set()
     for path, source in sorted(sources.items()):
         found.update(source_violations(path, source))

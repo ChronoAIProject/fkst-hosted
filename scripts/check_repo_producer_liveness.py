@@ -422,7 +422,7 @@ def top_level_table_bodies(source: str) -> list[str]:
     return bodies
 
 
-def producer_liveness_contracts(path: Path, root: Path) -> set[ProducerLivenessContract]:
+def producer_liveness_contracts(path: Path, root: Path, package_root: Path | None = None) -> set[ProducerLivenessContract]:
     source = strip_lua_comments(path.read_text(encoding="utf-8"))
     function_match = re.search(r"\bfunction\s+M\s*\.\s*producer_liveness_contracts\s*\(", source)
     if function_match is None:
@@ -430,7 +430,8 @@ def producer_liveness_contracts(path: Path, root: Path) -> set[ProducerLivenessC
     body = bracket_body(source, function_match.end())
     if body is None:
         return set()
-    package = path.parent.name
+    base = root / "packages" if package_root is None else package_root
+    package = path.parent.relative_to(base).parts[0]
     contracts: set[ProducerLivenessContract] = set()
     for entry_body in top_level_table_bodies(body):
         if "runtime_gate" not in entry_body or "adversarial_fixture" not in entry_body:
@@ -455,35 +456,36 @@ def producer_liveness_contracts(path: Path, root: Path) -> set[ProducerLivenessC
     return contracts
 
 
-def declared_liveness_contracts(root: Path) -> set[ProducerLivenessContract]:
-    packages = root / "packages"
+def declared_liveness_contracts(root: Path, package_root: Path | None = None) -> set[ProducerLivenessContract]:
+    packages = root / "packages" if package_root is None else package_root
     if not packages.exists():
         return set()
     return {
         contract
         for path in sorted(packages.glob("*/core.lua"))
         if path.is_file()
-        for contract in producer_liveness_contracts(path, root)
+        for contract in producer_liveness_contracts(path, root, packages)
     }
 
 
-def declared_raiser(path: Path, root: Path) -> ProducerRaiser:
-    package = path.parents[1].name
+def declared_raiser(path: Path, root: Path, package_root: Path | None = None) -> ProducerRaiser:
+    base = root / "packages" if package_root is None else package_root
+    package = path.parents[1].relative_to(base).parts[0]
     source = strip_lua_comments(path.read_text(encoding="utf-8"))
     name_match = RAISER_NAME_RE.search(source)
     name = name_match.group("name") if name_match is not None else path.stem
     produces = [match.group("queue") for match in PRODUCES_STRING_RE.finditer(source)]
     for table in PRODUCES_TABLE_RE.finditer(source):
         produces.extend(match.group("value") for match in STRING_RE.finditer(table.group("body")))
-    return ProducerRaiser(package, name, path.relative_to(root).as_posix(), tuple(dict.fromkeys(produces)))
+    return ProducerRaiser(package, name, "packages/" + path.relative_to(base).as_posix(), tuple(dict.fromkeys(produces)))
 
 
-def declared_raisers(root: Path) -> set[ProducerRaiser]:
-    packages = root / "packages"
+def declared_raisers(root: Path, package_root: Path | None = None) -> set[ProducerRaiser]:
+    packages = root / "packages" if package_root is None else package_root
     if not packages.exists():
         return set()
     return {
-        declared_raiser(path, root)
+        declared_raiser(path, root, packages)
         for path in sorted(packages.glob("*/raisers/*.lua"))
         if path.is_file()
     }
@@ -570,13 +572,14 @@ def ratchet_messages(
     return messages
 
 
-def repository_messages(root: Path) -> list[str]:
-    raisers = declared_raisers(root)
+def repository_messages(root: Path, package_root: Path | None = None) -> list[str]:
+    packages = root / "packages" if package_root is None else package_root
+    raisers = declared_raisers(root, packages)
     fixture_coverage = {
         package.name: package_test_fixture_coverage(package)
-        for package in sorted((root / "packages").iterdir())
+        for package in sorted(packages.iterdir())
         if package.is_dir()
-    } if (root / "packages").exists() else {}
+    } if packages.exists() else {}
     coverage = {
         package: set().union(*by_fixture.values()) if by_fixture else set()
         for package, by_fixture in fixture_coverage.items()
@@ -586,5 +589,5 @@ def repository_messages(root: Path) -> list[str]:
     messages: list[str] = []
     if base_status == "unresolved":
         messages.append("cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
-    messages.extend(ratchet_messages(raisers, coverage, allowlist, base_allowlist, fixture_coverage, declared_liveness_contracts(root)))
+    messages.extend(ratchet_messages(raisers, coverage, allowlist, base_allowlist, fixture_coverage, declared_liveness_contracts(root, packages)))
     return messages
