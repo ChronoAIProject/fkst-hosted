@@ -199,6 +199,40 @@ class HostRunTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_explicit_local_packages_root_overrides_host_default(self) -> None:
+        h = HostRunHarness()
+        custom_local = h.root / "custom-local-packages"
+        try:
+            (custom_local / "site-board").mkdir(parents=True)
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.website_host),
+                    "--platform-root",
+                    str(h.platform),
+                    "--local-packages",
+                    str(custom_local),
+                    "--platform-packages",
+                    "github-proxy",
+                    "--host-packages",
+                    "site-board",
+                    "--durable-root",
+                    str(h.durable),
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str(h.platform / "packages" / "github-proxy"),
+                    str(custom_local / "site-board"),
+                ],
+            )
+        finally:
+            h.close()
+
     def test_missing_durable_root_fails_closed(self) -> None:
         h = HostRunHarness()
         try:

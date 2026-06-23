@@ -16,6 +16,11 @@
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
 #
+#   scripts/run.sh host --host-root <HOST> [--platform-root <PKGSRC>] [--local-packages <dir>] -- <check|test|supervise [args]>
+#       Run shared fkst-packages orchestration for a host repo. The host passes
+#       only its root/config; this runner owns BIN resolution, source ratchets,
+#       engine package-root wiring, and host_run.sh supervise delegation.
+#
 #   scripts/run.sh doctor
 #       Run read-only preflight checks for git/cargo/rustc, fkst-framework BIN,
 #       codex, gh auth, and relevant FKST_* host facts.
@@ -88,6 +93,8 @@ DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 . "$ROOT/scripts/bin_bootstrap.sh"
 # shellcheck source=scripts/host_run.sh
 . "$ROOT/scripts/host_run.sh"
+# shellcheck source=scripts/host_entry.sh
+. "$ROOT/scripts/host_entry.sh"
 
 resolve_bin() {
   if ! resolve_bin_contract "$ROOT" "bootstrap"; then
@@ -252,6 +259,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_github_devloop_helpers_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
+  python3 -B "$ROOT/scripts/host_entry_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_run_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_run_equivalence_test.py" || fail=1
   python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
@@ -947,6 +955,7 @@ cmd_build() {
 main() {
   case "${1:-}" in
     check) shift; cmd_check "$@" ;;
+    host) shift; cmd_host "$@" ;;
     doctor) shift; cmd_doctor "$@" ;;
     board) shift; resolve_bin; ensure_fresh_bin; cmd_board "$@" ;;
     health) shift; resolve_bin; ensure_fresh_bin; cmd_health "$@" ;;

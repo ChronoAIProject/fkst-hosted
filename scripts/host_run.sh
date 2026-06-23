@@ -3,6 +3,7 @@
 
 HOST_RUN_PROJECT_ROOT=""
 HOST_RUN_PLATFORM_ROOT=""
+HOST_RUN_LOCAL_PACKAGES_ROOT=""
 HOST_RUN_PLATFORM_PACKAGES=""
 HOST_RUN_HOST_PACKAGES=""
 HOST_RUN_DURABLE_ROOT=""
@@ -38,6 +39,7 @@ host_run_same_path() {
 host_run_parse_supervise_args() {
   HOST_RUN_PROJECT_ROOT=""
   HOST_RUN_PLATFORM_ROOT=""
+  HOST_RUN_LOCAL_PACKAGES_ROOT=""
   HOST_RUN_PLATFORM_PACKAGES=""
   HOST_RUN_HOST_PACKAGES=""
   HOST_RUN_DURABLE_ROOT=""
@@ -55,6 +57,9 @@ host_run_parse_supervise_args() {
       --platform-root)
         [ "$#" -ge 2 ] || { echo "error: --platform-root requires a path" >&2; return 2; }
         HOST_RUN_PLATFORM_ROOT="$2"; shift 2 ;;
+      --local-packages)
+        [ "$#" -ge 2 ] || { echo "error: --local-packages requires a path" >&2; return 2; }
+        HOST_RUN_LOCAL_PACKAGES_ROOT="$2"; shift 2 ;;
       --platform-packages)
         [ "$#" -ge 2 ] || { echo "error: --platform-packages requires a package list" >&2; return 2; }
         HOST_RUN_PLATFORM_PACKAGES="$2"; shift 2 ;;
@@ -85,6 +90,9 @@ host_run_parse_supervise_args() {
 
   HOST_RUN_PROJECT_ROOT="$(host_run_abs_path "$HOST_RUN_PROJECT_ROOT")"
   HOST_RUN_PLATFORM_ROOT="$(host_run_abs_path "$HOST_RUN_PLATFORM_ROOT")"
+  if [ -n "$HOST_RUN_LOCAL_PACKAGES_ROOT" ]; then
+    HOST_RUN_LOCAL_PACKAGES_ROOT="$(host_run_abs_path "$HOST_RUN_LOCAL_PACKAGES_ROOT")"
+  fi
   HOST_RUN_DURABLE_ROOT="$(host_run_abs_path "$HOST_RUN_DURABLE_ROOT")"
   if [ -n "$HOST_RUN_RUNTIME_BASE" ]; then
     HOST_RUN_RUNTIME_BASE="$(host_run_abs_path "$HOST_RUN_RUNTIME_BASE")"
@@ -117,6 +125,10 @@ host_run_validate_shape() {
 host_run_host_package_base() {
   if host_run_same_path "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_ROOT"; then
     printf '%s/packages\n' "$HOST_RUN_PROJECT_ROOT"
+    return 0
+  fi
+  if [ -n "$HOST_RUN_LOCAL_PACKAGES_ROOT" ]; then
+    printf '%s\n' "$HOST_RUN_LOCAL_PACKAGES_ROOT"
     return 0
   fi
   printf '%s/.fkst/local-packages\n' "$HOST_RUN_PROJECT_ROOT"
