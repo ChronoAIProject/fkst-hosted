@@ -5,19 +5,14 @@ local audit_main = require("departments.audit.main")
 local env_lib = require("workflow.env")
 local t = fkst.test
 
-local function opts(name, env)
-  local base = {
-    FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/archaudit/" .. tostring(name),
-    FKST_DURABLE_ROOT = "/tmp/fkst-packages-test/archaudit/durable-" .. tostring(name),
-    FKST_GITHUB_REPO = "owner/repo",
-    FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
-    ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
-    FKST_GITHUB_WRITE = "",
+local function run_department_opts()
+  return {
+    env = {
+      FKST_GITHUB_REPO = "owner/repo",
+      FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
+      ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
+    },
   }
-  for key, value in pairs(env or {}) do
-    base[key] = value
-  end
-  return { env = base }
 end
 
 local function idle_event(extra)
@@ -349,25 +344,6 @@ return {
     t.is_true(result.raises[1].payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
     t.eq(#dept.search_calls, 1)
     t.eq(dept.search_calls[1].query, "fkst:archaudit:audit-run:v1")
-  end,
-
-  test_run_department_real_cron_tick_is_accepted_and_reaches_audit_body = function()
-    mock_env("owner/repo", "3")
-    mock_busy_observe()
-    t.mock_command("gh issue list", { stdout = "[]", stderr = "", exit_code = 0 })
-    t.mock_command("codex exec", {
-      stdout = '[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Real cron tick reached audit body.","suggested_fix":"Small local fix."}]',
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command("gh label list", { stdout = "[]", stderr = "", exit_code = 0 })
-
-    local result = t.run_department("departments/audit/main.lua", stale_tick_event(), opts("real-cron-tick"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "github-proxy.github_issue_create_request")
-    t.is_true(result.raises[1].payload.body:find("Real cron tick reached audit body.", 1, true) ~= nil)
-    t.is_true(result.raises[1].payload.body:find("Audit trigger: stale", 1, true) ~= nil)
   end,
 
   test_stale_tick_zero_findings_records_durable_audit_run_marker = function()
@@ -918,13 +894,13 @@ return {
         schema = "idle-detector.system-idle.v1",
         source_ref = { kind = "host-observe", ref = "idle_tick/foreign" },
       },
-    }, opts("unknown-queue"))
+    }, run_department_opts())
     t.eq(bad_queue.exit_code, 1)
     t.eq(#bad_queue.raises, 0)
 
     local bad_schema = t.run_department("departments/audit/main.lua", idle_event({
       schema = "idle-detector.system-idle.v2",
-    }), opts("unknown-schema"))
+    }), run_department_opts())
     t.eq(bad_schema.exit_code, 1)
     t.eq(#bad_schema.raises, 0)
   end,
@@ -933,7 +909,7 @@ return {
     mock_idle_observe()
     local result = t.run_department("departments/audit/main.lua", idle_event({
       detected_at = "not-a-time",
-    }), opts("malformed-detected-at"))
+    }), run_department_opts())
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
   end,
@@ -942,7 +918,7 @@ return {
     mock_idle_observe()
     local result = t.run_department("departments/audit/main.lua", idle_event({
       expires_at = "not-a-time",
-    }), opts("malformed-expires-at"))
+    }), run_department_opts())
     t.eq(result.exit_code, 1)
     t.eq(#result.raises, 0)
   end,

@@ -1,4 +1,5 @@
 local conformance = require("testkit.namespaced_dispatch_conformance")
+local helper = require("tests.fire_raiser_helpers")
 local t = fkst.test
 
 local function load_department(path, module_name)
@@ -8,9 +9,7 @@ local function load_department(path, module_name)
   return { path = path, module = module }
 end
 
-local departments = conformance.loaded_departments({
-  load_department("departments/audit/main.lua", "departments.audit.main"),
-})
+local audit_department = load_department("departments/audit/main.lua", "departments.audit.main")
 
 local function system_idle_payload()
   return {
@@ -27,11 +26,6 @@ end
 local function payload_for_queue(_path, queue)
   if queue == "idle-detector.system_idle" then
     return system_idle_payload()
-  end
-  if queue == "archaudit_tick" then
-    -- Production supervise emits this canonical shape; fully closing the
-    -- hand-built gap needs substrate fkst.test.fire_raiser.
-    return { raiser = "archaudit.audit_poll" }
   end
   error("archaudit: no production-shaped queue fixture for " .. tostring(queue))
 end
@@ -69,15 +63,49 @@ local function opts_for_case()
   }
 end
 
+local function idle_only_departments()
+  local spec = {}
+  for key, value in pairs(audit_department.module.spec) do
+    spec[key] = value
+  end
+  spec.consumes = { "idle-detector.system_idle" }
+  local module = {
+    spec = spec,
+    pipeline = audit_department.module.pipeline,
+  }
+  return conformance.loaded_departments({
+    { path = audit_department.path, module = module },
+  })
+end
+
 return {
-  test_all_departments_accept_production_namespaced_consumed_queues = function()
+  test_idle_dispatch_fixture_accepts_production_namespaced_consumed_queue = function()
     conformance.assert_all_consumed_queues_route({
       t = t,
       package_name = "archaudit",
       package_root = "packages/archaudit",
-      departments = departments,
+      departments = idle_only_departments(),
       payload_for_queue = payload_for_queue,
       opts_for_case = opts_for_case,
     })
+  end,
+
+  test_audit_poll_namespaced_dispatch_uses_real_fire_raiser = function()
+    local root = helper.setup_workspace("namespaced", helper.fire_raiser_child([[
+  test_fire_raiser_namespaced_dispatch = function()
+    mock_env("owner/repo", "3")
+    mock_idle_observe()
+    mock_production_github("[]", "[]")
+    mock_codex_findings("[]", 0)
+
+    local trace = t.fire_raiser("audit_poll")
+    t.eq(trace.source_payload.raiser, "archaudit.audit_poll")
+    t.eq(trace.routed_to[1], "archaudit.audit")
+    t.eq(trace.consumer_result.status, "accepted")
+    t.eq(#trace.raised, 1)
+  end,
+]]))
+    local output = helper.run_child(root)
+    t.is_true(output:find("1 passed, 0 failed", 1, true) ~= nil, output)
   end,
 }
