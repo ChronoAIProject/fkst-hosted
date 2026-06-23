@@ -6,6 +6,7 @@ HOST_ENTRY_PLATFORM_ROOT=""
 HOST_ENTRY_LOCAL_PACKAGES=""
 HOST_ENTRY_PACKAGE_ROOTS=()
 HOST_ENTRY_HOST_PACKAGE_ROOTS=()
+HOST_ENTRY_PLATFORM_PACKAGE_ROOTS=()
 HOST_ENTRY_ENGINE_PACKAGE_ROOT_ARGS=()
 HOST_ENTRY_PLATFORM_PACKAGE_NAMES=()
 HOST_ENTRY_HOST_PACKAGE_NAMES=()
@@ -127,11 +128,13 @@ host_entry_add_package_root() {
   HOST_ENTRY_PACKAGE_ROOTS+=("$root")
   HOST_ENTRY_ENGINE_PACKAGE_ROOT_ARGS+=(--package-root "$root")
   if name="$(host_entry_package_name_under "$root" "$HOST_ENTRY_PLATFORM_ROOT/packages")"; then
+    HOST_ENTRY_PLATFORM_PACKAGE_ROOTS+=("$root")
     host_entry_add_platform_name "$name"
     return 0
   fi
   if host_entry_same_path "$HOST_ENTRY_HOST_ROOT" "$HOST_ENTRY_PLATFORM_ROOT" \
       && name="$(host_entry_package_name_under "$root" "$HOST_ENTRY_HOST_ROOT/packages")"; then
+    HOST_ENTRY_PLATFORM_PACKAGE_ROOTS+=("$root")
     host_entry_add_platform_name "$name"
     return 0
   fi
@@ -193,6 +196,7 @@ host_entry_discover_roots() {
 host_entry_build_package_roots() {
   HOST_ENTRY_PACKAGE_ROOTS=()
   HOST_ENTRY_HOST_PACKAGE_ROOTS=()
+  HOST_ENTRY_PLATFORM_PACKAGE_ROOTS=()
   HOST_ENTRY_ENGINE_PACKAGE_ROOT_ARGS=()
   HOST_ENTRY_PLATFORM_PACKAGE_NAMES=()
   HOST_ENTRY_HOST_PACKAGE_NAMES=()
@@ -285,6 +289,16 @@ PY
   return "$rc"
 }
 
+host_entry_package_test_project_root() {
+  local pkg="$1"
+  if host_entry_same_path "$HOST_ENTRY_HOST_ROOT" "$HOST_ENTRY_PLATFORM_ROOT" \
+      && host_entry_package_name_under "$pkg" "$HOST_ENTRY_PLATFORM_ROOT/packages" >/dev/null; then
+    printf '%s\n' "$pkg"
+    return 0
+  fi
+  printf '%s\n' "$HOST_ENTRY_HOST_ROOT"
+}
+
 host_entry_cmd_check() {
   host_entry_build_package_roots
   host_entry_run_shared_source_ratchets
@@ -294,7 +308,7 @@ host_entry_cmd_check() {
 }
 
 host_entry_cmd_test() {
-  local target="" pkg name ran=0 fail=0 report_dir report_file engine_args=() conf_cmd=() test_cmd=()
+  local target="" pkg name project_root ran=0 fail=0 report_dir report_file conf_cmd=() test_cmd=() test_roots=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       -v|--verbose) FKST_TEST_VERBOSE=1; export FKST_TEST_VERBOSE ;;
@@ -307,9 +321,6 @@ host_entry_cmd_test() {
   host_entry_build_package_roots
   resolve_bin
   ensure_fresh_bin
-  while IFS= read -r arg; do
-    engine_args+=("$arg")
-  done < <(host_entry_engine_args)
 
   trap 'rm -rf "${HOST_TEST_RUNTIME_ROOT:-}" "${HOST_TEST_DURABLE_ROOT:-}"' EXIT
   HOST_TEST_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-host-test-rt.XXXXXX")"
@@ -324,29 +335,38 @@ host_entry_cmd_test() {
   echo "=== self-test ==="
   if ! run_self_test_with_optional_lua_coverage; then fail=$((fail + 1)); fi
 
+  if [ -z "$target" ]; then
+    if ! host_entry_run_engine_conformance; then fail=$((fail + 1)); fi
+  fi
+
+  test_roots=()
   if [ "${#HOST_ENTRY_HOST_PACKAGE_ROOTS[@]}" -gt 0 ]; then
-    for pkg in "${HOST_ENTRY_HOST_PACKAGE_ROOTS[@]}"; do
+    test_roots+=("${HOST_ENTRY_HOST_PACKAGE_ROOTS[@]}")
+  fi
+  if host_entry_same_path "$HOST_ENTRY_HOST_ROOT" "$HOST_ENTRY_PLATFORM_ROOT"; then
+    if [ "${#HOST_ENTRY_PLATFORM_PACKAGE_ROOTS[@]}" -gt 0 ]; then
+      test_roots+=("${HOST_ENTRY_PLATFORM_PACKAGE_ROOTS[@]}")
+    fi
+  fi
+
+  if [ "${#test_roots[@]}" -gt 0 ]; then
+    for pkg in "${test_roots[@]}"; do
       name="$(basename "$pkg")"
       if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
       echo "=== $name ==="
       ran=$((ran + 1))
+      project_root="$(host_entry_package_test_project_root "$pkg")"
       if [ -f "$pkg/composed.deps" ] || grep -q '^kind = "package\.composed"' "$pkg/fkst.toml" 2>/dev/null; then
         echo "skip single-package conformance for composed package: $name"
       else
-        conf_cmd=("$BIN" conformance --project-root "$pkg")
-        if [ "${#engine_args[@]}" -gt 0 ]; then
-          conf_cmd+=("${engine_args[@]}")
-        fi
+        conf_cmd=("$BIN" conformance --project-root "$project_root" --package-root "$pkg")
         if ! run_quiet_pass "${conf_cmd[@]}"; then
           fail=$((fail + 1))
           continue
         fi
       fi
       report_file="$report_dir/$name.json"
-      test_cmd=("$BIN" test --project-root "$pkg")
-      if [ "${#engine_args[@]}" -gt 0 ]; then
-        test_cmd+=("${engine_args[@]}")
-      fi
+      test_cmd=("$BIN" test --project-root "$project_root" --package-root "$pkg")
       test_cmd+=(--report-json "$report_file")
       if ! run_quiet_keep '^FAIL |passed, [0-9]+ failed|panic' "${test_cmd[@]}"; then
         fail=$((fail + 1))

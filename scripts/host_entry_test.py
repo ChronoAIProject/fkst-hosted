@@ -277,6 +277,199 @@ class HostEntryTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_host_test_runs_full_graph_conformance_but_only_host_owned_unit_tests(self) -> None:
+        h = HostEntryHarness()
+        fake_bin = h.root / "fake-framework"
+        engine_log = h.root / "engine-log"
+        fake_bin.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "{ printf 'CMD\\n'; for arg in \"$@\"; do printf '%s\\n' \"$arg\"; done; printf 'END\\n'; } >> "
+            + shell_quote(engine_log)
+            + "\n"
+            "if [ \"${1:-}\" = \"--self-test\" ]; then\n"
+            "  coverage=''\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--coverage\" ]; then shift; coverage=\"${1:-}\"; fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  if [ -n \"$coverage\" ]; then mkdir -p \"$coverage\"; printf '{\"files\":[]}\\n' > \"$coverage/coverage.json\"; fi\n"
+            "  printf '0 passed, 0 failed\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"conformance\" ]; then\n"
+            "  printf '%s\\n' '{\"ok\":true}'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"test\" ]; then\n"
+            "  report=''\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--report-json\" ]; then shift; report=\"${1:-}\"; fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  if [ -n \"$report\" ]; then printf '%s\\n' '{\"schema\":\"fkst.test.report.v1\",\"summary\":{\"passed\":1,\"failed\":0},\"tests\":[{\"owner_namespace\":\"site-board\",\"file\":\"tests/site_test.lua\",\"name\":\"test_site\",\"status\":\"pass\"}]}' > \"$report\"; fi\n"
+            "  printf '1 passed, 0 failed\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 99\n",
+            encoding="utf-8",
+        )
+        fake_bin.chmod(0o755)
+        try:
+            (h.local_packages / "site-board" / "fkst.toml").write_text(
+                'kind = "package.composed"\nname = "site-board"\n\n[code]\nroot = "."\n',
+                encoding="utf-8",
+            )
+            (h.config_dir / "package-roots").write_text(
+                ".fkst/local-packages/site-board\nfkst-packages:packages/idle-detector\n",
+                encoding="utf-8",
+            )
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/run.sh
+                    resolve_bin() {{ BIN={shell_quote(fake_bin)}; export BIN; }}
+                    ensure_fresh_bin() {{ :; }}
+                    cmd_host --host-root {shell_quote(h.host)} --platform-root {shell_quote(h.platform)} -- test
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            blocks: list[list[str]] = []
+            current: list[str] | None = None
+            for line in engine_log.read_text(encoding="utf-8").splitlines():
+                if line == "CMD":
+                    current = []
+                elif line == "END":
+                    self.assertIsNotNone(current)
+                    blocks.append(current or [])
+                    current = None
+                elif current is not None:
+                    current.append(line)
+
+            conformance = [block for block in blocks if block and block[0] == "conformance"]
+            tests = [block for block in blocks if block and block[0] == "test"]
+            self.assertEqual(
+                conformance,
+                [
+                    [
+                        "conformance",
+                        "--project-root",
+                        str(h.host),
+                        "--package-root",
+                        str(h.local_packages / "site-board"),
+                        "--package-root",
+                        str(h.platform / "packages" / "idle-detector"),
+                    ]
+                ],
+            )
+            self.assertEqual(len(tests), 1, blocks)
+            self.assertEqual(
+                tests[0][:5],
+                [
+                    "test",
+                    "--project-root",
+                    str(h.host),
+                    "--package-root",
+                    str(h.local_packages / "site-board"),
+                ],
+            )
+            self.assertNotIn(str(h.platform / "packages" / "idle-detector"), tests[0])
+        finally:
+            h.close()
+
+    def test_host_test_runs_platform_unit_tests_when_host_is_platform(self) -> None:
+        h = HostEntryHarness()
+        fake_bin = h.root / "fake-framework"
+        engine_log = h.root / "engine-log"
+        fake_bin.write_text(
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "{ printf 'CMD\\n'; for arg in \"$@\"; do printf '%s\\n' \"$arg\"; done; printf 'END\\n'; } >> "
+            + shell_quote(engine_log)
+            + "\n"
+            "if [ \"${1:-}\" = \"--self-test\" ]; then\n"
+            "  coverage=''\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--coverage\" ]; then shift; coverage=\"${1:-}\"; fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  if [ -n \"$coverage\" ]; then mkdir -p \"$coverage\"; printf '{\"files\":[]}\\n' > \"$coverage/coverage.json\"; fi\n"
+            "  printf '0 passed, 0 failed\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"conformance\" ]; then\n"
+            "  printf '%s\\n' '{\"ok\":true}'\n"
+            "  exit 0\n"
+            "fi\n"
+            "if [ \"${1:-}\" = \"test\" ]; then\n"
+            "  report=''\n"
+            "  while [ \"$#\" -gt 0 ]; do\n"
+            "    if [ \"${1:-}\" = \"--report-json\" ]; then shift; report=\"${1:-}\"; fi\n"
+            "    shift || true\n"
+            "  done\n"
+            "  if [ -n \"$report\" ]; then printf '%s\\n' '{\"schema\":\"fkst.test.report.v1\",\"summary\":{\"passed\":1,\"failed\":0},\"tests\":[{\"owner_namespace\":\"own-host\",\"file\":\"tests/package_test.lua\",\"name\":\"test_package\",\"status\":\"pass\"}]}' > \"$report\"; fi\n"
+            "  printf '1 passed, 0 failed\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 99\n",
+            encoding="utf-8",
+        )
+        fake_bin.chmod(0o755)
+        try:
+            for package in ("github-proxy", "idle-detector"):
+                h.make_package(h.host / "packages" / package, package)
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/run.sh
+                    resolve_bin() {{ BIN={shell_quote(fake_bin)}; export BIN; }}
+                    ensure_fresh_bin() {{ :; }}
+                    cmd_host --host-root {shell_quote(h.host)} --platform-root {shell_quote(h.host)} --local-packages {shell_quote(h.local_packages)} -- test
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("OK: 2 host package(s)", result.stdout)
+            blocks: list[list[str]] = []
+            current: list[str] | None = None
+            for line in engine_log.read_text(encoding="utf-8").splitlines():
+                if line == "CMD":
+                    current = []
+                elif line == "END":
+                    self.assertIsNotNone(current)
+                    blocks.append(current or [])
+                    current = None
+                elif current is not None:
+                    current.append(line)
+
+            tests = [block for block in blocks if block and block[0] == "test"]
+            tested_roots = [
+                block[block.index("--package-root") + 1]
+                for block in tests
+                if "--package-root" in block
+            ]
+            tested_project_roots = [
+                block[block.index("--project-root") + 1]
+                for block in tests
+                if "--project-root" in block
+            ]
+            self.assertEqual(
+                sorted(tested_roots),
+                sorted(
+                    [
+                        str(h.host / "packages" / "github-proxy"),
+                        str(h.host / "packages" / "idle-detector"),
+                    ]
+                ),
+            )
+            self.assertEqual(sorted(tested_project_roots), sorted(tested_roots))
+            self.assertNotIn(str(h.local_packages / "site-board"), tested_roots)
+        finally:
+            h.close()
+
 
 if __name__ == "__main__":
     unittest.main()
