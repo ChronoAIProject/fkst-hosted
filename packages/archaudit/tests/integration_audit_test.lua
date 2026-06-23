@@ -53,11 +53,11 @@ local function stale_idle_event()
 end
 
 local function stale_tick_event(slot)
-  local tick_slot = slot or "2026-06-20T01:00:00Z"
+  local tick_slot = slot or 1782003600000
   return {
     queue = "archaudit.archaudit_tick",
     ts = tick_slot,
-    payload = core.audit_tick_payload(tick_slot),
+    payload = { raiser = "archaudit.audit_poll" },
   }
 end
 
@@ -351,6 +351,25 @@ return {
     t.eq(dept.search_calls[1].query, "fkst:archaudit:audit-run:v1")
   end,
 
+  test_run_department_real_cron_tick_is_accepted_and_reaches_audit_body = function()
+    mock_env("owner/repo", "3")
+    mock_busy_observe()
+    t.mock_command("gh issue list", { stdout = "[]", stderr = "", exit_code = 0 })
+    t.mock_command("codex exec", {
+      stdout = '[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Real cron tick reached audit body.","suggested_fix":"Small local fix."}]',
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command("gh label list", { stdout = "[]", stderr = "", exit_code = 0 })
+
+    local result = t.run_department("departments/audit/main.lua", stale_tick_event(), opts("real-cron-tick"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_create_request")
+    t.is_true(result.raises[1].payload.body:find("Real cron tick reached audit body.", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find("Audit trigger: stale", 1, true) ~= nil)
+  end,
+
   test_stale_tick_zero_findings_records_durable_audit_run_marker = function()
     mock_env("owner/repo", "3")
     mock_busy_observe()
@@ -370,11 +389,11 @@ return {
     mock_busy_observe()
     local dept = fake_audit_department("[]")
     local event = stale_tick_event()
-    event.payload.schema = "wrong"
+    event.payload.raiser = "wrong"
     local result = run_fake_failure_at(dept, event, core.iso_timestamp_epoch_seconds("2026-06-20T01:00:00Z"))
     t.eq(#result.raises, 0)
     t.eq(#dept.search_calls, 0)
-    t.is_true(tostring(result.failure.error):find("unknown archaudit_tick schema", 1, true) ~= nil)
+    t.is_true(tostring(result.failure.error):find("unknown archaudit_tick producer", 1, true) ~= nil)
   end,
 
   test_stale_tick_fails_closed_without_durable_search_port = function()

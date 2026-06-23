@@ -296,28 +296,47 @@ local function audit_run_body(trigger_reason)
   }, "\n")
 end
 
-function M.audit_tick_payload(slot)
-  return {
-    schema = "archaudit.tick.v1",
-    slot = tostring(slot or ""),
-    source_ref = {
-      kind = "cron",
-      ref = "archaudit/audit_poll/" .. tostring(slot or ""),
-    },
-  }
+local function is_audit_poll_raiser(raiser)
+  if raiser == "audit_poll" then
+    return true
+  end
+  if type(raiser) ~= "string" then
+    return false
+  end
+  return raiser:match("^[A-Za-z0-9_%-]+%.audit_poll$") ~= nil
 end
 
-function M.validate_audit_tick_payload(payload)
-  if type(payload) ~= "table" or payload.schema ~= "archaudit.tick.v1" then
-    return false
+function M.normalize_audit_tick_event(event)
+  if type(event) ~= "table" then
+    return nil, "missing-event"
   end
-  if not strings.is_bounded_string(payload.slot, 80) then
-    return false
+  local queue = tostring(event.queue or "")
+  if queue ~= "archaudit.archaudit_tick" and queue ~= "archaudit_tick" then
+    return nil, "wrong-queue"
   end
-  if type(payload.source_ref) ~= "table" or payload.source_ref.kind ~= "cron" then
-    return false
+  local payload = event.payload
+  if type(payload) ~= "table" then
+    return nil, "missing-payload"
   end
-  return payload.source_ref.ref == "archaudit/audit_poll/" .. tostring(payload.slot)
+  if not is_audit_poll_raiser(payload.raiser) then
+    return nil, "wrong-raiser"
+  end
+  local slot = payload.slot or payload.cron_slot or payload.detected_at or event.ts
+  if slot == nil or tostring(slot) == "" then
+    return nil, "missing-slot"
+  end
+  local slot_text = tostring(slot)
+  if not strings.is_bounded_string(slot_text, 120) then
+    return nil, "malformed-slot"
+  end
+  return {
+    reason = "stale",
+    slot = slot_text,
+    source_ref = {
+      kind = "cron",
+      ref = "audit_poll/slot/" .. strings.sanitize_key(slot_text, 120),
+    },
+  }, nil
 end
 
 local function required_list(facts, name)

@@ -218,8 +218,8 @@ local function audit_done(event)
   if trigger == "idle" and payload.schema ~= "idle-detector.system-idle.v1" then
     fail(event, "unknown-schema", "unknown system_idle schema")
   end
-  if trigger == "stale" and not core.validate_audit_tick_payload(payload) then
-    fail(event, "unknown-schema", "unknown archaudit_tick schema")
+  if trigger == "stale" and core.normalize_audit_tick_event(event) == nil then
+    fail(event, "unknown-cron-tick", "unknown archaudit_tick producer")
   end
   return false
 end
@@ -257,8 +257,8 @@ local function make_department(ports)
         log_fact("warn", "audit", "SKIP", "terminal-skip", event, why or "current system busy", true)
         return
       end
-    elseif not core.validate_audit_tick_payload(payload) then
-      fail(event, "unknown-schema", "unknown archaudit_tick schema")
+    elseif core.normalize_audit_tick_event(event) == nil then
+      fail(event, "unknown-cron-tick", "unknown archaudit_tick producer")
     end
 
     local repo, repo_error_class, repo_error = repo_from_env()

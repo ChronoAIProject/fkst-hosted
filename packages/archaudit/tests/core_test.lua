@@ -294,15 +294,48 @@ return {
     t.is_true(payload.body:find('fkst:archaudit:audit-run:v1 reason="stale"', 1, true) ~= nil)
   end,
 
-  test_audit_tick_payload_is_small_and_source_referenced = function()
-    local payload = core.audit_tick_payload("2026-06-20T01:00:00Z")
-    t.eq(payload.schema, "archaudit.tick.v1")
-    t.eq(payload.slot, "2026-06-20T01:00:00Z")
-    t.eq(payload.source_ref.kind, "cron")
-    t.eq(payload.source_ref.ref, "archaudit/audit_poll/2026-06-20T01:00:00Z")
-    t.eq(core.validate_audit_tick_payload(payload), true)
-    payload.source_ref.ref = "other"
-    t.eq(core.validate_audit_tick_payload(payload), false)
+  test_audit_tick_event_normalizes_real_namespaced_cron_payload = function()
+    local trigger = core.normalize_audit_tick_event({
+      queue = "archaudit.archaudit_tick",
+      ts = 1782003600000,
+      payload = { raiser = "archaudit.audit_poll" },
+    })
+    t.eq(trigger.reason, "stale")
+    t.eq(trigger.slot, "1782003600000")
+    t.eq(trigger.source_ref.kind, "cron")
+    t.eq(trigger.source_ref.ref, "audit_poll/slot/1782003600000")
+
+    local explicit_slot = core.normalize_audit_tick_event({
+      queue = "archaudit.archaudit_tick",
+      ts = 1782003600000,
+      payload = {
+        raiser = "archaudit.audit_poll",
+        slot = "slot-value",
+        cron_slot = "cron-slot-value",
+        detected_at = "2026-06-20T01:00:00Z",
+      },
+    })
+    t.eq(explicit_slot.slot, "slot-value")
+
+    t.eq(core.normalize_audit_tick_event({
+      queue = "archaudit.archaudit_tick",
+      payload = { raiser = "archaudit.audit_poll", cron_slot = "cron-slot-value" },
+    }).slot, "cron-slot-value")
+
+    t.eq(core.normalize_audit_tick_event({
+      queue = "archaudit.archaudit_tick",
+      payload = { raiser = "archaudit.audit_poll", detected_at = "2026-06-20T01:00:00Z" },
+    }).slot, "2026-06-20T01:00:00Z")
+
+    t.eq(core.normalize_audit_tick_event({
+      queue = "archaudit_tick",
+      payload = { raiser = "audit_poll", cron_slot = "flat-slot" },
+    }).slot, "flat-slot")
+
+    t.eq(core.normalize_audit_tick_event({
+      queue = "archaudit.archaudit_tick",
+      payload = { raiser = "other", slot = "2026-06-20T01:00:00Z" },
+    }), nil)
   end,
 
   test_audit_search_parses_and_trusts_bot_authored_marker_issues = function()

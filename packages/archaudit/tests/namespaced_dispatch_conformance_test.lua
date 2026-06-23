@@ -1,5 +1,4 @@
 local conformance = require("testkit.namespaced_dispatch_conformance")
-local core = require("core")
 local t = fkst.test
 
 local function load_department(path, module_name)
@@ -30,7 +29,9 @@ local function payload_for_queue(_path, queue)
     return system_idle_payload()
   end
   if queue == "archaudit_tick" then
-    return core.audit_tick_payload("2026-06-19T01:00:00Z")
+    -- Production supervise emits this canonical shape; fully closing the
+    -- hand-built gap needs substrate fkst.test.fire_raiser.
+    return { raiser = "archaudit.audit_poll" }
   end
   error("archaudit: no production-shaped queue fixture for " .. tostring(queue))
 end
