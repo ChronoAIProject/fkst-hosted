@@ -524,10 +524,13 @@ run_quiet_keep() {
   return "$rc"
 }
 
+load_composed_test_roots() { local script; script="$(bash "$ROOT/scripts/composed_test_graph_roots.sh" "$1" "$2")" || return 1; eval "$script"; }
+
 cmd_test() {
   local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}"
   local report_dir report_file coverage_report_dir coverage_dir coverage_file
   local coverage_artifacts=()
+  local test_project_root test_pkg_args
   # Lines worth surfacing when a package test fails: the engine's per-test FAIL
   # line (anchored at column 0 so it does not catch mid-line tag=FAILURE in the
   # info logs of tests that deliberately exercise error paths and still pass),
@@ -588,14 +591,23 @@ cmd_test() {
     coverage_dir="$coverage_report_dir/$name"
     rm -rf "$coverage_dir"
     mkdir -p "$coverage_dir"
+    test_project_root="$pkg"; test_pkg_args=(--package-root "$pkg")
+    if [ -f "$pkg/composed.deps" ] && ! load_composed_test_roots normal "$name"; then fail=$((fail + 1)); continue; fi
     # Default-quiet: keep only failure-relevant lines (the --report-json that
     # drives the tally and G5 coverage is unaffected). run_quiet_keep is called
     # from `if !` so the inner pipe never trips `set -e` on a failing package;
     # the loop continues, the count is correct, and FAILED: still prints.
     if ! run_quiet_keep "$test_failure_filter" \
-        "$BIN" test --project-root "$pkg" --package-root "$pkg" --report-json "$report_file" --coverage "$coverage_dir"; then
+        "$BIN" test --project-root "$test_project_root" "${test_pkg_args[@]}" --report-json "$report_file" --coverage "$coverage_dir"; then
       fail=$((fail + 1))
     else
+      if [ -f "$pkg/composed.deps" ] && compgen -G "$pkg/tests/run_graph*_test.lua" >/dev/null; then
+        if ! load_composed_test_roots graph "$name" || ! run_quiet_keep "$test_failure_filter" \
+            "$BIN" test --project-root "$test_project_root" "${test_pkg_args[@]}" --report-json "$report_dir/$name.graph.json" --coverage "$coverage_dir.graph"; then
+          fail=$((fail + 1))
+          continue
+        fi
+      fi
       coverage_file="$coverage_dir/coverage.json"
       if [ ! -f "$coverage_file" ]; then
         echo "error: fkst-framework test --coverage did not write coverage.json for $name in $coverage_dir" >&2
