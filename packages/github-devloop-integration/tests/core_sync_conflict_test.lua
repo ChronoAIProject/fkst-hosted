@@ -31,6 +31,17 @@ local function conflict(extra)
 end
 
 return {
+  test_integration_package_installs_only_sync_conflict_prompt_role = function()
+    t.eq(type(core.build_sync_conflict_prompt), "function")
+    t.is_nil(core.build_implement_prompt)
+    t.is_nil(core.build_fix_prompt)
+    t.is_nil(core.build_intake_prompt)
+    t.is_nil(core.build_decompose_prompt)
+    t.is_nil(core.build_review_meta_prompt)
+    t.is_nil(core.parse_intake_action)
+    t.is_nil(core.parse_review_meta_action)
+  end,
+
   test_sync_conflict_fingerprint_uses_stable_identity_and_paths = function()
     local one = core.sync_conflict_fingerprint(conflict(), table.concat({
       "100644 abc 1\tpackages/github-devloop/core.lua",

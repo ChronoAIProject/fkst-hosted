@@ -173,46 +173,12 @@ return {
     end):find("Write all prose output in Simplified Chinese", 1, true) ~= nil)
   end,
 
-  test_devloop_issue_pr_role_prompts_include_scoped_github_history = function()
+  test_devloop_issue_prompt_includes_scoped_github_history = function()
     local issue = prompt_issue()
     local manifest = "Read these local files for your complete context.\nIssue JSON: /tmp/ctx/issue.json\nBoard digest: /tmp/ctx/board.txt\nPR diff patch: /tmp/ctx/diff.patch"
-    local fix_reflection_prompt = core.build_review_meta_prompt({
-      mode = "fix-reflection",
-      proposal_id = "github-devloop/issue/owner/repo/42",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
-      fix_round = 3,
-    }, issue, manifest)
-    local judge_prompts = {
-      core.build_review_meta_prompt({
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
-      }, issue, manifest),
-      fix_reflection_prompt,
-    }
     local actor_prompts = {
       core.build_implement_prompt("github-devloop/issue/owner/repo/42", issue, "Approved framing.", manifest),
-      core.build_fix_prompt({
-        proposal_id = "github-devloop/issue/owner/repo/42",
-        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
-        reviewed_head_sha = "abcdef123456",
-      }, issue, "Review feedback.", "Approved framing.", manifest),
     }
-
-    for _, prompt in ipairs(judge_prompts) do
-      assert_judge_preamble_slots(prompt)
-      assert_github_entity_history(prompt)
-      t.is_true(prompt:find("/tmp/ctx/issue.json", 1, true) ~= nil)
-      t.is_nil(prompt:find("gh issue", 1, true))
-      t.is_nil(prompt:find("gh pr", 1, true))
-      t.is_nil(prompt:find("gh api", 1, true))
-      t.is_nil(prompt:find("{{", 1, true))
-    end
-
-    t.is_true(fix_reflection_prompt:find("Line two: the marker named ⟦FKST:REASON⟧ followed by one concise paragraph.", 1, true) ~= nil)
-    t.is_true(fix_reflection_prompt:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
-    t.is_true(fix_reflection_prompt:find("Read GitHub context only from the local files named below", 1, true) ~= nil)
-    t.is_nil(fix_reflection_prompt:find("Chinese", 1, true))
-    t.is_nil(fix_reflection_prompt:find("{{", 1, true))
 
     for _, prompt in ipairs(actor_prompts) do
       assert_actor_preamble_slots(prompt)

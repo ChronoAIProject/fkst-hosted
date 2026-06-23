@@ -53,10 +53,7 @@ end
 function W.prompts()
   return {
     prompts = {
-      fix = require("prompts.fix"),
-      fix_reflection = require("prompts.fix_reflection"),
       implement = require("prompts.implement"),
-      review_meta = require("prompts.review_meta"),
     },
   }
 end
