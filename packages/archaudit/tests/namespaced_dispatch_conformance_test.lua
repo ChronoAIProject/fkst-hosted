@@ -41,25 +41,19 @@ local function opts_for_case()
         ARCHAUDIT_MAX_ISSUES_PER_IDLE = "3",
       },
     },
-    before_replay = function()
-      local core = require("core")
-      local old_observe = core.observe
-      core.observe = function()
-        return {
-          schema_version = 1,
-          generated_at_ms = 1781830860000,
-          source = {},
-          limits = { max_deliveries = 500, max_dead_letters = 500 },
-          truncated = { deliveries = false, dead_letters = false },
-          queues = {},
-          deliveries = {},
-          dead_letters = {},
-        }
-      end
-      return function()
-        core.observe = old_observe
-      end
-    end,
+  }
+end
+
+local function observe_facts()
+  return {
+    schema_version = 1,
+    generated_at_ms = 1781830860000,
+    source = {},
+    limits = { max_deliveries = 500, max_dead_letters = 500 },
+    truncated = { deliveries = false, dead_letters = false },
+    queues = {},
+    deliveries = {},
+    dead_letters = {},
   }
 end
 
@@ -71,7 +65,16 @@ local function idle_only_departments()
   spec.consumes = { "idle-detector.system_idle" }
   local module = {
     spec = spec,
-    pipeline = audit_department.module.pipeline,
+    pipeline = audit_department.module.make_department({
+      github = {
+        issue_search = function()
+          return { stdout = "[]", stderr = "", exit_code = 0 }
+        end,
+      },
+      observe = {
+        facts = observe_facts,
+      },
+    }).pipeline,
   }
   return conformance.loaded_departments({
     { path = audit_department.path, module = module },

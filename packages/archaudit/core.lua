@@ -3,7 +3,6 @@ local M = {}
 local strings = require("contract.strings")
 local forge_strings = require("forge.strings")
 local error_facts = require("contract.error_facts")
-local env = require("workflow.env")
 
 local file_limit = 240
 local rule_limit = 80
@@ -26,27 +25,10 @@ local audit_poll_interval_seconds = 30 * 60
 -- plus 15 minutes for the current sub-10-minute audit runtime and downstream slack.
 local audit_due_completion_budget_seconds = 2 * audit_poll_interval_seconds + 15 * 60
 local audit_poll_interval = tostring(math.floor(audit_poll_interval_seconds / 60)) .. "m"
-local observe_env = {
-  BIN = true,
-  FKST_DURABLE_ROOT = true,
-}
 
 function M.persistence_class()
   return "composed_judgment_pipeline"
 end
-
-local function read_env_command(name)
-  if not observe_env[name] then
-    error("archaudit: invalid-env-name: env name is not allowed")
-  end
-  return 'printf %s "$' .. name .. '"'
-end
-
-M.read_env_command = read_env_command
-M.read_env = env.read_env(read_env_command, {
-  missing_exec_error = "archaudit: missing-exec: observe requires exec_sync",
-  propagate_exec_errors = true,
-})
 
 function M.audit_due_staleness_seconds()
   return audit_due_staleness_seconds
@@ -500,42 +482,6 @@ end
 function M.observe_now_seconds(facts)
   M.validate_observe_facts(facts)
   return math.floor(facts.generated_at_ms / 1000)
-end
-
-function M.observe(exec)
-  local run_sync = nil
-  local run_argv = nil
-  if exec == nil then
-    run_sync, run_argv = exec_sync, exec_argv
-  elseif type(exec) == "table" then
-    run_sync, run_argv = exec.exec_sync, exec.exec_argv
-  end
-  if type(run_sync) ~= "function" then
-    error("archaudit: missing-exec: observe requires exec_sync")
-  end
-  if type(run_argv) ~= "function" then
-    error("archaudit: missing-exec: observe requires exec_argv")
-  end
-  local bin = strings.trim(M.read_env("BIN", run_sync))
-  if bin == "" then
-    error("archaudit: observe-bin-unresolved: BIN is unset")
-  end
-  local durable_root = strings.trim(M.read_env("FKST_DURABLE_ROOT", run_sync))
-  if durable_root == "" then
-    error("archaudit: observe-durable-root-unresolved: FKST_DURABLE_ROOT is unset")
-  end
-  local ok_run, result = pcall(run_argv, { argv = { bin, "observe", "--durable-root", durable_root, "--json" }, timeout = 30 })
-  if not ok_run then
-    error("archaudit: observe-bin-unresolved: " .. tostring(result))
-  end
-  if type(result) ~= "table" or result.exit_code ~= 0 then
-    error("archaudit: observe-unreadable: " .. tostring(result and result.stderr or "no result"))
-  end
-  local ok, decoded = pcall(decode_json, result.stdout or "")
-  if not ok or type(decoded) ~= "table" then
-    error("archaudit: observe-malformed-json: observe returned malformed JSON")
-  end
-  return M.validate_observe_facts(decoded)
 end
 
 function M.is_idle_observe(facts)

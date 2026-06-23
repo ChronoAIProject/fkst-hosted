@@ -1,6 +1,7 @@
 local core = require("core")
 local codex = require("workflow.codex")
-local env = require("workflow.env")
+local env_port = require("departments.audit.env_port")
+local observe_port = require("departments.audit.observe_port")
 local saga = require("workflow.saga")
 local ports_lib = require("forge.ports")
 local strings = require("contract.strings")
@@ -23,14 +24,7 @@ local allowed_env = {
   ARCHAUDIT_MAX_ISSUES_PER_IDLE = true,
 }
 
-local function read_env_command(name)
-  if not allowed_env[name] then
-    error("archaudit: invalid-env-name: env name is not allowed")
-  end
-  return 'printf %s "$' .. name .. '"'
-end
-
-local read_env = env.read_env(read_env_command)
+local read_env = env_port.read_env(allowed_env)
 
 local function log_fact(level, dept, tag, error_class, event, message, terminal)
   if tag == "SKIP" then
@@ -139,8 +133,8 @@ local function parser_error_class(err)
   return "validation-failure"
 end
 
-local function observe_result()
-  return pcall(core.observe)
+local function observe_result(observe)
+  return pcall(observe.facts)
 end
 
 local function observe_now_result(facts)
@@ -246,13 +240,15 @@ local function audit_done(event)
 end
 
 local function make_department(ports)
+  ports = ports or {}
+  local observe = ports.observe or observe_port
   local function act_audit(event)
     local payload = event.payload or {}
     local trigger = trigger_kind(event)
     if trigger == nil then
       fail(event, "unknown-queue", "unknown queue")
     end
-    local ok_observe, facts_or_err = observe_result()
+    local ok_observe, facts_or_err = observe_result(observe)
     if not ok_observe and stop_observe_error(event, facts_or_err) then
       return
     end
@@ -350,5 +346,6 @@ local function make_department(ports)
 end
 
 local M = ports_lib.install(make_department)
+M.observe_port = observe_port
 _G.pipeline = M.pipeline
 return M
