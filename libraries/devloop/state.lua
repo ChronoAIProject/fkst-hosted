@@ -1,12 +1,15 @@
 local S = {}
 local source_ref = require("contract.source_ref")
-local schema = require("devloop.state.schema")
 local order_number_width = 12
 
-local label_by_state = schema.label_by_state
-local state_graph = schema.state_graph
-local state_order = schema.state_order
-local state_stage_rank = schema.state_stage_rank
+local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", blocked = "fkst-dev:blocked" }
+local state_labels = {}
+for _, label in pairs(label_by_state) do state_labels[label] = true end
+local state_graph = { unmanaged = { "thinking" }, thinking = { "dependency_wait", "ready", "blocked" }, dependency_wait = { "dependency_wait", "ready", "blocked" }, ready = { "dependency_wait", "implementing", "blocked" }, implementing = { "awaiting-pr", "impl-failed" }, ["awaiting-pr"] = { "merged", "ready", "blocked" }, ["pr-open"] = { "reviewing", "blocked" }, reviewing = { "merge-ready", "fixing", "review-meta" }, ["merge-ready"] = { "merging", "blocked" }, merging = { "merged", "reviewing", "fixing", "blocked" }, merged = {}, ["closed-unmerged"] = {}, fixing = { "reviewing", "review-meta" }, ["review-meta"] = { "fixing", "blocked" }, ["impl-failed"] = { "implementing" }, blocked = {} }
+local issue_state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged", "awaiting-pr" }
+local state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged", "closed-unmerged", "awaiting-pr" }
+local state_stage_rank = { thinking = 100, dependency_wait = 500, ready = 500, implementing = 600, ["awaiting-pr"] = 625, ["pr-open"] = 650, reviewing = 675, ["merge-ready"] = 690, merging = 695, fixing = 700, ["review-meta"] = 710, ["impl-failed"] = 750, blocked = 800, ["closed-unmerged"] = 825, merged = 900 }
+local function copy_array(values) local out = {}; for _, value in ipairs(values or {}) do table.insert(out, value) end; return out end
 
 local function marker_attrs(marker)
   local attrs = {}
@@ -33,30 +36,26 @@ function M.has_label(labels, expected)
   return false
 end
 
-M.is_state = schema.is_state
-M.is_state_label = schema.is_state_label
-M.state_label = schema.state_label
-M.state_order = schema.state_order_copy
-M.issue_state_order = schema.issue_state_order_copy
-M.state_successors = schema.state_successors
-M.lifecycle_state_set = schema.lifecycle_state_set
+function M.is_state(state) return label_by_state[state] ~= nil end
+function M.is_state_label(label) return state_labels[tostring(label)] == true end
+function M.state_label(state) return label_by_state[state] end
+function M.state_order() return copy_array(state_order) end
+function M.issue_state_order() return copy_array(issue_state_order) end
+function M.state_successors(state) return copy_array(state_graph[state]) end
+function M.lifecycle_state_set()
+  local out = {}
+  for state, _ in pairs(label_by_state) do out[state] = true end
+  for state, next_states in pairs(state_graph) do
+    if state ~= "unmanaged" then out[state] = true end
+    for _, next_state in ipairs(next_states or {}) do if next_state ~= "unmanaged" then out[next_state] = true end end
+  end
+  for _, state in ipairs(state_order) do out[state] = true end
+  for state, _ in pairs(state_stage_rank) do out[state] = true end
+  return out
+end
 
 function M.state_marker(proposal_id, state, version, effects)
-  if state ~= "thinking"
-    and state ~= "dependency_wait"
-    and state ~= "ready"
-    and state ~= "implementing"
-    and state ~= "awaiting-pr"
-    and state ~= "pr-open"
-    and state ~= "reviewing"
-    and state ~= "review-meta"
-    and state ~= "merge-ready"
-    and state ~= "merging"
-    and state ~= "merged"
-    and state ~= "closed-unmerged"
-    and state ~= "fixing"
-    and state ~= "impl-failed"
-    and state ~= "blocked" then
+  if not M.is_state(state) then
     error("github-devloop: invalid state")
   end
   local effects_field = ""
