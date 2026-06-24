@@ -20,3 +20,6 @@ public = ["workflow.*"]
 
 [visibility]
 public = false
+
+[conformance]
+pack = "conformance/pack.toml"

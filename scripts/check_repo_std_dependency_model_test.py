@@ -102,43 +102,6 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
 
-    def test_workflow_policy_guard_blocks_product_and_forge_strings(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(
-                root / "libraries" / "workflow" / "bad.lua",
-                "\n".join(
-                    [
-                        'local a = "github-devloop"',
-                        'local b = "forge.github"',
-                        'local c = "gh issue view"',
-                        'local d = "state:v1"',
-                        'local e = "pr-delegation:v1"',
-                        'local f = "pr-comment-stream"',
-                        'local g = "implement-attempt"',
-                        'local h = "devloop_fixing"',
-                        'local i = "fkst-dev:ready"',
-                    ]
-                )
-                + "\n",
-            )
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, _warnings = self.run_guard(root)
-
-        self.assertTrue(any("contains product/forge policy string 'github-devloop'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'forge.github'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'state:v1'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'pr-delegation:v1'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'pr-comment-stream'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'implement-attempt'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'devloop_fixing'" in message for message in violations))
-        self.assertTrue(any("contains product/forge policy string 'fkst-dev:'" in message for message in violations))
-        self.assertTrue(any("contains raw gh/git command text" in message for message in violations))
 
     def test_devloop_visibility_excludes_non_family_packages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -28,20 +28,6 @@ DEVLOOP_FAMILY = {
     "github-devloop-ops",
     "github-devloop-pr",
 }
-WORKFLOW_FORBIDDEN_STRINGS = (
-    "state:v1",
-    "pr-delegation:v1",
-    "pr-comment-stream",
-    "implement-attempt",
-    "devloop_fixing",
-    "github-devloop",
-    "fkst-dev:",
-    "forge.github",
-    "forge.git",
-    "std.github",
-    "std.git",
-)
-WORKFLOW_FORBIDDEN_RAW_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_.-])(?:gh|git)(?:\s|['\"]|$)")
 
 
 def require_literals(
@@ -152,15 +138,6 @@ def check_devloop_visibility(root: Path, violations: list[str], add) -> None:
         add(violations, "G-LIB-DEP", f"devloop visibility must list only {sorted(DEVLOOP_FAMILY)}; observed {sorted(observed)}")
 
 
-def check_workflow_policy(root: Path, violations: list[str], read_text, rel, add) -> None:
-    for path in library_lua_files(root, "workflow"):
-        stripped = read_text(path)
-        for line_number, line in enumerate(stripped.splitlines(), start=1):
-            for needle in WORKFLOW_FORBIDDEN_STRINGS:
-                if needle in line:
-                    add(violations, "G-WORKFLOW-POLICY", f"{rel(root, path)}:{line_number} contains product/forge policy string {needle!r}")
-            if WORKFLOW_FORBIDDEN_RAW_COMMAND_RE.search(line) is not None:
-                add(violations, "G-WORKFLOW-POLICY", f"{rel(root, path)}:{line_number} contains raw gh/git command text")
 
 
 def check_devloop_forge_import_inventory(root: Path, violations: list[str], read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range) -> None:
@@ -206,5 +183,4 @@ def check_std_dependency_model(
 ) -> None:
     check_library_publishability(root, violations, add)
     check_devloop_visibility(root, violations, add)
-    check_workflow_policy(root, violations, read_text, rel, add)
     check_devloop_forge_import_inventory(root, violations, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)
