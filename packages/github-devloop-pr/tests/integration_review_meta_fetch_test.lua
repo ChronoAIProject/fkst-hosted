@@ -125,23 +125,14 @@ return {
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
   end,
 
-  test_review_meta_spec_amendment_blocks_and_files_one_ledgered_issue = function()
+  test_review_meta_spec_amendment_blocks_without_spawning_intake_issue = function()
     local flaw = "The agreed framing requires preserving stale state, so a faithful implementation is defective."
     local result = run_case(action_label .. " spec-amendment\n" .. reason_label .. " " .. flaw, "review-meta-spec-amendment")
     assert_blocked_without_merge(result)
-    local create = find_raise(result.raises, "github-proxy.github_issue_create_request")
-    t.eq(create.payload.schema, "github-proxy.issue-create.v1")
-    t.eq(create.payload.title, "Spec amendment needed: Implement decision recorder")
-    t.is_true(create.payload.body:find("Spec flaw statement:", 1, true) ~= nil)
-    t.is_true(create.payload.body:find(flaw, 1, true) ~= nil)
-    t.is_true(create.payload.body:find("Evidence digest:", 1, true) ~= nil)
-    t.is_true(create.payload.body:find("Parent issue: #42", 1, true) ~= nil)
-    t.is_true(create.payload.body:find("Parent PR: #7", 1, true) ~= nil)
-    t.is_true(create.payload.dedup_key:find("spec-amendment/github-devloop/issue/owner/repo/42/", 1, true) ~= nil)
-    t.eq(create.payload.parent_comment_target.repo, "owner/repo")
-    t.eq(create.payload.parent_comment_target.pr_number, 7)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment:find("github-devloop review-meta action: blocked-pending-spec", 1, true) ~= nil)
+    t.is_true(comment:find(flaw, 1, true) ~= nil)
     t.is_true(comment:find('action="spec-amendment"', 1, true) ~= nil)
     t.is_true(comment:find('reason="blocked-pending-spec"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
