@@ -26,7 +26,6 @@ GENERIC_RATCHETS = (
     "permission-control",
 )
 LIBRARY_B_SPECIFIC_RATCHETS = (
-    "github_devloop_helpers",
     "dogfood_boundary",
     "std_dependency_model",
     "devloop product knowledge",

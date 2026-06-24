@@ -160,7 +160,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
 def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:
     root = config.project_root
     c.check_ownership_gate_claim_owner(root, violations); c.check_entity_read_count_assertions(root, violations)
-    c.check_convergence_budget_caps(root, violations); c.check_github_devloop_name_only_path_helper(root, violations)
+    c.check_convergence_budget_caps(root, violations)
     c.check_std_dependency_model(root, violations, warnings)
     if (root / ".claude/skills/dogfood-github-devloop/dogfood.sh").exists():
         __import__("check_repo_dogfood_boundary").check(root, violations, c.add)

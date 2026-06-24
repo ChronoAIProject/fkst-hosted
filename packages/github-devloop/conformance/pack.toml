@@ -1,0 +1,12 @@
+schema = 1
+runner_protocol = "fkst-declarative-rulepack@1"
+owner_package = "github-devloop"
+
+[[rules]]
+id = "no-local-parse-name-only-paths-helper"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["core.lua", "**/tests/**", "tests/**"]
+pattern = "\\blocal\\s+function\\s+parse_name_only_paths\\s*\\("
+message = "local parse_name_only_paths helper is forbidden; use core.parse_name_only_paths"

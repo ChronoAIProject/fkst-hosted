@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_devloop_helpers, check_repo_ingress, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_std_dependency_model, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_std_dependency_model, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -774,11 +774,6 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
                 "G7",
                 f"{rel(root, path)}:{line} gh rate pool sizing belongs to FKST_RATE_POOL_GH host posture; package code may declare only the pool name",
             )
-
-
-def check_github_devloop_name_only_path_helper(root: Path, violations: list[str]) -> None:
-    for message in check_repo_github_devloop_helpers.repository_messages(root, packages_root(root), read_text, rel, strip_lua_comments_and_strings):
-        add(violations, "G14", message)
 
 
 def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
