@@ -51,6 +51,7 @@ M.restart_source_root = "packages/github-devloop-pr/"
 M.restart_consumer_sources = {
   "packages/github-devloop-pr/departments/observe_pr/main.lua",
   "packages/github-devloop-pr/departments/merge/main.lua",
+  "packages/github-devloop-pr/departments/merge_queue/main.lua",
 }
 require("devloop.restart").install(M, wiring.restart(M))
 require("workflow.restart_liveness_contract").install(M, require("devloop.liveness").with_restart_policy({

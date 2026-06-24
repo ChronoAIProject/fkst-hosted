@@ -25,7 +25,7 @@ local function mock_repo_env()
 end
 
 local function run_starvation_merge_queue_tick(event, run_opts)
-  return t.run_department("departments/merge/main.lua", {
+  return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
     payload = core.merge_queue_starvation_tick_payload("owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
       pr_number = event.pr_number,

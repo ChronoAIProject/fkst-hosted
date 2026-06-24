@@ -36,7 +36,7 @@ local function run_direct_merge_ready(payload, run_opts)
 end
 
 local function run_merge_queue_tick(run_opts)
-  return t.run_department("departments/merge/main.lua", {
+  return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
     payload = {
       schema = "github-devloop.merge-queue-tick.v1",
