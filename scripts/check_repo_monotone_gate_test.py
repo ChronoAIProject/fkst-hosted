@@ -187,6 +187,30 @@ class MonotoneGateRatchetTest(unittest.TestCase):
 
         self.assertEqual(monotone.ratchet_messages(current, allowlist, base), [])
 
+    def test_implement_worktree_extraction_does_not_grow_existing_allowlist_debt(self) -> None:
+        current = {
+            monotone.Violation(
+                "packages/github-devloop/departments/implement/main.lua",
+                "precheck_implementation_write_gate",
+                "cursor-read",
+                "current_state(",
+                499,
+            )
+        }
+        original_debt = monotone.Violation(
+            "packages/github-devloop/departments/implement/main.lua",
+            "precheck_implementation_write_gate",
+            "cursor-read",
+            "current_state(",
+            602,
+        )
+        allowlist = {original_debt}
+        base = {
+            original_debt
+        }
+
+        self.assertEqual(monotone.ratchet_messages(current, allowlist, base), [])
+
 
 if __name__ == "__main__":
     unittest.main()
