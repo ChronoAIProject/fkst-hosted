@@ -158,7 +158,6 @@ local template_audit = {
   { id = "state-labels", classification = "machine" },
   { id = "ai-sentinel", classification = "machine" },
   { id = "pr-title-and-body", classification = "repo-policy" },
-  { id = "spec-amendment-issue-create", classification = "repo-policy" },
 }
 
 for _, key in ipairs(human_comment_keys) do

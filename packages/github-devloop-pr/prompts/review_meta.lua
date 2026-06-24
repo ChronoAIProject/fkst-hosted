@@ -6,7 +6,7 @@ return {
 Choose the conservative next state. Pick exactly one action:
 - fix: the PR probably needs another fix pass before review.
 - block: the work should stop for human intervention.
-- spec-amendment: the implementation faithfully follows the agreed framing, but the framing/spec is defective and fixing the PR would violate it.
+- spec-amendment: the implementation faithfully follows the agreed framing, but the framing/spec is defective and fixing the PR would violate it; stop for human design intervention.
 
 Read the full local source context before deciding. If you cannot read the local context files (issue body / PR diff / comments) for ANY reason, choose `block`.
 

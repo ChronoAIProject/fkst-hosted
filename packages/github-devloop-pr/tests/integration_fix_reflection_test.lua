@@ -140,7 +140,7 @@ return {
     t.eq(replay_payload.blocking_gap, fresh_payload.blocking_gap)
   end,
 
-  test_fix_reflection_spec_gap_blocks_and_files_spec_amendment = function()
+  test_fix_reflection_spec_gap_blocks_without_spawning_intake_issue = function()
     local event = reflection_meta_event()
     mock_reflection_context(event, "Round ledger: latest gap diverges from stated acceptance.")
     t.mock_command("codex exec", {
@@ -151,13 +151,13 @@ return {
 
     local result = run_review_meta(event, opts("fix-reflection-spec-gap"))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 3)
+    t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
-    local create = find_raise(result.raises, "github-proxy.github_issue_create_request")
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:blocked")
     t.eq(find_raise(result.raises, "devloop_fixing"), nil)
     t.is_true(comment:find('verdict="spec-gap"', 1, true) ~= nil)
-    t.is_true(create.payload.title:find("Spec amendment needed:", 1, true) == 1)
-    t.is_true(create.payload.body:find("The review demand exceeds the original acceptance boundary.", 1, true) ~= nil)
+    t.is_true(comment:find('state="blocked"', 1, true) ~= nil)
+    t.is_true(comment:find("The review demand exceeds the original acceptance boundary.", 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
   end,
 }
