@@ -32,24 +32,12 @@ local function reachable_lifecycle_states(M)
     end
     return scoped
   end
+  if type(M.lifecycle_state_set) == "function" then
+    return M.lifecycle_state_set()
+  end
   local seen = {}
   local function add(state)
     add_to(seen, state)
-  end
-  for state, _ in pairs(M._label_by_state or {}) do
-    add(state)
-  end
-  for _, state in ipairs(M._state_order or {}) do
-    add(state)
-  end
-  for state, _ in pairs(M._state_stage_rank or {}) do
-    add(state)
-  end
-  for state, next_states in pairs(M._state_graph or {}) do
-    add(state)
-    for _, next_state in ipairs(next_states or {}) do
-      add(next_state)
-    end
   end
   return seen
 end

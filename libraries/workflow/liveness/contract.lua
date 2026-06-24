@@ -265,7 +265,7 @@ function M.liveness_contract_errors(rows)
       end
     end
     for _, next_state in ipairs(row.to_states or {}) do
-      if M._label_by_state[next_state] == nil then
+      if M.is_state ~= nil and not M.is_state(next_state) then
         table.insert(errors, tostring(row.from_state or "?") .. ": unknown next state " .. tostring(next_state))
       end
     end

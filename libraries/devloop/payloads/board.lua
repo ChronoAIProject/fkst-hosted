@@ -60,7 +60,7 @@ end
 local function state_label(M, labels)
   for _, label in ipairs(labels or {}) do
     local text = tostring(label)
-    if M._state_labels[text] then
+    if M.is_state_label(text) then
       return text
     end
   end

@@ -33,7 +33,7 @@ local function append_state_markers(markers, comments, proposal_id)
         local marker_proposal = marker:match('proposal="([^"]+)"')
         local state = marker:match('state="([^"]+)"')
         local version = marker:match('version="([^"]*)"')
-        if marker_proposal == proposal_id and M._label_by_state[state] ~= nil then
+        if marker_proposal == proposal_id and M.is_state(state) then
           table.insert(markers, {
             proposal_id = proposal_id,
             state = state,

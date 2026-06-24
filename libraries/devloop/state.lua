@@ -1,6 +1,12 @@
 local S = {}
 local source_ref = require("contract.source_ref")
+local schema = require("devloop.state.schema")
 local order_number_width = 12
+
+local label_by_state = schema.label_by_state
+local state_graph = schema.state_graph
+local state_order = schema.state_order
+local state_stage_rank = schema.state_stage_rank
 
 local function marker_attrs(marker)
   local attrs = {}
@@ -27,9 +33,13 @@ function M.has_label(labels, expected)
   return false
 end
 
-function M.state_label(state)
-  return M._label_by_state[state]
-end
+M.is_state = schema.is_state
+M.is_state_label = schema.is_state_label
+M.state_label = schema.state_label
+M.state_order = schema.state_order_copy
+M.issue_state_order = schema.issue_state_order_copy
+M.state_successors = schema.state_successors
+M.lifecycle_state_set = schema.lifecycle_state_set
 
 function M.state_marker(proposal_id, state, version, effects)
   if state ~= "thinking"
@@ -56,7 +66,7 @@ function M.state_marker(proposal_id, state, version, effects)
   return '<!-- fkst:github-devloop:state:v1 proposal="' .. tostring(proposal_id)
     .. '" state="' .. tostring(state)
     .. '" version="' .. tostring(version)
-    .. '" stage_rank="' .. tostring(M._state_stage_rank[state])
+    .. '" stage_rank="' .. tostring(M.stage_rank(state))
     .. '" marker_order_key="' .. M.marker_order_key(version, state)
     .. '"'
     .. effects_field
@@ -68,7 +78,7 @@ function M.version_order_key(version)
 end
 
 function M.stage_rank(state)
-  return M._state_stage_rank[state] or 0
+  return state_stage_rank[state] or 0
 end
 
 function M.version_updated_at(version)
@@ -277,7 +287,7 @@ local function state_marker_fact(marker, comment)
   local marker_proposal = attrs.proposal
   local marker_state = attrs.state
   local marker_version = attrs.version
-  if marker_proposal == nil or M._label_by_state[marker_state] == nil then
+  if marker_proposal == nil or not M.is_state(marker_state) then
     return nil
   end
   return {
@@ -504,7 +514,7 @@ local function domain_allows_state(domain, state)
   end
   local allowed = milestone_domains[domain]
   if allowed == nil then
-    return domain == "github-devloop" and M._label_by_state[state] ~= nil
+    return domain == "github-devloop" and M.is_state(state)
   end
   return allowed[state] == true
 end
@@ -574,13 +584,13 @@ function M.compare_phase(left, right, opts)
   local left_state = type(left) == "table" and left.state or left
   local right_state = type(right) == "table" and right.state or right
   local right_rank = M.stage_rank(right_state)
-  if M._label_by_state[right_state] == nil then
+  if not M.is_state(right_state) then
     error("github-devloop: invalid milestone")
   end
   validate_milestone_domain(options.domain or options.milestone_domain, right_state)
   local left_rank = type(left) == "table" and tonumber(left.stage_rank) or nil
   if left_rank == nil then
-    if M._label_by_state[left_state] == nil then
+    if not M.is_state(left_state) then
       return nil
     end
     left_rank = M.stage_rank(left_state)
@@ -597,7 +607,7 @@ function M.reached(comments, proposal_id, milestone, opts)
     return false
   end
   local options = opts or {}
-  if M._label_by_state[milestone] == nil then
+  if not M.is_state(milestone) then
     error("github-devloop: invalid milestone")
   end
   local domain = options.domain or options.milestone_domain
@@ -682,7 +692,8 @@ local function can_reach(from_state, to_state, seen)
   if from == to_state then
     return true
   end
-  if M._state_graph[from] == nil then
+  local next_states = state_graph[from]
+  if next_states == nil then
     return false
   end
   local visited = seen or {}
@@ -690,7 +701,7 @@ local function can_reach(from_state, to_state, seen)
     return false
   end
   visited[from] = true
-  for _, next_state in ipairs(M._state_graph[from]) do
+  for _, next_state in ipairs(next_states) do
     if can_reach(next_state, to_state, visited) then
       return true
     end
@@ -798,8 +809,8 @@ function M.state_label_changes(to_state)
 
   local remove_labels = {}
   local remove_seen = {}
-  for _, state in ipairs(M._state_order) do
-    local label = M._label_by_state[state]
+  for _, state in ipairs(state_order) do
+    local label = label_by_state[state]
     if state ~= to_state and label ~= add_label and remove_seen[label] ~= true then
       table.insert(remove_labels, label)
       remove_seen[label] = true
@@ -821,7 +832,7 @@ function M.state_label_reconcile_changes(labels, to_state)
     local label_text = tostring(label)
     if label_text == expected_label then
       has_expected = true
-    elseif M._state_labels[label_text] then
+    elseif M.is_state_label(label_text) then
       table.insert(remove_labels, label_text)
     end
   end
@@ -842,7 +853,7 @@ function M.state_label_hint_matches(labels, state)
     local label_text = tostring(label)
     if label_text == expected_label then
       has_expected = true
-    elseif M._state_labels[label_text] then
+    elseif M.is_state_label(label_text) then
       return false
     end
   end
