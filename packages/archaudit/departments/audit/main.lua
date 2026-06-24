@@ -14,6 +14,7 @@ local spec = {
 }
 
 local freshness_budget_seconds = 10 * 60
+local source_read_timeout_seconds = 30
 -- Match the engine's default codex wall-clock cap for long repository audits.
 -- This may exceed stall_window: fkst-substrate renews running delivery leases
 -- in supervise/consumer.rs, and stall_window is not a child kill deadline.
@@ -179,15 +180,18 @@ local function issue_request_result(repo, finding, label_available, trigger_reas
   return pcall(core.build_issue_create_request, repo, finding, label_available, trigger_reason)
 end
 
-local function production_read_file(path)
-  return file.read(path)
-end
-
-local function finding_has_existing_line(finding, read_file)
+local function finding_has_existing_line(finding, git)
   if not core.validate_finding(finding) then
     return false
   end
-  return core.finding_line_exists(finding, read_file(finding.file))
+  if type(git) ~= "table" or type(git.show_file) ~= "function" then
+    error("archaudit: git-show-file-unavailable: Git show_file port is required")
+  end
+  local result = git.show_file("HEAD", finding.file, source_read_timeout_seconds)
+  if type(result) ~= "table" or result.exit_code ~= 0 then
+    return false
+  end
+  return core.finding_line_exists(finding, result.stdout)
 end
 
 local function audit_run_request_result(repo, trigger_reason, label_available, now_seconds, max_staleness)
@@ -253,7 +257,6 @@ end
 local function make_department(ports)
   ports = ports or {}
   local observe = ports.observe or observe_port
-  local read_file = ports.read_file or production_read_file
   local function act_audit(event)
     local payload = event.payload or {}
     local trigger = trigger_kind(event)
@@ -331,7 +334,7 @@ local function make_department(ports)
       if #requests >= count then
         break
       end
-      if not finding_has_existing_line(finding, read_file) then
+      if not finding_has_existing_line(finding, ports.git) then
         fail(event, "validation-failure", "invalid file or line")
       end
       local ok_request, request_or_err = issue_request_result(repo, finding, label_available, trigger)
