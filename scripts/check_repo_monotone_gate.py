@@ -122,6 +122,22 @@ class Violation:
         else:
             path = moved_paths.get(path, path)
         line = "dependency_wait_fact" if path == "packages/github-devloop-ops/core/dependency_wait.lua" and self.surface == "M.dependency_wait_fact" else str(self.line)
+        implement_worktree_extraction_lines = {
+            ("recheck_implementation_write_gate", "cursor-read", "current_state(", 448): "551",
+            ("recheck_implementation_write_gate", "state-equality", "implementing", 449): "552",
+            ("recheck_implementation_write_gate", "state-equality", "impl-failed", 467): "570",
+            ("precheck_implementation_write_gate", "cursor-read", "current_state(", 499): "602",
+            ("precheck_implementation_write_gate", "state-equality", "implementing", 500): "603",
+            ("precheck_implementation_write_gate", "state-equality", "impl-failed", 513): "616",
+            ("process_ready_event", "cursor-read", "current_state(", 608): "711",
+            ("process_ready_event", "state-equality", "implementing", 649): "752",
+            ("process_ready_event", "state-equality", "impl-failed", 711): "814",
+            ("process_ready_event", "state-equality", "blocked", 717): "820",
+            ("process_ready_event", "state-equality", "impl-failed", 719): "822",
+            ("process_ready_event", "state-equality", "implementing", 719): "822",
+        }
+        if path == "packages/github-devloop/departments/implement/main.lua":
+            line = implement_worktree_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
         return path, self.surface, self.kind, self.token, line
 
     def label(self) -> str:
