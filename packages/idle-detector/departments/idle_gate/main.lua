@@ -30,8 +30,7 @@ end
 
 local function is_unresolved_observe_config_error(err)
   local message = tostring(err)
-  return message:find("observe%-bin%-unresolved", 1, false) ~= nil
-    or message:find("observe%-durable%-root%-unresolved", 1, false) ~= nil
+  return message:find("observe%-durable%-root%-unresolved", 1, false) ~= nil
 end
 
 local function wrap_pipeline_failure(dept, fn)

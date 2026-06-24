@@ -1,28 +1,8 @@
 local M = {}
 
 local error_facts = require("contract.error_facts")
-local strings = require("contract.strings")
-local env = require("workflow.env")
 
 local observe_schema_version = 1
-local observe_env = {
-  BIN = true,
-  FKST_DURABLE_ROOT = true,
-}
-
-
-local function read_env_command(name)
-  if not observe_env[name] then
-    error("idle-detector: invalid-env-name: env name is not allowed")
-  end
-  return 'printf %s "$' .. name .. '"'
-end
-
-M.read_env_command = read_env_command
-M.read_env = env.read_env(read_env_command, {
-  missing_exec_error = "idle-detector: missing-exec: observe requires exec_sync",
-  propagate_exec_errors = true,
-})
 
 local function required_list(facts, name)
   local value = facts[name]
@@ -110,38 +90,22 @@ function M.observe_now_seconds(facts)
   return math.floor(facts.generated_at_ms / 1000)
 end
 
-function M.observe(exec)
-  local run_sync = nil
-  local run_argv = nil
-  if exec == nil then
-    run_sync, run_argv = exec_sync, exec_argv
-  elseif type(exec) == "table" then
-    run_sync, run_argv = exec.exec_sync, exec.exec_argv
+function M.observe(opts)
+  if type(fkst) ~= "table" or type(fkst.observe) ~= "function" then
+    error("idle-detector: missing-observe: fkst.observe is required")
   end
-  if type(run_sync) ~= "function" then
-    error("idle-detector: missing-exec: observe requires exec_sync")
+  local ok, facts = pcall(fkst.observe, opts)
+  if not ok then
+    local message = tostring(facts)
+    if message:find("FKST_DURABLE_ROOT", 1, true) ~= nil then
+      error("idle-detector: observe-durable-root-unresolved: " .. message)
+    end
+    if message:find("fkst.observe snapshot", 1, true) ~= nil then
+      error("idle-detector: malformed-observe-facts: " .. message)
+    end
+    error("idle-detector: observe-unreadable: " .. message)
   end
-  if type(run_argv) ~= "function" then
-    error("idle-detector: missing-exec: observe requires exec_argv")
-  end
-  local bin = strings.trim(M.read_env("BIN", run_sync))
-  if bin == "" then
-    error("idle-detector: observe-bin-unresolved: BIN is unset")
-  end
-  local durable_root = strings.trim(M.read_env("FKST_DURABLE_ROOT", run_sync))
-  if durable_root == "" then
-    error("idle-detector: observe-durable-root-unresolved: FKST_DURABLE_ROOT is unset")
-  end
-  local ok_run, result = pcall(run_argv, { argv = { bin, "observe", "--durable-root", durable_root, "--json" }, timeout = 30 })
-  if not ok_run then
-    error("idle-detector: observe-bin-unresolved: " .. tostring(result))
-  end
-  if type(result) ~= "table" or result.exit_code ~= 0 then
-    error("idle-detector: observe-failed: " .. tostring(result and result.stderr or "no result"))
-  end
-  local ok, decoded = pcall(json.decode, result.stdout or "")
-  assert(ok and type(decoded) == "table", "idle-detector: malformed-observe-json: observe returned malformed JSON")
-  return validate_observe_facts(decoded)
+  return validate_observe_facts(facts)
 end
 
 function M.is_idle_observe(facts)

@@ -100,6 +100,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
             c.add(violations, "G13", message)
     c.check_no_permission_control(root, violations)
     c.check_gh_git_adapter_ratchet(root, violations, allowlists)
+    c.check_shell_out_to_self_ratchet(root, violations, allowlists)
     c.check_code_dedup_ratchet(root, violations, allowlists, enforce_base)
     check_content_truncation(c, root, violations, allowlists, enforce_base)
     for message in check_repo_coverage.repository_messages(root):

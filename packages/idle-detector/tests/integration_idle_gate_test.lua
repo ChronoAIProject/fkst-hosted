@@ -1,12 +1,10 @@
+local core = require("core")
 local t = fkst.test
-local observe_bin = "/tmp/fkst-framework"
-local observe_durable_root = "/tmp/fkst-durable"
 
 local function opts(name)
   return {
     env = {
       FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/idle-detector/" .. tostring(name),
-      FKST_DURABLE_ROOT = "/tmp/fkst-packages-test/idle-detector/durable-" .. tostring(name),
     },
   }
 end
@@ -24,40 +22,61 @@ local function event(ts)
   }
 end
 
-local function mock_observe(stdout, exit_code)
-  t.mock_command('printf %s "$BIN"', { stdout = observe_bin, stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_DURABLE_ROOT"', { stdout = observe_durable_root, stderr = "", exit_code = 0 })
-  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
-    stdout = stdout or "",
-    stderr = exit_code == 0 and "" or "observe failed",
-    exit_code = exit_code or 0,
-  })
+local function observe_facts(opts)
+  opts = opts or {}
+  local facts = {
+    schema_version = opts.schema_version or 1,
+    source = opts.source or {
+      durable_root = "/tmp/fkst-durable",
+      database = "/tmp/fkst-durable/delivery.redb",
+      read_semantics = "single read transaction",
+      history_semantics = "delivery queue snapshot only",
+    },
+    limits = opts.limits or { max_deliveries = 500, max_dead_letters = 500 },
+    truncated = opts.truncated or { deliveries = false, dead_letters = false },
+    queues = opts.queues or {
+      { queue = "proposal", depth = 0, pending = 0, in_flight = 0, retrying = 0, oldest_pending_age_ms = nil },
+    },
+    deliveries = opts.deliveries or json.decode("[]"),
+    dead_letters = opts.dead_letters or json.decode("[]"),
+  }
+  if not opts.omit_generated_at then
+    facts.generated_at_ms = opts.generated_at_ms or 1781830860000
+  end
+  if opts.omit_source then facts.source = nil end
+  if opts.omit_limits then facts.limits = nil end
+  if opts.omit_truncated then facts.truncated = nil end
+  if opts.omit_queues then facts.queues = nil end
+  return facts
 end
 
-local function observe_json(generated_at_ms, queue_json, deliveries_json, dead_letters_json, truncated_json)
-  return table.concat({
-    '{"schema_version":1',
-    ',"generated_at_ms":' .. tostring(generated_at_ms or 1781830860000),
-    ',"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"}',
-    ',"limits":{"max_deliveries":500,"max_dead_letters":500}',
-    ',"truncated":' .. (truncated_json or '{"deliveries":false,"dead_letters":false}'),
-    ',"queues":' .. (queue_json or '[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}]'),
-    ',"deliveries":' .. (deliveries_json or "[]"),
-    ',"dead_letters":' .. (dead_letters_json or "[]"),
-    "}",
-  }, "")
+local function mock_observe(snapshot)
+  t.mock_observe(snapshot or observe_facts())
 end
 
-local function assert_skip_with_observe(case_name, observe_stdout, exit_code)
-  mock_observe(observe_stdout, exit_code or 0)
+local function assert_skip_with_observe(case_name, snapshot)
+  mock_observe(snapshot)
   local result = t.run_department("departments/idle_gate/main.lua", event("2026-06-19T01:00:00Z"), opts(case_name))
   t.eq(result.exit_code, 0)
   t.eq(#result.raises, 0)
 end
 
+local function with_core_observe_error(message, fn)
+  local original = core.observe
+  core.observe = function()
+    error(message)
+  end
+  local ok, result = pcall(fn)
+  core.observe = original
+  if not ok then
+    error(result, 0)
+  end
+  return result
+end
+
 return {
   test_idle_gate_uses_observe_time_to_raise_fresh_idle = function()
-    mock_observe(observe_json(1781830860000), 0)
+    mock_observe(observe_facts({ generated_at_ms = 1781830860000 }))
     local result = t.run_department("departments/idle_gate/main.lua", event("2026-06-19T01:00:00Z"), opts("fresh"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
@@ -66,7 +85,7 @@ return {
   end,
 
   test_idle_gate_accepts_cron_slot_and_event_ts_fallbacks = function()
-    mock_observe(observe_json(1781830860000), 0)
+    mock_observe(observe_facts({ generated_at_ms = 1781830860000 }))
     local cron_event = event("2026-06-19T01:00:00Z")
     cron_event.payload.slot = nil
     cron_event.payload.cron_slot = "2026-06-19T01:00:00Z"
@@ -74,7 +93,7 @@ return {
     t.eq(cron_result.exit_code, 0)
     t.eq(cron_result.raises[1].payload.detected_at, "2026-06-19T01:00:00Z")
 
-    mock_observe(observe_json(1781830860000), 0)
+    mock_observe(observe_facts({ generated_at_ms = 1781830860000 }))
     local ts_event = event("2026-06-19T01:00:00Z")
     ts_event.payload.slot = nil
     ts_event.payload.cron_slot = nil
@@ -85,7 +104,7 @@ return {
   end,
 
   test_idle_gate_uses_observe_time_to_drop_stale_slot = function()
-    mock_observe(observe_json(1781831461000), 0)
+    mock_observe(observe_facts({ generated_at_ms = 1781831461000 }))
     local result = t.run_department("departments/idle_gate/main.lua", event("2026-06-19T01:00:00Z"), opts("stale"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
@@ -95,41 +114,43 @@ return {
     for _, case in ipairs({
       {
         name = "pending",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":1,"pending":1,"in_flight":0,"retrying":0,"oldest_pending_age_ms":1000}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 1, pending = 1, in_flight = 0, retrying = 0, oldest_pending_age_ms = 1000 } } }),
       },
       {
         name = "in-flight",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":1,"pending":0,"in_flight":1,"retrying":0,"oldest_pending_age_ms":null}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 1, pending = 0, in_flight = 1, retrying = 0, oldest_pending_age_ms = nil } } }),
       },
       {
         name = "retrying",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":1,"pending":0,"in_flight":0,"retrying":1,"oldest_pending_age_ms":null}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 1, pending = 0, in_flight = 0, retrying = 1, oldest_pending_age_ms = nil } } }),
       },
       {
         name = "depth",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":1,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 1, pending = 0, in_flight = 0, retrying = 0, oldest_pending_age_ms = nil } } }),
       },
     }) do
-      assert_skip_with_observe("busy-" .. case.name, case.observe, 0)
+      assert_skip_with_observe("busy-" .. case.name, case.observe)
     end
   end,
 
   test_idle_gate_skips_deliveries_or_dead_letters = function()
-    assert_skip_with_observe("deliveries", observe_json(1781830860000, nil, '[{"delivery_id":"d1","queue":"proposal","dept":"decide","status":"pending","attempt":1}]', nil), 0)
-    assert_skip_with_observe("dead-letters", observe_json(1781830860000, nil, nil, '[{"delivery_id":"dead","queue":"proposal","dept":"decide","attempts":1,"replayable":true,"permanent":false}]'), 0)
+    assert_skip_with_observe("deliveries", observe_facts({ deliveries = { { delivery_id = "d1", queue = "proposal", dept = "decide", status = "pending", attempt = 1 } } }))
+    assert_skip_with_observe("dead-letters", observe_facts({ dead_letters = { { delivery_id = "dead", queue = "proposal", dept = "decide", attempts = 1, replayable = true, permanent = false } } }))
   end,
 
   test_idle_gate_skips_truncated_observe_lists_without_raising_idle = function()
-    assert_skip_with_observe("truncated-deliveries", observe_json(1781830860000, nil, nil, nil, '{"deliveries":true,"dead_letters":false}'), 0)
-    assert_skip_with_observe("truncated-dead-letters", observe_json(1781830860000, nil, nil, nil, '{"deliveries":false,"dead_letters":true}'), 0)
+    assert_skip_with_observe("truncated-deliveries", observe_facts({ truncated = { deliveries = true, dead_letters = false } }))
+    assert_skip_with_observe("truncated-dead-letters", observe_facts({ truncated = { deliveries = false, dead_letters = true } }))
   end,
 
   test_idle_gate_skips_observe_read_failure = function()
-    assert_skip_with_observe("observe-failure", "", 1)
+    with_core_observe_error("idle-detector: observe-unreadable: synthetic observe failure", function()
+      local dept = require("departments.idle_gate.main")
+      dept.pipeline(event("2026-06-19T01:00:00Z"))
+    end)
   end,
 
-  test_idle_gate_fails_loud_when_observe_bin_unresolved = function()
-    t.mock_command('printf %s "$BIN"', { stdout = "", stderr = "", exit_code = 0 })
+  test_idle_gate_fails_loud_when_observe_durable_root_unresolved = function()
     local previous_warn = log.warn
     local previous_error = log.error
     local warns = {}
@@ -141,27 +162,30 @@ return {
       table.insert(errors, tostring(message))
     end
     local ok, err = pcall(function()
-      local dept = require("departments.idle_gate.main")
-      dept.pipeline(event("2026-06-19T01:00:00Z"))
+      with_core_observe_error("idle-detector: observe-durable-root-unresolved: FKST_DURABLE_ROOT must be set for fkst.observe", function()
+        local dept = require("departments.idle_gate.main")
+        dept.pipeline(event("2026-06-19T01:00:00Z"))
+      end)
     end)
     log.warn = previous_warn
     log.error = previous_error
     t.eq(ok, false)
     t.eq(#warns, 0)
-    t.is_true(tostring(err):find("observe-bin-unresolved", 1, true) ~= nil)
+    t.is_true(tostring(err):find("observe-durable-root-unresolved", 1, true) ~= nil)
     t.is_true(tostring(errors[1] or ""):find("caught-failure", 1, true) ~= nil)
   end,
 
   test_idle_gate_logs_terminal_skip_on_observe_read_failure = function()
-    mock_observe("", 1)
     local previous_warn = log.warn
     local logs = {}
     log.warn = function(message)
       table.insert(logs, tostring(message))
     end
     local ok, err = pcall(function()
-      local dept = require("departments.idle_gate.main")
-      dept.pipeline(event("2026-06-19T01:00:00Z"))
+      with_core_observe_error("idle-detector: observe-unreadable: synthetic observe failure", function()
+        local dept = require("departments.idle_gate.main")
+        dept.pipeline(event("2026-06-19T01:00:00Z"))
+      end)
     end)
     log.warn = previous_warn
     if not ok then
@@ -174,10 +198,10 @@ return {
     t.is_true(logs[1]:find("unreadable observe facts", 1, true) ~= nil)
   end,
 
-  test_idle_gate_skips_malformed_json_and_malformed_slot_without_raising_idle = function()
-    assert_skip_with_observe("malformed-json", "{not json", 0)
+  test_idle_gate_skips_malformed_snapshot_and_malformed_slot_without_raising_idle = function()
+    assert_skip_with_observe("malformed-snapshot", "not facts")
 
-    mock_observe(observe_json(1781830860000), 0)
+    mock_observe(observe_facts({ generated_at_ms = 1781830860000 }))
     local malformed_slot = event("not-a-time")
     local result = t.run_department("departments/idle_gate/main.lua", malformed_slot, opts("malformed-slot"))
     t.eq(result.exit_code, 0)
@@ -188,50 +212,50 @@ return {
     for _, case in ipairs({
       {
         name = "missing-generated-at",
-        observe = '{"schema_version":1,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[],"deliveries":[],"dead_letters":[]}',
+        observe = observe_facts({ omit_generated_at = true, queues = {} }),
       },
       {
         name = "wrong-generated-at-type",
-        observe = '{"schema_version":1,"generated_at_ms":"1781830860000","source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[],"deliveries":[],"dead_letters":[]}',
+        observe = observe_facts({ generated_at_ms = "1781830860000", queues = {} }),
       },
       {
         name = "missing-source",
-        observe = '{"schema_version":1,"generated_at_ms":1781830860000,"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[],"deliveries":[],"dead_letters":[]}',
+        observe = observe_facts({ omit_source = true, queues = {} }),
       },
       {
         name = "missing-limits",
-        observe = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"truncated":{"deliveries":false,"dead_letters":false},"queues":[],"deliveries":[],"dead_letters":[]}',
+        observe = observe_facts({ omit_limits = true, queues = {} }),
       },
       {
         name = "missing-truncated",
-        observe = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"queues":[],"deliveries":[],"dead_letters":[]}',
+        observe = observe_facts({ omit_truncated = true, queues = {} }),
       },
       {
         name = "non-boolean-truncated",
-        observe = observe_json(1781830860000, nil, nil, nil, '{"deliveries":"false","dead_letters":false}'),
+        observe = observe_facts({ truncated = { deliveries = "false", dead_letters = false } }),
       },
       {
-        name = "non-integer-limits",
-        observe = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":1.5,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[],"deliveries":[],"dead_letters":[]}',
+        name = "non-object-limits",
+        observe = observe_facts({ limits = "bad", queues = {} }),
       },
       {
         name = "non-table-queues",
-        observe = observe_json(1781830860000, '"bad"'),
+        observe = observe_facts({ queues = "bad" }),
       },
       {
         name = "keyed-queues",
-        observe = observe_json(1781830860000, '{"proposal":{"depth":0,"pending":0,"in_flight":0,"retrying":0}}'),
+        observe = observe_facts({ queues = { proposal = { depth = 0, pending = 0, in_flight = 0, retrying = 0 } } }),
       },
       {
         name = "keyed-deliveries",
-        observe = observe_json(1781830860000, "[]", '{"one":{}}'),
+        observe = observe_facts({ queues = {}, deliveries = { one = {} } }),
       },
       {
         name = "keyed-dead-letters",
-        observe = observe_json(1781830860000, "[]", "[]", '{"one":{}}'),
+        observe = observe_facts({ queues = {}, dead_letters = { one = {} } }),
       },
     }) do
-      assert_skip_with_observe("malformed-" .. case.name, case.observe, 0)
+      assert_skip_with_observe("malformed-" .. case.name, case.observe)
     end
   end,
 
@@ -239,22 +263,22 @@ return {
     for _, case in ipairs({
       {
         name = "missing-depth",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","pending":0,"in_flight":0,"retrying":0}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", pending = 0, in_flight = 0, retrying = 0 } } }),
       },
       {
         name = "missing-pending",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":0,"in_flight":0,"retrying":0}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 0, in_flight = 0, retrying = 0 } } }),
       },
       {
         name = "missing-in-flight",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":0,"pending":0,"retrying":0}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 0, pending = 0, retrying = 0 } } }),
       },
       {
         name = "missing-retrying",
-        observe = observe_json(1781830860000, '[{"queue":"proposal","depth":0,"pending":0,"in_flight":0}]'),
+        observe = observe_facts({ queues = { { queue = "proposal", depth = 0, pending = 0, in_flight = 0 } } }),
       },
     }) do
-      assert_skip_with_observe("metric-" .. case.name, case.observe, 0)
+      assert_skip_with_observe("metric-" .. case.name, case.observe)
     end
   end,
 }

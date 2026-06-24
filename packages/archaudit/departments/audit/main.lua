@@ -200,9 +200,6 @@ end
 
 local function stop_observe_error(event, err)
   local message = tostring(err)
-  if message:find("observe%-bin%-unresolved", 1, false) ~= nil then
-    fail(event, "observe-bin-unresolved", message)
-  end
   if message:find("observe%-durable%-root%-unresolved", 1, false) ~= nil then
     fail(event, "observe-durable-root-unresolved", message)
   end

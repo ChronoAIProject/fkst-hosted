@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_std_dependency_model, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, ratchet_base
 LINE_LIMIT = 1000
 LINE_WARNING_MARGIN = 50
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
@@ -888,6 +888,14 @@ def check_gh_git_adapter_ratchet(root: Path, violations: list[str], allowlist_di
     allowlist = gh_git_adapter.load_allowlist(allowlist_path(root, gh_git_adapter.ALLOWLIST, allowlist_dir))
     for message in gh_git_adapter.ratchet_messages(sources, allowlist, lua_string_literals):
         add(violations, "G-ADAPTER", message)
+
+def check_shell_out_to_self_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None) -> None:
+    current = check_repo_shell_out_to_self.sites(root, package_roots(root), read_text, rel, strip_lua_comments_and_strings, lua_string_literals)
+    allowlist = check_repo_shell_out_to_self.load_allowlist(
+        allowlist_path(root, check_repo_shell_out_to_self.ALLOWLIST, allowlist_dir)
+    )
+    for message in check_repo_shell_out_to_self.ratchet_messages(current, allowlist):
+        add(violations, "G-SHELL-OUT-TO-SELF", message)
 
 def check_code_dedup_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
     source_map = {}

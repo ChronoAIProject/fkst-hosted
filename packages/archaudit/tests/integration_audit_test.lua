@@ -4,8 +4,6 @@ local core = require("core")
 local audit_main = require("departments.audit.main")
 local env_lib = require("workflow.env")
 local t = fkst.test
-local observe_bin = "/tmp/fkst-framework"
-local observe_durable_root = "/tmp/fkst-durable"
 
 local function run_department_opts()
   return {
@@ -64,68 +62,56 @@ local function mock_env(repo, max_issues)
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
 end
 
-local function mock_observe_env()
-  t.mock_command('printf %s "$BIN"', { stdout = observe_bin, stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_DURABLE_ROOT"', { stdout = observe_durable_root, stderr = "", exit_code = 0 })
+local function observe_facts(opts)
+  opts = opts or {}
+  local facts = {
+    schema_version = opts.schema_version or 1,
+    source = opts.source or {
+      durable_root = "/tmp/fkst-durable",
+      database = "/tmp/fkst-durable/delivery.redb",
+      read_semantics = "single read transaction",
+      history_semantics = "delivery queue snapshot only",
+    },
+    limits = opts.limits or { max_deliveries = 500, max_dead_letters = 500 },
+    truncated = opts.truncated or { deliveries = false, dead_letters = false },
+    queues = opts.queues or {
+      { queue = "proposal", depth = 0, pending = 0, in_flight = 0, retrying = 0, oldest_pending_age_ms = nil },
+    },
+    deliveries = opts.deliveries or json.decode("[]"),
+    dead_letters = opts.dead_letters or json.decode("[]"),
+  }
+  if not opts.omit_generated_at then
+    facts.generated_at_ms = opts.generated_at_ms or 1781830860000
+  end
+  if opts.omit_source then facts.source = nil end
+  if opts.omit_limits then facts.limits = nil end
+  if opts.omit_truncated then facts.truncated = nil end
+  if opts.omit_queues then facts.queues = nil end
+  return facts
+end
+
+local function mock_observe(snapshot)
+  t.mock_observe(snapshot or observe_facts())
 end
 
 local function mock_idle_observe()
-  mock_observe_env()
-  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
-    stdout = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}],"deliveries":[],"dead_letters":[]}',
-    stderr = "",
-    exit_code = 0,
-  })
+  mock_observe(observe_facts())
 end
 
 local function mock_busy_observe()
-  mock_observe_env()
-  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
-    stdout = '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":1,"pending":1,"in_flight":0,"retrying":0,"oldest_pending_age_ms":1000}],"deliveries":[],"dead_letters":[]}',
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
-local function mock_observe(stdout, exit_code)
-  mock_observe_env()
-  t.mock_command(observe_bin .. " observe --durable-root " .. observe_durable_root .. " --json", {
-    stdout = stdout,
-    stderr = exit_code == 0 and "" or "observe failed",
-    exit_code = exit_code or 0,
-  })
-end
-
-local function observe_json(opts)
-  opts = opts or {}
-  local parts = {
-    '{"schema_version":' .. tostring(opts.schema_version or 1),
-    ',"generated_at_ms":' .. tostring(opts.generated_at_ms or 1781830860000),
-  }
-  if not opts.omit_source then
-    table.insert(parts, ',"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"}')
-  end
-  if not opts.omit_limits then
-    table.insert(parts, ',"limits":' .. (opts.limits_json or '{"max_deliveries":500,"max_dead_letters":500}'))
-  end
-  if not opts.omit_truncated then
-    table.insert(parts, ',"truncated":' .. (opts.truncated_json or '{"deliveries":false,"dead_letters":false}'))
-  end
-  if not opts.omit_queues then
-    table.insert(parts, ',"queues":' .. (opts.queues_json or '[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0,"oldest_pending_age_ms":null}]'))
-  end
-  table.insert(parts, ',"deliveries":' .. (opts.deliveries_json or "[]"))
-  table.insert(parts, ',"dead_letters":' .. (opts.dead_letters_json or "[]"))
-  table.insert(parts, "}")
-  return table.concat(parts, "")
+  mock_observe(observe_facts({
+    queues = {
+      { queue = "proposal", depth = 1, pending = 1, in_flight = 0, retrying = 0, oldest_pending_age_ms = 1000 },
+    },
+  }))
 end
 
 local function mock_stale_observe()
-  mock_observe(observe_json({ generated_at_ms = 1781831461000 }), 0)
+  mock_observe(observe_facts({ generated_at_ms = 1781831461000 }))
 end
 
 local function mock_idle_observe_at(generated_at_ms)
-  mock_observe(observe_json({ generated_at_ms = generated_at_ms }), 0)
+  mock_observe(observe_facts({ generated_at_ms = generated_at_ms }))
 end
 
 local function mock_codex_findings(stdout, exit_code)
@@ -268,6 +254,20 @@ local function with_core_patch(patches, fn)
   return result
 end
 
+local function with_observe_port_error(message, fn)
+  local observe_port = audit_main.observe_port
+  local original = observe_port.facts
+  observe_port.facts = function()
+    error(message)
+  end
+  local ok, result = pcall(fn)
+  observe_port.facts = original
+  if not ok then
+    error(result, 0)
+  end
+  return result
+end
+
 return {
   test_read_env_command_rejects_invalid_env_name = function()
     local allowed = {
@@ -386,7 +386,7 @@ return {
   end,
 
   test_expired_idle_hint_skips_without_codex = function()
-    mock_observe(observe_json({ generated_at_ms = core.iso_timestamp_epoch_seconds("2026-06-19T01:03:00Z") * 1000 }), 0)
+    mock_observe(observe_facts({ generated_at_ms = core.iso_timestamp_epoch_seconds("2026-06-19T01:03:00Z") * 1000 }))
     local dept = fake_audit_department("[]")
     local result = run_fake_at(dept, idle_event({
       detected_at = "2026-06-19T01:00:00Z",
@@ -510,11 +510,11 @@ return {
 
   test_fake_current_truncated_observe_skips_without_issue = function()
     for _, truncated_json in ipairs({
-      '{"deliveries":true,"dead_letters":false}',
-      '{"deliveries":false,"dead_letters":true}',
+      { deliveries = true, dead_letters = false },
+      { deliveries = false, dead_letters = true },
     }) do
       mock_env("owner/repo", "3")
-      mock_observe(observe_json({ truncated_json = truncated_json }), 0)
+      mock_observe(observe_facts({ truncated = truncated_json }))
       local dept = fake_audit_department_with_search("[]", "[]")
       local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
       t.eq(#result.raises, 0)
@@ -523,7 +523,7 @@ return {
 
   test_fake_current_observe_missing_queues_is_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe(observe_json({ omit_queues = true }), 0)
+    mock_observe(observe_facts({ omit_queues = true }))
     local dept = fake_audit_department("[]")
     local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
@@ -531,7 +531,7 @@ return {
 
   test_fake_current_observe_unknown_schema_is_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe(observe_json({ schema_version = 2, queues_json = "[]" }), 0)
+    mock_observe(observe_facts({ schema_version = 2, queues = {} }))
     local dept = fake_audit_department("[]")
     local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
@@ -539,9 +539,10 @@ return {
 
   test_fake_current_observe_unreadable_skips_without_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe("", 1)
-    local dept = fake_audit_department("[]")
-    local result = run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    local result = with_observe_port_error("archaudit: observe-unreadable: synthetic observe failure", function()
+      local dept = fake_audit_department("[]")
+      return run_fake_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    end)
     t.eq(#result.raises, 0)
   end,
 
@@ -554,19 +555,20 @@ return {
     t.eq(#result.raises, 0)
   end,
 
-  test_observe_bin_unresolved_is_loud_failure_not_terminal_skip = function()
+  test_observe_durable_root_unresolved_is_loud_failure_not_terminal_skip = function()
     mock_env("owner/repo", "3")
-    t.mock_command('printf %s "$BIN"', { stdout = "", stderr = "", exit_code = 0 })
-    local dept = fake_audit_department("[]")
-    local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    local result = with_observe_port_error("archaudit: observe-durable-root-unresolved: FKST_DURABLE_ROOT must be set for fkst.observe", function()
+      local dept = fake_audit_department("[]")
+      return run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
+    end)
     t.eq(#result.raises, 0)
-    t.is_true(tostring(result.failure.error):find("observe-bin-unresolved", 1, true) ~= nil)
+    t.is_true(tostring(result.failure.error):find("observe-durable-root-unresolved", 1, true) ~= nil)
     t.is_true(tostring(result.failure.error):find("terminal-skip", 1, true) == nil)
   end,
 
-  test_fake_current_observe_malformed_json_is_structured_failure_no_issue = function()
+  test_fake_current_observe_malformed_snapshot_is_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe("{not json", 0)
+    mock_observe("not facts")
     local dept = fake_audit_department("[]")
     local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
@@ -653,7 +655,7 @@ return {
 
   test_fake_current_observe_idle_check_malformed_queue_is_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe(observe_json({ queues_json = '[{"queue":"proposal","depth":"bad","pending":0,"in_flight":0,"retrying":0}]' }), 0)
+    mock_observe(observe_facts({ queues = { { queue = "proposal", depth = "bad", pending = 0, in_flight = 0, retrying = 0 } } }))
     local dept = fake_audit_department("[]")
     local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
@@ -662,22 +664,22 @@ return {
 
   test_fake_current_observe_malformed_top_level_is_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe('{"schema_version":1,"generated_at_ms":"1781830860000","source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[],"deliveries":[],"dead_letters":[]}', 0)
+    mock_observe(observe_facts({ generated_at_ms = "1781830860000", queues = {} }))
     local dept = fake_audit_department("[]")
     local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
   end,
 
   test_fake_current_observe_missing_or_malformed_source_limits_truncated_is_structured_failure_no_issue = function()
-    for _, observe_stdout in ipairs({
-      observe_json({ omit_source = true, queues_json = "[]" }),
-      observe_json({ omit_limits = true, queues_json = "[]" }),
-      observe_json({ omit_truncated = true, queues_json = "[]" }),
-      observe_json({ truncated_json = '{"deliveries":"false","dead_letters":false}', queues_json = "[]" }),
-      observe_json({ limits_json = '{"max_deliveries":1.5,"max_dead_letters":500}', queues_json = "[]" }),
+    for _, snapshot in ipairs({
+      observe_facts({ omit_source = true, queues = {} }),
+      observe_facts({ omit_limits = true, queues = {} }),
+      observe_facts({ omit_truncated = true, queues = {} }),
+      observe_facts({ truncated = { deliveries = "false", dead_letters = false }, queues = {} }),
+      observe_facts({ limits = "bad", queues = {} }),
     }) do
       mock_env("owner/repo", "3")
-      mock_observe(observe_stdout, 0)
+      mock_observe(snapshot)
       local dept = fake_audit_department("[]")
       local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
       t.eq(#result.raises, 0)
@@ -686,20 +688,20 @@ return {
 
   test_fake_current_observe_malformed_dead_letter_truncated_is_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe(observe_json({ truncated_json = '{"deliveries":false,"dead_letters":0}', queues_json = "[]" }), 0)
+    mock_observe(observe_facts({ truncated = { deliveries = false, dead_letters = 0 }, queues = {} }))
     local dept = fake_audit_department("[]")
     local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#result.raises, 0)
   end,
 
   test_fake_current_observe_keyed_lists_are_structured_failure_no_issue = function()
-    for _, observe_json in ipairs({
-      observe_json({ queues_json = '{"proposal":{"depth":0,"pending":0,"in_flight":0,"retrying":0}}' }),
-      observe_json({ deliveries_json = '{"one":{}}' }),
-      observe_json({ dead_letters_json = '{"one":{}}' }),
+    for _, snapshot in ipairs({
+      observe_facts({ queues = { proposal = { depth = 0, pending = 0, in_flight = 0, retrying = 0 } } }),
+      observe_facts({ deliveries = { one = {} } }),
+      observe_facts({ dead_letters = { one = {} } }),
     }) do
       mock_env("owner/repo", "3")
-      mock_observe(observe_json, 0)
+      mock_observe(snapshot)
       local dept = fake_audit_department("[]")
       local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
       t.eq(#result.raises, 0)
@@ -707,14 +709,14 @@ return {
   end,
 
   test_fake_current_observe_missing_each_busy_dimension_is_structured_failure_no_issue = function()
-    for _, observe_json in ipairs({
-      observe_json({ queues_json = '[{"queue":"proposal","pending":0,"in_flight":0,"retrying":0}]' }),
-      observe_json({ queues_json = '[{"queue":"proposal","depth":0,"in_flight":0,"retrying":0}]' }),
-      observe_json({ queues_json = '[{"queue":"proposal","depth":0,"pending":0,"retrying":0}]' }),
-      observe_json({ queues_json = '[{"queue":"proposal","depth":0,"pending":0,"in_flight":0}]' }),
+    for _, snapshot in ipairs({
+      observe_facts({ queues = { { queue = "proposal", pending = 0, in_flight = 0, retrying = 0 } } }),
+      observe_facts({ queues = { { queue = "proposal", depth = 0, in_flight = 0, retrying = 0 } } }),
+      observe_facts({ queues = { { queue = "proposal", depth = 0, pending = 0, retrying = 0 } } }),
+      observe_facts({ queues = { { queue = "proposal", depth = 0, pending = 0, in_flight = 0 } } }),
     }) do
       mock_env("owner/repo", "3")
-      mock_observe(observe_json, 0)
+      mock_observe(snapshot)
       local dept = fake_audit_department("[]")
       local result = run_fake_failure_at(dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
       t.eq(#result.raises, 0)
@@ -723,13 +725,13 @@ return {
 
   test_fake_current_observe_malformed_queue_rows_are_structured_failure_no_issue = function()
     mock_env("owner/repo", "3")
-    mock_observe(observe_json({ queues_json = '[{"queue":"","depth":0,"pending":0,"in_flight":0,"retrying":0}]' }), 0)
+    mock_observe(observe_facts({ queues = { { queue = "", depth = 0, pending = 0, in_flight = 0, retrying = 0 } } }))
     local bad_name_dept = fake_audit_department("[]")
     local bad_name = run_fake_failure_at(bad_name_dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#bad_name.raises, 0)
 
     mock_env("owner/repo", "3")
-    mock_observe(observe_json({ queues_json = '[{"queue":"proposal","depth":0,"pending":-1,"in_flight":0,"retrying":0}]' }), 0)
+    mock_observe(observe_facts({ queues = { { queue = "proposal", depth = 0, pending = -1, in_flight = 0, retrying = 0 } } }))
     local negative_dept = fake_audit_department("[]")
     local negative = run_fake_failure_at(negative_dept, fresh_idle_event(), core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.eq(#negative.raises, 0)

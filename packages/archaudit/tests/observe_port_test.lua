@@ -19,13 +19,9 @@ local function observe_idle()
     queues = {
       { queue = "proposal", depth = 0, pending = 0, in_flight = 0, retrying = 0 },
     },
-    deliveries = {},
-    dead_letters = {},
+    deliveries = json.decode("[]"),
+    dead_letters = json.decode("[]"),
   }
-end
-
-local function observe_idle_json()
-  return '{"schema_version":1,"generated_at_ms":1781830860000,"source":{"durable_root":"/tmp/fkst-durable","database":"/tmp/fkst-durable/delivery.redb","read_semantics":"single read transaction","history_semantics":"delivery queue snapshot only"},"limits":{"max_deliveries":500,"max_dead_letters":500},"truncated":{"deliveries":false,"dead_letters":false},"queues":[{"queue":"proposal","depth":0,"pending":0,"in_flight":0,"retrying":0}],"deliveries":[],"dead_letters":[]}'
 end
 
 local function fresh_idle_event()
@@ -48,108 +44,32 @@ local function mock_env()
 end
 
 return {
-  test_audit_observe_adapter_requires_exec_and_rejects_unreadable_or_malformed_json = function()
-    t.raises(function() observe_port.facts({ exec_argv = function() end }) end)
-    t.raises(function()
-      observe_port.facts({
-        exec_sync = function(cmd)
-          if cmd == 'printf %s "$BIN"' then
-            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
-          end
-          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
-            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
-          end
-          error("unexpected env command: " .. tostring(cmd))
-        end,
-        exec_argv = function(_cmd)
-          return { stdout = "", stderr = "observe failed", exit_code = 1 }
-        end,
-      })
-    end)
-    t.raises(function()
-      observe_port.facts({
-        exec_sync = function(cmd)
-          if cmd == 'printf %s "$BIN"' then
-            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
-          end
-          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
-            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
-          end
-          error("unexpected env command: " .. tostring(cmd))
-        end,
-        exec_argv = function(_cmd)
-          return { stdout = "{not json", stderr = "", exit_code = 0 }
-        end,
-      })
-    end)
+  test_audit_observe_adapter_rejects_malformed_injected_snapshot = function()
+    t.mock_observe("not facts")
+    t.raises(function() observe_port.facts() end)
   end,
 
-  test_audit_observe_adapter_reports_malformed_json_error_class = function()
+  test_audit_observe_adapter_reports_malformed_snapshot_error_class = function()
+    t.mock_observe("not facts")
     local ok, err = pcall(function()
-      observe_port.facts({
-        exec_sync = function(cmd)
-          if cmd == 'printf %s "$BIN"' then
-            return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
-          end
-          if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
-            return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
-          end
-          error("unexpected env command: " .. tostring(cmd))
-        end,
-        exec_argv = function(_cmd)
-          return { stdout = "{not json", stderr = "", exit_code = 0 }
-        end,
-      })
+      observe_port.facts()
     end)
     t.eq(ok, false)
-    t.is_true(tostring(err):find("archaudit: observe-malformed-json", 1, true) ~= nil)
+    t.is_true(tostring(err):find("archaudit: observe-malformed", 1, true) ~= nil)
   end,
 
-  test_audit_observe_adapter_uses_resolved_bin_argv_and_resolved_durable_root = function()
-    local observed = observe_port.facts({
-      exec_sync = function(cmd)
-        if cmd == 'printf %s "$BIN"' then
-          return { stdout = "/tmp/fkst-framework", stderr = "", exit_code = 0 }
-        end
-        if cmd == 'printf %s "$FKST_DURABLE_ROOT"' then
-          return { stdout = "/tmp/fkst-durable", stderr = "", exit_code = 0 }
-        end
-        error("unexpected env command: " .. tostring(cmd))
-      end,
-      exec_argv = function(cmd)
-        t.eq(cmd.timeout, 30)
-        t.eq(cmd.argv[1], "/tmp/fkst-framework")
-        t.eq(cmd.argv[2], "observe")
-        t.eq(cmd.argv[3], "--durable-root")
-        t.eq(cmd.argv[4], "/tmp/fkst-durable")
-        t.eq(cmd.argv[5], "--json")
-        t.is_nil(cmd.cmd)
-        return { stdout = observe_idle_json(), stderr = "", exit_code = 0 }
-      end,
-    })
+  test_audit_observe_adapter_consumes_injected_snapshot = function()
+    t.mock_observe(observe_idle())
+    local observed = observe_port.facts()
     t.eq(observed.schema_version, 1)
     t.eq(observed.generated_at_ms, 1781830860000)
   end,
 
-  test_audit_observe_adapter_fails_loud_when_resolved_bin_is_unset = function()
-    local called_argv = false
-    local ok, err = pcall(function()
-      observe_port.facts({
-        exec_sync = function(cmd)
-          if cmd == 'printf %s "$BIN"' then
-            return { stdout = "", stderr = "", exit_code = 0 }
-          end
-          error("unexpected env command: " .. tostring(cmd))
-        end,
-        exec_argv = function(_cmd)
-          called_argv = true
-          return { stdout = observe_idle_json(), stderr = "", exit_code = 0 }
-        end,
-      })
-    end)
-    t.eq(ok, false)
-    t.eq(called_argv, false)
-    t.is_true(tostring(err):find("archaudit: observe-bin-unresolved", 1, true) ~= nil)
+  test_audit_observe_adapter_accepts_generic_options = function()
+    t.mock_observe(observe_idle())
+    local observed = observe_port.facts({ limit = 10 })
+    t.eq(observed.schema_version, 1)
+    t.eq(#observed.queues, 1)
   end,
 
   test_audit_department_consumes_injected_observe_port = function()
