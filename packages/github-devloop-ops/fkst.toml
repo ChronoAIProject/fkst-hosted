@@ -1,5 +1,6 @@
 kind = "package.composed"
 name = "github-devloop-ops"
+persistence_class = "saga"
 
 [code]
 root = "."

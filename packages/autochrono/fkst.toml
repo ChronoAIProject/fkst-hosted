@@ -1,5 +1,6 @@
 kind = "package.composed"
 name = "autochrono"
+persistence_class = "judgment_pipeline"
 
 [code]
 root = "."

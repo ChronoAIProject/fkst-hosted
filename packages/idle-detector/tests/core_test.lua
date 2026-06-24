@@ -27,10 +27,6 @@ local function observe_idle_json()
 end
 
 return {
-  test_persistence_class_is_stateless_adapter = function()
-    t.eq(core.persistence_class(), "stateless_adapter")
-  end,
-
   test_idle_predicate_accepts_real_zero_snapshot = function()
     local idle, why = core.is_idle_observe(observe_idle())
     t.eq(idle, true)

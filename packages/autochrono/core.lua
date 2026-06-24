@@ -4,9 +4,6 @@ local payload_validator = require("contract.payload")
 local source_refs = require("contract.source_ref")
 local strings = require("contract.strings")
 
-function M.persistence_class()
-  return "judgment_pipeline"
-end
 
 function M.error_class_from_message(message)
   local text = tostring(message or "")

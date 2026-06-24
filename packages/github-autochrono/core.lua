@@ -4,9 +4,6 @@ local payload_validator = require("contract.payload")
 local require_field = payload_validator.require_field
 local error_context = "github-autochrono glue"
 
-function M.persistence_class()
-  return "composed_judgment_pipeline"
-end
 
 local function require_source_ref(payload)
   local source_ref = require_field(payload, "source_ref", error_context)

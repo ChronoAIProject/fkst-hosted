@@ -1,8 +1,5 @@
 local M = {}
 
-function M.persistence_class()
-  return "saga"
-end
 
 function M.decompose_package_queue()
   return "github-devloop-decompose.devloop_decompose"

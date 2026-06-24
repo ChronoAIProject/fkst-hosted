@@ -165,10 +165,6 @@ local function synthetic_heartbeat_row()
 end
 
 return {
-  test_persistence_class_is_declared = function()
-    t.eq(core.persistence_class(), "saga")
-  end,
-
   test_executable_restart_table_covers_non_terminal_states = function()
     local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "blocked", "merged" }
     local by_state = table_by_state()

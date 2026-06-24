@@ -4,9 +4,6 @@ local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
 
-function M.persistence_class()
-  return "judgment_pipeline"
-end
 
 local default_angles = { "minimal", "structural", "delete" }
 local max_angles = 4

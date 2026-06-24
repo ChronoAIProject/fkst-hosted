@@ -6,9 +6,6 @@ local forge_strings = require("forge.strings")
 
 local M = {}
 
-function M.persistence_class()
-  return "stateless_adapter"
-end
 
 local allowed_env = {
   FKST_GITHUB_BOT_LOGIN = true,

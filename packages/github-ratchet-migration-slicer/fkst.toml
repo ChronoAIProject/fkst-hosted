@@ -1,5 +1,6 @@
 kind = "package"
 name = "github-ratchet-migration-slicer"
+persistence_class = "stateless_adapter"
 
 [code]
 root = "."

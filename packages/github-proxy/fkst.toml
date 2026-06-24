@@ -1,5 +1,6 @@
 kind = "package"
 name = "github-proxy"
+persistence_class = "stateless_adapter"
 
 [code]
 root = "."

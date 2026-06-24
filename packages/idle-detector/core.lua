@@ -10,9 +10,6 @@ local observe_env = {
   FKST_DURABLE_ROOT = true,
 }
 
-function M.persistence_class()
-  return "stateless_adapter"
-end
 
 local function read_env_command(name)
   if not observe_env[name] then

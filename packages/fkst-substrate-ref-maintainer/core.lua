@@ -1,8 +1,5 @@
 local M = {}
 
-function M.persistence_class()
-  return "saga"
-end
 
 require("devloop.base").install(M)
 require("devloop.config").install(M)

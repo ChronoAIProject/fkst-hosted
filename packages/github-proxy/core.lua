@@ -4,9 +4,6 @@ local forge_strings = require("forge.strings")
 
 require("core.error_facts").install(M)
 
-function M.persistence_class()
-  return "stateless_adapter"
-end
 
 -- A GitHub App's author login is "<slug>[bot]" via the REST API but bare
 -- "<slug>" via GraphQL. Strip the suffix so callers comparing against a

@@ -52,12 +52,13 @@ GH_RATE_POOL_FUNCTION_RE = re.compile(
 )
 GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
 OWNERSHIP_GATE_RE = re.compile(r"(?ms)^\s*function\s+M\s*\.\s*verify_pr_review_issue_claim\s*\([^)]*\).*?(?=^\s*function\s+M\s*\.|\Z)")
+# Declaration presence + valid value moved to the engine manifest schema
+# (`persistence_class` in fkst.toml + the `engine.persistence-class` conformance
+# check, the single authority). This regex reads that authoritative field only to
+# drive the saga-recovery-token guard below (a not-yet-promoted follow-up).
 PERSISTENCE_CLASS_RE = re.compile(
-    r"\bfunction\s+M\s*\.\s*persistence_class\s*\([^)]*\)\s*"
-    r"return\s*(?P<quote>[\"'])(?P<class>[A-Za-z0-9_]+)(?P=quote)",
-    re.DOTALL,
+    r"(?m)^\s*persistence_class\s*=\s*(?P<quote>[\"'])(?P<class>[A-Za-z0-9_]+)(?P=quote)"
 )
-ALLOWED_PERSISTENCE_CLASSES = {"saga", "stateless_adapter", "judgment_pipeline", "composed_judgment_pipeline"}
 SAGA_RECOVERY_TOKENS = ("fkst:github-devloop:state:v1", "current_entity_state", "restart_completeness", "transition_status", "versioned_transition_status", "cyclic_transition_status")
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
@@ -800,33 +801,25 @@ def check_ownership_gate_claim_owner(root: Path, violations: list[str]) -> None:
         )
 
 
-def package_persistence_class(core_path: Path) -> str | None:
-    match = PERSISTENCE_CLASS_RE.search(read_text(core_path))
+def package_persistence_class(pkg: Path) -> str | None:
+    fkst_toml = pkg / "fkst.toml"
+    if not fkst_toml.exists():
+        return None
+    match = PERSISTENCE_CLASS_RE.search(read_text(fkst_toml))
     if match is None:
         return None
     return match.group("class")
 
 
 def check_persistence_classes(root: Path, violations: list[str]) -> None:
+    # Declaration presence and valid value are enforced by the engine
+    # `engine.persistence-class` conformance check (the single authority, read
+    # from the typed `persistence_class` manifest field). This ratchet retains
+    # only the saga-recovery-token guard for non-saga packages — a follow-up
+    # promotion (gating the marker primitives on the saga_recovery capability).
     for pkg in package_dirs(root):
-        core_path = pkg / "core.lua"
-        if not core_path.exists():
-            continue
-        declared = package_persistence_class(core_path)
-        if declared is None:
-            add(
-                violations,
-                "G8",
-                f"{rel(root, core_path)} must declare M.persistence_class()",
-            )
-            continue
-        if declared not in ALLOWED_PERSISTENCE_CLASSES:
-            add(
-                violations,
-                "G8",
-                f"{rel(root, core_path)} declares unsupported persistence class: {declared}",
-            )
-        if declared == "saga":
+        declared = package_persistence_class(pkg)
+        if declared is None or declared == "saga":
             continue
         for path in sorted(pkg.rglob("*.lua")):
             if not path.is_file() or "tests" in path.relative_to(pkg).parts:

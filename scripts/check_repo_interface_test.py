@@ -60,7 +60,10 @@ class CheckRepoPublishedInterfaceTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("repository check failed:", result.stderr)
-        self.assertIn("G8: packages/source-board/core.lua must declare M.persistence_class()", result.stderr)
+        # persistence_class declaration presence is now enforced by the engine
+        # `engine.persistence-class` conformance check (covered in substrate's
+        # host_conformance tests), not this Python generic ratchet; G1 below is the
+        # witness that generic ratchets still run on an external project root.
         self.assertIn("G1: packages/site-board/core.lua has 1001 lines; limit is 1000", result.stderr)
         self.assertIn("OK: skipped library-B-specific ratchets for external project root:", result.stdout)
 

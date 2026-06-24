@@ -1,5 +1,6 @@
 kind = "package.composed"
 name = "archaudit"
+persistence_class = "composed_judgment_pipeline"
 
 [code]
 root = "."

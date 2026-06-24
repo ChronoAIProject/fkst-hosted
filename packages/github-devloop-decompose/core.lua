@@ -1,9 +1,6 @@
 local M = {}
 local wiring = require("core.devloop_wiring")
 
-function M.persistence_class()
-  return "saga"
-end
 
 function M.decompose_package_queue()
   return "devloop_decompose"

@@ -44,10 +44,6 @@ local function copy_contract(contract)
 end
 
 return {
-  test_persistence_class_is_composed_judgment_pipeline = function()
-    t.eq(core.persistence_class(), "composed_judgment_pipeline")
-  end,
-
   test_producer_liveness_contract_declares_overdue_progress = function()
     local contracts = core.producer_liveness_contracts()
     t.eq(#contracts, 1)

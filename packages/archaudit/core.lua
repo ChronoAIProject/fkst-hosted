@@ -26,9 +26,6 @@ local audit_poll_interval_seconds = 30 * 60
 local audit_due_completion_budget_seconds = 2 * audit_poll_interval_seconds + 15 * 60
 local audit_poll_interval = tostring(math.floor(audit_poll_interval_seconds / 60)) .. "m"
 
-function M.persistence_class()
-  return "composed_judgment_pipeline"
-end
 
 function M.audit_due_staleness_seconds()
   return audit_due_staleness_seconds

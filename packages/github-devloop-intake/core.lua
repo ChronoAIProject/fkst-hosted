@@ -1,9 +1,6 @@
 local M = {}
 local wiring = require("core.devloop_wiring")
 
-function M.persistence_class()
-  return "saga"
-end
 
 require("devloop.base").install(M)
 require("devloop.config").install(M)
