@@ -73,45 +73,6 @@ local label_colors = {
   [blocked_on_dependency_label] = "E99695",
 }
 
-local state_labels = {
-  [thinking_label] = true,
-  [ready_label] = true,
-  [implementing_label] = true,
-  [awaiting_pr_label] = true,
-  [pr_open_label] = true,
-  [reviewing_label] = true,
-  [merge_ready_label] = true,
-  [merging_label] = true,
-  [merged_label] = true,
-  [fixing_label] = true,
-  [review_meta_label] = true,
-  [impl_failed_label] = true,
-  [blocked_label] = true,
-}
-
-local label_by_state = {
-  thinking = thinking_label,
-  dependency_wait = ready_label,
-  ready = ready_label,
-  implementing = implementing_label,
-  ["awaiting-pr"] = awaiting_pr_label,
-  ["pr-open"] = pr_open_label,
-  reviewing = reviewing_label,
-  ["merge-ready"] = merge_ready_label,
-  merging = merging_label,
-  merged = merged_label,
-  ["closed-unmerged"] = blocked_label,
-  fixing = fixing_label,
-  ["review-meta"] = review_meta_label,
-  ["impl-failed"] = impl_failed_label,
-  blocked = blocked_label,
-}
-
-local state_by_label = {}
-for state, label in pairs(label_by_state) do
-  state_by_label[label] = state
-end
-
 function M.parse_name_only_paths(stdout)
   local paths = {}
   local seen = {}
@@ -126,44 +87,6 @@ function M.parse_name_only_paths(stdout)
   return paths
 end
 
-local state_graph = {
-  unmanaged = { "thinking" },
-  thinking = { "dependency_wait", "ready", "blocked" },
-  dependency_wait = { "dependency_wait", "ready", "blocked" },
-  ready = { "dependency_wait", "implementing", "blocked" },
-  implementing = { "awaiting-pr", "impl-failed" },
-  ["awaiting-pr"] = { "merged", "ready", "blocked" },
-  ["pr-open"] = { "reviewing", "blocked" },
-  reviewing = { "merge-ready", "fixing", "review-meta" },
-  ["merge-ready"] = { "merging", "blocked" },
-  merging = { "merged", "reviewing", "fixing", "blocked" },
-  merged = {},
-  ["closed-unmerged"] = {},
-  fixing = { "reviewing", "review-meta" },
-  ["review-meta"] = { "fixing", "blocked" },
-  ["impl-failed"] = { "implementing" },
-  blocked = {},
-}
-
-local issue_state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged", "awaiting-pr" }
-local state_order = { "thinking", "dependency_wait", "ready", "implementing", "pr-open", "reviewing", "merge-ready", "fixing", "impl-failed", "blocked", "review-meta", "merging", "merged", "closed-unmerged", "awaiting-pr" }
-local state_stage_rank = {
-  thinking = 100,
-  dependency_wait = 500,
-  ready = 500,
-  implementing = 600,
-  ["awaiting-pr"] = 625,
-  ["pr-open"] = 650,
-  reviewing = 675,
-  ["merge-ready"] = 690,
-  merging = 695,
-  fixing = 700,
-  ["review-meta"] = 710,
-  ["impl-failed"] = 750,
-  blocked = 800,
-  ["closed-unmerged"] = 825,
-  merged = 900,
-}
 local trusted_bot_login = nil
 local comment_body
 local comment_author_login
@@ -949,12 +872,6 @@ M._impl_failed_label = impl_failed_label
 M._blocked_label = blocked_label
 M._blocked_on_dependency_label = blocked_on_dependency_label
 M._label_colors = label_colors
-M._state_labels = state_labels
-M._label_by_state = label_by_state
-M._state_graph = state_graph
-M._issue_state_order = issue_state_order
-M._state_order = state_order
-M._state_stage_rank = state_stage_rank
 M._shell_single_quote = shell_single_quote
 M._trim = trim
 M._neutralize_fkst_markers = neutralize_fkst_markers

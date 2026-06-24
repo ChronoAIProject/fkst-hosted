@@ -234,7 +234,6 @@ local function liveness_model(rows)
   local model = {
     restart_package_name = "archaudit",
     restart_lifecycle_states = {},
-    _label_by_state = {},
     restart_transition_table = function()
       return rows
     end,
@@ -245,9 +244,16 @@ local function liveness_model(rows)
       return {}
     end,
   }
+  local lifecycle_states = {}
+  function model.is_state(state)
+    return lifecycle_states[state] == true
+  end
   for _, row in ipairs(rows or {}) do
     table.insert(model.restart_lifecycle_states, row.from_state)
-    model._label_by_state[row.from_state] = true
+    lifecycle_states[row.from_state] = true
+    for _, next_state in ipairs(row.to_states or {}) do
+      lifecycle_states[next_state] = true
+    end
   end
   restart_liveness_contract.install(model)
   local shared = workflow_liveness_shared.install(model, { liveness_signal_producers = {} })

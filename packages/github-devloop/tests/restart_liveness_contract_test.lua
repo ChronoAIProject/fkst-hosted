@@ -143,10 +143,9 @@ local function install_generic_restart_liveness_model(row)
   local model = {
     restart_package_name = "synthetic",
     restart_lifecycle_states = { row.from_state },
-    _label_by_state = {
-      [row.from_state] = true,
-      blocked = true,
-    },
+    is_state = function(state)
+      return state == row.from_state or state == "blocked"
+    end,
     restart_transition_table = function()
       return { row }
     end,
