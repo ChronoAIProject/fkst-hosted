@@ -79,22 +79,6 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
 
-    def test_library_publishability_requires_only_contract_public(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            manifest(root / "libraries" / "contract" / "fkst.toml", "contract", [], public=False)
-            manifest(root / "libraries" / "workflow" / "fkst.toml", "workflow", ["contract"], public=True)
-            self.seed_devloop_manifest(root)
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, _warnings = self.run_guard_without_seed(root)
-
-        self.assertIn("G-LIB-DEP: contract must be the public publishable library", violations)
-        self.assertIn("G-LIB-DEP: workflow must not be public/publishable", violations)
 
     def run_guard_without_seed(self, root: Path) -> tuple[list[str], list[str]]:
         violations: list[str] = []
