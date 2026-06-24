@@ -17,7 +17,6 @@ GENERIC_RATCHETS = (
     "dedup",
     "producer-liveness",
     "ingress",
-    "forward-direct",
     "monotone-gate",
     "content-truncation",
     "coverage",

@@ -14,7 +14,6 @@ end
 local ratchet_allowlist_paths = {
   ["saga-handler"] = "migration/saga-handler.allowlist",
   ["code-dedup"] = "migration/code-dedup.allowlist",
-  ["forward-direct-raise"] = "migration/forward-direct-raise.allowlist",
 }
 
 local default_entry_key = "1111111111111111111111111111111111111111111111111111111111111111"
@@ -399,8 +398,8 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
-    t.eq(count_kind(result.github._model.writes, "issue_search"), 3)
-    t.eq(#result.exec_calls, 3)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
+    t.eq(#result.exec_calls, 2)
   end,
 
   test_poll_with_ref_issue_created_open_child_noops = function()
@@ -590,6 +589,6 @@ return {
     t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
     t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
-    t.eq(count_kind(result.github._model.writes, "issue_search"), 3)
+    t.eq(count_kind(result.github._model.writes, "issue_search"), 2)
   end,
 }

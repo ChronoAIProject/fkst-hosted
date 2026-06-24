@@ -1,5 +1,0 @@
-# Existing marker-gated FORWARD-direct raise inventory.
-# Format: path|function|queue
-# New entries fail CI. Remove entries only when the path is routed through
-# github_comment_written -> comment_handoff or declared REDRIVE from visible
-# marker facts.

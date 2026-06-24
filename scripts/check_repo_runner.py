@@ -6,7 +6,6 @@ from __future__ import annotations
 import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
-import check_repo_forward_direct
 import check_repo_monotone_gate
 import check_repo_namespaced_queue
 import check_repo_producer_liveness
@@ -30,15 +29,6 @@ def check_content_truncation(c, root, violations, allowlist_dir=None, enforce_ba
         c.add(violations, "G-CONTENT-TRUNCATION", "cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
     for message in check_repo_content_truncation.ratchet_messages(current, allowlist, base_allowlist):
         c.add(violations, "G-CONTENT-TRUNCATION", message)
-
-
-def check_forward_direct(c, root, violations, allowlist_dir=None) -> None:
-    current = check_repo_forward_direct.current_sites(check_repo_forward_direct.sources(root, c.package_roots(root)))
-    allowlist = check_repo_forward_direct.load_allowlist(
-        c.allowlist_path(root, check_repo_forward_direct.ALLOWLIST, allowlist_dir)
-    )
-    for message in check_repo_forward_direct.ratchet_messages(current, allowlist):
-        c.add(violations, "G-FORWARD-DIRECT", message)
 
 
 def check_producer_liveness(c, root, violations, allowlist_dir=None, enforce_base=True) -> None:
@@ -114,7 +104,6 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     check_content_truncation(c, root, violations, allowlists, enforce_base)
     for message in check_repo_coverage.repository_messages(root):
         c.add(violations, "G-COVERAGE", message)
-    check_forward_direct(c, root, violations, allowlists)
     check_producer_liveness(c, root, violations, allowlists, enforce_base)
     for package_root in c.package_roots(root):
         for message in check_repo_namespaced_queue.repository_messages(root, package_root, c.read_text, c.rel, c.strip_lua_comments_and_strings, c.is_unmasked_range):

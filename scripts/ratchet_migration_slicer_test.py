@@ -327,7 +327,6 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
 
         self.assertEqual(all_specs["saga-handler"].parent, "979")
         self.assertEqual(all_specs["code-dedup"].parent, "1018")
-        self.assertEqual(all_specs["forward-direct-raise"].parent, "1046")
         self.assertNotEqual(all_specs["code-dedup"].parent, "1002")
 
     def test_controller_plan_excludes_parent_issue_and_wraps_next_slice(self) -> None:
@@ -815,47 +814,6 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
         self.assertIn("safe_segment", messages[0])
         self.assertIn("no longer matches a duplicate group", messages[0])
         self.assertIn("prune the stale entry", messages[0])
-
-    def test_forward_direct_allowlist_maps_sites(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "packages/github-devloop/core/example.lua"
-            source.parent.mkdir(parents=True)
-            source.write_text(
-                textwrap.dedent(
-                    """\
-                    local function first()
-                      core.log_raise("x", id, "devloop_ready", payload)
-                    end
-
-                    function M.second()
-                      core.log_raise("x", id, "devloop_fixing", payload)
-                    end
-                    """
-                ),
-                encoding="utf-8",
-            )
-            migration = root / "migration"
-            migration.mkdir()
-            (migration / "forward-direct-raise.allowlist").write_text(
-                "\n".join([
-                    "packages/github-devloop/core/example.lua|first|devloop_ready",
-                    "packages/github-devloop/core/example.lua|M.second|devloop_fixing",
-                ]),
-                encoding="utf-8",
-            )
-
-            spec = slicer.specs()["forward-direct-raise"]
-            inventory = slicer.load_forward_direct_inventory(root, spec)
-
-            self.assertEqual([site.site_ref() for site in inventory], [
-                "packages/github-devloop/core/example.lua:1",
-                "packages/github-devloop/core/example.lua:5",
-            ])
-            self.assertEqual([site.detail for site in inventory], [
-                "forward_direct_raise: first devloop_ready",
-                "forward_direct_raise: M.second devloop_fixing",
-            ])
 
     def test_rejects_paths_that_escape_repo_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

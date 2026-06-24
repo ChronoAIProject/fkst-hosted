@@ -9,9 +9,4 @@ return {
     allowlist_path = "migration/code-dedup.allowlist",
     parent_issue = 1018,
   },
-  {
-    ratchet = "forward-direct-raise",
-    allowlist_path = "migration/forward-direct-raise.allowlist",
-    parent_issue = 1046,
-  },
 }

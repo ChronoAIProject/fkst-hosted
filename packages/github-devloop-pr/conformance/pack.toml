@@ -1,0 +1,12 @@
+schema = 1
+runner_protocol = "fkst-declarative-rulepack@1"
+owner_package = "github-devloop-pr"
+
+[[rules]]
+id = "no-forward-direct-raise.marker-gated"
+severity = "error"
+kind = "text_forbid_regex"
+include = ["**/*.lua"]
+exclude = ["tests/**", "core/pr_review_replayer.lua", "departments/comment_handoff/main.lua"]
+pattern = "(?s)(?:\\braise\\s*\\(\\s*[\"']|\\b(?:core|M)\\s*\\.\\s*log_raise\\s*\\([^\\n]*[\"'])(?:devloop_ready|devloop_reviewing|devloop_fixing|devloop_merge_ready|devloop_reconcile)[\"']|raise_effects\\s*\\([^)]*queue\\s*=\\s*[\"'](?:devloop_ready|devloop_reviewing|devloop_fixing|devloop_merge_ready|devloop_reconcile)[\"']"
+message = "marker-gated forward queues must be raised only via comment_handoff causal handoff or explicit redrive, not direct raise"

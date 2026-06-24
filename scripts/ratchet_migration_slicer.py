@@ -18,7 +18,6 @@ from time import time
 from typing import Any, Callable
 
 import check_repo_dedup as code_dedup
-import check_repo_forward_direct as forward_direct
 import check_repo_gh_git_adapter as gh_git_adapter
 
 
@@ -26,12 +25,12 @@ TARGET_COUNT = 0
 DEFAULT_SLICE_SIZE = 3
 MAX_SLICE_SIZE = 10
 SCHEMA = "fkst.ratchet-slice.v1"
-VALID_RATCHETS = ("gh-git-adapter", "saga-handler", "code-dedup", "forward-direct-raise")
+VALID_RATCHETS = ("gh-git-adapter", "saga-handler", "code-dedup")
 RATCHET_ALIASES = {
     "891": "gh-git-adapter",
     "892": "saga-handler",
 }
-DEFAULT_RECONCILE_RATCHETS = ("saga-handler", "code-dedup", "forward-direct-raise")
+DEFAULT_RECONCILE_RATCHETS = ("saga-handler", "code-dedup")
 DEFAULT_LABELS = ("fkst-dev:enabled",)
 FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
 SAFE_MARKER_VALUE_RE = re.compile(r"^[A-Za-z0-9._/,-]+$")
@@ -268,17 +267,6 @@ def load_code_dedup_inventory(root: Path, spec: MigrationSpec) -> list[Inventory
     return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
 
 
-def load_forward_direct_inventory(root: Path, spec: MigrationSpec) -> list[InventorySite]:
-    allowlist_path = validated_repo_path(root, spec.allowlist_path)
-    sites: list[InventorySite] = []
-    for site in sorted(forward_direct.load_allowlist(allowlist_path)):
-        source_path = validated_repo_path(root, site.path)
-        source = read_text(source_path)
-        line = line_for_function_basename(source, site.function) or 1
-        sites.append(InventorySite(site.path, line, f"forward_direct_raise: {site.function} {site.queue}", site.allowlist_line()))
-    return sorted(sites, key=lambda site: (site.path, site.line, site.detail))
-
-
 def line_for_function_basename(source: str, basename: str) -> int | None:
     code = code_dedup.code_without_comments_and_strings(source)
     expected = code_dedup.function_basename(basename)
@@ -334,16 +322,6 @@ def specs() -> dict[str, MigrationSpec]:
                 "This spec-only slice explicitly waives a migration-slicer recurrence-class fix; any broader slicer deduplication change must be tracked separately.",
             ),
             inventory_loader=load_code_dedup_inventory,
-        ),
-        "forward-direct-raise": MigrationSpec(
-            parent="1046",
-            ratchet="forward-direct-raise",
-            migration_kind="allowlist",
-            allowlist_path="migration/forward-direct-raise.allowlist",
-            title="forward-direct raise allowlist migration slice",
-            reference_shape="Route marker-gated forward progress through visible write-confirm facts, or declare the raise as a redrive from visible marker facts.",
-            allowlist_contract=(),
-            inventory_loader=load_forward_direct_inventory,
         ),
     }
 

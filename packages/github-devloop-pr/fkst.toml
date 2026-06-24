@@ -9,3 +9,6 @@ libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
 packages = ["github-proxy", "consensus", "github-devloop-decompose"]
+
+[conformance]
+pack = "conformance/pack.toml"
