@@ -7,7 +7,7 @@
 #       failure-relevant lines unless -v/--verbose or FKST_TEST_VERBOSE=1 is set.
 #
 #   scripts/run.sh check
-#       Run hermetic repository checks only. Does not resolve or execute BIN.
+#       Run hermetic repository checks and engine workspace dependency validation.
 #
 #   scripts/run.sh host --host-root <HOST> [--platform-root <PKGSRC>] [--local-packages <dir>] -- <check|test|supervise [args]>
 #       Run shared fkst-packages orchestration for a host repo. The host passes
@@ -259,6 +259,10 @@ cmd_check() {
     python3 -B "$ROOT/scripts/competence_gate.py" --base-ref "$competence_base_ref" || fail=1
   fi
   python3 -B "$ROOT/scripts/competence_gate_test.py" || fail=1
+  if [ "$fail" -eq 0 ]; then
+    resolve_bin
+    "$BIN" deps --project-root "$ROOT" || fail=1
+  fi
   return "$fail"
 }
 

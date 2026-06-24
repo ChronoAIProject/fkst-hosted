@@ -44,11 +44,6 @@ def manifest(path: Path, name: str, deps: list[str], *, public: bool | None = No
     )
 
 
-def package_manifest(path: Path, deps: list[str]) -> None:
-    quoted_deps = ", ".join(f'"{item}"' for item in deps)
-    write(path, f'kind = "package"\nname = "{path.parent.name}"\n\n[lib_deps]\nlibraries = [{quoted_deps}]\n')
-
-
 def inventory_line(path: str, module: str) -> str:
     return f'{{"path":"{path}","module":"{module}"}}\n'
 
@@ -83,42 +78,6 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
         warnings: list[str] = []
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
-
-    def test_allows_declared_package_library_dependencies(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "libraries" / "forge" / "github.lua", "return {}\n")
-            package_manifest(root / "packages" / "example" / "fkst.toml", ["contract", "forge"])
-            write(root / "packages" / "example" / "core.lua", 'local gh = require("forge.github")\n')
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, warnings = self.run_guard(root)
-
-        self.assertEqual(violations, [])
-        self.assertIn("G-LIB-DEP: package example uses forge.github", warnings)
-
-    def test_package_require_must_match_declared_lib_deps_and_resolve(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            package_manifest(root / "packages" / "example" / "fkst.toml", ["contract"])
-            write(root / "packages" / "example" / "core.lua", 'local gh = require("forge.missing")\n')
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, _warnings = self.run_guard(root)
-
-        self.assertIn("G-LIB-DEP: packages/example/core.lua:1 requires unresolved module 'forge.missing'", violations)
-        self.assertIn(
-            "G-LIB-DEP: packages/example/core.lua:1 package example requires 'forge.missing' but fkst.toml does not declare lib_dep 'forge'",
-            violations,
-        )
 
     def test_contract_surface_is_value_only_and_dependency_free(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -199,29 +158,6 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
         self.assertTrue(any("contains product/forge policy string 'fkst-dev:'" in message for message in violations))
         self.assertTrue(any("contains raw gh/git command text" in message for message in violations))
 
-    def test_non_devloop_family_package_cannot_depend_on_devloop(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "libraries" / "devloop" / "liveness.lua", "return {}\n")
-            package_manifest(root / "packages" / "archaudit" / "fkst.toml", ["contract", "workflow", "devloop"])
-            write(root / "packages" / "archaudit" / "core.lua", 'local liveness = require("devloop.liveness")\n')
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, _warnings = self.run_guard(root)
-
-        self.assertTrue(
-            any("package archaudit must not declare lib_dep 'devloop'" in message for message in violations),
-            violations,
-        )
-        self.assertTrue(
-            any("packages/archaudit/core.lua:1 package archaudit must not require 'devloop.liveness'" in message for message in violations),
-            violations,
-        )
-
     def test_devloop_visibility_excludes_non_family_packages(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -236,25 +172,6 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
                 violations, _warnings = self.run_guard_without_seed(root)
 
         self.assertTrue(any("devloop visibility must list only" in message and "archaudit" in message for message in violations))
-
-    def test_github_devloop_ops_is_devloop_family(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.seed_contract(root)
-            family = sorted(check_repo.check_repo_std_dependency_model.DEVLOOP_FAMILY)
-            self.seed_devloop_manifest(root, allow=family)
-            write(root / "libraries" / "devloop" / "state.lua", "return {}\n")
-            package_manifest(root / "packages" / "github-devloop-ops" / "fkst.toml", ["contract", "workflow", "testkit", "forge", "devloop"])
-            write(root / "packages" / "github-devloop-ops" / "core.lua", 'local state = require("devloop.state")\nreturn state\n')
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, _warnings = self.run_guard_without_seed(root)
-
-        self.assertEqual(violations, [])
 
     def test_devloop_forge_import_inventory_matches_current_and_legacy_base(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

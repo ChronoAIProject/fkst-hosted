@@ -67,69 +67,6 @@ def library_lua_files(root: Path, library_name: str) -> list[Path]:
     return sorted(path for path in library_root.rglob("*.lua") if path.is_file())
 
 
-def package_lua_files(package_root: Path) -> Iterable[Path]:
-    for path in sorted(package_root.rglob("*.lua")):
-        if path.is_file():
-            yield path
-
-
-def library_module_name(root: Path, path: Path, library: str) -> str:
-    relative = path.relative_to(root / "libraries" / library)
-    if relative.name == "init.lua":
-        parts = relative.parent.parts
-    else:
-        parts = relative.with_suffix("").parts
-    return ".".join((library, *parts)) if parts else library
-
-
-def module_path(root: Path, module: str) -> Path | None:
-    top, _, rest = module.partition(".")
-    if top not in LIBRARIES or rest == "":
-        return None
-    return root / "libraries" / top / Path(*rest.split("."))
-
-
-def module_exists(root: Path, module: str) -> bool:
-    path = module_path(root, module)
-    if path is None:
-        return True
-    return path.with_suffix(".lua").is_file() or (path / "init.lua").is_file()
-
-
-def modules_for_path(root: Path, path: Path) -> set[str]:
-    modules: set[str] = set()
-    for library in LIBRARIES:
-        try:
-            path.relative_to(root / "libraries" / library)
-        except ValueError:
-            continue
-        modules.add(library)
-        if library == "devloop":
-            modules.update({"contract", "workflow", "forge"})
-        return modules
-    try:
-        package = path.relative_to(root / "packages").parts[0]
-    except (ValueError, IndexError):
-        return set()
-    deps = package_lib_deps(root / "packages" / package / "fkst.toml")
-    return deps | {package}
-
-
-def package_lib_deps(path: Path) -> set[str]:
-    if not path.exists():
-        return set()
-    text = path.read_text(encoding="utf-8")
-    match = re.search(r"(?ms)^\[lib_deps\]\s*\n\s*libraries\s*=\s*\[(?P<body>.*?)\]", text)
-    if match is None:
-        return set()
-    return set(re.findall(r"[\"']([A-Za-z0-9_.-]+)[\"']", match.group("body")))
-
-
-def manifest_value(text: str, key: str) -> str | None:
-    match = re.search(r"(?m)^" + re.escape(key) + r"\s*=\s*[\"']([^\"']+)[\"']", text)
-    return None if match is None else match.group(1)
-
-
 def load_visibility_allow(path: Path) -> set[str]:
     if not path.exists():
         return set()
@@ -222,11 +159,6 @@ def check_devloop_visibility(root: Path, violations: list[str], add) -> None:
         add(violations, "G-LIB-DEP", f"devloop visibility must list only {sorted(DEVLOOP_FAMILY)}; observed {sorted(observed)}")
 
 
-def devloop_family(root: Path) -> set[str]:
-    observed = load_visibility_allow(root / "libraries" / "devloop" / "fkst.toml")
-    return observed if observed else DEVLOOP_FAMILY
-
-
 def check_workflow_policy(root: Path, violations: list[str], read_text, rel, add) -> None:
     for path in library_lua_files(root, "workflow"):
         stripped = read_text(path)
@@ -238,11 +170,8 @@ def check_workflow_policy(root: Path, violations: list[str], read_text, rel, add
                 add(violations, "G-WORKFLOW-POLICY", f"{rel(root, path)}:{line_number} contains raw gh/git command text")
 
 
-def check_require_edges(root: Path, violations: list[str], warnings: list[str], packages, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range) -> None:
-    package_usage: dict[str, set[str]] = {package.name: set() for package in packages}
-    library_edges: dict[str, set[str]] = {library: set() for library in LIBRARIES}
+def check_library_require_policy(root: Path, violations: list[str], read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range) -> None:
     devloop_forge_imports: set[tuple[str, str]] = set()
-    devloop_visible_packages = devloop_family(root)
     allowed = {
         "contract": {"contract"},
         "workflow": {"workflow", "contract"},
@@ -253,39 +182,14 @@ def check_require_edges(root: Path, violations: list[str], warnings: list[str], 
     for library in LIBRARIES:
         for path in library_lua_files(root, library):
             rel_path = rel(root, path)
-            source_module = library_module_name(root, path, library)
-            for module, line in require_literals(read_text(path), strip_lua_comments_and_strings, is_unmasked_range):
-                top = module.split(".")[0]
-                if top in LIBRARIES:
-                    if not module_exists(root, module):
-                        add(violations, "G-LIB-DEP", f"{rel_path}:{line} requires unresolved module {module!r}")
-                    if top not in allowed[library]:
-                        add(violations, "G-LIB-DEP", f"{rel_path}:{line} {library} must not require {module!r}")
-                    else:
-                        library_edges[library].add(f"{source_module}->{module}")
-                    if library == "devloop" and top == "forge":
-                        devloop_forge_imports.add((rel_path, module))
-                    continue
-                if module in LIBRARIES:
-                    continue
-                if library in {"contract", "workflow", "testkit", "forge"}:
-                    add(violations, "G-LIB-DEP", f'{library} module {rel_path}:{line} requires non-library module "{module}"')
-    for package in packages:
-        deps = package_lib_deps(package / "fkst.toml")
-        if "devloop" in deps and package.name not in devloop_visible_packages:
-            add(violations, "G-LIB-DEP", f"package {package.name} must not declare lib_dep 'devloop'")
-        for path in package_lua_files(package):
             for module, line in require_literals(read_text(path), strip_lua_comments_and_strings, is_unmasked_range):
                 top = module.split(".")[0]
                 if top not in LIBRARIES:
                     continue
-                package_usage[package.name].add(module)
-                if not module_exists(root, module):
-                    add(violations, "G-LIB-DEP", f"{rel(root, path)}:{line} requires unresolved module {module!r}")
-                if top not in deps:
-                    add(violations, "G-LIB-DEP", f"{rel(root, path)}:{line} package {package.name} requires {module!r} but fkst.toml does not declare lib_dep {top!r}")
-                if top == "devloop" and package.name not in devloop_visible_packages:
-                    add(violations, "G-LIB-DEP", f"{rel(root, path)}:{line} package {package.name} must not require {module!r}")
+                if top not in allowed[library]:
+                    add(violations, "G-LIB-DEP", f"{rel_path}:{line} {library} must not require {module!r}")
+                if library == "devloop" and top == "forge":
+                    devloop_forge_imports.add((rel_path, module))
     inventory_path = root / DEVLOOP_FORGE_IMPORTS_INVENTORY
     if library_lua_files(root, "devloop") or inventory_path.exists():
         current_inventory, inventory_errors = load_devloop_forge_import_inventory(inventory_path)
@@ -306,12 +210,6 @@ def check_require_edges(root: Path, violations: list[str], warnings: list[str], 
             for item in sorted(current_inventory - base_inventory):
                 path, module = item
                 add(violations, "G-LIB-DEP", f"{DEVLOOP_FORGE_IMPORTS_INVENTORY} grows relative to dev: {path} {module}")
-    for package_name, modules in sorted(package_usage.items()):
-        if modules:
-            add(warnings, "G-LIB-DEP", f"package {package_name} uses {', '.join(sorted(modules))}")
-    for library, edges in sorted(library_edges.items()):
-        if edges:
-            add(warnings, "G-LIB-DEP", f"library {library} edges {', '.join(sorted(edges))}")
 
 
 def check_std_dependency_model(
@@ -326,8 +224,7 @@ def check_std_dependency_model(
     strip_lua_comments_and_strings: Callable[[str], str],
     is_unmasked_range: Callable[[str, str, int, int], bool],
 ) -> None:
-    packages = list(packages)
     check_contract_surface(root, violations, add)
     check_devloop_visibility(root, violations, add)
     check_workflow_policy(root, violations, read_text, rel, add)
-    check_require_edges(root, violations, warnings, packages, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)
+    check_library_require_policy(root, violations, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)
