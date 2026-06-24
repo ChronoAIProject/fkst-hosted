@@ -138,6 +138,17 @@ class Violation:
         }
         if path == "packages/github-devloop/departments/implement/main.lua":
             line = implement_worktree_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
+        merge_executor_extraction_lines = {
+            ("assert_merge_pr_authority", "cursor-read", "current_entity_state(", 173): "160",
+            ("process_merge_queue_tick", "state-equality", "merging", 843): "830",
+            ("process_merge_ready_locked", "cursor-read", "current_entity_state(", 369): "356",
+            ("process_merge_ready_locked", "state-equality", "merge-ready", 452): "439",
+            ("process_merge_ready_locked", "state-equality", "merged", 370): "357",
+            ("process_merge_ready_locked", "state-equality", "merging", 443): "430",
+        }
+        if path == "packages/github-devloop-pr/departments/merge/main.lua":
+            path = "packages/github-devloop-pr/core/merge_executor.lua"
+            line = merge_executor_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
         return path, self.surface, self.kind, self.token, line
 
     def label(self) -> str:

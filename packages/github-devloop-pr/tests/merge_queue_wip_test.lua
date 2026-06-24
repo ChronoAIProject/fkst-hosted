@@ -33,7 +33,7 @@ local function branch_for_pr(pr_number)
 end
 
 local function run_merge_queue_tick(run_opts)
-  return t.run_department("departments/merge/main.lua", {
+  return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
     payload = {
       schema = "github-devloop.merge-queue-tick.v1",
@@ -42,7 +42,7 @@ local function run_merge_queue_tick(run_opts)
 end
 
 local function run_starvation_merge_queue_tick(event, run_opts)
-  return t.run_department("departments/merge/main.lua", {
+  return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
     payload = core.merge_queue_starvation_tick_payload("owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
       pr_number = event.pr_number,
@@ -489,7 +489,7 @@ return {
     mock_bot_env()
     mock_repo_env()
     mock_queue_list({})
-    local result = t.run_department("departments/merge/main.lua", {
+    local result = t.run_department("departments/merge_queue/main.lua", {
       queue = "github-devloop-pr.devloop_merge_queue_tick",
       payload = { schema = "github-devloop.merge-queue-tick.v1" },
     }, opts("merge-tick-namespaced-dispatch", {

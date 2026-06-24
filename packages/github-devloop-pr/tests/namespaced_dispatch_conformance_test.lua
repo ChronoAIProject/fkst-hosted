@@ -15,6 +15,7 @@ local departments = conformance.loaded_departments({
   load_department("departments/fix/main.lua", "departments.fix.main"),
   load_department("departments/liveness_scan/main.lua", "departments.liveness_scan.main"),
   load_department("departments/merge/main.lua", "departments.merge.main"),
+  load_department("departments/merge_queue/main.lua", "departments.merge_queue.main"),
   load_department("departments/observe_pr/main.lua", "departments.observe_pr.main"),
   load_department("departments/reconcile/main.lua", "departments.reconcile.main"),
   load_department("departments/review_loop/main.lua", "departments.review_loop.main"),
