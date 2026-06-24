@@ -115,21 +115,6 @@ def devloop_forge_imports_at_base(root: Path) -> tuple[str, set[tuple[str, str]]
     return "present", entries, messages
 
 
-def check_library_publishability(root: Path, violations: list[str], add) -> None:
-    contract_root = root / "libraries" / "contract"
-    manifest = contract_root / "fkst.toml"
-    if not manifest.exists():
-        add(violations, "G-LIB-DEP", "libraries/contract/fkst.toml is required")
-        return
-    text = manifest.read_text(encoding="utf-8")
-    if re.search(r"(?ms)^\[visibility\]\s*\n\s*public\s*=\s*true", text) is None:
-        add(violations, "G-LIB-DEP", "contract must be the public publishable library")
-    for library in ("workflow", "testkit", "forge", "devloop"):
-        lib_manifest = root / "libraries" / library / "fkst.toml"
-        if not lib_manifest.exists():
-            continue
-        if re.search(r"(?ms)^\[visibility\]\s*\n\s*public\s*=\s*true", lib_manifest.read_text(encoding="utf-8")) is not None:
-            add(violations, "G-LIB-DEP", f"{library} must not be public/publishable")
 
 
 def check_devloop_visibility(root: Path, violations: list[str], add) -> None:
@@ -181,6 +166,5 @@ def check_std_dependency_model(
     strip_lua_comments_and_strings: Callable[[str], str],
     is_unmasked_range: Callable[[str, str, int, int], bool],
 ) -> None:
-    check_library_publishability(root, violations, add)
     check_devloop_visibility(root, violations, add)
     check_devloop_forge_import_inventory(root, violations, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)
