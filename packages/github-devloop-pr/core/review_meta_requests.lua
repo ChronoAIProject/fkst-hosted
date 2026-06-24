@@ -2,21 +2,7 @@ local S = {}
 
 function S.install(M)
 local strings = require("contract.strings")
-local max_evidence_len = 600
 local ai_sentinel = "⟦AI:FKST⟧"
-
-local function build_comment_evidence_digest(comments)
-  local text = table.concat(M.comment_bodies(comments), "\n\n")
-  text = text:gsub("%c", " "):gsub("%s+", " ")
-  text = text:gsub("^%s+", ""):gsub("%s+$", "")
-  if text == "" then
-    return M.comment_string("comment_evidence_empty")
-  end
-  if #text > max_evidence_len then
-    text = M.truncate_utf8(text, max_evidence_len)
-  end
-  return text
-end
 
 local function normalized_reflection_action(review_meta, action)
   if review_meta.mode == "fix-reflection" and action == "spec-gap" then
@@ -156,40 +142,6 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     }, review_meta.source_ref)
   end
   return request
-end
-
-function M.build_spec_amendment_issue_create_request(repo, issue_number, review_meta, title_brief, reason, comments)
-  local title = "Spec amendment needed: " .. tostring(title_brief or ("Issue #" .. tostring(issue_number or "unknown")))
-  if #title > M._max_title_len then
-    title = M.truncate_utf8(title, M._max_title_len)
-  end
-  local body = "Spec flaw statement:\n" .. M.neutralize_untrusted_comment_text(reason or "")
-    .. "\n\nEvidence digest:\n" .. M.neutralize_untrusted_comment_text(build_comment_evidence_digest(comments))
-    .. "\n\nParent issue: #" .. tostring(issue_number or "unknown")
-    .. "\nParent PR: #" .. tostring(review_meta.pr_number)
-    .. "\nReview proposal: " .. tostring(review_meta.review_proposal_id)
-    .. "\nReview dedup: " .. tostring(review_meta.dedup_key)
-    .. "\n\nThis issue requests a spec revision only. Do not edit the human-authored parent issue text."
-  if #body > M._max_body_len then
-    body = M.truncate_utf8(body, M._max_body_len)
-  end
-  return {
-    schema = "github-proxy.issue-create.v1",
-    repo = repo,
-    title = title,
-    body = body,
-    labels = json.decode("[]"),
-    dedup_key = M._dedup_key({
-      "spec-amendment",
-      tostring(review_meta.proposal_id),
-      tostring(review_meta.dedup_key),
-    }),
-    parent_comment_target = {
-      repo = repo,
-      pr_number = review_meta.pr_number,
-    },
-    source_ref = M.normalize_source_ref(review_meta.source_ref),
-  }
 end
 
 function M.build_review_reconcile_label_request(repo, issue_number, review_reconcile)

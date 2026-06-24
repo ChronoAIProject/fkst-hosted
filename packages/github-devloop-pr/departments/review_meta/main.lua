@@ -7,7 +7,6 @@ local spec = {
   produces = {
     "github-proxy.github_issue_label_request",
     "github-proxy.github_pr_comment_request",
-    "github-proxy.github_issue_create_request",
   },
   stall_window = "2m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
@@ -63,6 +62,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       end
     end
     core.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
+
     local state = core.current_entity_state(current_pr.comments, review_meta.proposal_id)
     local transition = core.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
@@ -150,17 +150,6 @@ return saga.department(spec, { done = function() return false end, act = functio
     if issue_number ~= nil then
       label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
     end
-    local spec_issue_request = nil
-    if parsed.action == "spec-amendment" or parsed.action == "spec-gap" then
-      spec_issue_request = core.build_spec_amendment_issue_create_request(
-        repo,
-        issue_number,
-        review_meta,
-        current_issue.title,
-        parsed.reason,
-        current_pr.comments
-      )
-    end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {
       "github-proxy.github_pr_comment_request",
@@ -168,16 +157,10 @@ return saga.department(spec, { done = function() return false end, act = functio
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
-    if spec_issue_request ~= nil then
-      table.insert(raised, "github-proxy.github_issue_create_request")
-    end
     core.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if label_request ~= nil then
       core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
-    end
-    if spec_issue_request ~= nil then
-      core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_create_request", spec_issue_request)
     end
   end)
 end, wrap = core.wrap_pipeline_failure, name = "review_meta" })

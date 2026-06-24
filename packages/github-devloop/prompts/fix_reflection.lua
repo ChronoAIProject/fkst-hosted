@@ -9,7 +9,7 @@ Established control practice:
 
 Choose exactly one action:
 - continue: the recent fix rounds are converging on the stated goal; allow one more fix pass for the latest bounded gap.
-- spec-gap: the reviewer demands exceed or diverge from the stated goal; route to a spec-amendment issue instead of another fix round.
+- spec-gap: the reviewer demands exceed or diverge from the stated goal; stop at a blocked human design intervention instead of another fix round.
 
 Do not invent a third action. If the approach seems deeply wrong but the stated goal still applies, choose `spec-gap` only when the mismatch is in the framing/spec; otherwise choose `continue` and explain the risk.
 If you cannot read the local context files (issue body / PR diff / comments) for ANY reason, choose `spec-gap`.
