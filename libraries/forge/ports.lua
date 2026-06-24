@@ -32,11 +32,29 @@ local function validate_department(department)
   end
 end
 
+local function make_with_pipeline_restore(make_department, handles)
+  local previous_pipeline = _G.pipeline
+  local ok, department_or_err = pcall(make_department, handles)
+  if not ok then
+    _G.pipeline = previous_pipeline
+    error(department_or_err, 0)
+  end
+  local ok_validate, validate_err = pcall(validate_department, department_or_err)
+  if not ok_validate then
+    _G.pipeline = previous_pipeline
+    error(validate_err, 0)
+  end
+  _G.pipeline = previous_pipeline
+  return department_or_err
+end
+
 function M.install(make_department)
   assert(type(make_department) == "function", "forge.ports.install requires a make_department function")
-  local department = make_department(M.production_handles())
-  validate_department(department)
-  department.make_department = make_department
+  local department = make_with_pipeline_restore(make_department, M.production_handles())
+  _G.pipeline = department.pipeline
+  department.make_department = function(handles)
+    return make_with_pipeline_restore(make_department, handles)
+  end
   return department
 end
 

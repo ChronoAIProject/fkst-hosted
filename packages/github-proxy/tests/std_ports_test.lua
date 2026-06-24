@@ -22,7 +22,29 @@ return {
     assert(type(seen.git) == "table", "git handle present")
     assert(dept.spec.consumes[1] == "q", "department spec preserved")
     assert(dept.pipeline ~= nil, "department pipeline preserved")
-    assert(dept.make_department == make_department, "make_department exposed for fake-port tests")
+    assert(type(dept.make_department) == "function", "make_department exposed for fake-port tests")
+  end,
+
+  test_install_publishes_pipeline_and_fake_factory_restores_previous_pipeline = function()
+    local production_pipeline = function() return "production" end
+    local fake_pipeline = function() return "fake" end
+    local before = _G.pipeline
+    _G.pipeline = function() return "before" end
+
+    local dept = ports.install(function(p)
+      if p.fake then
+        _G.pipeline = fake_pipeline
+        return { spec = { consumes = { "q" } }, pipeline = fake_pipeline }
+      end
+      _G.pipeline = production_pipeline
+      return { spec = { consumes = { "q" } }, pipeline = production_pipeline }
+    end)
+
+    assert(_G.pipeline == production_pipeline, "install publishes the production pipeline")
+    local fake = dept.make_department({ fake = true })
+    assert(fake.pipeline == fake_pipeline, "fake department keeps its returned pipeline")
+    assert(_G.pipeline == production_pipeline, "fake factory restores the published pipeline")
+    _G.pipeline = before
   end,
 
   test_production_handles_builds_github_and_git_handles = function()

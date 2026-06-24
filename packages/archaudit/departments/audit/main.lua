@@ -345,19 +345,15 @@ local function make_department(ports)
     end
   end
 
-  local previous_pipeline = _G.pipeline
   local department = saga.department(spec, {
     done = audit_done,
     act = act_audit,
     name = "audit",
   })
-  department.pipeline = _G.pipeline
-  _G.pipeline = previous_pipeline
   department.ports = ports
   return department
 end
 
 local M = ports_lib.install(make_department)
 M.observe_port = observe_port
-_G.pipeline = M.pipeline
 return M
