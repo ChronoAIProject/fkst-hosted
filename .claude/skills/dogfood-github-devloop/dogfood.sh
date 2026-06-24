@@ -71,7 +71,7 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # genuinely differs (env DEVLOOP_PKGS > dogfood.config.sh > this default). The supervise loads only
 # the platform (not every package in packages/) because it RUNS packages (raisers fire); co-loading
 # independent agents would fight over the same repo's issues. (`test` loads all to validate the graph.)
-DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-proxy consensus github-external-pr-intake idle-detector archaudit}"
+DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-devloop-ops github-proxy consensus github-external-pr-intake github-ratchet-migration-slicer fkst-substrate-ref-maintainer idle-detector archaudit}"
 _DEVLOOP_PKGS_BASE="$DEVLOOP_PKGS"   # immutable base; cfg() resolves the per-target list from this
 
 # Audit-producer agents (idle-detector + archaudit): they consume a non-issue signal and FILE
