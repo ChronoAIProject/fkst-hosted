@@ -1,5 +1,5 @@
+-- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's trusted `state:v1` marker and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S = {}
-
 function S.install(M)
 local child_terminal_states = {
   merged = true,
