@@ -65,14 +65,23 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # (root stays website source) — so the trio comes from `$PKGSRC/packages/<pkg>`, a host's own package
 # from `$HOST/.fkst/local-packages/<pkg>`. (`.fkst/` is a tracked+ignored runtime INTERFACE dir, not
 # "all runtime": host repos commit their own Lua there. See fkst-website CLAUDE.md.)
-# Platform packages this dogfood LOADS + RUNS from PKGSRC/packages/ — a per-DEPLOYMENT value set in
-# dogfood.config.sh (or the DEVLOOP_PKGS env var). dogfood.sh is GENERIC operator tooling and carries
-# NO package names: the list of which packages to run is project config, not tool logic. REQUIRED —
-# `run`/`restart` fail-closed if unset. The supervise loads only the project's platform (not every
-# package in packages/) because it RUNS packages (raisers fire); co-loading independent agents would
-# fight over the same repo's issues. (`test` loads all packages only to validate the graph.) The
-# package list lives in dogfood.config.example.sh (the project template) + each machine's config.
-DEVLOOP_PKGS="${DEVLOOP_PKGS:-}"
+# Platform packages every dogfood supervise LOADS + RUNS from PKGSRC/packages/. The DEFAULT below is
+# the full platform set (the github-devloop trio + the rest of the library + the audit-producer
+# agents) and lives HERE in the tool so every host is consistent; a host OVERRIDES it only when it
+# genuinely differs (env DEVLOOP_PKGS > dogfood.config.sh > this default). The supervise loads only
+# the platform (not every package in packages/) because it RUNS packages (raisers fire); co-loading
+# independent agents would fight over the same repo's issues. (`test` loads all to validate the graph.)
+DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-proxy consensus github-external-pr-intake idle-detector archaudit}"
+_DEVLOOP_PKGS_BASE="$DEVLOOP_PKGS"   # immutable base; cfg() resolves the per-target list from this
+
+# Audit-producer agents (idle-detector + archaudit): they consume a non-issue signal and FILE
+# architecture issues into github-devloop's own intake. They co-run safely on package/host targets,
+# but are EXCLUDED by default on `substrate` (the engine repo) — auditing the engine yields Rust-change
+# issues the autonomous pipeline cannot safely auto-develop (they break the engine↔package contract,
+# e.g. the proposal_id→dedup_key revert #174); engine architecture stays human-reviewed. Override per
+# host via AUDIT_PKGS / NO_AUDIT_TARGETS in dogfood.config.sh.
+AUDIT_PKGS="${AUDIT_PKGS:-idle-detector archaudit}"
+NO_AUDIT_TARGETS="${NO_AUDIT_TARGETS:-substrate}"
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
 # layout across machines); stable durable roots default under it but are commonly PINNED per machine
@@ -80,6 +89,7 @@ DEVLOOP_PKGS="${DEVLOOP_PKGS:-}"
 # host target's OWN packages (committed under the host repo's `.fkst/local-packages/<pkg>`).
 cfg() {
   LOCAL_PKGS=""   # repo-local custom packages this target drives (committed in the host repo)
+  DEVLOOP_PKGS="$_DEVLOOP_PKGS_BASE"   # reset from the immutable base (cfg runs per target)
   case "$1" in
     packages)
       REPO="$GH_ORG/fkst-packages"
@@ -94,6 +104,15 @@ cfg() {
       HOST="$DOGFOOD_ROOT/website-dogfood/site"; PKGSRC="$DOGFOOD_ROOT/website-dogfood/pkgs"
       DUR="${DUR_WEBSITE:-$DOGFOOD_ROOT/dogfood-durable-website}"; LOCAL_PKGS="site-board" ;;
     *) echo "unknown dogfood: $1 (packages|substrate|website)" >&2; return 1 ;;
+  esac
+  # Per-target package set: drop the audit-producer agents on NO_AUDIT_TARGETS (substrate by default —
+  # see the DEVLOOP_PKGS / AUDIT_PKGS notes above), so the engine repo does not auto-audit itself.
+  case " $NO_AUDIT_TARGETS " in
+    *" $1 "*)
+      for _ap in $AUDIT_PKGS; do
+        DEVLOOP_PKGS="$(printf '%s\n' $DEVLOOP_PKGS | grep -vxF "$_ap" | tr '\n' ' ')"
+      done
+      DEVLOOP_PKGS="$(printf '%s' "$DEVLOOP_PKGS" | xargs)" ;;
   esac
 }
 

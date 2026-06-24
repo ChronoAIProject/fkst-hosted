@@ -39,23 +39,28 @@
 # A machine that only dogfoods two of the three repos lists just those.
 # DOGFOOD_REPOS="packages substrate website"
 
-# The github-devloop PLATFORM packages the supervise loads + runs from PKGSRC/packages/. REQUIRED:
-# dogfood.sh is generic tooling and carries no package names, so this MUST be set here (run/restart
-# fail-closed if unset). This list is the ONE place to add/remove a loaded package — you NEVER edit
-# dogfood.sh or the skill to add one, so they stay generic as packages/ grows.
+# The github-devloop PLATFORM packages each supervise loads + runs from PKGSRC/packages/. The DEFAULT
+# (the full platform: the github-devloop trio + the rest of the library + the audit-producer agents
+# idle-detector/archaudit) now lives in dogfood.sh so every host stays consistent — you do NOT set it
+# here unless THIS host genuinely differs. Precedence: env DEVLOOP_PKGS > this file > the dogfood.sh default.
 #   WHERE TO LOOK (what packages exist + each one's role): PKGSRC/packages/<pkg>/ — `fkst.toml` gives
 #     its `kind` (package | package.composed + composed.deps); `departments/<d>/main.lua` gives each
-#     dept's `consumes`/`produces` (its event contract). That is the source of truth, not this list.
-#   CO-RUN RULE (is a package safe to add to THIS platform supervise?): the supervise RUNS packages
+#     dept's `consumes`/`produces` (its event contract). That is the source of truth.
+#   CO-RUN RULE (is a package safe to add to a platform supervise?): the supervise RUNS packages
 #     (raisers fire), so an added agent must NOT contend with github-devloop for the same issues —
 #     derive it from the consume surface. An issue-PRODUCER (consumes a non-issue signal — a cron tick,
 #     system_idle — and produces github-proxy issue/comment requests) co-runs SAFELY: it only FILES
 #     work that github-devloop's intake then judges (e.g. an architecture-audit agent). An issue-CONSUMER
 #     (consumes github_entity_changed / claims + manages the issue lifecycle, e.g. an issue->reply agent)
 #     WOULD fight github-devloop over the same issues and must run as its OWN separate supervise, not here.
-#   ENABLE: append the package name(s) below, then `dogfood.sh restart` (a composed package also needs
-#     its composed.deps siblings listed). No skill/tooling edit, ever.
-DEVLOOP_PKGS="github-devloop github-devloop-intake github-devloop-pr github-devloop-integration github-devloop-decompose github-proxy consensus"
+#   AUDIT per target: the audit-producer agents (AUDIT_PKGS, default "idle-detector archaudit") load on
+#     every target EXCEPT those in NO_AUDIT_TARGETS (default "substrate") — auditing the engine repo
+#     yields Rust-change issues the autonomous pipeline cannot safely auto-develop, so engine architecture
+#     stays human-reviewed. Override which targets skip the audit (or the audit set) only if needed, e.g.:
+#       # NO_AUDIT_TARGETS="substrate website"
+#       # AUDIT_PKGS="idle-detector archaudit"
+#   OVERRIDE the whole platform list only if this host differs from the dogfood.sh default, e.g.:
+#       # DEVLOOP_PKGS="github-devloop github-devloop-pr github-devloop-integration github-proxy consensus"
 
 # STABLE durable roots — the redb persistent delivery store, REUSED across restarts so
 # in-flight events resume. NEVER point these at a fresh path on a normal restart (that wipes
