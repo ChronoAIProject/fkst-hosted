@@ -69,7 +69,8 @@ local function implement_codex_run(state_version)
     dedup_key = state_version,
     status = "running",
     started_at = "2026-06-03T00:00:00Z",
-    started_at_ms = 1780000000000,
+    started_at_ms = 1780444800000,
+    timeout_seconds = 3600,
   }
 end
 

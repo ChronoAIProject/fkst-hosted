@@ -72,7 +72,7 @@ local function codex_run_status(M)
   local function fallback(reason)
     if type(M.log_line) == "function" then
       M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
-        "outcome=fallback-to-marker-budget",
+        "outcome=marker-budget-fallback",
         "error_class=codex-runs-unavailable",
         "reason=" .. one_line(reason),
       })
@@ -108,7 +108,82 @@ local function real_execution_expected_value(M, match, key, state, facts)
   return selector
 end
 
-local function codex_run_liveness_signal(M, row, state, facts)
+local function timestamp_ms(M, value)
+  if value == nil or value == "" then
+    return nil
+  end
+  local seconds = M.iso_timestamp_epoch_seconds(value)
+  if seconds == nil then
+    return nil
+  end
+  return seconds * 1000
+end
+
+local function timestamp_field_ms(M, run, ms_field, field)
+  local direct = tonumber(run and run[ms_field])
+  if direct ~= nil then
+    return direct
+  end
+  return timestamp_ms(M, run and run[field])
+end
+
+local function run_deadline_ms(M, run)
+  local lease_deadline = timestamp_field_ms(M, run, "lease_expires_at_ms", "lease_expires_at")
+  if lease_deadline ~= nil then
+    return lease_deadline, "lease_expires_at"
+  end
+  local attempt_deadline = timestamp_field_ms(M, run, "attempt_deadline_ms", "attempt_deadline")
+  if attempt_deadline ~= nil then
+    return attempt_deadline, "attempt_deadline"
+  end
+  local started_ms = timestamp_field_ms(M, run, "started_at_ms", "started_at")
+  local timeout_seconds = tonumber(run and run.timeout_seconds)
+  if started_ms ~= nil and timeout_seconds ~= nil and timeout_seconds > 0 then
+    return started_ms + (timeout_seconds * 1000), "started_at_plus_timeout_seconds"
+  end
+  return nil, "missing-run-deadline"
+end
+
+local function run_matches(run, expected_role, expected_proposal_id, expected_dedup_key)
+  return type(run) == "table"
+    and tostring(run.role or "") == tostring(expected_role or "")
+    and tostring(run.proposal_id or "") == tostring(expected_proposal_id or "")
+    and tostring(run.dedup_key or "") == tostring(expected_dedup_key or "")
+end
+
+local function matching_signal(run, now_ms, collection, reason, deadline_ms, deadline_source)
+  return {
+    live = true,
+    reason = reason,
+    family = "codex_run:v1",
+    resolver = "fkst.codex_runs",
+    run_id = run.run_id,
+    role = run.role,
+    proposal_id = run.proposal_id,
+    dedup_key = run.dedup_key,
+    run_status = run.status,
+    collection = collection,
+    deadline_ms = deadline_ms,
+    deadline_source = deadline_source,
+    remaining_ms = deadline_ms ~= nil and now_ms ~= nil and (deadline_ms - now_ms) or nil,
+  }
+end
+
+local function base_codex_run_signal(status, expected_role, expected_proposal_id, expected_dedup_key)
+  return {
+    live = false,
+    reason = status.codex_runs_fallback and "codex-runs-unavailable" or "codex-run-not-running",
+    family = "codex_run:v1",
+    resolver = "fkst.codex_runs",
+    expected_role = expected_role,
+    expected_proposal_id = expected_proposal_id,
+    expected_dedup_key = expected_dedup_key,
+    codex_runs_fallback = status.codex_runs_fallback,
+    codex_runs_error = status.codex_runs_error,
+  }
+end
+
+local function codex_run_liveness_signal(M, row, state, facts, now_seconds)
   local real_execution = row and row.liveness_contract and row.liveness_contract.real_execution
   local match = real_execution and real_execution.match or nil
   if type(real_execution) ~= "table" or type(match) ~= "table" then
@@ -132,35 +207,63 @@ local function codex_run_liveness_signal(M, row, state, facts)
   local expected_dedup_key = real_execution_expected_value(M, match, "dedup_key", state, facts)
   local expected_status = real_execution.status or "running"
   local status = codex_run_status(M)
+  local now_ms = tonumber(now_seconds) and tonumber(now_seconds) * 1000 or nil
+  local expired_match = nil
+  local deadline_missing_match = nil
   for _, run in ipairs(status.running or {}) do
-    if type(run) == "table"
-      and tostring(run.status or "running") == tostring(expected_status)
-      and tostring(run.role or "") == tostring(expected_role or "")
-      and tostring(run.proposal_id or "") == tostring(expected_proposal_id or "")
-      and tostring(run.dedup_key or "") == tostring(expected_dedup_key or "") then
-      return {
-        live = true,
-        reason = "codex-run-running",
-        family = "codex_run:v1",
-        resolver = "fkst.codex_runs",
-        run_id = run.run_id,
-        role = run.role,
-        proposal_id = run.proposal_id,
-        dedup_key = run.dedup_key,
-      }
+    if run_matches(run, expected_role, expected_proposal_id, expected_dedup_key)
+      and tostring(run.status or "running") == tostring(expected_status) then
+      local deadline_ms, deadline_source = run_deadline_ms(M, run)
+      if deadline_ms ~= nil and now_ms ~= nil and now_ms < deadline_ms then
+        return matching_signal(run, now_ms, "running", "codex-run-running", deadline_ms, deadline_source)
+      end
+      if deadline_ms == nil or now_ms == nil then
+        deadline_missing_match = {
+          run_id = run.run_id,
+          collection = "running",
+          deadline_source = now_ms == nil and "missing-now" or deadline_source,
+        }
+      else
+        expired_match = {
+          run_id = run.run_id,
+          collection = "running",
+          deadline_ms = deadline_ms,
+          deadline_source = deadline_source,
+        }
+      end
     end
   end
-  return {
-    live = false,
-    reason = status.codex_runs_fallback and "codex-runs-unavailable" or "codex-run-not-running",
-    family = "codex_run:v1",
-    resolver = "fkst.codex_runs",
-    expected_role = expected_role,
-    expected_proposal_id = expected_proposal_id,
-    expected_dedup_key = expected_dedup_key,
-    codex_runs_fallback = status.codex_runs_fallback,
-    codex_runs_error = status.codex_runs_error,
-  }
+  for _, run in ipairs(status.recent or {}) do
+    if run_matches(run, expected_role, expected_proposal_id, expected_dedup_key) then
+      local deadline_ms, deadline_source = run_deadline_ms(M, run)
+      if deadline_ms ~= nil and now_ms ~= nil and now_ms < deadline_ms then
+        return matching_signal(run, now_ms, "recent", "codex-run-recent-handoff", deadline_ms, deadline_source)
+      end
+      if deadline_ms ~= nil then
+        expired_match = expired_match or {
+          run_id = run.run_id,
+          collection = "recent",
+          deadline_ms = deadline_ms,
+          deadline_source = deadline_source,
+        }
+      end
+    end
+  end
+  local signal = base_codex_run_signal(status, expected_role, expected_proposal_id, expected_dedup_key)
+  if deadline_missing_match ~= nil then
+    signal.reason = "codex-run-deadline-unavailable"
+    signal.run_id = deadline_missing_match.run_id
+    signal.collection = deadline_missing_match.collection
+    signal.deadline_source = deadline_missing_match.deadline_source
+    signal.indeterminate = true
+  elseif expired_match ~= nil then
+    signal.reason = "codex-run-deadline-expired"
+    signal.run_id = expired_match.run_id
+    signal.collection = expired_match.collection
+    signal.deadline_ms = expired_match.deadline_ms
+    signal.deadline_source = expired_match.deadline_source
+  end
+  return signal
 end
 
 local function merge_gate_wait_identity(M, facts, state)
@@ -382,7 +485,7 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
   if row
     and row.actionable_epoch
     and row.actionable_epoch.source == "codex_run:v1" then
-    return codex_run_liveness_signal(M, row, state, facts)
+    return codex_run_liveness_signal(M, row, state, facts, now_seconds)
   end
   local signal_contract = liveness_contract_signal(contract)
   if type(signal_contract) ~= "table" then

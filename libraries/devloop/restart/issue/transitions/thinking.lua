@@ -31,7 +31,7 @@ return function(M, h)
     observe_surfaces = { issue = true, liveness_scan = true },
     timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
     output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "blocked", "thinking" }),
-    budget = budget(150, "A live consensus receiver defers indefinitely via fkst.codex_runs() real execution truth; when no matching codex run exists, the no-live budget bounds redrive and force-termination."),
+    budget = budget(150, "A live consensus receiver defers only when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline; unavailable or undecidable status falls back to the marker-budget timeout path."),
     liveness_contract = liveness({
       mode = "live-defer",
       real_execution = {
@@ -42,7 +42,7 @@ return function(M, h)
           dedup_key = "state.version",
         },
         status = "running",
-        on_error = "fallback-to-marker-budget",
+        on_error = "marker-budget-fallback",
       },
     }),
     on_timeout = timeout("consensus.proposal"),

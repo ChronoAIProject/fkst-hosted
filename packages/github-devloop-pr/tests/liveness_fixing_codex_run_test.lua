@@ -55,7 +55,15 @@ local function seed_codex_run(run_opts, record)
   return path
 end
 
+local function live_run_timing()
+  local started = now() - 60
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", started),
+    started * 1000,
+    (now() + 3600) * 1000
+end
+
 local function seed_role_codex_run(run_opts, role, run_proposal_id, dedup_key, extra)
+  local started_at, started_at_ms, lease_expires_at_ms = live_run_timing()
   local record = {
     run_id = nonce(),
     role = role,
@@ -63,8 +71,9 @@ local function seed_role_codex_run(run_opts, role, run_proposal_id, dedup_key, e
     proposal_id = run_proposal_id,
     dedup_key = dedup_key,
     status = "running",
-    started_at = "2026-06-03T00:00:00Z",
-    started_at_ms = 1780000000000,
+    started_at = started_at,
+    started_at_ms = started_at_ms,
+    lease_expires_at_ms = lease_expires_at_ms,
     timeout_seconds = 3600,
     log_path = "/tmp/fkst-packages-test/codex.log",
     cmd_line = "codex exec -",
@@ -324,6 +333,7 @@ return {
         proposal_id = event.proposal_id,
         dedup_key = event.version,
         status = "running",
+        lease_expires_at_ms = (now() + 3600) * 1000,
       },
     }, function()
       local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)
@@ -439,6 +449,7 @@ return {
         proposal_id = event.proposal_id,
         dedup_key = event.version,
         status = "running",
+        lease_expires_at_ms = (now() + 3600) * 1000,
       },
     }, function()
       local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)

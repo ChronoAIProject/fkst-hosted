@@ -260,10 +260,12 @@ local function resolve_codex_run(row, state, facts, now_seconds)
   end
   local entry_ms = state_entry_ms(state)
   if entry_ms == nil then
-    return invalid("codex run absent and state entry epoch is missing")
+    return invalid("codex run fallback epoch is missing state entry")
   end
-  local eval = actionable(row, state, entry_ms, tostring(row.defer and row.defer.producer or "codex-run") .. ":" .. tostring(signal.reason or "not-running"), "codex run absent")
+  local eval = actionable(row, state, entry_ms, tostring(row.defer and row.defer.producer or "codex-run") .. ":" .. tostring(signal.reason or "not-running"), "codex run not positively live")
   eval.signal = signal
+  eval.codex_runs_fallback = signal.codex_runs_fallback == true
+  eval.indeterminate = signal.indeterminate == true
   return eval
 end
 

@@ -21,7 +21,7 @@ local function codex_runs_status()
   local function fallback(reason)
     if type(M.log_line) == "function" then
       M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
-        "outcome=fallback-to-marker-budget",
+        "outcome=marker-budget-fallback",
         "error_class=codex-runs-unavailable",
         "reason=" .. one_line(reason),
       })

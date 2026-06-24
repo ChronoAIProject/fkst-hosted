@@ -472,6 +472,8 @@ return {
           role = "consensus",
           proposal_id = "github-devloop/issue/owner/repo/42",
           dedup_key = version,
+          started_at = "2026-06-04T00:30:00Z",
+          timeout_seconds = 7200,
         },
       }, function()
       local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {

@@ -29,7 +29,7 @@ return function(M, h)
     driving_queue = "devloop_review_meta",
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "review-meta:v1", "state:v1 fixing", "state:v1 blocked" }, { "fixing", "blocked" }),
-    budget = budget(90, "A live review-meta codex defers indefinitely via fkst.codex_runs() real execution truth; when no matching codex run exists, the no-live budget bounds redrive and force-termination."),
+    budget = budget(90, "A live review-meta codex defers only when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline; unavailable or undecidable status falls back to the marker-budget timeout path."),
     liveness_contract = liveness({
       mode = "live-defer",
       real_execution = {
@@ -40,7 +40,7 @@ return function(M, h)
           dedup_key = "state.version",
         },
         status = "running",
-        on_error = "fallback-to-marker-budget",
+        on_error = "marker-budget-fallback",
       },
     }),
     on_timeout = timeout("devloop_review_meta"),

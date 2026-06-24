@@ -66,7 +66,7 @@ local function assert_codex_run_row(row, expected_role, state)
   t.eq(row.liveness_contract.real_execution.match.proposal_id, "state.proposal_id", state)
   t.eq(row.liveness_contract.real_execution.match.dedup_key, "state.version", state)
   t.eq(row.liveness_contract.real_execution.status, "running", state)
-  t.eq(row.liveness_contract.real_execution.on_error, "fallback-to-marker-budget", state)
+  t.eq(row.liveness_contract.real_execution.on_error, "marker-budget-fallback", state)
   t.eq(row.watchdog.on_stale.op, "redrive_receiver", state)
   t.eq(row.watchdog.on_stale.producer, nil, state)
   t.eq(#core.strict_restart_liveness_contract_errors({ row }), 0, state)
@@ -492,7 +492,7 @@ return {
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.proposal_id must be state.proposal_id"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.dedup_key must be state.version"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.status must be running"), joined_errors(errors))
-    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.on_error must be fallback-to-marker-budget"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.on_error must be marker-budget-fallback"), joined_errors(errors))
   end,
 
   test_heartbeat_defer_rejects_clear_fact_shape = function()

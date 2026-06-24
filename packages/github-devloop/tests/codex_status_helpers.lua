@@ -41,6 +41,13 @@ local function log_dir(run_opts)
   return root .. "/codex"
 end
 
+local function live_run_timing()
+  local started = now() - 60
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", started),
+    started * 1000,
+    (now() + 3600) * 1000
+end
+
 function H.seed_codex_run(run_opts, record)
   local dir = log_dir(run_opts)
   os.execute("mkdir -p " .. string.format("%q", dir))
@@ -52,6 +59,7 @@ function H.seed_codex_run(run_opts, record)
 end
 
 function H.seed_implement_codex_run(run_opts, proposal_id, dedup_key, extra)
+  local started_at, started_at_ms, lease_expires_at_ms = live_run_timing()
   local record = {
     run_id = nonce(),
     role = "implement",
@@ -59,8 +67,9 @@ function H.seed_implement_codex_run(run_opts, proposal_id, dedup_key, extra)
     proposal_id = proposal_id,
     dedup_key = dedup_key,
     status = "running",
-    started_at = "2026-06-03T00:00:00Z",
-    started_at_ms = 1780000000000,
+    started_at = started_at,
+    started_at_ms = started_at_ms,
+    lease_expires_at_ms = lease_expires_at_ms,
     timeout_seconds = 3600,
     log_path = "/tmp/fkst-packages-test/codex.log",
     cmd_line = "codex exec -",
@@ -73,6 +82,7 @@ function H.seed_implement_codex_run(run_opts, proposal_id, dedup_key, extra)
 end
 
 function H.seed_role_codex_run(run_opts, role, proposal_id, dedup_key, extra)
+  local started_at, started_at_ms, lease_expires_at_ms = live_run_timing()
   local record = {
     run_id = nonce(),
     role = role,
@@ -80,8 +90,9 @@ function H.seed_role_codex_run(run_opts, role, proposal_id, dedup_key, extra)
     proposal_id = proposal_id,
     dedup_key = dedup_key,
     status = "running",
-    started_at = "2026-06-03T00:00:00Z",
-    started_at_ms = 1780000000000,
+    started_at = started_at,
+    started_at_ms = started_at_ms,
+    lease_expires_at_ms = lease_expires_at_ms,
     timeout_seconds = 3600,
     log_path = "/tmp/fkst-packages-test/codex.log",
     cmd_line = "codex exec -",

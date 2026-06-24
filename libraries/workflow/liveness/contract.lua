@@ -137,8 +137,8 @@ local function validate_real_execution_signal(state, real_execution, errors)
   if real_execution.status ~= "running" then
     table.insert(errors, state .. ": live-defer codex_run real_execution.status must be running")
   end
-  if real_execution.on_error ~= "fallback-to-marker-budget" then
-    table.insert(errors, state .. ": live-defer codex_run real_execution.on_error must be fallback-to-marker-budget")
+  if real_execution.on_error ~= "marker-budget-fallback" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.on_error must be marker-budget-fallback")
   end
 end
 
