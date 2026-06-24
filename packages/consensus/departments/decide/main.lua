@@ -25,12 +25,20 @@ local function prepare_judgment_worktree(path)
   return path
 end
 
+local function codex_opts(proposal, prompt, worktree, role)
+  local opts = core.judgment_codex_opts(prompt, worktree)
+  opts.role = role or "consensus"
+  opts.proposal_id = proposal.proposal_id
+  opts.dedup_key = proposal.dedup_key
+  return opts
+end
+
 local function spawn_angle(proposal, angle, runtime_root)
   local prompt = core.build_angle_prompt(proposal, angle)
   local worktree = prepare_judgment_worktree(
     core.judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
-  return spawn_codex(core.judgment_codex_opts(prompt, worktree))
+  return spawn_codex(codex_opts(proposal, prompt, worktree, "consensus"))
 end
 
 local function spawn_meta_judge(proposal, angle_results, runtime_root)
@@ -38,7 +46,7 @@ local function spawn_meta_judge(proposal, angle_results, runtime_root)
   local worktree = prepare_judgment_worktree(
     core.judgment_scratch_worktree(runtime_root, "meta-judge", proposal.dedup_key)
   )
-  return spawn_codex_sync(core.judgment_codex_opts(prompt, worktree))
+  return spawn_codex_sync(codex_opts(proposal, prompt, worktree, "consensus"))
 end
 
 local function raise_converge(proposal, angle_results, narrowed_question)

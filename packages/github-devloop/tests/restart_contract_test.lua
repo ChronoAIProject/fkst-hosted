@@ -108,6 +108,62 @@ local function capture_raises(fn)
   return raised
 end
 
+local function with_codex_runs(running, fn)
+  local original = fkst.codex_runs
+  fkst.codex_runs = function()
+    return { running = running or {}, recent = {} }
+  end
+  local ok, err = pcall(fn)
+  fkst.codex_runs = original
+  if not ok then
+    error(err)
+  end
+end
+
+local function synthetic_heartbeat_row()
+  local row = copy_rows(core.restart_transition_table())[1]
+  row.from_state = "synthetic-heartbeat"
+  row.terminal = false
+  row.liveness_class_id = "synthetic.heartbeat"
+  row.watchdog = {
+    mode = "live-defer",
+    budget_ms = 45 * 60 * 1000,
+    on_stale = {
+      op = "redrive_receiver",
+      producer = "converge-round",
+    },
+  }
+  row.actionable_epoch = {
+    source = "live_defer_heartbeat:v1",
+    generation_source = "same_as_actionable_epoch",
+    live_marker = "converge-round:v1",
+    producer = "converge-round",
+  }
+  row.defer = {
+    kind = "heartbeat",
+    live_marker = "converge-round:v1",
+    producer = "converge-round",
+    freshness_ms = 45 * 60 * 1000,
+    redrive_opens_generation = true,
+  }
+  row.budget = {
+    minutes = 45,
+    receiver_max_work_justification = "Synthetic heartbeat fixture.",
+  }
+  row.liveness_contract = {
+    mode = "live-defer",
+    signal = {
+      family = "converge-round",
+      producer = "converge-round",
+      surface = "issue-comment-stream",
+      version_form = "raw",
+      max_age_minutes = 45,
+    },
+  }
+  row.span_contract = nil
+  return row
+end
+
 return {
   test_persistence_class_is_declared = function()
     t.eq(core.persistence_class(), "saga")
@@ -265,10 +321,10 @@ return {
   test_liveness_contract_declares_receiver_liveness_for_every_non_terminal_row = function()
     local by_state = table_by_state()
     local expected = {
-      thinking = { mode = "live-defer", family = "converge-round", max_age = 120, budget = 150 },
+      thinking = { mode = "live-defer", codex_run = true, role = "consensus", budget = 150 },
       dependency_wait = { mode = "live-defer", family = "dependency-wait", resolver = "dependency-hold", max_age = 525600, budget = 525600 },
       ready = { mode = "row-budget-bounds-receiver", receiver = 15, external = 0, budget = 120 },
-      implementing = { mode = "live-defer", family = "implement-attempt", codex_run = true, budget = 120 },
+      implementing = { mode = "live-defer", codex_run = true, role = "implement", budget = 120 },
       ["awaiting-pr"] = { mode = "live-defer", family = "state", producer = "child-state", resolver = "child-state", max_age = 1440, budget = 259200 },
       ["impl-failed"] = { mode = "row-budget-bounds-receiver", receiver = 0, external = 1410, budget = 1440 },
       blocked = { mode = "row-budget-bounds-receiver", receiver = 0, external = 1410, budget = 1440 },
@@ -280,12 +336,16 @@ return {
       t.eq(row.budget.minutes, spec.budget)
       t.eq(row.liveness_contract.mode, spec.mode)
       if spec.mode == "live-defer" then
-        t.eq(row.liveness_contract.signal.family, spec.family)
-        t.eq(row.liveness_contract.signal.resolver, spec.resolver)
-        t.eq(row.liveness_contract.signal.producer, spec.producer or spec.family)
         if spec.codex_run then
-          t.eq(row.liveness_contract.signal.max_age_minutes, nil)
+          t.eq(row.liveness_contract.signal, nil)
+          t.eq(row.liveness_contract.real_execution.primitive, "fkst.codex_runs")
+          t.eq(row.liveness_contract.real_execution.match.role, spec.role)
+          t.eq(row.liveness_contract.real_execution.match.proposal_id, "state.proposal_id")
+          t.eq(row.liveness_contract.real_execution.match.dedup_key, "state.version")
         else
+          t.eq(row.liveness_contract.signal.family, spec.family)
+          t.eq(row.liveness_contract.signal.resolver, spec.resolver)
+          t.eq(row.liveness_contract.signal.producer, spec.producer or spec.family)
           t.eq(row.liveness_contract.signal.max_age_minutes, spec.max_age)
         end
       else
@@ -324,12 +384,11 @@ return {
   end,
 
   test_liveness_contract_rejects_live_defer_without_resolver_or_existing_family = function()
-    local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows).thinking
+    local row = synthetic_heartbeat_row()
     row.liveness_contract.signal.family = "missing-family"
     row.liveness_contract.signal.resolver = "missing-resolver"
     row.liveness_contract.signal.max_age_minutes = nil
-    local errors = core.liveness_contract_errors(rows)
+    local errors = core.liveness_contract_errors({ row })
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("missing-family", 1, true) ~= nil)
     t.is_true(joined:find("missing-resolver", 1, true) ~= nil)
@@ -338,21 +397,19 @@ return {
   end,
 
   test_liveness_contract_rejects_live_defer_without_producer_binding = function()
-    local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows).thinking
+    local row = synthetic_heartbeat_row()
     row.liveness_contract.signal.producer = nil
-    local errors = core.liveness_contract_errors(rows)
-    t.eq(#errors, 1)
-    t.is_true(errors[1]:find("thinking", 1, true) ~= nil)
-    t.is_true(errors[1]:find("producer binding", 1, true) ~= nil)
+    local errors = core.liveness_contract_errors({ row })
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("synthetic-heartbeat", 1, true) ~= nil, joined)
+    t.is_true(joined:find("producer binding", 1, true) ~= nil, joined)
   end,
 
   test_liveness_contract_rejects_live_defer_family_resolver_producer_mismatch = function()
-    local rows = copy_rows(core.restart_transition_table())
-    local row = rows_by_state(rows).thinking
+    local row = synthetic_heartbeat_row()
     row.liveness_contract.signal.family = "dependency-wait"
     row.liveness_contract.signal.producer = "converge-round"
-    local errors = core.liveness_contract_errors(rows)
+    local errors = core.liveness_contract_errors({ row })
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("producer binding family mismatch", 1, true) ~= nil)
     t.is_true(joined:find("producer binding resolver mismatch", 1, true) ~= nil)
@@ -408,11 +465,19 @@ return {
     end
   end,
 
-  test_live_thinking_converge_round_defers_timeout_count = function()
+  test_live_thinking_codex_run_defers_timeout_count = function()
     local row = table_by_state().thinking
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local source_ref = core.issue_source_ref("owner/repo", 42)
     local raised = capture_raises(function()
+      with_codex_runs({
+        {
+          status = "running",
+          role = "consensus",
+          proposal_id = "github-devloop/issue/owner/repo/42",
+          dedup_key = version,
+        },
+      }, function()
       local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
         repo = "owner/repo",
         number = 42,
@@ -425,20 +490,11 @@ return {
       }, row, {
         proposal_id = "github-devloop/issue/owner/repo/42",
         source_ref = source_ref,
-        current = {
-          comments = {
-            {
-              body = core.converge_round_marker("github-devloop/issue/owner/repo/42", version, core.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Still converging", {
-                { angle = "minimal", verdict = "continue", digest = "recent" },
-              }),
-              author_login = "fkst-test-bot",
-              created_at = "2026-06-04T00:30:00Z",
-            },
-          },
-        },
+        current = { comments = {} },
         now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
       })
       t.eq(applied, true)
+      end)
     end)
     t.eq(#raised, 0)
   end,

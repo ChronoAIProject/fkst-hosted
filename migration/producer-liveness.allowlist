@@ -7,7 +7,6 @@ fkst-substrate-ref-maintainer.substrate_ref_poll
 github-devloop-intake.intake_poll
 github-devloop-intake.intake_probe_poll
 github-devloop-integration.branch_poll
-github-devloop-pr.liveness_poll
 github-devloop-pr.merge_queue_poll
 github-devloop.liveness_poll
 github-external-pr-intake.external_pr_scan

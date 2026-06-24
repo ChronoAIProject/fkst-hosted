@@ -15,20 +15,14 @@ return function(M, h)
       budget_ms = 150 * 60 * 1000,
       on_stale = {
         op = "redrive_receiver",
-        producer = "converge-round",
       },
     },
     actionable_epoch = {
-      source = "live_defer_heartbeat:v1",
+      source = "codex_run:v1",
       generation_source = "same_as_actionable_epoch",
-      live_marker = "converge-round:v1",
-      producer = "converge-round",
     },
     defer = {
-      kind = "heartbeat",
-      live_marker = "converge-round:v1",
-      producer = "converge-round",
-      freshness_ms = 120 * 60 * 1000,
+      kind = "codex_run",
       redrive_opens_generation = true,
     },
     terminal = false,
@@ -37,15 +31,18 @@ return function(M, h)
     observe_surfaces = { issue = true, liveness_scan = true },
     timeout_surfaces = { issue = true, issue_liveness_scan = true, liveness_scan = true },
     output_obligation = obligation({ "consensus.consensus_reached", "consensus.consensus_converge" }, { "ready", "blocked", "thinking" }),
-    budget = budget(150, "The long consensus receiver is supervised by converge-round heartbeats; this budget only bounds stale heartbeat redrive."),
+    budget = budget(150, "A live consensus receiver defers indefinitely via fkst.codex_runs() real execution truth; when no matching codex run exists, the no-live budget bounds redrive and force-termination."),
     liveness_contract = liveness({
       mode = "live-defer",
-      signal = {
-        family = "converge-round",
-        producer = "converge-round",
-        surface = "issue-comment-stream",
-        version_form = "raw",
-        max_age_minutes = 120,
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "consensus",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+        status = "running",
+        on_error = "fallback-to-marker-budget",
       },
     }),
     on_timeout = timeout("consensus.proposal"),
@@ -84,13 +81,14 @@ return function(M, h)
     },
     version_identity = "strip_transition_version_suffixes(state.version)",
     effects = effect({ "consensus.proposal" }, "consensus proposal dedup is derived from state.version or next complete converge-round"),
-    marker_facts = "state:v1 thinking plus optional converge-round:v1",
+    marker_facts = "active run uses state:v1 thinking plus fkst.codex_runs real execution; converge-round:v1 remains an audit/progress fact, not a heartbeat",
     kickoff = "consensus.proposal",
     replay = "Initial thinking reuses the state version as proposal dedup; convergence replays the next /loop/N from the latest complete converge-round marker.",
     span_contract = span_contract({
       department = "external:consensus",
       durable_start_marker = "state:v1 thinking",
       spawn_predecessor = "consensus.proposal",
+      spawn_function = "consensus.decide",
     }),
   }
 end

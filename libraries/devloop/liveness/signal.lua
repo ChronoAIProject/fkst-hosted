@@ -62,6 +62,107 @@ local function live_signal_version(M, signal, version)
   return M.liveness_heartbeat_version(version, signal)
 end
 
+local function codex_run_status(M)
+  local function one_line(value)
+    if type(M._one_line) == "function" then
+      return M._one_line(value)
+    end
+    return tostring(value or ""):gsub("[%s\r\n]+", " ")
+  end
+  local function fallback(reason)
+    if type(M.log_line) == "function" then
+      M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
+        "outcome=fallback-to-marker-budget",
+        "error_class=codex-runs-unavailable",
+        "reason=" .. one_line(reason),
+      })
+    end
+    return {
+      running = {},
+      recent = {},
+      codex_runs_fallback = true,
+      codex_runs_error = tostring(reason or "unknown"),
+    }
+  end
+  if type(fkst) ~= "table" or type(fkst.codex_runs) ~= "function" then
+    return fallback("fkst.codex_runs SDK primitive is unavailable")
+  end
+  local ok, status = pcall(fkst.codex_runs)
+  if not ok then
+    return fallback("fkst.codex_runs failed for restart liveness: " .. tostring(status))
+  end
+  if type(status) ~= "table" or type(status.running) ~= "table" then
+    return fallback("fkst.codex_runs returned invalid restart liveness status")
+  end
+  return status
+end
+
+local function real_execution_expected_value(M, match, key, state, facts)
+  local selector = match and match[key] or nil
+  if selector == "state.proposal_id" then
+    return (facts and facts.proposal_id) or (state and state.proposal_id)
+  end
+  if selector == "state.version" then
+    return strip_liveness_timeout_suffixes(state and state.version)
+  end
+  return selector
+end
+
+local function codex_run_liveness_signal(M, row, state, facts)
+  local real_execution = row and row.liveness_contract and row.liveness_contract.real_execution
+  local match = real_execution and real_execution.match or nil
+  if type(real_execution) ~= "table" or type(match) ~= "table" then
+    return {
+      live = false,
+      reason = "missing-real-execution-contract",
+      family = "codex_run:v1",
+      resolver = "fkst.codex_runs",
+    }
+  end
+  if real_execution.primitive ~= "fkst.codex_runs" then
+    return {
+      live = false,
+      reason = "unsupported-real-execution-primitive",
+      family = "codex_run:v1",
+      resolver = "fkst.codex_runs",
+    }
+  end
+  local expected_role = real_execution_expected_value(M, match, "role", state, facts)
+  local expected_proposal_id = real_execution_expected_value(M, match, "proposal_id", state, facts)
+  local expected_dedup_key = real_execution_expected_value(M, match, "dedup_key", state, facts)
+  local expected_status = real_execution.status or "running"
+  local status = codex_run_status(M)
+  for _, run in ipairs(status.running or {}) do
+    if type(run) == "table"
+      and tostring(run.status or "running") == tostring(expected_status)
+      and tostring(run.role or "") == tostring(expected_role or "")
+      and tostring(run.proposal_id or "") == tostring(expected_proposal_id or "")
+      and tostring(run.dedup_key or "") == tostring(expected_dedup_key or "") then
+      return {
+        live = true,
+        reason = "codex-run-running",
+        family = "codex_run:v1",
+        resolver = "fkst.codex_runs",
+        run_id = run.run_id,
+        role = run.role,
+        proposal_id = run.proposal_id,
+        dedup_key = run.dedup_key,
+      }
+    end
+  end
+  return {
+    live = false,
+    reason = status.codex_runs_fallback and "codex-runs-unavailable" or "codex-run-not-running",
+    family = "codex_run:v1",
+    resolver = "fkst.codex_runs",
+    expected_role = expected_role,
+    expected_proposal_id = expected_proposal_id,
+    expected_dedup_key = expected_dedup_key,
+    codex_runs_fallback = status.codex_runs_fallback,
+    codex_runs_error = status.codex_runs_error,
+  }
+end
+
 local function merge_gate_wait_identity(M, facts, state)
   local source_repo, source_pr = M.parse_pr_source_ref(facts and facts.source_ref)
   local pr_number = source_pr
@@ -278,6 +379,11 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
   if type(contract) ~= "table" then
     return { live = false, reason = "missing-contract" }
   end
+  if row
+    and row.actionable_epoch
+    and row.actionable_epoch.source == "codex_run:v1" then
+    return codex_run_liveness_signal(M, row, state, facts)
+  end
   local signal_contract = liveness_contract_signal(contract)
   if type(signal_contract) ~= "table" then
     return { live = false, reason = "no-liveness-signal" }
@@ -322,13 +428,18 @@ function M.restart_row_receiver_liveness(row, state, facts, now_seconds)
       facts.actionable_epoch_eval = eval
     end
     if eval.status == "deferred" then
+      local signal = eval.signal or {
+        family = row.defer and (row.defer.live_marker or row.defer.kind),
+        resolver = row.actionable_epoch and row.actionable_epoch.source,
+      }
+      if row.actionable_epoch.source == "codex_run:v1" then
+        signal.family = signal.family or "codex_run:v1"
+        signal.resolver = signal.resolver or "fkst.codex_runs"
+      end
       return {
         action = "defer",
         reason = "actionable-epoch-deferred",
-        signal = {
-          family = row.defer and row.defer.live_marker,
-          resolver = row.actionable_epoch and row.actionable_epoch.source,
-        },
+        signal = signal,
       }
     end
     return {

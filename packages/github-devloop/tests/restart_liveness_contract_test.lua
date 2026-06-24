@@ -54,6 +54,24 @@ local function assert_inventory_errors(inventory, state, expected)
   t.eq(count, expected_count, state)
 end
 
+local function assert_codex_run_row(row, expected_role, state)
+  t.eq(row.actionable_epoch.source, "codex_run:v1", state)
+  t.eq(row.defer.kind, "codex_run", state)
+  t.eq(row.defer.producer, nil, state)
+  t.eq(row.defer.live_marker, nil, state)
+  t.eq(row.defer.freshness_ms, nil, state)
+  t.eq(row.liveness_contract.signal, nil, state)
+  t.eq(row.liveness_contract.real_execution.primitive, "fkst.codex_runs", state)
+  t.eq(row.liveness_contract.real_execution.match.role, expected_role, state)
+  t.eq(row.liveness_contract.real_execution.match.proposal_id, "state.proposal_id", state)
+  t.eq(row.liveness_contract.real_execution.match.dedup_key, "state.version", state)
+  t.eq(row.liveness_contract.real_execution.status, "running", state)
+  t.eq(row.liveness_contract.real_execution.on_error, "fallback-to-marker-budget", state)
+  t.eq(row.watchdog.on_stale.op, "redrive_receiver", state)
+  t.eq(row.watchdog.on_stale.producer, nil, state)
+  t.eq(#core.strict_restart_liveness_contract_errors({ row }), 0, state)
+end
+
 local function synthetic_live_defer_row()
   return {
     from_state = "synthetic-live-defer-bad",
@@ -180,9 +198,6 @@ return {
     t.eq(sources["codex_run:v1"].durable, true)
     t.eq(sources["codex_run:v1"].opens_generation, "spawn_or_redrive_only")
     t.eq(sources["codex_run:v1"].excludes_deferred_time, false)
-    t.eq(sources["codex_run:v1"].requires_start_marker, true)
-    t.eq(sources["codex_run:v1"].requires_producer, true)
-    t.eq(sources["codex_run:v1"].requires_exec_ref, true)
     t.eq(sources["codex_run:v1"].requires_real_execution, true)
     t.eq(sources["codex_run:v1"].real_execution_primitive, "fkst.codex_runs")
     t.eq(sources["codex_run:v1"].forbids_freshness_ms, true)
@@ -397,46 +412,19 @@ return {
 
   test_live_defer_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
-    local heartbeat_expected = {
-      thinking = "converge-round",
-    }
-    for state, producer in pairs(heartbeat_expected) do
-      local row = by_state[state]
-      t.eq(row.actionable_epoch.source, "live_defer_heartbeat:v1", state)
-      t.eq(row.defer.kind, "heartbeat", state)
-      t.eq(row.defer.producer, producer, state)
-      t.eq(row.defer.live_marker, producer .. ":v1", state)
-      t.eq(row.defer.freshness_ms, row.liveness_contract.signal.max_age_minutes * 60 * 1000, state)
-      t.eq(row.defer.redrive_opens_generation, true, state)
-      t.eq(row.watchdog.on_stale.op, "redrive_receiver", state)
-      t.eq(row.watchdog.on_stale.producer, producer, state)
-      t.eq(#core.strict_restart_liveness_contract_errors({ row }), 0, state)
-    end
-    local implementing = by_state.implementing
-    t.eq(implementing.actionable_epoch.source, "codex_run:v1")
-    t.eq(implementing.defer.kind, "codex_run")
-    t.eq(implementing.defer.producer, "implement-attempt")
-    t.eq(implementing.defer.live_marker, "implement-attempt:v1")
-    t.eq(implementing.defer.freshness_ms, nil)
-    t.eq(implementing.liveness_contract.signal.family, "implement-attempt")
-    t.eq(implementing.liveness_contract.signal.producer, "implement-attempt")
-    t.eq(implementing.liveness_contract.signal.resolver, nil)
-    t.eq(implementing.liveness_contract.signal.max_age_minutes, nil)
-    t.eq(implementing.liveness_contract.real_execution.primitive, "fkst.codex_runs")
-    t.eq(implementing.liveness_contract.real_execution.match.role, "implement")
-    t.eq(implementing.liveness_contract.real_execution.match.proposal_id, "state.proposal_id")
-    t.eq(implementing.liveness_contract.real_execution.match.dedup_key, "state.version")
-    t.eq(implementing.liveness_contract.real_execution.status, "running")
-    t.eq(implementing.liveness_contract.real_execution.on_error, "fallback-to-marker-budget")
-    t.eq(implementing.watchdog.on_stale.op, "redrive_receiver")
-    t.eq(implementing.watchdog.on_stale.producer, "implement-attempt")
-    t.eq(#core.strict_restart_liveness_contract_errors({ implementing }), 0, "implementing")
+    assert_codex_run_row(by_state.thinking, "consensus", "thinking")
+    assert_codex_run_row(by_state.implementing, "implement", "implementing")
   end,
 
   test_codex_run_defer_rejects_age_based_signal = function()
     local row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
-    row.liveness_contract.signal.max_age_minutes = 45
+    row.liveness_contract.signal = {
+      family = "implement-attempt",
+      producer = "implement-attempt",
+      max_age_minutes = 45,
+    }
     local errors = core.strict_restart_liveness_contract_errors({ row })
+    t.is_true(contains_error(errors, "implementing: codex_run defer must not declare liveness_contract.signal"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer signal must not declare max_age_minutes"), joined_errors(errors))
   end,
 
@@ -447,15 +435,41 @@ return {
     t.is_true(contains_error(errors, "implementing: codex_run defer must not declare freshness_ms"), joined_errors(errors))
   end,
 
-  test_codex_run_defer_rejects_non_exec_ref_resolver = function()
+  test_blocking_codex_receiver_rejects_self_reported_heartbeat = function()
     local row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
-    row.liveness_contract.signal.family = "converge-round"
-    row.liveness_contract.signal.producer = "converge-round"
-    row.liveness_contract.signal.resolver = "converge-round"
-    row.liveness_contract.signal.max_age_minutes = 120
+    row.watchdog = {
+      mode = "live-defer",
+      budget_ms = 45 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+        producer = "implement-attempt",
+      },
+    }
+    row.actionable_epoch = {
+      source = "live_defer_heartbeat:v1",
+      generation_source = "same_as_actionable_epoch",
+      live_marker = "implement-attempt:v1",
+      producer = "implement-attempt",
+    }
+    row.defer = {
+      kind = "heartbeat",
+      live_marker = "implement-attempt:v1",
+      producer = "implement-attempt",
+      freshness_ms = 45 * 60 * 1000,
+      redrive_opens_generation = true,
+    }
+    row.liveness_contract = {
+      mode = "live-defer",
+      signal = {
+        family = "implement-attempt",
+        producer = "implement-attempt",
+        surface = "issue-comment-stream",
+        version_form = "raw",
+        max_age_minutes = 45,
+      },
+    }
     local errors = core.strict_restart_liveness_contract_errors({ row })
-    t.is_true(contains_error(errors, "implementing: codex_run defer signal must resolve through implement-attempt exec_ref"), joined_errors(errors))
-    t.is_true(contains_error(errors, "implementing: codex_run defer producer must bind the implement-attempt exec_ref resolver"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: blocking spawn_codex_sync receiver must use codex_run:v1 liveness"), joined_errors(errors))
   end,
 
   test_codex_run_defer_rejects_missing_real_execution = function()
@@ -468,14 +482,14 @@ return {
   test_codex_run_defer_rejects_wrong_real_execution_match = function()
     local row = copy_value(rows_by_state(core.restart_transition_table()).implementing)
     row.liveness_contract.real_execution.primitive = "marker-age"
-    row.liveness_contract.real_execution.match.role = "review"
+    row.liveness_contract.real_execution.match.role = ""
     row.liveness_contract.real_execution.match.proposal_id = "marker.proposal"
     row.liveness_contract.real_execution.match.dedup_key = "marker.dedup"
     row.liveness_contract.real_execution.status = "recent"
     row.liveness_contract.real_execution.on_error = "defer"
     local errors = core.strict_restart_liveness_contract_errors({ row })
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.primitive must be fkst.codex_runs"), joined_errors(errors))
-    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.role must be implement"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.role must be non-empty"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.proposal_id must be state.proposal_id"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.dedup_key must be state.version"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.status must be running"), joined_errors(errors))
@@ -518,7 +532,7 @@ return {
     local codex_model = install_generic_restart_liveness_model(codex_row)
     local codex_errors = codex_model.strict_restart_liveness_contract_errors({ codex_row })
     t.is_true(
-      contains_error(codex_errors, "synthetic-codex-run: policy not injected for defer kind codex_run field family"),
+      contains_error(codex_errors, "synthetic-codex-run: policy not injected for defer kind codex_run field primitive"),
       joined_errors(codex_errors)
     )
 

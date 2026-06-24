@@ -5,24 +5,45 @@ return function(M, h)
   local budget = h.budget
   local timeout = h.timeout
   local liveness = h.liveness
-  local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "fixing",
     generation_entry = "always",
     liveness_class_id = "fixing.actionable",
-    watchdog = watchdog("row-budget-bounds-receiver", 120),
-    actionable_epoch = actionable_epoch("state_entry:v1"),
+    watchdog = {
+      mode = "live-defer",
+      budget_ms = 120 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+      },
+    },
+    actionable_epoch = {
+      source = "codex_run:v1",
+      generation_source = "same_as_actionable_epoch",
+    },
+    defer = {
+      kind = "codex_run",
+      redrive_opens_generation = true,
+    },
     terminal = false,
     to_states = { "reviewing", "review-meta" },
     driving_queue = "devloop_fixing",
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "fix:v1", "state:v1 reviewing", "review-meta:v1" }, { "reviewing", "review-meta", "fixing" }),
-    budget = budget(120, "The fixing receiver is bounded by a 60 minute codex repair attempt plus the standard 30 minute watchdog margin and retry slack."),
+    budget = budget(120, "A live fixing codex defers indefinitely via fkst.codex_runs() real execution truth; when no matching codex run exists, the no-live budget bounds redrive and force-termination."),
     liveness_contract = liveness({
-      mode = "row-budget-bounds-receiver",
-      receiver_bound_minutes = 60,
+      mode = "live-defer",
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "fix",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+        status = "running",
+        on_error = "fallback-to-marker-budget",
+      },
     }),
     on_timeout = timeout("devloop_fixing"),
     responsibility_signature = responsibility_signature({

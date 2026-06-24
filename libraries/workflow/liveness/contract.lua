@@ -112,6 +112,36 @@ local function validate_liveness_signal_shape(M, state, signal, label, errors)
   validate_liveness_signal_producer(M, state, signal, family, resolver, errors)
 end
 
+local function validate_real_execution_signal(state, real_execution, errors)
+  if type(real_execution) ~= "table" then
+    table.insert(errors, state .. ": live-defer codex_run must declare real_execution")
+    return
+  end
+  if real_execution.primitive ~= "fkst.codex_runs" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.primitive must be fkst.codex_runs")
+  end
+  local match = real_execution.match
+  if type(match) ~= "table" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match must declare role, proposal_id, and dedup_key")
+    return
+  end
+  if type(match.role) ~= "string" or match.role == "" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match.role must be non-empty")
+  end
+  if match.proposal_id ~= "state.proposal_id" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match.proposal_id must be state.proposal_id")
+  end
+  if match.dedup_key ~= "state.version" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match.dedup_key must be state.version")
+  end
+  if real_execution.status ~= "running" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.status must be running")
+  end
+  if real_execution.on_error ~= "fallback-to-marker-budget" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.on_error must be fallback-to-marker-budget")
+  end
+end
+
 local function validate_liveness_contract(M, row, errors)
   local state = tostring(row.from_state or "?")
   local contract = row.liveness_contract
@@ -141,6 +171,14 @@ local function validate_liveness_contract(M, row, errors)
         table.insert(errors, state .. ": row-budget progress_signal max_age_minutes must be less than budget.minutes")
       end
     end
+    return
+  end
+
+  if row.actionable_epoch and row.actionable_epoch.source == "codex_run:v1" then
+    if contract.signal ~= nil then
+      table.insert(errors, state .. ": live-defer codex_run must not declare marker signal")
+    end
+    validate_real_execution_signal(state, contract.real_execution, errors)
     return
   end
 

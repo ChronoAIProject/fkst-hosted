@@ -238,7 +238,10 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
   local receiver_liveness = M.restart_row_receiver_liveness(row, state, facts, (facts and facts.now_seconds) or now())
   if receiver_liveness.action == "defer" then
     local signal = receiver_liveness.signal or {}
-    M.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-timeout-count(live-signal:" .. tostring(signal.family or "unknown") .. ")", "receiver liveness contract signal is still fresh")
+    local reason = signal.family == "codex_run:v1"
+      and "deferred: receiver still executing"
+      or "receiver liveness contract signal is still fresh"
+    M.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-timeout-count(live-signal:" .. tostring(signal.family or "unknown") .. ")", reason)
     return true
   end
   local decision = M.liveness_timeout_decision_with_facts(row, state, facts, (facts and facts.now_seconds) or now())

@@ -328,8 +328,10 @@ return {
   test_liveness_scan_requeues_every_non_terminal_issue_marker_state = function()
     local issues = {}
     local expected = {}
+    local live_defer = {}
     local terminal = {}
     local number = 100
+    local run_opts = opts("liveness-scan-non-terminal-issue-marker-conformance")
     for _, row in ipairs(core.restart_transition_table()) do
       number = number + 1
       local state = row.from_state
@@ -344,7 +346,14 @@ return {
       if state == "implementing" then table.insert(comments, { body = core.implement_attempt_marker(proposal, fresh_version, 1, tostring(now() - 60)), author_login = "fkst-test-bot", created_at = "2999-01-01T00:00:00Z" }) end
       mock_issue_state_number(number, { "fkst-dev:enabled", core.state_label(state) }, "OPEN", comments)
       if row.terminal == false then
-        expected[number] = state
+        if row.liveness_contract
+          and row.liveness_contract.real_execution
+          and row.liveness_contract.real_execution.primitive == "fkst.codex_runs" then
+          live_defer[number] = state
+          codex_status.seed_role_codex_run(run_opts, row.liveness_contract.real_execution.match.role, proposal, fresh_version)
+        else
+          expected[number] = state
+        end
       else
         terminal[number] = state
       end
@@ -353,10 +362,22 @@ return {
     mock_issue_list(issues)
     mock_empty_pr_list()
 
-    local result = run_liveness_scan("liveness-scan-non-terminal-issue-marker-conformance")
+    local result = run_liveness_scan("liveness-scan-non-terminal-issue-marker-conformance", run_opts)
     t.eq(result.exit_code, 0)
     for issue_number, state in pairs(expected) do
       t.eq(has_liveness_action_for_proposal(result, core.proposal_id(repo, issue_number)), true, "non-terminal issue marker state not sweep-reachable: " .. tostring(state))
+    end
+    for issue_number, state in pairs(live_defer) do
+      local target_proposal = core.proposal_id(repo, issue_number)
+      t.eq(find_raise(result.raises, "devloop_timeout_reconcile", function(payload)
+        return payload.proposal_id == target_proposal
+      end), nil, "live codex-run state should not timeout-reconcile: " .. tostring(state))
+      t.eq(find_raise(result.raises, "devloop_ready", function(payload)
+        return payload.proposal_id == target_proposal
+      end), nil, "live codex-run state should not respawn implement: " .. tostring(state))
+      t.eq(find_raise(result.raises, "consensus.proposal", function(payload)
+        return payload.proposal_id == target_proposal
+      end), nil, "live codex-run state should not respawn consensus: " .. tostring(state))
     end
     local raised = entity_change_issue_numbers(result)
     for issue_number, state in pairs(terminal) do

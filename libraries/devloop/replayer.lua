@@ -530,7 +530,8 @@ local function replay_implementing(dept, issue, state, row, facts)
       return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
     end
   end
-  if attempt ~= nil and type(attempt.exec_ref) == "string" and attempt.exec_ref ~= "" and M.implement_exec_ref_running(attempt.exec_ref) then
+  local live = M.restart_row_liveness_signal(row, state, facts, facts.now_seconds or now())
+  if live.live then
     return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(codex-run-live)", "matching implement codex run is still running")
   end
   -- Pass the INNER (unwrapped) version: build_devloop_ready_payload re-applies

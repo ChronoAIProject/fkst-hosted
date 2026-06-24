@@ -72,4 +72,25 @@ function H.seed_implement_codex_run(run_opts, proposal_id, dedup_key, extra)
   return record
 end
 
+function H.seed_role_codex_run(run_opts, role, proposal_id, dedup_key, extra)
+  local record = {
+    run_id = nonce(),
+    role = role,
+    dept = role,
+    proposal_id = proposal_id,
+    dedup_key = dedup_key,
+    status = "running",
+    started_at = "2026-06-03T00:00:00Z",
+    started_at_ms = 1780000000000,
+    timeout_seconds = 3600,
+    log_path = "/tmp/fkst-packages-test/codex.log",
+    cmd_line = "codex exec -",
+  }
+  for key, value in pairs(extra or {}) do
+    record[key] = value
+  end
+  H.seed_codex_run(run_opts, record)
+  return record
+end
+
 return H

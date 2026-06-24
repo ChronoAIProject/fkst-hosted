@@ -45,11 +45,8 @@ local epoch_sources = {
   ["codex_run:v1"] = {
     durable = true,
     opens_generation = "spawn_or_redrive_only",
-    -- Deferred time is not yet excluded; bounded by an oversized budget like fixing until a no-live-onset epoch is added.
+    -- Deferred time is not yet excluded; bounded by an oversized budget until a no-live-onset epoch is added.
     excludes_deferred_time = false,
-    requires_start_marker = true,
-    requires_producer = true,
-    requires_exec_ref = true,
     requires_real_execution = true,
     real_execution_primitive = "fkst.codex_runs",
     forbids_freshness_ms = true,
@@ -278,14 +275,7 @@ local function validate_codex_run_defer(row, errors)
   local state = state_name(row)
   local defer = row and row.defer or nil
   local epoch = row and row.actionable_epoch or nil
-  local signal = row and row.liveness_contract and row.liveness_contract.signal or nil
   local real_execution = row and row.liveness_contract and row.liveness_contract.real_execution or nil
-  if not non_empty_string(defer.live_marker) then
-    table.insert(errors, state .. ": codex_run defer must declare durable start live_marker")
-  end
-  if not non_empty_string(defer.producer) then
-    table.insert(errors, state .. ": codex_run defer must declare producer")
-  end
   if defer.freshness_ms ~= nil then
     table.insert(errors, state .. ": codex_run defer must not declare freshness_ms")
   end
@@ -305,26 +295,14 @@ local function validate_codex_run_defer(row, errors)
   if type(on_stale) ~= "table" or on_stale.op ~= "redrive_receiver" then
     table.insert(errors, state .. ": codex_run defer must declare watchdog.on_stale.op=redrive_receiver")
   end
-  if type(on_stale) == "table" and on_stale.producer ~= nil and on_stale.producer ~= defer.producer then
-    table.insert(errors, state .. ": codex_run defer watchdog.on_stale producer must match defer.producer")
-  end
-  if not registered_heartbeat_producer(row, defer) then
-    table.insert(errors, state .. ": codex_run defer producer is not a registered live-defer producer: " .. tostring(defer.producer))
-  end
-  if type(signal) ~= "table" then
-    table.insert(errors, state .. ": codex_run defer must declare liveness_contract.signal")
-    return
-  end
-  local resolver = signal.resolver or signal.family
-  if signal.max_age_minutes ~= nil then
-    table.insert(errors, state .. ": codex_run defer signal must not declare max_age_minutes")
+  local signal = row and row.liveness_contract and row.liveness_contract.signal or nil
+  if signal ~= nil then
+    table.insert(errors, state .. ": codex_run defer must not declare liveness_contract.signal")
+    if type(signal) == "table" and signal.max_age_minutes ~= nil then
+      table.insert(errors, state .. ": codex_run defer signal must not declare max_age_minutes")
+    end
   end
   local policy = require_policy(codex_run_policy, "codex_run", {
-    "family",
-    "resolver",
-    "producer",
-    "role",
-    "match",
     "primitive",
     "status",
     "on_error",
@@ -332,23 +310,9 @@ local function validate_codex_run_defer(row, errors)
   if policy == nil then
     return
   end
-  local expected_family = policy.family
-  local expected_resolver = policy.resolver
-  local expected_producer = policy.producer
-  local expected_role = policy.role
-  local expected_match = policy.match
   local expected_primitive = policy.primitive
   local expected_status = policy.status
   local expected_on_error = policy.on_error
-  if signal.family ~= expected_family or resolver ~= expected_resolver or signal.producer ~= expected_producer then
-    table.insert(errors, state .. ": codex_run defer signal must resolve through " .. tostring(expected_resolver) .. " exec_ref")
-  end
-  local binding = type(M.liveness_signal_producer_contract) == "function"
-    and M.liveness_signal_producer_contract(signal.producer)
-    or nil
-  if type(binding) ~= "table" or binding.resolver ~= expected_resolver then
-    table.insert(errors, state .. ": codex_run defer producer must bind the " .. tostring(expected_resolver) .. " exec_ref resolver")
-  end
   if type(real_execution) ~= "table" then
     table.insert(errors, state .. ": codex_run defer must declare liveness_contract.real_execution")
     return
@@ -361,14 +325,14 @@ local function validate_codex_run_defer(row, errors)
     table.insert(errors, state .. ": codex_run defer real_execution.match must declare role, proposal_id, and dedup_key")
     return
   end
-  if match.role ~= expected_role then
-    table.insert(errors, state .. ": codex_run defer real_execution.match.role must be " .. tostring(expected_role))
+  if not non_empty_string(match.role) then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.role must be non-empty")
   end
-  if match.proposal_id ~= expected_match.proposal_id then
-    table.insert(errors, state .. ": codex_run defer real_execution.match.proposal_id must be " .. tostring(expected_match.proposal_id))
+  if match.proposal_id ~= "state.proposal_id" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.proposal_id must be state.proposal_id")
   end
-  if match.dedup_key ~= expected_match.dedup_key then
-    table.insert(errors, state .. ": codex_run defer real_execution.match.dedup_key must be " .. tostring(expected_match.dedup_key))
+  if match.dedup_key ~= "state.version" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.dedup_key must be state.version")
   end
   if real_execution.status ~= expected_status then
     table.insert(errors, state .. ": codex_run defer real_execution.status must be " .. tostring(expected_status))
@@ -376,6 +340,14 @@ local function validate_codex_run_defer(row, errors)
   if real_execution.on_error ~= expected_on_error then
     table.insert(errors, state .. ": codex_run defer real_execution.on_error must be " .. tostring(expected_on_error))
   end
+end
+
+local function blocking_codex_receiver(row)
+  local span = row and row.span_contract or nil
+  if type(span) ~= "table" then
+    return false
+  end
+  return non_empty_string(span.spawn_function)
 end
 
 local function validate_child_workflow_wait_defer(row, errors)
@@ -503,6 +475,10 @@ local function validate_row(row, errors)
     if row.defer ~= nil then
       table.insert(errors, state .. ": row-budget-bounds-receiver row must not declare defer")
     end
+  end
+  if blocking_codex_receiver(row)
+    and not (mode == "live-defer" and epoch ~= nil and epoch.source == "codex_run:v1") then
+    table.insert(errors, state .. ": blocking spawn_codex_sync receiver must use codex_run:v1 liveness")
   end
   if epoch ~= nil and epoch.source == "state_entry:v1" then
     if mode == "live-defer" then

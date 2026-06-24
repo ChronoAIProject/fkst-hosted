@@ -5,23 +5,43 @@ return function(M, h)
   local budget = h.budget
   local timeout = h.timeout
   local liveness = h.liveness
-  local watchdog = h.watchdog
-  local actionable_epoch = h.actionable_epoch
-  local responsibility_signature = h.responsibility_signature
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "review-meta",
     liveness_class_id = "review_meta.actionable",
-    watchdog = watchdog("row-budget-bounds-receiver", 90),
-    actionable_epoch = actionable_epoch("state_entry:v1"),
+    watchdog = {
+      mode = "live-defer",
+      budget_ms = 90 * 60 * 1000,
+      on_stale = {
+        op = "redrive_receiver",
+      },
+    },
+    actionable_epoch = {
+      source = "codex_run:v1",
+      generation_source = "same_as_actionable_epoch",
+    },
+    defer = {
+      kind = "codex_run",
+      redrive_opens_generation = true,
+    },
     terminal = false,
     to_states = { "fixing", "blocked" },
     driving_queue = "devloop_review_meta",
     observe_surfaces = { issue = true, pr = true, liveness_scan = true },
     output_obligation = obligation({ "review-meta:v1", "state:v1 fixing", "state:v1 blocked" }, { "fixing", "blocked" }),
-    budget = budget(90, "The review-meta receiver is bounded by a 60 minute codex decision attempt plus the standard 30 minute watchdog margin."),
+    budget = budget(90, "A live review-meta codex defers indefinitely via fkst.codex_runs() real execution truth; when no matching codex run exists, the no-live budget bounds redrive and force-termination."),
     liveness_contract = liveness({
-      mode = "row-budget-bounds-receiver",
-      receiver_bound_minutes = 60,
+      mode = "live-defer",
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "review-meta",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+        status = "running",
+        on_error = "fallback-to-marker-budget",
+      },
     }),
     on_timeout = timeout("devloop_review_meta"),
     responsibility_signature = responsibility_signature({
@@ -77,5 +97,10 @@ return function(M, h)
     marker_facts = "state:v1 review-meta plus review proposal encoded in version/dedup",
     kickoff = "devloop_review_meta",
     replay = "Observe re-raises review-meta using the review proposal, PR number, issue version, and original dedup.",
+    span_contract = span_contract({
+      department = "review_meta",
+      durable_start_marker = "state:v1 review-meta",
+      spawn_function = "review_meta_codex_decision",
+    }),
   }
 end

@@ -94,10 +94,14 @@ return saga.department(spec, { done = function() return false end, act = functio
       version = review_meta.dedup_key,
       tick = event.ts,
     })
-    local result = spawn_codex_sync(core.judgment_codex_opts(
+    local codex_opts = core.judgment_codex_opts(
       core.build_review_meta_prompt(review_meta, current_issue, content_fetch),
       core.judgment_worktree("review-meta", review_meta.dedup_key)
-    ))
+    )
+    codex_opts.role = "review-meta"
+    codex_opts.proposal_id = review_meta.proposal_id
+    codex_opts.dedup_key = review_meta.version
+    local result = spawn_codex_sync(codex_opts)
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
       core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr, {

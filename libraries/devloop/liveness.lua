@@ -49,14 +49,6 @@ end
 local function devloop_restart_liveness_policy()
   return {
     codex_run = {
-      family = "implement-attempt",
-      resolver = "implement-attempt",
-      producer = "implement-attempt",
-      role = "implement",
-      match = {
-        proposal_id = "state.proposal_id",
-        dedup_key = "state.version",
-      },
       primitive = "fkst.codex_runs",
       status = "running",
       on_error = "fallback-to-marker-budget",
