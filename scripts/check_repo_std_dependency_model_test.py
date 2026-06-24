@@ -79,12 +79,11 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
 
-    def test_contract_surface_is_value_only_and_dependency_free(self) -> None:
+    def test_library_publishability_requires_only_contract_public(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.seed_contract(root)
-            write(root / "libraries" / "contract" / "registry.lua", "return {}\n")
-            manifest(root / "libraries" / "contract" / "fkst.toml", "contract", ["workflow"], public=True)
+            manifest(root / "libraries" / "contract" / "fkst.toml", "contract", [], public=False)
+            manifest(root / "libraries" / "workflow" / "fkst.toml", "workflow", ["contract"], public=True)
             self.seed_devloop_manifest(root)
             write(root / "migration" / "devloop-forge-imports.inventory", "")
             with mock.patch.object(
@@ -94,31 +93,14 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
             ):
                 violations, _warnings = self.run_guard_without_seed(root)
 
-        self.assertIn("G-LIB-DEP: contract must declare zero outgoing lib_deps", violations)
-        self.assertTrue(any("contract modules must be exactly" in message for message in violations))
+        self.assertIn("G-LIB-DEP: contract must be the public publishable library", violations)
+        self.assertIn("G-LIB-DEP: workflow must not be public/publishable", violations)
 
     def run_guard_without_seed(self, root: Path) -> tuple[list[str], list[str]]:
         violations: list[str] = []
         warnings: list[str] = []
         check_repo.check_std_dependency_model(root, violations, warnings)
         return violations, warnings
-
-    def test_library_direction_rules_reject_wrong_edges(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write(root / "libraries" / "workflow" / "bad.lua", 'local gh = require("forge.github")\n')
-            write(root / "libraries" / "forge" / "bad.lua", 'local testkit = require("testkit.saga_conformance")\n')
-            write(root / "libraries" / "testkit" / "ok.lua", 'local c = require("contract.strings")\nreturn {}\n')
-            write(root / "migration" / "devloop-forge-imports.inventory", "")
-            with mock.patch.object(
-                check_repo.check_repo_std_dependency_model.ratchet_base,
-                "file_at_base",
-                return_value=("absent", None),
-            ):
-                violations, _warnings = self.run_guard(root)
-
-        self.assertIn("G-LIB-DEP: libraries/workflow/bad.lua:1 workflow must not require 'forge.github'", violations)
-        self.assertIn("G-LIB-DEP: libraries/forge/bad.lua:1 forge must not require 'testkit.saga_conformance'", violations)
 
     def test_workflow_policy_guard_blocks_product_and_forge_strings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -7,6 +7,9 @@ root = "."
 [lib_deps]
 libraries = ["contract"]
 
+[dependency_constraints]
+allowed_lib_deps = ["contract"]
+
 [library]
 name = "workflow"
 stable_id = "fkst.library.workflow"

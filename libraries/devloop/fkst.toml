@@ -7,6 +7,9 @@ root = "."
 [lib_deps]
 libraries = ["contract", "workflow", "forge"]
 
+[dependency_constraints]
+allowed_lib_deps = ["contract", "workflow", "forge"]
+
 [library]
 name = "devloop"
 stable_id = "fkst.library.devloop"

@@ -7,13 +7,17 @@ root = "."
 [lib_deps]
 libraries = []
 
+[dependency_constraints]
+allowed_lib_deps = []
+
 [library]
 name = "contract"
 stable_id = "fkst.library.contract"
 version = "workspace"
 
 [exports]
-public = ["contract.*"]
+exact = true
+public = ["contract.error_facts", "contract.payload", "contract.source_ref", "contract.strings"]
 
 [visibility]
 public = true

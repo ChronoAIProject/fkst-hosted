@@ -19,8 +19,6 @@ LEGACY_DEVLOOP_STD_IMPORTS_INVENTORY = "migration/devloop-std-imports.inventory"
 FORGE_STRINGS_SPLIT_IMPORTS = {
     ("libraries/devloop/parsers/misc.lua", "forge.strings"),
 }
-LIBRARIES = ("contract", "workflow", "testkit", "forge", "devloop")
-CONTRACT_MODULES = {"error_facts", "payload", "source_ref", "strings"}
 DEVLOOP_FAMILY = {
     "fkst-substrate-ref-maintainer",
     "github-devloop",
@@ -131,18 +129,13 @@ def devloop_forge_imports_at_base(root: Path) -> tuple[str, set[tuple[str, str]]
     return "present", entries, messages
 
 
-def check_contract_surface(root: Path, violations: list[str], add) -> None:
+def check_library_publishability(root: Path, violations: list[str], add) -> None:
     contract_root = root / "libraries" / "contract"
-    actual = {path.with_suffix("").name for path in contract_root.glob("*.lua") if path.is_file()}
-    if actual != CONTRACT_MODULES:
-        add(violations, "G-LIB-DEP", f"contract modules must be exactly {sorted(CONTRACT_MODULES)}; observed {sorted(actual)}")
     manifest = contract_root / "fkst.toml"
     if not manifest.exists():
         add(violations, "G-LIB-DEP", "libraries/contract/fkst.toml is required")
         return
     text = manifest.read_text(encoding="utf-8")
-    if re.search(r"(?ms)^\[lib_deps\]\s*\n\s*libraries\s*=\s*\[\s*\]", text) is None:
-        add(violations, "G-LIB-DEP", "contract must declare zero outgoing lib_deps")
     if re.search(r"(?ms)^\[visibility\]\s*\n\s*public\s*=\s*true", text) is None:
         add(violations, "G-LIB-DEP", "contract must be the public publishable library")
     for library in ("workflow", "testkit", "forge", "devloop"):
@@ -170,26 +163,13 @@ def check_workflow_policy(root: Path, violations: list[str], read_text, rel, add
                 add(violations, "G-WORKFLOW-POLICY", f"{rel(root, path)}:{line_number} contains raw gh/git command text")
 
 
-def check_library_require_policy(root: Path, violations: list[str], read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range) -> None:
+def check_devloop_forge_import_inventory(root: Path, violations: list[str], read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range) -> None:
     devloop_forge_imports: set[tuple[str, str]] = set()
-    allowed = {
-        "contract": {"contract"},
-        "workflow": {"workflow", "contract"},
-        "testkit": {"testkit", "contract", "workflow"},
-        "forge": {"forge", "contract"},
-        "devloop": {"devloop", "contract", "workflow", "forge"},
-    }
-    for library in LIBRARIES:
-        for path in library_lua_files(root, library):
-            rel_path = rel(root, path)
-            for module, line in require_literals(read_text(path), strip_lua_comments_and_strings, is_unmasked_range):
-                top = module.split(".")[0]
-                if top not in LIBRARIES:
-                    continue
-                if top not in allowed[library]:
-                    add(violations, "G-LIB-DEP", f"{rel_path}:{line} {library} must not require {module!r}")
-                if library == "devloop" and top == "forge":
-                    devloop_forge_imports.add((rel_path, module))
+    for path in library_lua_files(root, "devloop"):
+        rel_path = rel(root, path)
+        for module, _line in require_literals(read_text(path), strip_lua_comments_and_strings, is_unmasked_range):
+            if module.split(".")[0] == "forge":
+                devloop_forge_imports.add((rel_path, module))
     inventory_path = root / DEVLOOP_FORGE_IMPORTS_INVENTORY
     if library_lua_files(root, "devloop") or inventory_path.exists():
         current_inventory, inventory_errors = load_devloop_forge_import_inventory(inventory_path)
@@ -224,7 +204,7 @@ def check_std_dependency_model(
     strip_lua_comments_and_strings: Callable[[str], str],
     is_unmasked_range: Callable[[str, str, int, int], bool],
 ) -> None:
-    check_contract_surface(root, violations, add)
+    check_library_publishability(root, violations, add)
     check_devloop_visibility(root, violations, add)
     check_workflow_policy(root, violations, read_text, rel, add)
-    check_library_require_policy(root, violations, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)
+    check_devloop_forge_import_inventory(root, violations, read_text, rel, add, strip_lua_comments_and_strings, is_unmasked_range)
