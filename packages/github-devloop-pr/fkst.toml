@@ -13,3 +13,4 @@ packages = ["github-proxy", "consensus", "github-devloop-decompose"]
 
 [conformance]
 pack = "conformance/pack.toml"
+function = "core.span_conformance_errors"

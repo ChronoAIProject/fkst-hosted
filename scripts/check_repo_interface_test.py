@@ -43,7 +43,6 @@ class CheckRepoPublishedInterfaceTest(unittest.TestCase):
         self.assertIn("OK: skipped library-B-specific ratchets for external project root:", result.stdout)
         self.assertIn("OK: repository checks passed", result.stdout)
         self.assertNotIn("G-DOGFOOD-BOUNDARY", result.stderr)
-        self.assertNotIn("G-SPAN", result.stderr)
         self.assertNotIn("G-LIB-DEP", result.stderr)
 
     def test_external_project_root_runs_generic_ratchets(self) -> None:

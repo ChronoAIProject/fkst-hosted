@@ -11,7 +11,6 @@ import check_repo_namespaced_queue
 import check_repo_producer_liveness
 import check_repo_saga_head
 import check_repo_saga_split
-import check_repo_span
 
 
 def check_content_truncation(c, root, violations, allowlist_dir=None, enforce_base=True) -> None:
@@ -124,8 +123,6 @@ def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violati
         __import__("check_repo_dogfood_boundary").check(root, violations, c.add)
     for message in check_repo_saga_split.repository_messages(root):
         c.add(violations, "G-SAGA-SPLIT", message)
-    for message in check_repo_span.repository_messages(root):
-        c.add(violations, "G-SPAN", message)
 
 
 def run(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:

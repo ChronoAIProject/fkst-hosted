@@ -241,7 +241,7 @@ The ~8 github-devloop-hardcoded ratchets split three ways (don't preserve weak s
   produces ⊆ own+published-seam, namespaced-queue fidelity, event_deps shape, source_ref-on-
   reliable shape, saga spec-head/restart-row + liveness budget/actionable-epoch/responsibility_signature,
   span-contract completeness, monotone-gate declarations. (Anything a graph/schema fact can make impossible.)
-- **Travel as package DATA** (pure static source-shape residue): e.g. G14 helper-clone, G-SPAN wording,
+- **Travel as package DATA** (pure static source-shape residue): e.g. G14 helper-clone, span wording,
   G-FORWARD-DIRECT marker-gated allowlist (interim, until queue authority is typed).
 - **Delete as scaffolding** once the structural field exists: G-SAGA-SPLIT, G-MONOTONE-GATE(-DSL), and the
   source-scan parts of G8/G11/G12 after their concept is a typed restart-table/capability field.

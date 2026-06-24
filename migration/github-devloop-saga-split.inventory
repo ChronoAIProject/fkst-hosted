@@ -1,59 +1,152 @@
-{"path":"packages/github-devloop/departments/comment_handoff/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop/departments/consensus_result/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop-ops/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop-ops/departments/doctor/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop-ops/departments/ensure_repo/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop/departments/implement/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"libraries/devloop/autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
+{"path":"libraries/devloop/base.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/claims.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}
+{"path":"libraries/devloop/config.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/conflict_telemetry.lua","owner":"shared","reason":"conflict telemetry parsing and logging are used by PR fix and issue-side hotspot patrol."}
+{"path":"libraries/devloop/context_bundle.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/convergence.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
+{"path":"libraries/devloop/entity.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
+{"path":"libraries/devloop/forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
+{"path":"libraries/devloop/gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
+{"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
+{"path":"libraries/devloop/liveness.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/liveness_scan.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/logging.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/markers.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/merge_batch.lua","owner":"shared","reason":"merge batch helpers are used by PR merge and integration tests during R1, so they must not peer-require github-devloop-pr."}
+{"path":"libraries/devloop/merge_gate_wait.lua","owner":"shared","reason":"merge-gate wait markers are read by shared liveness and PR merge reconciliation."}
+{"path":"libraries/devloop/merge_queue.lua","owner":"shared","reason":"merge queue helpers include WIP admission used by the remaining issue implement department."}
+{"path":"libraries/devloop/operator_commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/parsers.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/payloads.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/pr_safety.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/prompts.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/queue.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}
+{"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart/issue/pr_partition_contract.lua","owner":"shared","reason":"declares inert issue/PR partition contract data."}
+{"path":"libraries/devloop/restart/issue/transitions/awaiting_pr.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/blocked.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/dependency_wait.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/impl_failed.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/implementing.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/index.lua","owner":"cross-cutting","reason":"restart transition helper shared by the issue lifecycle provider."}
+{"path":"libraries/devloop/restart/issue/transitions/merged.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/ready.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue/transitions/thinking.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
+{"path":"libraries/devloop/restart/issue_lifecycle.lua","owner":"shared","reason":"shared issue restart lifecycle provider used by github-devloop and ops diagnostics."}
+{"path":"libraries/devloop/restart_actionable_epoch.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart_responsibility_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/rounds.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/state.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/strings.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
+{"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"packages/github-devloop-intake/core/devloop_wiring.lua","owner":"intake","reason":"core module resolves intake package-private prompt modules."}
+{"path":"packages/github-devloop-intake/core/github_capabilities.lua","owner":"intake","reason":"core module owns intake trust-gate capability and hostile canary helpers."}
+{"path":"packages/github-devloop-intake/core/intake_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/core/intake_scan.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
+{"path":"packages/github-devloop-intake/core/intake_service_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop-intake/departments/intake_judge/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop-intake/departments/intake_probe/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop-intake/departments/intake_scan/main.lua","owner":"intake","reason":"owns unmanaged issue intake and enable policy."}
-{"path":"packages/github-devloop/departments/liveness_scan/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop/departments/loop/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
-{"path":"packages/github-devloop-ops/departments/observability/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop/departments/observe_issue/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop-intake/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-integration/core/branches.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches/branch_train.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches/pr_freshness.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/branches/shared.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/devloop_wiring.lua","owner":"integration","reason":"core module resolves integration package-private prompt modules."}
+{"path":"packages/github-devloop-integration/core/release_notes.lua","owner":"integration","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop-integration/core/rollup_health.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
+{"path":"packages/github-devloop-integration/core/sync_conflict.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/pr_freshness_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop/departments/reconcile/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop-integration/departments/rollup_merge/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/rollup_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/sync_conflict/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
 {"path":"packages/github-devloop-integration/departments/sync_scan/main.lua","owner":"integration","reason":"owns branch topology or integration freshness work."}
-{"path":"packages/github-devloop/departments/test_board_digest_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop/departments/test_context_bundle_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"packages/github-devloop-intake/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop-integration/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
-{"path":"libraries/devloop/autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
-{"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop-integration/core/branches/branch_train.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop-integration/core/branches/pr_freshness.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop-integration/core/branches/shared.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop-integration/core/branches.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
 {"path":"packages/github-devloop-ops/core/conflict_telemetry.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop/core/dependencies.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop-ops/core/dependency_wait.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}
 {"path":"packages/github-devloop-ops/core/doctor.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop-ops/core/ensure_repo.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"libraries/devloop/entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
 {"path":"packages/github-devloop-ops/core/error_facts.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop-ops/core/failure_triage.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"libraries/devloop/forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
+{"path":"packages/github-devloop-ops/core/observability_bounds.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
+{"path":"packages/github-devloop-ops/core/state_gap.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
+{"path":"packages/github-devloop-ops/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-ops/departments/doctor/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-ops/departments/ensure_repo/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-ops/departments/observability/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop-pr/core/devloop_wiring.lua","owner":"pr","reason":"github-devloop-pr resolves PR package-private restart and prompt modules."}
+{"path":"packages/github-devloop-pr/core/merge_ci_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR merge-gate wait effects after extraction."}
+{"path":"packages/github-devloop-pr/core/merge_executor.lua","owner":"pr","reason":"github-devloop-pr owns shared PR merge execution and merge-queue redrive behavior after extraction."}
+{"path":"packages/github-devloop-pr/core/merge_runtime_files.lua","owner":"pr","reason":"github-devloop-pr owns PR merge runtime file paths after extraction."}
+{"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/pr_review_replayer.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/merge_gate_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/review_converge_round.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/fix_reflection.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/merge_gate.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/merge_gate_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/merge_ready.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/merged.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/merging.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/pr_delegation.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/pr_link.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_carry_over.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_converge_round.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_meta.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_result.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/marker_fields/state.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/fixing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/blocked.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/closed_unmerged.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/fixing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/merge_ready.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/merged.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/merging.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/pr_open.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/review_meta.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/restart/transitions/reviewing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/review_carry_over.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/review_meta_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/review_redrive.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/core/span_conformance.lua","owner":"cross-cutting","reason":"package-owned PR-side span declaration conformance wrapper."}
+{"path":"packages/github-devloop-pr/departments/comment_handoff/main.lua","owner":"pr","reason":"github-devloop-pr owns PR comment-stream handoff authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/fix/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/liveness_scan/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/merge/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/merge_queue/main.lua","owner":"pr","reason":"github-devloop-pr owns PR merge-queue polling authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/observe_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/reconcile/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/review_loop/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/review_meta/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/review_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-pr/departments/review_result/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop/core/dependencies.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
+{"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}
 {"path":"packages/github-devloop/core/gates/child_start_visible.lua","owner":"issue","reason":"issue-side PR child kickoff gate definition; raw PR facts stay outside the gate DSL spec."}
-{"path":"packages/github-devloop-intake/core/github_capabilities.lua","owner":"intake","reason":"core module owns intake trust-gate capability and hostile canary helpers."}
 {"path":"packages/github-devloop/core/github_graphql.lua","owner":"shared","reason":"core module is shared or authority-neutral after extraction."}
 {"path":"packages/github-devloop/core/impl_failure.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/implement_attempt.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop-intake/core/intake_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
-{"path":"packages/github-devloop-intake/core/devloop_wiring.lua","owner":"intake","reason":"core module resolves intake package-private prompt modules."}
-{"path":"packages/github-devloop-intake/core/intake_scan.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
-{"path":"packages/github-devloop-intake/core/intake_service_class.lua","owner":"intake","reason":"core module owns unmanaged issue intake and enable policy."}
 {"path":"packages/github-devloop/core/liveness_bounds.lua","owner":"issue","reason":"issue lifecycle liveness fallback and operator rereview thresholds remain in the parent issue saga."}
-{"path":"packages/github-devloop-ops/core/observability_bounds.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
 {"path":"packages/github-devloop/core/pr_delegation.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/ratchet_slice_ledger.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/ready_split.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/reconcile_requests.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop-integration/core/release_notes.lua","owner":"integration","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua","owner":"shared","reason":"liveness signal producer is shared by issue wait boundaries."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
@@ -87,107 +180,16 @@
 {"path":"packages/github-devloop/core/restart/marker_fields/review_meta.lua","owner":"issue","reason":"marker fields belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/marker_fields/review_result.lua","owner":"issue","reason":"marker fields belong to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/restart/marker_fields/state.lua","owner":"shared","reason":"marker fields are shared by the issue/PR seam."}
-{"path":"libraries/devloop/restart/issue/pr_partition_contract.lua","owner":"shared","reason":"declares inert issue/PR partition contract data."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/fixing.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/required_replay_payload_fields/index.lua","owner":"issue","reason":"required replay payload fields belong to the parent issue saga."}
-{"path":"libraries/devloop/restart/issue/transitions/awaiting_pr.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/blocked.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/dependency_wait.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/impl_failed.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/implementing.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/index.lua","owner":"cross-cutting","reason":"restart transition helper shared by the issue lifecycle provider."}
-{"path":"libraries/devloop/restart/issue/transitions/merged.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/ready.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"libraries/devloop/restart/issue/transitions/thinking.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
-{"path":"packages/github-devloop-integration/core/rollup_health.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop-integration/core/devloop_wiring.lua","owner":"integration","reason":"core module resolves integration package-private prompt modules."}
-{"path":"packages/github-devloop-ops/core/state_gap.lua","owner":"cross-cutting","reason":"core module supports diagnostics, observability, or cross-saga views."}
-{"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
-{"path":"packages/github-devloop-integration/core/sync_conflict.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}
-{"path":"packages/github-devloop-pr/departments/fix/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/comment_handoff/main.lua","owner":"pr","reason":"github-devloop-pr owns PR comment-stream handoff authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/liveness_scan/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/merge/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/merge_queue/main.lua","owner":"pr","reason":"github-devloop-pr owns PR merge-queue polling authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/observe_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/reconcile/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/review_loop/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/review_meta/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/review_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/departments/review_result/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"libraries/devloop/merge_batch.lua","owner":"shared","reason":"merge batch helpers are used by PR merge and integration tests during R1, so they must not peer-require github-devloop-pr."}
-{"path":"libraries/devloop/merge_gate_wait.lua","owner":"shared","reason":"merge-gate wait markers are read by shared liveness and PR merge reconciliation."}
-{"path":"packages/github-devloop-pr/core/merge_ci_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR merge-gate wait effects after extraction."}
-{"path":"packages/github-devloop-pr/core/merge_executor.lua","owner":"pr","reason":"github-devloop-pr owns shared PR merge execution and merge-queue redrive behavior after extraction."}
-{"path":"packages/github-devloop-pr/core/merge_runtime_files.lua","owner":"pr","reason":"github-devloop-pr owns PR merge runtime file paths after extraction."}
-{"path":"packages/github-devloop-pr/core/pr_label_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/devloop_wiring.lua","owner":"pr","reason":"github-devloop-pr resolves PR package-private restart and prompt modules."}
-{"path":"packages/github-devloop-pr/core/pr_review_replayer.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"libraries/devloop/merge_queue.lua","owner":"shared","reason":"merge queue helpers include WIP admission used by the remaining issue implement department."}
-{"path":"libraries/devloop/queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}
-{"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/merge_gate_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/liveness_signal_producers/review_converge_round.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/fix_reflection.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/merge_gate.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/merge_gate_wait.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/merge_ready.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/merged.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/merging.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/pr_delegation.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/pr_link.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_carry_over.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_converge_round.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_meta.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/review_result.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/marker_fields/state.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/fixing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/required_replay_payload_fields/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/blocked.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/closed_unmerged.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/fixing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/index.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/merge_ready.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/merged.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/merging.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/pr_open.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/review_meta.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/restart/transitions/reviewing.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/review_carry_over.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/review_meta_requests.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"packages/github-devloop-pr/core/review_redrive.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
-{"path":"libraries/devloop/base.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/claims.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}
-{"path":"libraries/devloop/conflict_telemetry.lua","owner":"shared","reason":"conflict telemetry parsing and logging are used by PR fix and issue-side hotspot patrol."}
-{"path":"libraries/devloop/config.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/context_bundle.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/convergence.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
-{"path":"libraries/devloop/entity.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
-{"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
-{"path":"libraries/devloop/liveness.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/liveness_scan.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/logging.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/markers.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/operator_commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/parsers.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/payloads.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/pr_safety.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/prompts.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/queue.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/restart.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/restart/issue_lifecycle.lua","owner":"shared","reason":"shared issue restart lifecycle provider used by github-devloop and ops diagnostics."}
-{"path":"libraries/devloop/restart_actionable_epoch.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/restart_responsibility_contract.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/rounds.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/state.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/strings.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"packages/github-devloop/core/span_conformance.lua","owner":"cross-cutting","reason":"package-owned conformance for github-devloop span source-shape ratchet."}
+{"path":"packages/github-devloop/departments/comment_handoff/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/consensus_result/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/implement/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/liveness_scan/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/loop/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/observe_issue/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/reconcile/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/test_board_digest_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
+{"path":"packages/github-devloop/departments/test_context_bundle_probe/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
