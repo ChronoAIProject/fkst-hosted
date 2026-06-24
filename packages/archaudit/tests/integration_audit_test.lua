@@ -356,10 +356,18 @@ return {
     mock_env("owner/repo", "3")
     mock_idle_observe()
     mock_codex_findings('[{"file":"packages/archaudit/core.lua","line":1,"rule":"SRP","why":"Valid issue.","suggested_fix":"Fix valid."},{"file":"packages/archaudit/core.lua","line":999999,"rule":"DIP","why":"Invalid line.","suggested_fix":"Fix invalid."}]', 0)
-    local dept = fake_audit_department("[]")
+    local read_paths = {}
+    local dept = fake_audit_department("[]", {
+      read_file = function(path)
+        table.insert(read_paths, path)
+        return "line one\n"
+      end,
+    })
     local event = fresh_idle_event()
     local result = run_fake_failure_at(dept, event, core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.is_true(tostring(result.failure.error):find("invalid file or line", 1, true) ~= nil)
+    t.eq(read_paths[1], "packages/archaudit/core.lua")
+    t.eq(read_paths[2], "packages/archaudit/core.lua")
     t.eq(#result.raises, 0)
   end,
 

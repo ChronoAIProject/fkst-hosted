@@ -179,6 +179,17 @@ local function issue_request_result(repo, finding, label_available, trigger_reas
   return pcall(core.build_issue_create_request, repo, finding, label_available, trigger_reason)
 end
 
+local function production_read_file(path)
+  return file.read(path)
+end
+
+local function finding_has_existing_line(finding, read_file)
+  if not core.validate_finding(finding) then
+    return false
+  end
+  return core.finding_line_exists(finding, read_file(finding.file))
+end
+
 local function audit_run_request_result(repo, trigger_reason, label_available, now_seconds, max_staleness)
   return pcall(core.build_audit_run_issue_create_request, repo, trigger_reason, label_available, now_seconds, max_staleness)
 end
@@ -242,6 +253,7 @@ end
 local function make_department(ports)
   ports = ports or {}
   local observe = ports.observe or observe_port
+  local read_file = ports.read_file or production_read_file
   local function act_audit(event)
     local payload = event.payload or {}
     local trigger = trigger_kind(event)
@@ -319,7 +331,7 @@ local function make_department(ports)
       if #requests >= count then
         break
       end
-      if not core.validate_finding(finding) then
+      if not finding_has_existing_line(finding, read_file) then
         fail(event, "validation-failure", "invalid file or line")
       end
       local ok_request, request_or_err = issue_request_result(repo, finding, label_available, trigger)
