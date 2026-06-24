@@ -26,7 +26,7 @@ packages, and also loads any external runtime packages present under `.fkst/pack
 
 Packages communicate through event queues. Flat packages are self-contained and use bare queue
 names internally. Composed packages are first-class packages that adapt or combine sibling package
-queues and declare those siblings in `composed.deps` so composed conformance can test the union
+queues and declare those siblings in `[event_deps]` so composed conformance can test the union
 graph.
 
 ## Quickstart

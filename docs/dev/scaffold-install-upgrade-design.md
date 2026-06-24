@@ -15,7 +15,7 @@ meta-judge `meta-layer convergence`; the worker conclusions are the basis for th
 ## 1. Problem & goal
 
 An independent product repo (a web app, a service, anything — **not** a fkst library repo and
-**not** a fork) wants to install the fkst autonomous devloop (`github-devloop` + its composed deps
+**not** a fork) wants to install the fkst autonomous devloop (`github-devloop` + its `[event_deps]`
 `consensus`, `github-proxy`) into its `.fkst/` directory, so `github-devloop` autonomously develops
 the host's own product code. The host root stays domain-owned; fkst lives entirely under `.fkst/`.
 
@@ -59,14 +59,14 @@ into the product repo is the wrong shape** and is rejected (§7).
   bare one-line pin and not a resolver.** Converged. A bare `fkst-packages@<sha>` cannot say *which
   top-level package* to load; a full manifest risks becoming a resolver the engine contract avoids.
   The resolution is the minimal middle: **a pin (`repo@ref`) plus a top-level package selection**
-  — `{ repo, ref, packages: [<top-level>] }` (e.g. `github-devloop`) — with `composed.deps`
-  expanded automatically into the `--package-root` set. No per-package versions, no dependency
+  — `{ repo, ref, packages: [<top-level>] }` (e.g. `github-devloop`) — with `fkst.toml`
+  `[event_deps]` expanded automatically into the `--package-root` set. No per-package versions, no dependency
   solver, no second manifest.
 
 - **D3 — reuse, do not duplicate.** Generalize the existing `substrate_ref.lua` auto-bump from
   "engine pin only" into **one multi-upstream bump mechanism** (engine pin + package pin). Do not
-  build a second installer competing with `init-package-repo`; do not make the engine read
-  `composed.deps` as a resolver unless the substrate contract is explicitly changed.
+  build a second installer competing with `init-package-repo`; do not make the engine read package
+  composition as a resolver unless the substrate contract is explicitly changed.
 
 - **D4 — upgrade is regenerate + bump + gate.** Tooling upgrades stay engine-owned via re-running
   `init-package-repo` (idempotent); pins advance via bump PRs; CI re-fetches at the new pin and
@@ -123,7 +123,7 @@ by D2.
    → builds the engine BIN into cache (existing); clones `fkst-packages@manifest.ref` → exposes its
    `packages/` in cache (new).
 3. `run.sh supervise` resolves the manifest's top-level `packages` + their transitive
-   `composed.deps` into the repeated `--package-root <cache>/packages/<pkg>` args and supervises
+   `fkst.toml` `[event_deps]` into the repeated `--package-root <cache>/packages/<pkg>` args and supervises
    `FKST_GITHUB_REPO` = the host repo. (In the dogfood today this `--package-root` resolution is
    the manual step done by hand.)
 
@@ -179,8 +179,9 @@ shell script, not Rust. Net: the bulk of SP0/SP1 is substrate work; the auto-bum
 - **No sibling-clone-as-source-of-truth** — the host must not depend on a co-located fkst-packages
   checkout on the same disk (the dogfood's manual `--package-root` to `~/fkst-packages` is a
   developer convenience, not the install contract).
-- **No engine-side `composed.deps` resolver** unless the substrate contract is explicitly extended;
-  `composed.deps` expansion lives in the generated `run.sh`, not in the engine binary.
+- **No engine-side package-composition resolver** unless the substrate contract is explicitly extended;
+  `[event_deps]` expansion via the manifest CLI lives in the generated `run.sh`, not as an engine
+  scheduling resolver.
 
 ---
 
@@ -191,7 +192,8 @@ This is too large for one implementation plan and spans repos. Decompose + seque
 - **SP0 (precondition, substrate)** — unify the ref-surface to a single canonical
   `.fkst/substrate-ref`; migrate `init-package-repo`, CI template, `fkst-website`. Blocks SP1.
 - **SP1 (substrate)** — `init-package-repo` writes `packages.manifest`; `bin_bootstrap.sh` fetches
-  the package source by pin to cache; `run.sh` resolves manifest + `composed.deps` → `--package-root`.
+  the package source by pin to cache; `run.sh` resolves manifest + `fkst.toml` `[event_deps]`
+  via the manifest CLI → `--package-root`.
 - **SP2 (fkst-packages, this repo)** — generalize `substrate_ref.lua` → multi-upstream auto-bump
   with a per-edge config table (engine + packages edges). The actionable in-repo deliverable.
 - **SP3 (substrate CI template)** — package-pin bump PRs gated by composed conformance at the new pin.
@@ -204,7 +206,7 @@ becomes live once SP1 ships `packages.manifest`. The first fkst-substrate propos
 ## 9. Open questions
 
 - **Q1 — manifest serialization**: single-line `ChronoAIProject/fkst-packages@<sha> github-devloop`
-  vs a 3-line key/value vs reuse `composed.deps` file shape. (Semantics fixed by D2; form open.)
+  vs a 3-line key/value. (Semantics fixed by D2; form open.)
 - **Q2 — canonical ref location for SP0**: confirm `.fkst/substrate-ref` (inside `.fkst/`) as the
   single home, and whether `packages.manifest` sits beside it as `.fkst/packages.manifest`.
 - **Q3 — multi-package hosts**: D2 supports a `packages` list > 1; do we need that now, or start

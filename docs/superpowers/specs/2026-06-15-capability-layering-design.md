@@ -90,7 +90,7 @@ The full per-surface manifest (every department, raiser, core module, script acr
 3. **`rollup_scan` = Plane 2 + diagnosis hook.** Rollup policy is topology-specific; `rollup_scan:173` may file a repair issue via `rollup_health`.
 4. **`github-proxy` is a shared adapter that currently leaks devloop knowledge** (`current_devloop_state`, `fkst-dev:*` label colors/guards, PR marker guards) — those leaks must move out of the shared adapter.
 5. **Two doctors, one name.** `scripts/doctor.sh` = host preflight; `github-devloop/departments/doctor` = in-system saga/liveness doctor. Rename by concern in docs/CLI.
-6. **Keep `github-devloop` composed.** It genuinely consumes/produces `github-proxy.*` and `consensus.*` (`composed.deps:1-2`); flattening it would duplicate the adapter + judgment engine and violate the composed-package doctrine. The fix is in-package capability decomposition, **not** flattening.
+6. **Keep `github-devloop` composed.** It genuinely consumes/produces `github-proxy.*` and `consensus.*` (`fkst.toml` `[event_deps]`); flattening it would duplicate the adapter + judgment engine and violate the composed-package doctrine. The fix is in-package capability decomposition, **not** flattening.
 
 ## 6. Staged remediation / 分阶段计划
 

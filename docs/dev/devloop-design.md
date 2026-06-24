@@ -7,7 +7,7 @@ issue/PR 为状态载体。本方案经 sshx thinking triplet（minimal/structur
 
 ## 1. 架构总览
 
-- 新增 GitHub-aware **composed 包 `github-devloop`**（`composed.deps: github-proxy, consensus`），把现有
+- 新增 GitHub-aware **composed 包 `github-devloop`**（`fkst.toml` `[event_deps]` packages: `github-proxy`, `consensus`），把现有
   `consensus` 引擎编排成 issue → 实施 → PR → merge 的自主开发循环。
 - **GitHub/git 是唯一状态源（doctrine）**：
   - GitHub 是 **eventually-consistent authenticated fact source**，不是 strong-consistency KV；

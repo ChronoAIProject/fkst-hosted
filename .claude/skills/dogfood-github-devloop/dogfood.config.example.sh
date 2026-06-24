@@ -44,9 +44,9 @@
 # idle-detector/archaudit) now lives in dogfood.sh so every host stays consistent — you do NOT set it
 # here unless THIS host genuinely differs. Precedence: env DEVLOOP_PKGS > this file > the dogfood.sh default.
 #   WHERE TO LOOK (what packages exist + each one's role): PKGSRC/packages/<pkg>/ — `fkst.toml` gives
-#     its `kind` (package | package.composed + composed.deps); `departments/<d>/main.lua` gives each
-#     dept's `consumes`/`produces` (its event contract). That is the source of truth.
-#   CO-RUN RULE (is a package safe to add to a platform supervise?): the supervise RUNS packages
+#     its `kind` (package | package.composed) and `[event_deps]`; `departments/<d>/main.lua` gives each
+#     dept's `consumes`/`produces` (its event contract). That is the source of truth, not this list.
+#   CO-RUN RULE (is a package safe to add to THIS platform supervise?): the supervise RUNS packages
 #     (raisers fire), so an added agent must NOT contend with github-devloop for the same issues —
 #     derive it from the consume surface. An issue-PRODUCER (consumes a non-issue signal — a cron tick,
 #     system_idle — and produces github-proxy issue/comment requests) co-runs SAFELY: it only FILES

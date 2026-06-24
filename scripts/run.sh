@@ -2,16 +2,9 @@
 # Generic dev runner for fkst packages.
 #
 #   scripts/run.sh test [-v|--verbose] [package]
-#       Run fkst-framework --self-test once, then conformance + test for flat
-#       packages. Composed packages skip single-package conformance and still
-#       run tests. Full test also runs composed graph conformance. This is the
-#       single CI and local test entrypoint. FKST_RUNTIME_ROOT and
-#       FKST_DURABLE_ROOT are overridden with fresh temp roots, and
-#       FKST_GITHUB_WRITE is cleared, so local runs predict CI.
-#       By default only failure-relevant lines are printed (the per-test
-#       --report-json drives the tally and G5 coverage independently of stdout,
-#       so filtering stdout is safe). Pass -v/--verbose or set FKST_TEST_VERBOSE=1
-#       to stream the full per-test department logs.
+#       Run self-test, flat package conformance, package tests, and composed
+#       graph conformance. Tests use fresh runtime/durable roots and keep only
+#       failure-relevant lines unless -v/--verbose or FKST_TEST_VERBOSE=1 is set.
 #
 #   scripts/run.sh check
 #       Run hermetic repository checks only. Does not resolve or execute BIN.
@@ -31,10 +24,8 @@
 #       unavailable here and need fkst-framework doctor support.
 #
 #   scripts/run.sh board [--refresh] [--ttl seconds] [--stall seconds]
-#       Render the local github-devloop observability board from the engine's
-#       generic `observe --json` event/entity timeline and queue/DLQ state.
-#       Uses .fkst/run/board-cache.json by default as a TTL cache; --refresh forces
-#       a read from the engine. The cache is local only and never authoritative.
+#       Render the local github-devloop observability board from engine observe
+#       data, using a local non-authoritative TTL cache unless --refresh is set.
 #
 #   scripts/run.sh ratchet-migration-dry-run <891|892> [--slice-size N]
 #       Print a deterministic child issue body for a code-owned allowlist ratchet
@@ -45,18 +36,13 @@
 #       Print only the current HEALTHY / anomaly verdict from the board renderer.
 #
 #   scripts/run.sh test-composed
-#       Run only composed graph conformance for packages with composed.deps.
+#       Run only composed graph conformance for composed package graphs.
 #
 #   scripts/run.sh run <package> <department> [event-json]
 #   scripts/run.sh run <package> <department> --event-file <path>
-#       One-shot run a department against the REAL host environment via
-#       `fkst-framework run`: decode emitted RAISED events and dump the <RT>
-#       scratch tree. Generic across packages; pass package-specific config via
-#       env, e.g.:
-#         PACKAGE_CONFIG=value scripts/run.sh run example-package example_department
-#       Reuses $FKST_RUNTIME_ROOT if already set (run twice with the same one to
-#       observe dedup), else uses .fkst/run/runtime. Never sets FKST_GITHUB_WRITE, so
-#       a read-only inbound dogfood stays read-only.
+#       One-shot run a department through fkst-framework run, decode emitted
+#       RAISED events, and dump the runtime scratch tree. Never sets
+#       FKST_GITHUB_WRITE.
 #
 #   scripts/run.sh supervise --project-root <HOST> --platform-root <PKGSRC> --platform-packages "<names>" [--host-packages "<names>"] --durable-root <path> [--runtime-root <fresh-scratch-root>] [--restart]
 #       Start the real fkst-framework supervise event loop for one host. Runtime
@@ -95,6 +81,8 @@ DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 . "$ROOT/scripts/host_run.sh"
 # shellcheck source=scripts/host_entry.sh
 . "$ROOT/scripts/host_entry.sh"
+# shellcheck source=scripts/composed_manifest.sh
+. "$ROOT/scripts/composed_manifest.sh"
 
 resolve_bin() {
   if ! resolve_bin_contract "$ROOT" "bootstrap"; then
@@ -262,6 +250,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/host_run_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_run_equivalence_test.py" || fail=1
   python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
+  python3 -B "$ROOT/scripts/composed_manifest_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
   python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
@@ -526,17 +515,12 @@ run_quiet_keep() {
 load_composed_test_roots() { local script; script="$(bash "$ROOT/scripts/composed_test_graph_roots.sh" "$1" "$2")" || return 1; eval "$script"; }
 
 cmd_test() {
-  local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}"
+  local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}" rc is_pkg_composed
   local report_dir report_file coverage_report_dir coverage_dir coverage_file
   local coverage_artifacts=()
   local test_project_root test_pkg_args
-  # Lines worth surfacing when a package test fails: the engine's per-test FAIL
-  # line (anchored at column 0 so it does not catch mid-line tag=FAILURE in the
-  # info logs of tests that deliberately exercise error paths and still pass),
-  # the per-package tally, and panics. Everything else (PASS lines, LEVEL=info
-  # department logs, expected-error tracebacks) is suppressed unless verbose.
-  # For a real failure the FAIL line already carries the assertion/error reason;
-  # use -v for the full traceback.
+  # Keep failure-relevant lines only unless verbose; per-test FAIL is anchored so
+  # expected error-path logs containing tag=FAILURE do not match.
   local test_failure_filter='^FAIL |passed, [0-9]+ failed|panic'
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -578,7 +562,13 @@ cmd_test() {
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
     echo "=== $name ==="
     ran=$((ran + 1))
-    if [ -f "$pkg/composed.deps" ]; then
+    rc=0; is_composed "$pkg" || rc=$?
+    case "$rc" in
+      0) is_pkg_composed=1 ;;
+      1) is_pkg_composed=0 ;;
+      *) echo "error: failed to read package composition for $pkg" >&2; fail=$((fail + 1)); continue ;;
+    esac
+    if [ "$is_pkg_composed" -eq 1 ]; then
       echo "skip single-package conformance for composed package: $name"
     else
       if ! run_quiet_pass "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
@@ -591,7 +581,9 @@ cmd_test() {
     rm -rf "$coverage_dir"
     mkdir -p "$coverage_dir"
     test_project_root="$pkg"; test_pkg_args=(--package-root "$pkg")
-    if [ -f "$pkg/composed.deps" ] && ! load_composed_test_roots normal "$name"; then fail=$((fail + 1)); continue; fi
+    if [ "$is_pkg_composed" -eq 1 ]; then
+      if ! load_composed_test_roots normal "$name"; then fail=$((fail + 1)); continue; fi
+    fi
     # Default-quiet: keep only failure-relevant lines (the --report-json that
     # drives the tally and G5 coverage is unaffected). run_quiet_keep is called
     # from `if !` so the inner pipe never trips `set -e` on a failing package;
@@ -600,7 +592,7 @@ cmd_test() {
         "$BIN" test --project-root "$test_project_root" "${test_pkg_args[@]}" --report-json "$report_file" --coverage "$coverage_dir"; then
       fail=$((fail + 1))
     else
-      if [ -f "$pkg/composed.deps" ] && compgen -G "$pkg/tests/run_graph*_test.lua" >/dev/null; then
+      if [ "$is_pkg_composed" -eq 1 ] && compgen -G "$pkg/tests/run_graph*_test.lua" >/dev/null; then
         if ! load_composed_test_roots graph "$name" || ! run_quiet_keep "$test_failure_filter" \
             "$BIN" test --project-root "$test_project_root" "${test_pkg_args[@]}" --report-json "$report_dir/$name.graph.json" --coverage "$coverage_dir.graph"; then
           fail=$((fail + 1))
@@ -653,31 +645,38 @@ cmd_test() {
 }
 
 collect_composed_package() {
-  local name="$1" pkg dep
+  local name="$1" pkg dep deps rc
   pkg="$(package_root_for_name "$name")" || { echo "error: composed package dependency not found: $name" >&2; return 1; }
   [ -d "$pkg" ] || { echo "error: composed package dependency not found: $name" >&2; return 1; }
   case " ${COMPOSED_SEEN[*]-} " in
     *" $name "*) return 0 ;;
   esac
   COMPOSED_SEEN+=("$name")
-  if [ -f "$pkg/composed.deps" ]; then
-    while IFS= read -r dep || [ -n "$dep" ]; do
-      dep="${dep%%#*}"
-      dep="${dep#"${dep%%[![:space:]]*}"}"
-      dep="${dep%"${dep##*[![:space:]]}"}"
-      [ -n "$dep" ] || continue
-      collect_composed_package "$dep" || return 1
-    done < "$pkg/composed.deps"
-  fi
+  set +e; deps="$(composition_siblings_of "$pkg")"; rc=$?; set -e
+  case "$rc" in
+    0)
+      while IFS= read -r dep || [ -n "$dep" ]; do
+        [ -n "$dep" ] || continue
+        collect_composed_package "$dep" || return 1
+      done <<< "$deps"
+      ;;
+    1) return 0 ;;
+    *) echo "error: failed to read package composition for $pkg" >&2; return 1 ;;
+  esac
 }
 
 cmd_test_composed() {
-  local pkg name args project_root
+  local pkg name args project_root rc
   ensure_package_view
   COMPOSED_SEEN=()
   for pkg in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
     [ -d "$pkg" ] || continue
-    [ -f "$pkg/composed.deps" ] || continue
+    rc=0; is_composed "$pkg" || rc=$?
+    case "$rc" in
+      0) ;;
+      1) continue ;;
+      *) echo "error: failed to read package composition for $pkg" >&2; return 1 ;;
+    esac
     name="$(basename "$pkg")"
     collect_composed_package "$name" || return 1
   done

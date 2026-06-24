@@ -54,10 +54,12 @@ On idle, raise only this tiny payload:
 No queue contents, metrics, audit intent, repo info, persisted idle state, idle marker family, or durable idle lifecycle. `core.lua` may contain only the idle predicate and payload builder.
 
 ## Package 2: `archaudit`
-`archaudit` is composed. `composed.deps` is:
-```text
-idle-detector
-github-proxy
+`archaudit` is composed. Its `fkst.toml` declares:
+```toml
+kind = "package.composed"
+
+[event_deps]
+packages = ["idle-detector", "github-proxy"]
 ```
 
 Its only cross-package links are namespaced queues: consume `idle-detector.system_idle`, produce `github-proxy.github_issue_create_request`.
@@ -67,7 +69,7 @@ It is independent of `github-devloop`: it feeds ordinary issues into the existin
 Layout:
 ```text
 packages/archaudit/
-  composed.deps
+  fkst.toml
   core.lua
   departments/audit/main.lua
   tests/*_test.lua

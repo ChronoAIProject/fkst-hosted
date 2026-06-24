@@ -60,12 +60,12 @@ packages/<pkg>/
 Package-local shared code belongs at package root, usually `core.lua`, and is required as
 `require("core")`. Departments may split local responsibilities beside `main.lua` and require them
 as `require("departments.<dept>.<module>")`. Do not cross-require sibling packages. Cross-package
-composition must use event queues and, for composed packages, `composed.deps`.
+composition must use event queues and, for composed packages, `[event_deps]`.
 
 Flat packages must be self-contained, use their own bare queue names internally, avoid external
 package namespace references, and pass single-root conformance. Composed packages may reference
 sibling package queues such as `<pkg>.<queue>` and must declare the loaded siblings in
-`composed.deps`.
+`[event_deps]`.
 
 ## Source and Documentation Language
 

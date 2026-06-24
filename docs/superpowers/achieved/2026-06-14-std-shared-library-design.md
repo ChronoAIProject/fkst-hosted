@@ -44,7 +44,7 @@ later be promoted into the substrate with **zero rework**.
 
 **Non-goals.**
 - Not a manifest / dependency resolver / version solver (same restraint as
-  `composed.deps`).
+  `[event_deps]`).
 - Not peer cross-package coupling (see §4 — that stays forbidden).
 - Not a separate repository (see §6 — rejected with reasons).
 
@@ -76,7 +76,7 @@ prohibition into two distinct cases:
 | **hierarchical shared-lib require** (every pkg requires the repo's blessed `std`) | one-way, layered | **newly allowed** — like a language stdlib |
 
 Justification: the repo **already** accepts non-self-containment at the *event*
-level (composed packages, `composed.deps`, namespaced `pkg.queue`). A one-way
+level (composed packages, `[event_deps]`, namespaced `pkg.queue`). A one-way
 shared *code* lib is the symmetric analog at the code level. The prohibition
 becomes: *no peer cross-package require; a single blessed shared-lib root is
 allowed.*
@@ -136,7 +136,7 @@ symlink. `std/` lives once at repo root; each package gains one symlink.
   places on every owner's `package.path` by default (like Lua's built-in
   stdlib — no flag needed; a `--lib-root` primitive is only needed for *repo*-level
   Tier R sharing). Conformance gains a "lib dep" accounting (the code-level analog
-  of `composed.deps`). **Tier R stays in fkst-packages forever.**
+  of `[event_deps]`). **Tier R stays in fkst-packages forever.**
 - **Not a separate repo.** Tier S is *release-coupled* to the engine contract
   (`department{done,act}` means "the conforming way to author a department for
   *this* engine version"). A separate repo would create an engine ↔ stdlib ↔
@@ -154,7 +154,7 @@ between package-repos.
 
 A flat package that uses `std` is **no longer single-root self-contained** — it
 depends on the `std` root being projected in. This is the same compromise
-`composed.deps` already makes at the event level. Conformance handling:
+`[event_deps]` already makes at the event level. Conformance handling:
 - Flat single-root conformance runs against the **assembled** package root
   (which includes the projected `std/`), so `require("std.X")` resolves.
 - A new check (in `scripts/check_repo.py`, the existing G-gate home) asserts:

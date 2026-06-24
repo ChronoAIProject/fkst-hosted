@@ -5,6 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCAL_PACKAGES_ROOT="$ROOT/.fkst/local-packages"
 EXTERNAL_PACKAGES_ROOT="$ROOT/.fkst/packages"
 
+# shellcheck source=scripts/composed_manifest.sh
+. "$ROOT/scripts/composed_manifest.sh"
+
 usage() {
   echo "usage: scripts/composed_test_graph_roots.sh <normal|graph> <package>" >&2
 }
@@ -20,14 +23,6 @@ package_root_for_name() {
     return 0
   fi
   return 1
-}
-
-trim_dep_line() {
-  local dep="$1"
-  dep="${dep%%#*}"
-  dep="${dep#"${dep%%[![:space:]]*}"}"
-  dep="${dep%"${dep##*[![:space:]]}"}"
-  printf '%s\n' "$dep"
 }
 
 shell_quote() {
@@ -52,7 +47,7 @@ write_roots() {
 }
 
 collect_package() {
-  local name="$1" pkg dep
+  local name="$1" pkg dep deps rc
   pkg="$(package_root_for_name "$name")" || {
     echo "error: composed package dependency not found: $name" >&2
     return 1
@@ -61,13 +56,23 @@ collect_package() {
     *" $name "*) return 0 ;;
   esac
   seen+=("$name")
-  if [ -f "$pkg/composed.deps" ]; then
-    while IFS= read -r dep || [ -n "$dep" ]; do
-      dep="$(trim_dep_line "$dep")"
-      [ -n "$dep" ] || continue
-      collect_package "$dep" || return 1
-    done < "$pkg/composed.deps"
-  fi
+  set +e
+  deps="$(composition_siblings_of "$pkg")"
+  rc=$?
+  set -e
+  case "$rc" in
+    0)
+      while IFS= read -r dep || [ -n "$dep" ]; do
+        [ -n "$dep" ] || continue
+        collect_package "$dep" || return 1
+      done <<< "$deps"
+      ;;
+    1) return 0 ;;
+    *)
+      echo "error: failed to read package composition for $pkg" >&2
+      return 1
+      ;;
+  esac
 }
 
 copy_package() {

@@ -238,7 +238,7 @@ host copy).
 
 The ~8 github-devloop-hardcoded ratchets split three ways (don't preserve weak scans as the final form):
 - **Promote to engine schema/capability** (make illegal states unrepresentable; substrate work, not data):
-  produces ⊆ own+published-seam, namespaced-queue fidelity, event_deps/composed.deps shape, source_ref-on-
+  produces ⊆ own+published-seam, namespaced-queue fidelity, event_deps shape, source_ref-on-
   reliable shape, saga spec-head/restart-row + liveness budget/actionable-epoch/responsibility_signature,
   span-contract completeness, monotone-gate declarations. (Anything a graph/schema fact can make impossible.)
 - **Travel as package DATA** (pure static source-shape residue): e.g. G14 helper-clone, G-SPAN wording,

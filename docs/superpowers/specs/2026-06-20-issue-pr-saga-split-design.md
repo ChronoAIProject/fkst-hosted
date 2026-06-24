@@ -175,12 +175,12 @@ polling of the child PR state marker.
 ```
 
 - **`github-devloop`** (parent / issue saga) — composed package
-  (`composed.deps = github-proxy, consensus, github-devloop-pr`). Owns the issue
+  (`fkst.toml` `[event_deps]` packages: `github-proxy`, `consensus`, `github-devloop-pr`). Owns the issue
   transition table. While `awaiting-pr`, `observe_issue` reads `pr-delegation`,
   fetches the child PR, and CAS-resumes the issue only from a matching child
   terminal `state:v1`.
 - **`github-devloop-pr`** (child / PR saga) — composed package
-  (`composed.deps = github-proxy, consensus`). Owns the PR transition table and all
+  (`fkst.toml` `[event_deps]` packages: `github-proxy`, `consensus`). Owns the PR transition table and all
   PR-phase departments + PR-specific core. It advances the PR from `pr-open` to its
   terminal state on the PR comment stream; it does not push a terminal event back to
   the parent.

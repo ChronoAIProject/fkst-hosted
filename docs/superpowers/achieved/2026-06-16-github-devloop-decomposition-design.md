@@ -42,7 +42,7 @@ The accepted capability-layering design decided the product boundary. This spec 
 
 ### Option 1 - primary, actionable
 
-Keep `packages/github-devloop` as one composed package. `packages/github-devloop/composed.deps` stays exactly:
+Keep `packages/github-devloop` as one composed package. `packages/github-devloop/fkst.toml` keeps these `[event_deps]` packages:
 
 ```text
 github-proxy
@@ -404,7 +404,7 @@ Required guards:
 - Enforce the shrink-only physical split allowlist from §3. The guard must not require every module to live under `core/{foundation,lifecycle,ops,diagnosis}` in this spec.
 - Forbid new mixed top-level `packages/github-devloop/core/*.lua`. Existing cohesive top-level modules are allowed only with a single `@capability` owner comment, and adding a new top-level module requires proving it is single-concern.
 - Forbid relocation, deletion, or path rewrites of `core/queue.lua`, `core/merge_batch.lua`, `core/merge_gate.lua`, `core/merge_gate/reason_classes/*`, and `core/pr_safety.lua` by any slice generated from this spec.
-- Require `composed.deps` entries for any sibling namespaced queue reference.
+- Require `fkst.toml` `[event_deps]` entries for any sibling namespaced queue reference.
 - Keep the existing peer cross-package require ban.
 - Ban shim, compat, legacy, `.old`, and `_legacy` names in new files.
 - Keep existing line-limit, hidden-text, error-class, and source hygiene guards.
@@ -419,7 +419,7 @@ Future package:
 
 ```text
 packages/fkst-dogfood/
-  composed.deps
+  fkst.toml
   core.lua
   core/ops/*
   core/diagnosis/*
@@ -428,7 +428,7 @@ packages/fkst-dogfood/
   tests/*_test.lua
 ```
 
-`composed.deps` declares `github-devloop`. It also declares `github-proxy` and `consensus` only if `fkst-dogfood` directly references their queues. Do not use transitive dependency assumptions as an API.
+`fkst.toml` `[event_deps]` declares `github-devloop`. It also declares `github-proxy` and `consensus` only if `fkst-dogfood` directly references their queues. Do not use transitive dependency assumptions as an API.
 
 Owned surfaces after extraction:
 

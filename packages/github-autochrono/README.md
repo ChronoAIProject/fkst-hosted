@@ -2,7 +2,7 @@
 
 这是一个 **composed 包**（适配/wiring 层）,把 `github-proxy` 与 `autochrono` 组合起来,而两个包互不认识:`github-proxy` 只发布 GitHub 实体变化、消费评论请求;`autochrono` 只消费自己的 `issue` 契约、产出自己的 `reply` 契约。本包的 glue 部门是唯一同时引用 `github-proxy.*` 与 `autochrono.*` 队列的层,耦合集中于此。
 
-`composed.deps` 声明它组合的兄弟包(`github-proxy`、`autochrono`),仅供标准测试入口拼装组合 conformance 用,不是版本/依赖解析 manifest。因为 glue 部门引用跨包命名空间,本包不做单根 conformance(只在组合图里有效)。
+`fkst.toml` 的 `[event_deps]` 声明它组合的兄弟包(`github-proxy`、`autochrono`),作为标准测试入口拼装组合 conformance 的唯一来源。因为 glue 部门引用跨包命名空间,本包不做单根 conformance(只在组合图里有效)。
 
 链路:
 
@@ -21,7 +21,7 @@ github-proxy.github_entity_changed
 
 ```sh
 scripts/run.sh test            # 全包:flat 单根 + composed 跳单根+单测 + 组合 conformance
-scripts/run.sh test-composed   # 只跑组合图 conformance(按 composed.deps 递归 union github-proxy + autochrono + consensus + 本包)
+scripts/run.sh test-composed   # 只跑组合图 conformance(按 [event_deps] 递归 union github-proxy + autochrono + consensus + 本包)
 ```
 
 ⟦AI:FKST⟧
