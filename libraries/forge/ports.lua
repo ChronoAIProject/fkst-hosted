@@ -39,6 +39,10 @@ local function make_with_pipeline_restore(make_department, handles)
     _G.pipeline = previous_pipeline
     error(department_or_err, 0)
   end
+  local captured_pipeline = _G.pipeline
+  if type(department_or_err) == "table" and type(captured_pipeline) == "function" and captured_pipeline ~= previous_pipeline then
+    department_or_err.pipeline = captured_pipeline
+  end
   local ok_validate, validate_err = pcall(validate_department, department_or_err)
   if not ok_validate then
     _G.pipeline = previous_pipeline

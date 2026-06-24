@@ -47,6 +47,22 @@ return {
     _G.pipeline = before
   end,
 
+  test_install_captures_global_pipeline_side_effect_into_department_contract = function()
+    local side_effect_pipeline = function() return "side-effect" end
+    local returned_pipeline = function() return "returned" end
+    local before = _G.pipeline
+    _G.pipeline = function() return "before" end
+
+    local dept = ports.install(function()
+      _G.pipeline = side_effect_pipeline
+      return { spec = { consumes = { "q" } }, pipeline = returned_pipeline }
+    end)
+
+    assert(dept.pipeline == side_effect_pipeline, "install captures the side-effect pipeline")
+    assert(_G.pipeline == side_effect_pipeline, "install publishes the captured pipeline")
+    _G.pipeline = before
+  end,
+
   test_production_handles_builds_github_and_git_handles = function()
     local handles = ports.production_handles()
     assert(type(handles.github.read_issue) == "function", "github adapter handle")
