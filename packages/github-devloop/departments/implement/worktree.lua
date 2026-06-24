@@ -1,4 +1,5 @@
 local core = require("core")
+local exec_sync = exec_sync
 
 local M = {}
 
