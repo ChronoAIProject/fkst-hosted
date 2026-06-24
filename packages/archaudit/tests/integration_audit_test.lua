@@ -148,10 +148,20 @@ local function findings_json(count)
   return "[" .. table.concat(rows, ",") .. "]"
 end
 
+local function fake_git(calls)
+  return {
+    show_file = function(ref, path, timeout)
+      table.insert(calls, { ref = ref, path = path, timeout = timeout })
+      return { stdout = "line one\n", stderr = "", exit_code = 0 }
+    end,
+  }
+end
+
 local function fake_audit_department(label_stdout, extra_ports)
   local model = github_fake.model()
   local label_calls = {}
   local search_calls = {}
+  local git_calls = {}
   local github = github_fake.new(model)
   function github.issue_search(repo, query, fields, timeout)
     table.insert(search_calls, { repo = repo, query = query, fields = fields, timeout = timeout })
@@ -162,13 +172,14 @@ local function fake_audit_department(label_stdout, extra_ports)
     return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
   end
   t.eq(type(audit_main.make_department), "function")
-  local ports = { github = github, git = nil }
+  local ports = { github = github, git = fake_git(git_calls) }
   for key, value in pairs(extra_ports or {}) do
     ports[key] = value
   end
   local dept = audit_main.make_department(ports)
   dept.model = model
   dept.search_calls = search_calls
+  dept.git_calls = git_calls
   return dept, model, label_calls
 end
 
@@ -176,6 +187,7 @@ local function fake_audit_department_with_search(search_stdout, label_stdout, ex
   local model = github_fake.model()
   local label_calls = {}
   local search_calls = {}
+  local git_calls = {}
   local github = github_fake.new(model)
   function github.issue_search(repo, query, fields, timeout)
     table.insert(search_calls, { repo = repo, query = query, fields = fields, timeout = timeout })
@@ -185,18 +197,19 @@ local function fake_audit_department_with_search(search_stdout, label_stdout, ex
     table.insert(label_calls, { repo = repo, timeout = timeout })
     return { stdout = label_stdout or "[]", stderr = "", exit_code = 0 }
   end
-  local ports = { github = github, git = nil }
+  local ports = { github = github, git = fake_git(git_calls) }
   for key, value in pairs(extra_ports or {}) do
     ports[key] = value
   end
   local dept = audit_main.make_department(ports)
   dept.search_calls = search_calls
+  dept.git_calls = git_calls
   return dept, model, label_calls
 end
 
 local function fake_audit_department_with_github(github, extra_ports)
   t.eq(type(audit_main.make_department), "function")
-  local ports = { github = github, git = nil }
+  local ports = { github = github, git = fake_git({}) }
   for key, value in pairs(extra_ports or {}) do
     ports[key] = value
   end
@@ -360,6 +373,8 @@ return {
     local event = fresh_idle_event()
     local result = run_fake_failure_at(dept, event, core.iso_timestamp_epoch_seconds("2026-06-19T01:01:00Z"))
     t.is_true(tostring(result.failure.error):find("invalid file or line", 1, true) ~= nil)
+    t.eq(table.concat({ dept.git_calls[1].ref, dept.git_calls[1].path, tostring(dept.git_calls[1].timeout) }, "|"), "HEAD|packages/archaudit/core.lua|30")
+    t.eq(table.concat({ dept.git_calls[2].ref, dept.git_calls[2].path, tostring(dept.git_calls[2].timeout) }, "|"), "HEAD|packages/archaudit/core.lua|30")
     t.eq(#result.raises, 0)
   end,
 

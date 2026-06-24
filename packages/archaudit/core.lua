@@ -565,11 +565,21 @@ function M.parse_findings_json(stdout)
   return findings
 end
 
-function M.validate_finding(finding)
-  if type(finding) ~= "table" or not bounded(finding.file, file_limit) or type(finding.line) ~= "number" then
+function M.validate_finding_shape(finding)
+  return type(finding) == "table"
+    and bounded(finding.file, file_limit)
+    and type(finding.line) == "number"
+    and finding.line >= 1
+    and math.floor(finding.line) == finding.line
+    and bounded(finding.rule, rule_limit)
+    and bounded(finding.why, why_limit)
+    and bounded(finding.suggested_fix, fix_limit)
+end
+
+function M.finding_line_exists(finding, text)
+  if not M.validate_finding_shape(finding) then
     return false
   end
-  local text = file.read(finding.file)
   if type(text) ~= "string" or text == "" then
     return false
   end
@@ -581,6 +591,10 @@ function M.validate_finding(finding)
     end
   end
   return false
+end
+
+function M.validate_finding(finding)
+  return M.validate_finding_shape(finding)
 end
 
 function M.dedup_key(repo, finding)

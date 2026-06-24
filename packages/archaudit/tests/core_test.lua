@@ -211,23 +211,34 @@ return {
     t.eq(#parsed, 0)
   end,
 
-  test_validate_finding_checks_file_and_line = function()
+  test_validate_finding_is_pure_shape_validation = function()
     local finding = core.parse_findings_json(finding_json)[1]
+    t.eq(core.validate_finding_shape(finding), true)
     t.eq(core.validate_finding(finding), true)
     finding.line = 999999
-    t.eq(core.validate_finding(finding), false)
+    t.eq(core.validate_finding(finding), true)
     t.eq(core.validate_finding("not a finding"), false)
     local previous_read = file.read
     file.read = function(_path)
-      return ""
+      error("ambient file.read should not be used by core validation")
     end
     local ok, err = pcall(function()
-      t.eq(core.validate_finding({ file = "packages/archaudit/core.lua", line = 1 }), false)
+      t.eq(core.validate_finding(finding), true)
     end)
     file.read = previous_read
     if not ok then
       error(err, 0)
     end
+  end,
+
+  test_finding_line_exists_checks_provided_text = function()
+    local finding = core.parse_findings_json(finding_json)[1]
+    finding.line = 2
+    t.eq(core.finding_line_exists(finding, "first\nsecond"), true)
+    finding.line = 3
+    t.eq(core.finding_line_exists(finding, "first\nsecond"), false)
+    t.eq(core.finding_line_exists(finding, ""), false)
+    t.eq(core.finding_line_exists({ file = finding.file, line = 1 }, "first"), false)
   end,
 
   test_dedup_key_is_stable_and_bounded = function()
