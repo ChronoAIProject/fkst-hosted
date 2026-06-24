@@ -234,7 +234,6 @@ local function liveness_model(rows)
   local model = {
     restart_package_name = "archaudit",
     restart_lifecycle_states = {},
-    _label_by_state = {},
     restart_transition_table = function()
       return rows
     end,
@@ -245,9 +244,16 @@ local function liveness_model(rows)
       return {}
     end,
   }
+  local lifecycle_states = {}
+  function model.is_state(state)
+    return lifecycle_states[state] == true
+  end
   for _, row in ipairs(rows or {}) do
     table.insert(model.restart_lifecycle_states, row.from_state)
-    model._label_by_state[row.from_state] = true
+    lifecycle_states[row.from_state] = true
+    for _, next_state in ipairs(row.to_states or {}) do
+      lifecycle_states[next_state] = true
+    end
   end
   restart_liveness_contract.install(model)
   local shared = workflow_liveness_shared.install(model, { liveness_signal_producers = {} })
@@ -565,11 +571,21 @@ function M.parse_findings_json(stdout)
   return findings
 end
 
-function M.validate_finding(finding)
-  if type(finding) ~= "table" or not bounded(finding.file, file_limit) or type(finding.line) ~= "number" then
+function M.validate_finding_shape(finding)
+  return type(finding) == "table"
+    and bounded(finding.file, file_limit)
+    and type(finding.line) == "number"
+    and finding.line >= 1
+    and math.floor(finding.line) == finding.line
+    and bounded(finding.rule, rule_limit)
+    and bounded(finding.why, why_limit)
+    and bounded(finding.suggested_fix, fix_limit)
+end
+
+function M.finding_line_exists(finding, text)
+  if not M.validate_finding_shape(finding) then
     return false
   end
-  local text = file.read(finding.file)
   if type(text) ~= "string" or text == "" then
     return false
   end
@@ -581,6 +597,10 @@ function M.validate_finding(finding)
     end
   end
   return false
+end
+
+function M.validate_finding(finding)
+  return M.validate_finding_shape(finding)
 end
 
 function M.dedup_key(repo, finding)

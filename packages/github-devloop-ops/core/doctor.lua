@@ -35,7 +35,7 @@ end
 
 local function has_state_label(labels)
   for _, label in ipairs(labels or {}) do
-    if M._state_labels[tostring(label)] == true then
+    if M.is_state_label(label) then
       return true
     end
   end

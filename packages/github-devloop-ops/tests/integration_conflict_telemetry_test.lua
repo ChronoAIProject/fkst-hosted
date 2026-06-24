@@ -68,7 +68,7 @@ local function mock_empty_observe_lists()
     stderr = "",
     exit_code = 0,
   })
-  for _, state in ipairs(core._state_order) do
+  for _, state in ipairs(core.state_order()) do
     t.mock_command(core.gh_issue_list_observe_cmd("owner/repo", core.state_label(state), 1, true), {
       stdout = "[]\n",
       stderr = "",

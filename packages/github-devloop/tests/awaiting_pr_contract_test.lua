@@ -50,8 +50,8 @@ return {
         t.eq(has_value(row.to_states, "awaiting-pr"), row.from_state == "implementing", row.from_state)
       end
     end
-    t.eq(has_value(core._state_graph.implementing, "awaiting-pr"), true)
-    t.eq(has_value(core._state_graph.implementing, "pr-open"), false)
+    t.eq(has_value(core.state_successors("implementing"), "awaiting-pr"), true)
+    t.eq(has_value(core.state_successors("implementing"), "pr-open"), false)
   end,
 
   test_awaiting_pr_timeout_escalates_through_timeout_reconcile = function()
