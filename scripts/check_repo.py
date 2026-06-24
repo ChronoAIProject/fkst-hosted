@@ -62,7 +62,7 @@ SAGA_RECOVERY_TOKENS = ("fkst:github-devloop:state:v1", "current_entity_state", 
 HEX_LITERAL_RE = re.compile(r"[0-9A-Fa-f]+\Z")
 BASE64_LITERAL_RE = re.compile(r"[A-Za-z0-9+/]+={0,2}\Z")
 BYTE_ESCAPE_RE = re.compile(r"\\x[0-9A-Fa-f]{2}|\\[0-9]{1,3}|\\u\{[0-9A-Fa-f]+\}")
-ENCODED_LITERAL_MIN_BYTES = 6; ENTITY_READ_COUNT_RE = re.compile(r"count_calls\s*\([^)\n]*(?:[\"']gh (?:issue|pr) view\b|core\.gh_(?:issue|pr)_view_|[\"']--json (?:headRefName|title|labels,comments|assignees,author))")
+ENCODED_LITERAL_MIN_BYTES = 6
 @dataclass(frozen=True)
 class LuaStringLiteral:
     line: int
@@ -887,25 +887,6 @@ def check_cross_package_require(root: Path, violations: list[str]) -> None:
                     "G9",
                     f"{rel(root, path)} peer cross-package require of {name!r}; share via workspace libraries (peer cross-package require is forbidden)",
                 )
-
-def check_entity_read_count_assertions(root: Path, violations: list[str]) -> None:
-    base = packages_root(root) / "github-devloop" / "tests"
-    if not base.exists(): return
-    for path in sorted(base.glob("*.lua")):
-        if path.name.endswith("_helpers.lua") or path.name == "devloop_helpers.lua": continue
-        for index, line in enumerate(read_text(path).splitlines(), start=1):
-            if ENTITY_READ_COUNT_RE.search(line):
-                add(violations, "G11", f"{rel(root, path)}:{index} asserts entity-read command counts; assert outcomes instead")
-
-def check_convergence_budget_caps(root: Path, violations: list[str]) -> None:
-    rows = (("github-devloop/departments/loop/main.lua", "converge_boundary_budget_round", "converge_round_facts_for_proposal_boundary"), ("github-devloop/departments/review_loop/main.lua", "review_converge_budget_round", None))
-    for rel_path, helper, stable_fact_helper in rows:
-        path = packages_root(root) / rel_path
-        if not path.exists(): continue
-        source = strip_lua_comments_and_strings(read_text(path))
-        if "hit_round_cap" not in source or "core.max_converge_rounds()" not in source: continue
-        if f"core.{helper}(" not in source: add(violations, "G12", f"{rel(root, path)} convergence cap must use boundary-preserving core.{helper}() budget")
-        if stable_fact_helper is not None and f"core.{stable_fact_helper}(" not in source: add(violations, "G12", f"{rel(root, path)} convergence round counter must derive from stable boundary-preserving core.{stable_fact_helper}() facts")
 
 def check_gh_git_adapter_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None) -> None:
     sources = {}

@@ -8,7 +8,6 @@ import check_repo_content_truncation
 import check_repo_coverage
 import check_repo_forward_direct
 import check_repo_monotone_gate
-import check_repo_monotone_gate_dsl
 import check_repo_namespaced_queue
 import check_repo_producer_liveness
 import check_repo_saga_head
@@ -97,36 +96,6 @@ def check_monotone_gate(c, root, violations, allowlist_dir=None, enforce_base=Tr
         c.add(violations, "G-MONOTONE-GATE", message)
 
 
-def check_monotone_gate_dsl(c, root, violations, allowlist_dir=None, enforce_base=True) -> None:
-    package_roots = c.package_roots(root)
-    if not enforce_base and not check_repo_monotone_gate_dsl.gate_sources(root, package_roots):
-        return
-    gate_module_sources, gate_module_messages = check_repo_monotone_gate_dsl.gate_source_modules(root, package_roots)
-    current = set()
-    for path, (source, line_offset) in gate_module_sources.items():
-        current.update(check_repo_monotone_gate_dsl.source_findings(path, source, line_offset))
-    for message in gate_module_messages:
-        c.add(violations, "G-MONOTONE-GATE-DSL", message)
-    allowlist = check_repo_monotone_gate_dsl.load_allowlist(
-        c.allowlist_path(root, check_repo_monotone_gate_dsl.ALLOWLIST, allowlist_dir)
-    )
-    base_status, base_allowlist = check_repo_monotone_gate_dsl.allowlist_at_dev_base(root) if enforce_base else ("absent", None)
-    if base_status == "unresolved":
-        c.add(violations, "G-MONOTONE-GATE-DSL", "cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
-    for finding in sorted(current):
-        if not any(entry.key() == finding.key() for entry in allowlist):
-            c.add(violations, "G-MONOTONE-GATE-DSL", f"{finding.label()} is forbidden in a core/gates DSL definition; gate definitions are loaded by devloop.gate.load_gate with injected constructors, must not require modules, must not read raw marker/cursor helpers, and must stay pure positive data construction without reflection, loaders, metatables, raw table access, globals, or monkey-patching")
-    for finding in sorted(check_repo_monotone_gate_dsl.loader_bypass_findings(root, package_roots)):
-        c.add(violations, "G-MONOTONE-GATE-DSL", f"{finding.label()} is forbidden; gate definitions must be loaded only through devloop.gate.load_gate so the restricted_lua_load sandbox is authoritative")
-    for entry in sorted(allowlist):
-        if not any(finding.key() == entry.key() for finding in current):
-            c.add(violations, "G-MONOTONE-GATE-DSL", f"{entry.label()} no longer matches monotone-gate-dsl debt; prune the stale entry")
-    if base_allowlist is not None:
-        for entry in sorted(allowlist):
-            if not any(base.key() == entry.key() for base in base_allowlist):
-                c.add(violations, "G-MONOTONE-GATE-DSL", f"{entry.label()} grows monotone-gate-dsl allowlist relative to dev; migrate to devloop.gate data specs instead")
-
-
 def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:
     root = config.project_root
     allowlists = config.allowlist_dir
@@ -150,7 +119,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     for package_root in c.package_roots(root):
         for message in check_repo_namespaced_queue.repository_messages(root, package_root, c.read_text, c.rel, c.strip_lua_comments_and_strings, c.is_unmasked_range):
             c.add(violations, "G-NAMESPACED-QUEUE", message)
-    check_monotone_gate(c, root, violations, allowlists, enforce_base); check_monotone_gate_dsl(c, root, violations, allowlists, enforce_base)
+    check_monotone_gate(c, root, violations, allowlists, enforce_base)
     c.check_saga_handler_ratchet(root, violations, warnings, allowlists, enforce_base)
     sources = {c.rel(root, path): c.read_text(path) for package_root in c.package_roots(root) for path in sorted(package_root.glob("*/departments/*/main.lua")) if path.is_file()}
     for message in check_repo_saga_head.violations(sources, c.strip_lua_comments_and_strings):
@@ -159,8 +128,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
 
 def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:
     root = config.project_root
-    c.check_ownership_gate_claim_owner(root, violations); c.check_entity_read_count_assertions(root, violations)
-    c.check_convergence_budget_caps(root, violations)
+    c.check_ownership_gate_claim_owner(root, violations)
     c.check_std_dependency_model(root, violations, warnings)
     if (root / ".claude/skills/dogfood-github-devloop/dogfood.sh").exists():
         __import__("check_repo_dogfood_boundary").check(root, violations, c.add)

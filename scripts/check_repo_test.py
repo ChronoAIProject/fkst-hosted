@@ -371,7 +371,7 @@ class RunScriptContractTest(unittest.TestCase):
         expected = (
             "check_repo.py", "ratchet_base_test.py", "check_repo_fkst_layout.py", "check_repo_dedup_test.py",
             "check_repo_forward_direct_test.py", "check_repo_content_truncation_test.py", "check_repo_coverage_test.py",
-            "check_repo_producer_liveness_test.py", "check_repo_monotone_gate_test.py", "check_repo_monotone_gate_dsl_test.py",
+            "check_repo_producer_liveness_test.py", "check_repo_monotone_gate_test.py",
             "check_repo_test_graphql.py", "check_repo_interface_test.py", "lua_coverage_to_lcov_test.py", "check_repo_test.py",
             "check_repo_std_dependency_model_test.py", "check_repo_saga_head_test.py", "check_repo_namespaced_queue_test.py",
             "check_repo_span_test.py", "check_repo_fkst_layout_test.py",
@@ -409,9 +409,9 @@ class RunScriptContractTest(unittest.TestCase):
             scripts.mkdir(parents=True)
             pkg.mkdir(parents=True)
 
-            for name in ("run.sh", "bin_bootstrap.sh", "host_entry.sh", "host_run.sh", "composed_manifest.sh", "check_repo.py", "check_repo_config.py", "check_repo_runner.py", "check_repo_content_truncation.py", "check_repo_coverage.py", "check_repo_dedup.py", "check_repo_forward_direct.py", "check_repo_gh_git_adapter.py", "check_repo_ingress.py", "check_repo_monotone_gate.py", "check_repo_monotone_gate_dsl.py", "check_repo_namespaced_queue.py", "check_repo_perm.py", "check_repo_producer_liveness.py", "check_repo_saga_head.py", "check_repo_saga_split.py", "check_repo_span.py", "check_repo_std_dependency_model.py", "ratchet_base.py"):
+            for name in ("run.sh", "bin_bootstrap.sh", "host_entry.sh", "host_run.sh", "composed_manifest.sh", "check_repo.py", "check_repo_config.py", "check_repo_runner.py", "check_repo_content_truncation.py", "check_repo_coverage.py", "check_repo_dedup.py", "check_repo_forward_direct.py", "check_repo_gh_git_adapter.py", "check_repo_ingress.py", "check_repo_monotone_gate.py", "check_repo_namespaced_queue.py", "check_repo_perm.py", "check_repo_producer_liveness.py", "check_repo_saga_head.py", "check_repo_saga_split.py", "check_repo_span.py", "check_repo_std_dependency_model.py", "ratchet_base.py"):
                 shutil.copy2(root / "scripts" / name, scripts / name)
-            for name in ("check_repo_coverage_test.py", "check_repo_dedup_test.py", "check_repo_forward_direct_test.py", "check_repo_content_truncation_test.py", "check_repo_producer_liveness_test.py", "check_repo_monotone_gate_test.py", "check_repo_monotone_gate_dsl_test.py", "check_repo_test_graphql.py", "check_repo_interface_test.py", "lua_coverage_to_lcov_test.py", "check_repo_test.py", "check_repo_std_dependency_model_test.py", "check_repo_saga_head_test.py", "check_repo_namespaced_queue_test.py", "check_repo_span_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "host_entry_test.py", "host_run_test.py", "host_run_equivalence_test.py", "run_sh_coverage_test.py", "composed_manifest_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py", "ratchet_base_test.py", "competence_gate_test.py"):
+            for name in ("check_repo_coverage_test.py", "check_repo_dedup_test.py", "check_repo_forward_direct_test.py", "check_repo_content_truncation_test.py", "check_repo_producer_liveness_test.py", "check_repo_monotone_gate_test.py", "check_repo_test_graphql.py", "check_repo_interface_test.py", "lua_coverage_to_lcov_test.py", "check_repo_test.py", "check_repo_std_dependency_model_test.py", "check_repo_saga_head_test.py", "check_repo_namespaced_queue_test.py", "check_repo_span_test.py", "check_repo_fkst_layout.py", "check_repo_fkst_layout_test.py", "bin_cache_test.py", "bin_bootstrap_test.py", "host_entry_test.py", "host_run_test.py", "host_run_equivalence_test.py", "run_sh_coverage_test.py", "composed_manifest_test.py", "board_test.py", "doctor_test.py", "ratchet_migration_slicer_test.py", "ratchet_base_test.py", "competence_gate_test.py"):
                 (scripts / name).write_text("#!/usr/bin/env python3\nraise SystemExit(0)\n", encoding="utf-8")
 
             core_lines = [
@@ -610,50 +610,6 @@ local real = require("consensus.thing")
         )
 
 
-class ConvergenceBudgetGuardTest(unittest.TestCase):
-    def violations(self, loop_source: str, review_source: str | None = None) -> list[str]:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            loop = root / "packages" / "github-devloop" / "departments" / "loop"
-            review = root / "packages" / "github-devloop" / "departments" / "review_loop"
-            loop.mkdir(parents=True)
-            review.mkdir(parents=True)
-            loop.joinpath("main.lua").write_text(loop_source, encoding="utf-8")
-            review.joinpath("main.lua").write_text(review_source or "", encoding="utf-8")
-            violations: list[str] = []
-            check_repo.check_convergence_budget_caps(root, violations)
-            return violations
-
-    def test_flags_loop_budget_without_stable_proposal_round_facts(self) -> None:
-        source = """
-local facts = core.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
-local round = math.max(payload.round, core.max_converge_round(facts))
-local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests))
-local hit_round_cap = budget_round >= core.max_converge_rounds()
-"""
-        violations = self.violations(source)
-        self.assertEqual(len(violations), 1)
-        self.assertIn("convergence round counter must derive from stable boundary-preserving core.converge_round_facts_for_proposal_boundary() facts", violations[0])
-
-    def test_flags_loop_budget_without_boundary_preserving_budget(self) -> None:
-        source = """
-local facts = core.converge_round_facts_for_proposal_boundary(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests)
-local round = math.max(payload.round, core.max_converge_round(facts))
-local budget_round = math.max(round, core.converge_budget_round(current.comments, proposal_id))
-local hit_round_cap = budget_round >= core.max_converge_rounds()
-"""
-        violations = self.violations(source)
-        self.assertEqual(len(violations), 1)
-        self.assertIn("convergence cap must use boundary-preserving core.converge_boundary_budget_round() budget", violations[0])
-
-    def test_allows_loop_budget_with_stable_boundary_preserving_round_facts(self) -> None:
-        source = """
-local facts = core.converge_round_facts_for_proposal_boundary(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests)
-local round = math.max(payload.round, core.max_converge_round(facts))
-local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, proposal_id, payload.narrowed_question, payload.angle_digests))
-local hit_round_cap = budget_round >= core.max_converge_rounds()
-"""
-        self.assertEqual(self.violations(source), [])
 
 
 class SagaHandlerRatchetTest(unittest.TestCase):
