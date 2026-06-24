@@ -12,7 +12,6 @@ allowed_lib_deps = []
 
 [library]
 name = "contract"
-publishable = true
 stable_id = "fkst.library.contract"
 version = "workspace"
 

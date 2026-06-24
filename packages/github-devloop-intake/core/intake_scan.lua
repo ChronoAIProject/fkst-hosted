@@ -3,7 +3,7 @@ local S = {}
 function S.install(M)
 local function has_devloop_state_label(labels)
   for _, label in ipairs(labels or {}) do
-    if M._state_labels[tostring(label)] then
+    if M.is_state_label(label) then
       return true
     end
   end

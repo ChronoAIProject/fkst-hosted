@@ -579,8 +579,9 @@ return {
       ["impl-failed"] = true,
       blocked = true, merged = true,
     }
-    for state, next_states in pairs(core._state_graph) do
+    for state in pairs(core.lifecycle_state_set()) do
       if expected[state] then
+        local next_states = core.state_successors(state)
         local row = by_state[state]
         t.is_true(row ~= nil)
         for _, next_state in ipairs(row.to_states) do
