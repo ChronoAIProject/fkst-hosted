@@ -3,7 +3,7 @@ return {
   resolver = "merge-gate-wait",
   surface = "pr-comment-stream",
   version_form = "raw",
-  producer = "departments/merge/ci_wait.lua",
+  producer = "core/merge_ci_wait.lua",
   queue = "github-proxy.github_pr_comment_request",
   marker_source = "libraries/devloop/merge_gate_wait.lua",
   request_source = "libraries/devloop/merge_gate_wait.lua",
