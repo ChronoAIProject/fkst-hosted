@@ -13,13 +13,18 @@ Date: 2026-06-24 (revised; original 2026-06-23 draft + Round-1 in git history)
 Scope: fkst-substrate (engine validator + conformance runner + resolver), fkst-packages (rule-pack data +
 migration), host repos (fkst-website first; substrate-dogfood + future hosts).
 
-## 0. Verified current state (2026-06-24 — seek truth from facts)
+Superseded note (2026-06-25): Part A has since retired the side pin described in the pre-migration inventory.
+ADR 0002 is the canonical host layout and pin source of truth: the current platform pin is
+`fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock`, and host composition roots live at
+`.fkst/compose/package-roots`.
+
+## 0. Verified pre-Part-A state (2026-06-24 — seek truth from facts)
 
 Round-1's premise ("fkst-website has a COPIED check_repo.py") is STALE. The copy is gone, replaced by
 **fetch + a new lock**, and the defect evolved into a worse one. Verified by reading both repos:
 
-- fkst-website has NO `check_repo*.py` copy. `scripts/run.sh check` clones fkst-packages at the SHA in
-  `.fkst-packages-ref` into `.fkst/run/fkst-packages-conformance/` and runs THAT (B-private)
+- fkst-website had NO `check_repo*.py` copy. `scripts/run.sh check` cloned fkst-packages at the side-pin SHA
+  into `.fkst/run/fkst-packages-platform/` and ran THAT (B-private)
   `check_repo.py --project-root <website>`, then `$BIN conformance`.
 - A new cross-repo dependency mechanism exists: `fkst.workspace.toml` `[[external_sources]]`
   (`id=fkst-packages-platform`, git+rev, `libraries=["contract"]`) resolved into `fkst.lock`
@@ -29,14 +34,14 @@ Round-1's premise ("fkst-website has a COPIED check_repo.py") is STALE. The copy
   `1734c42e…` (contract library). They are not merely different: `45ef0324` is the commit that ADDS the
   host-facing ratchet interface (`scripts/check_repo_config.py` + `check_repo.py --project-root`), and
   `1734c42e` predates it (verified by the quality reviewer via `git show <rev>:scripts/check_repo_config.py`).
-  `scripts/run.sh:108` even prints "bump .fkst-packages-ref to a Track P commit with the shared host-repo
-  interface". So the conformance result is the accidental product of two clocks pointing at incompatible
+  `scripts/run.sh:108` even printed "bump .fkst-packages-ref to a Track P commit with the shared host-repo
+  interface". So the conformance result was the accidental product of two clocks pointing at incompatible
   commits.
-- `.fkst-packages-ref` (or its checkout) has FOUR consumers (verified):
+- `.fkst-packages-ref` (or its checkout) had FOUR consumers (verified):
   1. `scripts/run.sh` `run_shared_source_ratchets` → fetched `check_repo.py --project-root` (run.sh:103-124).
-  2. `scripts/run.sh` `build_engine_package_root_args` → resolves `.fkst/conformance/package-roots` entry
+  2. `scripts/run.sh` `build_engine_package_root_args` → resolves `.fkst/compose/package-roots` entry
      `fkst-packages:packages/idle-detector` from the SAME checkout (run.sh:127-155, 258).
-  3. `.github/workflows/ci.yml:26-35` independently reads `.fkst-packages-ref` and pre-clones the checkout
+  3. `.github/workflows/ci.yml:26-35` independently read `.fkst-packages-ref` and pre-cloned the checkout
      BEFORE `scripts/run.sh` runs.
   4. `scripts/run.sh:72-82` `FKST_PACKAGES_CONFORMANCE_ROOT` — a local-only override (a second checkout
      authority).
@@ -44,7 +49,7 @@ Round-1's premise ("fkst-website has a COPIED check_repo.py") is STALE. The copy
   ratchets (skipped for an external project-root). This is a compatibility PATCH, not a public API: the
   inverted-dependency ugly (a "generic" harness hardcoding one package's name) survives under a blanket.
 
-Verified current-state corrections to the earlier draft (do not assert these as already-solved):
+Verified pre-Part-A corrections to the earlier draft (do not assert these as already-solved):
 - The engine `fkst-framework conformance` command EXISTS, but `host_conformance.rs` registers only an
   `EngineRulePack` + layout/schema/graph checks (runtime-layout, project-layout, locale-catalogs,
   graph-scan, department-non-empty, schema-validation). It does **not** demonstrably run testkit/devloop
@@ -57,7 +62,7 @@ Verified current-state corrections to the earlier draft (do not assert these as 
   (`manifest_workspace.rs`, `manifest_external.rs`). Typed `conformance_packs` / `tools` / external
   `packages` are unimplemented resolver work.
 - The external `idle-detector` package is NOT a locked external artifact today; it is consumed by an
-  untyped `fkst-packages:*` path in `.fkst/conformance/package-roots`.
+  untyped `fkst-packages:*` path in `.fkst/compose/package-roots`.
 
 ## 1. The corrected thesis (Round-2 converged direction; the contract is still TBD — see Part B)
 
@@ -252,7 +257,7 @@ enforcement; a `migration/devloop-hardcoded-ratchets.inventory` shrinks N→0):
 2. **Slice 1 (mechanism + host-travel proof):** substrate `DeclarativeRulePack` v1 + typed `packages`/
    `conformance_packs` lock/resolver + expose checkout root + scope boundary + activation; `idle-detector`
    ships one real declarative rule (`max_line_count`); fkst-website declares `packages=["idle-detector"]`,
-   regenerates `fkst.lock`, drops the `.fkst/conformance/package-roots` entry for it, and runs
+   regenerates `fkst.lock`, drops the `.fkst/compose/package-roots` entry for it, and runs
    `fkst-framework conformance` so the SAME rule fires in fkst-packages (local self) AND fkst-website (locked
    external). Proves transport + symmetry across both repos.
 3. **Slice 2 (ownership-deletion proof):** port `github-devloop/G-FORWARD-DIRECT` from `scripts/check_repo*.py`

@@ -223,6 +223,8 @@ need host-stable runtime, durable, and rate-pool roots:
 The authoritative engine-package contract lives in `fkst-substrate` at
 `docs/package-repo-contract.md`.
 
+For host repo layout normalization, see [`docs/adr/0002-host-fkst-layout.md`](docs/adr/0002-host-fkst-layout.md).
+
 ## Contributing and Security
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution workflow, package conventions, language

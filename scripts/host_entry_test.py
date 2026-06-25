@@ -26,6 +26,7 @@ class HostEntryHarness:
         self.host = self.root / "host"
         self.platform = self.root / "platform"
         self.local_packages = self.host / ".fkst" / "local-packages"
+        (self.host / ".fkst" / "compose").mkdir(parents=True)
         self.config_dir = self.host / ".fkst" / "conformance"
         self.config_dir.mkdir(parents=True)
         for package in ("github-proxy", "idle-detector"):
@@ -51,7 +52,8 @@ class HostEntryHarness:
             '[workspace]\nmembers = [".fkst/local-packages/site-board"]\n',
             encoding="utf-8",
         )
-        (self.host / ".fkst-packages-ref").write_text("local-test-ref\n", encoding="utf-8")
+        compose = self.host / ".fkst" / "compose"
+        compose.mkdir(parents=True, exist_ok=True)
         allowlists = self.config_dir / "allowlists"
         allowlists.mkdir()
         (allowlists / "README").write_text("host allowlists fixture\n", encoding="utf-8")
@@ -82,7 +84,7 @@ class HostEntryTest(unittest.TestCase):
     def test_configured_package_roots_split_platform_and_host_names(self) -> None:
         h = HostEntryHarness()
         try:
-            (h.config_dir / "package-roots").write_text(
+            (h.host / ".fkst" / "compose" / "package-roots").write_text(
                 "\n".join(
                     [
                         ".fkst/local-packages/site-board",
@@ -145,7 +147,7 @@ class HostEntryTest(unittest.TestCase):
         durable = h.root / "durable"
         runtime = h.root / "runtime"
         try:
-            (h.config_dir / "package-roots").write_text(
+            (h.host / ".fkst" / "compose" / "package-roots").write_text(
                 ".fkst/local-packages/site-board\nfkst-packages:packages/github-proxy\n",
                 encoding="utf-8",
             )
@@ -202,7 +204,7 @@ class HostEntryTest(unittest.TestCase):
         fake_bin.chmod(0o755)
         try:
             h.write_host_metadata()
-            (h.config_dir / "package-roots").write_text(
+            (h.host / ".fkst" / "compose" / "package-roots").write_text(
                 ".fkst/local-packages/site-board\nfkst-packages:packages/idle-detector\n",
                 encoding="utf-8",
             )
@@ -331,7 +333,7 @@ class HostEntryTest(unittest.TestCase):
                 'kind = "package.composed"\nname = "site-board"\n\n[code]\nroot = "."\n',
                 encoding="utf-8",
             )
-            (h.config_dir / "package-roots").write_text(
+            (h.host / ".fkst" / "compose" / "package-roots").write_text(
                 ".fkst/local-packages/site-board\nfkst-packages:packages/idle-detector\n",
                 encoding="utf-8",
             )

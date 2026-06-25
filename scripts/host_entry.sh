@@ -168,7 +168,7 @@ host_entry_resolve_root_line() {
 }
 
 host_entry_load_configured_roots() {
-  local config="$HOST_ENTRY_HOST_ROOT/.fkst/conformance/package-roots" line
+  local config="$HOST_ENTRY_HOST_ROOT/.fkst/compose/package-roots" line
   [ -f "$config" ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     line="$(host_entry_trim "$line")"
@@ -427,7 +427,7 @@ host_entry_cmd_supervise() {
     host_names="$(host_entry_join_names "${HOST_ENTRY_HOST_PACKAGE_NAMES[@]}")"
   fi
   if [ -z "$platform_names" ]; then
-    echo "error: host supervise requires at least one fkst-packages:<path> package root in .fkst/conformance/package-roots" >&2
+    echo "error: host supervise requires at least one fkst-packages:<path> package root in .fkst/compose/package-roots" >&2
     return 1
   fi
 

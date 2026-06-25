@@ -6,6 +6,11 @@ Scope: fkst-packages `scripts/run.sh` host entry and docs. Host-side thin
 bootstrappers, starting with fkst-website, are follow-up changes in their own
 repos.
 
+Superseded note (2026-06-25): ADR 0002 is the canonical host layout source of truth. The current platform
+pin is `fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock`; older `.fkst-packages-ref` bootstrap
+references in this dated spec are historical. The canonical host composition roots path is
+`.fkst/compose/package-roots`.
+
 ## Problem
 
 Host repos currently copy launch and conformance plumbing that belongs to the
@@ -20,10 +25,11 @@ fkst-website's host runner re-implements `resolve_bin`,
 engine/package-root wiring, and turns a shared launch contract into per-host
 shell.
 
-The source convention already says host repos compose the platform through
-top-level `.fkst-<dependency>-ref` pins, host-owned packages under
-`.fkst/local-packages/`, host conformance config under `.fkst/conformance/`,
-and the one-host supervise contract in `scripts/host_run.sh`. The user doc
+The source convention now says host repos compose the platform through
+`fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock`, host-owned packages under
+`.fkst/local-packages/`, host composition roots under `.fkst/compose/package-roots`,
+host conformance allowlists under `.fkst/conformance/allowlists/`, and the one-host supervise contract in
+`scripts/host_run.sh`. The user doc
 [`docs/user/control-planes-and-host-repo-composition.md`](../../user/control-planes-and-host-repo-composition.md)
 defines the three-plane split: PRODUCT, HOST-RUN contract, and DOGFOOD-OPERATOR.
 This spec closes the remaining run.sh duplication.
@@ -37,7 +43,7 @@ A host repo's `scripts/run.sh` is a bootstrapper, not a runner:
 set -euo pipefail
 
 HOST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PIN="$(sed -n '1s/[[:space:]]//gp' "$HOST_ROOT/.fkst-packages-ref")"
+PIN="$(resolve_fkst_packages_platform_rev "$HOST_ROOT/fkst.workspace.toml" "$HOST_ROOT/fkst.lock")"
 SHARED="$(hydrate_or_reuse_pinned_fkst_packages "$HOST_ROOT" "$PIN")"
 exec "$SHARED/scripts/run.sh" host --host-root "$HOST_ROOT" -- "$@"
 ```
@@ -45,7 +51,7 @@ exec "$SHARED/scripts/run.sh" host --host-root "$HOST_ROOT" -- "$@"
 The host bootstrapper owns only the irreducible host-local glue:
 
 - discover its own repository root;
-- read the top-level `.fkst-packages-ref` full-SHA pin;
+- read the `fkst-packages-platform` full-SHA pin from `fkst.workspace.toml` and `fkst.lock`;
 - hydrate or reuse that pinned fkst-packages checkout;
 - `exec <shared>/scripts/run.sh host --host-root <HOST> -- <command>`.
 
@@ -77,7 +83,7 @@ into it. `--local-packages` points at the host's package directory.
   `scripts/check_repo.py --project-root <HOST>`, with
   `<HOST>/.fkst/conformance/allowlists` passed when present;
 - engine conformance using package roots from
-  `<HOST>/.fkst/conformance/package-roots` when present, otherwise discovered
+  `<HOST>/.fkst/compose/package-roots` when present, otherwise discovered
   host-local package roots under `<HOST>/packages/*` and
   `<HOST>/.fkst/local-packages/*`.
 
@@ -107,11 +113,11 @@ supervise, and the final `fkst-framework supervise` invocation.
 
 The next host repo follows these conventions:
 
-- top-level `.fkst-packages-ref` pins the fkst-packages checkout by full commit
-  SHA;
+- `fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock` pins the fkst-packages checkout by full commit
+  SHA under the `fkst-packages-platform` source identity;
 - host packages live under `.fkst/local-packages/<pkg>/`;
-- host conformance config lives under `.fkst/conformance/`;
-- `.fkst/conformance/package-roots` lists engine roots, one per line:
+- host conformance allowlists live under `.fkst/conformance/allowlists/`;
+- `.fkst/compose/package-roots` lists engine roots, one per line:
   relative paths resolve from `<HOST>`, absolute paths stay absolute, and
   `fkst-packages:<path>` resolves from `<PKGSRC>`.
 

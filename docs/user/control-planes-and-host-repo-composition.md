@@ -39,10 +39,12 @@ It does NOT vendor or copy the platform; it **composes** it and **pins** version
   HOST REPO (e.g. fkst-website)
   ├── <website source ...>                  # the repo's primary content
   ├── .fkst-substrate-ref                    # PIN: engine (fkst-substrate) SHA
-  ├── .fkst-packages-ref                      # PIN: platform packages (fkst-packages) SHA
+  ├── fkst.workspace.toml                     # declares fkst-packages-platform external source
+  ├── fkst.lock                               # locks the platform packages source and artifacts
   ├── .fkst/local-packages/<pkg>/            # the host's OWN package (e.g. site-board), composed into the graph
-  ├── .fkst/std/                              # host-local std, if any
-  └── .fkst/conformance/                      # host conformance config (waivers/roots), see §3
+  ├── .fkst/local-libraries/<lib>/           # host-owned workspace libraries, if any
+  ├── .fkst/compose/package-roots             # host composition roots, see ADR 0002
+  └── .fkst/conformance/allowlists/           # host conformance allowlists, see ADR 0002
         │ composes (pkg.queue limited names; no cross-require, no vendoring)
         ▼
   PLATFORM (from a pinned fkst-packages, supplied at dogfood time by a sibling PKGSRC clone)
@@ -69,19 +71,22 @@ the check_repo infrastructure. Three tiers by ownership:
 | **Shared source ratchets** | fkst-packages `scripts/check_repo.py --project-root <repo>` | the generic source ratchets run over ANY repo's tree (discovering packages from both `<root>/packages/*` and `<root>/.fkst/local-packages/*`); library-B-specific ratchets gate on own-repo |
 | **Engine-run Lua** | `libraries/testkit` | execution conformance (saga runtime, namespaced dispatch) via the engine in test mode |
 
-A host repo's `scripts/run.sh check` invokes the **shared** `check_repo.py` (from the fkst-packages checkout
-pinned by `.fkst-packages-ref`) plus `fkst-framework conformance`, providing ONLY its config (its package
-roots + its own waivers). It carries **no copied check_repo**. (fkst-website's former 610-line copy is gone.)
+A host repo's `scripts/run.sh check` invokes the **shared** `check_repo.py` from the fkst-packages checkout
+resolved by `fkst.workspace.toml` `[[external_sources]]` and `fkst.lock`, plus `fkst-framework conformance`,
+providing ONLY its config (its package roots + its own waivers). It carries **no copied check_repo**.
+(fkst-website's former 610-line copy is gone.)
 
 ## 4. Conventions a new host repo follows
 
-- **Cross-repo version pins are top-level `.fkst-<dependency>-ref` files**: `.fkst-substrate-ref` (engine),
-  `.fkst-packages-ref` (platform packages). Same shape, drift-safe; bump by writing a new SHA.
+- **The platform packages pin** is `fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock`, with
+  `fkst-packages-platform` as the source identity. `.fkst-substrate-ref` remains the engine toolchain pin when
+  a host uses a checked-out substrate build.
 - **The host's own package(s)** live under `.fkst/local-packages/<pkg>/`.
-- **Host conformance config** (waivers/allowlists, package roots, README) lives under `.fkst/conformance/` —
-  **not** a per-repo `.conformance/` directory, **not** a copied ratchet stack.
+- **Host composition roots** live under `.fkst/compose/package-roots`; host conformance allowlists stay under
+  `.fkst/conformance/allowlists/`. See [`docs/adr/0002-host-fkst-layout.md`](../adr/0002-host-fkst-layout.md).
 - **`.fkst/` is the host runtime/interface directory** (tracked + ignored mix): committed host-owned bits
-  (`local-packages`, `std`, `conformance`) plus gitignored engine scratch (`runtime/`, `durable/`).
+  (`local-packages`, `local-libraries`, `conformance`, `compose`) plus gitignored engine scratch
+  (`runtime/`, `durable/`).
 
 ## 5. The big picture
 
@@ -97,7 +102,7 @@ roots + its own waivers). It carries **no copied check_repo**. (fkst-website's f
                     │                         │
    DOGFOOD-OPERATOR (dogfood.sh) ─ coordinates N hosts, NO launch logic (ratchet-enforced)
                                               │
-   HOST REPO (fkst-website / substrate) ──────┘  ← composes the platform via .fkst-*-ref pins
+   HOST REPO (fkst-website / substrate) ──────┘  ← composes the platform via workspace external_sources + lock
                                                     + .fkst/local-packages/, gets conformance via the
                                                     shared tiers with ZERO rebuilt infrastructure
 ```
