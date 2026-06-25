@@ -30,7 +30,7 @@ return function(M, h)
     driving_queue = "devloop_ready",
     observe_surfaces = { issue = true, liveness_scan = true },
     output_obligation = obligation({ "state:v1 awaiting-pr", "state:v1 impl-failed" }, { "awaiting-pr", "impl-failed" }),
-    budget = budget(120, "A live implementation codex defers when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline, or when codex run liveness is indeterminate; only positively not-running status falls back to the marker-budget timeout path."),
+    budget = budget(120, "A live implementation codex defers when fkst.codex_runs() positively reports a matching run with an unexpired run-derived deadline, or when codex run liveness is transiently indeterminate; a permanently indeterminate signal is bounded by this row budget."),
     liveness_contract = liveness({
       mode = "live-defer",
       real_execution = {
@@ -42,6 +42,7 @@ return function(M, h)
         },
         status = "running",
         on_error = "defer",
+        indeterminate_timeout = "row-budget",
       },
     }),
     on_timeout = timeout("devloop_ready"),
