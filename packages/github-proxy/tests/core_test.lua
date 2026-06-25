@@ -299,9 +299,7 @@ return {
     t.eq(key, "github-proxy/issue/owner/repo/12")
   end,
 
-  test_entity_view_cache_key = function()
-    local key = core.entity_view_cache_key("owner/repo", "issue", 12, "2026-06-03T01:02:03Z")
-    t.eq(key, "github-proxy/view/owner/repo/issue/12/2026-06-03T01-02-03Z")
+  test_entity_view_helpers = function()
     t.eq(type(core.gh_issue_view_entity_cmd("owner/repo", 12)), "function")
     t.eq(type(core.gh_pr_view_entity_cmd("owner/repo", 7)), "function")
   end,

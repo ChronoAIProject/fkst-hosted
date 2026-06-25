@@ -94,7 +94,6 @@ local function raise_changed_item(repo, item)
         state = entity.state,
         labels = entity.labels,
         updated_at = entity.updated_at,
-        view_cache_key = core.entity_view_cache_key(repo, item.entity_type, entity.number, entity.updated_at),
         dedup_key = dedup_key,
         source = "gh",
         -- Durable-delivery: stable pointer so a reliable consumer can
