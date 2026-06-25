@@ -165,6 +165,62 @@ class BoardScriptTest(unittest.TestCase):
         self.assertEqual(buckets["unclassified"]["false_consensus_numerator"], 0)
         self.assertEqual(buckets["unclassified"]["false_consensus_denominator"], 0)
 
+    def test_avm_aggregation_detects_explicit_revert_pr_pairs(self) -> None:
+        observe = {
+            "autonomy_facts": [
+                {
+                    "schema": "github-devloop.autonomy-result.v1",
+                    "proposal_id": "github-devloop/issue/owner/repo/30",
+                    "pr_number": 40,
+                    "version": "v30",
+                    "head_sha": "abc",
+                    "task_class": "L2",
+                    "valid_autonomous_merge": "true",
+                    "codex_calls": 5,
+                    "rounds": 2,
+                    "gates": {"no_revert_reopen": "pass"},
+                    "merged_at": "2026-06-14T08:00:00Z",
+                }
+            ],
+            "recent_merged_prs": [
+                {"number": 40, "title": "Implement detector", "merged_at": "2026-06-14T08:00:00Z"},
+                {"number": 41, "title": 'Revert "Implement detector" (#40)', "body": "Reverts #40.", "merged_at": "2026-06-14T09:00:00Z"},
+            ],
+        }
+
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L2"]["false_consensus_numerator"], 1)
+        self.assertEqual(buckets["L2"]["false_consensus_denominator"], 1)
+        self.assertEqual(buckets["L2"]["revert_numerator"], 1)
+        self.assertEqual(buckets["L2"]["revert_denominator"], 1)
+
+    def test_avm_aggregation_requires_exact_revert_pr_reference(self) -> None:
+        observe = {
+            "autonomy_facts": [
+                {
+                    "schema": "github-devloop.autonomy-result.v1",
+                    "proposal_id": "github-devloop/issue/owner/repo/32",
+                    "pr_number": 12,
+                    "version": "v32",
+                    "head_sha": "abc",
+                    "task_class": "L2",
+                    "valid_autonomous_merge": "true",
+                    "gates": {"no_revert_reopen": "pass"},
+                    "merged_at": "2026-06-14T08:00:00Z",
+                }
+            ],
+            "recent_merged_prs": [
+                {"number": 12, "title": "Feature", "merged_at": "2026-06-14T08:00:00Z"},
+                {"number": 13, "title": "Revert unrelated change (#123)", "body": "Reverts #123.", "merged_at": "2026-06-14T09:00:00Z"},
+            ],
+        }
+
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L2"]["false_consensus_numerator"], 0)
+        self.assertEqual(buckets["L2"]["false_consensus_denominator"], 1)
+        self.assertEqual(buckets["L2"]["revert_numerator"], 0)
+        self.assertEqual(buckets["L2"]["revert_denominator"], 1)
+
     def test_refresh_fetches_observe_json_writes_cache_and_renders_stalls(self) -> None:
         h = BoardHarness(
             {
@@ -317,6 +373,38 @@ class BoardScriptTest(unittest.TestCase):
             )
             self.assertIn("- unclassified merges=1 AVM-rate=0/1 (0%) cost-per-AVM=unknown", result.stdout)
             self.assertNotIn("TOTAL", result.stdout)
+        finally:
+            h.close()
+
+    def test_board_lists_false_consensus_churn_pairs(self) -> None:
+        h = BoardHarness(
+            {
+                "autonomy_facts": [
+                    {
+                        "schema": "github-devloop.autonomy-result.v1",
+                        "proposal_id": "github-devloop/issue/owner/repo/31",
+                        "pr_number": 50,
+                        "version": "v31",
+                        "head_sha": "abc",
+                        "task_class": "L1",
+                        "valid_autonomous_merge": "true",
+                        "codex_calls": 4,
+                        "rounds": 1,
+                        "gates": {"no_revert_reopen": "pass"},
+                    }
+                ],
+                "recent_merged_prs": [
+                    {"number": 50, "title": "Feature", "merged_at": "2026-06-14T08:00:00Z"},
+                    {"number": 51, "title": "Revert Feature (#50)", "body": "Reverts #50.", "merged_at": "2026-06-14T09:00:00Z"},
+                ],
+            }
+        )
+        try:
+            result = h.run_board("--refresh")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("False consensus churn", result.stdout)
+            self.assertIn("PR #50 reverted-by PR #51 evidence=explicit-revert-pr", result.stdout)
+            self.assertIn("false-consensus-rate=1/1 (100%)", result.stdout)
         finally:
             h.close()
 

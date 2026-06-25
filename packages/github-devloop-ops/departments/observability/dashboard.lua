@@ -224,6 +224,24 @@ local function append_state_section(lines, title, state, by_state, now_seconds)
   append_entity_lines(lines, by_state[state] or {}, now_seconds)
 end
 
+local function false_consensus_pair_line(pair)
+  local reverted = tonumber(pair and pair.reverted_pr)
+  if reverted == nil then
+    return nil
+  end
+  if tonumber(pair.revert_pr) ~= nil then
+    return "- PR #" .. tostring(reverted)
+      .. " reverted-by PR #" .. tostring(pair.revert_pr)
+      .. " evidence=" .. tostring(pair.evidence or "explicit-revert-pr")
+  end
+  if tonumber(pair.issue_number) ~= nil then
+    return "- PR #" .. tostring(reverted)
+      .. " issue=#" .. tostring(pair.issue_number)
+      .. " evidence=" .. tostring(pair.evidence or "issue-reopened")
+  end
+  return nil
+end
+
 local function section(lines)
   return table.concat(lines, "\n")
 end
@@ -269,6 +287,7 @@ function core.render_observability_dashboard(args)
   local stalls = args and args.stalls or {}
   local state_gap_report = args and args.state_gap_report or {}
   local topology_mermaid = args and args.topology_mermaid or nil
+  local recent_merged_prs = args and args.recent_merged_prs or nil
   local now_seconds = args and args.now_seconds or now()
   local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds)
   local instance = core.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
@@ -325,8 +344,30 @@ function core.render_observability_dashboard(args)
 
   lines = {}
   table.insert(lines, "## AVM scoreboard by task level")
-  for _, bucket in ipairs(core.aggregate_avm_scoreboard(core.collect_avm_scoreboard_facts(list, now_seconds))) do
+  local avm_facts = core.collect_avm_scoreboard_facts(list, now_seconds, recent_merged_prs)
+  for _, bucket in ipairs(core.aggregate_avm_scoreboard(avm_facts)) do
     table.insert(lines, core.render_avm_scoreboard_bucket(bucket))
+  end
+  append_section(sections, lines)
+
+  lines = {}
+  table.insert(lines, "## False consensus churn")
+  local pairs = core.false_consensus_pairs(avm_facts)
+  if #pairs == 0 then
+    table.insert(lines, "- None")
+  else
+    local shown = 0
+    for _, pair in ipairs(pairs) do
+      if shown >= max_dashboard_section_items then
+        table.insert(lines, "- ... " .. tostring(#pairs - shown) .. " more")
+        break
+      end
+      local line = false_consensus_pair_line(pair)
+      if line ~= nil then
+        table.insert(lines, line)
+        shown = shown + 1
+      end
+    end
   end
   append_section(sections, lines)
 

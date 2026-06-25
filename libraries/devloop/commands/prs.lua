@@ -21,12 +21,22 @@ function S.install(M)
     end)
   end
 
+  function M.gh_pr_list_recent_merged(repo, limit, timeout)
+    return support.gh_result(function()
+      return support.github().pr_list_recent_merged(
+        repo,
+        validators.bounded_limit(limit, 30, 1, 100, "github-devloop: invalid recent merged PR list limit"),
+        timeout
+      )
+    end)
+  end
+
   function M.gh_pr_view_origin(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(
         repo,
         pr_number,
-        "headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus",
+        "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus",
         timeout
       )
     end)

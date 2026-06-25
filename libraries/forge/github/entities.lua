@@ -51,6 +51,10 @@ local function pr_list_cli_argv(repo, state, limit, fields)
   }
 end
 
+local function pr_list_recent_merged_argv(repo, limit)
+  return pr_list_cli_argv(repo, "merged", limit, "number,title,mergedAt,headRefOid")
+end
+
 local function pr_list_argv(repo)
   return { "gh", "api", "--paginate", "--slurp", "repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100" }
 end
@@ -345,6 +349,10 @@ function M.install(handle)
 
   function handle.pr_list_cli(repo, state, limit, fields, timeout)
     return handle._exec(pr_list_cli_argv(repo, state, limit, fields), timeout, "gh pr list")
+  end
+
+  function handle.pr_list_recent_merged(repo, limit, timeout)
+    return handle._exec(pr_list_recent_merged_argv(repo, limit), timeout, "gh pr list recent merged")
   end
 
   function handle.pr_list_board_digest(repo, timeout)

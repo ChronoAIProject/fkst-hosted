@@ -43,6 +43,7 @@ function core.observe_devloop_entities(event)
   local limits = core.observability_limits()
   local deadline = core.observability_deadline(now(), limits)
   local observed = core.collect_observability_entities(event, repo, limits, deadline)
+  local recent_merged_prs = core.collect_recent_merged_prs(repo, limits, deadline)
 
   core.reap_orphan_prs(repo, observed.list)
   local queue_starvation = core.observe_queue_starvation(repo, observed.list, limits, deadline, observed.now_seconds)
@@ -52,6 +53,7 @@ function core.observe_devloop_entities(event)
     counts = observed.counts,
     stalls = observed.stalls,
     state_gap_report = observed.state_gap_report,
+    recent_merged_prs = recent_merged_prs,
     now_seconds = observed.now_seconds,
     topology_mermaid = core.observability_topology_mermaid(),
   })
