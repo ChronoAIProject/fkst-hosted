@@ -80,6 +80,11 @@ local function mock_empty_observe_lists()
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command(core.gh_pr_list_recent_merged_cmd("owner/repo", core.observability_limits().entity_cap), {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function count_calls(needle)

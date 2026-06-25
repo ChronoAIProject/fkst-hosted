@@ -121,6 +121,11 @@ local function mock_pr_list(items)
   if #rendered >= 100 then
     t.mock_command(observe_pr_list_command(2), { stdout = "[]\n", stderr = "", exit_code = 0 })
   end
+  t.mock_command(core.gh_pr_list_recent_merged_cmd("owner/repo", core.observability_limits().entity_cap), {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function render_assignees(logins)

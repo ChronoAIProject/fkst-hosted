@@ -32,6 +32,26 @@ function M.parse_pr_list_merge_queue(stdout)
   return M.parse_pr_list_head_base(stdout)
 end
 
+function M.parse_pr_list_recent_merged(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local prs = {}
+  if type(decoded) ~= "table" then
+    return prs
+  end
+  each_paginated_item(decoded, function(pr)
+    local number = type(pr) == "table" and tonumber(pr.number) or nil
+    if number ~= nil then
+      table.insert(prs, {
+        number = number,
+        title = tostring(pr.title or ""),
+        merged_at = pr.mergedAt or pr.merged_at,
+        head_sha = pr.headRefOid or pr.head_ref_oid,
+      })
+    end
+  end)
+  return prs
+end
+
 local function repository_name_with_owner(head_repository, head_repository_owner)
   if type(head_repository) == "string" then
     return head_repository
@@ -71,6 +91,8 @@ function M.parse_pr_view_origin(stdout)
     is_cross_repository = decoded.is_cross_repository
   end
   return {
+    title = decoded.title ~= nil and tostring(decoded.title) or "",
+    body = decoded.body ~= nil and tostring(decoded.body) or "",
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
     head_sha = decoded.headRefOid or decoded.head_ref_oid,
     base_ref_name = decoded.baseRefName or decoded.base_ref_name,

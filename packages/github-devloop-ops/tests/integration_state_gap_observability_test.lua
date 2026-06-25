@@ -106,6 +106,11 @@ local function mock_pr_list(numbers)
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command(core.gh_pr_list_recent_merged_cmd("owner/repo", core.observability_limits().entity_cap), {
+    stdout = "[]\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_issue_view(comments, number)

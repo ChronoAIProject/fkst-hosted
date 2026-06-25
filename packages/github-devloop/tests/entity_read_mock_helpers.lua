@@ -269,7 +269,7 @@ local issue_view_selectors = {
   "title,labels,comments,state,assignees",
 }
 
-local pr_origin_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
+local pr_origin_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_origin_legacy_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_head_selector = "headRefName"
 local pr_fix_selector = "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
