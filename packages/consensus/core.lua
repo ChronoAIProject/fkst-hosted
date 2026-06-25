@@ -489,6 +489,18 @@ local function review_gap_list(angle_results)
   return gaps
 end
 
+function M.all_angles_succeeded(angle_results)
+  if type(angle_results) ~= "table" or #angle_results == 0 then
+    return false
+  end
+  for _, result in ipairs(angle_results) do
+    if type(result) ~= "table" or result.exit_code ~= 0 then
+      return false
+    end
+  end
+  return true
+end
+
 function M.aggregate(angle_results, verdict_mode)
   if type(angle_results) ~= "table" or #angle_results == 0 then
     return nil

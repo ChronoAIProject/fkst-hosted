@@ -76,7 +76,6 @@ local function issue(extra)
     updated_at = "2026-06-03T01:02:03Z",
     labels = { "fkst-dev:enabled" },
     dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
-    view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-03Z",
     source_ref = source_ref(),
   }
   for key, field in pairs(extra or {}) do
