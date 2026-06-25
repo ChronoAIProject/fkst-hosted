@@ -219,6 +219,17 @@ class OwnershipGateClaimOwnerGuardTest(unittest.TestCase):
     def violation_lines(self, source: str) -> list[int]:
         return check_repo.ownership_gate_defaulting_bot_login_lines(source)
 
+    def repository_violations(self, claims_source: str | None) -> list[str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            if claims_source is not None:
+                path = root / "libraries/devloop/claims.lua"
+                path.parent.mkdir(parents=True)
+                path.write_text(claims_source, encoding="utf-8")
+            violations: list[str] = []
+            check_repo.check_ownership_gate_claim_owner(root, violations)
+            return violations
+
     def test_flags_defaulting_getter_inside_pr_review_ownership_gate(self) -> None:
         source = """
 function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
@@ -240,6 +251,31 @@ function M.trusted_bot_login()
 end
 """
         self.assertEqual(self.violation_lines(source), [])
+
+    def test_repository_check_reads_library_claims_path(self) -> None:
+        violations = self.repository_violations("""
+function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
+  local owner = M.trusted_bot_login()
+  return M.is_self_owned_issue(current_issue, owner)
+end
+""")
+        self.assertEqual(len(violations), 1)
+        self.assertIn("libraries/devloop/claims.lua:3", violations[0])
+        self.assertIn("trusted_bot_login()", violations[0])
+
+    def test_repository_check_passes_canonical_claim_owner(self) -> None:
+        self.assertEqual(self.repository_violations("""
+function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
+  local owner = M.claim_owner()
+  return M.is_self_owned_issue(current_issue, owner)
+end
+"""), [])
+
+    def test_repository_check_fails_when_claims_target_missing(self) -> None:
+        violations = self.repository_violations(None)
+        self.assertEqual(violations, [
+            "G8: libraries/devloop/claims.lua is missing; ownership gate guard cannot run"
+        ])
 
     def test_ignores_comments_and_other_functions(self) -> None:
         source = """
