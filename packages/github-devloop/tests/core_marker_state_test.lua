@@ -808,6 +808,21 @@ return {
     t.eq(current.state, "thinking")
     t.eq(current.version, "v1")
   end,
+  test_current_state_ignores_authorless_state_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    core.configure_trusted_bot_login(nil)
+    local parsed = core.parse_issue_view_state('{"comments":[{"body":"'
+      .. core.state_marker(proposal_id, "ready", "v2"):gsub('"', '\\"')
+      .. '","author":null},{"body":"'
+      .. core.state_marker(proposal_id, "thinking", "v1"):gsub('"', '\\"')
+      .. '","author":{"login":"'
+      .. core.trusted_bot_login()
+      .. '"}}]}')
+
+    local current = core.current_state(parsed.comments, proposal_id)
+    t.eq(current.state, "thinking")
+    t.eq(current.version, "v1")
+  end,
   test_untrusted_comment_text_neutralizes_fkst_markers = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local forged = core.state_marker(proposal_id, "blocked", "consensus:github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z")
