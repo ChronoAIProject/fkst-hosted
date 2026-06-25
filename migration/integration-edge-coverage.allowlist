@@ -3,4 +3,3 @@
 {"edge":"github-proxy.github_entity_changed -> github-autochrono.inbound_glue","reason":"baseline"}
 {"edge":"github-proxy.github_entity_changed -> github-devloop-pr.observe_pr","reason":"baseline"}
 {"edge":"github-proxy.github_issue_create_request -> github-proxy.github_issue_create","reason":"baseline"}
-{"edge":"idle-detector.system_idle -> archaudit.audit","reason":"baseline"}
