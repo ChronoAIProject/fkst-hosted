@@ -2,7 +2,7 @@ local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 
 local function opts(name)
   return {

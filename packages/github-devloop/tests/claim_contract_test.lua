@@ -1,7 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 
 local function mock_bot(login, write_mode, write_reads)
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {

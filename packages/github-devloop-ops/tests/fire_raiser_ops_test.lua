@@ -146,7 +146,6 @@ local function setup_workspace(name, child_test)
   setup_stub_siblings(root)
   run_command("mkdir -p " .. shell_quote(root .. "/packages/github-devloop-ops/tests"))
   copy_test_helper(source, root, "github-devloop-ops", "entity_read_mock_helpers.lua")
-  copy_test_helper(source, root, "github-devloop-ops", "gh_argv_mock_helpers.lua")
   write_file(root .. "/packages/github-devloop-ops/tests/fire_raiser_child_test.lua", child_test)
   return root
 end
@@ -186,7 +185,7 @@ local function fire_raiser_child(body)
 local t = fkst.test
 local core = require("core")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 gh_argv.install(t, core)
 
 local function opts(name)
