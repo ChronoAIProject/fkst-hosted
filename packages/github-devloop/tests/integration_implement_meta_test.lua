@@ -615,6 +615,25 @@ return {
     t.eq(count_calls("git -C"), 0)
   end,
 
+  test_implement_ready_with_live_attempt_without_visible_markers_skips_redelivery = function()
+    local event = ready()
+    local run_opts = opts("implement-live-run-no-marker-redelivery")
+    local branch = deterministic_branch_for(event)
+    codex_status.seed_implement_codex_run(run_opts, event.proposal_id, event.dedup_key)
+    mock_issue_implement({ "fkst-dev:ready" }, {
+      core.state_marker(event.proposal_id, "ready", event.dedup_key),
+    })
+    mock_existing_dirty_implement_worktree_reuse(nil, branch, "1")
+    mock_implement_codex(0, "duplicate implementation should not spawn")
+
+    local result = run_implement(event, run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("reset --hard"), 0)
+    t.eq(count_calls("clean -fd"), 0)
+  end,
+
   test_implement_skips_foreign_proposal_before_gh_view = function()
     local result = run_implement(ready({
       proposal_id = "autochrono/issue/owner/repo/42",
