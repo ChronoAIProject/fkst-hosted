@@ -233,19 +233,21 @@ local comparable_transition_base
 
 local function version_primary_key(version)
   if version == nil then
-    return ""
+    return 0, ""
   end
   local base = comparable_transition_base(version)
   local updated_at = M.version_updated_at(base)
   if updated_at ~= "" then
-    return updated_at
+    return 1, updated_at
   end
-  return source_ref.version_order_key(M.safe_version_segment(base))
+  return 0, source_ref.version_order_key(M.safe_version_segment(base))
 end
 
 local function version_sort_key(version, stage_rank)
+  local primary_rank, primary = version_primary_key(version)
   return {
-    primary = version_primary_key(version),
+    primary_rank = primary_rank,
+    primary = primary,
     loop_n = M.version_loop_round(version),
     fix_n = M.version_fix_round(version),
     reimplement_n = M.version_reimplement_round(version),
@@ -299,6 +301,9 @@ local function state_marker_fact(marker, comment)
 end
 
 local function compare_version_keys(left, right)
+  if left.primary_rank ~= right.primary_rank then
+    return left.primary_rank > right.primary_rank and 1 or -1
+  end
   if left.primary ~= right.primary then
     return left.primary > right.primary and 1 or -1
   end

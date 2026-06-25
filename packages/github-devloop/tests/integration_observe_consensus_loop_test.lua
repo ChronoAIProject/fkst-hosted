@@ -458,7 +458,10 @@ return {
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/v2",
     })
     local older_marker = core.result_marker(current.proposal_id, "approve", "consensus:github-devloop/issue/owner/repo/42/v1")
-    mock_issue_result({ "fkst-dev:thinking" }, { older_marker })
+    mock_issue_result({ "fkst-dev:thinking" }, {
+      core.state_marker(current.proposal_id, "thinking", current.dedup_key),
+      older_marker,
+    })
 
     local result = run_result(current, opts("result-older-same-direction-marker"))
     t.eq(result.exit_code, 0)
