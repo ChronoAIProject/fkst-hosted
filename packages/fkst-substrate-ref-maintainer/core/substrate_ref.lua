@@ -3,6 +3,7 @@ local S = {}
 function S.install(M)
 local strings = require("contract.strings")
 local substrate_ref_path = ".fkst/substrate-ref"
+local substrate_repo = "ChronoAIProject/fkst-substrate"
 local substrate_remote = "https://github.com/ChronoAIProject/fkst-substrate.git"
 local substrate_branch = "dev"
 local bump_branch = "chore/substrate-ref-bump"
@@ -168,6 +169,36 @@ local function substrate_pin_is_dev_ancestor(pin, target_sha)
   return false, "substrate-pin-not-dev-ancestor"
 end
 
+local function substrate_publishability_reason(reason)
+  if reason == "rollup-green" then
+    return "substrate-ci-green"
+  end
+  if reason == "missing-status-rollup" then
+    return "substrate-ci-missing"
+  end
+  if reason == "rollup-pending" then
+    return "substrate-ci-pending"
+  end
+  if reason == "rollup-red" then
+    return "substrate-ci-red"
+  end
+  return "substrate-ci-" .. tostring(strings.sanitize_key(reason or "unknown", false):gsub("/", "-"))
+end
+
+local function substrate_commit_publishable(sha)
+  if not M._is_git_sha(sha) then
+    return false, "invalid-substrate-target"
+  end
+  local result = run_gh(function()
+    return github().api_get(substrate_repo, "commits/" .. tostring(sha) .. "/check-runs", 60)
+  end, "substrate upstream check-runs read")
+  local ok, reason = M.commit_check_runs_green(M.parse_commit_check_runs(result.stdout))
+  if ok then
+    return true, "substrate-ci-green"
+  end
+  return false, substrate_publishability_reason(reason)
+end
+
 local function parse_pr_list(stdout)
   local pages = json.decode(stdout)
   local prs = {}
@@ -250,7 +281,7 @@ local function write_pr_body(repo, current_pin, target_sha)
     "- Previous pin: `" .. tostring(current_pin) .. "`",
     "- New pin: `" .. tostring(target_sha) .. "`",
     "",
-    "CI is the verification gate for package compatibility with the new engine pin.",
+    "The upstream commit check runs were green before this bump was opened. Consumer CI is the compatibility gate for this package repo.",
     "",
     "⟦AI:FKST⟧",
   }, "\n")
@@ -474,7 +505,7 @@ local function substrate_ref_merge_audit_body(pr, target_sha, outcome, reason)
   return table.concat({
     "github-devloop substrate-ref deterministic merge audit",
     "",
-    "The substrate-ref bump is handled by deterministic gates: exact `.fkst/substrate-ref` diff, upstream ancestry, same-repo head, non-draft PR, CI green, mergeability, and matched head merge.",
+    "The substrate-ref bump is handled by deterministic gates: exact `.fkst/substrate-ref` diff, upstream ancestry, upstream commit CI green, same-repo head, non-draft PR, consumer CI green, mergeability, and matched head merge.",
     "",
     substrate_ref_merge_marker(pr, target_sha, outcome, reason),
     "⟦AI:FKST⟧",
@@ -502,6 +533,10 @@ local function validate_bump_merge_facts(repo, base_branch, pr, target_sha)
   local pin_ok, pin_reason = substrate_pin_is_dev_ancestor(pin, target_sha)
   if not pin_ok then
     return false, pin_reason
+  end
+  local publishable_ok, publishable_reason = substrate_commit_publishable(pin)
+  if not publishable_ok then
+    return false, publishable_reason
   end
   local gate_ok, gate_reason = M.evaluate_ci_merge_gate(pr, {
     repo = repo,
@@ -570,6 +605,23 @@ local function maybe_merge_bump_pr(repo, base_branch, existing, target_sha, writ
   return { status = "merged", pr_number = number, reason = merge_reason }
 end
 
+local function hold_unpublishable_target(repo, current_pin, target_sha, reason, merge_result)
+  log_scan("bump-hold", {
+    "repo=" .. repo,
+    "from=" .. current_pin,
+    "to=" .. target_sha,
+    "reason=" .. tostring(reason),
+  })
+  return {
+    status = "hold",
+    reason = reason,
+    pin = current_pin,
+    target = target_sha,
+    branch = bump_branch,
+    merge = merge_result,
+  }
+end
+
 function M.substrate_ref_constants()
   return {
     path = substrate_ref_path,
@@ -611,6 +663,10 @@ function M.substrate_ref_scan()
     if existing ~= nil then
       merge_result = maybe_merge_bump_pr(repo, cfg.upstream_branch, existing, target_sha, false)
     end
+    local publishable_ok, publishable_reason = substrate_commit_publishable(target_sha)
+    if not publishable_ok then
+      return hold_unpublishable_target(repo, current_pin, target_sha, publishable_reason, merge_result)
+    end
     log_scan("bump-planned", {
       "mode=" .. cfg.write_mode,
       "repo=" .. repo,
@@ -633,6 +689,7 @@ function M.substrate_ref_scan()
   local branch_action = nil
   local created_pr_number = nil
   local preupdate_merge_result = nil
+  local target_hold_reason = nil
   with_lock("github-devloop/substrate-ref/" .. M.safe_repo(repo), function()
     final_existing = existing_bump_pr(repo)
     if final_existing ~= nil then
@@ -640,6 +697,13 @@ function M.substrate_ref_scan()
       if preupdate_merge_result.status == "merged" then
         return
       end
+    end
+    local publishable_ok, publishable_reason = substrate_commit_publishable(target_sha)
+    if not publishable_ok then
+      branch_action = "target-not-publishable"
+      target_hold_reason = publishable_reason
+      preupdate_merge_result = preupdate_merge_result or { status = "hold", reason = publishable_reason }
+      return
     end
     branch_action = create_or_update_branch(repo, cfg.upstream_branch, current_pin, target_sha)
     if final_existing == nil and branch_action ~= "base-current" then
@@ -693,6 +757,15 @@ function M.substrate_ref_scan()
       branch = bump_branch,
       merge = preupdate_merge_result,
     }
+  end
+  if branch_action == "target-not-publishable" then
+    return hold_unpublishable_target(
+      repo,
+      current_pin,
+      target_sha,
+      target_hold_reason or "substrate-ci-missing",
+      preupdate_merge_result
+    )
   end
   if branch_action == "base-current" then
     return { status = "current", pin = current_pin, target = target_sha }

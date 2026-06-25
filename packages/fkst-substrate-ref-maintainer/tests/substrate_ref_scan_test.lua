@@ -10,6 +10,7 @@ local base_sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 local old_branch_sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 local pr_head_sha = "dddddddddddddddddddddddddddddddddddddddd"
 local pr_number = 27
+local substrate_repo = "ChronoAIProject/fkst-substrate"
 
 local function opts(name, extra)
   local env = {
@@ -92,6 +93,25 @@ local function mock_substrate_head(sha)
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function mock_substrate_check_runs(sha, status, conclusion)
+  local conclusion_json = conclusion == nil and "null" or ('"' .. tostring(conclusion) .. '"')
+  t.mock_command(core.gh_commit_check_runs_cmd(substrate_repo, sha), {
+    stdout = '{"total_count":1,"check_runs":[{"name":"test","status":"'
+      .. tostring(status)
+      .. '","conclusion":'
+      .. conclusion_json
+      .. '}]}\n',
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_substrate_check_runs_green(sha, times)
+  for _ = 1, times or 1 do
+    mock_substrate_check_runs(sha, "completed", "success")
+  end
 end
 
 local function mock_current_pin(sha)
@@ -602,6 +622,7 @@ return {
     mock_env("")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha)
     mock_no_existing_pr()
 
     local result = run_scan(opts("substrate-dry-run"))
@@ -612,10 +633,42 @@ return {
     t.eq(count_git_write_calls(), 0)
   end,
 
+  test_dry_run_holds_unpublishable_substrate_head_without_writes = function()
+    mock_env("")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_no_existing_pr()
+    mock_substrate_check_runs(target_sha, "in_progress", nil)
+
+    local result = run_scan(opts("substrate-unpublishable-dry-run"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(core.gh_commit_check_runs_cmd(substrate_repo, target_sha)), 1)
+    t.eq(count_calls("gh pr create"), 0)
+    t.eq(count_git_write_calls(), 0)
+  end,
+
+  test_real_mode_holds_unpublishable_substrate_head_before_branch_mutation = function()
+    mock_env("1")
+    mock_current_pin(current_pin)
+    mock_substrate_head(target_sha)
+    mock_no_existing_pr()
+    mock_substrate_check_runs(target_sha, "completed", "failure")
+
+    local result = run_scan(opts("substrate-unpublishable-real", { FKST_GITHUB_WRITE = "1" }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls(core.gh_commit_check_runs_cmd(substrate_repo, target_sha)), 1)
+    eq_zero(count_calls("git worktree add"), "worktree add for unpublishable target")
+    eq_zero(count_calls("gh pr create"), "PR create for unpublishable target")
+    eq_zero(count_calls("HEAD:refs/heads/chore/substrate-ref-bump"), "push for unpublishable target")
+  end,
+
   test_real_mode_creates_single_bump_pr_for_new_dev_head = function()
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha, 3)
     mock_no_existing_pr()
     mock_branch_missing()
     mock_base_head()
@@ -653,6 +706,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(older_valid_pin, 2)
     mock_existing_pr()
     mock_bump_pr_view()
     mock_bump_diff()
@@ -681,6 +735,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha, 2)
     mock_existing_pr()
     mock_bump_pr_view()
     mock_bump_diff()
@@ -709,6 +764,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha, 2)
     mock_existing_pr()
     mock_bump_pr_view()
     mock_bump_diff()
@@ -734,6 +790,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha)
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
@@ -753,6 +810,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha, 2)
     mock_existing_pr()
     mock_branch_present()
     mock_bump_pr_view()
@@ -786,6 +844,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha, 2)
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
@@ -815,6 +874,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha)
     mock_existing_pr()
     mock_branch_present()
     mock_branch_pin(target_sha)
@@ -847,6 +907,7 @@ return {
     mock_env("1")
     mock_current_pin(current_pin)
     mock_substrate_head(target_sha)
+    mock_substrate_check_runs_green(target_sha, 2)
     mock_existing_pr()
     mock_branch_present()
     mock_bump_pr_view()
