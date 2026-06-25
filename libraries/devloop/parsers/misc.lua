@@ -121,6 +121,7 @@ local function comment_author_login(comment)
     if type(comment.user) == "table" and comment.user.login ~= nil then
       return M.strip_bot_login_suffix(comment.user.login)
     end
+    return nil
   end
   return M._test_bot_login
 end

@@ -110,6 +110,14 @@ return {
     t.eq(core.comment_author_login({ author_login = "octocat" }), "octocat")
   end,
 
+  test_authorless_comment_is_not_trusted_by_default_test_bot_login = function()
+    core.configure_trusted_bot_login(nil)
+    t.eq(core.trusted_bot_login(), core._test_bot_login)
+    t.is_nil(core.comment_author_login({ body = "authorless" }))
+    t.eq(core._is_trusted_comment({ body = "authorless" }), false)
+    t.eq(core._is_trusted_comment({ author = nil, user = nil, body = "authorless" }), false)
+  end,
+
   -- Bare-config vs [bot]-author: trusted.
   test_bare_config_trusts_bracket_bot_author = function()
     core.configure_trusted_bot_login("chronoai-bot")
