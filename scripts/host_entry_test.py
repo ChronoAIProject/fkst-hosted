@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import subprocess
 import tempfile
 import textwrap
@@ -191,6 +192,27 @@ class HostEntryTest(unittest.TestCase):
         h = HostEntryHarness()
         fake_bin = h.root / "fake-framework"
         engine_argv = h.root / "engine-argv"
+        check_repo_argv = h.root / "check-repo-argv"
+        fake_python_dir = h.root / "fake-python"
+        fake_python_dir.mkdir()
+        (fake_python_dir / "python3").write_text(
+            "#!/usr/bin/env bash\n"
+            "case \"$1:$2\" in\n"
+            "  -B:*/scripts/check_repo.py)\n"
+            "  shift 2\n"
+            "  printf '%s\\n' \"$@\" > "
+            + shell_quote(check_repo_argv)
+            + "\n"
+            "  printf 'OK\\n'\n"
+            "  exit 0\n"
+            "  ;;\n"
+            "esac\n"
+            "exec "
+            + shell_quote(sys.executable)
+            + " \"$@\"\n",
+            encoding="utf-8",
+        )
+        (fake_python_dir / "python3").chmod(0o755)
         fake_bin.write_text(
             "#!/usr/bin/env bash\n"
             "printf '%s\\n' \"$@\" > " + shell_quote(engine_argv) + "\n"
@@ -213,24 +235,17 @@ class HostEntryTest(unittest.TestCase):
                     f"""\
                     set -euo pipefail
                     source scripts/run.sh
+                    export PATH={shell_quote(fake_python_dir)}:"$PATH"
                     resolve_bin() {{ BIN={shell_quote(fake_bin)}; export BIN; }}
                     ensure_fresh_bin() {{ :; }}
-                    host_entry_run_shared_source_ratchets() {{
-                      host_entry_source_ratchet_args
-                      printf 'ratchets'
-                      printf ' <%s>' "${{HOST_ENTRY_SOURCE_RATCHET_ARGS[@]}}"
-                      printf '\\n'
-                    }}
                     cmd_host --host-root {shell_quote(h.host)} --platform-root {shell_quote(h.platform)} -- check
                     """
                 )
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("=== host source ratchets ===", result.stdout)
+            self.assertIn("OK", result.stdout)
             self.assertIn('{"ok":true}', result.stdout)
-            self.assertIn(
-                f"ratchets <--project-root> <{h.host}> <--allowlist-dir> <{h.config_dir / 'allowlists'}>",
-                result.stdout,
-            )
             self.assertEqual(
                 engine_argv.read_text(encoding="utf-8").splitlines(),
                 [
@@ -241,6 +256,17 @@ class HostEntryTest(unittest.TestCase):
                     str(h.local_packages / "site-board"),
                     "--package-root",
                     str(h.platform / "packages" / "idle-detector"),
+                ],
+            )
+            self.assertEqual(
+                check_repo_argv.read_text(encoding="utf-8").splitlines(),
+                [
+                    "--project-root",
+                    str(h.host),
+                    "--platform-root",
+                    str(h.platform),
+                    "--allowlist-dir",
+                    str(h.config_dir / "allowlists"),
                 ],
             )
         finally:

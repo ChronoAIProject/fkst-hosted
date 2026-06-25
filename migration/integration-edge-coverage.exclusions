@@ -1,0 +1,2 @@
+# Permanent integration coverage exclusions. JSON-lines entries must include:
+# {"edge":"<producer.queue> -> <consumer.pkg.dept>","reason":"...","owner":"...","review_by":"YYYY-MM-DD"}

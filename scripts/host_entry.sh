@@ -219,7 +219,7 @@ host_entry_build_package_roots() {
 }
 
 host_entry_source_ratchet_args() {
-  HOST_ENTRY_SOURCE_RATCHET_ARGS=(--project-root "$HOST_ENTRY_HOST_ROOT")
+  HOST_ENTRY_SOURCE_RATCHET_ARGS=(--project-root "$HOST_ENTRY_HOST_ROOT" --platform-root "$HOST_ENTRY_PLATFORM_ROOT")
   if [ -d "$HOST_ENTRY_HOST_ROOT/.fkst/conformance/allowlists" ]; then
     HOST_ENTRY_SOURCE_RATCHET_ARGS+=(--allowlist-dir "$HOST_ENTRY_HOST_ROOT/.fkst/conformance/allowlists")
   fi

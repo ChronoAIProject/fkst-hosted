@@ -137,6 +137,137 @@ class IntegrationCoverageRatchetTest(unittest.TestCase):
 
         self.assertEqual(messages, [])
 
+    def test_host_mode_filters_platform_owned_edges_and_reports_owner_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            host = base / "host"
+            platform = base / "platform"
+            write(
+                platform / "packages" / "platform-producer" / "departments" / "emit" / "main.lua",
+                """\
+                local spec = {
+                  consumes = {},
+                  produces = { "platform_event" },
+                }
+                return { spec = spec }
+                """,
+            )
+            write(
+                platform / "packages" / "platform-consumer" / "departments" / "take" / "main.lua",
+                """\
+                local spec = {
+                  consumes = { "platform-producer.platform_event" },
+                  produces = {},
+                }
+                return { spec = spec }
+                """,
+            )
+            write(
+                host / ".fkst" / "local-packages" / "site-board" / "departments" / "take" / "main.lua",
+                """\
+                local spec = {
+                  consumes = { "platform-producer.platform_event" },
+                  produces = {},
+                }
+                return { spec = spec }
+                """,
+            )
+
+            report = integration_coverage.edge_report(host, platform_root=platform)
+            messages = integration_coverage.repository_messages(host, platform_root=platform)
+
+        edge_ids = {entry["edge_id"] for entry in report}
+        self.assertIn("platform-producer.platform_event -> site-board.take", edge_ids)
+        self.assertNotIn("platform-producer.platform_event -> platform-consumer.take", edge_ids)
+        self.assertEqual(
+            [entry["owner_scope"] for entry in report if entry["edge_id"] == "platform-producer.platform_event -> site-board.take"],
+            ["host-owned"],
+        )
+        self.assertEqual(len(messages), 1)
+        self.assertIn("platform-producer.platform_event -> site-board.take", messages[0])
+
+    def test_exclusions_are_typed_and_stale_entries_fail(self) -> None:
+        edges = {"consensus.proposal -> consensus.decide"}
+        messages = integration_coverage.ratchet_messages(
+            edges,
+            observed=set(),
+            allowlist=set(),
+            exclusions={
+                "consensus.proposal -> consensus.decide": integration_coverage.Exclusion(
+                    edge="consensus.proposal -> consensus.decide",
+                    reason="host-owned permanent gap",
+                    owner="platform",
+                    review_by="2026-12-31",
+                ),
+                "stale.queue -> stale.consumer": integration_coverage.Exclusion(
+                    edge="stale.queue -> stale.consumer",
+                    reason="old gap",
+                    owner="platform",
+                    review_by="2026-12-31",
+                ),
+            },
+        )
+
+        joined = "\n".join(messages)
+        self.assertIn("stale: excluded edge stale.queue -> stale.consumer no longer exists", joined)
+        self.assertNotIn("new uncovered cross-package edge consensus.proposal", joined)
+
+    def test_load_exclusions_requires_owner_reason_and_review_by(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "integration-edge-coverage.exclusions"
+            path.write_text(
+                json.dumps(
+                    {
+                        "edge": "consensus.proposal -> consensus.decide",
+                        "reason": "missing owner",
+                        "review_by": "2026-12-31",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "owner is required"):
+                integration_coverage.load_exclusions(path)
+
+    def test_report_marks_allowlisted_excluded_and_unlisted_statuses(self) -> None:
+        edges = {
+            "consensus.proposal -> consensus.decide",
+            "consensus.consensus_reached -> autochrono.reply",
+            "autochrono.reply -> github-autochrono.outbound_glue",
+            "github-proxy.github_entity_changed -> github-autochrono.inbound_glue",
+        }
+        observed = {"consensus.proposal -> consensus.decide"}
+
+        report = integration_coverage.report_for_edges(
+            edges,
+            observed,
+            allowlist={"consensus.consensus_reached -> autochrono.reply"},
+            exclusions={
+                "autochrono.reply -> github-autochrono.outbound_glue": integration_coverage.Exclusion(
+                    edge="autochrono.reply -> github-autochrono.outbound_glue",
+                    reason="documented host-owned gap",
+                    owner="platform",
+                    review_by="2026-12-31",
+                )
+            },
+            platform_packages=set(),
+        )
+
+        by_edge = {entry["edge_id"]: entry for entry in report}
+        self.assertEqual(by_edge["consensus.proposal -> consensus.decide"]["status"], "covered")
+        self.assertEqual(
+            by_edge["consensus.consensus_reached -> autochrono.reply"]["status"],
+            "uncovered-allowlisted",
+        )
+        self.assertEqual(by_edge["autochrono.reply -> github-autochrono.outbound_glue"]["status"], "excluded")
+        self.assertEqual(
+            by_edge["github-proxy.github_entity_changed -> github-autochrono.inbound_glue"]["status"],
+            "uncovered-UNLISTED",
+        )
+        self.assertEqual(by_edge["consensus.proposal -> consensus.decide"]["queue"], "consensus.proposal")
+        self.assertEqual(by_edge["consensus.proposal -> consensus.decide"]["producer_pkg"], "consensus")
+
 
 if __name__ == "__main__":
     unittest.main()

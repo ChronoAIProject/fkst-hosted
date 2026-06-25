@@ -105,7 +105,17 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     check_content_truncation(c, root, violations, allowlists, enforce_base)
     for message in check_repo_coverage.repository_messages(root):
         c.add(violations, "G-COVERAGE", message)
-    for message in check_repo_integration_coverage.repository_messages(root):
+    integration_allowlist = None
+    integration_exclusions = None
+    if config.platform_root is not None:
+        integration_allowlist = root / check_repo_integration_coverage.HOST_ALLOWLIST
+        integration_exclusions = root / check_repo_integration_coverage.HOST_EXCLUSIONS
+    for message in check_repo_integration_coverage.repository_messages(
+        root,
+        platform_root=config.platform_root,
+        allowlist_path=integration_allowlist,
+        exclusions_path=integration_exclusions,
+    ):
         c.add(violations, "G-INTEGRATION-COVERAGE", message)
     check_producer_liveness(c, root, violations, allowlists, enforce_base)
     for package_root in c.package_roots(root):

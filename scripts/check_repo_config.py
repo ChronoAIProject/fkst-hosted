@@ -36,6 +36,7 @@ LIBRARY_B_SPECIFIC_RATCHETS = (
 class CheckRepoConfig:
     project_root: Path
     allowlist_dir: Path | None
+    platform_root: Path | None = None
     own_repo_root: Path = OWN_REPO_ROOT
 
     @property
@@ -68,8 +69,13 @@ def parse_args(argv: list[str] | None = None) -> CheckRepoConfig:
         type=resolve_dir,
         help="directory containing *.allowlist waiver files; defaults to <project-root>/migration",
     )
+    parser.add_argument(
+        "--platform-root",
+        type=resolve_dir,
+        help="fkst-packages checkout to include for host-owned integration coverage edges",
+    )
     args = parser.parse_args(argv)
-    return CheckRepoConfig(project_root=args.project_root, allowlist_dir=args.allowlist_dir)
+    return CheckRepoConfig(project_root=args.project_root, allowlist_dir=args.allowlist_dir, platform_root=args.platform_root)
 
 
 def package_roots(project_root: Path) -> list[Path]:
