@@ -550,6 +550,19 @@ return {
     }))
   end,
 
+  test_all_angles_succeeded_requires_every_angle_exit_zero = function()
+    t.eq(core.all_angles_succeeded({
+      { exit_code = 0 },
+      { exit_code = 0 },
+    }), true)
+    t.eq(core.all_angles_succeeded({
+      { exit_code = 0 },
+      { exit_code = 7 },
+    }), false)
+    t.eq(core.all_angles_succeeded({}), false)
+    t.eq(core.all_angles_succeeded(nil), false)
+  end,
+
   test_build_reached_payload_preserves_source_ref_and_dedup_key = function()
     local input = proposal()
     local payload = core.build_reached_payload(input, "approve", {
