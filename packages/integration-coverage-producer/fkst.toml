@@ -1,0 +1,12 @@
+kind = "package.composed"
+name = "integration-coverage-producer"
+persistence_class = "stateless_adapter"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow", "testkit", "forge"]
+
+[event_deps]
+packages = ["github-proxy"]
