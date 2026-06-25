@@ -149,7 +149,6 @@ return {
   test_issue_rereview_command_reenters_stalled_plain_thinking = function()
     local event = issue({
       updated_at = "2026-06-03T04:05:06Z",
-      view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T04-05-06Z",
     })
     local command = trusted_issue_command("rereview", "IC_issue_rereview_plain_stalled")
     local base_version = core.build_proposal(event).dedup_key

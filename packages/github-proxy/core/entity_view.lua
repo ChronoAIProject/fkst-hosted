@@ -34,7 +34,7 @@ local function sanitize_cache_segment(value, allow_slash)
   return safe
 end
 
-local function entity_view_cache_key(repo, kind, number, updated_at)
+local function entity_view_storage_base_key(repo, kind, number, updated_at)
   return "github-proxy/view/"
     .. sanitize_cache_segment(repo, true)
     .. "/"
@@ -55,7 +55,7 @@ local function entity_view_generation_key(repo, kind, number)
 end
 
 local function entity_view_storage_cache_key(repo, kind, number, updated_at)
-  local base_key = entity_view_cache_key(repo, kind, number, updated_at)
+  local base_key = entity_view_storage_base_key(repo, kind, number, updated_at)
   local generation = cache_get(entity_view_generation_key(repo, kind, number))
   if generation == nil or generation == "" then
     return base_key
@@ -127,10 +127,6 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
     cache_set(key, encode_cached_view(result.stdout or "", consumer))
   end
   return result
-end
-
-function M.entity_view_cache_key(repo, kind, number, updated_at)
-  return entity_view_cache_key(repo, kind, number, updated_at)
 end
 
 function M.entity_view_generation_key(repo, kind, number)

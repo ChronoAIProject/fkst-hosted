@@ -248,7 +248,6 @@ return {
     mock_issue_state({ "fkst-dev:enabled" })
     local second = run_observe(issue({
       updated_at = "2026-06-03T01:02:04Z",
-      view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-04Z",
     }), run_opts)
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 3)
@@ -256,7 +255,6 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", { { body = core.state_marker("github-devloop/issue/owner/repo/42", "thinking", "github-devloop/issue/owner/repo/42/2026-06-03T01-02-05Z"), created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()) } })
     local thinking = run_observe(issue({
       updated_at = "2026-06-03T01:02:05Z",
-      view_cache_key = "github-proxy/view/owner/repo/issue/42/2026-06-03T01-02-05Z",
     }), run_opts)
     t.eq(thinking.exit_code, 0)
     local replay_proposal = find_raise(thinking.raises, "consensus.proposal").payload
