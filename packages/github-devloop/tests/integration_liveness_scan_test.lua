@@ -791,7 +791,7 @@ return {
     t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
   end,
 
-  test_codex_runs_error_falls_back_to_marker_budget_timeout_decision = function()
+  test_codex_runs_error_defers_timeout_decision = function()
     local event = ready()
     local row = core.restart_transition_row("implementing")
     local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
@@ -827,11 +827,12 @@ return {
         error("synthetic codex_runs failure")
       end
       local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
-      t.eq(due, true)
-      t.eq(age, 180)
+      t.eq(due, false)
+      t.eq(age, nil)
       local eval = facts.actionable_epoch_eval
-      table.insert(comments, timeout_attempt_v2_comment(row, eval.generation_key, 1, "2026-06-03T00:01:00Z"))
-      table.insert(comments, timeout_attempt_v2_comment(row, eval.generation_key, 2, "2026-06-03T00:02:00Z"))
+      t.eq(eval.status, "deferred")
+      t.eq(eval.signal.reason, "codex-runs-unavailable")
+      t.eq(eval.signal.codex_runs_fallback, true)
       local raised, logs = capture_timeout_raises_and_logs(function()
         local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
           repo = repo,
@@ -842,13 +843,10 @@ return {
       end)
       t.eq(captured_raise(raised, "devloop_ready"), nil)
       t.eq(captured_raise(raised, "github-proxy.github_issue_comment_request"), nil)
-      local reconcile = captured_raise(raised, "devloop_timeout_reconcile")
-      t.is_true(reconcile ~= nil)
-      t.eq(reconcile.payload.state, "implementing")
-      t.eq(reconcile.payload.round, 3)
+      t.eq(captured_raise(raised, "devloop_timeout_reconcile"), nil)
       local logged_fallback = false
       for _, log in ipairs(logs) do
-        if log.tag == "CODEX_RUNS" and table.concat(log.fields or {}, " "):find("marker-budget-fallback", 1, true) ~= nil then
+        if log.tag == "CODEX_RUNS" and table.concat(log.fields or {}, " "):find("outcome=defer", 1, true) ~= nil then
           logged_fallback = true
         end
       end

@@ -52,6 +52,7 @@ GH_RATE_POOL_FUNCTION_RE = re.compile(
 )
 GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
 OWNERSHIP_GATE_RE = re.compile(r"(?ms)^\s*function\s+M\s*\.\s*verify_pr_review_issue_claim\s*\([^)]*\).*?(?=^\s*function\s+M\s*\.|\Z)")
+OWNERSHIP_GATE_CLAIMS_PATH = Path("libraries/devloop/claims.lua")
 # Declaration presence + valid value moved to the engine manifest schema
 # (`persistence_class` in fkst.toml + the `engine.persistence-class` conformance
 # check, the single authority). This regex reads that authoritative field only to
@@ -790,8 +791,9 @@ def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
 
 
 def check_ownership_gate_claim_owner(root: Path, violations: list[str]) -> None:
-    path = packages_root(root) / "github-devloop" / "core" / "claims.lua"
+    path = root / OWNERSHIP_GATE_CLAIMS_PATH
     if not path.exists():
+        add(violations, "G8", f"{OWNERSHIP_GATE_CLAIMS_PATH.as_posix()} is missing; ownership gate guard cannot run")
         return
     for line in ownership_gate_defaulting_bot_login_lines(read_text(path)):
         add(

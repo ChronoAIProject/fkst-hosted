@@ -309,6 +309,24 @@ return {
     t.eq(current.state, "ready")
     t.eq(current.version, "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z")
   end,
+  test_compare_transition_versions_timestampless_fallback_loses_to_real_timestamp = function()
+    local incoming = "consensus:github-devloop/issue/owner/repo/42/v1"
+    local current = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+
+    t.eq(core._compare_transition_versions(incoming, current) < 0, true)
+    t.eq(core._compare_transition_versions(current, incoming) > 0, true)
+  end,
+  test_current_state_prefers_timestamped_marker_over_timestampless_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local comments = {
+      core.state_marker(proposal_id, "ready", "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"),
+      core.state_marker(proposal_id, "blocked", "consensus:github-devloop/issue/owner/repo/42/v1"),
+    }
+
+    local current = core.current_state(comments, proposal_id)
+    t.eq(current.state, "ready")
+    t.eq(current.version, "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z")
+  end,
   test_reached_stays_true_after_later_phase_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
@@ -805,6 +823,21 @@ return {
       },
     }
     local current = core.current_state(comments, proposal_id)
+    t.eq(current.state, "thinking")
+    t.eq(current.version, "v1")
+  end,
+  test_current_state_ignores_authorless_state_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    core.configure_trusted_bot_login(nil)
+    local parsed = core.parse_issue_view_state('{"comments":[{"body":"'
+      .. core.state_marker(proposal_id, "ready", "v2"):gsub('"', '\\"')
+      .. '","author":null},{"body":"'
+      .. core.state_marker(proposal_id, "thinking", "v1"):gsub('"', '\\"')
+      .. '","author":{"login":"'
+      .. core.trusted_bot_login()
+      .. '"}}]}')
+
+    local current = core.current_state(parsed.comments, proposal_id)
     t.eq(current.state, "thinking")
     t.eq(current.version, "v1")
   end,

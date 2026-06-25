@@ -33,6 +33,20 @@ local managed = {
   ["other-bot"] = true,
 }
 
+local function merged_marker(issue_number, pr_number)
+  return '<!-- fkst:github-devloop:merged:v1 proposal="github-devloop/issue/owner/repo/'
+    .. tostring(issue_number)
+    .. '" pr="'
+    .. tostring(pr_number)
+    .. '" version="v1" head_sha="0123456789abcdef0123456789abcdef01234567" -->'
+end
+
+local function merged_state_marker(issue_number)
+  return '<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/owner/repo/'
+    .. tostring(issue_number)
+    .. '" state="merged" version="v1" stage_rank="900" -->'
+end
+
 local function is_candidate_with_default_age(candidate)
   return with_env({ FKST_EXTERNAL_PR_BRIDGE_MIN_AGE_SECONDS = "" }, function()
     return core.is_external_candidate(candidate, managed, fixed_now_seconds)
@@ -109,5 +123,41 @@ return {
   test_external_candidate_skips_missing_or_unparseable_created_at = function()
     t.eq(is_candidate_with_default_age(pr({ created_at = nil })), false)
     t.eq(is_candidate_with_default_age(pr({ created_at = "not-a-time" })), false)
+  end,
+
+  test_find_bridge_issue_merged_signal_ignores_untrusted_merged_marker = function()
+    local issue = {
+      comments = {
+        { author_login = "contributor", body = merged_marker(77, 88) },
+      },
+    }
+
+    t.is_nil(core.find_bridge_issue_merged_signal(issue, "owner/repo", 77, managed))
+  end,
+
+  test_find_bridge_issue_merged_signal_ignores_untrusted_state_marker = function()
+    local issue = {
+      comments = {
+        { author_login = "contributor", body = merged_state_marker(77) },
+      },
+    }
+
+    t.is_nil(core.find_bridge_issue_merged_signal(issue, "owner/repo", 77, managed))
+  end,
+
+  test_find_pr_bridge_marker_ignores_untrusted_bridge_marker = function()
+    local comments = {
+      { author_login = "contributor", body = core.bridge_marker("owner/repo", 7, 77) },
+    }
+
+    t.is_nil(core.find_pr_bridge_marker(comments, "owner/repo", 7, managed))
+  end,
+
+  test_find_pr_handled_marker_ignores_untrusted_handled_marker = function()
+    local comments = {
+      { author_login = "contributor", body = core.handled_marker("owner/repo", 7, 77) },
+    }
+
+    t.is_nil(core.find_pr_handled_marker(comments, "owner/repo", 7, 77, managed))
   end,
 }
