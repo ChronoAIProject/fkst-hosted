@@ -74,7 +74,10 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # archaudit + idle-detector audit-producer agents are NOT loaded on any target (re-add them here to
 # re-enable). archaudit auditing the engine repo produced Rust SDK changes the pipeline cannot safely
 # auto-develop (engine↔package contract, e.g. the proposal_id→dedup_key revert #174).
-DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-devloop-ops github-proxy consensus github-external-pr-intake github-ratchet-migration-slicer fkst-substrate-ref-maintainer}"
+# integration-coverage-producer IS loaded: a co-run-safe issue-producer SCOPED to Lua-package run_graph
+# coverage gaps (idle-gated + dedup'd + Lua-coverage-only, never engine) — the lasting self-drive arm of
+# the integration-edge coverage ratchet; unlike archaudit it cannot file engine/SDK work.
+DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-devloop-ops github-proxy consensus github-external-pr-intake github-ratchet-migration-slicer fkst-substrate-ref-maintainer integration-coverage-producer}"
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
 # layout across machines); stable durable roots default under it but are commonly PINNED per machine
