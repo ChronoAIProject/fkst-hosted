@@ -153,6 +153,115 @@ local outcome = run_fix_attempt(attempt_plan)
     t.eq(#errors, 0)
   end,
 
+  test_long_running_dispatch_spawn_without_live_run_dedup_fails = function()
+    local errors = span.errors_from_sources({
+      ["packages/github-devloop-pr/core/restart/transitions/fixing.lua"] = [[
+return function(M, h)
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
+  return {
+    from_state = "fixing",
+    responsibility_signature = responsibility_signature({
+      state_kind = "worker",
+    }),
+    liveness_contract = {
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "fix",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+      },
+    },
+    span_contract = span_contract({
+      department = "fix",
+      durable_start_marker = "state:v1 fixing",
+      spawn_predecessor = "precheck_fix_write_gate",
+      spawn_function = "run_fix_attempt",
+    }),
+  }
+end
+]],
+      ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
+local function validate_fix_write_gate_snapshot(pr, fix)
+  local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
+  if rechecked_state.state ~= "fixing" then
+    return nil
+  end
+  return pr
+end
+
+local function precheck_fix_write_gate(repo, fix, branch)
+  return validate_fix_write_gate_snapshot(pr, fix) ~= nil
+end
+
+local function run_fix_attempt(plan)
+  return spawn_codex_sync({ prompt = prompt })
+end
+
+precheck_fix_write_gate(repo, fix, branch)
+local outcome = run_fix_attempt(attempt_plan)
+]],
+    })
+    t.is_true(contains_error(errors, "run_fix_attempt call must be preceded by dispatch_live_run_dedup"), "missing live-run dispatch dedup error")
+  end,
+
+  test_long_running_dispatch_spawn_with_live_run_dedup_passes = function()
+    local errors = span.errors_from_sources({
+      ["packages/github-devloop-pr/core/restart/transitions/fixing.lua"] = [[
+return function(M, h)
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
+  return {
+    from_state = "fixing",
+    responsibility_signature = responsibility_signature({
+      state_kind = "worker",
+    }),
+    liveness_contract = {
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "fix",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+      },
+    },
+    span_contract = span_contract({
+      department = "fix",
+      durable_start_marker = "state:v1 fixing",
+      spawn_predecessor = "precheck_fix_write_gate",
+      spawn_function = "run_fix_attempt",
+    }),
+  }
+end
+]],
+      ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
+local function validate_fix_write_gate_snapshot(pr, fix)
+  local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
+  if rechecked_state.state ~= "fixing" then
+    return nil
+  end
+  return pr
+end
+
+local function precheck_fix_write_gate(repo, fix, branch)
+  return validate_fix_write_gate_snapshot(pr, fix) ~= nil
+end
+
+local function run_fix_attempt(plan)
+  return spawn_codex_sync({ prompt = prompt })
+end
+
+precheck_fix_write_gate(repo, fix, branch)
+if core.dispatch_live_run_dedup("fix", attempt_plan.fix.proposal_id, attempt_plan.fix.version) then
+  return
+end
+local outcome = run_fix_attempt(attempt_plan)
+]],
+    })
+    t.eq(#errors, 0)
+  end,
+
   test_worker_span_contract_declaration_reuses_strict_contract = function()
     local rows = {}
     for index, row in ipairs(core.restart_transition_table()) do

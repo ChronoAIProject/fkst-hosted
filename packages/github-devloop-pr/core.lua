@@ -35,6 +35,7 @@ require("devloop.pr_safety").install(M)
 require("devloop.payloads").install(M)
 require("devloop.convergence").install(M)
 require("devloop.decompose").install(M)
+require("devloop.dispatch_live_run").install(M)
 M.restart_package_name = "github-devloop-pr"
 M.restart_lifecycle_states = {
   "pr-open",
