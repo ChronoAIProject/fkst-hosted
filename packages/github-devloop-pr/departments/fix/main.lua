@@ -800,6 +800,18 @@ local function act_fix(event)
   local pre_spawn_gate_ok = false
   with_lock(lock_key, function()
     pre_spawn_gate_ok = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
+    if pre_spawn_gate_ok and core.dispatch_live_run_dedup("fix", fix.proposal_id, fix.version) then
+      core.log_cas_decision(
+        "fix",
+        fix.proposal_id,
+        { state = "fixing", version = fix.version, stage_rank = core.stage_rank("fixing") },
+        "fixing",
+        "reviewing|review-meta",
+        "skip-idempotent(live-exec-ref)",
+        "matching fix codex run is still live"
+      )
+      pre_spawn_gate_ok = false
+    end
   end)
   if not pre_spawn_gate_ok then
     return

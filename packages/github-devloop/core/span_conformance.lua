@@ -373,6 +373,18 @@ local function span_contracts(transition_sources)
         }
       end
     end
+    local real_execution_start, real_execution_body_start = source:find("real_execution%s*=%s*%{", row.start)
+    if contracts[row.state] ~= nil and real_execution_start ~= nil then
+      local real_execution_body_end = source:find("%}%s*,?%s*%}%s*,?%s*%)", real_execution_body_start + 1)
+        or source:find("%}%s*,?%s*%}%s*,?", real_execution_body_start + 1)
+      local body = real_execution_body_end ~= nil
+        and source:sub(real_execution_body_start + 1, real_execution_body_end - 1)
+        or source:sub(real_execution_body_start + 1)
+      local fields = key_value_strings(body)
+      if fields.primitive == "fkst.codex_runs" then
+        contracts[row.state].dispatch_live_run_role = fields.role
+      end
+    end
   end
   return contracts
 end
@@ -515,6 +527,38 @@ local function spawn_start_messages(transition_sources, department_sources, supp
             contract.line,
             contract.department
           ))
+        end
+      end
+    end
+  end
+  return messages
+end
+
+local function dispatch_live_run_dedup_messages(transition_sources, department_sources)
+  local contracts = span_contracts(transition_sources)
+  local messages = {}
+  local required_roles = {
+    implement = true,
+    fix = true,
+  }
+  for _, row in ipairs(worker_rows(transition_sources)) do
+    local contract = contracts[row.state]
+    if contract ~= nil
+      and required_roles[tostring(contract.dispatch_live_run_role or "")] == true
+      and contract.spawn_function ~= nil then
+      local sources = department_spawn_sources(department_sources, contract.department)
+      for _, source_path in ipairs(sorted_keys(sources)) do
+        local source = sources[source_path]
+        for _, call_pos in ipairs(function_call_positions(source, contract.spawn_function)) do
+          if predecessor_call_before(source, "dispatch_live_run_dedup", call_pos) < 0 then
+            table.insert(messages, string.format(
+              "%s:%d %s call must be preceded by dispatch_live_run_dedup for role %q before long-running codex dispatch",
+              source_path,
+              line_number(source, call_pos),
+              contract.spawn_function,
+              contract.dispatch_live_run_role
+            ))
+          end
         end
       end
     end
@@ -878,6 +922,9 @@ function S.errors_from_sources(sources)
   for _, message in ipairs(spawn_start_messages(transition_sources, department_sources, sources)) do
     table.insert(out, record("gspan.spawn-order", message))
   end
+  for _, message in ipairs(dispatch_live_run_dedup_messages(transition_sources, department_sources)) do
+    table.insert(out, record("gspan.dispatch-live-run-dedup", message))
+  end
   return out
 end
 
@@ -901,6 +948,7 @@ end
 
 S._completion_fact_name_messages = completion_fact_name_messages
 S._spawn_start_messages = spawn_start_messages
+S._dispatch_live_run_dedup_messages = dispatch_live_run_dedup_messages
 S._span_declaration_errors = span_declaration_errors
 
 return S
