@@ -1,4 +1,3 @@
-{"edge":"autochrono.reply -> github-autochrono.outbound_glue","reason":"baseline"}
 {"edge":"consensus.consensus_converge -> github-devloop-pr.review_loop","reason":"baseline"}
 {"edge":"consensus.consensus_reached -> github-devloop-pr.review_result","reason":"baseline"}
 {"edge":"github-devloop-decompose.devloop_decompose -> github-devloop-decompose.decompose","reason":"baseline"}
