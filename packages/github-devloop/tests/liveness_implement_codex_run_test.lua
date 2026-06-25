@@ -230,7 +230,29 @@ return {
     end)
   end,
 
-  test_implement_codex_runs_unavailable_falls_back_to_marker_budget_terminate = function()
+  test_implement_no_codex_run_over_budget_remains_actionable = function()
+    local event = ready()
+    local row = core.restart_transition_row("implementing")
+    local timeout_version = event.dedup_key .. "/timeout/implementing/2"
+    local state = state_for(event, timeout_version)
+    local facts = facts_for(event, {
+      core.state_marker(event.proposal_id, "implementing", timeout_version),
+    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    with_codex_runs({}, function()
+      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      t.eq(eval.status, "actionable")
+      t.eq(eval.signal.reason, "codex-run-not-running")
+      t.eq(eval.codex_runs_fallback, false)
+      t.eq(eval.indeterminate, false)
+      local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
+      t.eq(due, true)
+      t.eq(age, 180)
+      local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)
+      t.eq(receiver.action, "stuck")
+    end)
+  end,
+
+  test_implement_codex_runs_unavailable_defers_without_timeout_effects = function()
     local event = ready()
     local row = core.restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
@@ -244,20 +266,16 @@ return {
     end
     local ok, err = pcall(function()
       local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
-      t.eq(eval.status, "actionable")
+      t.eq(eval.status, "deferred")
       t.eq(eval.signal.reason, "codex-runs-unavailable")
-      t.eq(eval.codex_runs_fallback, true)
+      t.eq(eval.signal.codex_runs_fallback, true)
       local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
-      t.eq(due, true)
-      t.eq(age, 180)
+      t.eq(due, false)
+      t.eq(age, nil)
       local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)
-      t.eq(receiver.action, "stuck")
+      t.eq(receiver.action, "defer")
       local raised = run_timeout(row, state, facts)
-      t.eq(captured_raise(raised, "devloop_ready"), nil)
-      local reconcile = captured_raise(raised, "devloop_timeout_reconcile")
-      t.is_true(reconcile ~= nil)
-      t.eq(reconcile.payload.state, "implementing")
-      t.eq(reconcile.payload.round, 3)
+      assert_no_timeout_effects(raised)
     end)
     fkst.codex_runs = original
     if not ok then
@@ -265,7 +283,7 @@ return {
     end
   end,
 
-  test_implement_running_codex_run_without_deadline_falls_back_to_marker_budget_terminate = function()
+  test_implement_running_codex_run_without_deadline_defers_without_timeout_effects = function()
     local event = ready()
     local row = core.restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
@@ -283,20 +301,16 @@ return {
       },
     }, function()
       local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
-      t.eq(eval.status, "actionable")
+      t.eq(eval.status, "deferred")
       t.eq(eval.signal.reason, "codex-run-deadline-unavailable")
-      t.eq(eval.indeterminate, true)
+      t.eq(eval.signal.indeterminate, true)
       local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
-      t.eq(due, true)
-      t.eq(age, 180)
+      t.eq(due, false)
+      t.eq(age, nil)
       local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)
-      t.eq(receiver.action, "stuck")
+      t.eq(receiver.action, "defer")
       local raised = run_timeout(row, state, facts)
-      t.eq(captured_raise(raised, "devloop_ready"), nil)
-      local reconcile = captured_raise(raised, "devloop_timeout_reconcile")
-      t.is_true(reconcile ~= nil)
-      t.eq(reconcile.payload.state, "implementing")
-      t.eq(reconcile.payload.round, 3)
+      assert_no_timeout_effects(raised)
     end)
   end,
 
