@@ -251,6 +251,29 @@ return {
     t.eq(model.prs[7].state, "CLOSED")
   end,
 
+  test_scan_ignores_untrusted_merged_bridge_issue_marker = function()
+    local model = {
+      writes = {},
+      prs = {
+        [7] = { number = 7, author_login = "contributor", head_ref_name = "feature/contrib", state = "OPEN", comments = {} },
+      },
+      issues = {
+        bridge_issue({
+          labels = { "fkst-dev:enabled", "fkst-dev:merged" },
+          comments = {
+            { author_login = "contributor", body = merged_state_marker(77) },
+          },
+        }),
+      },
+    }
+    local result = run_scan({ model = model })
+
+    t.eq(count_kind(model.writes, "pr_comment"), 0)
+    t.eq(count_kind(model.writes, "pr_close"), 0)
+    t.eq(#result.raises, 1)
+    t.eq(model.prs[7].state, "OPEN")
+  end,
+
   test_scan_links_internal_pr_from_trusted_merged_marker = function()
     local model = {
       writes = {},
