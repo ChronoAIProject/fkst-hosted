@@ -66,32 +66,52 @@ function BranchTrain.install(M, shared)
     }
   end
 
-  function M.is_supported_rollup_ready(payload)
-    if type(payload) ~= "table"
-      or payload.schema ~= "github-devloop.v1"
-      or not M._is_git_ref_safe(payload.upstream_branch)
-      or not M._is_git_ref_safe(payload.integration_branch)
-      or not M._is_git_sha(payload.head_sha)
-      or type(payload.source_ref) ~= "table"
-      or payload.source_ref.kind ~= "external" then
-      return false
+  function M.validate_rollup_ready(payload)
+    if type(payload) ~= "table" then
+      return false, "payload-not-table"
     end
-    local ok = pcall(function()
+    if payload.schema ~= "github-devloop.v1" then
+      return false, "schema"
+    end
+    if not M._is_git_ref_safe(payload.upstream_branch) then
+      return false, "upstream-branch"
+    end
+    if not M._is_git_ref_safe(payload.integration_branch) then
+      return false, "integration-branch"
+    end
+    if not M._is_git_sha(payload.head_sha) then
+      return false, "head-sha"
+    end
+    if type(payload.source_ref) ~= "table" then
+      return false, "source-ref"
+    end
+    if payload.source_ref.kind ~= "external" then
+      return false, "source-ref-kind"
+    end
+    local repo_ok, repo_err = pcall(function()
       require_safe_repo(payload.repo)
     end)
-    if not ok then
-      return false
+    if not repo_ok then
+      return false, "repo-validation: " .. tostring(repo_err)
     end
     if tostring(payload.source_ref.ref or "") ~= M.rollup_source_ref(payload.repo, payload.pr_number).ref then
-      return false
+      return false, "source-ref-ref"
     end
-    return tostring(payload.dedup_key or "") == M.rollup_dedup_key(
+    if tostring(payload.dedup_key or "") ~= M.rollup_dedup_key(
       payload.repo,
       payload.upstream_branch,
       payload.integration_branch,
       payload.pr_number,
       payload.head_sha
-    )
+    ) then
+      return false, "dedup-key"
+    end
+    return true, "ok"
+  end
+
+  function M.is_supported_rollup_ready(payload)
+    local ok = M.validate_rollup_ready(payload)
+    return ok == true
   end
 
   function M.branch_sync_source_ref(repo, upstream, integration)

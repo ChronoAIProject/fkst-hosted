@@ -97,6 +97,10 @@ local cases = {
   },
 }
 
+local function expects_non_table_payload_fail_closed(dept)
+  return dept == "rollup_merge"
+end
+
 return {
   test_all_departments_accept_production_namespaced_consumed_queues = function()
     for _, path in ipairs(department_paths()) do
@@ -112,7 +116,7 @@ return {
     end
   end,
 
-  test_unsupported_payload_consumers_skip_non_table_payloads = function()
+  test_unsupported_payload_consumers_handle_non_table_payloads_by_queue_contract = function()
     for _, case in ipairs(cases) do
       for _, payload in ipairs({ false, "foreign-payload", 42 }) do
         local result = t.run_department(case.path, {
@@ -120,7 +124,16 @@ return {
           payload = payload,
         })
 
-        t.eq(result.exit_code, 0)
+        if expects_non_table_payload_fail_closed(case.dept) then
+          t.is_true(result.exit_code ~= 0)
+          t.is_true(tostring(result.error or ""):find(
+            "github-devloop: rollup_merge unsupported devloop_rollup_ready payload",
+            1,
+            true
+          ) ~= nil)
+        else
+          t.eq(result.exit_code, 0)
+        end
         t.eq(#result.raises, 0)
       end
     end
