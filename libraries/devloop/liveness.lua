@@ -52,6 +52,7 @@ local function devloop_restart_liveness_policy()
       primitive = "fkst.codex_runs",
       status = "running",
       on_error = "defer",
+      indeterminate_timeout = "row-budget",
     },
     child_workflow_wait = {
       live_marker = "state:v1",

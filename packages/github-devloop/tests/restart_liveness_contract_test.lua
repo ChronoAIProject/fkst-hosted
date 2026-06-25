@@ -67,6 +67,7 @@ local function assert_codex_run_row(row, expected_role, state)
   t.eq(row.liveness_contract.real_execution.match.dedup_key, "state.version", state)
   t.eq(row.liveness_contract.real_execution.status, "running", state)
   t.eq(row.liveness_contract.real_execution.on_error, "defer", state)
+  t.eq(row.liveness_contract.real_execution.indeterminate_timeout, "row-budget", state)
   t.eq(row.watchdog.on_stale.op, "redrive_receiver", state)
   t.eq(row.watchdog.on_stale.producer, nil, state)
   t.eq(#core.strict_restart_liveness_contract_errors({ row }), 0, state)
@@ -486,6 +487,7 @@ return {
     row.liveness_contract.real_execution.match.dedup_key = "marker.dedup"
     row.liveness_contract.real_execution.status = "recent"
     row.liveness_contract.real_execution.on_error = "marker-budget-fallback"
+    row.liveness_contract.real_execution.indeterminate_timeout = nil
     local errors = core.strict_restart_liveness_contract_errors({ row })
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.primitive must be fkst.codex_runs"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.role must be non-empty"), joined_errors(errors))
@@ -493,6 +495,7 @@ return {
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.match.dedup_key must be state.version"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.status must be running"), joined_errors(errors))
     t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.on_error must be defer"), joined_errors(errors))
+    t.is_true(contains_error(errors, "implementing: codex_run defer real_execution.indeterminate_timeout must be row-budget"), joined_errors(errors))
   end,
 
   test_heartbeat_defer_rejects_clear_fact_shape = function()

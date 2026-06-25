@@ -306,6 +306,7 @@ local function validate_codex_run_defer(row, errors)
     "primitive",
     "status",
     "on_error",
+    "indeterminate_timeout",
   }, errors, state)
   if policy == nil then
     return
@@ -313,6 +314,7 @@ local function validate_codex_run_defer(row, errors)
   local expected_primitive = policy.primitive
   local expected_status = policy.status
   local expected_on_error = policy.on_error
+  local expected_indeterminate_timeout = policy.indeterminate_timeout
   if type(real_execution) ~= "table" then
     table.insert(errors, state .. ": codex_run defer must declare liveness_contract.real_execution")
     return
@@ -339,6 +341,9 @@ local function validate_codex_run_defer(row, errors)
   end
   if real_execution.on_error ~= expected_on_error then
     table.insert(errors, state .. ": codex_run defer real_execution.on_error must be " .. tostring(expected_on_error))
+  end
+  if real_execution.indeterminate_timeout ~= expected_indeterminate_timeout then
+    table.insert(errors, state .. ": codex_run defer real_execution.indeterminate_timeout must be " .. tostring(expected_indeterminate_timeout))
   end
 end
 

@@ -252,14 +252,13 @@ return {
     end)
   end,
 
-  test_implement_codex_runs_unavailable_defers_without_timeout_effects = function()
+  test_implement_codex_runs_unavailable_before_budget_defers_without_timeout_effects = function()
     local event = ready()
     local row = core.restart_transition_row("implementing")
-    local timeout_version = event.dedup_key .. "/timeout/implementing/2"
-    local state = state_for(event, timeout_version)
+    local state = state_for(event)
     local facts = facts_for(event, {
-      core.state_marker(event.proposal_id, "implementing", timeout_version),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+    }, core.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
     local original = fkst.codex_runs
     fkst.codex_runs = function()
       error("synthetic codex_runs failure")
@@ -283,7 +282,7 @@ return {
     end
   end,
 
-  test_implement_running_codex_run_without_deadline_defers_without_timeout_effects = function()
+  test_implement_codex_runs_unavailable_past_budget_escalates = function()
     local event = ready()
     local row = core.restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
@@ -291,6 +290,57 @@ return {
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", timeout_version),
     }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    local original = fkst.codex_runs
+    fkst.codex_runs = function()
+      error("synthetic codex_runs failure")
+    end
+    local ok, err = pcall(function()
+      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      t.eq(eval.status, "actionable")
+      t.eq(eval.reason, "codex run liveness indeterminate over row budget")
+      t.eq(eval.signal.reason, "codex-runs-unavailable")
+      t.eq(eval.codex_runs_fallback, true)
+      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+        event.proposal_id,
+        row.from_state,
+        row.liveness_class_id,
+        eval.generation_key,
+        1,
+        event.source_ref
+      )))
+      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+        event.proposal_id,
+        row.from_state,
+        row.liveness_class_id,
+        eval.generation_key,
+        2,
+        event.source_ref
+      )))
+      local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
+      t.eq(due, true)
+      t.eq(age, 180)
+      local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)
+      t.eq(receiver.action, "stuck")
+      local raised = run_timeout(row, state, facts)
+      t.eq(captured_raise(raised, "devloop_ready"), nil)
+      local reconcile = captured_raise(raised, "devloop_timeout_reconcile")
+      t.is_true(reconcile ~= nil)
+      t.eq(reconcile.payload.state, "implementing")
+      t.eq(reconcile.payload.round, 3)
+    end)
+    fkst.codex_runs = original
+    if not ok then
+      error(err)
+    end
+  end,
+
+  test_implement_running_codex_run_without_deadline_before_budget_defers_then_recovers = function()
+    local event = ready()
+    local row = core.restart_transition_row("implementing")
+    local state = state_for(event)
+    local facts = facts_for(event, {
+      core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+    }, core.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
     with_codex_runs({
       {
         run_id = "implement-running-missing-deadline",
@@ -311,6 +361,71 @@ return {
       t.eq(receiver.action, "defer")
       local raised = run_timeout(row, state, facts)
       assert_no_timeout_effects(raised)
+    end)
+    with_codex_runs({}, function()
+      local recovered = facts_for(event, {
+        core.state_marker(event.proposal_id, "implementing", event.dedup_key),
+      }, core.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
+      local eval = core.actionable_epoch_resolve(row, state, recovered, recovered.now_seconds)
+      t.eq(eval.status, "actionable")
+      t.eq(eval.signal.reason, "codex-run-not-running")
+      local due, age = core.liveness_timeout_due_with_facts(row, state, recovered, recovered.now_seconds)
+      t.eq(due, false)
+      t.eq(age, 60)
+      local receiver = core.restart_row_receiver_liveness(row, state, recovered, recovered.now_seconds)
+      t.eq(receiver.action, "stuck")
+    end)
+  end,
+
+  test_implement_running_codex_run_without_deadline_past_budget_escalates = function()
+    local event = ready()
+    local row = core.restart_transition_row("implementing")
+    local timeout_version = event.dedup_key .. "/timeout/implementing/2"
+    local state = state_for(event, timeout_version)
+    local facts = facts_for(event, {
+      core.state_marker(event.proposal_id, "implementing", timeout_version),
+    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    with_codex_runs({
+      {
+        run_id = "implement-running-missing-deadline",
+        role = "implement",
+        proposal_id = event.proposal_id,
+        dedup_key = event.dedup_key,
+        status = "running",
+      },
+    }, function()
+      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      t.eq(eval.status, "actionable")
+      t.eq(eval.reason, "codex run liveness indeterminate over row budget")
+      t.eq(eval.signal.reason, "codex-run-deadline-unavailable")
+      t.eq(eval.signal.indeterminate, true)
+      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+        event.proposal_id,
+        row.from_state,
+        row.liveness_class_id,
+        eval.generation_key,
+        1,
+        event.source_ref
+      )))
+      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+        event.proposal_id,
+        row.from_state,
+        row.liveness_class_id,
+        eval.generation_key,
+        2,
+        event.source_ref
+      )))
+      local due, age = core.liveness_timeout_due_with_facts(row, state, facts, facts.now_seconds)
+      t.eq(due, true)
+      t.eq(age, 180)
+      local receiver = core.restart_row_receiver_liveness(row, state, facts, facts.now_seconds)
+      t.eq(receiver.action, "stuck")
+      local raised = run_timeout(row, state, facts)
+      t.eq(captured_raise(raised, "devloop_ready"), nil)
+      local reconcile = captured_raise(raised, "devloop_timeout_reconcile")
+      t.is_true(reconcile ~= nil)
+      t.eq(reconcile.payload.state, "implementing")
+      t.eq(reconcile.payload.round, 3)
     end)
   end,
 

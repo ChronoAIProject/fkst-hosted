@@ -259,6 +259,23 @@ local function resolve_codex_run(row, state, facts, now_seconds)
     return eval
   end
   if signal.codex_runs_fallback == true or signal.indeterminate == true then
+    local entry_ms = state_entry_ms(state)
+    if entry_ms == nil then
+      return invalid("codex run indeterminate epoch is missing state entry")
+    end
+    local now_ms = tonumber(now_seconds) and tonumber(now_seconds) * 1000 or nil
+    local budget = row and row.budget and tonumber(row.budget.minutes) or nil
+    if now_ms == nil or budget == nil or budget <= 0 or now_ms < entry_ms then
+      return invalid("codex run indeterminate row budget is invalid")
+    end
+    local age = math.floor((now_ms - entry_ms) / 60000)
+    if age >= budget then
+      local eval = actionable(row, state, entry_ms, "codex-run:indeterminate", "codex run liveness indeterminate over row budget")
+      eval.signal = signal
+      eval.codex_runs_fallback = signal.codex_runs_fallback == true
+      eval.indeterminate = signal.indeterminate == true
+      return eval
+    end
     local eval = deferred("codex run liveness is indeterminate")
     eval.signal = signal
     return eval
