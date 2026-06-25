@@ -49,7 +49,13 @@ return {
     t.eq(id, "autochrono/issue/owner/repo/42")
     t.eq(repo, "owner/repo")
     t.eq(issue_number, "42")
-    t.eq(core.issue_ref_round_trips("owner/repo", 42), true)
+  end,
+
+  test_issue_ref_round_trips_rejects_non_canonical_inputs = function()
+    t.eq(core.issue_ref_round_trips("owner:repo", 42), false)
+    t.eq(core.issue_ref_round_trips(string.rep("r", 101), 42), false)
+    t.eq(core.issue_ref_round_trips("owner/repo", "42:evil"), false)
+    t.eq(core.issue_ref_round_trips("owner/repo", string.rep("7", 31)), false)
   end,
 
   test_parse_proposal_id_rejects_foreign_ids = function()
