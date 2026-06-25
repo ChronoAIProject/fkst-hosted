@@ -10,15 +10,6 @@ local issue_number = 42
 local proposal_id = core.proposal_id(repo, issue_number)
 local blocked_version = "blocked/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
-local function contains(values, expected)
-  for _, value in ipairs(values or {}) do
-    if value == expected then
-      return true
-    end
-  end
-  return false
-end
-
 local function observe_spec()
   return require("departments.observe_issue.main").spec
 end
@@ -94,25 +85,18 @@ end
 
 return {
   test_run_graph_entity_changed_delivers_to_observe_issue_and_raises_forward_action = function()
-    local spec = observe_spec()
-    t.is_true(contains(spec.consumes, "github-proxy.github_entity_changed"))
-    t.is_true(contains(spec.produces, "github-proxy.github_issue_label_request"))
-
     mock_runtime_and_context()
     mock_blocked_issue_with_stale_label()
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 4 }))
 
-    local observe_step, observe_index = graph.require_delivery(trace, {
-      queue = "github-proxy.github_entity_changed",
+    local route = graph.require_router_regression(trace, {
+      spec = observe_spec(),
+      entry_queue = "github-proxy.github_entity_changed",
       consumer = "github-devloop.observe_issue",
-    })
-    t.eq(observe_step.exit_code, 0)
-
-    local label_request, _, label_request_index = graph.require_raise(
-      trace,
-      "github-proxy.github_issue_label_request",
-      function(raised)
+      raised_queue = "github-proxy.github_issue_label_request",
+      downstream_consumer = "github-proxy.github_issue_label",
+      raised_predicate = function(raised)
         local payload = raised.payload or {}
         return payload.schema == "github-proxy.label.v1"
           and payload.repo == repo
@@ -120,16 +104,10 @@ return {
           and payload.add_labels ~= nil
           and payload.add_labels[1] == "fkst-dev:blocked"
           and graph.payload_contains(raised, proposal_id)
-      end
-    )
-    t.eq(label_request_index, observe_index)
-    t.eq(label_request.payload.source_ref.ref, "owner/repo#issue/42")
-
-    local label_step, label_index = graph.require_delivery(trace, {
-      queue = "github-proxy.github_issue_label_request",
-      consumer = "github-proxy.github_issue_label",
+      end,
     })
-    t.eq(label_step.exit_code, 0)
-    t.is_true(label_index > label_request_index)
+
+    local label_request = route.raised
+    t.eq(label_request.payload.source_ref.ref, "owner/repo#issue/42")
   end,
 }
