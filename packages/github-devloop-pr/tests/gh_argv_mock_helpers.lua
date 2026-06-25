@@ -730,7 +730,7 @@ local function install_legacy_command_renderers(core)
   end
 
   core.gh_pr_view_origin_cmd = core.gh_pr_view_origin_cmd or function(repo, number)
-    return gh_pr_view_command(repo, number, "headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus")
+    return gh_pr_view_command(repo, number, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus")
   end
   core.gh_pr_view_observe_cmd = core.gh_pr_view_observe_cmd or core.gh_pr_view_origin_cmd
   core.gh_pr_view_merge_cmd = core.gh_pr_view_merge_cmd or function(repo, number)
@@ -753,6 +753,11 @@ local function install_legacy_command_renderers(core)
   end
   core.gh_pr_list_freshness_cmd = core.gh_pr_list_freshness_cmd or function(repo)
     return gh_api_paginate("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")
+  end
+  core.gh_pr_list_recent_merged_cmd = core.gh_pr_list_recent_merged_cmd or function(repo, limit)
+    return "gh pr list --repo " .. shell_single_quote(repo)
+      .. " --state merged --limit " .. tostring(math.floor(tonumber(limit or 30)))
+      .. " --json number,title,mergedAt,headRefOid"
   end
   core.gh_pr_list_merge_queue_cmd = core.gh_pr_list_merge_queue_cmd or function(repo, base)
     return gh_api_paginate("repos/" .. tostring(repo) .. "/pulls?state=open&base=" .. url_encode(base) .. "&per_page=100")

@@ -98,6 +98,121 @@ local function copy_fact(raw)
   return fact
 end
 
+local function normalize_text(value)
+  return tostring(value or ""):lower():gsub("%s+", " ")
+end
+
+local function title_or_body_reverts_pr(pr, target_number)
+  local number = tonumber(target_number)
+  if number == nil then
+    return false
+  end
+  local text = normalize_text(tostring(pr and pr.title or "") .. "\n" .. tostring(pr and pr.body or ""))
+  if text:find("revert", 1, true) == nil then
+    return false
+  end
+  local escaped = tostring(number):gsub("([^%w])", "%%%1")
+  local suffix = "%f[%D]"
+  return text:find("#" .. escaped .. suffix) ~= nil
+    or text:find("pull/" .. escaped .. suffix) ~= nil
+    or text:find("pull request " .. escaped .. suffix) ~= nil
+    or text:find("pr " .. escaped .. suffix) ~= nil
+end
+
+local function merged_seconds(value)
+  local parsed = core.iso_timestamp_epoch_seconds(value)
+  return parsed or 0
+end
+
+local function later_than_reverted_pair(revert_pr, fact)
+  local fact_merged_at = fact.merged_at or fact.comment_created_at
+  local revert_merged_at = revert_pr and revert_pr.merged_at
+  if fact_merged_at == nil or revert_merged_at == nil then
+    return true
+  end
+  local left = merged_seconds(revert_merged_at)
+  local right = merged_seconds(fact_merged_at)
+  return left == 0 or right == 0 or left >= right
+end
+
+local function pair_key(pair)
+  return tostring(pair.reverted_pr or "")
+    .. "->"
+    .. tostring(pair.revert_pr or pair.issue_number or "")
+    .. ":"
+    .. tostring(pair.evidence or "")
+end
+
+local function append_pair(pairs, seen, pair)
+  local key = pair_key(pair)
+  if seen[key] then
+    return
+  end
+  seen[key] = true
+  table.insert(pairs, pair)
+end
+
+local function issue_was_reopened(entity)
+  if type(entity) ~= "table" then
+    return false
+  end
+  local issue = entity.parent_issue or entity.issue
+  if type(issue) == "table" then
+    if tostring(issue.state_reason or ""):upper() == "REOPENED" then
+      return true
+    end
+    if issue.reopened == true then
+      return true
+    end
+  end
+  return entity.issue_reopened == true
+end
+
+local function detect_false_consensus(fact, entities, recent_merged_prs)
+  local pairs = {}
+  local seen = {}
+  local pr_number = tonumber(fact and fact.pr_number)
+  if pr_number == nil then
+    return false, pairs
+  end
+  for _, pr in ipairs(recent_merged_prs or {}) do
+    local revert_number = tonumber(pr and pr.number)
+    if revert_number ~= nil
+      and revert_number ~= pr_number
+      and title_or_body_reverts_pr(pr, pr_number)
+      and later_than_reverted_pair(pr, fact) then
+      append_pair(pairs, seen, {
+        reverted_pr = pr_number,
+        revert_pr = revert_number,
+        evidence = "explicit-revert-pr",
+      })
+    end
+  end
+  for _, entity in ipairs(entities or {}) do
+    if tonumber(entity and entity.pr_number) == pr_number and issue_was_reopened(entity) then
+      append_pair(pairs, seen, {
+        reverted_pr = pr_number,
+        issue_number = tonumber(entity.issue_number),
+        evidence = "issue-reopened",
+      })
+    end
+  end
+  return #pairs > 0, pairs
+end
+
+local function scanned_pr_contains(recent_merged_prs, pr_number)
+  local number = tonumber(pr_number)
+  if number == nil or type(recent_merged_prs) ~= "table" then
+    return false
+  end
+  for _, pr in ipairs(recent_merged_prs) do
+    if tonumber(pr and pr.number) == number then
+      return true
+    end
+  end
+  return false
+end
+
 local function decorate_with_attempt_projection(fact, comments, now_seconds)
   if type(fact) ~= "table" then
     return nil
@@ -118,6 +233,21 @@ local function decorate_with_attempt_projection(fact, comments, now_seconds)
     fact.attempt_outcomes = projection.outcomes
     fact.avm_rate_numerator = projection.valid_merges
     fact.avm_rate_denominator = projection.total_attempts
+  end
+  return fact
+end
+
+local function decorate_with_false_consensus(fact, entities, recent_merged_prs)
+  local detected, pairs = detect_false_consensus(fact, entities, recent_merged_prs)
+  if detected then
+    fact.false_consensus = true
+    fact.false_consensus_pairs = pairs
+    if type(fact.gates) ~= "table" then
+      fact.gates = {}
+    end
+    fact.gates.no_revert_reopen = "fail"
+  elseif fact.false_consensus == nil and scanned_pr_contains(recent_merged_prs, fact.pr_number) then
+    fact.false_consensus = false
   end
   return fact
 end
@@ -176,13 +306,96 @@ local function append_entity_direct_facts(facts, entity)
   append_direct_facts(facts, entity.autonomy_results)
 end
 
-function core.collect_avm_scoreboard_facts(entities, now_seconds)
+local function append_recent_pr_facts(facts, recent_merged_prs, now_seconds)
+  for _, pr in ipairs(recent_merged_prs or {}) do
+    append_comment_facts(facts, comments_from_entity({ pr = pr }), now_seconds)
+  end
+end
+
+local function recent_merged_pr_cache_key(repo)
+  return table.concat({
+    "github-devloop",
+    "avm",
+    "recent-merged-prs",
+    tostring(repo or ""):gsub("[^%w%._%-%/]", "-"),
+  }, "/")
+end
+
+local function recent_merged_pr_view(pr, listed)
+  pr.number = tonumber(pr.number) or tonumber(listed.number)
+  if pr.title == nil or pr.title == "" then
+    pr.title = tostring(listed.title or "")
+  end
+  pr.merged_at = pr.merged_at or listed.merged_at
+  if pr.head_sha == nil or pr.head_sha == "" then
+    pr.head_sha = listed.head_sha
+  end
+  return pr
+end
+
+function core.collect_recent_merged_prs(repo, limits, deadline)
+  local limit = math.max(1, math.floor(tonumber(limits and limits.entity_cap) or 25))
+  local listed = core.observability_run_cmd({
+    run = function(timeout)
+      return core.gh_pr_list_recent_merged(repo, limit, timeout)
+    end,
+    read_coalesce = {
+      key = recent_merged_pr_cache_key(repo),
+      ttl_seconds = 60,
+    },
+  }, limits, deadline, "recent merged PR list")
+  if core.observability_result_deferred(listed) then
+    return nil
+  end
+  local prs = {}
+  for _, item in ipairs(core.parse_pr_list_recent_merged(listed.stdout)) do
+    if not core.observability_has_budget(deadline) then
+      log.warn("github-devloop dept=observability tag=AVM_FALSE_CONSENSUS_DEFERRED reason=deadline processed_prs=" .. tostring(#prs))
+      break
+    end
+    local view = core.observability_run_cmd({
+      run = function(timeout)
+        return core.gh_pr_view_observe(repo, item.number, timeout)
+      end,
+    }, limits, deadline, "recent merged PR view")
+    if core.observability_result_deferred(view) then
+      log.warn("github-devloop dept=observability tag=AVM_FALSE_CONSENSUS_DEFERRED reason=deadline processed_prs=" .. tostring(#prs))
+      break
+    end
+    table.insert(prs, recent_merged_pr_view(core.parse_pr_view_origin(view.stdout), item))
+  end
+  return prs
+end
+
+function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs)
   local facts = {}
   for _, entity in ipairs(entities or {}) do
     append_entity_direct_facts(facts, entity)
     append_comment_facts(facts, comments_from_entity(entity), now_seconds)
   end
+  append_recent_pr_facts(facts, recent_merged_prs, now_seconds)
+  for _, fact in ipairs(facts) do
+    decorate_with_false_consensus(fact, entities, recent_merged_prs)
+  end
   return facts
+end
+
+function core.false_consensus_pairs(facts)
+  local pairs = {}
+  local seen = {}
+  for _, fact in ipairs(facts or {}) do
+    if type(fact) == "table" then
+      for _, pair in ipairs(fact.false_consensus_pairs or {}) do
+        append_pair(pairs, seen, pair)
+      end
+    end
+  end
+  table.sort(pairs, function(a, b)
+    local left = tostring(a.reverted_pr or "") .. "/" .. tostring(a.revert_pr or a.issue_number or "")
+    local right = tostring(b.reverted_pr or "") .. "/" .. tostring(b.revert_pr or b.issue_number or "")
+    return left < right
+  end)
+  return pairs
 end
 
 local function fact_identity(fact)

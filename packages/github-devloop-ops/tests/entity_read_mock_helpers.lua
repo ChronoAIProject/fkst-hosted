@@ -269,7 +269,7 @@ local issue_view_selectors = {
   "title,labels,comments,state,assignees",
 }
 
-local pr_origin_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
+local pr_origin_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_origin_legacy_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_head_selector = "headRefName"
 local pr_fix_selector = "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
@@ -384,6 +384,10 @@ end
 
 function M.mock_pr_list_command(t, command, prs, times)
   register_view_commands(t, { command }, list_stdout(prs, pr_list_item_json), times or 1)
+end
+
+function M.mock_recent_merged_pr_list(t, repo, prs, times)
+  M.mock_pr_list_command(t, core.gh_pr_list_recent_merged_cmd(repo, #prs > 0 and #prs or 30), prs, times)
 end
 
 function M.mock_issue_list_raw_command(t, command, result, times)

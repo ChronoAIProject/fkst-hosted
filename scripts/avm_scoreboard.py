@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -123,6 +124,144 @@ def avm_fact_shape(raw: dict[str, Any]) -> bool:
     )
 
 
+def normalize_text(value: Any) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def parse_pr_number(value: Any) -> int | None:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 1:
+        return None
+    return parsed
+
+
+def title_or_body_reverts_pr(pr: dict[str, Any], target_number: int) -> bool:
+    text = normalize_text(f"{pr.get('title') or ''}\n{pr.get('body') or ''}")
+    if "revert" not in text:
+        return False
+    target = str(target_number)
+    return re.search(rf"(?:#|pull/|pull request |pr ){re.escape(target)}(?!\d)", text) is not None
+
+
+def timestamp_order(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def later_than_reverted_pair(revert_pr: dict[str, Any], fact: dict[str, Any]) -> bool:
+    reverted = timestamp_order(fact.get("merged_at") or fact.get("comment_created_at"))
+    reverter = timestamp_order(revert_pr.get("merged_at") or revert_pr.get("mergedAt"))
+    return reverted is None or reverter is None or reverter >= reverted
+
+
+def pr_records(data: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+
+    def add(raw: Any) -> None:
+        if not isinstance(raw, dict):
+            return
+        number = parse_pr_number(raw.get("number") or raw.get("pr_number"))
+        if number is None:
+            return
+        row = dict(raw)
+        row["number"] = number
+        if "merged_at" not in row and "mergedAt" in row:
+            row["merged_at"] = row.get("mergedAt")
+        records.append(row)
+
+    if isinstance(data, dict):
+        for key in ("recent_merged_prs", "merged_prs", "pull_requests", "prs"):
+            for raw in list_from_any(data.get(key)):
+                add(raw)
+    for entity in raw_entity_records(data):
+        if not isinstance(entity, dict):
+            continue
+        add(entity.get("pr"))
+        if entity.get("kind") == "pr" or "pr_number" in entity:
+            add(entity)
+    return records
+
+
+def issue_reopened(entity: dict[str, Any]) -> bool:
+    issue = entity.get("parent_issue") if isinstance(entity.get("parent_issue"), dict) else entity.get("issue")
+    if isinstance(issue, dict):
+        if str(issue.get("state_reason") or issue.get("stateReason") or "").upper() == "REOPENED":
+            return True
+        if issue.get("reopened") is True:
+            return True
+    return entity.get("issue_reopened") is True
+
+
+def detect_false_consensus(fact: dict[str, Any], data: Any) -> list[dict[str, Any]]:
+    pr_number = parse_pr_number(fact.get("pr_number") or fact.get("pr"))
+    if pr_number is None:
+        return []
+    pairs: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, Any]] = set()
+
+    def add(pair: dict[str, Any]) -> None:
+        key = (pair.get("reverted_pr"), pair.get("revert_pr") or pair.get("issue_number"), pair.get("evidence"))
+        if key in seen:
+            return
+        seen.add(key)
+        pairs.append(pair)
+
+    for pr in pr_records(data):
+        number = parse_pr_number(pr.get("number"))
+        if number is None or number == pr_number:
+            continue
+        if title_or_body_reverts_pr(pr, pr_number) and later_than_reverted_pair(pr, fact):
+            add({"reverted_pr": pr_number, "revert_pr": number, "evidence": "explicit-revert-pr"})
+    for entity in raw_entity_records(data):
+        if not isinstance(entity, dict):
+            continue
+        if parse_pr_number(entity.get("pr_number")) == pr_number and issue_reopened(entity):
+            add({"reverted_pr": pr_number, "issue_number": parse_pr_number(entity.get("issue_number")), "evidence": "issue-reopened"})
+    return pairs
+
+
+def scanned_pr_numbers(data: Any) -> set[int]:
+    numbers: set[int] = set()
+    if not isinstance(data, dict):
+        return numbers
+    for raw in list_from_any(data.get("recent_merged_prs")):
+        if not isinstance(raw, dict):
+            continue
+        number = parse_pr_number(raw.get("number") or raw.get("pr_number"))
+        if number is not None:
+            numbers.add(number)
+    return numbers
+
+
+def decorate_false_consensus(fact: dict[str, Any], data: Any) -> dict[str, Any]:
+    if "false_consensus" in fact or "false_consensus_rate_numerator" in fact:
+        return fact
+    pairs = detect_false_consensus(fact, data)
+    scanned = scanned_pr_numbers(data)
+    if not pairs and parse_pr_number(fact.get("pr_number") or fact.get("pr")) not in scanned:
+        return fact
+    decorated = dict(fact)
+    decorated["false_consensus"] = bool(pairs)
+    if pairs:
+        decorated["false_consensus_pairs"] = pairs
+        gates = dict(decorated.get("gates") or {})
+        gates["no_revert_reopen"] = "fail"
+        decorated["gates"] = gates
+    return decorated
+
+
 def raw_avm_sources(data: Any) -> list[dict[str, Any]]:
     sources: list[dict[str, Any]] = []
 
@@ -188,8 +327,24 @@ def avm_facts(data: Any) -> list[dict[str, Any]]:
             if identity in seen:
                 continue
             seen.add(identity)
-        facts.append(raw)
+        facts.append(decorate_false_consensus(raw, data))
     return facts
+
+
+def false_consensus_pairs(data: Any) -> list[dict[str, Any]]:
+    pairs: list[dict[str, Any]] = []
+    seen: set[tuple[Any, Any, Any]] = set()
+    for fact in avm_facts(data):
+        for pair in list_from_any(fact.get("false_consensus_pairs")):
+            if not isinstance(pair, dict):
+                continue
+            key = (pair.get("reverted_pr"), pair.get("revert_pr") or pair.get("issue_number"), pair.get("evidence"))
+            if key in seen:
+                continue
+            seen.add(key)
+            pairs.append(pair)
+    pairs.sort(key=lambda row: (int_value(row.get("reverted_pr")), int_value(row.get("revert_pr") or row.get("issue_number")), str(row.get("evidence") or "")))
+    return pairs
 
 
 def empty_bucket(level: str) -> dict[str, Any]:

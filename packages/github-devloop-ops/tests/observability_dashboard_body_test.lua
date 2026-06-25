@@ -230,6 +230,144 @@ return {
     t.eq(dashboard.body:find("TOTAL", 1, true), nil)
   end,
 
+  test_false_consensus_detector_flags_explicit_merged_revert_pr = function()
+    mock_dashboard_env()
+    local proposal_id = "github-devloop/issue/owner/repo/44"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/44/2026-06-03T01-02-03Z"
+    local head_sha = "abcdef1"
+    local record = autonomy_record({
+      proposal_id = proposal_id,
+      issue_number = "44",
+      pr_number = "9",
+      version = version,
+      head_sha = head_sha,
+      task_class = "L2",
+      codex_calls = 3,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    })
+    local recent_prs = {
+      {
+        number = 9,
+        title = "Implement AVM fact",
+        merged_at = "2026-06-03T01:30:00Z",
+        comments = {
+          trusted_comment(core.merged_marker(proposal_id, "9", version, head_sha, record), "2026-06-03T01:30:00Z", 2001),
+        },
+      },
+      {
+        number = 10,
+        title = "Revert \"Implement AVM fact\" (#9)",
+        body = "Reverts #9.",
+        merged_at = "2026-06-03T02:30:00Z",
+        comments = {},
+      },
+    }
+    local facts = core.collect_avm_scoreboard_facts({}, 1770000000, recent_prs)
+    local rows = core.aggregate_avm_scoreboard(facts)
+    local by_level = {}
+    for _, row in ipairs(rows) do
+      by_level[row.level] = row
+    end
+
+    t.eq(by_level.L2.false_consensus_numerator, 1)
+    t.eq(by_level.L2.false_consensus_denominator, 1)
+    t.eq(by_level.L2.revert_numerator, 1)
+    t.eq(by_level.L2.revert_denominator, 1)
+    local pairs = core.false_consensus_pairs(facts)
+    t.eq(#pairs, 1)
+    t.eq(pairs[1].reverted_pr, 9)
+    t.eq(pairs[1].revert_pr, 10)
+    t.eq(pairs[1].evidence, "explicit-revert-pr")
+  end,
+
+  test_false_consensus_detector_requires_exact_pr_reference = function()
+    mock_dashboard_env()
+    local record = autonomy_record({
+      proposal_id = "github-devloop/issue/owner/repo/46",
+      issue_number = "46",
+      pr_number = "12",
+      version = "ready/consensus-github-devloop/issue/owner/repo/46/2026-06-03T01-02-03Z",
+      head_sha = "abc1212",
+      task_class = "L2",
+      gates = { no_revert_reopen = "pass" },
+    })
+    local facts = core.collect_avm_scoreboard_facts({}, 1770000000, {
+      {
+        number = 12,
+        merged_at = "2026-06-03T01:30:00Z",
+        comments = {
+          trusted_comment(core.merged_marker(record.proposal_id, "12", record.version, record.head_sha, record), "2026-06-03T01:30:00Z", 2002),
+        },
+      },
+      {
+        number = 13,
+        title = "Revert unrelated change (#123)",
+        body = "Reverts #123.",
+        merged_at = "2026-06-03T02:30:00Z",
+        comments = {},
+      },
+    })
+    local pairs = core.false_consensus_pairs(facts)
+    t.eq(#pairs, 0)
+  end,
+
+  test_dashboard_lists_false_consensus_churn_pairs = function()
+    mock_dashboard_env()
+    local proposal_id = "github-devloop/issue/owner/repo/45"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/45/2026-06-03T01-02-03Z"
+    local head_sha = "abc9999"
+    local record = autonomy_record({
+      proposal_id = proposal_id,
+      issue_number = "45",
+      pr_number = "12",
+      version = version,
+      head_sha = head_sha,
+      task_class = "L1",
+      codex_calls = 2,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    })
+    local dashboard = core.render_observability_dashboard({
+      entities = {},
+      counts = {},
+      stalls = {},
+      recent_merged_prs = {
+        {
+          number = 12,
+          merged_at = "2026-06-03T01:30:00Z",
+          comments = {
+            trusted_comment(core.merged_marker(proposal_id, "12", version, head_sha, record), "2026-06-03T01:30:00Z", 3001),
+          },
+        },
+        {
+          number = 13,
+          title = "Revert \"Change that passed review\" (#12)",
+          body = "Reverts #12.",
+          merged_at = "2026-06-03T02:30:00Z",
+          comments = {},
+        },
+      },
+      now_seconds = 1770000000,
+    })
+
+    t.is_true(dashboard.body:find("## False consensus churn", 1, true) ~= nil)
+    t.is_true(dashboard.body:find("PR #12 reverted-by PR #13 evidence=explicit-revert-pr", 1, true) ~= nil)
+    t.is_true(dashboard.body:find("false-consensus-rate=1/1 (100%)", 1, true) ~= nil)
+  end,
+
   test_dashboard_renders_large_topology_without_old_cap_cutting_mermaid = function()
     mock_dashboard_env()
     local mermaid = large_mermaid(900)
