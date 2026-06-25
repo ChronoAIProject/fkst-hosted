@@ -1,7 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 local zh_summary = string.char(228, 184, 173, 230, 150, 135, 230, 145, 152, 232, 166, 129)
 
 local function opts(name, extra)

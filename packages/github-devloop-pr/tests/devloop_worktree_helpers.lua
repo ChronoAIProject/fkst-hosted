@@ -1,7 +1,7 @@
 local base = require("tests.devloop_base_helpers")
 local t = base.t
 local core = base.core
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 local function mock_setup_worktree(path)
   t.mock_command("git -C", {
     stdout = "dev\n",

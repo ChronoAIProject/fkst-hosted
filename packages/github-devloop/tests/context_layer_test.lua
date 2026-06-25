@@ -4,7 +4,7 @@ require("tests.board_digest_probe_helpers")
 local core = h.core
 local t = h.t
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 
 local function assert_language_preamble(prompt)
   t.is_true(prompt:find("Write all output in English; quote code identifiers and cited originals verbatim.", 1, true) ~= nil)
