@@ -1,6 +1,6 @@
 local core = require("core")
 local t = fkst.test
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 gh_argv.install(t, core)
 
 local function has_value(values, expected)

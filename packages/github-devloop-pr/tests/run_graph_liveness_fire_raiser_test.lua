@@ -2,7 +2,7 @@ local t = fkst.test
 local core = require("core")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 gh_argv.install(t, core)
 
 local repo = "owner/repo"

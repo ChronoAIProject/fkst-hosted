@@ -1,6 +1,6 @@
 local t = fkst.test
 local core = require("core")
-local gh_argv = require("tests.gh_argv_mock_helpers")
+local gh_argv = require("testkit.gh_argv_mock")
 gh_argv.install(t, core)
 
 local current_pin = "cccccccccccccccccccccccccccccccccccccccc"
