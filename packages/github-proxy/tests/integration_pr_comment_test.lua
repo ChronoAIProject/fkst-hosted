@@ -114,6 +114,45 @@ return {
     t.eq(#result.raises, 0)
   end,
 
+  test_pr_comment_duplicate_delivery_uses_marker_to_skip_second_post = function()
+    local request = event()
+    local marker = core.comment_marker(request.payload.dedup_key)
+
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_comment_view("existing PR comment")
+    mock_pr_comment_write()
+
+    local first = t.run_department("departments/github_pr_comment/main.lua", request, opts("pr-comment-replay-first", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+    t.eq(first.raises[1].queue, "github_comment_written")
+    t.eq(first.raises[1].payload.request_dedup_key, request.payload.dedup_key)
+
+    mock_write_env("1")
+    mock_bot_env()
+    mock_pr_comment_view({
+      {
+        id = "IC_graphql_replay_marker",
+        body = "created comment\n" .. marker,
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_pr_comment_write()
+
+    local second = t.run_department("departments/github_pr_comment/main.lua", request, opts("pr-comment-replay-second", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 2)
+    t.eq(count_calls(pr_comment_create), 1)
+  end,
+
   test_pr_comment_request_real_write_uses_rest_create = function()
     mock_write_env("1")
     mock_bot_env()
