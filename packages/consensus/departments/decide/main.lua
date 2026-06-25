@@ -98,7 +98,7 @@ local function decide(proposal)
   if type(meta_result) == "table" and meta_result.exit_code == 0 then
     parsed = core.parse_meta_judge_output(meta_result.stdout, verdict_mode)
   end
-  if parsed ~= nil and parsed.kind == "reached" then
+  if parsed ~= nil and parsed.kind == "reached" and core.all_angles_succeeded(angle_results) then
     return {
       queue = "consensus_reached",
       payload = core.build_reached_payload(

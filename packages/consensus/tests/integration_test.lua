@@ -1,3 +1,4 @@
+local core = require("core")
 local t = fkst.test
 require("tests.cache_seed_helpers")
 local verdict_label = "⟦FKST:VERDICT⟧"
@@ -483,6 +484,53 @@ return {
     t.eq(result.raises[1].payload.decision, "approve")
     t.eq(result.raises[1].payload.framing, "approve approve the narrowed framing")
     t.eq(result.raises[1].payload.body:find("Meta-judge framing:", 1, true), nil)
+    t.eq(#codex_calls(), 4)
+  end,
+
+  test_meta_reached_with_failed_angle_falls_back_to_consensus_converge = function()
+    mock_judgment_runtime()
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_judgment_dir()
+    t.mock_command("consensus-angle-structural", {
+      stderr = "forced failure",
+      exit_code = 7,
+    })
+    mock_angle("delete", "abstain", "Delete angle abstains.")
+    mock_meta("reached:approve approve the narrowed framing")
+
+    local run_opts = opts("split-meta-reached-degraded")
+    local result = run_decide(proposal({
+      dedup_key = "proposal-42-v1/split-meta-reached-degraded",
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_converge")
+    t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/split-meta-reached-degraded")))
+    t.eq(#codex_calls(), 4)
+  end,
+
+  test_meta_reached_with_failed_angle_falls_back_to_consensus_converge_in_gate_mode = function()
+    mock_judgment_runtime()
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_judgment_dir()
+    t.mock_command("consensus-angle-structural", {
+      stderr = "forced failure",
+      exit_code = 7,
+    })
+    mock_angle("delete", "comment", "Delete angle notes a non-blocking concern.")
+    mock_meta("reached:approve approve the narrowed framing")
+
+    local run_opts = opts("gate-split-meta-reached-degraded")
+    local result = run_decide(proposal({
+      verdict_mode = "gate",
+      dedup_key = "proposal-42-v1/gate-split-meta-reached-degraded",
+    }), run_opts)
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "consensus_converge")
+    t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/gate-split-meta-reached-degraded")))
     t.eq(#codex_calls(), 4)
   end,
 
