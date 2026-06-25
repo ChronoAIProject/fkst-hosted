@@ -258,6 +258,11 @@ local function resolve_codex_run(row, state, facts, now_seconds)
     eval.signal = signal
     return eval
   end
+  if signal.codex_runs_fallback == true or signal.indeterminate == true then
+    local eval = deferred("codex run liveness is indeterminate")
+    eval.signal = signal
+    return eval
+  end
   local entry_ms = state_entry_ms(state)
   if entry_ms == nil then
     return invalid("codex run fallback epoch is missing state entry")

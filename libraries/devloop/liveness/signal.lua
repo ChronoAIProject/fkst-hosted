@@ -72,7 +72,7 @@ local function codex_run_status(M)
   local function fallback(reason)
     if type(M.log_line) == "function" then
       M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
-        "outcome=marker-budget-fallback",
+        "outcome=defer",
         "error_class=codex-runs-unavailable",
         "reason=" .. one_line(reason),
       })
