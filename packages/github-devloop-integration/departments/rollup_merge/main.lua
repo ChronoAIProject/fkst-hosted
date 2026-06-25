@@ -20,12 +20,20 @@ local function log_skip(payload, reason)
   })
 end
 
+local function unsupported_payload_error(payload, reason)
+  return "github-devloop: rollup_merge unsupported devloop_rollup_ready payload: dedup_key="
+    .. tostring(core.payload_field(payload, "dedup_key"))
+    .. " reason="
+    .. tostring(reason)
+end
+
 local function act(event)
   local payload = event.payload or {}
-  if not core.is_supported_rollup_ready(payload) then
+  local supported, unsupported_reason = core.validate_rollup_ready(payload)
+  if not supported then
     core.log_entry("rollup_merge", event, "rollup", core.payload_field(payload, "dedup_key"))
     log_skip(payload, "unsupported-payload")
-    return
+    error(unsupported_payload_error(payload, unsupported_reason))
   end
 
   core.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
