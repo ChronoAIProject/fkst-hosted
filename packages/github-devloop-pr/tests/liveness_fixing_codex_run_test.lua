@@ -3,6 +3,17 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local fixing = h.fixing
+local run_fix = h.run_fix
+local mock_issue_fix_for_event = h.mock_issue_fix_for_event
+local mock_pr_fix = h.mock_pr_fix
+local mock_implement_codex = h.mock_implement_codex
+local mock_git_status = h.mock_git_status
+local mock_git_commit = h.mock_git_commit
+local mock_git_push = h.mock_git_push
+local mock_existing_fix_worktree = h.mock_existing_fix_worktree
+local mock_write_env = h.mock_write_env
+local mock_bot_env = h.mock_bot_env
+local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
@@ -281,6 +292,34 @@ local function mock_pr_state(comments)
   }, entity_read_mocks.pr_origin_selector)
 end
 
+local function reject_comment(event)
+  return core.build_review_result_comment_request(
+    repo,
+    "42",
+    event.proposal_id,
+    event.version,
+    {
+      proposal_id = event.review_proposal_id,
+      decision = "reject",
+      body = "Reject because parser must fail closed.",
+      blocking_gap = "missing regression guard",
+      dedup_key = event.review_dedup_key,
+      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+    },
+    event.source_ref
+  ).body
+end
+
+local function mock_fix_dispatch_context(event, branch, rejection)
+  mock_bot_env()
+  mock_write_env("1")
+  mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
+    core.state_marker(event.proposal_id, "fixing", event.version),
+    rejection,
+  }, branch, event.version)
+  mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, event.reviewed_head_sha)
+end
+
 local function run_liveness_scan(name, run_opts)
   return t.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
@@ -409,6 +448,33 @@ return {
     t.eq(h.find_raise(result.raises, "github-proxy.github_pr_comment_request", function(payload)
       return tostring(payload.body or ""):find("fkst:github-devloop:timeout-attempt", 1, true) ~= nil
     end), nil)
+  end,
+
+  test_fixing_dispatch_with_live_run_without_completion_markers_skips_redelivery = function()
+    local event = fixing()
+    local branch = core.implement_branch(repo, "42", event.version)
+    local rejection = reject_comment(event)
+    local run_opts = opts("fixing-dispatch-live-run-no-marker", { FKST_GITHUB_WRITE = "1" })
+    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.version)
+    mock_fix_dispatch_context(event, branch, rejection)
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
+    mock_existing_fix_worktree(branch, event.reviewed_head_sha)
+    mock_implement_codex(0, "duplicate fix should not spawn")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("feedface", branch)
+    mock_write_env("1")
+    mock_fix_dispatch_context(event, branch, rejection)
+    mock_git_push(branch)
+    mock_pr_fix({ core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "feedface")
+
+    local result = run_fix(event, run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git worktree add --force -B"), 0)
+    t.eq(count_calls("git worktree remove --force"), 0)
+    t.eq(count_calls("git worktree prune"), 0)
+    t.eq(count_calls("merge --no-edit"), 0)
   end,
 
   test_fixing_codex_run_match_preserves_fix_suffix = function()

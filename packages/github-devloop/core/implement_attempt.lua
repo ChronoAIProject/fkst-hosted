@@ -3,58 +3,11 @@ local S = {}
 function S.install(M)
 
 function M.implement_exec_ref(proposal_id, dedup_key)
-  return M._dedup_key({
-    "implement-exec",
-    tostring(proposal_id or ""),
-    tostring(dedup_key or ""),
-    "implement",
-  })
-end
-
-local function codex_runs_status()
-  local function one_line(value)
-    if type(M._one_line) == "function" then
-      return M._one_line(value)
-    end
-    return tostring(value or ""):gsub("[%s\r\n]+", " ")
-  end
-  local function fallback(reason)
-    if type(M.log_line) == "function" then
-      M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
-        "outcome=marker-budget-fallback",
-        "error_class=codex-runs-unavailable",
-        "reason=" .. one_line(reason),
-      })
-    end
-    return { running = {}, recent = {}, codex_runs_fallback = true, codex_runs_error = tostring(reason or "unknown") }
-  end
-  if type(fkst) ~= "table" or type(fkst.codex_runs) ~= "function" then
-    return fallback("fkst.codex_runs SDK primitive is unavailable")
-  end
-  local ok, status = pcall(fkst.codex_runs)
-  if not ok then
-    return fallback("fkst.codex_runs failed for implement liveness: " .. tostring(status))
-  end
-  if type(status) ~= "table" or type(status.running) ~= "table" then
-    return fallback("fkst.codex_runs returned invalid implement liveness status")
-  end
-  return status
+  return M.dispatch_live_run_exec_ref("implement", proposal_id, dedup_key)
 end
 
 function M.implement_exec_ref_running(exec_ref, status)
-  if type(exec_ref) ~= "string" or exec_ref == "" then
-    return false
-  end
-  local runs = status or codex_runs_status()
-  for _, run in ipairs(runs.running or {}) do
-    if type(run) == "table"
-      and tostring(run.status or "running") == "running"
-      and tostring(run.role or "") == "implement"
-      and M.implement_exec_ref(run.proposal_id, run.dedup_key) == exec_ref then
-      return true
-    end
-  end
-  return false
+  return M.dispatch_live_run_exec_ref_running("implement", exec_ref, status)
 end
 
 function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at, exec_ref)

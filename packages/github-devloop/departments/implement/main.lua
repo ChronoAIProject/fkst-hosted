@@ -795,7 +795,7 @@ local function process_ready_event(event)
       attempt_plan.expected_from_states,
       attempt_plan.accepted_ready_hand_off
     ) then
-      if core.implement_exec_ref_running(core.implement_exec_ref(attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key)) then
+      if core.dispatch_live_run_dedup("implement", attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key) then
         core.log_cas_decision(
           "implement",
           attempt_plan.marker_ready.proposal_id,
