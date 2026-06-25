@@ -268,7 +268,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   })
   local result = spawn_codex_sync({
     prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing, content_fetch),
-    worktree = worktree,
+    worktree = worktree, timeout = 2 * 60 * 60,  -- 2h: implement loops code+test until green; complex tasks exceed the 60min default (#1481)
     role = "implement", proposal_id = ready.proposal_id, dedup_key = ready.dedup_key,
   })
 

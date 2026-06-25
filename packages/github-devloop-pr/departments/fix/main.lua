@@ -418,7 +418,7 @@ local function run_fix_attempt(plan)
   })
   local result = spawn_codex_sync({
     prompt = core.build_fix_prompt(plan.fix, plan.current_issue, plan.feedback_reason, plan.fix.framing, content_fetch, merge_context),
-    worktree = worktree, role = "fix", proposal_id = plan.fix.proposal_id, dedup_key = plan.fix.version,
+    worktree = worktree, role = "fix", proposal_id = plan.fix.proposal_id, dedup_key = plan.fix.version, timeout = 2 * 60 * 60,  -- 2h: fix loops code+test (#1481)
   })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     local stderr = type(result) == "table" and result.stderr or "nil result"
