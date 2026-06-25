@@ -163,6 +163,11 @@ return {
     mock_implement_issue_read()
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 8 }))
+    graph.assert_covers(trace, {
+      "consensus.consensus_reached -> github-devloop.consensus_result",
+      "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
+      "github-proxy.github_comment_written -> github-devloop.comment_handoff",
+    })
 
     local result_step, result_index = graph.require_delivery(trace, {
       queue = "consensus.consensus_reached",

@@ -1,5 +1,6 @@
 local t = fkst.test
 local core = require("core")
+local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("tests.gh_argv_mock_helpers")
 gh_argv.install(t, core)
@@ -49,5 +50,6 @@ return {
     t.eq(trace.routed_to[1], "github-devloop-pr.liveness_scan")
     t.eq(trace.consumer_result.status, "accepted")
     t.eq(#trace.raised, 0)
+    graph.assert_covers(trace, {})
   end,
 }

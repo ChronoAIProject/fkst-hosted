@@ -6,6 +6,7 @@ from __future__ import annotations
 import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
+import check_repo_integration_coverage
 import check_repo_monotone_gate
 import check_repo_namespaced_queue
 import check_repo_producer_liveness
@@ -104,6 +105,8 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     check_content_truncation(c, root, violations, allowlists, enforce_base)
     for message in check_repo_coverage.repository_messages(root):
         c.add(violations, "G-COVERAGE", message)
+    for message in check_repo_integration_coverage.repository_messages(root):
+        c.add(violations, "G-INTEGRATION-COVERAGE", message)
     check_producer_liveness(c, root, violations, allowlists, enforce_base)
     for package_root in c.package_roots(root):
         for message in check_repo_namespaced_queue.repository_messages(root, package_root, c.read_text, c.rel, c.strip_lua_comments_and_strings, c.is_unmasked_range):

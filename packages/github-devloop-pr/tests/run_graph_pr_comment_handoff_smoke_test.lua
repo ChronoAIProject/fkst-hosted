@@ -127,6 +127,11 @@ return {
     mock_pr_label_write()
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 6 }))
+    graph.assert_covers(trace, {
+      "github-proxy.github_pr_comment_request -> github-proxy.github_pr_comment",
+      "github-proxy.github_comment_written -> github-devloop-pr.comment_handoff",
+      "github-proxy.github_issue_label_request -> github-proxy.github_issue_label",
+    })
 
     local comment_step, comment_index = graph.require_delivery(trace, {
       queue = "github-proxy.github_pr_comment_request",

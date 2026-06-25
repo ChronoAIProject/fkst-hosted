@@ -55,7 +55,13 @@ end
 
 local function run_smoke(issue_number)
   mock_consensus_approval()
-  return graph.require_quiescent(graph.run(initial_event(issue_number), { max_steps = 8 }))
+  local trace = graph.require_quiescent(graph.run(initial_event(issue_number), { max_steps = 8 }))
+  graph.assert_covers(trace, {
+    "autochrono.issue -> autochrono.propose",
+    "consensus.proposal -> consensus.decide",
+    "consensus.consensus_reached -> autochrono.reply",
+  })
+  return trace
 end
 
 return {

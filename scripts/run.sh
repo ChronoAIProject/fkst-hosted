@@ -231,6 +231,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_dedup_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_content_truncation_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_coverage_test.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_integration_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_producer_liveness_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_monotone_gate_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_test_graphql.py" || fail=1

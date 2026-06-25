@@ -58,6 +58,32 @@ function M.require_delivery(trace, expected)
   return step, index
 end
 
+-- Integration-coverage observation (the anti-lie gate of the coverage ratchet).
+-- A run_graph test DECLARES the cross-package edges it covers as canonical edge
+-- ids "<producer_namespaced_queue> -> <consumer_package.dept>"; this asserts each
+-- declared edge is ACTUALLY observed as a delivery in the real trace, so a stale
+-- or wrong `covers` declaration fails the test (coverage cannot be claimed without
+-- being proven through the real router). scripts/check_repo_integration_coverage.py
+-- reads the static `covers` declarations, trusting them because this assertion
+-- would fail the test otherwise.
+function M.parse_coverage_edge(edge)
+  local queue, consumer = tostring(edge):match("^%s*(.-)%s*%->%s*(.-)%s*$")
+  if not queue or queue == "" or not consumer or consumer == "" then
+    error("invalid coverage edge id (want '<queue> -> <pkg.dept>'): " .. tostring(edge), 3)
+  end
+  return queue, consumer
+end
+
+function M.assert_covers(trace, edges)
+  for _, edge in ipairs(edges or {}) do
+    local queue, consumer = M.parse_coverage_edge(edge)
+    if M.find_delivery(trace, { queue = queue, consumer = consumer }) == nil then
+      error("coverage edge declared in `covers` but not observed as a delivery in the trace: " .. tostring(edge), 2)
+    end
+  end
+  return trace
+end
+
 function M.find_raise(trace, queue, predicate)
   for step_index, step in ipairs((trace and trace.steps) or {}) do
     for raise_index, raised in ipairs(step.raises or {}) do

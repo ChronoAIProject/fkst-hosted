@@ -146,6 +146,12 @@ return {
     mock_github_proxy_writes()
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 8 }))
+    graph.assert_covers(trace, {
+      "consensus.consensus_converge -> github-devloop.loop",
+      "github-proxy.github_issue_comment_request -> github-proxy.github_comment",
+      "github-proxy.github_comment_written -> github-devloop.comment_handoff",
+      "github-proxy.github_issue_label_request -> github-proxy.github_issue_label",
+    })
 
     local loop_step, loop_index = graph.require_delivery(trace, {
       queue = "consensus.consensus_converge",

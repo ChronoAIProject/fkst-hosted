@@ -89,6 +89,10 @@ return {
     mock_blocked_issue_with_stale_label()
 
     local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 4 }))
+    graph.assert_covers(trace, {
+      "github-proxy.github_entity_changed -> github-devloop.observe_issue",
+      "github-proxy.github_issue_label_request -> github-proxy.github_issue_label",
+    })
 
     local route = graph.require_router_regression(trace, {
       spec = observe_spec(),

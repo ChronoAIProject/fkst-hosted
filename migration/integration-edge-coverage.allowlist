@@ -1,0 +1,8 @@
+{"edge":"autochrono.reply -> github-autochrono.outbound_glue","reason":"baseline"}
+{"edge":"consensus.consensus_converge -> github-devloop-pr.review_loop","reason":"baseline"}
+{"edge":"consensus.consensus_reached -> github-devloop-pr.review_result","reason":"baseline"}
+{"edge":"github-devloop-decompose.devloop_decompose -> github-devloop-decompose.decompose","reason":"baseline"}
+{"edge":"github-proxy.github_entity_changed -> github-autochrono.inbound_glue","reason":"baseline"}
+{"edge":"github-proxy.github_entity_changed -> github-devloop-pr.observe_pr","reason":"baseline"}
+{"edge":"github-proxy.github_issue_create_request -> github-proxy.github_issue_create","reason":"baseline"}
+{"edge":"idle-detector.system_idle -> archaudit.audit","reason":"baseline"}
