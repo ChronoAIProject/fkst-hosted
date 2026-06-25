@@ -71,13 +71,17 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # dogfood.config.sh > this default). The supervise loads only the platform (not every package in
 # packages/) because it RUNS packages (raisers fire); co-loading independent agents would fight over
 # the same repo's issues. (`test` loads all to validate the graph.) Auto-audit is DISABLED: the
-# archaudit + idle-detector audit-producer agents are NOT loaded on any target (re-add them here to
-# re-enable). archaudit auditing the engine repo produced Rust SDK changes the pipeline cannot safely
-# auto-develop (engine↔package contract, e.g. the proposal_id→dedup_key revert #174).
+# archaudit audit AGENT is NOT loaded on any target (re-add it here to re-enable). archaudit auditing
+# the engine repo produced Rust SDK changes the pipeline cannot safely auto-develop (engine↔package
+# contract, e.g. the proposal_id→dedup_key revert #174). idle-detector IS loaded though: it is NOT an
+# audit agent but a shared PRODUCER the website's site-board depends on (board_scan consumes
+# `idle-detector.system_idle`), so excluding it breaks the website supervise ("unknown namespace
+# idle-detector" graph-scan failure); on packages/substrate it just produces an unconsumed
+# system_idle with no consumer (harmless).
 # integration-coverage-producer IS loaded: a co-run-safe issue-producer SCOPED to Lua-package run_graph
 # coverage gaps (idle-gated + dedup'd + Lua-coverage-only, never engine) — the lasting self-drive arm of
 # the integration-edge coverage ratchet; unlike archaudit it cannot file engine/SDK work.
-DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-devloop-ops github-proxy consensus github-external-pr-intake github-ratchet-migration-slicer fkst-substrate-ref-maintainer integration-coverage-producer}"
+DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-decompose github-devloop-ops github-proxy consensus github-external-pr-intake github-ratchet-migration-slicer fkst-substrate-ref-maintainer integration-coverage-producer idle-detector}"
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
 # layout across machines); stable durable roots default under it but are commonly PINNED per machine
