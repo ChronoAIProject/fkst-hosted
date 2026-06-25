@@ -169,4 +169,17 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(h.count_calls("gh pr merge"), 0)
   end,
+
+  test_rollup_merge_malformed_owned_queue_payload_fails_closed = function()
+    local payload = event({ schema = "github-devloop.bad.v1" })
+    local result = run_merge(payload, opts("rollup-merge-malformed", "1"))
+    t.is_true(result.exit_code ~= 0)
+    t.is_true(tostring(result.error or ""):find(
+      "github-devloop: rollup_merge unsupported devloop_rollup_ready payload",
+      1,
+      true
+    ) ~= nil)
+    t.is_true(tostring(result.error or ""):find(payload.dedup_key, 1, true) ~= nil)
+    t.eq(h.count_calls("gh pr merge"), 0)
+  end,
 }
