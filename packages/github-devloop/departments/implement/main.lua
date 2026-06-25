@@ -795,6 +795,18 @@ local function process_ready_event(event)
       attempt_plan.expected_from_states,
       attempt_plan.accepted_ready_hand_off
     ) then
+      if core.implement_exec_ref_running(core.implement_exec_ref(attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key)) then
+        core.log_cas_decision(
+          "implement",
+          attempt_plan.marker_ready.proposal_id,
+          { state = "ready", version = attempt_plan.marker_ready.dedup_key, stage_rank = core.stage_rank("ready") },
+          "ready",
+          "implementing",
+          "skip-idempotent(live-exec-ref)",
+          "matching implementation codex run is still live"
+        )
+        return
+      end
       if attempt_plan.base_head == nil then
         attempt_plan.base_head = worktree_lifecycle.prepare_base(attempt_plan.branches)
       end
