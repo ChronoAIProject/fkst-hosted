@@ -359,6 +359,39 @@ return {
     t.is_true(meta_call.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
   end,
 
+  test_duplicate_converge_delivery_redecides_but_emits_stable_dedup_key = function()
+    local run_opts = opts("duplicate-converge-delivery")
+    mock_judgment_runtime()
+    mock_angle("minimal", "approve", "Minimal angle approves.")
+    mock_angle("structural", "abstain", "Structural angle needs one blocker resolved.")
+    mock_angle("delete", "approve", "Delete angle approves.")
+    mock_meta("converge: Should structural concerns block this proposal?")
+
+    local first = run_decide(proposal(), run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 1)
+    t.eq(first.raises[1].queue, "consensus_converge")
+    t.eq(first.raises[1].payload.dedup_key, "consensus:proposal-42-v1")
+    t.eq(first.raises[1].payload.narrowed_question, "Should structural concerns block this proposal?")
+
+    mock_judgment_runtime()
+    mock_angle("minimal", "approve", "Minimal angle approves on replay.")
+    mock_angle("structural", "abstain", "Structural angle still needs one blocker resolved.")
+    mock_angle("delete", "approve", "Delete angle approves on replay.")
+    mock_meta("converge: Replay may re-decide, but downstream dedup must see the same key.")
+
+    local second = run_decide(proposal(), run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 1)
+    t.eq(second.raises[1].queue, "consensus_converge")
+    t.eq(second.raises[1].payload.dedup_key, "consensus:proposal-42-v1")
+    t.eq(second.raises[1].payload.round, 0)
+    t.eq(second.raises[1].payload.source_ref.kind, "proposal")
+    t.eq(second.raises[1].payload.source_ref.ref, "demo/consensus/42")
+    t.eq(second.raises[1].payload.narrowed_question, "Replay may re-decide, but downstream dedup must see the same key.")
+    t.eq(#codex_calls(), 8)
+  end,
+
   test_meta_plan_flows_into_next_converge_round = function()
     mock_judgment_runtime()
     mock_angle("minimal", "approve", "Minimal angle accepts a small adapter.")
