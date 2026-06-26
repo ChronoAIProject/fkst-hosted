@@ -518,6 +518,24 @@ local function process_issue_event(event)
       core.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-held", "fkst-dev:hold label is present")
       return
     end
+    if issue.source == "pr-entity-change" then
+      if issue_state.state ~= "awaiting-pr" then
+        core.log_cas_decision("observe_issue", proposal_id, issue_state, "awaiting-pr", "awaiting-pr", "skip-foreign(parent-not-awaiting-pr)", "PR entity change only replays parent awaiting-pr")
+        return
+      end
+      if not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
+        return
+      end
+      local row = core.restart_transition_row("awaiting-pr")
+      core.replay_from_table("observe_issue", issue, issue_state, row, {
+        proposal_id = proposal_id,
+        current = current,
+        current_issue = current,
+        current_pr = issue.child_pr,
+        fresh_current_state = issue_state,
+      })
+      return
+    end
     local claim_checked = false
     if issue_state.state ~= nil then
       if not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
@@ -667,9 +685,63 @@ local function process_issue_event(event)
   end)
 end
 
+local function process_pr_event(event)
+  local pr = event.payload or {}
+  if not core.is_supported_pr(pr) then
+    core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
+    core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr)", "unsupported PR payload")
+    return
+  end
+
+  local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at, {
+    force_fresh = true,
+    consumer = "observe_issue",
+  })
+  if pr_view.exit_code ~= 0 then
+    error("github-devloop: observe-issue-pr-view-failed: " .. tostring(pr_view.stderr))
+  end
+  local current_pr = core.parse_pr_view_origin(pr_view.stdout)
+  current_pr.number = pr.number
+  local origin = core.pr_origin_fact(current_pr.comments)
+  if origin == nil or origin.pr_native == true or origin.repo ~= pr.repo or tonumber(origin.issue_number) == nil then
+    core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
+    core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr-origin)", "PR entity change has no issue-backed devloop origin")
+    return
+  end
+  if tostring(origin.branch or "") ~= tostring(current_pr.head_ref_name or "")
+    or tostring(origin.base_branch or "") ~= tostring(current_pr.base_ref_name or "") then
+    core.log_entry("observe_issue", event, origin.proposal_id, core.payload_field(pr, "dedup_key"))
+    core.log_cas_decision("observe_issue", origin.proposal_id, { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-stale(pr-origin)", "PR origin no longer matches current PR head/base")
+    return
+  end
+
+  return process_issue_event({
+    queue = event.queue,
+    ts = event.ts,
+    payload = {
+      schema = "github-proxy.v1",
+      type = "issue",
+      repo = origin.repo,
+      number = tonumber(origin.issue_number),
+      title = "PR-backed parent issue",
+      state = "OPEN",
+      updated_at = pr.updated_at,
+      dedup_key = tostring(pr.dedup_key or "") .. "/parent-awaiting-pr",
+      source_ref = core.issue_source_ref(origin.repo, origin.issue_number),
+      source = "pr-entity-change",
+      child_pr = current_pr,
+    },
+  })
+end
+
 return saga.department(spec, { done = function() return false end, act = function(event)
   core.dispatch_consumed_queue("observe_issue", spec, event, {
-    ["github-proxy.github_entity_changed"] = process_issue_event,
+    ["github-proxy.github_entity_changed"] = function(e)
+      if core.payload_field(e and e.payload, "type") == "pr" then
+        return process_pr_event(e)
+      end
+      return process_issue_event(e)
+    end,
     devloop_observe_issue = process_issue_event,
   })
 end, wrap = core.wrap_pipeline_failure, name = "observe_issue" })

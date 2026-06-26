@@ -11,6 +11,9 @@ local child_pr = "github-devloop/pr/owner/repo/7"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local delegation = "g1"
 local head_sha = "0123456789abcdef0123456789abcdef01234567"
+local integration_branch = "integration/dev"
+local upstream_branch = "dev"
+local upstream_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
 
 local function comment(body, author, created_at)
   return {
@@ -52,12 +55,19 @@ local function mock_issue_close()
   })
 end
 
+local function run_timeout_reconcile(payload, opts)
+  return t.run_department("departments/reconcile/main.lua", {
+    queue = "devloop_timeout_reconcile",
+    payload = payload,
+  }, opts)
+end
+
 local function parent_comments(fields)
   local f = fields or {}
   local state = f.state or "awaiting-pr"
   local state_version = f.version or version
   local comments = {
-    comment(core.state_marker(parent, state, state_version), core._test_bot_login, "2026-06-03T01:02:03Z"),
+    comment(core.state_marker(parent, state, state_version), core._test_bot_login, f.created_at or "2026-06-03T01:02:03Z"),
   }
   if f.delegation ~= false then
     table.insert(comments, comment(core.pr_delegation_marker(
@@ -72,14 +82,21 @@ local function parent_comments(fields)
 end
 
 local function child_comments(state, child_version)
+  local effective_version = child_version or version
+  local body = core.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", effective_version, integration_branch)
+    .. "\n" .. core.state_marker(parent, state, effective_version)
+  if state == "merged" then
+    body = body .. "\n" .. core.merged_marker(parent, pr_number, effective_version, head_sha)
+  end
   return {
-    comment(core.state_marker(parent, state, child_version or version), core._test_bot_login, "2026-06-03T01:04:03Z"),
+    comment(body, core._test_bot_login, "2026-06-03T01:04:03Z"),
   }
 end
 
 local function child_merged_comments_with_kept_promotion()
   return {
-    comment(core.state_marker(parent, "merged", version)
+    comment(core.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch)
+      .. "\n" .. core.state_marker(parent, "merged", version)
       .. "\n" .. core.merged_marker(parent, pr_number, version, head_sha), core._test_bot_login, "2026-06-03T01:04:03Z"),
   }
 end
@@ -106,6 +123,37 @@ local function mock_real_write_env()
   })
 end
 
+local function mock_branch_config(split)
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = upstream_branch,
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = split == false and upstream_branch or integration_branch,
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_rollup_ancestry(exit_code)
+  t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.git_remote_branch_head_cmd("origin", upstream_branch), {
+    stdout = upstream_head_sha .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git merge-base --is-ancestor " .. head_sha .. " " .. upstream_head_sha, {
+    stdout = "",
+    stderr = "",
+    exit_code = exit_code,
+  })
+end
+
 local function mock_reads(issue_comments, pr_comments, opts)
   local options = opts or {}
   entity_mocks.mock_issue_view_selector(t, {
@@ -123,9 +171,9 @@ local function mock_reads(issue_comments, pr_comments, opts)
     head = "devloop-owner-repo-42-01HY",
     head_sha = head_sha,
     state = options.pr_state or "OPEN",
-    base_branch = "dev",
+    base_branch = options.base_branch or integration_branch,
     labels = {},
-  }, entity_mocks.pr_origin_selector)
+  }, entity_mocks.pr_origin_selector, options.pr_view_times)
 end
 
 local function run_observe(issue_comments, pr_comments, opts)
@@ -153,6 +201,30 @@ local function run_observe(issue_comments, pr_comments, opts)
   })
 end
 
+local function run_pr_observe(issue_comments, pr_comments, opts)
+  local options = opts or {}
+  if options.write == "real" then
+    mock_real_write_env()
+  else
+    mock_env()
+  end
+  options.pr_view_times = options.pr_view_times or 2
+  mock_reads(issue_comments, pr_comments, options)
+  return t.run_department("departments/observe_issue/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = {
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = repo,
+      number = pr_number,
+      state = "OPEN",
+      updated_at = "2026-06-03T02:03:04Z",
+      dedup_key = "owner/repo#pr#7@2026-06-03T02:03:04Z",
+      source_ref = core.pr_source_ref(repo, pr_number),
+    },
+  })
+end
+
 local function resume_comment(result)
   return find_raise(result.raises, "github-proxy.github_issue_comment_request")
 end
@@ -160,7 +232,23 @@ end
 return {
   test_child_merged_reconciles_parent_to_merged = function()
     mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(0)
     local result = run_observe(parent_comments(), child_comments("merged"), { write = "real" })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_pr_entity_changed_child_merged_reconciles_parent_to_merged = function()
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(0)
+    local result = run_pr_observe(parent_comments(), child_comments("merged"), { write = "real" })
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
@@ -172,12 +260,43 @@ return {
 
   test_child_merged_with_kept_issue_promotion_closes_issue_once = function()
     mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(0)
     local result = run_observe(parent_comments(), child_merged_comments_with_kept_promotion(), { write = "real" })
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
     t.is_true(resume ~= nil)
     t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_split_topology_child_merged_waits_until_rollup_lands_on_upstream = function()
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(1)
+    local result = run_observe(parent_comments(), child_comments("merged"), { write = "real" })
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_comment_request"), 0)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 0)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 0)
+  end,
+
+  test_single_branch_topology_child_merged_does_not_require_rollup_probe = function()
+    mock_issue_close()
+    mock_branch_config(false)
+    local result = run_observe(parent_comments(), child_comments("merged"), {
+      base_branch = upstream_branch,
+      write = "real",
+    })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 0)
+    t.eq(count_calls("git merge-base --is-ancestor"), 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 
@@ -251,5 +370,71 @@ return {
     t.eq(count_raises(result.raises, "github-proxy.github_issue_comment_request"), 0)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), close_calls_before)
+  end,
+
+  test_over_budget_awaiting_pr_timeout_reconcile_writes_why_terminal = function()
+    local state = {
+      state = "awaiting-pr",
+      version = version .. "/timeout/awaiting-pr/2",
+      proposal_id = parent,
+      marker_created_at = "2025-01-01T00:00:00Z",
+    }
+    local row = core.restart_transition_row("awaiting-pr")
+    local comments = parent_comments({ version = state.version, delegation_version = state.version })
+    local facts = {
+      proposal_id = parent,
+      source_ref = core.issue_source_ref(repo, issue_number),
+      current = { comments = comments },
+      current_pr = { comments = {} },
+      ["pr-delegation"] = core.pr_delegation_fact(comments, parent, state.version),
+      fresh_current_state = state,
+      now_seconds = core.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),
+    }
+    local raised = {}
+    local original_log_raise = core.log_raise
+    core.log_raise = function(_, _, queue, payload)
+      table.insert(raised, { queue = queue, payload = payload })
+    end
+    local ok, err = pcall(function()
+      t.eq(core.maybe_timeout_redrive_from_table("observe_issue", {
+        repo = repo,
+        number = issue_number,
+        source_ref = core.issue_source_ref(repo, issue_number),
+      }, state, row, facts), true)
+    end)
+    core.log_raise = original_log_raise
+    if not ok then
+      error(err)
+    end
+    local reconcile = find_raise(raised, "devloop_timeout_reconcile")
+
+    t.is_true(reconcile ~= nil)
+    t.eq(reconcile.payload.state, "awaiting-pr")
+    t.eq(reconcile.payload.issue_version, state.version)
+    t.eq(reconcile.payload.round, 3)
+    mock_env()
+    entity_mocks.mock_issue_view_selector(t, {
+      repo = repo,
+      number = issue_number,
+      labels = { "fkst-dev:enabled", "fkst-dev:awaiting-pr" },
+      comments = parent_comments({
+        version = state.version,
+        delegation_version = state.version,
+        created_at = "2025-01-01T00:00:00Z",
+      }),
+      assignees = { "fkst-test-bot" },
+      author_login = "fkst-test-bot",
+    }, "title,updatedAt,labels,comments,state")
+
+    local result = run_timeout_reconcile(reconcile.payload, h.opts("awaiting-pr-timeout-reconcile-terminal"))
+
+    t.eq(result.exit_code, 0)
+    local terminal = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
+    t.is_true(terminal ~= nil)
+    t.is_true(terminal.payload.body:find('state="blocked"', 1, true) ~= nil)
+    t.is_true(terminal.payload.body:find("reason_class=state-output-obligation-timeout", 1, true) ~= nil)
+    t.is_true(label ~= nil)
+    t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
   end,
 }
