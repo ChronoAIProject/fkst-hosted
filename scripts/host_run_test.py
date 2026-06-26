@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import signal
 import subprocess
 import tempfile
@@ -60,6 +61,37 @@ class HostRunHarness:
                 host_run_print_package_roots
                 """
             )
+        )
+
+    def write_platform_external_source(self) -> None:
+        (self.website_host / "fkst.workspace.toml").write_text(
+            textwrap.dedent(
+                """\
+                [workspace]
+                units = [".fkst/run/fkst-packages-platform/packages/github-proxy"]
+
+                [[external_sources]]
+                id = "fkst-packages-platform"
+                git = "https://example.invalid/fkst-packages.git"
+                rev = "0123456789012345678901234567890123456789"
+                libraries = ["contract"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        (self.website_host / "fkst.lock").write_text(
+            textwrap.dedent(
+                """\
+                [[external_source]]
+                id = "fkst-packages-platform"
+                git = "https://example.invalid/fkst-packages.git"
+
+                [external_source.resolved]
+                rev = "0123456789012345678901234567890123456789"
+                tree_sha256 = "sha256-test"
+                """
+            ),
+            encoding="utf-8",
         )
 
 
@@ -232,6 +264,151 @@ class HostRunTest(unittest.TestCase):
             )
         finally:
             h.close()
+
+    def test_host_external_platform_source_uses_framework_deps_fetch_before_package_roots(self) -> None:
+        h = HostRunHarness()
+        fake_bin = h.root / "fkst-framework"
+        call_log = h.root / "deps-fetch-call.txt"
+        source_root = h.root / "framework-cache" / "fkst-packages-platform"
+        try:
+            h.write_platform_external_source()
+            fake_bin.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    printf '%s\\n' "$*" > {shell_quote(call_log)}
+                    [ "$1" = "deps" ] && [ "$2" = "fetch" ] && [ "$3" = "--project-root" ] && [ "$4" = {shell_quote(h.website_host)} ] && [ "$5" = "--json" ]
+                    mkdir -p {shell_quote(source_root / "packages" / "github-proxy")} {shell_quote(source_root / "libraries" / "contract")}
+                    cat <<'JSON'
+                    {{"ok":true,"workspace_root":{json.dumps(str(h.website_host))},"units":[{{"name":"external:fkst-packages-platform:contract","kind":"library","root":{json.dumps(str(source_root / "libraries" / "contract"))},"code_root":{json.dumps(str(source_root / "libraries" / "contract"))},"library":"contract","lib_deps":[],"event_deps":[],"actual_lib_requires":[],"modules":[],"public_exports":[]}}],"lib_edges":[],"event_edges":[],"failures":[],"warnings":[]}}
+                    JSON
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_bin.chmod(0o755)
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    git() {{
+                      echo "error: host_run.sh must not hydrate with direct git calls" >&2
+                      return 99
+                    }}
+                    BIN={shell_quote(fake_bin)}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_prepare_platform_source
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
+                    host_run_print_package_roots
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            hydrated = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            self.assertTrue(hydrated.is_symlink())
+            self.assertEqual(hydrated.resolve(), source_root.resolve())
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    f"platform={hydrated}",
+                    str(hydrated / "packages" / "github-proxy"),
+                ],
+            )
+            self.assertEqual(
+                call_log.read_text(encoding="utf-8").splitlines(),
+                [
+                    f"deps fetch --project-root {h.website_host} --json",
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_already_bound_host_external_platform_source_still_uses_framework_fetch(self) -> None:
+        h = HostRunHarness()
+        fake_bin = h.root / "fkst-framework"
+        call_log = h.root / "deps-fetch-call.txt"
+        source_root = h.root / "framework-cache" / "fkst-packages-platform"
+        try:
+            h.write_platform_external_source()
+            (source_root / "packages" / "github-proxy").mkdir(parents=True)
+            (source_root / "libraries" / "contract").mkdir(parents=True)
+            hydrated = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            hydrated.parent.mkdir(parents=True)
+            hydrated.symlink_to(source_root, target_is_directory=True)
+            fake_bin.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    printf '%s\\n' "$*" > {shell_quote(call_log)}
+                    cat <<'JSON'
+                    {{"ok":true,"workspace_root":{json.dumps(str(h.website_host))},"units":[{{"name":"external:fkst-packages-platform:contract","kind":"library","root":{json.dumps(str(source_root / "libraries" / "contract"))},"code_root":{json.dumps(str(source_root / "libraries" / "contract"))},"library":"contract","lib_deps":[],"event_deps":[],"actual_lib_requires":[],"modules":[],"public_exports":[]}}],"lib_edges":[],"event_edges":[],"failures":[],"warnings":[]}}
+                    JSON
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_bin.chmod(0o755)
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    BIN={shell_quote(fake_bin)}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(hydrated)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_prepare_platform_source
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
+                    host_run_print_package_roots
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    f"platform={hydrated}",
+                    str(hydrated / "packages" / "github-proxy"),
+                ],
+            )
+            self.assertEqual(call_log.read_text(encoding="utf-8").strip(), f"deps fetch --project-root {h.website_host} --json")
+        finally:
+            h.close()
+
+    def test_host_external_platform_source_fails_closed_without_framework_bin(self) -> None:
+        h = HostRunHarness()
+        try:
+            h.write_platform_external_source()
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    unset BIN
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_prepare_platform_source
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("BIN is required to prepare host external source", result.stderr)
+        finally:
+            h.close()
+
+    def test_host_run_does_not_embed_a_workspace_materializer(self) -> None:
+        source = (REPO_ROOT / "scripts" / "host_run.sh").read_text(encoding="utf-8")
+        self.assertNotIn("host_run_platform_source_spec", source)
+        self.assertNotIn("host_run_hydrate_platform_source", source)
+        self.assertNotIn("tomllib", source)
+        self.assertNotIn("git clone", source)
+        self.assertNotIn("git fetch", source)
+        self.assertNotIn("git checkout", source)
+        self.assertNotIn("FKST_HOST_WORKSPACE_HYDRATE_CMD", source)
 
     def test_missing_durable_root_fails_closed(self) -> None:
         h = HostRunHarness()
