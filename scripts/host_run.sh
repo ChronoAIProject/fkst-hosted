@@ -13,6 +13,7 @@ HOST_RUN_RUNTIME_LABEL=""
 HOST_RUN_RUNTIME_IS_EXPLICIT=0
 HOST_RUN_RESTART=0
 HOST_RUN_PACKAGE_ROOTS=()
+HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID="fkst-packages-platform"
 
 host_run_usage() {
   cat >&2 <<'EOF'
@@ -34,6 +35,132 @@ host_run_same_path() {
   left_phys="$(cd "$left" 2>/dev/null && pwd -P)" || return 1
   right_phys="$(cd "$right" 2>/dev/null && pwd -P)" || return 1
   [ "$left_phys" = "$right_phys" ]
+}
+
+host_run_platform_source_spec() {
+  local workspace_file="$HOST_RUN_PROJECT_ROOT/fkst.workspace.toml" lock_file="$HOST_RUN_PROJECT_ROOT/fkst.lock"
+  [ -f "$workspace_file" ] || [ -f "$lock_file" ] || return 0
+  python3 - "$workspace_file" "$lock_file" "$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" <<'PY'
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    print("error: python3 tomllib is required to read host external source pins", file=sys.stderr)
+    raise SystemExit(1)
+
+
+workspace_file = Path(sys.argv[1])
+lock_file = Path(sys.argv[2])
+source_id = sys.argv[3]
+
+
+def load_toml(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    with path.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def find_source(items: object, id_value: str) -> dict | None:
+    if not isinstance(items, list):
+        return None
+    matches = [item for item in items if isinstance(item, dict) and item.get("id") == id_value]
+    if len(matches) > 1:
+        print(f"error: duplicate external source id {id_value!r}", file=sys.stderr)
+        raise SystemExit(1)
+    return matches[0] if matches else None
+
+
+workspace = load_toml(workspace_file)
+lock = load_toml(lock_file)
+workspace_source = find_source(workspace.get("external_sources"), source_id)
+lock_source = find_source(lock.get("external_source"), source_id)
+
+if workspace_source is None and lock_source is None:
+    raise SystemExit(0)
+if workspace_source is None:
+    print(f"error: {lock_file} declares {source_id} but {workspace_file} does not", file=sys.stderr)
+    raise SystemExit(1)
+if lock_source is None:
+    print(f"error: {workspace_file} declares {source_id} but {lock_file} does not", file=sys.stderr)
+    raise SystemExit(1)
+
+workspace_git = workspace_source.get("git")
+lock_git = lock_source.get("git")
+if not isinstance(workspace_git, str) or workspace_git == "":
+    print(f"error: {workspace_file} external source {source_id} has no git URL", file=sys.stderr)
+    raise SystemExit(1)
+if workspace_git != lock_git:
+    print(f"error: {source_id} git URL mismatch between workspace and lock", file=sys.stderr)
+    raise SystemExit(1)
+
+workspace_rev = workspace_source.get("rev")
+intent = lock_source.get("intent")
+intent_rev = intent.get("rev") if isinstance(intent, dict) else None
+if isinstance(workspace_rev, str) and isinstance(intent_rev, str) and workspace_rev != intent_rev:
+    print(f"error: {source_id} intent rev mismatch between workspace and lock", file=sys.stderr)
+    raise SystemExit(1)
+
+resolved = lock_source.get("resolved")
+resolved_rev = resolved.get("rev") if isinstance(resolved, dict) else None
+if not isinstance(resolved_rev, str) or resolved_rev == "":
+    print(f"error: {lock_file} external source {source_id} has no resolved rev", file=sys.stderr)
+    raise SystemExit(1)
+
+print(source_id)
+print(workspace_git)
+print(resolved_rev)
+PY
+}
+
+host_run_dir_is_empty() {
+  local path="$1"
+  [ -d "$path" ] || return 0
+  [ -z "$(find "$path" -mindepth 1 -maxdepth 1 2>/dev/null | head -1)" ]
+}
+
+host_run_checkout_ref() {
+  local checkout_dir="$1" ref="$2"
+  if git -C "$checkout_dir" checkout --detach "$ref" 1>&2; then
+    return 0
+  fi
+  git -C "$checkout_dir" checkout --detach "origin/$ref" 1>&2
+}
+
+host_run_hydrate_platform_source() {
+  local spec source_id git_url resolved_rev target head
+  spec="$(host_run_platform_source_spec)" || return $?
+  [ -n "$spec" ] || return 0
+
+  source_id="$(printf '%s\n' "$spec" | sed -n '1p')"
+  git_url="$(printf '%s\n' "$spec" | sed -n '2p')"
+  resolved_rev="$(printf '%s\n' "$spec" | sed -n '3p')"
+  target="$HOST_RUN_PROJECT_ROOT/.fkst/run/$source_id"
+
+  mkdir -p "$(dirname "$target")"
+  if [ -d "$target/.git" ]; then
+    git -C "$target" remote set-url origin "$git_url" 1>&2
+    git -C "$target" fetch --tags origin '+refs/heads/*:refs/remotes/origin/*' 1>&2 || return $?
+  else
+    if ! host_run_dir_is_empty "$target"; then
+      echo "error: platform hydration target is not an empty directory or git checkout: $target" >&2
+      return 1
+    fi
+    git clone --no-checkout "$git_url" "$target" 1>&2 || return $?
+    git -C "$target" fetch --tags origin '+refs/heads/*:refs/remotes/origin/*' 1>&2 || return $?
+  fi
+
+  host_run_checkout_ref "$target" "$resolved_rev" || return $?
+  head="$(git -C "$target" rev-parse HEAD 2>/dev/null)" || return $?
+  if [ "$head" != "$resolved_rev" ]; then
+    echo "error: hydrated $source_id at $target resolved to $head, expected $resolved_rev" >&2
+    return 1
+  fi
+  HOST_RUN_PLATFORM_ROOT="$target"
 }
 
 host_run_parse_supervise_args() {
@@ -276,6 +403,7 @@ host_run_print_package_roots() {
 
 host_run_supervise_contract() {
   host_run_parse_supervise_args "$@" || return $?
+  host_run_hydrate_platform_source || return $?
   host_run_validate_shape || return $?
   host_run_build_package_roots || return $?
   if [ -n "${FKST_RATE_POOL_ROOT:-}" ]; then

@@ -62,6 +62,65 @@ class HostRunHarness:
             )
         )
 
+    def make_platform_git_source(self) -> tuple[Path, str]:
+        source = self.root / "platform-source"
+        (source / "packages" / "github-proxy").mkdir(parents=True)
+        (source / "packages" / "github-proxy" / "fkst.toml").write_text(
+            'kind = "package"\nname = "github-proxy"\n',
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "init", "-q", str(source)], check=True)
+        subprocess.run(["git", "-C", str(source), "add", "."], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(source),
+                "-c",
+                "user.name=Host Run Test",
+                "-c",
+                "user.email=host-run-test@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "seed platform source",
+            ],
+            check=True,
+        )
+        rev = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
+        return source, rev
+
+    def write_platform_external_source(self, source: Path, rev: str) -> None:
+        (self.website_host / "fkst.workspace.toml").write_text(
+            textwrap.dedent(
+                f"""\
+                [workspace]
+                units = [".fkst/run/fkst-packages-platform/packages/github-proxy"]
+
+                [[external_sources]]
+                id = "fkst-packages-platform"
+                git = "{source.as_posix()}"
+                rev = "{rev}"
+                libraries = ["contract"]
+                """
+            ),
+            encoding="utf-8",
+        )
+        (self.website_host / "fkst.lock").write_text(
+            textwrap.dedent(
+                f"""\
+                [[external_source]]
+                id = "fkst-packages-platform"
+                git = "{source.as_posix()}"
+
+                [external_source.resolved]
+                rev = "{rev}"
+                tree_sha256 = "sha256-test"
+                """
+            ),
+            encoding="utf-8",
+        )
+
 
 def shell_quote(value: str | Path) -> str:
     text = str(value)
@@ -228,6 +287,39 @@ class HostRunTest(unittest.TestCase):
                 [
                     str(h.platform / "packages" / "github-proxy"),
                     str(custom_local / "site-board"),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_host_external_platform_source_is_hydrated_before_package_roots(self) -> None:
+        h = HostRunHarness()
+        try:
+            source, rev = h.make_platform_git_source()
+            h.write_platform_external_source(source, rev)
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_hydrate_platform_source
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
+                    host_run_print_package_roots
+                    git -C "$HOST_RUN_PLATFORM_ROOT" rev-parse HEAD
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            hydrated = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    f"platform={hydrated}",
+                    str(hydrated / "packages" / "github-proxy"),
+                    rev,
                 ],
             )
         finally:
