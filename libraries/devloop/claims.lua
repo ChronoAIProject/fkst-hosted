@@ -175,8 +175,8 @@ local function log_claim(dept, proposal_id, action, reason)
   M.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "claim", "claim", action, reason)
 end
 
-local function log_terminal_skip(dept, proposal_id, queue, source_ref, why)
-  local fields = error_facts.error_fact_fields("terminal-skip", queue, dept, why, {
+local function log_terminal_skip(dept, proposal_id, queue, source_ref, error_class, why)
+  local fields = error_facts.error_fact_fields(error_class, queue, dept, why, {
     source_ref = source_ref,
     terminal = true,
   })
@@ -351,7 +351,7 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
   if not assigned then
     if is_assign_permission_denied(assign_error) then
       local why = "assign permission-denied is permanent"
-      log_terminal_skip(dept, proposal_id, "claim", issue_source_ref(repo, issue_number), why)
+      log_terminal_skip(dept, proposal_id, "claim", issue_source_ref(repo, issue_number), "intake-skip-unclaimable", why)
       log_claim(dept, proposal_id, "skip-claim-permission-denied", why)
       return false
     end
