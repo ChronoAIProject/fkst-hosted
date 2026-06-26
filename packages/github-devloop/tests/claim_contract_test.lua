@@ -23,6 +23,14 @@ local function mock_bot(login, write_mode, write_reads)
   end
 end
 
+local function mock_managed_bot_logins(logins)
+  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
+    stdout = logins or "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function count_calls(needle)
   local count = 0
   for _, call in ipairs(t.command_calls()) do
@@ -109,6 +117,20 @@ local function capture_warn_logs(fn)
   end
   local ok, result = pcall(fn)
   log.warn = previous_warn
+  if not ok then
+    error(result, 0)
+  end
+  return result, logs
+end
+
+local function capture_info_logs(fn)
+  local previous_info = log.info
+  local logs = {}
+  log.info = function(message)
+    table.insert(logs, tostring(message))
+  end
+  local ok, result = pcall(fn)
+  log.info = previous_info
   if not ok then
     error(result, 0)
   end
@@ -266,6 +288,36 @@ return {
     t.eq(ok, false)
     t.eq(count_calls("gh issue edit"), 0)
     t.eq(#raised, 0)
+  end,
+
+  test_managed_bot_author_unassigned_issue_after_grace_skips_without_forking = function()
+    mock_bot("fkst-test-bot", "1")
+    mock_managed_bot_logins("peer-bot[bot],other-peer")
+    cache_set(core.fork_first_observed_key("owner/repo", 45), tostring(now() - (3 * 60 * 60) - 1))
+    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 45), {
+      stdout = issue_state_json({ author_login = "peer-bot[bot]" }),
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok, captured_logs = capture_info_logs(function()
+      local result, raised = capture_raises(function()
+        return core.claim_issue_for_management(
+          "claim_contract",
+          "owner/repo",
+          45,
+          self_current({ author_login = "peer-bot[bot]" }),
+          "github-devloop/issue/owner/repo/45"
+        )
+      end)
+      t.eq(#raised, 0)
+      return result
+    end)
+
+    t.eq(ok, false)
+    t.eq(count_calls("gh issue edit"), 0)
+    local logs = table.concat(captured_logs, "\n")
+    t.is_true(logs:find("outcome=skip-fork-peer-bot", 1, true) ~= nil)
   end,
 
   test_other_author_unassigned_issue_after_grace_raises_self_assigned_fork = function()

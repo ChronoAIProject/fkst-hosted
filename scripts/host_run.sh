@@ -13,6 +13,7 @@ HOST_RUN_RUNTIME_LABEL=""
 HOST_RUN_RUNTIME_IS_EXPLICIT=0
 HOST_RUN_RESTART=0
 HOST_RUN_PACKAGE_ROOTS=()
+HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID="fkst-packages-platform"
 
 host_run_usage() {
   cat >&2 <<'EOF'
@@ -34,6 +35,67 @@ host_run_same_path() {
   left_phys="$(cd "$left" 2>/dev/null && pwd -P)" || return 1
   right_phys="$(cd "$right" 2>/dev/null && pwd -P)" || return 1
   [ "$left_phys" = "$right_phys" ]
+}
+
+host_run_prepare_platform_source() {
+  local target report source_root
+  [ -f "$HOST_RUN_PROJECT_ROOT/fkst.workspace.toml" ] || return 0
+  [ -f "$HOST_RUN_PROJECT_ROOT/fkst.lock" ] || return 0
+
+  if [ -z "${BIN:-}" ]; then
+    echo "error: BIN is required to prepare host external source $HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" >&2
+    return 1
+  fi
+
+  target="$HOST_RUN_PROJECT_ROOT/.fkst/run/$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID"
+  report="$("$BIN" deps fetch --project-root "$HOST_RUN_PROJECT_ROOT" --json)" || return $?
+  if ! source_root="$(HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID="$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" python3 -c '
+import json
+import os
+import pathlib
+import sys
+
+source_id = os.environ["HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID"]
+try:
+    report = json.load(sys.stdin)
+except json.JSONDecodeError as exc:
+    print(f"error: deps fetch returned invalid JSON: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+prefix = f"external:{source_id}:"
+for unit in report.get("units", []):
+    if not str(unit.get("name", "")).startswith(prefix):
+        continue
+    path = pathlib.Path(str(unit.get("root", ""))).resolve()
+    for candidate in (path, *path.parents):
+        if (candidate / "packages").is_dir():
+            print(candidate)
+            sys.exit(0)
+    print(f"error: external source unit has no package-bearing parent: {path}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0)
+' <<<"$report")"
+  then
+    return 1
+  fi
+  [ -n "$source_root" ] || return 0
+
+  mkdir -p "$(dirname "$target")"
+  if [ -L "$target" ]; then
+    ln -sfn "$source_root" "$target"
+  elif [ -e "$target" ]; then
+    if ! host_run_same_path "$target" "$source_root"; then
+      echo "error: host external source target exists but does not match deps fetch source: $target" >&2
+      return 1
+    fi
+  else
+    ln -s "$source_root" "$target"
+  fi
+  [ -d "$target/packages" ] || {
+    echo "error: deps fetch did not provide a platform packages directory: $target/packages" >&2
+    return 1
+  }
+  HOST_RUN_PLATFORM_ROOT="$target"
 }
 
 host_run_parse_supervise_args() {
@@ -276,6 +338,7 @@ host_run_print_package_roots() {
 
 host_run_supervise_contract() {
   host_run_parse_supervise_args "$@" || return $?
+  host_run_prepare_platform_source || return $?
   host_run_validate_shape || return $?
   host_run_build_package_roots || return $?
   if [ -n "${FKST_RATE_POOL_ROOT:-}" ]; then
