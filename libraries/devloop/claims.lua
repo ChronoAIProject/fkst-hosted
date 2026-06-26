@@ -72,6 +72,23 @@ function M.claim_owner()
   return M.strip_bot_login_suffix(M.assert_trusted_bot_configured() or M.trusted_bot_login())
 end
 
+function M.peer_bot_logins(exec)
+  local raw = M.read_env("FKST_DEVLOOP_PEER_BOT_LOGINS", exec)
+  local logins = {}
+  for entry in tostring(raw or ""):gmatch("[^,%s]+") do
+    local login = M.strip_bot_login_suffix(M._trim(entry))
+    if login ~= nil and login ~= "" then
+      logins[login] = true
+    end
+  end
+  return logins
+end
+
+function M.is_peer_bot_login(login, peers)
+  local normalized = M.strip_bot_login_suffix(login)
+  return normalized ~= nil and normalized ~= "" and type(peers) == "table" and peers[normalized] == true
+end
+
 local claimed_label = "fkst-dev:claimed"
 
 function M.claimed_label()
@@ -280,6 +297,10 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
   -- opts issues in via the fkst-dev:enabled label, so it claims directly
   -- (matching the label-claim fork). Assignee-mode keeps the original behavior.
   if M.claim_mode() ~= "label" and author ~= owner then
+    if M.is_peer_bot_login(author, M.peer_bot_logins()) then
+      log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a configured peer bot")
+      return false
+    end
     local dedup_key = M.fork_issue_dedup_key(repo, issue_number)
     if M.has_trusted_issue_create_parent_marker(current and current.comments, dedup_key, owner) then
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
