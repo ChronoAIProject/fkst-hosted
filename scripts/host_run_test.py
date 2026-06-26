@@ -62,45 +62,17 @@ class HostRunHarness:
             )
         )
 
-    def make_platform_git_source(self) -> tuple[Path, str]:
-        source = self.root / "platform-source"
-        (source / "packages" / "github-proxy").mkdir(parents=True)
-        (source / "packages" / "github-proxy" / "fkst.toml").write_text(
-            'kind = "package"\nname = "github-proxy"\n',
-            encoding="utf-8",
-        )
-        subprocess.run(["git", "init", "-q", str(source)], check=True)
-        subprocess.run(["git", "-C", str(source), "add", "."], check=True)
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(source),
-                "-c",
-                "user.name=Host Run Test",
-                "-c",
-                "user.email=host-run-test@example.invalid",
-                "commit",
-                "-q",
-                "-m",
-                "seed platform source",
-            ],
-            check=True,
-        )
-        rev = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
-        return source, rev
-
-    def write_platform_external_source(self, source: Path, rev: str) -> None:
+    def write_platform_external_source(self) -> None:
         (self.website_host / "fkst.workspace.toml").write_text(
             textwrap.dedent(
-                f"""\
+                """\
                 [workspace]
                 units = [".fkst/run/fkst-packages-platform/packages/github-proxy"]
 
                 [[external_sources]]
                 id = "fkst-packages-platform"
-                git = "{source.as_posix()}"
-                rev = "{rev}"
+                git = "https://example.invalid/fkst-packages.git"
+                rev = "0123456789012345678901234567890123456789"
                 libraries = ["contract"]
                 """
             ),
@@ -108,13 +80,13 @@ class HostRunHarness:
         )
         (self.website_host / "fkst.lock").write_text(
             textwrap.dedent(
-                f"""\
+                """\
                 [[external_source]]
                 id = "fkst-packages-platform"
-                git = "{source.as_posix()}"
+                git = "https://example.invalid/fkst-packages.git"
 
                 [external_source.resolved]
-                rev = "{rev}"
+                rev = "0123456789012345678901234567890123456789"
                 tree_sha256 = "sha256-test"
                 """
             ),
@@ -292,23 +264,45 @@ class HostRunTest(unittest.TestCase):
         finally:
             h.close()
 
-    def test_host_external_platform_source_is_hydrated_before_package_roots(self) -> None:
+    def test_host_external_platform_source_uses_workspace_hydration_delegate_before_package_roots(self) -> None:
         h = HostRunHarness()
+        hydrator = h.root / "hydrate-platform.sh"
+        call_log = h.root / "hydrate-call.txt"
         try:
-            source, rev = h.make_platform_git_source()
-            h.write_platform_external_source(source, rev)
+            h.write_platform_external_source()
+            hydrator.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    {{
+                      printf 'host=%s\\n' "$FKST_HOST_WORKSPACE_HOST_ROOT"
+                      printf 'source=%s\\n' "$FKST_HOST_WORKSPACE_SOURCE_ID"
+                      printf 'target=%s\\n' "$FKST_HOST_WORKSPACE_TARGET"
+                      printf 'bootstrap=%s\\n' "$FKST_HOST_WORKSPACE_BOOTSTRAP_PLATFORM_ROOT"
+                    }} > {shell_quote(call_log)}
+                    mkdir -p "$FKST_HOST_WORKSPACE_TARGET/packages/github-proxy"
+                    """
+                ),
+                encoding="utf-8",
+            )
+            hydrator.chmod(0o755)
             result = h.run_helper(
                 textwrap.dedent(
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
+                    git() {{
+                      echo "error: host_run.sh must not hydrate with direct git calls" >&2
+                      return 99
+                    }}
+                    export FKST_HOST_WORKSPACE_HYDRATE_CMD={shell_quote(hydrator)}
                     host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
-                    host_run_hydrate_platform_source
+                    host_run_prepare_platform_source
                     host_run_validate_shape
                     host_run_build_package_roots
                     printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
                     host_run_print_package_roots
-                    git -C "$HOST_RUN_PLATFORM_ROOT" rev-parse HEAD
                     """
                 )
             )
@@ -319,11 +313,80 @@ class HostRunTest(unittest.TestCase):
                 [
                     f"platform={hydrated}",
                     str(hydrated / "packages" / "github-proxy"),
-                    rev,
+                ],
+            )
+            self.assertEqual(
+                call_log.read_text(encoding="utf-8").splitlines(),
+                [
+                    f"host={h.website_host}",
+                    "source=fkst-packages-platform",
+                    f"target={hydrated}",
+                    f"bootstrap={h.platform}",
                 ],
             )
         finally:
             h.close()
+
+    def test_already_hydrated_host_external_platform_source_needs_no_delegate(self) -> None:
+        h = HostRunHarness()
+        try:
+            h.write_platform_external_source()
+            hydrated = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            (hydrated / "packages" / "github-proxy").mkdir(parents=True)
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    unset FKST_HOST_WORKSPACE_HYDRATE_CMD
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(hydrated)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_prepare_platform_source
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
+                    host_run_print_package_roots
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    f"platform={hydrated}",
+                    str(hydrated / "packages" / "github-proxy"),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_host_external_platform_source_fails_closed_without_workspace_hydration_delegate(self) -> None:
+        h = HostRunHarness()
+        try:
+            h.write_platform_external_source()
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    unset FKST_HOST_WORKSPACE_HYDRATE_CMD
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_prepare_platform_source
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("FKST_HOST_WORKSPACE_HYDRATE_CMD is required", result.stderr)
+        finally:
+            h.close()
+
+    def test_host_run_does_not_embed_a_workspace_materializer(self) -> None:
+        source = (REPO_ROOT / "scripts" / "host_run.sh").read_text(encoding="utf-8")
+        self.assertNotIn("host_run_platform_source_spec", source)
+        self.assertNotIn("host_run_hydrate_platform_source", source)
+        self.assertNotIn("tomllib", source)
+        self.assertNotIn("git clone", source)
+        self.assertNotIn("git fetch", source)
+        self.assertNotIn("git checkout", source)
 
     def test_missing_durable_root_fails_closed(self) -> None:
         h = HostRunHarness()
