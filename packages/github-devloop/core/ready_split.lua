@@ -196,6 +196,17 @@ local function next_ready_redrive_version(marker_version, round)
   return tostring(marker_version or "") .. "/redrive/ready/" .. tostring(round)
 end
 
+local function ready_redrive_round(M, comments, proposal_id, marker_version, row)
+  local timeout_round = M.timeout_attempt_round(
+    comments,
+    proposal_id,
+    marker_version,
+    row.from_state
+  ) or 0
+  local command_round = M.operator_command_response_count(comments, "reready", "applied", "ready")
+  return math.max(timeout_round, command_round) + 1
+end
+
 function M.replay_ready_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local fields = replay_fields(M, row, state, issue, proposal_id)
@@ -229,15 +240,16 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "skip-pending(ready-marker-comment-not-visible)", "trusted ready state marker comment id is not visible")
     return false
   end
-  local ready_redrive_round = (M.timeout_attempt_round(
+  local redrive_round = ready_redrive_round(
+    M,
     facts.current.comments,
     proposal_id,
     state.version,
-    row.from_state
-  ) or 0) + 1
+    row
+  )
   local ready_payload = M.build_devloop_ready_payload({
     proposal_id = fields.proposal_id,
-    dedup_key = next_ready_redrive_version(state.version, ready_redrive_round),
+    dedup_key = next_ready_redrive_version(state.version, redrive_round),
     source_ref = fields.source_ref,
     effect_version = state.version,
     include_ready_hand_off = true,
