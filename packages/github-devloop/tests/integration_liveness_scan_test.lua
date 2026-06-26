@@ -134,6 +134,29 @@ local function mock_empty_pr_list()
   })
 end
 
+local function mock_branch_config()
+  t.mock_command(core.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_empty_implementation_pr_list(issue_number, impl_version)
+  local branch = core.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
+  mock_branch_config()
+  t.mock_command(core.gh_pr_list_head_base_cmd(repo, branch, "dev"), {
+    stdout = "[[]]\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function mock_pr_list(items)
   t.mock_command(core.gh_pr_list_observe_cmd(repo), {
     stdout = numbered_list_json(items),
@@ -780,6 +803,7 @@ return {
     t.eq(reconcile.payload.round, 3)
 
     h.mock_issue_reconcile({ "fkst-dev:enabled", "fkst-dev:implementing" }, comments)
+    mock_empty_implementation_pr_list(42, event.dedup_key)
     local reconciled = run_timeout_reconcile(reconcile.payload, opts("liveness-scan-absent-codex-run-reconciles-blocked"))
     t.eq(reconciled.exit_code, 0)
     local comment = find_raise(reconciled.raises, "github-proxy.github_issue_comment_request")

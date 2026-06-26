@@ -149,6 +149,13 @@ class Violation:
         if path == "packages/github-devloop-pr/departments/merge/main.lua":
             path = "packages/github-devloop-pr/core/merge_executor.lua"
             line = merge_executor_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
+        reconcile_timeout_pr_guard_lines = {
+            ("pipeline_thinking", "cursor-read", "current_state(", 116): "58",
+            ("pipeline_timeout", "cursor-read", "current_entity_state(", 181): "123",
+            ("pipeline_timeout", "state-equality", "blocked", 236): "175",
+        }
+        if path == "packages/github-devloop/departments/reconcile/main.lua":
+            line = reconcile_timeout_pr_guard_lines.get((self.surface, self.kind, self.token, self.line), line)
         return path, self.surface, self.kind, self.token, line
 
     def label(self) -> str:

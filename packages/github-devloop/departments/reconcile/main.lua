@@ -7,9 +7,16 @@ local spec = {
   produces = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
+    "github-proxy.github_pr_comment_request",
   },
   stall_window = "2m",
 }
+
+local function emit_effects(proposal_id, effects)
+  for _, effect in ipairs(effects or {}) do
+    core.log_raise("reconcile", proposal_id, effect.queue, effect.payload)
+  end
+end
 
 local function emit_blocked_reconcile(proposal_id, state, version, action, reason, comment_request, label_request)
   local add_labels, remove_labels = core.state_label_changes("blocked")
@@ -22,6 +29,57 @@ local function emit_blocked_reconcile(proposal_id, state, version, action, reaso
   if label_request ~= nil then
     core.log_raise("reconcile", proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
+end
+
+local function strip_timeout_transition_suffixes(version)
+  local text = tostring(version or "")
+  local previous = nil
+  while previous ~= text do
+    previous = text
+    text = text
+      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
+      :gsub("/timeout/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
+  end
+  return text
+end
+
+local function maybe_adopt_open_implementation_pr(repo, issue_number, reconcile, current, state)
+  if reconcile.state ~= "implementing" then
+    return false
+  end
+  local impl_version = strip_timeout_transition_suffixes(state.version)
+  local ready = {
+    proposal_id = reconcile.proposal_id,
+    dedup_key = impl_version,
+    source_ref = reconcile.source_ref,
+  }
+  local issue = {
+    repo = repo,
+    number = issue_number,
+    title = current and current.title,
+    proposal_id = reconcile.proposal_id,
+    source_ref = reconcile.source_ref,
+    comments = current and current.comments or {},
+  }
+  local child = core.adopt_existing_pr_child(issue, impl_version, core.implementation_retry_attempt(impl_version) or 1)
+  if child == nil then
+    return false
+  end
+  local comment_request = core.build_parent_awaiting_pr_comment_request(repo, issue_number, ready, child)
+  local label_request = core.build_parent_awaiting_pr_label_request(repo, issue_number, ready, child)
+  local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
+  core.log_cas_decision("reconcile", reconcile.proposal_id, state, "implementing", "awaiting-pr", "applied(open-pr-ground-truth)", "timeout reconcile found an open implementation PR before terminal write")
+  core.log_apply("reconcile", reconcile.proposal_id, "awaiting-pr", impl_version, { add = add_labels, remove = remove_labels }, {
+    "github-proxy.github_pr_comment_request",
+    "github-proxy.github_issue_comment_request",
+    "github-proxy.github_issue_label_request",
+  })
+  emit_effects(reconcile.proposal_id, child.effects)
+  core.log_raise("reconcile", reconcile.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  core.log_raise("reconcile", reconcile.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  return true
 end
 
 local function pipeline_thinking(event)
@@ -170,6 +228,9 @@ local function pipeline_timeout(event)
     local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or nil
     if not due or decision.action ~= "escalate" or tonumber(decision.attempt) < tonumber(reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(no-longer-over-budget)", "current marker is no longer at timeout escalation threshold")
+      return
+    end
+    if maybe_adopt_open_implementation_pr(repo, issue_number, reconcile, current, state) then
       return
     end
     if reconcile.state == "blocked" then
