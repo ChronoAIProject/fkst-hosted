@@ -104,6 +104,13 @@ local function child_dedup_key(event, index)
   }, index).dedup_key
 end
 
+local function trusted_comment(body)
+  return {
+    body = body,
+    author_login = core.trusted_bot_login(),
+  }
+end
+
 blocked_comments = function(event, extra)
   local comments = {
     core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
@@ -374,9 +381,26 @@ return {
     local result = run_decompose(event, opts("decompose-depth-cap"))
 
     t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
+    t.is_true(result.raises[1].payload.body:find("fkst:github-devloop:decompose-exhausted:v1", 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('reason_class="decompose-output-obligation-timeout"', 1, true) ~= nil)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
+
+  end,
+
+  test_decompose_depth_cap_exhausted_marker_is_idempotent = function()
+    local event = decompose_event()
+    local exhausted_marker = core.decompose_exhausted_marker(event.proposal_id, event.version, 1, event.source_ref)
+    mock_bot_env()
+    mock_write_env_real()
+    h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, { trusted_comment(exhausted_marker) }))
+    mock_pr_view(event, blocked_comments(event, { trusted_comment(exhausted_marker) }))
+
+    local result = run_decompose(event, opts("decompose-depth-cap-idempotent"))
+
+    t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("codex exec"), 0)
-    t.eq(count_calls("gh pr comment"), 0)
   end,
 
   test_decompose_parse_fail_retries_then_falls_back = function()
