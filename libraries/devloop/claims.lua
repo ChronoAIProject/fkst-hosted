@@ -168,15 +168,7 @@ local function log_terminal_skip(dept, proposal_id, queue, source_ref, why)
 end
 
 local function is_assign_permission_denied(err)
-  if type(err) ~= "table" then
-    return false
-  end
-  if tostring(err.context or "") ~= "gh issue assign" then
-    return false
-  end
-  local result = err.result
-  local stderr = type(result) == "table" and tostring(result.stderr or ""):lower() or ""
-  return stderr:find("permission%-denied", 1, false) ~= nil
+  return type(err) == "table" and err.class == "gh-issue-assign-permission-denied"
 end
 
 local function issue_source_ref(repo, issue_number)
