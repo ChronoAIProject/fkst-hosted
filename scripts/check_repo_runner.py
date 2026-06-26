@@ -6,6 +6,7 @@ from __future__ import annotations
 import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
+import check_repo_intake_routing
 import check_repo_integration_coverage
 import check_repo_monotone_gate
 import check_repo_namespaced_queue
@@ -136,6 +137,8 @@ def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violati
         __import__("check_repo_dogfood_boundary").check(root, violations, c.add)
     for message in check_repo_saga_split.repository_messages(root):
         c.add(violations, "G-SAGA-SPLIT", message)
+    for message in check_repo_intake_routing.repository_messages(root):
+        c.add(violations, "G-INTAKE-ROUTING", message)
 
 
 def run(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:
