@@ -294,12 +294,6 @@ local function issue_view_command(repo, number, fields)
     .. " --json " .. fields
 end
 
-local function issue_view_adapter_command(repo, number, fields)
-  return "gh issue view " .. tostring(number)
-    .. " --repo " .. tostring(repo)
-    .. " --json " .. shell_quote(fields)
-end
-
 local function pr_view_command(repo, number, fields)
   return "gh pr view " .. shell_quote(number)
     .. " --repo " .. shell_quote(repo)
@@ -422,7 +416,6 @@ function M.mock_issue_view_selector(t, fields, selector, times)
   local number = f.number or 42
   register_view_commands(t, {
     issue_view_command(repo, number, selector),
-    issue_view_adapter_command(repo, number, selector),
   }, M.issue_view_stdout(f), times or 1)
   if selector == "title,body,comments,labels,state,updatedAt,assignees,author" then
     register_view_commands(t, {

@@ -2,9 +2,9 @@ local core = require("core")
 local saga = require("workflow.saga")
 
 local spec = {
-  consumes = { "devloop_intake_candidate" },
+  consumes = { "github-devloop-intake.devloop_intake_candidate" },
   produces = {
-    "consensus.proposal",
+    "github-devloop.devloop_execute_request",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
     "github-proxy.github_issue_label_request",
@@ -32,71 +32,43 @@ local function tracks_umbrella(action)
   return action == "track"
 end
 
-local function intake_hand_off(candidate, decision, decision_dedup_key)
-  return {
-    kind = "own-intake-decision",
+local function build_enable_request(candidate, decision_dedup_key)
+  return core.build_execution_request_payload({
     proposal_id = candidate.proposal_id,
-    decision = decision,
     dedup_key = decision_dedup_key or candidate.dedup_key,
-    source_ref = core.normalize_source_ref(candidate.source_ref),
-  }
-end
-
-local function build_direct_proposal(repo, issue_number, candidate, current, event_ts, decision_dedup_key)
-  local issue = {
-    repo = repo,
-    number = issue_number,
-    title = current.title,
-    updated_at = current.updated_at,
     source_ref = candidate.source_ref,
-    content_fetch = core.context_fetch_ref_from_bundle({
-      dept = "intake_judge",
-      repo = repo,
-      issue_number = issue_number,
-      proposal_id = candidate.proposal_id,
-      version = decision_dedup_key,
-      tick = event_ts,
-    }),
-  }
-  local proposal = core.build_board_proposal(issue, event_ts)
-  proposal.dedup_key = decision_dedup_key or candidate.dedup_key
-  proposal.effect_version = decision_dedup_key or candidate.dedup_key
-  proposal.intake_hand_off = intake_hand_off(candidate, "enable", proposal.dedup_key)
-  return core.validate_proposal(proposal) and proposal or nil
+    origin = {
+      package = "github-devloop-intake-default",
+      route = "default",
+      decision = "enable",
+    },
+    service_class = candidate.service_class,
+  })
 end
 
 local function raise_enable_successor(dept, repo, issue_number, candidate, current, event_ts, decision_dedup_key, options)
   local opts = options or {}
-  local direct_proposal = build_direct_proposal(repo, issue_number, candidate, current, event_ts, decision_dedup_key)
-  if direct_proposal == nil then
-    log.warn("github-devloop dept=" .. tostring(dept) .. " proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-direct-proposal")
+  local _ = current
+  local __ = event_ts
+  local execution_request = build_enable_request(candidate, decision_dedup_key)
+  if not core.is_supported_execution_request(execution_request) then
+    log.warn("github-devloop dept=" .. tostring(dept) .. " proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-execution-request")
     return false
   end
-  local issue_ref = {
-    repo = repo,
-    number = issue_number,
-    source_ref = candidate.source_ref,
-  }
   local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
-  local thinking_comment_request = core.build_observe_comment_request(issue_ref, direct_proposal)
-  local thinking_label_request = core.build_thinking_label_request(issue_ref, direct_proposal)
   if opts.log_apply then
     local class_add, class_remove = core.intake_service_class_label_changes(candidate.service_class)
-    core.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "intake-enable", "thinking", "applied(" .. tostring(opts.reason or "direct") .. ")", "raising direct intake successor event")
-    core.log_apply(dept, candidate.proposal_id, "thinking", direct_proposal.effect_version, {
-      add = { core._enabled_label, class_add[1], core._thinking_label },
+    core.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "intake-enable", "execution-request", "applied(" .. tostring(opts.reason or "direct") .. ")", "raising execution request successor event")
+    core.log_apply(dept, candidate.proposal_id, "enable", execution_request.dedup_key, {
+      add = { core._enabled_label, class_add[1] },
       remove = class_remove,
     }, {
       "github-proxy.github_issue_label_request",
-      "github-proxy.github_issue_comment_request",
-      "github-proxy.github_issue_label_request",
-      "consensus.proposal",
+      "github-devloop.devloop_execute_request",
     })
   end
   core.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
-  core.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_comment_request", thinking_comment_request)
-  core.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_label_request", thinking_label_request)
-  core.log_raise(dept, candidate.proposal_id, "consensus.proposal", direct_proposal)
+  core.log_raise(dept, candidate.proposal_id, "github-devloop.devloop_execute_request", execution_request)
   return true
 end
 
@@ -314,8 +286,7 @@ local function act_intake_judge(event)
     local apply_add = { class_add[1] }
     local apply_remove = class_remove
     if enables_pipeline(parsed.action) then
-      table.insert(raised, "consensus.proposal")
-      table.insert(raised, "github-proxy.github_issue_comment_request")
+      table.insert(raised, "github-devloop.devloop_execute_request")
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
     if enables_pipeline(parsed.action) then

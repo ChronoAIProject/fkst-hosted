@@ -768,6 +768,7 @@ local SCANNED_SOURCE_FILES = {
   "packages/github-devloop/core/restart/required_replay_payload_fields/index.lua",
   "packages/github-devloop/departments/comment_handoff/main.lua",
   "packages/github-devloop/departments/consensus_result/main.lua",
+  "packages/github-devloop/departments/execute_start/main.lua",
   "packages/github-devloop/departments/implement/main.lua",
   "packages/github-devloop/departments/implement/pr_child_handoff.lua",
   "packages/github-devloop/departments/implement/slice_gate.lua",

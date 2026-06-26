@@ -29,7 +29,7 @@ function M.intake_candidate_updated_at(issue, command)
   return issue.updated_at
 end
 
-function M.build_intake_scan_candidate(repo, issue, command, delivery_version)
+function M.build_intake_admission_candidate(repo, issue, command, delivery_version)
   local updated_at = M.intake_candidate_updated_at(issue, command)
   local proposal_id = M.proposal_id(repo, tostring(issue.number))
   local effect_id = M.intake_decision_dedup_key(proposal_id, {
@@ -41,14 +41,6 @@ function M.build_intake_scan_candidate(repo, issue, command, delivery_version)
     delivery_version = delivery_version,
     reintake_command_created_at = command and command.created_at or nil,
   })
-end
-
-function M.read_intake_repo()
-  local repo = M.devloop_config().repo
-  if repo == nil or not M.issue_ref_round_trips(repo, 1) then
-    return nil
-  end
-  return repo
 end
 end
 

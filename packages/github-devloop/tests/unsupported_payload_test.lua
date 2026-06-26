@@ -148,6 +148,17 @@ local function payload_for_queue(queue)
     },
     devloop_doctor_tick = { schema = "github-devloop.doctor-tick.v1" },
     devloop_ensure_repo_tick = { schema = "github-devloop.ensure-repo-tick.v1" },
+    devloop_execute_request = core.build_execution_request_payload({
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      dedup_key = "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
+      source_ref = { kind = "external", ref = "owner/repo#issue/42" },
+      origin = {
+        package = "github-devloop-intake-default",
+        route = "default",
+        decision = "enable",
+      },
+      service_class = "standard",
+    }),
     devloop_fix_reconcile = core.build_devloop_fix_reconcile_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),

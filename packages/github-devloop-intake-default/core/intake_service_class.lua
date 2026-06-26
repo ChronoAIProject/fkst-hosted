@@ -1,25 +1,8 @@
 local S = {}
 
 local classes = { "expedite", "standard", "background" }
-local class_set = {
-  expedite = true,
-  standard = true,
-  background = true,
-}
 
 function S.install(M)
-function M.normalize_intake_service_class(value)
-  local text = tostring(value or ""):lower()
-  if class_set[text] then
-    return text
-  end
-  return "standard"
-end
-
-function M.is_intake_service_class(value)
-  return class_set[tostring(value or "")] == true
-end
-
 function M.intake_service_class_label(value)
   return "fkst-class:" .. M.normalize_intake_service_class(value)
 end

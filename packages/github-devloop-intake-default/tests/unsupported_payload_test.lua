@@ -1,7 +1,7 @@
 local t = fkst.test
 local core = require("core")
 
-local package_root = "packages/github-devloop-intake"
+local package_root = "packages/github-devloop-intake-default"
 
 local function department_paths()
   local root = package_root
@@ -13,7 +13,7 @@ local function department_paths()
   end
   local ok = find:close()
   if ok == false then
-    error("github-devloop-intake: department discovery failed")
+    error("github-devloop-intake-default: department discovery failed")
   end
   return result
 end
@@ -23,7 +23,7 @@ local function load_department_spec(path)
   local module = require(tostring(path):gsub("/", "."):gsub("%.lua$", ""))
   pipeline = old_pipeline
   if type(module) ~= "table" or type(module.spec) ~= "table" then
-    error("github-devloop-intake: department spec missing for " .. tostring(path))
+    error("github-devloop-intake-default: department spec missing for " .. tostring(path))
   end
   return module.spec
 end
@@ -32,28 +32,16 @@ local function production_queue_name(queue)
   if tostring(queue):find("%.", 1, false) ~= nil then
     return queue
   end
-  return "github-devloop-intake." .. tostring(queue)
+  return "github-devloop-intake-default." .. tostring(queue)
 end
 
 local function payload_for_queue(queue)
   local payloads = {
-    cache_seed = { key = "github-devloop-intake/test-cache", value = "1" },
-    ["github-proxy.github_entity_changed"] = {
-      schema = "github-proxy.v1",
-      type = "issue",
-      repo = "owner/repo",
-      number = 42,
-      title = "Namespaced dispatch probe",
-      state = "CLOSED",
-      labels = {},
-      updated_at = "2026-06-03T01:02:03Z",
-      dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
-      source_ref = core.issue_source_ref("owner/repo", 42),
-    },
+    ["github-devloop-intake.devloop_intake_candidate"] = core.build_devloop_intake_candidate_payload("owner/repo", "42", "2026-06-03T01:02:03Z"),
   }
   local payload = payloads[queue]
   if payload == nil then
-    error("github-devloop-intake: no production-shaped queue fixture for " .. tostring(queue))
+    error("github-devloop-intake-default: no production-shaped queue fixture for " .. tostring(queue))
   end
   return payload
 end
@@ -69,14 +57,22 @@ end
 local function assert_no_unsupported_queue_fallthrough(path, queue, _ok, err, logs)
   local text = tostring(err or "") .. "\n" .. tostring(logs or "")
   if text:find("consumed-queue-unrouted", 1, true) ~= nil then
-    error("github-devloop-intake: consumed queue is unrouted for " .. path .. " queue=" .. queue .. ": " .. text)
+    error("github-devloop-intake-default: consumed queue is unrouted for " .. path .. " queue=" .. queue .. ": " .. text)
   end
   if text:find("unsupported event payload", 1, true) ~= nil
     or text:find("skip-foreign(payload)", 1, true) ~= nil
     or text:find("skip-foreign(source_ref)", 1, true) ~= nil then
-    error("github-devloop-intake: production-shaped consumed queue fell through unsupported path for " .. path .. " queue=" .. queue .. ": " .. text)
+    error("github-devloop-intake-default: production-shaped consumed queue fell through unsupported path for " .. path .. " queue=" .. queue .. ": " .. text)
   end
 end
+
+local cases = {
+  {
+    dept = "intake_judge",
+    path = "departments/intake_judge/main.lua",
+    queue = "github-devloop-intake.devloop_intake_candidate",
+  },
+}
 
 return {
   test_all_departments_accept_production_namespaced_consumed_queues = function()
@@ -89,6 +85,20 @@ return {
         }
         local ok, err, logs = run_department_with_logs(path, event)
         assert_no_unsupported_queue_fallthrough(path, queue, ok, err, logs)
+      end
+    end
+  end,
+
+  test_unsupported_payload_consumers_skip_non_table_payloads = function()
+    for _, case in ipairs(cases) do
+      for _, payload in ipairs({ false, "foreign-payload", 42 }) do
+        local result = t.run_department(case.path, {
+          queue = case.queue,
+          payload = payload,
+        })
+
+        t.eq(result.exit_code, 0)
+        t.eq(#result.raises, 0)
       end
     end
   end,

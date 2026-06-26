@@ -3,6 +3,7 @@ local registry = require("workflow.registry")
 
 local validators_index = require("devloop.validators.index")
 local validators = {
+  require("devloop.validators.execution_request"),
   require("devloop.validators.fixing"),
   require("devloop.validators.intake_candidate"),
   require("devloop.validators.issue"),

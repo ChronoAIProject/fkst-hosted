@@ -24,7 +24,6 @@ end
 local function list_helpers_without_observe_coalesce()
   return {
     core.gh_issue_list_intake_cmd("owner/repo", 100),
-    core.gh_issue_list_intake_probe_cmd("owner/repo", 5),
     core.gh_issue_list_decompose_children_cmd("owner/repo", "github-devloop/issue/owner/repo/42"),
     core.gh_issue_list_recent_closed_cmd("owner/repo", 30),
     core.gh_issue_list_wip_cmd("owner/repo"),
@@ -89,14 +88,6 @@ return {
     t.eq(
       core.gh_issue_list_intake_cmd("owner/repo", 50),
       "gh issue list --repo 'owner/repo' --state open --limit 50 --json number,title,body,updatedAt,labels,assignees,author"
-    )
-    t.eq(
-      core.gh_issue_list_intake_probe_cmd("owner/repo", 5),
-      "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5'"
-    )
-    t.eq(
-      core.gh_issue_list_intake_probe_cmd("owner/repo", 5, "2026-06-03T01:02:03Z"),
-      "gh api 'repos/owner/repo/issues?state=open&sort=created&direction=desc&per_page=5&since=2026-06-03T01%3A02%3A03Z'"
     )
     t.eq(core.gh_issue_list_observe_cmd("owner/repo"), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&per_page=100'")
     t.eq(core.gh_issue_list_observe_cmd("owner/repo", core._enabled_label), "gh api --paginate --slurp 'repos/owner/repo/issues?state=open&labels=fkst-dev%3Aenabled&per_page=100'")
@@ -217,7 +208,6 @@ return {
 
   test_gh_issue_view_commands_match_existing_strings = function()
     local cases = {
-      { core.gh_issue_view_intake_scan_cmd, "title,labels,comments,state,assignees,author" },
       { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state,assignees,author" },
       { core.gh_issue_view_state_cmd, "title,updatedAt,labels,state,comments,assignees,author" },
       { core.gh_issue_view_result_cmd, "labels,comments" },

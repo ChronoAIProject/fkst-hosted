@@ -331,8 +331,6 @@ function M.saga_doctor_cron_summary(raiser_dir)
   local files = {
     "branch_poll.lua",
     "ensure_repo_poll.lua",
-    "intake_poll.lua",
-    "intake_probe_poll.lua",
     "liveness_poll.lua",
     "merge_queue_poll.lua",
     "observability_poll.lua",

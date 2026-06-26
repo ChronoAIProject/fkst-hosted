@@ -1,5 +1,5 @@
 kind = "package.composed"
-name = "github-devloop-intake"
+name = "github-devloop-intake-default"
 persistence_class = "saga"
 
 [code]
@@ -9,4 +9,4 @@ root = "."
 libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
-packages = ["github-proxy"]
+packages = ["github-devloop-intake", "github-devloop", "github-proxy"]

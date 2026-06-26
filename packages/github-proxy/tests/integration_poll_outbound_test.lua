@@ -366,6 +366,16 @@ return {
     local result = t.run_department("departments/github_poll/main.lua", event, run_opts)
     t.eq(result.exit_code, 0) t.eq(#result.raises, 2)
     t.eq(numbers(result.raises), "50,42")
+    t.eq(result.raises[1].queue, "github_entity_changed")
+    t.eq(result.raises[1].payload.schema, "github-proxy.v1")
+    t.eq(result.raises[1].payload.type, "issue")
+    t.eq(result.raises[1].payload.repo, "owner/x")
+    t.eq(result.raises[1].payload.number, 50)
+    t.eq(result.raises[1].payload.state, "OPEN")
+    t.eq(result.raises[1].payload.labels[1], "bug")
+    t.eq(result.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z")
+    t.eq(result.raises[1].payload.source_ref.kind, "external")
+    t.eq(result.raises[1].payload.source_ref.ref, "owner/x#issue/50")
   end,
 
   test_inbound_poll_rejects_invalid_replay_budget = function()

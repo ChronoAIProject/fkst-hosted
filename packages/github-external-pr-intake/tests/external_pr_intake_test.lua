@@ -409,10 +409,7 @@ return {
     local proxy_poll = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_poll/main.lua")
     local proxy_issue_create = read_disk_file(sibling_package_root("github-proxy") .. "/departments/github_issue_create/main.lua")
     local proxy_issue_create_core = read_disk_file(sibling_package_root("github-proxy") .. "/core/issue_create.lua")
-    local devloop_scan_raiser = read_disk_file(sibling_package_root("github-devloop-intake") .. "/raisers/intake_poll.lua")
-    local devloop_probe_raiser = read_disk_file(sibling_package_root("github-devloop-intake") .. "/raisers/intake_probe_poll.lua")
-    local devloop_scan = read_disk_file(sibling_package_root("github-devloop-intake") .. "/departments/intake_scan/main.lua")
-    local devloop_probe = read_disk_file(sibling_package_root("github-devloop-intake") .. "/departments/intake_probe/main.lua")
+    local devloop_admission = read_disk_file(sibling_package_root("github-devloop-intake") .. "/departments/admission/main.lua")
     local external_scan_raiser = read_disk_file(package_root .. "/raisers/external_pr_scan.lua")
     local external_intake = read_disk_file(package_root .. "/departments/external_pr_intake/main.lua")
 
@@ -439,18 +436,14 @@ return {
     t.is_true(proxy_issue_create_core:find("pr_list", 1, true) == nil)
     t.is_true(proxy_issue_create_core:find("external-pr-bridge:v1", 1, true) == nil)
 
-    -- Manual/no-op intake starts from GitHub issues only; it has no scheduled
-    -- PR source that can notice an external PR before a human creates an issue.
-    t.is_true(devloop_scan_raiser:find('produces = "devloop_intake_tick"', 1, true) ~= nil)
-    t.is_true(devloop_probe_raiser:find('produces = "devloop_intake_probe_tick"', 1, true) ~= nil)
-    t.is_true(devloop_scan:find("fetch_shared_issue_intake_list", 1, true) ~= nil)
-    t.is_true(devloop_scan:find("devloop_intake_candidate", 1, true) ~= nil)
-    t.is_true(devloop_scan:find("pr_list", 1, true) == nil)
-    t.is_true(devloop_scan:find("#pr/", 1, true) == nil)
-    t.is_true(devloop_probe:find("issue_list_intake_probe", 1, true) ~= nil)
-    t.is_true(devloop_probe:find("devloop_intake_candidate", 1, true) ~= nil)
-    t.is_true(devloop_probe:find("pr_list", 1, true) == nil)
-    t.is_true(devloop_probe:find("#pr/", 1, true) == nil)
+    -- Devloop issue intake admits only GitHub issues already surfaced by the
+    -- proxy entity stream; it has no PR source or bridge materialization policy.
+    t.is_true(devloop_admission:find('"github-proxy.github_entity_changed"', 1, true) ~= nil)
+    t.is_true(devloop_admission:find("devloop_intake_candidate", 1, true) ~= nil)
+    t.is_true(devloop_admission:find("issue_list_intake", 1, true) == nil)
+    t.is_true(devloop_admission:find("devloop_intake_tick", 1, true) == nil)
+    t.is_true(devloop_admission:find("pr_list", 1, true) == nil)
+    t.is_true(devloop_admission:find("#pr/", 1, true) == nil)
 
     -- The new adapter is the smallest owner of that middle step.
     t.is_true(external_scan_raiser:find('produces = "external_pr_scan"', 1, true) ~= nil)

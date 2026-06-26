@@ -130,10 +130,6 @@ function M.parse_issue_view_loop(stdout)
   }
 end
 
-function M.parse_issue_view_intake_scan(stdout)
-  return M.parse_issue_view_state(stdout)
-end
-
 function M.parse_issue_view_intake_judge(stdout)
   local decoded = json.decode(stdout or "{}")
   local result = M.parse_issue_view_result(stdout)

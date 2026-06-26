@@ -82,31 +82,4 @@ return {
     t.eq(count_calls(command), 2)
   end,
 
-  test_shared_intake_list_uses_separate_scope_from_observe_list = function()
-    local repo = "owner/shared-intake-list"
-    local observe_command = core.gh_issue_list_observe_cmd(repo)
-    local intake_command = core.gh_issue_list_intake_cmd(repo, 100)
-    t.mock_command(observe_command, {
-      stdout = '[{"number":1,"state":"open","updated_at":"2026-06-03T01:02:03Z"}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(intake_command, {
-      stdout = '[{"number":2,"title":"Candidate","body":"","updatedAt":"2026-06-03T01:02:03Z","labels":[]}]\n',
-      stderr = "",
-      exit_code = 0,
-    })
-
-    local observe = core.fetch_shared_issue_observe_list(repo, {
-      poll_key = "2026-06-03T01:02:03Z",
-    })
-    local intake = core.fetch_shared_issue_intake_list(repo, 100, {
-      poll_key = "2026-06-03T01:02:03Z",
-    })
-
-    t.eq(observe.exit_code, 0)
-    t.eq(intake.exit_code, 0)
-    t.eq(count_calls(observe_command), 1)
-    t.eq(count_calls(intake_command), 1)
-  end,
 }

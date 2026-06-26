@@ -26,15 +26,6 @@ local function issue_list_cli_argv(repo, state, limit, fields)
   }
 end
 
-local function issue_list_intake_probe_argv(repo, limit, since)
-  local query = "repos/" .. tostring(repo)
-    .. "/issues?state=open&sort=created&direction=desc&per_page=" .. tostring(limit)
-  if since ~= nil and tostring(since) ~= "" then
-    query = query .. "&since=" .. shell.url_encode(since)
-  end
-  return { "gh", "api", query }
-end
-
 local function pr_list_cli_argv(repo, state, limit, fields)
   return {
     "gh",
@@ -317,10 +308,6 @@ function M.install(handle)
 
   function handle.issue_list_intake(repo, limit, timeout)
     return handle.issue_list_cli(repo, "open", limit, "number,title,body,updatedAt,labels,assignees,author", timeout)
-  end
-
-  function handle.issue_list_intake_probe(repo, limit, since, timeout)
-    return handle._exec(issue_list_intake_probe_argv(repo, limit, since), timeout, "gh issue intake probe")
   end
 
   function handle.issue_list_recent_closed(repo, limit, timeout)

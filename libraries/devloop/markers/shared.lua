@@ -4,6 +4,24 @@ S.valid_round = require("devloop.rounds").valid_round
 S.strings = require("contract.strings")
 S.max_attr_len = 240
 
+local intake_service_class_set = {
+  expedite = true,
+  standard = true,
+  background = true,
+}
+
+function S.normalize_intake_service_class(value)
+  local text = tostring(value or ""):lower()
+  if intake_service_class_set[text] then
+    return text
+  end
+  return "standard"
+end
+
+function S.is_intake_service_class(value)
+  return intake_service_class_set[tostring(value or "")] == true
+end
+
 function S.marker_attr(marker, name)
   return marker:match(name .. '="([^"]*)"')
 end

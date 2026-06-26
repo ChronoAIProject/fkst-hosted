@@ -493,15 +493,6 @@ local function gh_issue_list_intake_command(repo, limit)
     .. " --json number,title,body,updatedAt,labels,assignees,author"
 end
 
-local function gh_issue_list_intake_probe_command(repo, limit, since)
-  local query = "repos/" .. tostring(repo)
-    .. "/issues?state=open&sort=created&direction=desc&per_page=" .. tostring(math.floor(tonumber(limit or 5)))
-  if since ~= nil and tostring(since) ~= "" then
-    query = query .. "&since=" .. url_encode(since)
-  end
-  return "gh api " .. shell_single_quote(query)
-end
-
 local function gh_issue_list_decompose_children_command(repo, proposal_id)
   return "gh issue list --repo " .. shell_single_quote(repo)
     .. " --state all --limit 100 --search "
@@ -611,7 +602,6 @@ end
 
 local function install_legacy_command_renderers(core)
   core.gh_issue_list_intake_cmd = core.gh_issue_list_intake_cmd or gh_issue_list_intake_command
-  core.gh_issue_list_intake_probe_cmd = core.gh_issue_list_intake_probe_cmd or gh_issue_list_intake_probe_command
   core.gh_issue_list_decompose_children_cmd = core.gh_issue_list_decompose_children_cmd or gh_issue_list_decompose_children_command
   core.gh_issue_list_recent_closed_cmd = core.gh_issue_list_recent_closed_cmd or gh_issue_list_recent_closed_command
   core.gh_issue_list_board_digest_cmd = core.gh_issue_list_board_digest_cmd or gh_issue_list_board_digest_command
@@ -677,9 +667,6 @@ local function install_legacy_command_renderers(core)
       .. " -f " .. shell_single_quote("description=" .. tostring(description or ""))
   end
 
-  core.gh_issue_view_intake_scan_cmd = core.gh_issue_view_intake_scan_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,labels,comments,state,assignees,author")
-  end
   core.gh_issue_view_intake_judge_cmd = core.gh_issue_view_intake_judge_cmd or function(repo, number)
     return gh_issue_view_command(repo, number, "title,body,updatedAt,labels,comments,state,assignees,author")
   end

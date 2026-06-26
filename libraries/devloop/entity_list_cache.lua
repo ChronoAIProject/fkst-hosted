@@ -105,13 +105,6 @@ function M.fetch_shared_pr_observe_list(repo, opts)
   end)
 end
 
-function M.fetch_shared_issue_intake_list(repo, limit, opts)
-  local options = opts or {}
-  return fetch_shared_list(repo, "issue", "intake-" .. tostring(limit or 100), options.poll_key, function()
-    return M.gh_issue_list_intake(repo, limit, options.timeout or 30)
-  end)
-end
-
 end
 
 return S

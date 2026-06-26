@@ -106,7 +106,7 @@ end
 
 local function run_judge(payload)
   return t.run_department("departments/intake_judge/main.lua", {
-    queue = "devloop_intake_candidate",
+    queue = "github-devloop-intake.devloop_intake_candidate",
     payload = payload,
   }, opts("intake-hostile-canary-real-path"))
 end

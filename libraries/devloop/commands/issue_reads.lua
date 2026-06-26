@@ -3,7 +3,6 @@ local support = require("devloop.commands.support")
 local validators = require("devloop.commands.validators")
 
 local issue_view_fields = {
-  intake_scan = "title,labels,comments,state,assignees,author",
   intake_judge = "title,body,updatedAt,labels,comments,state,assignees,author",
   view_state = "title,updatedAt,labels,state,comments,assignees,author",
   claim = "assignees,author",
@@ -32,17 +31,6 @@ function S.install(M)
       return support.github().issue_list_intake(
         repo,
         validators.bounded_limit(limit, 100, 1, 100, "github-devloop: invalid intake issue list limit"),
-        timeout
-      )
-    end)
-  end
-
-  function M.gh_issue_list_intake_probe(repo, limit, since, timeout)
-    return support.gh_result(function()
-      return support.github().issue_list_intake_probe(
-        repo,
-        validators.bounded_limit(limit, 5, 1, 10, "github-devloop: invalid intake probe issue list limit"),
-        since,
         timeout
       )
     end)
@@ -85,10 +73,6 @@ function S.install(M)
     return support.gh_result(function()
       return support.github(run).issue_view(repo, issue_number, issue_fields(fields_key_or_fields), timeout)
     end)
-  end
-
-  function M.gh_issue_view_intake_scan(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "intake_scan", timeout)
   end
 
   function M.gh_issue_view_intake_judge(repo, issue_number, timeout)
