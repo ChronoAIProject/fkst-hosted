@@ -13,7 +13,6 @@ HOST_RUN_RUNTIME_LABEL=""
 HOST_RUN_RUNTIME_IS_EXPLICIT=0
 HOST_RUN_RESTART=0
 HOST_RUN_PACKAGE_ROOTS=()
-HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID="fkst-packages-platform"
 
 host_run_usage() {
   cat >&2 <<'EOF'
@@ -37,65 +36,129 @@ host_run_same_path() {
   [ "$left_phys" = "$right_phys" ]
 }
 
-host_run_prepare_platform_source() {
-  local target report source_root
-  [ -f "$HOST_RUN_PROJECT_ROOT/fkst.workspace.toml" ] || return 0
+host_run_hydrate_external_sources() {
   [ -f "$HOST_RUN_PROJECT_ROOT/fkst.lock" ] || return 0
-
-  if [ -z "${BIN:-}" ]; then
-    echo "error: BIN is required to prepare host external source $HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" >&2
-    return 1
-  fi
-
-  target="$HOST_RUN_PROJECT_ROOT/.fkst/run/$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID"
-  report="$("$BIN" deps fetch --project-root "$HOST_RUN_PROJECT_ROOT" --json)" || return $?
-  if ! source_root="$(HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID="$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" python3 -c '
-import json
-import os
-import pathlib
+  python3 - "$HOST_RUN_PROJECT_ROOT" <<'PY'
+import re
+import shutil
+import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
-source_id = os.environ["HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID"]
-try:
-    report = json.load(sys.stdin)
-except json.JSONDecodeError as exc:
-    print(f"error: deps fetch returned invalid JSON: {exc}", file=sys.stderr)
-    sys.exit(2)
+ID_RE = re.compile(r"[A-Za-z0-9._-]+")
+REV_RE = re.compile(r"[0-9a-fA-F]{40}")
 
-prefix = f"external:{source_id}:"
-for unit in report.get("units", []):
-    if not str(unit.get("name", "")).startswith(prefix):
-        continue
-    path = pathlib.Path(str(unit.get("root", ""))).resolve()
-    for candidate in (path, *path.parents):
-        if (candidate / "packages").is_dir():
-            print(candidate)
-            sys.exit(0)
-    print(f"error: external source unit has no package-bearing parent: {path}", file=sys.stderr)
-    sys.exit(2)
-sys.exit(0)
-' <<<"$report")"
-  then
-    return 1
-  fi
-  [ -n "$source_root" ] || return 0
 
-  mkdir -p "$(dirname "$target")"
-  if [ -L "$target" ]; then
-    ln -sfn "$source_root" "$target"
-  elif [ -e "$target" ]; then
-    if ! host_run_same_path "$target" "$source_root"; then
-      echo "error: host external source target exists but does not match deps fetch source: $target" >&2
-      return 1
-    fi
-  else
-    ln -s "$source_root" "$target"
-  fi
-  [ -d "$target/packages" ] || {
-    echo "error: deps fetch did not provide a platform packages directory: $target/packages" >&2
-    return 1
-  }
-  HOST_RUN_PLATFORM_ROOT="$target"
+def fail(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def run_git(args: list[str], *, cwd: Path | None = None) -> None:
+    try:
+        subprocess.run(["git", *args], cwd=cwd, check=True)
+    except FileNotFoundError:
+        fail("git is required to hydrate host external sources")
+    except subprocess.CalledProcessError as exc:
+        fail(f"git {' '.join(args)} failed with exit {exc.returncode}")
+
+
+def git_output(args: list[str], *, cwd: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+    except FileNotFoundError:
+        fail("git is required to hydrate host external sources")
+    except subprocess.CalledProcessError as exc:
+        fail(f"git {' '.join(args)} failed with exit {exc.returncode}")
+    return result.stdout.strip()
+
+
+def git_output_optional(args: list[str], *, cwd: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError:
+        fail("git is required to hydrate host external sources")
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def remove_target(target: Path, run_root: Path) -> None:
+    if target.parent != run_root:
+        fail(f"refusing to remove external source outside .fkst/run: {target}")
+    if target.is_symlink() or target.is_file():
+        target.unlink()
+    elif target.exists():
+        shutil.rmtree(target)
+
+
+def lock_sources(lock_path: Path) -> list[dict[str, object]]:
+    try:
+        data = tomllib.loads(lock_path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        fail(f"invalid fkst lockfile: {lock_path}: {exc}")
+    sources = data.get("external_source", [])
+    if isinstance(sources, dict):
+        sources = [sources]
+    if not isinstance(sources, list):
+        fail("fkst.lock external_source must be a table array")
+    for source in sources:
+        if not isinstance(source, dict):
+            fail("fkst.lock external_source entries must be tables")
+    return sources
+
+
+def validate_source(source: dict[str, object]) -> tuple[str, str, str]:
+    source_id = source.get("id")
+    git_url = source.get("git")
+    resolved = source.get("resolved")
+    rev = resolved.get("rev") if isinstance(resolved, dict) else None
+    if not isinstance(source_id, str) or not ID_RE.fullmatch(source_id) or source_id in {".", ".."}:
+        fail("fkst.lock external_source has invalid id")
+    if not isinstance(git_url, str) or not git_url:
+        fail(f"fkst.lock external_source(id={source_id}) is missing git")
+    if not isinstance(rev, str) or not REV_RE.fullmatch(rev):
+        fail(f"fkst.lock external_source(id={source_id}) is missing resolved.rev as a full git SHA")
+    return source_id, git_url, rev.lower()
+
+
+project_root = Path(sys.argv[1]).resolve()
+lock_path = project_root / "fkst.lock"
+run_root = project_root / ".fkst" / "run"
+
+for source in lock_sources(lock_path):
+    source_id, git_url, rev = validate_source(source)
+    target = run_root / source_id
+    if target.exists() or target.is_symlink():
+        if not target.is_symlink() and (target / ".git").is_dir():
+            current = git_output(["rev-parse", "HEAD"], cwd=target).lower()
+            origin = git_output_optional(["config", "--get", "remote.origin.url"], cwd=target)
+            if current == rev and origin == git_url:
+                continue
+        remove_target(target, run_root)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    run_git(["clone", "--quiet", "--no-checkout", git_url, str(target)])
+    run_git(["checkout", "--quiet", rev], cwd=target)
+    current = git_output(["rev-parse", "HEAD"], cwd=target).lower()
+    if current != rev:
+        fail(f"external source {source_id} checkout is at {current}, expected {rev}")
+PY
 }
 
 host_run_parse_supervise_args() {
@@ -338,9 +401,9 @@ host_run_print_package_roots() {
 
 host_run_supervise_contract() {
   host_run_parse_supervise_args "$@" || return $?
-  host_run_prepare_platform_source || return $?
   host_run_validate_shape || return $?
   host_run_build_package_roots || return $?
+  host_run_hydrate_external_sources || return $?
   if [ -n "${FKST_RATE_POOL_ROOT:-}" ]; then
     case "$FKST_RATE_POOL_ROOT" in
       /*) ;;

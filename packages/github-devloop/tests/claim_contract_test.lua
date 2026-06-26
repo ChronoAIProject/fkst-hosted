@@ -217,8 +217,33 @@ return {
     t.eq(count_calls("--remove-assignee fkst-test-bot"), 0)
     local logs = table.concat(captured_logs, "\n")
     t.is_true(logs:find("tag=SKIP", 1, true) ~= nil)
-    t.is_true(logs:find("error_class=terminal-skip", 1, true) ~= nil)
+    t.is_true(logs:find("error_class=intake-skip-unclaimable", 1, true) ~= nil)
+    t.is_true(logs:find("source_ref=external:owner/repo#issue/42", 1, true) ~= nil)
     t.is_true(logs:find("WHY=assign permission-denied is permanent", 1, true) ~= nil)
+  end,
+
+  test_claim_transient_assign_error_propagates = function()
+    mock_bot("fkst-test-bot", "1")
+    t.mock_command("gh issue edit '42' --repo 'owner/repo' --add-assignee 'fkst-test-bot'", {
+      stdout = "",
+      stderr = "HTTP 502: upstream unavailable\n",
+      exit_code = 1,
+    })
+
+    local ok, err = pcall(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current(),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("gh-command-failed", 1, true) ~= nil)
+    t.eq(count_calls("--add-assignee fkst-test-bot"), 1)
+    t.eq(count_calls("--remove-assignee fkst-test-bot"), 0)
   end,
 
   test_claim_loss_unassigns_only_self_and_skips = function()
