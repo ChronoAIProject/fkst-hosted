@@ -1,5 +1,6 @@
 local S = {}
 local github_handle = nil
+local error_facts = require("contract.error_facts")
 
 function S.install(M)
 require("devloop.forks").install(M)
@@ -157,6 +158,26 @@ local function log_claim(dept, proposal_id, action, reason)
   M.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "claim", "claim", action, reason)
 end
 
+local function log_terminal_skip(dept, proposal_id, queue, source_ref, why)
+  local fields = error_facts.error_fact_fields("terminal-skip", queue, dept, why, {
+    source_ref = source_ref,
+    terminal = true,
+  })
+  table.insert(fields, "WHY=" .. error_facts.one_line(why))
+  M.log_line("warn", dept, proposal_id, "SKIP", fields)
+end
+
+local function is_assign_permission_denied(err)
+  return type(err) == "table" and err.class == "gh-issue-assign-permission-denied"
+end
+
+local function issue_source_ref(repo, issue_number)
+  return {
+    kind = "external",
+    ref = tostring(repo) .. "#issue/" .. tostring(issue_number),
+  }
+end
+
 function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
   if issue_number == nil then
     log_claim(dept, proposal_id, "skip-not-owned", "backing issue is absent")
@@ -303,7 +324,18 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
     return false
   end
 
-  github().issue_assign(repo, issue_number, owner, 30)
+  local assigned, assign_error = pcall(function()
+    return github().issue_assign(repo, issue_number, owner, 30)
+  end)
+  if not assigned then
+    if is_assign_permission_denied(assign_error) then
+      local why = "assign permission-denied is permanent"
+      log_terminal_skip(dept, proposal_id, "claim", issue_source_ref(repo, issue_number), why)
+      log_claim(dept, proposal_id, "skip-claim-permission-denied", why)
+      return false
+    end
+    error(assign_error, 0)
+  end
   M.invalidate_entity_after_write(repo, "issue", issue_number)
   if M.verify_issue_claim(repo, issue_number, owner) then
     log_claim(dept, proposal_id, "claim-won", "assignee claim verified after assign")
