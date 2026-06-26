@@ -28,9 +28,17 @@ function M.is_rate_limited(result)
   return false
 end
 
-function M.error_class(result)
+function M.is_issue_assign_permission_denied(result, context)
+  return tostring(context or "") == "gh issue assign"
+    and stderr_of(result):lower():find("permission%-denied", 1, false) ~= nil
+end
+
+function M.error_class(result, context)
   if M.is_rate_limited(result) then
     return "gh-rate-limited"
+  end
+  if M.is_issue_assign_permission_denied(result, context) then
+    return "gh-issue-assign-permission-denied"
   end
   return "gh-command-failed"
 end
@@ -60,11 +68,12 @@ function M.run(exec, argv, timeout, context)
   end
   local result = exec({ argv = argv, timeout = timeout })
   if type(result) ~= "table" or tonumber(result.exit_code) ~= 0 then
-    local class = M.error_class(result)
+    local class = M.error_class(result, context)
     local message = "forge.github: " .. tostring(context) .. " failed: " .. class .. ": " .. stderr_of(result)
     error(setmetatable({
       class = class,
       retryable = class == "gh-rate-limited",
+      permanent = class == "gh-issue-assign-permission-denied",
       result = result,
       context = context,
       message = message,

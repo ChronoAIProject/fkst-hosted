@@ -45,40 +45,6 @@ local function emit_effects(dept, proposal_id, effects)
   end
 end
 
-local function build_parent_awaiting_comment(repo, issue_number, ready, child)
-  local body = "github-devloop delegated implementation to PR #" .. tostring(child.pr_number)
-    .. "\n\n" .. core.state_marker(ready.proposal_id, "awaiting-pr", ready.dedup_key)
-    .. "\n" .. core.pr_delegation_marker(
-      ready.proposal_id,
-      child.pr_proposal_id,
-      child.pr_number,
-      ready.dedup_key,
-      child.delegation_generation
-    )
-  return core.build_entity_comment_request({
-    kind = "issue",
-    repo = repo,
-    number = issue_number,
-  }, body, core._dedup_key({
-    "awaiting-pr",
-    tostring(ready.proposal_id),
-    tostring(ready.dedup_key),
-    tostring(child.pr_number),
-    tostring(child.delegation_generation),
-  }), ready.source_ref)
-end
-
-local function build_parent_awaiting_label(repo, issue_number, ready, child)
-  return core.build_state_label_request(repo, issue_number, "awaiting-pr", core._dedup_key({
-    "awaiting-pr",
-    "label",
-    tostring(ready.proposal_id),
-    tostring(ready.dedup_key),
-    tostring(child.pr_number),
-    tostring(child.delegation_generation),
-  }), ready.source_ref)
-end
-
 function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current, fact, reason)
   if core.write_mode() ~= "real" then
     core.log_line("info", dept, ready.proposal_id, "OUTBOUND", {
@@ -123,8 +89,8 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
     return
   end
 
-  local comment_request = build_parent_awaiting_comment(repo, issue_number, ready, child)
-  local label_request = build_parent_awaiting_label(repo, issue_number, ready, child)
+  local comment_request = core.build_parent_awaiting_pr_comment_request(repo, issue_number, ready, child)
+  local label_request = core.build_parent_awaiting_pr_label_request(repo, issue_number, ready, child)
   local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
   core.log_apply(dept, ready.proposal_id, "awaiting-pr", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",

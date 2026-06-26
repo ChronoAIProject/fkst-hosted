@@ -52,6 +52,23 @@ return {
     assert(err.class == "gh-command-failed")
   end,
 
+  test_exec_classifies_issue_assign_permission_denied = function()
+    local handle = gh.new(function(_opts)
+      return {
+        stdout = "",
+        stderr = "GraphQL: Resource not accessible by integration (permission-denied)",
+        exit_code = 1,
+      }
+    end)
+    local ok, err = pcall(function()
+      return handle.issue_assign("owner/repo", 42, "bot-user", 10)
+    end)
+    assert(ok == false)
+    assert(err.class == "gh-issue-assign-permission-denied")
+    assert(err.retryable == false)
+    assert(err.permanent == true)
+  end,
+
   test_exec_returns_result_on_success = function()
     local handle = gh.new(function(_opts)
       return { stdout = "ok", stderr = "", exit_code = 0 }

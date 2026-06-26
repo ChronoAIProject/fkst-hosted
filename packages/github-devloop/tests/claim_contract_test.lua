@@ -101,6 +101,20 @@ local function capture_raises(fn)
   return result, raised
 end
 
+local function capture_warn_logs(fn)
+  local previous_warn = log.warn
+  local logs = {}
+  log.warn = function(message)
+    table.insert(logs, tostring(message))
+  end
+  local ok, result = pcall(fn)
+  log.warn = previous_warn
+  if not ok then
+    error(result, 0)
+  end
+  return result, logs
+end
+
 return {
   test_issue_claim_state_is_current_assignees_only = function()
     t.eq(core.issue_claim_state({}, "fkst-test-bot"), "unassigned")
@@ -156,6 +170,33 @@ return {
     t.eq(ok, true)
     t.eq(count_calls("--add-assignee fkst-test-bot"), 1)
     t.eq(count_calls("--remove-assignee fkst-test-bot"), 0)
+  end,
+
+  test_claim_permission_denied_is_terminal_skip_without_crashing_or_unassigning = function()
+    mock_bot("fkst-test-bot", "1")
+    t.mock_command("gh issue edit '42' --repo 'owner/repo' --add-assignee 'fkst-test-bot'", {
+      stdout = "",
+      stderr = "GraphQL: Could not resolve to a User with the login of 'fkst-test-bot'. (permission-denied)\n",
+      exit_code = 1,
+    })
+
+    local ok, captured_logs = capture_warn_logs(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current(),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(count_calls("--add-assignee fkst-test-bot"), 1)
+    t.eq(count_calls("--remove-assignee fkst-test-bot"), 0)
+    local logs = table.concat(captured_logs, "\n")
+    t.is_true(logs:find("tag=SKIP", 1, true) ~= nil)
+    t.is_true(logs:find("error_class=terminal-skip", 1, true) ~= nil)
+    t.is_true(logs:find("WHY=assign permission-denied is permanent", 1, true) ~= nil)
   end,
 
   test_claim_loss_unassigns_only_self_and_skips = function()
