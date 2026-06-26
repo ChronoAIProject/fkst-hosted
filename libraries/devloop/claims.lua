@@ -72,8 +72,8 @@ function M.claim_owner()
   return M.strip_bot_login_suffix(M.assert_trusted_bot_configured() or M.trusted_bot_login())
 end
 
-function M.peer_bot_logins(exec)
-  local raw = M.read_env("FKST_DEVLOOP_PEER_BOT_LOGINS", exec)
+function M.managed_bot_logins(exec)
+  local raw = M.read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec)
   local logins = {}
   for entry in tostring(raw or ""):gmatch("[^,%s]+") do
     local login = M.strip_bot_login_suffix(M._trim(entry))
@@ -84,9 +84,9 @@ function M.peer_bot_logins(exec)
   return logins
 end
 
-function M.is_peer_bot_login(login, peers)
+function M.is_managed_bot_login(login, managed)
   local normalized = M.strip_bot_login_suffix(login)
-  return normalized ~= nil and normalized ~= "" and type(peers) == "table" and peers[normalized] == true
+  return normalized ~= nil and normalized ~= "" and type(managed) == "table" and managed[normalized] == true
 end
 
 local claimed_label = "fkst-dev:claimed"
@@ -297,8 +297,8 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
   -- opts issues in via the fkst-dev:enabled label, so it claims directly
   -- (matching the label-claim fork). Assignee-mode keeps the original behavior.
   if M.claim_mode() ~= "label" and author ~= owner then
-    if M.is_peer_bot_login(author, M.peer_bot_logins()) then
-      log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a configured peer bot")
+    if M.is_managed_bot_login(author, M.managed_bot_logins()) then
+      log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
       return false
     end
     local dedup_key = M.fork_issue_dedup_key(repo, issue_number)

@@ -23,8 +23,8 @@ local function mock_bot(login, write_mode, write_reads)
   end
 end
 
-local function mock_peer_bot_logins(logins)
-  t.mock_command('printf %s "$FKST_DEVLOOP_PEER_BOT_LOGINS"', {
+local function mock_managed_bot_logins(logins)
+  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
     stdout = logins or "",
     stderr = "",
     exit_code = 0,
@@ -290,9 +290,9 @@ return {
     t.eq(#raised, 0)
   end,
 
-  test_peer_bot_author_unassigned_issue_after_grace_skips_without_forking = function()
+  test_managed_bot_author_unassigned_issue_after_grace_skips_without_forking = function()
     mock_bot("fkst-test-bot", "1")
-    mock_peer_bot_logins("peer-bot[bot],other-peer")
+    mock_managed_bot_logins("peer-bot[bot],other-peer")
     cache_set(core.fork_first_observed_key("owner/repo", 45), tostring(now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 45), {
       stdout = issue_state_json({ author_login = "peer-bot[bot]" }),
