@@ -107,6 +107,30 @@ function M.has_operator_command_response(comments, command)
   return false
 end
 
+function M.operator_command_response_count(comments, command_name, outcome, reason)
+  if type(comments) ~= "table" then
+    return 0
+  end
+  local count = 0
+  local prefix = '<!-- fkst:github-devloop:operator-command:v1 command="'
+    .. tostring(command_name)
+    .. '" '
+  local outcome_attr = outcome ~= nil and ('outcome="' .. tostring(outcome) .. '"') or nil
+  local reason_attr = reason ~= nil
+    and ('reason="' .. strings.sanitize_key(reason, false):gsub("/", "-") .. '"')
+    or nil
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:operator%-command:v1.-%-%->") do
+      if marker:find(prefix, 1, true) ~= nil
+        and (outcome_attr == nil or marker:find(outcome_attr, 1, true) ~= nil)
+        and (reason_attr == nil or marker:find(reason_attr, 1, true) ~= nil) then
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
 function M.operator_command_marker(command, outcome, reason)
   if type(command) ~= "table"
     or (command.command ~= "rereview"

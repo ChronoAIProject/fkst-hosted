@@ -345,6 +345,29 @@ return {
     t.eq(first_ready.payload.dedup_key == second_ready.payload.dedup_key, false)
   end,
 
+  test_ready_redrive_generation_advances_after_accepted_reready_response = function()
+    local marker = core.state_marker(proposal_id, "ready", version, "result-marker,ready-label,devloop-ready")
+    local command = {
+      command = "reready",
+      key = "operator-command/IC_reready_ready",
+    }
+    local accepted = core.operator_command_marker(command, "applied", "ready")
+    local raises = replay_ready_with_comments({
+      trusted_comment("IC_ready_visible", marker),
+      trusted_comment("IC_reready_response", accepted, "2026-06-03T01:01:00Z"),
+    })
+
+    local ready = find_raise(raises, "devloop_ready")
+    t.eq(ready ~= nil, true)
+    t.eq(ready.payload.ready_hand_off.comment_id, "IC_ready_visible")
+    t.eq(ready.payload.ready_hand_off.marker_version, version)
+    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload({
+      proposal_id = proposal_id,
+      dedup_key = version .. "/redrive/ready/2",
+      source_ref = source_ref(),
+    }).dedup_key)
+  end,
+
   test_ready_replay_ignores_prebuilt_payload_without_hand_off = function()
     local marker_version = version
     local marker = core.state_marker(proposal_id, "ready", marker_version, "result-marker,ready-label,devloop-ready")
