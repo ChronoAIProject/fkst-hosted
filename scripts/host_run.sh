@@ -37,46 +37,62 @@ host_run_same_path() {
   [ "$left_phys" = "$right_phys" ]
 }
 
-host_run_platform_source_declared() {
-  local file
-  for file in "$HOST_RUN_PROJECT_ROOT/fkst.workspace.toml" "$HOST_RUN_PROJECT_ROOT/fkst.lock"; do
-    [ -f "$file" ] || continue
-    grep -Eqs "^[[:space:]]*id[[:space:]]*=[[:space:]]*\"$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID\"" "$file" && return 0
-  done
-  return 1
-}
-
 host_run_prepare_platform_source() {
-  local target
-  host_run_platform_source_declared || return 0
+  local target report source_root
+  [ -f "$HOST_RUN_PROJECT_ROOT/fkst.workspace.toml" ] || return 0
+  [ -f "$HOST_RUN_PROJECT_ROOT/fkst.lock" ] || return 0
+
+  if [ -z "${BIN:-}" ]; then
+    echo "error: BIN is required to prepare host external source $HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" >&2
+    return 1
+  fi
+
   target="$HOST_RUN_PROJECT_ROOT/.fkst/run/$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID"
-  if [ "$HOST_RUN_PLATFORM_ROOT" = "$target" ]; then
-    return 0
-  fi
+  report="$("$BIN" deps fetch --project-root "$HOST_RUN_PROJECT_ROOT" --json)" || return $?
+  if ! source_root="$(HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID="$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" python3 -c '
+import json
+import os
+import pathlib
+import sys
 
-  if [ -z "${FKST_HOST_WORKSPACE_HYDRATE_CMD:-}" ]; then
-    echo "error: FKST_HOST_WORKSPACE_HYDRATE_CMD is required to prepare host external source $HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" >&2
+source_id = os.environ["HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID"]
+try:
+    report = json.load(sys.stdin)
+except json.JSONDecodeError as exc:
+    print(f"error: deps fetch returned invalid JSON: {exc}", file=sys.stderr)
+    sys.exit(2)
+
+prefix = f"external:{source_id}:"
+for unit in report.get("units", []):
+    if not str(unit.get("name", "")).startswith(prefix):
+        continue
+    path = pathlib.Path(str(unit.get("root", ""))).resolve()
+    for candidate in (path, *path.parents):
+        if (candidate / "packages").is_dir():
+            print(candidate)
+            sys.exit(0)
+    print(f"error: external source unit has no package-bearing parent: {path}", file=sys.stderr)
+    sys.exit(2)
+sys.exit(0)
+' <<<"$report")"
+  then
     return 1
   fi
-  case "$FKST_HOST_WORKSPACE_HYDRATE_CMD" in
-    /*) ;;
-    *)
-      echo "error: FKST_HOST_WORKSPACE_HYDRATE_CMD must be an absolute executable path" >&2
+  [ -n "$source_root" ] || return 0
+
+  mkdir -p "$(dirname "$target")"
+  if [ -L "$target" ]; then
+    ln -sfn "$source_root" "$target"
+  elif [ -e "$target" ]; then
+    if ! host_run_same_path "$target" "$source_root"; then
+      echo "error: host external source target exists but does not match deps fetch source: $target" >&2
       return 1
-      ;;
-  esac
-  [ -x "$FKST_HOST_WORKSPACE_HYDRATE_CMD" ] || {
-    echo "error: FKST_HOST_WORKSPACE_HYDRATE_CMD is not executable: $FKST_HOST_WORKSPACE_HYDRATE_CMD" >&2
-    return 1
-  }
-
-  FKST_HOST_WORKSPACE_HOST_ROOT="$HOST_RUN_PROJECT_ROOT" \
-  FKST_HOST_WORKSPACE_SOURCE_ID="$HOST_RUN_PLATFORM_EXTERNAL_SOURCE_ID" \
-  FKST_HOST_WORKSPACE_TARGET="$target" \
-  FKST_HOST_WORKSPACE_BOOTSTRAP_PLATFORM_ROOT="$HOST_RUN_PLATFORM_ROOT" \
-    "$FKST_HOST_WORKSPACE_HYDRATE_CMD" || return $?
+    fi
+  else
+    ln -s "$source_root" "$target"
+  fi
   [ -d "$target/packages" ] || {
-    echo "error: workspace hydration delegate did not create a platform packages directory: $target/packages" >&2
+    echo "error: deps fetch did not provide a platform packages directory: $target/packages" >&2
     return 1
   }
   HOST_RUN_PLATFORM_ROOT="$target"

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import signal
 import subprocess
 import tempfile
@@ -264,29 +265,29 @@ class HostRunTest(unittest.TestCase):
         finally:
             h.close()
 
-    def test_host_external_platform_source_uses_workspace_hydration_delegate_before_package_roots(self) -> None:
+    def test_host_external_platform_source_uses_framework_deps_fetch_before_package_roots(self) -> None:
         h = HostRunHarness()
-        hydrator = h.root / "hydrate-platform.sh"
-        call_log = h.root / "hydrate-call.txt"
+        fake_bin = h.root / "fkst-framework"
+        call_log = h.root / "deps-fetch-call.txt"
+        source_root = h.root / "framework-cache" / "fkst-packages-platform"
         try:
             h.write_platform_external_source()
-            hydrator.write_text(
+            fake_bin.write_text(
                 textwrap.dedent(
                     f"""\
                     #!/usr/bin/env bash
                     set -euo pipefail
-                    {{
-                      printf 'host=%s\\n' "$FKST_HOST_WORKSPACE_HOST_ROOT"
-                      printf 'source=%s\\n' "$FKST_HOST_WORKSPACE_SOURCE_ID"
-                      printf 'target=%s\\n' "$FKST_HOST_WORKSPACE_TARGET"
-                      printf 'bootstrap=%s\\n' "$FKST_HOST_WORKSPACE_BOOTSTRAP_PLATFORM_ROOT"
-                    }} > {shell_quote(call_log)}
-                    mkdir -p "$FKST_HOST_WORKSPACE_TARGET/packages/github-proxy"
+                    printf '%s\\n' "$*" > {shell_quote(call_log)}
+                    [ "$1" = "deps" ] && [ "$2" = "fetch" ] && [ "$3" = "--project-root" ] && [ "$4" = {shell_quote(h.website_host)} ] && [ "$5" = "--json" ]
+                    mkdir -p {shell_quote(source_root / "packages" / "github-proxy")} {shell_quote(source_root / "libraries" / "contract")}
+                    cat <<'JSON'
+                    {{"ok":true,"workspace_root":{json.dumps(str(h.website_host))},"units":[{{"name":"external:fkst-packages-platform:contract","kind":"library","root":{json.dumps(str(source_root / "libraries" / "contract"))},"code_root":{json.dumps(str(source_root / "libraries" / "contract"))},"library":"contract","lib_deps":[],"event_deps":[],"actual_lib_requires":[],"modules":[],"public_exports":[]}}],"lib_edges":[],"event_edges":[],"failures":[],"warnings":[]}}
+                    JSON
                     """
                 ),
                 encoding="utf-8",
             )
-            hydrator.chmod(0o755)
+            fake_bin.chmod(0o755)
             result = h.run_helper(
                 textwrap.dedent(
                     f"""\
@@ -296,7 +297,7 @@ class HostRunTest(unittest.TestCase):
                       echo "error: host_run.sh must not hydrate with direct git calls" >&2
                       return 99
                     }}
-                    export FKST_HOST_WORKSPACE_HYDRATE_CMD={shell_quote(hydrator)}
+                    BIN={shell_quote(fake_bin)}
                     host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_prepare_platform_source
                     host_run_validate_shape
@@ -308,6 +309,8 @@ class HostRunTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             hydrated = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            self.assertTrue(hydrated.is_symlink())
+            self.assertEqual(hydrated.resolve(), source_root.resolve())
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
@@ -318,27 +321,44 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 call_log.read_text(encoding="utf-8").splitlines(),
                 [
-                    f"host={h.website_host}",
-                    "source=fkst-packages-platform",
-                    f"target={hydrated}",
-                    f"bootstrap={h.platform}",
+                    f"deps fetch --project-root {h.website_host} --json",
                 ],
             )
         finally:
             h.close()
 
-    def test_already_hydrated_host_external_platform_source_needs_no_delegate(self) -> None:
+    def test_already_bound_host_external_platform_source_still_uses_framework_fetch(self) -> None:
         h = HostRunHarness()
+        fake_bin = h.root / "fkst-framework"
+        call_log = h.root / "deps-fetch-call.txt"
+        source_root = h.root / "framework-cache" / "fkst-packages-platform"
         try:
             h.write_platform_external_source()
+            (source_root / "packages" / "github-proxy").mkdir(parents=True)
+            (source_root / "libraries" / "contract").mkdir(parents=True)
             hydrated = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
-            (hydrated / "packages" / "github-proxy").mkdir(parents=True)
+            hydrated.parent.mkdir(parents=True)
+            hydrated.symlink_to(source_root, target_is_directory=True)
+            fake_bin.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    printf '%s\\n' "$*" > {shell_quote(call_log)}
+                    cat <<'JSON'
+                    {{"ok":true,"workspace_root":{json.dumps(str(h.website_host))},"units":[{{"name":"external:fkst-packages-platform:contract","kind":"library","root":{json.dumps(str(source_root / "libraries" / "contract"))},"code_root":{json.dumps(str(source_root / "libraries" / "contract"))},"library":"contract","lib_deps":[],"event_deps":[],"actual_lib_requires":[],"modules":[],"public_exports":[]}}],"lib_edges":[],"event_edges":[],"failures":[],"warnings":[]}}
+                    JSON
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_bin.chmod(0o755)
             result = h.run_helper(
                 textwrap.dedent(
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    unset FKST_HOST_WORKSPACE_HYDRATE_CMD
+                    BIN={shell_quote(fake_bin)}
                     host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(hydrated)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_prepare_platform_source
                     host_run_validate_shape
@@ -356,10 +376,11 @@ class HostRunTest(unittest.TestCase):
                     str(hydrated / "packages" / "github-proxy"),
                 ],
             )
+            self.assertEqual(call_log.read_text(encoding="utf-8").strip(), f"deps fetch --project-root {h.website_host} --json")
         finally:
             h.close()
 
-    def test_host_external_platform_source_fails_closed_without_workspace_hydration_delegate(self) -> None:
+    def test_host_external_platform_source_fails_closed_without_framework_bin(self) -> None:
         h = HostRunHarness()
         try:
             h.write_platform_external_source()
@@ -368,14 +389,14 @@ class HostRunTest(unittest.TestCase):
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    unset FKST_HOST_WORKSPACE_HYDRATE_CMD
+                    unset BIN
                     host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_prepare_platform_source
                     """
                 )
             )
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("FKST_HOST_WORKSPACE_HYDRATE_CMD is required", result.stderr)
+            self.assertIn("BIN is required to prepare host external source", result.stderr)
         finally:
             h.close()
 
@@ -387,6 +408,7 @@ class HostRunTest(unittest.TestCase):
         self.assertNotIn("git clone", source)
         self.assertNotIn("git fetch", source)
         self.assertNotIn("git checkout", source)
+        self.assertNotIn("FKST_HOST_WORKSPACE_HYDRATE_CMD", source)
 
     def test_missing_durable_root_fails_closed(self) -> None:
         h = HostRunHarness()
