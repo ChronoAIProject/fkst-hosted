@@ -915,15 +915,25 @@ def check_no_permission_control(root: Path, violations: list[str]) -> None: chec
 def is_saga_handler_source(source: str) -> bool:
     return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
 
-def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
+def stateless_generator_department_paths(root: Path) -> set[str]:
+    return {
+        rel(root, path)
+        for pkg in package_dirs(root)
+        if package_persistence_class(pkg) == "stateless_generator"
+        for path in sorted((pkg / "departments").glob("*/main.lua"))
+        if path.is_file()
+    }
+
+def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None, saga_exempt_paths: set[str] | None = None) -> list[str]:
     violations: list[str] = []
+    saga_exempt_paths = saga_exempt_paths or set()
     for path, source in sorted(sources.items()):
         saga_shaped = is_saga_handler_source(source)
         if saga_shaped and path in allowlist:
             violations.append(f"G10: {path} saga-shaped department remains on saga-handler allowlist; remove it")
         if saga_shaped and FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None:
             violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
-        if not saga_shaped and path not in allowlist:
+        if not saga_shaped and path not in allowlist and path not in saga_exempt_paths:
             violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to workflow.saga.department or (only for pre-existing) keep listed")
     for path in sorted(allowlist - set(sources)):
         violations.append(f"G10: {path} listed in saga-handler allowlist but does not exist")
@@ -945,9 +955,10 @@ def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list
     allow_path = allowlist_path(root, "migration/saga-handler.allowlist", allowlist_dir)
     allowlist = set() if not allow_path.exists() else {line.strip() for line in read_text(allow_path).splitlines() if line.strip() and not line.lstrip().startswith("#")}
     sources = {rel(root, path): read_text(path) for packages in package_roots(root) for path in sorted(packages.glob("*/departments/*/main.lua")) if path.is_file()}
+    saga_exempt_paths = stateless_generator_department_paths(root)
     base_status, base_allowlist = saga_allowlist_at_dev_base(root) if enforce_base else ("absent", None)
     if base_status == "unresolved": violations.append("G10: cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
-    violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist))
+    violations.extend(saga_handler_ratchet_violations(sources, allowlist, base_allowlist, saga_exempt_paths))
 
 def main(argv: list[str] | None = None) -> int:
     config = check_repo_config.parse_args(argv); violations: list[str] = []; warnings: list[str] = []
