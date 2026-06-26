@@ -4,9 +4,7 @@ local strings = require("contract.strings")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
-  produces = {
-    "github-proxy.github_issue_create_request",
-  },
+  produces = { "github-proxy.github_issue_create_request", "github-proxy.github_pr_comment_request" },
   stall_window = "2m",
   retry = { max_attempts = 2, base = "5s", cap = "10s" },
 }
@@ -306,20 +304,22 @@ local function decomposed_done(event)
   with_lock(context.lock_key, function()
     core.assert_trusted_bot_configured()
     local current_pr = read_current_pr(context.repo, context.decompose.pr_number)
-    core.log_forged_markers("decompose", context.decompose.proposal_id, current_pr.comments)
+    core.log_forged_markers("decompose",
+      context.decompose.proposal_id,
+      current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, context.decompose.proposal_id)
     if not core.has_fix_reconcile_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(context.decompose.version) then
       return
     end
-    local decomposed = core.decomposed_fact(
-      current_pr.comments,
-      context.decompose.proposal_id,
-      context.decompose.version,
-      context.decompose.pr_number
-    )
+    local decomposed = core.decomposed_fact(current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
     if decomposed == nil then
+      if core.has_decompose_exhausted_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version) then
+        core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed",
+          "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
+        done = true
+      end
       return
     end
     local child_issues = read_decompose_child_issues(context.repo, context.decompose.proposal_id)
@@ -373,7 +373,17 @@ local function act_decompose(event)
     local current_issue, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
     local depth = core.decompose_lineage_depth(current_issue.body)
     if reason == "depth-cap" or depth >= core.max_decompose_depth() then
-      core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-depth-cap(decompose-lineage)", "decompose lineage depth cap reached")
+      core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "applied(decompose-exhausted:depth-cap)", "decompose lineage depth cap reached")
+      core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
+        "github-proxy.github_pr_comment_request",
+      })
+      core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", core.build_decompose_exhausted_comment_request(
+        { kind = "pr", repo = repo, number = decompose.pr_number },
+        decompose.proposal_id,
+        state,
+        decompose.source_ref,
+        1
+      ))
       return
     end
     local count = math.min(#issues, core.max_decompose_issues())

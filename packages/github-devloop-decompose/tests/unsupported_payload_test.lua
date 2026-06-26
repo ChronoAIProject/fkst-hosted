@@ -47,7 +47,9 @@ return {
     })
 
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_pr_comment_request")
+    t.is_true(result.raises[1].payload.body:find("fkst:github-devloop:decompose-exhausted:v1", 1, true) ~= nil)
     t.is_true(tostring(result.stderr or ""):find("unsupported event payload", 1, true) == nil)
     t.is_true(tostring(result.stderr or ""):find("skip-foreign(payload)", 1, true) == nil)
   end,
