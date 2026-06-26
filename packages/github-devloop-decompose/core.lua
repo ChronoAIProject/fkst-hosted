@@ -27,6 +27,7 @@ require("devloop.entity").install(M)
 require("devloop.validators").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.claims").install(M)
+require("devloop.saga_conformance").install(M)
 require("core.saga").install(M)
 require("core.decompose").install(M)
 

@@ -14,6 +14,7 @@ require("forge.merge").install(M)
 require("devloop.logging").install(M)
 require("devloop.entity").install(M)
 require("devloop.github_proxy_entity_view").install(M)
+require("devloop.saga_conformance").install(M)
 require("core.substrate_ref").install(M)
 
 return M
