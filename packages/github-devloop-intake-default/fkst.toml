@@ -10,3 +10,6 @@ libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
 packages = ["github-devloop-intake", "github-devloop", "github-proxy"]
+
+[conformance]
+function = "core.saga_conformance_errors"
