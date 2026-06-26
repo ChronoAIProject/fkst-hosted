@@ -71,6 +71,24 @@ def lua_code_mask(text: str) -> str:
     return "".join(chars)
 
 
+def lua_string_literals(text: str) -> list[tuple[int, str]]:
+    literals: list[tuple[int, str]] = []
+    index = 0
+    while index < len(text):
+        if text.startswith("--", index):
+            newline = text.find("\n", index)
+            index = len(text) if newline == -1 else newline
+            continue
+        char = text[index]
+        if char in {"'", '"'}:
+            end = quoted_string_end(text, index)
+            literals.append((index, text[index + 1:end - 1]))
+            index = end
+            continue
+        index += 1
+    return literals
+
+
 def quoted_string_end(text: str, start: int) -> int:
     quote = text[start]
     index = start + 1
@@ -107,6 +125,10 @@ def raiser_fields(source: str) -> dict[str, str]:
 
 def queue_leaf(queue: str) -> str:
     return queue.rsplit(".", 1)[-1]
+
+
+def is_state_marker_literal(value: str) -> bool:
+    return "fkst:github-devloop:state:v1" in value or value == "state:v1"
 
 
 def sources(root: Path) -> list[Source]:
@@ -165,10 +187,14 @@ def static_messages(all_sources: list[Source]) -> list[str]:
             messages.append(
                 f"{source.relpath}:{line_number(source.text, match.start())} github-devloop-intake must not self-read GitHub issue lists"
             )
-        for pattern in (STATE_MARKER_CALL_RE, STATE_MARKER_LITERAL_RE):
-            for match in pattern.finditer(masked):
+        for match in STATE_MARKER_CALL_RE.finditer(masked):
+            messages.append(
+                f"{source.relpath}:{line_number(source.text, match.start())} github-devloop-intake must not build or write state:v1 markers"
+            )
+        for literal_start, value in lua_string_literals(source.text):
+            if is_state_marker_literal(value):
                 messages.append(
-                    f"{source.relpath}:{line_number(source.text, match.start())} github-devloop-intake must not build or write state:v1 markers"
+                    f"{source.relpath}:{line_number(source.text, literal_start)} github-devloop-intake must not build or write state:v1 markers"
                 )
     return messages
 

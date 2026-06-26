@@ -149,6 +149,17 @@ class IntakeRoutingRatchetTest(unittest.TestCase):
 
         self.assert_message_contains(messages, "must not build or write state:v1 markers")
 
+    def test_state_marker_literal_write_fails(self) -> None:
+        tmp, root = self.make_repo()
+        with tmp:
+            self.write_intake_admission(
+                root,
+                extra='return "<!-- fkst:github-devloop:state:v1 -->", "state:v1"',
+            )
+            messages = self.messages(root)
+
+        self.assert_message_contains(messages, "must not build or write state:v1 markers")
+
     def test_comments_strings_and_tests_do_not_count_as_production_violations(self) -> None:
         tmp, root = self.make_repo()
         with tmp:
