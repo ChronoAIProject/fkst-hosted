@@ -101,7 +101,18 @@ function M.parse_issue_number_list(stdout)
 end
 
 function M.parse_issue_list_observe(stdout)
-  return parse_numbered_list(stdout)
+  local issues = parse_numbered_list(stdout)
+  local decoded = json.decode(stdout or "[]")
+  local by_number = {}
+  each_paginated_item(decoded, function(item)
+    if type(item) == "table" and tonumber(item.number) ~= nil then
+      by_number[tostring(tonumber(item.number))] = item.title
+    end
+  end)
+  for _, issue in ipairs(issues) do
+    issue.title = by_number[tostring(issue.number)]
+  end
+  return issues
 end
 
 function M.parse_issue_view_result(stdout)

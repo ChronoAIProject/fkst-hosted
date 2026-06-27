@@ -4,7 +4,7 @@ local saga = require("workflow.saga")
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/issue-cursor/"
 
 local spec = {
-  consumes = { "devloop_liveness_tick" },
+  consumes = { "devloop_liveness_tick" }, published_seam = { "devloop_liveness_tick" },
   produces = {
     "devloop_observe_issue",
     "github-proxy.github_issue_comment_request",

@@ -3,7 +3,7 @@ local saga = require("workflow.saga")
 
 local spec = {
   consumes = { "devloop_rollup_ready" },
-  produces = {},
+  produces = { "github-devloop.devloop_liveness_tick" },
   stall_window = "5m",
 }
 
@@ -25,6 +25,24 @@ local function unsupported_payload_error(payload, reason)
     .. tostring(core.payload_field(payload, "dedup_key"))
     .. " reason="
     .. tostring(reason)
+end
+
+local function rollup_liveness_tick_payload(payload)
+  return {
+    schema = "github-devloop.tick.v1",
+    repo = payload.repo,
+    reason = "rollup-merged",
+    source_ref = payload.source_ref,
+    dedup_key = core._dedup_key({
+      "rollup",
+      "liveness-tick",
+      tostring(payload.repo),
+      tostring(payload.upstream_branch),
+      tostring(payload.integration_branch),
+      tostring(payload.pr_number),
+      tostring(payload.head_sha),
+    }),
+  }
 end
 
 local function act(event)
@@ -86,6 +104,12 @@ local function act(event)
       return
     end
     core.log_apply("rollup_merge", "rollup", "rollup-merged", payload.head_sha, {}, {})
+    core.log_raise(
+      "rollup_merge",
+      "rollup",
+      "github-devloop.devloop_liveness_tick",
+      rollup_liveness_tick_payload(payload)
+    )
   end)
 end
 

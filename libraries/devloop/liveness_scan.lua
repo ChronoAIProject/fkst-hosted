@@ -56,7 +56,7 @@ function M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
     schema = "github-proxy.v1",
     type = kind,
     repo = repo,
-    number = tonumber(number),
+    number = tonumber(number), title = entity.title,
     state = entity.state,
     updated_at = updated_at,
     dedup_key = M._dedup_key({

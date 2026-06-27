@@ -9,7 +9,7 @@ root = "."
 libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
-packages = ["github-proxy"]
+packages = ["github-proxy", "github-devloop"]
 
 [conformance]
 function = "core.saga_conformance_errors"
