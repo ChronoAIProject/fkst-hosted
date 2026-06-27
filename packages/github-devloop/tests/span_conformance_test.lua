@@ -79,6 +79,42 @@ return {
     t.is_true(facts["dependency-gate"] ~= nil)
   end,
 
+  test_hidden_state_converge_round_fixture_requires_true_stall = function()
+    local row = nil
+    for _, candidate in ipairs(core.restart_transition_table()) do
+      if candidate.from_state == "thinking" then
+        row = candidate
+      end
+    end
+    local declared = nil
+    for _, fact in ipairs(row.advancing_facts) do
+      if fact.fact_family == "converge-round" and fact.successor == "blocked" then
+        declared = fact
+      end
+    end
+    local positive_entity, positive_state = hidden_state.fixture(core, row, declared, true)
+    local positive_facts = core.converge_round_facts(
+      positive_entity.comments,
+      "github-devloop/issue/owner/repo/42",
+      positive_state.version,
+      core.source_ref_digest(positive_entity.source_ref)
+    )
+    local positive_round = core.max_converge_round(positive_facts)
+    t.eq(positive_round, 3)
+    t.is_true(core.is_true_stall(positive_facts, positive_round))
+
+    local negative_entity, negative_state = hidden_state.fixture(core, row, declared, false)
+    local negative_facts = core.converge_round_facts(
+      negative_entity.comments,
+      "github-devloop/issue/owner/repo/42",
+      negative_state.version,
+      core.source_ref_digest(negative_entity.source_ref)
+    )
+    local negative_round = core.max_converge_round(negative_facts)
+    t.eq(negative_round, 3)
+    t.eq(core.is_true_stall(negative_facts, negative_round), false)
+  end,
+
   test_hidden_state_conformance_rejects_non_poll_declaration = function()
     local rows = {}
     for index, row in ipairs(core.restart_transition_table()) do

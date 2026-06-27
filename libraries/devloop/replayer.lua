@@ -523,6 +523,12 @@ end
 
 local function replay_thinking(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
+  if type(M.replay_thinking_true_stall_blocked) == "function" then
+    local terminal = M.replay_thinking_true_stall_blocked(dept, issue, state, facts, log_skip, raise_effects)
+    if terminal ~= nil then
+      return terminal
+    end
+  end
   M.log_cas_decision(dept, proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
   local proposal = build_thinking_replay_proposal(issue, proposal_id, state, facts.current, facts.event_ts)
   if proposal == nil then

@@ -522,13 +522,16 @@ local function fact_value(core, row, state, family, successor)
     return {}
   end
   if family == "converge-round" then
+    local stalled = successor == "blocked"
     return {
       proposal_id = ISSUE_PROPOSAL,
       base_version = state.version,
       round = 3,
       dedup = state.version .. "/loop/3",
-      narrowed_question = "behavioral fixture narrowed question",
-      angle_digests = { "a", "b", "c" },
+      narrowed_question = stalled and "behavioral fixture narrowed question" or "behavioral fixture changing question",
+      angle_digests = stalled and { "a", "b", "c" } or { "a", "b", "changed" },
+      true_stall_fixture = stalled,
+      visible_round_sequence = not stalled,
     }
   end
   if family == "state" then
@@ -590,7 +593,18 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "merging" then
     table.insert(entity.comments, comment(core.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "converge-round" then
-    table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+    if value.true_stall_fixture == true then
+      for round = 1, value.round do
+        table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), value.narrowed_question, value.angle_digests), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+      end
+    elseif value.visible_round_sequence == true then
+      for round = 1, value.round - 1 do
+        table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), "behavioral fixture narrowed question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+      end
+      table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+    else
+      table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+    end
   elseif is_synthetic == true then
     table.insert(entity.comments, comment('<!-- fkst:github-devloop:synthetic-visible-fact:v1 proposal="' .. ISSUE_PROPOSAL
       .. '" family="' .. tostring(family):gsub('"', "'")
@@ -659,6 +673,11 @@ local function build_fixture(core, row, declared, include_fact)
     local value = fact_value(core, row, state, declared.fact_family, declared.successor)
     if value ~= nil then
       store_fact_value(facts, declared.fact_family, value)
+      install_marker(core, entity, state, declared.fact_family, value)
+    end
+  elseif declared.fact_family == "converge-round" then
+    local value = fact_value(core, row, state, declared.fact_family, row.from_state)
+    if value ~= nil then
       install_marker(core, entity, state, declared.fact_family, value)
     end
   end
