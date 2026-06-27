@@ -22,6 +22,29 @@ local function join_error_messages(errors)
   return table.concat(lines, "\n")
 end
 
+local function capture_raises(fn)
+  local raised = {}
+  local previous = core.log_raise
+  core.log_raise = function(_, _, queue, payload)
+    table.insert(raised, { queue = queue, payload = payload })
+  end
+  local ok, err = pcall(fn)
+  core.log_raise = previous
+  if not ok then
+    error(err)
+  end
+  return raised
+end
+
+local function find_raise(raised, queue)
+  for _, item in ipairs(raised or {}) do
+    if item.queue == queue then
+      return item
+    end
+  end
+  return nil
+end
+
 local function transition_source(contract_body)
   return [[
 return function(M, h)
@@ -113,6 +136,51 @@ return {
     local negative_round = core.max_converge_round(negative_facts)
     t.eq(negative_round, 3)
     t.eq(core.is_true_stall(negative_facts, negative_round), false)
+  end,
+
+  test_hidden_state_implementing_fixture_uses_over_budget_fact = function()
+    local row = nil
+    for _, candidate in ipairs(core.restart_transition_table()) do
+      if candidate.from_state == "implementing" then
+        row = candidate
+      end
+    end
+    local declared = nil
+    for _, fact in ipairs(row.advancing_facts) do
+      if fact.fact_family == "implementing" and fact.successor == "implementing" then
+        declared = fact
+      end
+    end
+    local _, state, positive = hidden_state.fixture(core, row, declared, true)
+    local age = math.floor((positive.now_seconds - core.iso_timestamp_epoch_seconds(state.marker_created_at)) / 60)
+    t.eq(age, row.budget.minutes + 1)
+    t.is_true(positive.implementing ~= nil)
+
+    local _, _, negative = hidden_state.fixture(core, row, declared, false)
+    t.eq(negative.implementing, nil)
+  end,
+
+  test_hidden_state_implementing_fixture_does_not_redrive_fresh_fact = function()
+    local row = nil
+    for _, candidate in ipairs(core.restart_transition_table()) do
+      if candidate.from_state == "implementing" then
+        row = candidate
+      end
+    end
+    local declared = nil
+    for _, fact in ipairs(row.advancing_facts) do
+      if fact.fact_family == "implementing" and fact.successor == "implementing" then
+        declared = fact
+      end
+    end
+    local entity, state, facts = hidden_state.fixture(core, row, declared, true)
+    facts.now_seconds = core.iso_timestamp_epoch_seconds(state.marker_created_at) + 60
+
+    local raised = capture_raises(function()
+      local issued = core.replay_from_table("behavioral_hidden_state_conformance", entity, state, row, facts)
+      t.eq(issued, false)
+    end)
+    t.eq(find_raise(raised, "devloop_ready"), nil)
   end,
 
   test_hidden_state_conformance_rejects_non_poll_declaration = function()

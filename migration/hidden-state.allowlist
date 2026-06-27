@@ -1,5 +1,4 @@
 # package|row|fact_family|successor|issue=<tracking>|why=<migration reason>
-github-devloop|implementing|implementing|implementing|issue=#1595|why=behavioral poll replay currently does not redrive implementing from the implementing marker fact alone.
 github-devloop-pr|pr-open|pr-link|reviewing|issue=#1595|why=base PR poll fixture can still advance pr-open without the declared PR link fact.
 github-devloop-pr|pr-open|pr-link|fixing|issue=#1595|why=behavioral poll replay currently does not advance pr-open to fixing from the PR link fact alone.
 github-devloop-pr|reviewing|review-result|merge-ready|issue=#1595|why=behavioral poll replay currently does not advance reviewing to merge-ready from the review result fact alone.

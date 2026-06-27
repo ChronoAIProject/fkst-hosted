@@ -314,6 +314,9 @@ local function base_version(row)
   if tostring(row.from_state or "") == "impl-failed" then
     return "ready/behavioral/2026-06-03T01-02-03Z"
   end
+  if tostring(row.from_state or "") == "implementing" then
+    return "ready/behavioral/2026-06-03T01-02-03Z"
+  end
   return tostring(row.from_state) .. "/behavioral/2026-06-03T01-02-03Z"
 end
 
@@ -679,6 +682,15 @@ local function build_fixture(core, row, declared, include_fact)
     local value = fact_value(core, row, state, declared.fact_family, row.from_state)
     if value ~= nil then
       install_marker(core, entity, state, declared.fact_family, value)
+    end
+  end
+  if include_fact
+    and row.from_state == "implementing"
+    and declared.fact_family == "implementing" then
+    local created = core.iso_timestamp_epoch_seconds(state.marker_created_at)
+    local budget = tonumber(row.budget and row.budget.minutes)
+    if created ~= nil and budget ~= nil then
+      facts.now_seconds = created + ((budget + 1) * 60)
     end
   end
   return entity, state, facts

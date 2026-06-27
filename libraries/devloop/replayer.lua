@@ -543,14 +543,21 @@ end
 local function replay_implementing(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local attempt = facts["implement-attempt"]
-  if attempt == nil then
-    if facts.implementing == nil then
-      return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-attempt-marker)", "implement attempt marker is not visible")
-    end
+  if attempt == nil and facts.implementing == nil then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(no-implementing-fact)", "neither implement attempt nor implementing progress marker is visible")
   end
-  local live = M.restart_row_liveness_signal(row, state, facts, facts.now_seconds or now())
-  if live.live then
+  local current_now = facts.now_seconds or now()
+  local receiver_liveness = M.restart_row_receiver_liveness(row, state, facts, current_now)
+  if receiver_liveness.action == "defer" then
     return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(codex-run-live)", "matching implement codex run is still running")
+  end
+  local decision = M.liveness_timeout_decision_with_facts(row, state, facts, current_now)
+  local age, budget = tonumber(decision.age_minutes), tonumber(row.budget and row.budget.minutes)
+  if attempt == nil and (budget == nil or age == nil or age < budget) then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(liveness-budget)", "implementing progress marker is not over row budget")
+  end
+  if decision.action ~= "redrive" then
+    return log_skip(dept, proposal_id, state, "implementing", row.driving_queue, "skip-pending(" .. tostring(decision.action or "liveness") .. ")", "implementing receiver liveness is not redriveable")
   end
   -- Pass the INNER (unwrapped) version: build_devloop_ready_payload re-applies
   -- the "ready/" wrapper, so re-wrapping the already-wrapped state.version would
