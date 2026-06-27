@@ -62,7 +62,7 @@ def make_fake_bin(path: Path) -> None:
             out.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
             print("TIMESTAMP=2026-01-01T00:00:00Z LEVEL=info EVENT=code_provenance ENGINE_VER=test-engine PKG_VERS=github-devloop@test-package", flush=True)
             print("TIMESTAMP=2026-01-01T00:00:00Z LEVEL=INFO handles=1 MSG=event runtime running", flush=True)
-            time.sleep(5)
+            time.sleep(15)
             """
         ),
     )
@@ -132,6 +132,7 @@ class DogfoodLayout:
                 (platform / "packages" / package).mkdir(parents=True, exist_ok=True)
             (platform / "scripts").mkdir(parents=True, exist_ok=True)
             shutil.copy2(REPO_ROOT / "scripts" / "run.sh", platform / "scripts" / "run.sh")
+            shutil.copy2(REPO_ROOT / "scripts" / "test_affected.sh", platform / "scripts" / "test_affected.sh")
             shutil.copy2(REPO_ROOT / "scripts" / "host_entry.sh", platform / "scripts" / "host_entry.sh")
             shutil.copy2(REPO_ROOT / "scripts" / "host_run.sh", platform / "scripts" / "host_run.sh")
             shutil.copy2(REPO_ROOT / "scripts" / "composed_manifest.sh", platform / "scripts" / "composed_manifest.sh")

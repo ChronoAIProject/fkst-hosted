@@ -624,13 +624,17 @@ return {
     t.is_nil(prompt:find("gh api", 1, true))
     t.is_true(prompt:find("Do not push.", 1, true) ~= nil)
     t.is_true(prompt:find("Do not open a pull request.", 1, true) ~= nil)
-    t.is_true(prompt:find("run `scripts/run.sh test`", 1, true) ~= nil)
-    t.is_true(prompt:find("rerun `scripts/run.sh test` until it exits 0", 1, true) ~= nil)
+    t.is_true(prompt:find("run the local iteration command from the repository root", 1, true) ~= nil)
+    t.is_true(prompt:find("local verification is scoped to your change for fast feedback", 1, true) ~= nil)
+    t.is_true(prompt:find("CI runs the full `scripts/run.sh test`", 1, true) ~= nil)
+    t.is_true(prompt:find("comprehensive gate", 1, true) ~= nil)
+    t.is_true(prompt:find("scripts/run.sh test <pkg>", 1, true) ~= nil)
+    t.is_nil(prompt:find("rerun `scripts/run.sh test` until it exits 0", 1, true))
     t.is_true(prompt:find("Do not finish with failing tests.", 1, true) ~= nil)
     t.is_true(prompt:find("engine BIN is unreachable", 1, true) ~= nil)
   end,
 
-  test_implement_prompt_uses_custom_test_command_host_fact = function()
+  test_implement_prompt_ignores_full_suite_host_fact_for_local_iteration = function()
     t.mock_command('printf %s "$FKST_DEVLOOP_TEST_COMMAND"', {
       stdout = "cargo build && cargo test",
       stderr = "",
@@ -639,9 +643,35 @@ return {
     local prompt = core.build_implement_prompt("github-devloop/issue/owner/repo/42", {
       title = "Fix parser",
     }, "Approved framing.")
-    t.is_true(prompt:find("run `cargo build && cargo test`", 1, true) ~= nil)
-    t.is_true(prompt:find("rerun `cargo build && cargo test` until it exits 0", 1, true) ~= nil)
-    t.is_nil(prompt:find("run `scripts/run.sh test`", 1, true))
+    t.is_nil(prompt:find("cargo build && cargo test", 1, true))
+    t.is_true(prompt:find("run the local iteration command from the repository root", 1, true) ~= nil)
+    t.is_true(prompt:find("scripts/run.sh test <pkg>", 1, true) ~= nil)
+    t.is_true(prompt:find("CI runs the full `scripts/run.sh test`", 1, true) ~= nil)
+  end,
+
+  test_issue_fix_prompt_template_uses_local_iteration_command = function()
+    local M = {}
+    for key, value in pairs(core) do
+      M[key] = value
+    end
+    prompt_installers.install(M, {
+      prompts = {
+        fix = require("prompts.fix"),
+      },
+    }, { fix = true })
+    local fix = {
+      proposal_id = "github-devloop/issue/owner/repo/42",
+      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+      reviewed_head_sha = "abcdef123456",
+      blocking_gap = "missing rollback guard",
+    }
+    local prompt = M.build_fix_prompt(fix, { title = "Fix parser" }, "Review says tests are red.", "Approved framing.")
+    t.is_true(prompt:find("run the local iteration command from the repository root", 1, true) ~= nil)
+    t.is_true(prompt:find("local verification is scoped to your change for fast feedback", 1, true) ~= nil)
+    t.is_true(prompt:find("CI runs the full `scripts/run.sh test`", 1, true) ~= nil)
+    t.is_true(prompt:find("comprehensive gate", 1, true) ~= nil)
+    t.is_true(prompt:find("scripts/run.sh test <pkg>", 1, true) ~= nil)
+    t.is_nil(prompt:find("rerun `scripts/run.sh test` until it exits 0", 1, true))
   end,
 
   test_implement_prompt_handles_nil_framing = function()

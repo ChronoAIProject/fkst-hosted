@@ -140,6 +140,10 @@ function M.test_command(exec)
   return command
 end
 
+function M.local_iteration_test_command(_exec)
+  return "scripts/run.sh test-affected"
+end
+
 local function current_checkout_branch(exec)
   local run = exec or exec_argv
   if type(run) ~= "function" then
