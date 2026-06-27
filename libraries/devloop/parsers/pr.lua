@@ -100,6 +100,11 @@ function M.parse_pr_view_origin(stdout)
     state = decoded.state,
     updated_at = decoded.updatedAt or decoded.updated_at,
     merged_at = decoded.mergedAt or decoded.merged_at,
+    merge_commit_sha = type(decoded.mergeCommit or decoded.merge_commit) == "table"
+      and (decoded.mergeCommit or decoded.merge_commit).oid
+      or decoded.mergeCommitOid
+      or decoded.merge_commit_oid
+      or decoded.merge_commit_sha,
     labels = label_names(decoded.labels),
     comments = M.comments_from_json(decoded.comments),
     head_repository = head_repo,

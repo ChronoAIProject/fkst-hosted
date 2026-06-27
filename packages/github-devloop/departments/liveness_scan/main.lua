@@ -65,6 +65,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     end
     current_pr = core.parse_pr_view_origin(pr_view.stdout)
     current_pr.number = delegation.pr_number
+    current_pr.force_fresh = true
     snapshot.comments = current.comments or {}
   end
   local timeout_action = core.liveness_scan_maybe_timeout_action(core.liveness_scan_issue_entity(repo, issue.number), state, {

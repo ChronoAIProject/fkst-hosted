@@ -13,6 +13,7 @@ local parent = core.proposal_id(repo, issue_number)
 local child_pr = core.pr_proposal_id(repo, child_pr_number)
 local version = "ready/consensus-" .. parent .. "/2026-06-03T01-02-03Z"
 local child_head_sha = "0123456789abcdef0123456789abcdef01234567"
+local child_merge_commit_sha = "1111111111111111111111111111111111111111"
 local rollup_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
 local integration_branch = "integration-elonsg"
 local upstream_branch = "dev"
@@ -156,25 +157,8 @@ local function mock_rollup_merge_success()
   }, entity_mocks.pr_merge_selector)
 end
 
-local function mock_rollup_ancestry()
-  t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command(core.git_remote_branch_head_cmd("origin", upstream_branch), {
-    stdout = rollup_head_sha .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command("git merge-base --is-ancestor " .. child_head_sha .. " " .. rollup_head_sha, {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
 local function mock_liveness_scan_inputs(child_state)
+  local effective_child_state = child_state or "merged"
   entity_mocks.mock_issue_list_command(t, core.gh_issue_list_observe_cmd(repo), {
     {
       number = issue_number,
@@ -200,14 +184,34 @@ local function mock_liveness_scan_inputs(child_state)
     comments = child_pr_comments(child_state),
     head = child_branch,
     head_sha = child_head_sha,
-    state = child_state == "merged" and "MERGED" or "OPEN",
+    merge_commit_sha = child_merge_commit_sha,
+    state = effective_child_state == "merged" and "MERGED" or "OPEN",
     base_branch = integration_branch,
-    merged_at = child_state == "merged" and "2026-06-03T02:03:04Z" or nil,
+    merged_at = effective_child_state == "merged" and "2026-06-03T02:03:04Z" or nil,
     labels = {},
   }, entity_mocks.pr_origin_selector, 2)
 end
 
-local function mock_observe_issue_inputs(child_state)
+local function mock_rollup_landing(exit_code)
+  t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command(core.git_remote_branch_head_cmd("origin", upstream_branch), {
+    stdout = rollup_head_sha .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("git merge-base --is-ancestor " .. child_merge_commit_sha .. " " .. rollup_head_sha, {
+    stdout = "",
+    stderr = "",
+    exit_code = exit_code,
+  })
+end
+
+local function mock_observe_issue_inputs(child_state, landed)
+  local effective_child_state = child_state or "merged"
   t.mock_command("gh api graphql", {
     stdout = '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\n',
     stderr = "",
@@ -230,13 +234,14 @@ local function mock_observe_issue_inputs(child_state)
     comments = child_pr_comments(child_state),
     head = child_branch,
     head_sha = child_head_sha,
-    state = child_state == "merged" and "MERGED" or "OPEN",
+    merge_commit_sha = child_merge_commit_sha,
+    state = effective_child_state == "merged" and "MERGED" or "OPEN",
     base_branch = integration_branch,
-    merged_at = child_state == "merged" and "2026-06-03T02:03:04Z" or nil,
+    merged_at = effective_child_state == "merged" and "2026-06-03T02:03:04Z" or nil,
     labels = {},
   }, entity_mocks.pr_origin_selector, 2)
-  if child_state == nil or child_state == "merged" then
-    mock_rollup_ancestry()
+  if effective_child_state == "merged" then
+    mock_rollup_landing(landed == false and 1 or 0)
   end
   t.mock_command("gh issue close " .. tostring(issue_number) .. " --repo " .. repo, {
     stdout = "closed\n",
@@ -280,11 +285,11 @@ local function mock_github_proxy_writes()
   })
 end
 
-local function mock_everything(child_state)
+local function mock_everything(child_state, landed)
   mock_common_env()
   mock_rollup_merge_success()
   mock_liveness_scan_inputs(child_state)
-  mock_observe_issue_inputs(child_state)
+  mock_observe_issue_inputs(child_state, landed)
   mock_github_proxy_writes()
 end
 
@@ -342,6 +347,30 @@ return {
     end)
     t.eq(merged_comment, nil)
     t.eq(merged_label, nil)
+    t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 0)
+  end,
+
+  test_rollup_merge_wake_does_not_close_parent_before_child_merge_commit_lands = function()
+    mock_everything("merged", false)
+
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 10 }))
+    graph.assert_covers(trace, {
+      "github-devloop-integration.devloop_rollup_ready -> github-devloop-integration.rollup_merge",
+      "github-devloop.devloop_liveness_tick -> github-devloop.liveness_scan",
+      "github-devloop.devloop_observe_issue -> github-devloop.observe_issue",
+    })
+
+    local merged_comment = graph.find_raise(trace, "github-proxy.github_issue_comment_request", function(raised)
+      return tostring(raised.payload and raised.payload.body or ""):find('state="merged"', 1, true) ~= nil
+    end)
+    local merged_label = graph.find_raise(trace, "github-proxy.github_issue_label_request", function(raised)
+      local add = raised.payload and raised.payload.add_labels or {}
+      return add[1] == "fkst-dev:merged"
+    end)
+    t.eq(merged_comment, nil)
+    t.eq(merged_label, nil)
+    t.eq(h.count_calls("git merge-base --is-ancestor " .. child_merge_commit_sha .. " " .. rollup_head_sha), 1)
+    t.eq(h.count_calls("git merge-base --is-ancestor " .. child_head_sha .. " " .. rollup_head_sha), 0)
     t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 0)
   end,
 }

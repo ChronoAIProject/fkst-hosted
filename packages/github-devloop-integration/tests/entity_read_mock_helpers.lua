@@ -152,8 +152,9 @@ function M.pr_view_stdout(fields)
   local owner = f.head_repository_owner or owner_login(f.head_repo or f.repo or "owner/repo")
   local state = tostring(f.state or "OPEN")
   local merged_at = f.merged_at or (state == "MERGED" and "2026-06-03T02:05:04Z" or "")
+  local merge_commit_sha = f.merge_commit_sha or (state == "MERGED" and (f.head_sha or "def456") or nil)
   return string.format(
-    '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","comments":[%s],"labels":[%s],"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
+    '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","mergeCommit":{"oid":%s},"comments":[%s],"labels":[%s],"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
     tonumber(f.number) or 7,
     encode_json_string(f.head or "devloop-owner-repo-42-01HY"),
     encode_json_string(f.head_sha or "def456"),
@@ -164,6 +165,7 @@ function M.pr_view_stdout(fields)
     f.is_draft == true and "true" or "false",
     state == "MERGED" and "true" or "false",
     encode_json_string(merged_at),
+    encode_json_value(merge_commit_sha),
     M.view_comments_json(f.comments),
     encode_labels_json(f.labels),
     encode_json_string(f.head_repo or f.repo or "owner/repo"),
@@ -197,6 +199,7 @@ local function pr_rest_stdout(fields)
   local head_repo = f.head_repo or repo
   local state = tostring(f.state or "OPEN")
   local merged_at = f.merged_at or (state == "MERGED" and "2026-06-03T02:05:04Z" or "")
+  local merge_commit_sha = f.merge_commit_sha or (state == "MERGED" and (f.head_sha or "def456") or nil)
   local mergeable = f.rest_mergeable
   if mergeable == nil then
     mergeable = f.mergeable
@@ -210,11 +213,12 @@ local function pr_rest_stdout(fields)
   end
   local mergeable_state = f.rest_mergeable_state or f.mergeable_state or f.merge_state or "clean"
   return string.format(
-    '{"number":%d,"state":"%s","updated_at":"%s","merged_at":%s,"draft":%s,"labels":[%s],"user":{"login":"%s"},"mergeable":%s,"mergeable_state":%s,"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}}}\n',
+    '{"number":%d,"state":"%s","updated_at":"%s","merged_at":%s,"merge_commit_sha":%s,"draft":%s,"labels":[%s],"user":{"login":"%s"},"mergeable":%s,"mergeable_state":%s,"head":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}},"base":{"ref":"%s","sha":"%s","repo":{"full_name":"%s","owner":{"login":"%s"}}}}\n',
     tonumber(f.number) or 7,
     encode_json_string(state == "MERGED" and "closed" or state:lower()),
     encode_json_string(f.updated_at or "2026-06-03T02:03:04Z"),
     merged_at ~= "" and encode_json_value(merged_at) or "null",
+    encode_json_value(merge_commit_sha),
     f.is_draft == true and "true" or "false",
     encode_labels_json(f.labels),
     encode_json_string(f.author_login or "fkst-test-bot"),

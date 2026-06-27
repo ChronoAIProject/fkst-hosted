@@ -360,9 +360,18 @@ local function child_pr(core, state, child_state)
     head_ref_name = BRANCH,
     base_ref_name = BASE_BRANCH,
     head_sha = HEAD_SHA,
+    merge_commit_sha = HEAD_SHA,
+    force_fresh = true,
     merged_at = child_state == "merged" and "2026-06-03T01:04:03Z" or nil,
     comments = { comment(body, "2026-06-03T01:04:03Z") },
   }
+end
+
+local function awaiting_pr_child_state_for_successor(successor)
+  if successor == "ready" then
+    return "closed-unmerged"
+  end
+  return successor
 end
 
 local function add_common_pr_facts(core, entity, state, facts)
@@ -436,7 +445,7 @@ local function fact_value(core, row, state, family, successor)
   if family == "child-state" then
     return {
       proposal_id = PR_PROPOSAL,
-      state = successor,
+      state = row.from_state == "awaiting-pr" and awaiting_pr_child_state_for_successor(successor) or successor,
       version = state.version,
     }
   end
@@ -591,20 +600,22 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
 end
 
 local function add_context_facts(core, row, entity, state, facts, source_ref, include_fact, declared)
-  if package_name(core) == "github-devloop-pr" or source_ref == PR_SOURCE_REF then
-    add_common_pr_facts(core, entity, state, facts)
-    entity.type = "pr"
-    entity.number = PR_NUMBER
-    facts.current_pr = facts.current_pr or entity
-    facts.current = entity
-    facts.snapshot.comments = entity.comments
-  elseif row.from_state == "awaiting-pr" then
-    local child_state = include_fact and declared.successor or nil
+  if row.from_state == "awaiting-pr" then
+    local child_state = include_fact and awaiting_pr_child_state_for_successor(declared.successor) or nil
+    if declared.fact_family == "canonical-child-pr-merged" then
+      child_state = nil
+    end
     facts.current_pr = child_pr(core, state, child_state)
+    if declared.fact_family == "canonical-child-pr-merged" and include_fact == true then
+      facts.current_pr.state = "MERGED"
+      facts.current_pr.merged_at = "2026-06-03T01:04:03Z"
+      facts.current_pr.merge_commit_sha = HEAD_SHA
+    end
     table.insert(entity.comments, comment(core.pr_delegation_marker(ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
     facts.pr_delegation = {
       proposal_id = ISSUE_PROPOSAL,
-      child = PR_PROPOSAL,
+      pr_proposal_id = PR_PROPOSAL,
+      pr_proposal = PR_PROPOSAL,
       pr_number = PR_NUMBER,
       version = state.version,
       delegation = "g1",
@@ -613,6 +624,13 @@ local function add_context_facts(core, row, entity, state, facts, source_ref, in
     facts.snapshot.prs = {
       { number = PR_NUMBER, current = facts.current_pr },
     }
+  elseif package_name(core) == "github-devloop-pr" or source_ref == PR_SOURCE_REF then
+    add_common_pr_facts(core, entity, state, facts)
+    entity.type = "pr"
+    entity.number = PR_NUMBER
+    facts.current_pr = facts.current_pr or entity
+    facts.current = entity
+    facts.snapshot.comments = entity.comments
   elseif row.from_state == "blocked" then
     add_common_pr_facts(core, entity, state, facts)
   end
@@ -680,6 +698,7 @@ local function build_exemption_fixture(core, row, rows, focus)
       install_marker(core, entity, state, family, value, declared.synthetic_required_fact == true)
       if family == "canonical-child-pr-merged" then
         facts.current_pr = child_pr(core, state, "merged")
+        facts.current_pr.force_fresh = true
         facts.snapshot.prs = {
           { number = PR_NUMBER, current = facts.current_pr },
         }
@@ -767,15 +786,36 @@ end
 
 local function with_poll_fakes(core, fn)
   local previous_children = core.gh_issue_list_decompose_children
+  local previous_branch_config = core.branch_config
+  local previous_fetch_branch = core.fetch_branch
+  local previous_remote_head = core.remote_head
+  local previous_is_ancestor = core.is_ancestor
   if type(previous_children) == "function" then
     core.gh_issue_list_decompose_children = function()
       return { exit_code = 0, stdout = "[]", stderr = "" }
     end
   end
+  core.branch_config = function()
+    return { integration = BASE_BRANCH, upstream = "dev" }
+  end
+  core.fetch_branch = function()
+    return nil
+  end
+  core.remote_head = function()
+    return HEAD_SHA
+  end
+  core.is_ancestor = function(ancestor_sha, descendant_sha)
+    return tostring(ancestor_sha or "") == tostring(HEAD_SHA)
+      and tostring(descendant_sha or "") == tostring(HEAD_SHA)
+  end
   local ok, first, second = pcall(fn)
   if type(previous_children) == "function" then
     core.gh_issue_list_decompose_children = previous_children
   end
+  core.branch_config = previous_branch_config
+  core.fetch_branch = previous_fetch_branch
+  core.remote_head = previous_remote_head
+  core.is_ancestor = previous_is_ancestor
   if not ok then
     error(first)
   end
@@ -820,7 +860,9 @@ local function behavioral_errors(core, rows, allowlist)
           end
         end
         local ok, issued, events = pcall(function()
-          return replay(core, row, declared, true)
+          return with_poll_fakes(core, function()
+            return replay(core, row, declared, true)
+          end)
         end)
         local passes_positive = ok and issued == true and advanced_to(events, row.from_state, declared.successor)
         local positive_message = nil
@@ -828,7 +870,9 @@ local function behavioral_errors(core, rows, allowlist)
           positive_message = label .. ": positive poll fixture did not advance to declared successor"
         end
         ok, issued, events = pcall(function()
-          return replay(core, row, declared, false)
+          return with_poll_fakes(core, function()
+            return replay(core, row, declared, false)
+          end)
         end)
         local passes_negative = not (ok and issued == true and advanced_to(events, row.from_state, declared.successor))
         local negative_message = nil

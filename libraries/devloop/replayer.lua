@@ -219,7 +219,7 @@ local function fetch_child_state_fact(facts)
       error("github-devloop: child-state PR view failed: " .. tostring(view.stderr))
     end
     facts.current_pr = M.parse_pr_view_origin(view.stdout)
-    facts.current_pr.number = delegation.pr_number
+    facts.current_pr.number, facts.current_pr.force_fresh = delegation.pr_number, true
   end
   facts.child_state = M.current_entity_state(facts.current_pr.comments, delegation.proposal_id)
   return facts.child_state

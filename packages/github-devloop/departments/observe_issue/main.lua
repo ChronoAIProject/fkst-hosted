@@ -702,6 +702,7 @@ local function process_pr_event(event)
   end
   local current_pr = core.parse_pr_view_origin(pr_view.stdout)
   current_pr.number = pr.number
+  current_pr.force_fresh = true
   local origin = core.pr_origin_fact(current_pr.comments)
   if origin == nil or origin.pr_native == true or origin.repo ~= pr.repo or tonumber(origin.issue_number) == nil then
     core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))

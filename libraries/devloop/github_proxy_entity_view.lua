@@ -194,6 +194,10 @@ local function rest_pr_to_view_json(pr_stdout, comments_stdout)
   end
   local merged_at = pr.merged_at or pr.mergedAt
   local merged = pr.merged == true or (type(merged_at) == "string" and merged_at ~= "")
+  local merge_commit_sha = pr.merge_commit_sha
+    or pr.mergeCommitOid
+    or pr.merge_commit_oid
+    or (type(pr.merge_commit) == "table" and pr.merge_commit.sha or nil)
   return '{"number":' .. json_value(pr.number)
     .. ',"title":' .. json_value(pr.title)
     .. ',"body":' .. json_value(pr.body)
@@ -206,6 +210,7 @@ local function rest_pr_to_view_json(pr_stdout, comments_stdout)
     .. ',"isDraft":' .. json_value(pr.draft or pr.isDraft or false)
     .. ',"merged":' .. json_value(merged)
     .. ',"mergedAt":' .. json_value(merged_at)
+    .. ',"mergeCommit":{"oid":' .. json_value(merge_commit_sha) .. "}"
     .. ',"labels":' .. labels_json(pr.labels)
     .. ',"comments":' .. rest_comments_to_view_json(comment_source)
     .. ',"headRepository":' .. head_repository

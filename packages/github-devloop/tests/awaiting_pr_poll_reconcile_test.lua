@@ -11,6 +11,7 @@ local child_pr = "github-devloop/pr/owner/repo/7"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local delegation = "g1"
 local head_sha = "0123456789abcdef0123456789abcdef01234567"
+local merge_commit_sha = "1111111111111111111111111111111111111111"
 local integration_branch = "integration/dev"
 local upstream_branch = "dev"
 local upstream_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
@@ -81,9 +82,11 @@ local function parent_comments(fields)
   return comments
 end
 
-local function child_comments(state, child_version)
+local function child_comments(state, child_version, opts)
+  local options = opts or {}
   local effective_version = child_version or version
-  local body = core.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", effective_version, integration_branch)
+  local base_branch = options.base_branch or integration_branch
+  local body = core.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", effective_version, base_branch)
     .. "\n" .. core.state_marker(parent, state, effective_version)
   if state == "merged" then
     body = body .. "\n" .. core.merged_marker(parent, pr_number, effective_version, head_sha)
@@ -142,7 +145,7 @@ local function mock_branch_config(split)
   })
 end
 
-local function mock_rollup_ancestry(exit_code)
+local function mock_rollup_landing(exit_code)
   t.mock_command(core.git_fetch_branch_cmd("origin", upstream_branch), {
     stdout = "",
     stderr = "",
@@ -153,7 +156,7 @@ local function mock_rollup_ancestry(exit_code)
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command("git merge-base --is-ancestor " .. head_sha .. " " .. upstream_head_sha, {
+  t.mock_command("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha, {
     stdout = "",
     stderr = "",
     exit_code = exit_code,
@@ -176,6 +179,7 @@ local function mock_reads(issue_comments, pr_comments, opts)
     comments = pr_comments,
     head = "devloop-owner-repo-42-01HY",
     head_sha = head_sha,
+    merge_commit_sha = options.merge_commit_sha or merge_commit_sha,
     state = options.pr_state or "OPEN",
     base_branch = options.base_branch or integration_branch,
     labels = {},
@@ -239,8 +243,11 @@ return {
   test_child_merged_reconciles_parent_to_merged = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(0)
-    local result = run_observe(parent_comments(), child_comments("merged"), { write = "real" })
+    mock_rollup_landing(0)
+    local result = run_observe(parent_comments(), child_comments("merged"), {
+      pr_state = "MERGED",
+      write = "real",
+    })
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
@@ -253,7 +260,7 @@ return {
   test_parent_poll_reconciles_canonical_merged_child_pr_without_child_terminal_markers = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(0)
+    mock_rollup_landing(0)
     local result = run_observe(parent_comments(), child_origin_only_comments(), {
       write = "real",
       pr_state = "MERGED",
@@ -270,7 +277,7 @@ return {
   test_parent_poll_reconciles_canonical_merged_child_pr_over_stale_nonterminal_marker = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(0)
+    mock_rollup_landing(0)
     local result = run_observe(parent_comments(), child_comments("merge-ready"), {
       write = "real",
       pr_state = "MERGED",
@@ -287,7 +294,7 @@ return {
   test_parent_poll_reconciles_canonical_merged_child_pr_over_stale_closed_marker = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(0)
+    mock_rollup_landing(0)
     local result = run_observe(parent_comments(), child_comments("closed-unmerged"), {
       write = "real",
       pr_state = "MERGED",
@@ -304,8 +311,11 @@ return {
   test_pr_entity_changed_child_merged_reconciles_parent_to_merged = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(0)
-    local result = run_pr_observe(parent_comments(), child_comments("merged"), { write = "real" })
+    mock_rollup_landing(0)
+    local result = run_pr_observe(parent_comments(), child_comments("merged"), {
+      pr_state = "MERGED",
+      write = "real",
+    })
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
@@ -318,8 +328,11 @@ return {
   test_child_merged_with_kept_issue_promotion_closes_issue_once = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(0)
-    local result = run_observe(parent_comments(), child_merged_comments_with_kept_promotion(), { write = "real" })
+    mock_rollup_landing(0)
+    local result = run_observe(parent_comments(), child_merged_comments_with_kept_promotion(), {
+      pr_state = "MERGED",
+      write = "real",
+    })
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
@@ -328,23 +341,61 @@ return {
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 
-  test_split_topology_child_merged_waits_until_rollup_lands_on_upstream = function()
+  test_split_topology_child_merged_uses_merge_commit_landing_not_head_ancestry = function()
     mock_issue_close()
     mock_branch_config()
-    mock_rollup_ancestry(1)
+    mock_rollup_landing(0)
+    local result = run_observe(parent_comments(), child_comments("merged"), {
+      pr_state = "MERGED",
+      write = "real",
+    })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 1)
+    t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha), 1)
+    t.eq(count_calls("git merge-base --is-ancestor " .. head_sha .. " " .. upstream_head_sha), 0)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_split_topology_open_child_with_merged_marker_does_not_advance_parent = function()
+    mock_issue_close()
+    mock_branch_config()
     local result = run_observe(parent_comments(), child_comments("merged"), { write = "real" })
 
     t.eq(result.exit_code, 0)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_comment_request"), 0)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 0)
+    t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 0)
+    t.eq(count_calls("git merge-base --is-ancestor"), 0)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 0)
+  end,
+
+  test_split_topology_canonical_merged_child_waits_until_merge_commit_lands_on_upstream = function()
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_landing(1)
+    local result = run_observe(parent_comments(), child_comments("merged"), {
+      pr_state = "MERGED",
+      write = "real",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_comment_request"), 0)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 0)
+    t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha), 1)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 0)
   end,
 
   test_single_branch_topology_child_merged_does_not_require_rollup_probe = function()
     mock_issue_close()
     mock_branch_config(false)
-    local result = run_observe(parent_comments(), child_comments("merged"), {
+    local result = run_observe(parent_comments(), child_comments("merged", nil, { base_branch = upstream_branch }), {
       base_branch = upstream_branch,
+      pr_state = "MERGED",
       write = "real",
     })
 
@@ -355,6 +406,22 @@ return {
     t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 0)
     t.eq(count_calls("git merge-base --is-ancestor"), 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_single_branch_topology_child_merged_requires_current_upstream_base = function()
+    mock_issue_close()
+    mock_branch_config(false)
+    local result = run_observe(parent_comments(), child_comments("merged"), {
+      pr_state = "MERGED",
+      write = "real",
+    })
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_comment_request"), 0)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 0)
+    t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 0)
+    t.eq(count_calls("git merge-base --is-ancestor"), 0)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 0)
   end,
 
   test_child_closed_unmerged_reconciles_parent_to_ready_generation = function()

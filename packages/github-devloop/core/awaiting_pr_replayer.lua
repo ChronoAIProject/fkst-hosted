@@ -6,7 +6,7 @@ local child_terminal_states = {
   ["closed-unmerged"] = true,
   blocked = true,
 }
-local canonical_pr_is_merged, origin_matches_delegation, canonical_merged_child_state
+local canonical_pr_is_merged, origin_matches_delegation, canonical_merged_child_state, merged_child_landed_on_upstream
 local function log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
   if type(M.replay_log_skip) == "function" then
     return M.replay_log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
@@ -74,7 +74,7 @@ local function read_delegated_child_pr(dept, issue, delegation)
     error("github-devloop: awaiting-pr-child-view-failed: " .. tostring(pr_view.stderr))
   end
   local current_pr = M.parse_pr_view_origin(pr_view.stdout)
-  current_pr.number = delegation.pr_number
+  current_pr.number, current_pr.force_fresh = delegation.pr_number, true
   return current_pr
 end
 
@@ -124,7 +124,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or cross-repo")
   end
-  local current_pr = facts.current_pr or read_delegated_child_pr(dept, issue, delegation)
+  local current_pr = (facts.current_pr ~= nil and facts.current_pr.force_fresh == true) and facts.current_pr or read_delegated_child_pr(dept, issue, delegation)
   local child_state = facts.child_state or facts["child-state"] or M.current_entity_state(current_pr.comments, delegation.proposal_id)
   local canonical_merged_state = canonical_merged_child_state(issue, state, delegation, current_pr)
   if canonical_merged_state ~= nil then
@@ -141,7 +141,10 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   end
   local next_state = parent_state_for_child_terminal(state, child_state)
   if next_state.to_state == "merged" then
-    local landed, outcome, reason = M.awaiting_pr_merged_child_head_landed_on_upstream(dept, issue, state, delegation, current_pr)
+    if canonical_merged_state == nil then
+      return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-pending(canonical-child-pr-merged-missing)", "delegated child PR has a merged marker but is not canonically merged by GitHub")
+    end
+    local landed, outcome, reason = merged_child_landed_on_upstream(dept, issue, state, delegation, current_pr)
     if not landed then
       return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", outcome, reason)
     end
@@ -216,7 +219,7 @@ origin_matches_delegation = function(issue, delegation, current_pr, branches)
 end
 
 canonical_merged_child_state = function(issue, state, delegation, current_pr)
-  if not canonical_pr_is_merged(current_pr) or not M._is_git_sha(current_pr and current_pr.head_sha) then
+  if not canonical_pr_is_merged(current_pr) then
     return nil
   end
   if not origin_matches_delegation(issue, delegation, current_pr) then
@@ -227,29 +230,26 @@ canonical_merged_child_state = function(issue, state, delegation, current_pr)
     version = delegation.version or state.version,
     proposal_id = delegation.proposal_id,
     head_sha = current_pr.head_sha,
+    merge_commit_sha = current_pr.merge_commit_sha,
   }
 end
 
-function M.awaiting_pr_merged_child_head_landed_on_upstream(dept, issue, state, delegation, current_pr)
+merged_child_landed_on_upstream = function(dept, issue, state, delegation, current_pr)
   local branches = M.branch_config()
-  if tostring(branches.integration or "") == tostring(branches.upstream or "") then
-    return true
-  end
   if not origin_matches_delegation(issue, delegation, current_pr, branches) then
     return false, "skip-stale(pr-origin-rollup-lineage)", "merged child PR lacks current split-topology origin facts"
   end
-  local merged = M.merged_fact(current_pr.comments, delegation.proposal_id, delegation.pr_number, state.version)
-  local merged_head_sha = merged and merged.head_sha or nil
-  if merged_head_sha == nil and canonical_pr_is_merged(current_pr) then
-    merged_head_sha = current_pr.head_sha
+  if tostring(branches.integration or "") == tostring(branches.upstream or "") then
+    return true
   end
-  if not M._is_git_sha(merged_head_sha) then
-    return false, "skip-pending(merged-head-missing)", "merged child PR has no trusted merged head marker or canonical merged head"
+  local merge_commit_sha = tostring(current_pr and current_pr.merge_commit_sha or "")
+  if not M._is_git_sha(merge_commit_sha) then
+    return false, "skip-pending(merge-commit-missing)", "canonical merged child PR has no GitHub mergeCommit.oid"
   end
   M.fetch_branch(branches.upstream, "awaiting-pr upstream fetch")
   local upstream_head = M.remote_head(branches.upstream, "awaiting-pr upstream head", "unsafe awaiting-pr upstream head")
-  if not M.is_ancestor(merged_head_sha, upstream_head, "awaiting-pr rollup ancestry") then
-    return false, "skip-pending(rollup-not-landed)", "merged child PR head is not contained in upstream branch"
+  if not M.is_ancestor(merge_commit_sha, upstream_head, "awaiting-pr rollup merge-commit reachability") then
+    return false, "skip-pending(rollup-not-landed)", "child PR merge commit is not reachable from upstream branch"
   end
   return true
 end
