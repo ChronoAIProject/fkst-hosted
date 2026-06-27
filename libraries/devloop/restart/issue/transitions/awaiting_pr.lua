@@ -5,6 +5,7 @@ return function(M, h)
   local budget = h.budget
   local timeout = h.timeout
   local liveness = h.liveness
+  local advancing_fact = h.advancing_fact
   local responsibility_signature = h.responsibility_signature
   local contract = require("devloop.restart.issue.pr_partition_contract").awaiting_pr_contract()
   local terminal_states = contract.child_terminal_states
@@ -96,6 +97,12 @@ return function(M, h)
       fact("state", "marker-read"),
       fact("pr-delegation", "marker-read"),
       fact("child-state", "marker-read"),
+    },
+    advancing_facts = {
+      advancing_fact("child-state", "merged", { issue = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("canonical-child-pr-merged", "merged", { issue = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("child-state", "ready", { issue = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("child-state", "blocked", { issue = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {
       proposal_id = "marker:state.proposal",

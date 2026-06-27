@@ -17,6 +17,7 @@
 {"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
+{"path":"libraries/devloop/hidden_state_conformance.lua","owner":"cross-cutting","reason":"shared behavioral hidden-state conformance applied to issue and PR restart tables."}
 {"path":"libraries/devloop/liveness.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/liveness_scan.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/logging.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
@@ -141,6 +142,7 @@
 {"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}
 {"path":"packages/github-devloop/core/gates/child_start_visible.lua","owner":"issue","reason":"issue-side PR child kickoff gate definition; raw PR facts stay outside the gate DSL spec."}
 {"path":"packages/github-devloop/core/github_graphql.lua","owner":"shared","reason":"core module is shared or authority-neutral after extraction."}
+{"path":"packages/github-devloop/core/hidden_state_conformance.lua","owner":"cross-cutting","reason":"package-owned conformance for restart-table advancing-fact declarations."}
 {"path":"packages/github-devloop/core/impl_failure.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/implement_attempt.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/liveness_bounds.lua","owner":"issue","reason":"issue lifecycle liveness fallback and operator rereview thresholds remain in the parent issue saga."}

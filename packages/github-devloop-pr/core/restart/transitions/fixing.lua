@@ -7,6 +7,7 @@ return function(M, h)
   local liveness = h.liveness
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
+  local advancing_fact = h.advancing_fact
   return {
     from_state = "fixing",
     generation_entry = "always",
@@ -79,6 +80,10 @@ return function(M, h)
       fact("review-meta", "marker-read"),
       fact("merge-gate", "marker-read"),
       fact("pr-head", "fetch-before-compare"),
+    },
+    advancing_facts = {
+      advancing_fact("fix-feedback", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("fix-feedback", "reviewing", { pr = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {
       schema = "literal:github-devloop.fixing.v1",

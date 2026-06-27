@@ -86,6 +86,7 @@ require("core.dependencies").install(M)
 require("devloop.validators").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.operator_commands").install(M)
+require("core.hidden_state_conformance").install(M)
 require("core.span_conformance").install(M)
 
 return M

@@ -8,6 +8,7 @@ return function(M, h)
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature
+  local advancing_fact = h.advancing_fact
   return {
     from_state = "pr-open",
     liveness_class_id = "pr_open.actionable",
@@ -64,6 +65,10 @@ return function(M, h)
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
       fact("pr-head", "fetch-before-compare"),
+    },
+    advancing_facts = {
+      advancing_fact("pr-link", "reviewing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("pr-link", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {
       proposal_id = "marker:pr-link.proposal",

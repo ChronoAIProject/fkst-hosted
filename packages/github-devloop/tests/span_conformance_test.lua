@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local span = require("core.span_conformance")
+local hidden_state = require("core.hidden_state_conformance")
 
 local function contains_error(errors, needle)
   for _, err in ipairs(errors or {}) do
@@ -11,6 +12,14 @@ local function contains_error(errors, needle)
     end
   end
   return false
+end
+
+local function join_error_messages(errors)
+  local lines = {}
+  for _, err in ipairs(errors or {}) do
+    table.insert(lines, tostring(err.message or err))
+  end
+  return table.concat(lines, "\n")
 end
 
 local function transition_source(contract_body)
@@ -30,7 +39,189 @@ end
 
 return {
   test_current_tree_has_no_gspan_errors = function()
-    t.eq(#core.span_conformance_errors(), 0)
+    local errors = core.span_conformance_errors()
+    t.is_true(#errors == 0, join_error_messages(errors))
+  end,
+
+  test_hidden_state_conformance_passes_with_seeded_allowlist = function()
+    local errors = core.hidden_state_conformance_errors()
+    t.is_true(#errors == 0, join_error_messages(errors))
+    local by_state = {}
+    for _, row in ipairs(core.restart_transition_table()) do
+      by_state[row.from_state] = row
+    end
+    local declared = {}
+    for _, fact in ipairs(by_state.dependency_wait.advancing_facts) do
+      declared[tostring(fact.fact_family) .. "->" .. tostring(fact.successor)] = true
+    end
+    t.eq(#by_state.dependency_wait.advancing_facts, 3)
+    t.is_true(declared["dependency-gate->dependency_wait"])
+    t.is_true(declared["dependency-gate->ready"])
+  end,
+
+  test_hidden_state_behavior_fixture_builds_poll_shape = function()
+    local row = nil
+    for _, candidate in ipairs(core.restart_transition_table()) do
+      if candidate.from_state == "dependency_wait" then
+        row = candidate
+      end
+    end
+    local declared = nil
+    for _, fact in ipairs(row.advancing_facts) do
+      if fact.fact_family == "dependency-gate" and fact.successor == "ready" then
+        declared = fact
+      end
+    end
+    local entity, state, facts = hidden_state.fixture(core, row, declared, true)
+    t.eq(entity.repo, "owner/repo")
+    t.eq(state.state, "dependency_wait")
+    t.is_true(facts.current == entity)
+    t.is_true(facts["dependency-gate"] ~= nil)
+  end,
+
+  test_hidden_state_conformance_rejects_non_poll_declaration = function()
+    local rows = {}
+    for index, row in ipairs(core.restart_transition_table()) do
+      rows[index] = row
+    end
+    rows[1] = {
+      from_state = "thinking",
+      to_states = { "blocked" },
+      observe_surfaces = { event = true },
+      advancing_facts = {
+        {
+          fact_family = "converge-round",
+          successor = "blocked",
+          observe_surfaces = { event = true },
+          source_ref_derivation = "source_ref:issue",
+        },
+      },
+    }
+    local errors = hidden_state.errors(core, rows, {})
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("poll observe surface", 1, true) ~= nil, joined)
+  end,
+
+  test_hidden_state_conformance_rejects_unaccounted_non_terminal_row = function()
+    local rows = {
+      {
+        from_state = "impl-failed",
+        to_states = { "implementing" },
+        observe_surfaces = { issue = true },
+        terminal = false,
+      },
+    }
+    local errors = hidden_state.errors(core, rows, {})
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("non-terminal row must declare advancing_facts", 1, true) ~= nil, joined)
+  end,
+
+  test_hidden_state_conformance_accepts_operator_only_non_durable_hold = function()
+    local rows = {
+      {
+        from_state = "blocked",
+        to_states = {},
+        observe_surfaces = { issue = true },
+        terminal = false,
+        non_durable_advance = {
+          category = "operator-reentry",
+          reason = "operator command re-entry is the only advance; no poll-derived durable fact autonomously advances this hold",
+        },
+      },
+    }
+    local errors = hidden_state.errors(core, rows, {})
+    t.eq(#errors, 0)
+  end,
+
+  test_hidden_state_conformance_accepts_real_blocked_exemption_with_all_durable_facts = function()
+    local rows = {}
+    for index, row in ipairs(core.restart_transition_table()) do
+      rows[index] = row
+    end
+    local errors = hidden_state.errors(core, rows, {})
+    t.is_true(not contains_error(errors, "github-devloop|blocked|*: non_durable_advance exemption advanced"), join_error_messages(errors))
+  end,
+
+  test_hidden_state_conformance_rejects_false_non_durable_exemption = function()
+    local fake_core
+    fake_core = setmetatable({
+      restart_package_name = core.restart_package_name,
+      replay_from_table = function(dept, issue, state, row, facts)
+        if state.state ~= "impl-failed" or facts.impl_failure == nil then
+          return false
+        end
+        fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-false-exemption)", "synthetic durable impl-failure advanced an exempt row")
+        fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
+        return true
+      end,
+    }, { __index = core })
+    local rows = {
+      {
+        from_state = "impl-failed",
+        to_states = { "implementing" },
+        observe_surfaces = { issue = true, liveness_scan = true },
+        terminal = false,
+        required_facts = {
+          { family = "state", freshness = "marker-read" },
+          { family = "impl-failure", freshness = "marker-read" },
+        },
+        non_durable_advance = {
+          category = "terminal-hold",
+          reason = "synthetic false exemption: impl-failure is durable and should be caught",
+        },
+      },
+      {
+        from_state = "ready",
+        to_states = { "implementing" },
+        observe_surfaces = { issue = true, liveness_scan = true },
+        terminal = false,
+        advancing_facts = {
+          {
+            fact_family = "impl-failure",
+            successor = "implementing",
+            observe_surfaces = { issue = true, liveness_scan = true },
+            source_ref_derivation = "source_ref:issue",
+          },
+        },
+      },
+    }
+    local errors = hidden_state.errors(fake_core, rows, {})
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("github-devloop|impl-failed|*: non_durable_advance exemption advanced to successor implementing", 1, true) ~= nil, joined)
+  end,
+
+  test_hidden_state_conformance_rejects_row_local_required_fact_false_exemption = function()
+    local fake_core
+    fake_core = setmetatable({
+      restart_package_name = core.restart_package_name,
+      replay_from_table = function(dept, issue, state, row, facts)
+        if state.state ~= "impl-failed" or facts["hidden-durable-trigger"] == nil then
+          return false
+        end
+        fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-row-local-false-exemption)", "synthetic row-local durable fact advanced an exempt row")
+        fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
+        return true
+      end,
+    }, { __index = core })
+    local rows = {
+      {
+        from_state = "impl-failed",
+        to_states = { "implementing" },
+        observe_surfaces = { issue = true, liveness_scan = true },
+        terminal = false,
+        required_facts = {
+          { family = "state", freshness = "marker-read" },
+          { family = "hidden-durable-trigger", freshness = "marker-read" },
+        },
+        non_durable_advance = {
+          category = "terminal-hold",
+          reason = "synthetic false exemption: row-local hidden durable trigger is durable and should be caught",
+        },
+      },
+    }
+    local errors = hidden_state.errors(fake_core, rows, {})
+    local joined = table.concat(errors, "\n")
+    t.is_true(joined:find("github-devloop|impl-failed|*: non_durable_advance exemption advanced to successor implementing", 1, true) ~= nil, joined)
   end,
 
   test_completion_comment_key_start_wording_fails = function()

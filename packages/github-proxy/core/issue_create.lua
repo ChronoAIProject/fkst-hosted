@@ -455,10 +455,13 @@ function M.write_issue_create_request(payload)
       return
     end
 
-    -- once() is host-runtime scratch, not an external fact. The issue body
-    -- marker search above is the durable duplicate backstop; parent-backed
-    -- requests also publish intent and created facts into the parent ledger.
-    local ran = once(M.issue_create_once_key(payload.dedup_key), function()
+    -- This is host-runtime scratch, not an external fact. The issue body marker
+    -- search above is the durable duplicate backstop; parent-backed requests
+    -- also publish intent and created facts into the parent ledger.
+    local once_key = M.issue_create_once_key(payload.dedup_key)
+    local ran = false
+    if cache_get(once_key) == nil then
+      ran = true
       local body = tostring(payload.body) .. "\n\n" .. M.issue_create_marker(payload.dedup_key) .. "\n"
       body = M.with_github_debug_stamp(body, {
         emitter = "github-proxy.issue-create",
@@ -478,7 +481,8 @@ function M.write_issue_create_request(payload)
         write_parent_created_marker(parent, payload.dedup_key, issue_number)
       end
       maybe_raise_post_create_blocked_by(payload, issue_number)
-    end)
+      cache_set(once_key, "1")
+    end
     if not ran then
       log.info("github-proxy: skip-idempotent issue-create once marker already present")
     end

@@ -6,6 +6,7 @@ from __future__ import annotations
 import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
+import check_repo_hidden_state
 import check_repo_intake_default_surface
 import check_repo_intake_routing
 import check_repo_integration_coverage
@@ -138,6 +139,8 @@ def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violati
         __import__("check_repo_dogfood_boundary").check(root, violations, c.add)
     for message in check_repo_saga_split.repository_messages(root):
         c.add(violations, "G-SAGA-SPLIT", message)
+    for message in check_repo_hidden_state.repository_messages(root, config.allowlist_dir, config.is_own_repo):
+        c.add(violations, "G-HIDDEN-STATE", message)
     for message in check_repo_intake_default_surface.repository_messages(root):
         c.add(violations, "G-INTAKE-DEFAULT-SURFACE", message)
     for message in check_repo_intake_routing.repository_messages(root):

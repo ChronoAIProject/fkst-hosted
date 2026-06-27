@@ -8,6 +8,7 @@ return function(M, h)
   local watchdog = h.watchdog
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature
+  local advancing_fact = h.advancing_fact
   return {
     from_state = "merging",
     liveness_class_id = "merging.actionable",
@@ -88,6 +89,12 @@ return function(M, h)
       fact("merge-gate-wait", "marker-read"),
       fact("pr-head", "fetch-before-compare"),
       fact("ci-status", "fetch-before-compare"),
+    },
+    advancing_facts = {
+      advancing_fact("merging", "merged", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("merging", "reviewing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("merging", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("merging", "blocked", { pr = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {
       proposal_id = "marker:merge-ready.proposal",

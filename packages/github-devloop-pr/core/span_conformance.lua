@@ -11,6 +11,11 @@ function S.errors(core)
       table.insert(out, record("gspan.span-contract", tostring(message)))
     end
   end
+  if type(core.hidden_state_conformance_errors) == "function" then
+    for _, message in ipairs(core.hidden_state_conformance_errors()) do
+      table.insert(out, record("gspan.hidden-state", tostring(message)))
+    end
+  end
   return out
 end
 

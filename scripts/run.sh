@@ -238,7 +238,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/check_repo_test_graphql.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_interface_test.py" || fail=1
   python3 -B "$ROOT/scripts/lua_coverage_to_lcov_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_shell_out_to_self_test.py" || fail=1
+  python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_shell_out_to_self_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_hidden_state_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_std_dependency_model_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_saga_head_test.py" || fail=1
   python3 -B "$ROOT/scripts/check_repo_namespaced_queue_test.py" || fail=1

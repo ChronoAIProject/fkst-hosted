@@ -26,6 +26,10 @@ return function(M, h)
       resets_budget = true,
       commands = { "rereview", "reintake" },
     },
+    non_durable_advance = {
+      category = "terminal-hold",
+      reason = "blocked is a recovery hold: operator commands or the decompose escape can create follow-up work, but no single poll-derived durable fact is expected to advance this row to a normal successor.",
+    },
     budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",
@@ -62,6 +66,7 @@ return function(M, h)
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
       fact("decomposed", "marker-read"),
+      fact("fix-feedback", "marker-read"),
       fact("decompose-children", "fetch-before-compare"),
     },
     payload_fields = {

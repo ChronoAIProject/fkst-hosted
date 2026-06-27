@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local advancing_fact = h.advancing_fact
   local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "thinking",
@@ -75,6 +76,9 @@ return function(M, h)
     payload_builder = M.build_proposal,
     dedup_shape = "proposal:<proposal_id>/<updated_at> or consensus:<base_version>/loop/<n>",
     required_facts = { fact("state", "marker-read") },
+    advancing_facts = {
+      advancing_fact("converge-round", "blocked", { issue = true, liveness_scan = true }, "source_ref:issue"),
+    },
     payload_fields = {
       proposal_id = "marker:state.proposal",
       dedup_key = "marker:state.version",

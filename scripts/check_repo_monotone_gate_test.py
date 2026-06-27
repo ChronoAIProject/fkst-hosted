@@ -211,6 +211,28 @@ class MonotoneGateRatchetTest(unittest.TestCase):
 
         self.assertEqual(monotone.ratchet_messages(current, allowlist, base), [])
 
+    def test_replayer_hidden_state_extraction_does_not_grow_existing_allowlist_debt(self) -> None:
+        current = {
+            monotone.Violation(
+                "libraries/devloop/replayer.lua",
+                "require_marker_fact",
+                "state-equality",
+                "implementing",
+                293,
+            )
+        }
+        original_debt = monotone.Violation(
+            "libraries/devloop/replayer.lua",
+            "require_marker_fact",
+            "state-equality",
+            "implementing",
+            287,
+        )
+        allowlist = {original_debt}
+        base = {original_debt}
+
+        self.assertEqual(monotone.ratchet_messages(current, allowlist, base), [])
+
 
 if __name__ == "__main__":
     unittest.main()

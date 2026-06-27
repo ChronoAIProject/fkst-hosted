@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local advancing_fact = h.advancing_fact
   local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
   return {
     from_state = "implementing",
@@ -77,6 +78,9 @@ return function(M, h)
       fact("implementing", "marker-read"),
       fact("implement-attempt", "marker-read"),
       fact("branch-head", "fetch-before-compare"),
+    },
+    advancing_facts = {
+      advancing_fact("implementing", "implementing", { issue = true, liveness_scan = true }, "source_ref:issue"),
     },
     payload_fields = {
       proposal_id = "marker:state.proposal",

@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local advancing_fact = h.advancing_fact
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature
   return {
@@ -59,6 +60,10 @@ return function(M, h)
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<state.version>",
     required_facts = { fact("state", "marker-read") },
+    advancing_facts = {
+      advancing_fact("dependency-gate", "dependency_wait", { issue = true, liveness_scan = true }, "source_ref:issue"),
+      advancing_fact("dependency-gate", "implementing", { issue = true, liveness_scan = true }, "source_ref:issue"),
+    },
     payload_fields = {
       proposal_id = "marker:state.proposal",
       dedup_key = "marker:state.version",

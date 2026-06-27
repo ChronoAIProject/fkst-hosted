@@ -245,8 +245,14 @@ local function require_marker_fact(facts, family)
   if family == "dependency-release" then
     return M.dependency_release_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
+  if family == "dependency-wait" then
+    return M.dependency_hold_fact(facts.snapshot.comments, facts.proposal_id)
+  end
   if family == "review-result" then
     return M.review_reject_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
+  end
+  if family == "fix-feedback" then
+    return M.fixing_replay_feedback_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "review-meta" then
     local current_pr = current_pr_fact(facts)
@@ -311,6 +317,9 @@ local function require_marker_fact(facts, family)
   if family == "review-carry-over" then
     return nil
   end
+  if rawget(facts, family) ~= nil then
+    return rawget(facts, family)
+  end
   error("github-devloop: unsupported replay marker fact family: " .. tostring(family))
 end
 
@@ -352,6 +361,9 @@ local function store_gathered_marker_fact(facts, family, value)
     facts.feedback = facts.feedback or value
   elseif family == "review-meta" then
     facts.review_meta = facts.review_meta or value
+    facts.feedback = facts.feedback or value
+  elseif family == "fix-feedback" then
+    facts.fix_feedback = value
     facts.feedback = facts.feedback or value
   elseif family == "fix-reflection" or family == "review-converge-round" then
     facts.review_meta = facts.review_meta or value
@@ -874,12 +886,12 @@ local function replay_blocked(dept, issue, state, row, facts)
     return log_skip(dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(pr-link)", "decompose recovery requires a pr-link marker")
   end
   local current_pr = find_linked_pr(facts.snapshot, link.pr_number)
-  local decomposed = M.decomposed_fact(facts.snapshot.comments, proposal_id, state.version, link.pr_number)
+  local decomposed = facts.decomposed
   if decomposed == nil then
     return log_skip(dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
   end
   local complete, completed_count = M.decompose_children_complete(
-    facts.snapshot.comments,
+    nil,
     facts.decompose_children or {},
     proposal_id,
     decomposed.version,
@@ -896,7 +908,7 @@ local function replay_blocked(dept, issue, state, row, facts)
     decomposed = decomposed,
     proposal_id = proposal_id,
   })
-  local payload = M.build_decompose_replay_payload(decomposed, facts.snapshot.comments, fields.source_ref, completed_count)
+  local payload = M.build_decompose_replay_payload(decomposed, facts.fix_feedback, fields.source_ref, completed_count)
   if payload == nil then
     return log_skip(dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
   end
@@ -931,6 +943,13 @@ if type(M.install_pr_review_replayers) == "function" then
   M.install_pr_review_replayers(replayers, pr_review_tools)
 end
 
+function M.register_restart_replayer(state_name, replay)
+  if type(state_name) ~= "string" or state_name == "" or (replay ~= nil and type(replay) ~= "function") then
+    error("github-devloop: invalid restart replayer registration")
+  end
+  replayers[state_name] = replay
+end
+
 function M.replay_from_table(dept, entity, state, table_row, facts)
   local row = table_row or transition_row(state and state.state)
   local proposal_id = facts and facts.proposal_id or nil
@@ -943,7 +962,11 @@ function M.replay_from_table(dept, entity, state, table_row, facts)
   local replay = replayers[row.from_state]
   if replay == nil then return log_skip(dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(replayer)", "restart transition table row is not replayable by this department") end
   local replay_facts = gather_required_facts(row, entity, state, facts or {})
-  return replay(dept, entity, state, row, replay_facts)
+  local ok, issued = pcall(function()
+    return replay(dept, entity, state, row, replay_facts)
+  end)
+  if not ok then error(issued) end
+  return issued
 end
 
 function M.replay_from_table_classified(dept, entity, state, table_row, facts)

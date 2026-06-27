@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
+  local advancing_fact = h.advancing_fact
   return {
     from_state = "review-meta",
     liveness_class_id = "review_meta.actionable",
@@ -81,6 +82,10 @@ return function(M, h)
       fact("review-result", "marker-read"),
       fact("review-converge-round", "marker-read"),
       fact("pr-head", "fetch-before-compare"),
+    },
+    advancing_facts = {
+      advancing_fact("review-meta", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("review-meta", "blocked", { pr = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {
       proposal_id = "marker:review-meta.proposal",

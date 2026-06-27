@@ -26,6 +26,10 @@ return function(M, h)
       resets_budget = true,
       commands = { "rereview" },
     },
+    non_durable_advance = {
+      category = "terminal-hold",
+      reason = "PR blocked is a recovery hold: operator rereview or the decompose escape creates the next generation, while ordinary poll-derived durable facts do not advance this row to a normal successor.",
+    },
     budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),
     liveness_contract = liveness({
       mode = "row-budget-bounds-receiver",

@@ -6,6 +6,7 @@ return function(M, h)
   local timeout = h.timeout
   local liveness = h.liveness
   local watchdog = h.watchdog
+  local advancing_fact = h.advancing_fact
   local actionable_epoch = h.actionable_epoch
   local responsibility_signature = h.responsibility_signature
   return {
@@ -17,7 +18,7 @@ return function(M, h)
     to_states = { "implementing" },
     driving_queue = "devloop_ready",
     observe_surfaces = { issue = true, liveness_scan = true },
-    output_obligation = obligation({ "operator reready/reimplement command", "state:v1 implementing" }, { "implementing", "impl-failed" }),
+    output_obligation = obligation({ "impl-failure:v1 retryable fact", "operator reready/reimplement command", "state:v1 implementing" }, { "implementing", "impl-failed" }),
     reentry_commands = { "reready", "reimplement" },
     budget = budget(1440, "No receiver work is expected; the row waits up to 1410 minutes for operator reentry before the 30 minute watchdog margin."),
     liveness_contract = liveness({
@@ -47,6 +48,9 @@ return function(M, h)
     payload_builder = M.build_devloop_ready_payload,
     dedup_shape = "ready/<impl-failure inner dedup> with impl_retry_attempt=<impl-failure.attempt+1>",
     required_facts = { fact("state", "marker-read"), fact("impl-failure", "marker-read"), fact("dependency-release", "marker-read") },
+    advancing_facts = {
+      advancing_fact("impl-failure", "implementing", { issue = true, liveness_scan = true }, "source_ref:issue"),
+    },
     payload_fields = {
       proposal_id = "marker:state.proposal",
       dedup_key = "marker:impl-failure.dedup",

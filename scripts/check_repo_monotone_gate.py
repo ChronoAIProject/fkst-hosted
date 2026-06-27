@@ -165,6 +165,11 @@ class Violation:
         }
         if path == "packages/github-devloop/departments/reconcile/main.lua":
             line = reconcile_timeout_pr_guard_lines.get((self.surface, self.kind, self.token, self.line), line)
+        replayer_hidden_state_lines = {
+            ("require_marker_fact", "state-equality", "implementing", 293): "287",
+        }
+        if path == "libraries/devloop/replayer.lua":
+            line = replayer_hidden_state_lines.get((self.surface, self.kind, self.token, self.line), line)
         return path, self.surface, self.kind, self.token, line
 
     def label(self) -> str:

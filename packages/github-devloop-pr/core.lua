@@ -85,6 +85,7 @@ require("devloop.queue_starvation").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.operator_commands").install(M)
 require("devloop.claims").install(M)
+require("devloop.hidden_state_conformance").install(M)
 require("core.span_conformance").install(M)
 
 return M

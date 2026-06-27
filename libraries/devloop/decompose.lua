@@ -209,8 +209,11 @@ function M.decompose_children_complete(comments, issues, proposal_id, version, p
   return completed_count >= count, completed_count
 end
 
-function M.build_decompose_replay_payload(fact, comments, source_ref, completed_count)
-  local feedback = M.fixing_replay_feedback_fact(comments, fact.proposal_id, fact.version)
+function M.build_decompose_replay_payload(fact, comments_or_feedback, source_ref, completed_count)
+  local feedback = comments_or_feedback
+  if type(feedback) == "table" and feedback[1] ~= nil then
+    feedback = M.fixing_replay_feedback_fact(comments_or_feedback, fact.proposal_id, fact.version)
+  end
   local payload = M.build_devloop_decompose_payload({
     proposal_id = fact.proposal_id,
     pr_number = fact.pr_number,

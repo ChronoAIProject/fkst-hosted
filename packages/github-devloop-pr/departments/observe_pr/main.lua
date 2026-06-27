@@ -137,7 +137,7 @@ local function replay_pr_local_state(origin, pr_number, current_pr, state, sourc
       base_branch = origin.base_branch,
     },
     source_ref = source_ref,
-    feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version),
+    feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version), fix_feedback = core.fixing_replay_feedback_fact(current_pr.comments, origin.proposal_id, state.version),
   })
 end
 

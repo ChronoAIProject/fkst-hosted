@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local hidden_state = require("devloop.hidden_state_conformance")
 
 local function copy_rows(rows)
   local copied = {}
@@ -28,7 +29,21 @@ local function rows_by_state(rows)
   return by_state
 end
 
+local function contains_error(errors, needle)
+  for _, err in ipairs(errors or {}) do
+    if tostring(err):find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
 return {
+  test_hidden_state_conformance_accepts_pr_blocked_exemption_with_all_durable_facts = function()
+    local errors = hidden_state.errors(core, core.restart_transition_table(), {})
+    t.is_true(not contains_error(errors, "github-devloop-pr|blocked|*: non_durable_advance exemption advanced"), table.concat(errors, "\n"))
+  end,
+
   test_liveness_contract_binds_live_defer_surface_and_version_form = function()
     local by_state = rows_by_state(core.restart_transition_table())
     t.eq(by_state.reviewing.liveness_contract.signal.surface, "pr-comment-stream")

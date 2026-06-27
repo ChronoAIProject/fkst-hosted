@@ -112,11 +112,21 @@ local function replay_fields(M, row, state, issue, proposal_id)
   })
 end
 
-local function raise_dependency_release(M, dept, issue, proposal_id, state, current, command_comment_request, gate)
+local function read_fact(facts, family)
+  if type(facts) ~= "table" then
+    return nil
+  end
+  local direct = facts[family]
+  if direct ~= nil then
+    return direct
+  end
+  return facts[tostring(family or ""):gsub("%-", "_")]
+end
+
+local function raise_dependency_release(M, dept, issue, proposal_id, state, current, command_comment_request, gate, release_fact)
   local ready_version = M.ready_split_version(state.version)
   local raised = { "github-proxy.github_issue_comment_request" }
   local has_blocked_label = M.has_label(current.labels, M._blocked_on_dependency_label)
-  local release_fact = M.dependency_release_fact(current.comments, proposal_id, state.version)
   if release_fact == nil then table.insert(raised, "github-proxy.github_issue_comment_request") end
   if command_comment_request ~= nil then table.insert(raised, "github-proxy.github_issue_comment_request") end
   if has_blocked_label then table.insert(raised, "github-proxy.github_issue_label_request") end
@@ -141,8 +151,7 @@ local function raise_dependency_release(M, dept, issue, proposal_id, state, curr
   return true
 end
 
-local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, current, gate, command)
-  local dependency_hold = M.dependency_hold_fact(current.comments, proposal_id)
+local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, current, gate, command, dependency_hold)
   local marker = gate.kind == "cycle"
     and M.dependency_cycle_marker(proposal_id, state.version)
     or (gate.kind == "unresolvable"
@@ -177,19 +186,19 @@ end
 
 function M.replay_dependency_wait_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
-  local gate = facts.dependency_gate or M.dependency_gate(issue.repo, issue.number, {
+  local gate = read_fact(facts, "dependency-gate") or M.dependency_gate(issue.repo, issue.number, {
     proposal_id = proposal_id,
     version = state.version,
     comments = facts.current.comments,
   })
   if not gate.ok then
-    return raise_dependency_wait_hold(M, dept, issue, proposal_id, state, facts.current, gate, facts.command)
+    return raise_dependency_wait_hold(M, dept, issue, proposal_id, state, facts.current, gate, facts.command, read_fact(facts, "dependency-wait"))
   end
   M.log_cas_decision(dept, proposal_id, state, "dependency_wait", "ready", "release-dependency-hold", gate.reason)
   local command_comment_request = facts.command_comment_request or (facts.command ~= nil
     and M.build_operator_issue_reready_comment_request(issue.repo, issue.number, facts.command, "dependency-release", issue.source_ref)
     or nil)
-  return raise_dependency_release(M, dept, issue, proposal_id, state, facts.current, command_comment_request, gate)
+  return raise_dependency_release(M, dept, issue, proposal_id, state, facts.current, command_comment_request, gate, read_fact(facts, "dependency-release"))
 end
 
 local function next_ready_redrive_version(marker_version, round)
@@ -210,7 +219,7 @@ end
 function M.replay_ready_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local fields = replay_fields(M, row, state, issue, proposal_id)
-  local gate = facts.dependency_gate or M.dependency_gate(issue.repo, issue.number, {
+  local gate = read_fact(facts, "dependency-gate") or M.dependency_gate(issue.repo, issue.number, {
     proposal_id = proposal_id,
     version = state.version,
     comments = facts.current.comments,

@@ -17,6 +17,15 @@ local function fact(family, freshness)
   return { family = family, freshness = freshness }
 end
 
+local function advancing_fact(fact_family, successor, observe_surfaces, source_ref_derivation)
+  return {
+    fact_family = fact_family,
+    successor = successor,
+    observe_surfaces = observe_surfaces,
+    source_ref_derivation = source_ref_derivation,
+  }
+end
+
 local function obligation(kinds, exits)
   return {
     kinds = kinds,
@@ -84,6 +93,7 @@ end
 
 local transition_helpers = {
   fact = fact,
+  advancing_fact = advancing_fact,
   obligation = obligation,
   effect = effect,
   budget = budget,
