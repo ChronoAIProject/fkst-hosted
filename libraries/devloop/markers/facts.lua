@@ -44,6 +44,10 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
   return nil
 end
 
+local function review_proposal_from_dedup(dedup_key)
+  return tostring(dedup_key or ""):match("^consensus:(.+)/review$")
+end
+
 function M.intake_decision_fact(comments, issue_proposal_id)
   if type(comments) ~= "table" then
     return nil
@@ -84,6 +88,22 @@ function M.review_reject_fact(comments, issue_proposal_id, issue_version)
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       local fact = review_result_fact_from_marker(M, marker, comment, issue_proposal_id, issue_version, "reject")
+      if fact ~= nil then
+        return fact
+      end
+    end
+  end
+  return nil
+end
+
+function M.review_result_fact(comments, issue_proposal_id, issue_version, expected_decision)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local fact = review_result_fact_from_marker(M, marker, comment, issue_proposal_id, issue_version, expected_decision)
       if fact ~= nil then
         return fact
       end
@@ -185,7 +205,7 @@ function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
         and action == "fix"
         and version == tostring(issue_version)
         and M._is_bounded_string(gap, M._max_blocking_gap_len) then
-        local review_proposal = marker_dedup:match("^consensus:([^/].-)/review")
+        local review_proposal = review_proposal_from_dedup(marker_dedup)
         local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
         return {
           review_proposal_id = review_proposal,
@@ -194,6 +214,47 @@ function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
           review_reason = M._comment_body(comment),
           blocking_gap = gap,
         }
+      end
+    end
+  end
+  return nil
+end
+
+function M.review_meta_decision_fact(comments, issue_proposal_id, issue_version)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local expected_lineage = M.strip_transition_version_suffixes(issue_version)
+  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker_attr(marker, "proposal")
+      local marker_dedup = marker_attr(marker, "dedup")
+      local action = marker_attr(marker, "action")
+      local version = marker_attr(marker, "version")
+      local gap = decode_marker_attr(marker_attr(marker, "gap"))
+      local marker_lineage = M.strip_transition_version_suffixes(version)
+      if marker_issue == tostring(issue_proposal_id)
+        and marker_lineage == expected_lineage
+        and (action == "fix" or action == "block" or action == "spec-amendment")
+        and M._is_bounded_string(marker_dedup, M._max_dedup_len) then
+        local review_proposal = review_proposal_from_dedup(marker_dedup)
+        local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+        if review_proposal ~= nil and M._is_git_sha(reviewed_head_sha) then
+          if action == "fix" and (gap == nil or not M._is_bounded_string(gap, M._max_blocking_gap_len)) then
+            return nil
+          end
+          return {
+            review_proposal_id = review_proposal,
+            review_dedup_key = marker_dedup,
+            reviewed_head_sha = reviewed_head_sha,
+            action = action,
+            version = version,
+            review_reason = M._comment_body(comment),
+            blocking_gap = gap,
+            comment_created_at = M._comment_created_at(comment),
+          }
+        end
       end
     end
   end
@@ -286,6 +347,7 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
           review_proposal_id = marker_review_proposal,
           review_dedup_key = marker_review_dedup,
           head_sha = marker_head_sha,
+          reviewed_head_sha = marker_head_sha,
           comment_created_at = M._comment_created_at(comment),
         }
       end
@@ -378,7 +440,7 @@ function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sh
       if marker_issue == tostring(issue_proposal_id)
         and tostring(marker_pr) == tostring(pr_number)
         and tostring(marker_version) == tostring(version)
-        and tostring(marker_head_sha) == tostring(head_sha)
+        and (head_sha == nil or tostring(marker_head_sha) == tostring(head_sha))
         and M._is_git_sha(marker_head_sha) then
         return {
           proposal_id = marker_issue,

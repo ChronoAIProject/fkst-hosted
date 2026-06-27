@@ -1,17 +1,1 @@
 # package|row|fact_family|successor|issue=<tracking>|why=<migration reason>
-github-devloop-pr|pr-open|pr-link|reviewing|issue=#1595|why=base PR poll fixture can still advance pr-open without the declared PR link fact.
-github-devloop-pr|pr-open|pr-link|fixing|issue=#1595|why=behavioral poll replay currently does not advance pr-open to fixing from the PR link fact alone.
-github-devloop-pr|reviewing|review-result|merge-ready|issue=#1595|why=behavioral poll replay currently does not advance reviewing to merge-ready from the review result fact alone.
-github-devloop-pr|reviewing|review-result|fixing|issue=#1595|why=behavioral poll replay currently does not advance reviewing to fixing from the review result fact alone.
-github-devloop-pr|reviewing|review-converge-round|review-meta|issue=#1595|why=behavioral poll replay currently does not advance reviewing to review-meta from the review converge round fact alone.
-github-devloop-pr|reviewing|review-converge-round|blocked|issue=#1595|why=behavioral poll replay currently does not advance reviewing to blocked from the review converge round fact alone.
-github-devloop-pr|fixing|fix-feedback|fixing|issue=#1595|why=base PR poll fixture can still advance fixing without the declared fix feedback fact.
-github-devloop-pr|fixing|fix-feedback|reviewing|issue=#1595|why=base PR poll fixture can still advance fixing without the declared fix feedback fact.
-github-devloop-pr|review-meta|review-meta|fixing|issue=#1595|why=behavioral poll replay currently does not advance review-meta to fixing from the review meta fact alone.
-github-devloop-pr|review-meta|review-meta|blocked|issue=#1595|why=behavioral poll replay currently does not advance review-meta to blocked from the review meta fact alone.
-github-devloop-pr|merge-ready|merge-ready|merging|issue=#1595|why=behavioral poll replay currently does not advance merge-ready to merging from the merge-ready fact alone.
-github-devloop-pr|merge-ready|merge-ready|blocked|issue=#1595|why=behavioral poll replay currently does not advance merge-ready to blocked from the merge-ready fact alone.
-github-devloop-pr|merging|merging|merged|issue=#1595|why=behavioral poll replay currently does not advance merging to merged from the merging fact alone.
-github-devloop-pr|merging|merging|reviewing|issue=#1595|why=behavioral poll replay currently does not advance merging to reviewing from the merging fact alone.
-github-devloop-pr|merging|merging|fixing|issue=#1595|why=behavioral poll replay currently does not advance merging to fixing from the merging fact alone.
-github-devloop-pr|merging|merging|blocked|issue=#1595|why=behavioral poll replay currently does not advance merging to blocked from the merging fact alone.

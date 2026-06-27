@@ -97,6 +97,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
   end
   local body = "github-devloop PR child open"
     .. "\n\n" .. M.pr_origin_marker(issue_proposal_id, issue_number, branch, impl_version, base_branch)
+    .. "\n" .. M.pr_link_marker(issue_proposal_id, pr_number, branch, impl_version, base_branch)
     .. "\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
   return M.build_entity_comment_request({
     kind = "pr",

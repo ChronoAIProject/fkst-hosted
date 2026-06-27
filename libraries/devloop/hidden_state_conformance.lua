@@ -11,8 +11,7 @@ local BRANCH = "devloop-owner-repo-42-01HY"
 local BASE_BRANCH = "integration/dev"
 local HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 local BASE_SHA = "fedcba9876543210fedcba9876543210fedcba98"
-local REVIEW_PROPOSAL = "consensus-review-github-devloop/pr/owner/repo/7"
-local REVIEW_DEDUP = "review-dedup-1"
+local ALT_HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef"
 local SOURCE_REF = { kind = "external", ref = "owner/repo#issue/42" }
 local PR_SOURCE_REF = { kind = "external", ref = "owner/repo#pr/7" }
 
@@ -363,6 +362,11 @@ local function child_pr(core, state, child_state)
     head_ref_name = BRANCH,
     base_ref_name = BASE_BRANCH,
     head_sha = HEAD_SHA,
+    mergeable = "MERGEABLE",
+    merge_state_status = "CLEAN",
+    status_check_rollup = {
+      { state = "COMPLETED", status = "COMPLETED", conclusion = "SUCCESS", name = "test" },
+    },
     merge_commit_sha = HEAD_SHA,
     force_fresh = true,
     merged_at = child_state == "merged" and "2026-06-03T01:04:03Z" or nil,
@@ -377,7 +381,10 @@ local function awaiting_pr_child_state_for_successor(successor)
   return successor
 end
 
-local function add_common_pr_facts(core, entity, state, facts)
+local function review_proposal(core, state) return core.pr_review_proposal_id(REPO, PR_NUMBER, state.version, HEAD_SHA) end
+local function review_dedup(core, state) return "consensus:" .. review_proposal(core, state) .. "/review" end
+
+local function add_common_pr_facts(core, entity, state, facts, include_pr_link_marker)
   local link = {
     proposal_id = ISSUE_PROPOSAL,
     pr_number = PR_NUMBER,
@@ -386,9 +393,13 @@ local function add_common_pr_facts(core, entity, state, facts)
     base_branch = BASE_BRANCH,
   }
   facts.link = link
-  facts["pr-link"] = link
   facts.current_pr = facts.current_pr or child_pr(core, state, nil)
-  table.insert(entity.comments, comment(core.pr_link_marker(ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
+  if include_pr_link_marker == true then
+    facts["pr-link"] = link
+    table.insert(entity.comments, comment(core.pr_link_marker(ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
+  else
+    facts._synthetic_pr_link = true
+  end
   facts.snapshot.prs = {
     { number = PR_NUMBER, current = facts.current_pr },
   }
@@ -469,13 +480,15 @@ local function fact_value(core, row, state, family, successor)
     }
   end
   if family == "fix-feedback" then
+    local reviewed = successor == "reviewing" and BASE_SHA or HEAD_SHA
+    local review_id = core.pr_review_proposal_id(REPO, PR_NUMBER, state.version, reviewed)
     return {
       proposal_id = ISSUE_PROPOSAL,
       version = state.version,
       pr_number = PR_NUMBER,
-      review_proposal_id = REVIEW_PROPOSAL,
-      review_dedup_key = REVIEW_DEDUP,
-      reviewed_head_sha = HEAD_SHA,
+      review_proposal_id = review_id,
+      review_dedup_key = "consensus:" .. review_id .. "/review",
+      reviewed_head_sha = reviewed,
       reason = "behavioral-fixture",
     }
   end
@@ -483,23 +496,24 @@ local function fact_value(core, row, state, family, successor)
     return {
       proposal_id = ISSUE_PROPOSAL,
       pr_number = PR_NUMBER,
-      review_proposal_id = REVIEW_PROPOSAL,
-      review_dedup_key = REVIEW_DEDUP,
+      review_proposal_id = review_proposal(core, state),
+      review_dedup_key = review_dedup(core, state),
       reviewed_head_sha = HEAD_SHA,
       decision = successor == "merge-ready" and "approve" or "reject",
       blocking_gap = "behavioral-fixture",
     }
   end
   if family == "review-meta" or family == "review-converge-round" then
+    local is_review_meta_replay = family == "review-converge-round" and successor == "review-meta"
     return {
       proposal_id = ISSUE_PROPOSAL,
       pr_number = PR_NUMBER,
-      review_proposal_id = REVIEW_PROPOSAL,
-      review_dedup_key = REVIEW_DEDUP,
+      review_proposal_id = review_proposal(core, state),
+      review_dedup_key = is_review_meta_replay and (review_dedup(core, state) .. "/loop/3") or review_dedup(core, state),
       reviewed_head_sha = HEAD_SHA,
       version = state.version,
       n = 3,
-      action = successor == "fixing" and "fix" or "block",
+      action = (successor == "fixing" or is_review_meta_replay) and "fix" or "block",
       blocking_gap = "behavioral-fixture",
     }
   end
@@ -508,9 +522,10 @@ local function fact_value(core, row, state, family, successor)
       proposal_id = ISSUE_PROPOSAL,
       pr_number = PR_NUMBER,
       version = state.version,
-      review_proposal_id = REVIEW_PROPOSAL,
-      review_dedup_key = REVIEW_DEDUP,
+      review_proposal_id = review_proposal(core, state),
+      review_dedup_key = review_dedup(core, state),
       head_sha = HEAD_SHA,
+      approve = successor ~= "blocked",
     }
   end
   if family == "merging" then
@@ -581,19 +596,37 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "decomposed" then
     table.insert(entity.comments, comment(core.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
-    table.insert(entity.comments, comment(core.fix_marker(ISSUE_PROPOSAL, REVIEW_PROPOSAL, REVIEW_DEDUP, HEAD_SHA, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then
-    table.insert(entity.comments, comment(core.review_result_marker(REVIEW_PROPOSAL, ISSUE_PROPOSAL, value.decision or "reject", REVIEW_DEDUP, 1, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, core.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     if value.decision == "approve" then
-      table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, REVIEW_PROPOSAL, REVIEW_DEDUP, HEAD_SHA), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
     else
-      table.insert(entity.comments, comment(core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, REVIEW_PROPOSAL, REVIEW_DEDUP, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     end
-  elseif family == "review-meta" or family == "review-converge-round" then
-    table.insert(entity.comments, comment(core.review_meta_marker(ISSUE_PROPOSAL, REVIEW_DEDUP, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+  elseif family == "review-meta" then
+    table.insert(entity.comments, comment(core.review_meta_marker(ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+  elseif family == "review-converge-round" then
+    local digest = core.source_ref_digest(PR_SOURCE_REF)
+    if value.action == "block" then
+      for round = 1, value.n do
+        table.insert(entity.comments, comment(core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, round, state.version .. "/review-loop/" .. tostring(round), "behavioral fixture same review question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+      end
+    else
+      table.insert(entity.comments, comment(core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, value.n, value.review_dedup_key, "behavioral fixture review question", {
+        { perspective = "one", verdict = "comment", digest = "a" },
+        { perspective = "two", verdict = "abstain", digest = "b" },
+        { perspective = "three", verdict = "abstain", digest = "c" },
+      }), "2026-06-03T01:03:09Z"))
+    end
   elseif family == "merge-ready" then
-    table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, REVIEW_PROPOSAL, REVIEW_DEDUP, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    if value.approve ~= false then
+      table.insert(entity.comments, comment(core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
+    end
+    table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "merging" then
+    table.insert(entity.comments, comment(core.review_result_marker(value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
     table.insert(entity.comments, comment(core.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "converge-round" then
     if value.true_stall_fixture == true then
@@ -642,14 +675,29 @@ local function add_context_facts(core, row, entity, state, facts, source_ref, in
       { number = PR_NUMBER, current = facts.current_pr },
     }
   elseif package_name(core) == "github-devloop-pr" or source_ref == PR_SOURCE_REF then
-    add_common_pr_facts(core, entity, state, facts)
+    add_common_pr_facts(core, entity, state, facts, declared.fact_family ~= "pr-link" or include_fact == true)
+    if include_fact == true and declared.fact_family == "pr-link" and declared.successor == "fixing" then
+      facts.current_pr.mergeable, facts.current_pr.merge_state_status = "CONFLICTING", "DIRTY"
+    elseif include_fact == true and declared.fact_family == "merging" then
+      if declared.successor == "merged" then
+        facts.current_pr.state, facts.current_pr.merged_at = "MERGED", "2026-06-03T01:04:03Z"
+      elseif declared.successor == "reviewing" then
+        facts.current_pr.head_sha = ALT_HEAD_SHA
+      elseif declared.successor == "fixing" then
+        facts.current_pr.mergeable, facts.current_pr.merge_state_status = "CONFLICTING", "DIRTY"
+      elseif declared.successor == "blocked" then
+        facts.current_pr.status_check_rollup = {
+          { state = "IN_PROGRESS", status = "IN_PROGRESS", conclusion = "", name = "test" },
+        }
+      end
+    end
     entity.type = "pr"
     entity.number = PR_NUMBER
     facts.current_pr = facts.current_pr or entity
     facts.current = entity
     facts.snapshot.comments = entity.comments
   elseif row.from_state == "blocked" then
-    add_common_pr_facts(core, entity, state, facts)
+    add_common_pr_facts(core, entity, state, facts, true)
   end
 end
 
@@ -675,7 +723,9 @@ local function build_fixture(core, row, declared, include_fact)
   if include_fact then
     local value = fact_value(core, row, state, declared.fact_family, declared.successor)
     if value ~= nil then
-      store_fact_value(facts, declared.fact_family, value)
+      if package_name(core) ~= "github-devloop-pr" then
+        store_fact_value(facts, declared.fact_family, value)
+      end
       install_marker(core, entity, state, declared.fact_family, value)
     end
   elseif declared.fact_family == "converge-round" then

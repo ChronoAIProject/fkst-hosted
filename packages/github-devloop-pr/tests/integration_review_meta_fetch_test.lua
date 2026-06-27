@@ -6,6 +6,9 @@ local opts = h.opts
 local review_meta_event = h.review_meta_event
 local mock_issue_review_meta = h.mock_issue_review_meta
 local run_review_meta = h.run_review_meta
+local run_observe_pr = h.run_observe_pr
+local mock_bot_env = h.mock_bot_env
+local mock_pr_origin = h.mock_pr_origin
 local find_causal_raise = h.find_causal_raise
 
 local action_label = h.action_label
@@ -122,6 +125,40 @@ return {
     t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
     t.eq(find_causal_raise(result, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
     t.eq(find_causal_raise(result, "devloop_fixing").payload.blocking_gap, "missing retry guard")
+    t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
+  end,
+
+  test_observe_pr_review_meta_fix_marker_advances_to_fixing = function()
+    local event = review_meta_event()
+    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, event.version, "def456")
+    local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
+    local comments = {
+      core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+      core.review_meta_marker(event.proposal_id, review_dedup_key, "fix", event.version, "missing retry guard"),
+    }
+    mock_bot_env()
+    mock_pr_origin(comments, "devloop-owner-repo-42-01HY", "def456")
+    mock_issue_review_meta({ "fkst-dev:review-meta" }, comments)
+
+    local result = run_observe_pr({
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = "owner/repo",
+      number = 7,
+      dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
+      source_ref = { kind = "external", ref = "owner/repo#pr/7" },
+    }, opts("observe-pr-review-meta-fix-production-replay"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_label_request").payload.add_labels[1], "fkst-dev:fixing")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
+    t.eq(fixing_raise.payload.schema, "github-devloop.fixing.v1")
+    t.eq(fixing_raise.payload.version, event.version)
+    t.eq(fixing_raise.payload.review_proposal_id, review_proposal_id)
+    t.eq(fixing_raise.payload.review_dedup_key, review_dedup_key)
+    t.eq(fixing_raise.payload.blocking_gap, "missing retry guard")
+    t.eq(find_raise(result.raises, "devloop_review_meta"), nil)
     t.eq(find_raise(result.raises, "devloop_merge_ready"), nil)
   end,
 

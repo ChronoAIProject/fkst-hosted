@@ -230,7 +230,7 @@ local function require_marker_fact(facts, family)
     return facts.state
   end
   if family == "pr-link" then
-    return facts.link or M.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
+    return M.pr_link_fact(facts.snapshot.comments, facts.proposal_id) or (facts._synthetic_pr_link ~= true and facts.link or nil)
   end
   if family == "pr-delegation" then
     return child_pr_delegation_fact(facts)
