@@ -35,6 +35,7 @@ def make_fake_bin(path: Path) -> None:
             import json
             import os
             import sys
+            import time
             from pathlib import Path
 
             out = Path(os.environ["CAPTURE_FILE"])
@@ -59,6 +60,9 @@ def make_fake_bin(path: Path) -> None:
                 "env": {key: os.environ[key] for key in keys if key in os.environ},
             }
             out.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
+            print("TIMESTAMP=2026-01-01T00:00:00Z LEVEL=info EVENT=code_provenance ENGINE_VER=test-engine PKG_VERS=github-devloop@test-package", flush=True)
+            print("TIMESTAMP=2026-01-01T00:00:00Z LEVEL=INFO handles=1 MSG=event runtime running", flush=True)
+            time.sleep(5)
             """
         ),
     )
@@ -189,6 +193,30 @@ class DogfoodLayout:
             time.sleep(0.05)
         raise AssertionError(f"dogfood start {target} did not invoke fake supervise\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
+    def run_start(self, target: str) -> subprocess.CompletedProcess[str]:
+        self.capture.unlink(missing_ok=True)
+        return subprocess.run(
+            [str(self.script), "start", target],
+            cwd=self.root,
+            env=self.env(target),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def run_sync(self, target: str) -> subprocess.CompletedProcess[str]:
+        self.capture.unlink(missing_ok=True)
+        return subprocess.run(
+            [str(self.script), "sync", target],
+            cwd=self.root,
+            env=self.env(target),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
 
 def load_golden_launches() -> dict[str, object]:
     return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
@@ -234,6 +262,103 @@ class HostRunEquivalenceTest(unittest.TestCase):
                         env["FKST_RUNTIME_ROOT"],  # type: ignore[index]
                         f"$ROOT/dogfood/dogfood-rt-{target}.{FIXED_TS}",
                     )
+
+    def test_dogfood_start_fails_when_supervise_exits_before_readiness(self) -> None:
+        new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = DogfoodLayout(Path(tmp) / "failed", new_script)
+            write_executable(
+                layout.fake_bin,
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import os
+                    from pathlib import Path
+
+                    Path(os.environ["CAPTURE_FILE"]).write_text("launched\\n", encoding="utf-8")
+                    print("startup error: schema validation failed", flush=True)
+                    raise SystemExit(17)
+                    """
+                ),
+            )
+
+            result = layout.run_start("packages")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("FAILED to start", result.stdout)
+            self.assertIn("startup error: schema validation failed", result.stdout)
+
+    def test_dogfood_sync_fails_when_selective_auto_restart_exits_before_readiness(self) -> None:
+        new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = DogfoodLayout(Path(tmp) / "sync-failed", new_script)
+            (layout.dogfood_root / "stable-durable-packages").mkdir(parents=True, exist_ok=True)
+            (layout.dogfood_root / "stable-durable-packages" / ".fkst-supervise.pid").write_text(
+                "999999\n",
+                encoding="utf-8",
+            )
+            (layout.dogfood_root / "packages-sv-100.log").write_text(
+                "TIMESTAMP=2026-01-01T00:00:00Z LEVEL=info EVENT=code_provenance "
+                "ENGINE_VER=aaaaaaaa PKG_VERS=github-proxy@bbbbbbbb\n",
+                encoding="utf-8",
+            )
+            write_executable(layout.bin_dir / "pgrep", "#!/usr/bin/env bash\nprintf '999999\\n'\n")
+            write_executable(
+                layout.bin_dir / "git",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    cdir=""
+                    if [ "${1:-}" = "-C" ]; then
+                      cdir="$2"
+                      shift 2
+                    fi
+                    cmd="${1:-}"
+                    case "$cmd" in
+                      rev-parse)
+                        case "${2:-}" in
+                          --git-dir) printf '.git\\n' ;;
+                          --show-toplevel) printf '%s\\n' "${cdir:-$PWD}" ;;
+                          --verify) exit 0 ;;
+                          --short) printf 'aaaaaaaa\\n' ;;
+                          origin/*|HEAD) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' ;;
+                          *) printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' ;;
+                        esac
+                        ;;
+                      fetch|status|merge-base|checkout|merge|push|reset) exit 0 ;;
+                      rev-list) printf '0\\n' ;;
+                      diff) printf 'changed package\\n' ;;
+                      worktree) exit 0 ;;
+                      *) exit 0 ;;
+                    esac
+                    """
+                ),
+            )
+            write_executable(
+                layout.fake_bin,
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env python3
+                    import os
+                    from pathlib import Path
+
+                    Path(os.environ["CAPTURE_FILE"]).write_text("launched\\n", encoding="utf-8")
+                    print("startup error: schema validation failed", flush=True)
+                    raise SystemExit(17)
+                    """
+                ),
+            )
+
+            result = layout.run_sync("packages")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("packages: pkg-stale -> auto-restart", result.stdout)
+            self.assertIn("FAILED to start", result.stdout)
+            self.assertIn("startup error: schema validation failed", result.stdout)
 
 
 if __name__ == "__main__":

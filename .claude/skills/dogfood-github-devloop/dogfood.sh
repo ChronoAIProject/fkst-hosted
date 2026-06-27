@@ -108,6 +108,36 @@ cfg() {
 
 pidof_df() { pgrep -f -- "supervise --project-root ${HOST} " 2>/dev/null; }
 latest_log() { ls -t "$LOGDIR/${1}-sv-"*.log 2>/dev/null | head -1; }
+pid_alive_non_zombie() {
+  local pid="$1" stat
+  kill -0 "$pid" 2>/dev/null || return 1
+  stat=$(ps -o stat= -p "$pid" 2>/dev/null | awk 'NF {print $1; exit}')
+  [[ "$stat" == Z* ]] && return 1
+  return 0
+}
+supervise_ready_log() {
+  local log="$1"
+  # Supervise-owned startup readiness contract, not a generic health semantic.
+  grep -qaE 'EVENT=code_provenance .*ENGINE_VER=[^ ]+ .*PKG_VERS=[^ ]+' "$log" 2>/dev/null \
+    && grep -qa 'MSG=event runtime running' "$log" 2>/dev/null
+}
+wait_supervise_ready() { # $1 pid, $2 log
+  local pid="$1" log="$2" attempts=0 ready_seen=0 stable_attempts=30 timeout_attempts=100
+  while [ "$attempts" -lt "$timeout_attempts" ]; do
+    if ! pid_alive_non_zombie "$pid"; then
+      return 1
+    fi
+    if supervise_ready_log "$log"; then
+      ready_seen=1
+    fi
+    if [ "$ready_seen" -eq 1 ] && [ "$attempts" -ge "$stable_attempts" ]; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.1
+  done
+  return 2
+}
 # Parse an ISO-8601 UTC timestamp (trailing Z) to epoch. TZ=UTC is REQUIRED: BSD `date -j -f`
 # ignores the Z and parses in the local zone, so on a +HH machine every computed age is inflated by
 # the local UTC offset (e.g. +0800 -> board recency reads 8h too old -> healthy issues mislabelled
@@ -274,11 +304,18 @@ launch_one() { # $1 name, $2 restart flag (0|1)
     nohup "${args[@]}" > "$log" 2>&1 &
   local pid=$!
   ln -sf "$log" "$LOGDIR/${name}-sv.log"
-  sleep 3
-  if kill -0 "$pid" 2>/dev/null; then
+  wait_supervise_ready "$pid" "$log"
+  local ready_status=$?
+  if [ "$ready_status" -eq 0 ]; then
     echo "[$name] started pid $pid  panic=$(grep -ac panicked "$log" 2>/dev/null)  log=$log"
   else
-    echo "[$name] FAILED to start; tail:"; tail -6 "$log" | sed 's/\x1b\[[0-9;]*m//g'
+    if [ "$ready_status" -eq 1 ]; then
+      echo "[$name] FAILED to start; supervise pid $pid exited before readiness; tail:"
+    else
+      echo "[$name] FAILED to become ready; supervise pid $pid did not emit startup readiness; tail:"
+    fi
+    tail -12 "$log" | sed 's/\x1b\[[0-9;]*m//g'
+    return 1
   fi
 }
 
@@ -428,7 +465,7 @@ cmd_sync() {
   _sync_checkout "$SUBSTRATE_SRC"                                                # engine BIN source
   echo "engine BIN:"; bin_ensure_fresh | sed 's/^/  /'
   echo "supervises (auto-restart only on real code change):"
-  local n st
+  local n st failed=0
   for n in $(expand "${1:-all}"); do
     cfg "$n" || continue
     ensure_run_checkout "$PKGSRC" "$GH_ORG/fkst-packages"              # re-clone if DOGFOOD_ROOT cleanup rotted the checkout (else _proc_stale misreads "skew" and fixes never deploy)
@@ -437,11 +474,12 @@ cmd_sync() {
     [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
     st=$(_proc_stale "$n")
     case "$st" in
-      pkg-stale|engine-stale) echo "  $n: $st -> auto-restart"; restart_one "$n" | sed 's/^/    /' ;;
+      pkg-stale|engine-stale) echo "  $n: $st -> auto-restart"; restart_one "$n" | sed 's/^/    /' || failed=1 ;;
       stopped)                echo "  $n: stopped (use 'start' to launch)" ;;
       *)                      echo "  $n: $st (no restart needed)" ;;
     esac
   done
+  return "$failed"
 }
 
 board_one() { # $1 name, $2 stale_hours
@@ -503,9 +541,9 @@ cmd_board() {
 cmd="${1:-status}"; arg2="${2:-}"; arg3="${3:-}"
 case "$cmd" in
   bin)     bin_ensure_fresh ;;
-  start)   for n in $(expand "${arg2:-all}"); do start_one   "$n"; done ;;
+  start)   rc=0; for n in $(expand "${arg2:-all}"); do start_one "$n" || rc=1; done; exit "$rc" ;;
   stop)    for n in $(expand "${arg2:-all}"); do stop_one "$n"; done ;;
-  restart) for n in $(expand "${arg2:-all}"); do restart_one "$n"; done ;;
+  restart) rc=0; for n in $(expand "${arg2:-all}"); do restart_one "$n" || rc=1; done; exit "$rc" ;;
   sync)    cmd_sync "$arg2" ;;
   status)  for n in $(expand "${arg2:-all}"); do status_one "$n"; done ;;
   doctor)  cmd_doctor "${arg2:-all}" ;;
