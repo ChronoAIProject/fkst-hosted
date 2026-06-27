@@ -1,4 +1,4 @@
--- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's trusted `state:v1` marker and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
+-- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S = {}
 function S.install(M)
 local child_terminal_states = {
@@ -6,7 +6,7 @@ local child_terminal_states = {
   ["closed-unmerged"] = true,
   blocked = true,
 }
-
+local canonical_pr_is_merged, origin_matches_delegation, canonical_merged_child_state
 local function log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
   if type(M.replay_log_skip) == "function" then
     return M.replay_log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
@@ -126,8 +126,12 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   end
   local current_pr = facts.current_pr or read_delegated_child_pr(dept, issue, delegation)
   local child_state = facts.child_state or M.current_entity_state(current_pr.comments, delegation.proposal_id)
+  local canonical_merged_state = canonical_merged_child_state(issue, state, delegation, current_pr)
+  if canonical_merged_state ~= nil then
+    child_state = canonical_merged_state
+  end
   if child_state == nil or child_state.state == nil then
-    return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-pending(child-state-missing)", "delegated child PR has no trusted state marker")
+    return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-pending(child-terminal-missing)", "delegated child PR has no trusted terminal marker or canonical merged state")
   end
   if child_terminal_states[child_state.state] ~= true then
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-pending(child-nonterminal)", "delegated child PR is not terminal")
@@ -167,7 +171,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     issue.source_ref or M.issue_source_ref(issue.repo, issue.number)
   )
   local add_labels, remove_labels = M.state_label_changes(next_state.to_state)
-  M.log_cas_decision(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "applied(" .. next_state.reason .. ")", "trusted child state marker matched parent delegation")
+  M.log_cas_decision(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "applied(" .. next_state.reason .. ")", "delegated child terminal fact matched parent delegation")
   local effects = {
     { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
     { queue = "github-proxy.github_issue_label_request", payload = label_request },
@@ -182,27 +186,69 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   return raise_effects(dept, proposal_id, next_state.to_state, next_state.version, { add = add_labels, remove = remove_labels }, effects)
 end
 
+canonical_pr_is_merged = function(current_pr)
+  local state = tostring(current_pr and current_pr.state or ""):upper()
+  if state == "MERGED" then
+    return true
+  end
+  local merged_at = current_pr and current_pr.merged_at
+  if type(merged_at) ~= "string" then
+    return false
+  end
+  return M.iso_timestamp_epoch_seconds(merged_at) ~= nil
+end
+
+origin_matches_delegation = function(issue, delegation, current_pr, branches)
+  local origin = M.pr_origin_fact(current_pr and current_pr.comments)
+  if origin == nil
+    or origin.pr_native == true
+    or tostring(origin.proposal_id or "") ~= tostring(delegation.proposal_id or "")
+    or tostring(origin.issue_number or "") ~= tostring(issue.number or "")
+    or M.strip_transition_version_suffixes(origin.impl_version) ~= M.strip_transition_version_suffixes(delegation.version)
+    or tostring(origin.branch or "") ~= tostring(current_pr and current_pr.head_ref_name or "")
+    or tostring(origin.base_branch or "") ~= tostring(current_pr and current_pr.base_ref_name or "") then
+    return false
+  end
+  if branches ~= nil and tostring(origin.base_branch or "") ~= tostring(branches.integration or "") then
+    return false
+  end
+  return true
+end
+
+canonical_merged_child_state = function(issue, state, delegation, current_pr)
+  if not canonical_pr_is_merged(current_pr) or not M._is_git_sha(current_pr and current_pr.head_sha) then
+    return nil
+  end
+  if not origin_matches_delegation(issue, delegation, current_pr) then
+    return nil
+  end
+  return {
+    state = "merged",
+    version = delegation.version or state.version,
+    proposal_id = delegation.proposal_id,
+    head_sha = current_pr.head_sha,
+  }
+end
+
 function M.awaiting_pr_merged_child_head_landed_on_upstream(dept, issue, state, delegation, current_pr)
   local branches = M.branch_config()
   if tostring(branches.integration or "") == tostring(branches.upstream or "") then
     return true
   end
-  local origin = M.pr_origin_fact(current_pr.comments)
-  if origin == nil
-    or origin.pr_native == true
-    or tostring(origin.proposal_id or "") ~= tostring(delegation.proposal_id or "")
-    or tostring(origin.issue_number or "") ~= tostring(issue.number or "")
-    or tostring(origin.branch or "") ~= tostring(current_pr.head_ref_name or "")
-    or tostring(origin.base_branch or "") ~= tostring(branches.integration or "") then
+  if not origin_matches_delegation(issue, delegation, current_pr, branches) then
     return false, "skip-stale(pr-origin-rollup-lineage)", "merged child PR lacks current split-topology origin facts"
   end
   local merged = M.merged_fact(current_pr.comments, delegation.proposal_id, delegation.pr_number, state.version)
-  if merged == nil then
-    return false, "skip-pending(merged-head-missing)", "merged child PR has no trusted merged head marker"
+  local merged_head_sha = merged and merged.head_sha or nil
+  if merged_head_sha == nil and canonical_pr_is_merged(current_pr) then
+    merged_head_sha = current_pr.head_sha
+  end
+  if not M._is_git_sha(merged_head_sha) then
+    return false, "skip-pending(merged-head-missing)", "merged child PR has no trusted merged head marker or canonical merged head"
   end
   M.fetch_branch(branches.upstream, "awaiting-pr upstream fetch")
   local upstream_head = M.remote_head(branches.upstream, "awaiting-pr upstream head", "unsafe awaiting-pr upstream head")
-  if not M.is_ancestor(merged.head_sha, upstream_head, "awaiting-pr rollup ancestry") then
+  if not M.is_ancestor(merged_head_sha, upstream_head, "awaiting-pr rollup ancestry") then
     return false, "skip-pending(rollup-not-landed)", "merged child PR head is not contained in upstream branch"
   end
   return true
