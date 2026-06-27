@@ -251,6 +251,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/composed_manifest_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
+  python3 -B "$ROOT/scripts/dogfood_board_test.py" || fail=1
   python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
   python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
   if ! competence_base_ref="$(competence_gate_base_ref)"; then

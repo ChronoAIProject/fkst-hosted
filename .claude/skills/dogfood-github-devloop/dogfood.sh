@@ -145,6 +145,50 @@ wait_supervise_ready() { # $1 pid, $2 log
 epoch_utc() { [ -z "${1:-}" ] && { echo 0; return; }; TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null || echo 0; }
 expand() { [ "${1:-all}" = all ] && echo "$DOGFOOD_REPOS" || echo "$1"; }
 
+issue_label_has() { # $1 comma-separated labels, $2 label
+  case ",$1," in
+    *",$2,"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+issue_primary_state() { # $1 comma-separated fkst-dev labels
+  local labels="$1" label state fallback="" old_ifs="$IFS"
+  IFS=,
+  for label in $labels; do
+    [ -n "$label" ] || continue
+    state="${label#fkst-dev:}"
+    [ -n "$fallback" ] || fallback="$state"
+    case "$state" in
+      enabled|blocked-on-dependency) continue ;;
+      *) IFS="$old_ifs"; echo "$state"; return 0 ;;
+    esac
+  done
+  IFS="$old_ifs"
+  echo "$fallback"
+}
+
+issue_recency_class() { # $1 issue-number, $2 labels, $3 state, $4 age-hours, $5 stale-hours, $6 open-pr-issue-numbers
+  local num="$1" labels="$2" st="$3" age="$4" stale="$5" openpr="$6"
+  case "$st" in
+    tracking|pr-open) echo "tracking/umbrella" ;;
+    blocked|impl-failed|merged|declined) echo "parked($st)" ;;
+    thinking|ready|implementing|stalled-thinking)
+      if [ "$st" = "ready" ] && issue_label_has "$labels" "fkst-dev:blocked-on-dependency"; then
+        echo "parked(dependency-wait)"
+      elif [ "$age" -ge "$stale" ]; then
+        echo "⚠ STUCK $st ${age}h"
+      else
+        echo "✓ flowing $st ${age}h"
+      fi
+      ;;
+    reviewing|fixing|review-meta|merge-ready|merging)
+      if echo "$openpr" | grep -qx "$num"; then echo "$st →see PR (active)"; else echo "⚠ STRANDED $st (no open PR)"; fi
+      ;;
+    *) return 1 ;;
+  esac
+}
+
 # Sync a dogfood RUN checkout (behavior PKGSRC + target HOST) to the machine's
 # INTEGRATION_BRANCH — the dogfood runs its own pre-rollup code (feature ->
 # integration-<device> -> rollup -> dev), so it is the live integration test of
@@ -504,15 +548,8 @@ board_one() { # $1 name, $2 stale_hours
   gh api "repos/$REPO/issues?state=open&per_page=100" --jq '.[]|select(.pull_request==null)|"\(.number)\t\(.updated_at)\t\([.labels[].name]|map(select(startswith("fkst-dev:")and .!="fkst-dev:enabled"))|join(","))\t\(.title[0:38])"' 2>/dev/null | \
   while IFS=$'\t' read -r num upd label title; do
     [ -z "$label" ] && continue
-    local a st cls; a=$(( (now - $(epoch_utc "$upd")) / 3600 )); st="${label#fkst-dev:}"; st="${st%%,*}"
-    case "$st" in
-      tracking|pr-open) cls="tracking/umbrella" ;;
-      blocked|impl-failed|merged|declined) cls="parked($st)" ;;
-      thinking|ready|implementing|stalled-thinking) [ "$a" -ge "$stale" ] && cls="⚠ STUCK $st ${a}h" || cls="✓ flowing $st ${a}h" ;;
-      reviewing|fixing|review-meta|merge-ready|merging)
-        if echo "$openpr"|grep -qx "$num"; then cls="$st →see PR (active)"; else cls="⚠ STRANDED $st (no open PR)"; fi ;;
-      *) continue ;;
-    esac
+    local a st cls; a=$(( (now - $(epoch_utc "$upd")) / 3600 )); st="$(issue_primary_state "$label")"
+    cls="$(issue_recency_class "$num" "$label" "$st" "$a" "$stale" "$openpr")" || continue
     printf "  #%-4s [%-12s] %s\n" "$num" "$st" "$cls"
   done
   echo ""
