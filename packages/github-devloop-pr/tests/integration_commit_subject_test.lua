@@ -24,6 +24,26 @@ local function has_commit_subject(subject)
   return false
 end
 
+local function has_commit_subject_with_prefix(prefix)
+  for _, call in ipairs(t.command_calls()) do
+    local argv = {}
+    if call.program ~= nil and tostring(call.program) ~= "" then
+      table.insert(argv, tostring(call.program))
+    end
+    for _, arg in ipairs(call.args or {}) do
+      table.insert(argv, tostring(arg))
+    end
+    if argv[1] == "git" and argv[2] == "commit" then
+      for index, value in ipairs(argv) do
+        if value == "-m" and tostring(argv[index + 1] or ""):sub(1, #prefix) == prefix then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 return {
   test_fix_commit_uses_issue_title_subject = function()
     local event = fixing()
@@ -73,7 +93,8 @@ return {
 
     local result = run_fix(event, opts("fix-commit-subject", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.is_true(has_commit_subject("auto-fix #42: Use issue-derived subjects"))
+    t.is_true(has_commit_subject("auto-fix refs #42: Use issue-derived subjects"))
+    t.eq(has_commit_subject_with_prefix("auto-fix #42"), false)
   end,
 
   test_fix_commit_subject_shell_quotes_single_quote_title = function()
@@ -124,7 +145,7 @@ return {
 
     local result = run_fix(event, opts("fix-commit-subject-quote", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.is_true(has_commit_subject("auto-fix #42: Don't drop quoted title"))
+    t.is_true(has_commit_subject("auto-fix refs #42: Don't drop quoted title"))
   end,
 
   test_fix_commit_subject_falls_back_to_issue_number_when_title_absent = function()
@@ -175,15 +196,16 @@ return {
 
     local result = run_fix(event, opts("fix-commit-subject-fallback", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.is_true(has_commit_subject("auto-fix #42"))
+    t.is_true(has_commit_subject("auto-fix refs #42"))
+    t.eq(has_commit_subject_with_prefix("auto-fix #42"), false)
   end,
 
   test_commit_subject_helpers_keep_message_bounded = function()
     local title = ("long title "):rep(30)
     t.is_true(#core.implement_commit_subject("42", { title = title }) <= 200)
     t.is_true(#core.fix_commit_subject("42", { title = title }) <= 200)
-    t.eq(core.implement_commit_subject("42", {}), "auto-implement #42")
-    t.eq(core.fix_commit_subject("42", nil), "auto-fix #42")
+    t.eq(core.implement_commit_subject("42", {}), "auto-implement refs #42")
+    t.eq(core.fix_commit_subject("42", nil), "auto-fix refs #42")
   end,
 
   test_commit_subject_helpers_truncate_utf8_safely = function()

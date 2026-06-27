@@ -21,7 +21,7 @@ local function commit_subject_title(M, current)
 end
 
 local function bounded_commit_subject(M, prefix, issue_number, current)
-  local subject = tostring(prefix) .. " #" .. tostring(issue_number)
+  local subject = tostring(prefix) .. " refs #" .. tostring(issue_number)
   local title = commit_subject_title(M, current)
   if title ~= nil then
     local title_prefix = subject .. ": "
