@@ -46,14 +46,15 @@ local function parent_comments()
   }
 end
 
-local function child_pr_comments()
+local function child_pr_comments(state)
+  local child_state = state or "merged"
+  local body = core.pr_origin_marker(parent, issue_number, child_branch, version, integration_branch)
+    .. "\n" .. core.state_marker(parent, child_state, version)
+  if child_state == "merged" then
+    body = body .. "\n" .. core.merged_marker(parent, child_pr_number, version, child_head_sha)
+  end
   return {
-    comment(
-      core.pr_origin_marker(parent, issue_number, child_branch, version, integration_branch)
-        .. "\n" .. core.state_marker(parent, "merged", version)
-        .. "\n" .. core.merged_marker(parent, child_pr_number, version, child_head_sha),
-      "2026-06-03T01:04:03Z"
-    ),
+    comment(body, "2026-06-03T01:04:03Z"),
   }
 end
 
@@ -173,7 +174,7 @@ local function mock_rollup_ancestry()
   })
 end
 
-local function mock_liveness_scan_inputs()
+local function mock_liveness_scan_inputs(child_state)
   entity_mocks.mock_issue_list_command(t, core.gh_issue_list_observe_cmd(repo), {
     {
       number = issue_number,
@@ -196,17 +197,17 @@ local function mock_liveness_scan_inputs()
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = child_pr_number,
-    comments = child_pr_comments(),
+    comments = child_pr_comments(child_state),
     head = child_branch,
     head_sha = child_head_sha,
-    state = "MERGED",
+    state = child_state == "merged" and "MERGED" or "OPEN",
     base_branch = integration_branch,
-    merged_at = "2026-06-03T02:03:04Z",
+    merged_at = child_state == "merged" and "2026-06-03T02:03:04Z" or nil,
     labels = {},
   }, entity_mocks.pr_origin_selector, 2)
 end
 
-local function mock_observe_issue_inputs()
+local function mock_observe_issue_inputs(child_state)
   t.mock_command("gh api graphql", {
     stdout = '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}\n',
     stderr = "",
@@ -226,15 +227,17 @@ local function mock_observe_issue_inputs()
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = child_pr_number,
-    comments = child_pr_comments(),
+    comments = child_pr_comments(child_state),
     head = child_branch,
     head_sha = child_head_sha,
-    state = "MERGED",
+    state = child_state == "merged" and "MERGED" or "OPEN",
     base_branch = integration_branch,
-    merged_at = "2026-06-03T02:03:04Z",
+    merged_at = child_state == "merged" and "2026-06-03T02:03:04Z" or nil,
     labels = {},
   }, entity_mocks.pr_origin_selector, 2)
-  mock_rollup_ancestry()
+  if child_state == nil or child_state == "merged" then
+    mock_rollup_ancestry()
+  end
   t.mock_command("gh issue close " .. tostring(issue_number) .. " --repo " .. repo, {
     stdout = "closed\n",
     stderr = "",
@@ -277,11 +280,11 @@ local function mock_github_proxy_writes()
   })
 end
 
-local function mock_everything()
+local function mock_everything(child_state)
   mock_common_env()
   mock_rollup_merge_success()
-  mock_liveness_scan_inputs()
-  mock_observe_issue_inputs()
+  mock_liveness_scan_inputs(child_state)
+  mock_observe_issue_inputs(child_state)
   mock_github_proxy_writes()
 end
 
@@ -312,5 +315,33 @@ return {
     t.eq(label.payload.add_labels[1], "fkst-dev:merged")
     t.eq(h.count_calls("gh pr merge"), 1)
     t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 1)
+  end,
+
+  test_rollup_merge_wake_does_not_close_parent_when_child_pr_is_nonterminal = function()
+    mock_everything("merge-ready")
+
+    local trace = graph.require_quiescent(graph.run(initial_event(), { max_steps = 10 }))
+    graph.assert_covers(trace, {
+      "github-devloop-integration.devloop_rollup_ready -> github-devloop-integration.rollup_merge",
+      "github-devloop.devloop_liveness_tick -> github-devloop.liveness_scan",
+      "github-devloop.devloop_observe_issue -> github-devloop.observe_issue",
+    })
+
+    local tick = graph.require_raise(trace, "github-devloop.devloop_liveness_tick")
+    t.eq(tick.payload.reason, "rollup-merged")
+
+    local observe = graph.require_raise(trace, "github-devloop.devloop_observe_issue")
+    t.eq(observe.payload.source, "liveness-scan")
+    t.eq(tonumber(observe.payload.number), issue_number)
+    local merged_comment = graph.find_raise(trace, "github-proxy.github_issue_comment_request", function(raised)
+      return tostring(raised.payload and raised.payload.body or ""):find('state="merged"', 1, true) ~= nil
+    end)
+    local merged_label = graph.find_raise(trace, "github-proxy.github_issue_label_request", function(raised)
+      local add = raised.payload and raised.payload.add_labels or {}
+      return add[1] == "fkst-dev:merged"
+    end)
+    t.eq(merged_comment, nil)
+    t.eq(merged_label, nil)
+    t.eq(h.count_calls("gh issue close " .. tostring(issue_number) .. " --repo " .. repo), 0)
   end,
 }

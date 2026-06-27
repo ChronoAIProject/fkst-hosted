@@ -62,7 +62,7 @@ def make_fake_bin(path: Path) -> None:
             out.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\\n", encoding="utf-8")
             print("TIMESTAMP=2026-01-01T00:00:00Z LEVEL=info EVENT=code_provenance ENGINE_VER=test-engine PKG_VERS=github-devloop@test-package", flush=True)
             print("TIMESTAMP=2026-01-01T00:00:00Z LEVEL=INFO handles=1 MSG=event runtime running", flush=True)
-            time.sleep(5)
+            time.sleep(12)
             """
         ),
     )
