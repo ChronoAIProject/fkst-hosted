@@ -29,6 +29,7 @@ LIBRARY_B_SPECIFIC_RATCHETS = (
     "std_dependency_model",
     "devloop product knowledge",
     "github-devloop saga-split guards",
+    "github-devloop-intake-default surface guard",
 )
 
 

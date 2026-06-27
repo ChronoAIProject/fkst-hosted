@@ -55,7 +55,6 @@
 {"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"packages/github-devloop-intake/core/admission.lua","owner":"intake","reason":"core module owns event-driven unmanaged issue admission."}
 {"path":"packages/github-devloop-intake-default/core/devloop_wiring.lua","owner":"intake","reason":"core module resolves default intake route package-private prompt modules."}
-{"path":"packages/github-devloop-intake-default/core/github_capabilities.lua","owner":"intake","reason":"core module owns default intake trust-gate capability and hostile canary helpers."}
 {"path":"packages/github-devloop-intake-default/core/intake_class.lua","owner":"intake","reason":"core module owns default intake enable policy."}
 {"path":"packages/github-devloop-intake-default/core/intake_service_class.lua","owner":"intake","reason":"core module owns default intake service-class policy."}
 {"path":"packages/github-devloop-intake-default/departments/intake_judge/main.lua","owner":"intake","reason":"owns default intake route enable and decline policy."}
