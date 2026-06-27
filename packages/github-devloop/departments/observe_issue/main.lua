@@ -131,15 +131,15 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
       comments = current.comments,
     })
   end
-  if state.state == "ready" then
-    facts.dependency_gate = facts.dependency_gate or core.dependency_gate(issue.repo, issue.number, {
-      proposal_id = proposal_id,
-      version = state.version,
-      comments = current.comments,
-    })
-    if core.canonicalize_legacy_ready_dependency_wait("observe_issue", issue, state, facts) then
-      return true
+  for _, advancing_fact in ipairs(row and row.advancing_facts or {}) do
+    if advancing_fact.fact_family == "dependency-gate" and facts.dependency_gate == nil then
+      facts.dependency_gate = core.dependency_gate(issue.repo, issue.number, {
+        proposal_id = proposal_id, version = state.version, comments = current.comments,
+      })
     end
+  end
+  if core.canonicalize_legacy_ready_dependency_wait("observe_issue", issue, state, facts) then
+    return true
   end
   local state_is_issue_local = issue_state ~= nil
     and issue_state.state == state.state
@@ -321,11 +321,11 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return true
   end
-  core.replay_from_table("observe_issue", issue, replay_state, core.restart_transition_row(replay_state.state), {
-    proposal_id = proposal_id,
-    current = current,
-    command = command,
-  })
+  local row, replay_facts = core.replay_row_and_facts_with_declared_dependency_gate(
+    issue, proposal_id, replay_state,
+    current, command
+  )
+  core.replay_from_table("observe_issue", issue, replay_state, row, replay_facts)
   return true
 end
 

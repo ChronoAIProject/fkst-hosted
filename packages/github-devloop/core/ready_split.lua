@@ -123,6 +123,29 @@ local function read_fact(facts, family)
   return facts[tostring(family or ""):gsub("%-", "_")]
 end
 
+local function dependency_gate_fact(M, dept, proposal_id, state, facts)
+  local gate = read_fact(facts, "dependency-gate")
+  if gate ~= nil then
+    return gate
+  end
+  M.log_cas_decision(dept, proposal_id, state, state.state, state.state, "skip-pending(dependency-gate-missing)", "declared dependency-gate fact is not visible")
+  return nil
+end
+
+function M.replay_row_and_facts_with_declared_dependency_gate(issue, proposal_id, state, current, command)
+  local row = M.restart_transition_row(state.state)
+  local facts = { proposal_id = proposal_id, current = current, command = command }
+  for _, advancing_fact in ipairs(row and row.advancing_facts or {}) do
+    if advancing_fact.fact_family == "dependency-gate" then
+      facts.dependency_gate = M.dependency_gate(issue.repo, issue.number, {
+        proposal_id = proposal_id, version = state.version, comments = current.comments,
+      })
+      break
+    end
+  end
+  return row, facts
+end
+
 local function raise_dependency_release(M, dept, issue, proposal_id, state, current, command_comment_request, gate, release_fact)
   local ready_version = M.ready_split_version(state.version)
   local raised = { "github-proxy.github_issue_comment_request" }
@@ -184,13 +207,43 @@ local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, cu
   return #raised > 0
 end
 
+local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state, gate)
+  local add_labels, remove_labels = M.state_label_changes("blocked")
+  table.insert(remove_labels, M._blocked_on_dependency_label)
+  local comment_request = M.attach_issue_claim({
+    schema = "github-proxy.v1",
+    repo = issue.repo,
+    issue_number = issue.number,
+    body = "github-devloop dependency gate blocked"
+      .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. tostring(gate.reason or "dependency-gate-unresolvable")
+      .. "\n\n" .. M.state_marker(proposal_id, "blocked", state.version),
+    dedup_key = M._dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
+    source_ref = M.normalize_source_ref(issue.source_ref),
+  }, issue.source_ref)
+  local label_request = M.build_label_request(
+    issue.repo,
+    issue.number,
+    add_labels,
+    remove_labels,
+    M._dedup_key({ "dependency", "blocked", "label", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
+    issue.source_ref
+  )
+  M.log_cas_decision(dept, proposal_id, state, "dependency_wait", "blocked", "applied(dependency-gate-unresolvable)", gate.reason)
+  return M.replay_raise_effects(dept, proposal_id, "blocked", state.version, { add = add_labels, remove = remove_labels }, {
+    { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
+    { queue = "github-proxy.github_issue_label_request", payload = label_request },
+  })
+end
+
 function M.replay_dependency_wait_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
-  local gate = read_fact(facts, "dependency-gate") or M.dependency_gate(issue.repo, issue.number, {
-    proposal_id = proposal_id,
-    version = state.version,
-    comments = facts.current.comments,
-  })
+  local gate = dependency_gate_fact(M, dept, proposal_id, state, facts)
+  if gate == nil then
+    return false
+  end
+  if gate.kind == "unresolvable" or gate.kind == "cycle" then
+    return raise_dependency_gate_blocked(M, dept, issue, proposal_id, state, gate)
+  end
   if not gate.ok then
     return raise_dependency_wait_hold(M, dept, issue, proposal_id, state, facts.current, gate, facts.command, read_fact(facts, "dependency-wait"))
   end
@@ -219,11 +272,10 @@ end
 function M.replay_ready_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   local fields = replay_fields(M, row, state, issue, proposal_id)
-  local gate = read_fact(facts, "dependency-gate") or M.dependency_gate(issue.repo, issue.number, {
-    proposal_id = proposal_id,
-    version = state.version,
-    comments = facts.current.comments,
-  })
+  local gate = dependency_gate_fact(M, dept, proposal_id, state, facts)
+  if gate == nil then
+    return false
+  end
   if not gate.ok then
     local dep_version = M.ready_split_version(state.version)
     M.log_cas_decision(dept, proposal_id, state, "ready", "dependency_wait", "hold-dependency-reappeared", gate.reason)

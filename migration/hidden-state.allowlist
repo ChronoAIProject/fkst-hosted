@@ -1,7 +1,4 @@
 # package|row|fact_family|successor|issue=<tracking>|why=<migration reason>
-github-devloop|ready|dependency-gate|dependency_wait|issue=#1595|why=behavioral poll replay currently does not advance ready to dependency_wait from the dependency gate fact alone.
-github-devloop|dependency_wait|dependency-gate|dependency_wait|issue=#1595|why=base poll fixture can still advance dependency_wait without the declared dependency gate fact.
-github-devloop|dependency_wait|dependency-gate|blocked|issue=#1595|why=behavioral poll replay currently does not advance dependency_wait to blocked from an unresolvable dependency gate fact alone.
 github-devloop|implementing|implementing|implementing|issue=#1595|why=behavioral poll replay currently does not redrive implementing from the implementing marker fact alone.
 github-devloop-pr|pr-open|pr-link|reviewing|issue=#1595|why=base PR poll fixture can still advance pr-open without the declared PR link fact.
 github-devloop-pr|pr-open|pr-link|fixing|issue=#1595|why=behavioral poll replay currently does not advance pr-open to fixing from the PR link fact alone.
