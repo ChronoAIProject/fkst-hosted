@@ -93,6 +93,12 @@ local function child_comments(state, child_version)
   }
 end
 
+local function child_origin_only_comments()
+  return {
+    comment(core.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch), core._test_bot_login, "2026-06-03T01:04:03Z"),
+  }
+end
+
 local function child_merged_comments_with_kept_promotion()
   return {
     comment(core.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch)
@@ -235,6 +241,57 @@ return {
     mock_branch_config()
     mock_rollup_ancestry(0)
     local result = run_observe(parent_comments(), child_comments("merged"), { write = "real" })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_parent_poll_reconciles_canonical_merged_child_pr_without_child_terminal_markers = function()
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(0)
+    local result = run_observe(parent_comments(), child_origin_only_comments(), {
+      write = "real",
+      pr_state = "MERGED",
+    })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_parent_poll_reconciles_canonical_merged_child_pr_over_stale_nonterminal_marker = function()
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(0)
+    local result = run_observe(parent_comments(), child_comments("merge-ready"), {
+      write = "real",
+      pr_state = "MERGED",
+    })
+
+    t.eq(result.exit_code, 0)
+    local resume = resume_comment(result)
+    t.is_true(resume ~= nil)
+    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
+    t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
+  end,
+
+  test_parent_poll_reconciles_canonical_merged_child_pr_over_stale_closed_marker = function()
+    mock_issue_close()
+    mock_branch_config()
+    mock_rollup_ancestry(0)
+    local result = run_observe(parent_comments(), child_comments("closed-unmerged"), {
+      write = "real",
+      pr_state = "MERGED",
+    })
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
