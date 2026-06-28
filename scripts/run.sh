@@ -850,7 +850,7 @@ cmd_health() {
 }
 
 cmd_ratchet_migration_dry_run() {
-  python3 -B "$ROOT/scripts/ratchet_migration_slicer.py" --repo-root "$ROOT" "$@"
+  python3 -B "$ROOT/packages/github-ratchet-migration-slicer/tools/ratchet_migration_slicer.py" --repo-root "$ROOT" "$@"
 }
 
 cmd_supervise_old() {

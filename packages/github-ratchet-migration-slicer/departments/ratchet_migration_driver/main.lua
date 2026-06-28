@@ -86,12 +86,56 @@ local function decode_json_list(stdout)
   return decoded
 end
 
+local function debug_source_path(level)
+  if type(debug) ~= "table" or type(debug.getinfo) ~= "function" then
+    return nil
+  end
+  local info = debug.getinfo(level or 1, "S")
+  local source = info and info.source or ""
+  if source:sub(1, 1) == "@" then
+    return source:sub(2)
+  end
+  return nil
+end
+
+local function strip_suffix(text, suffix)
+  text = tostring(text or "")
+  suffix = tostring(suffix or "")
+  if suffix ~= "" and text:sub(-#suffix) == suffix then
+    return text:sub(1, #text - #suffix)
+  end
+  return nil
+end
+
+local function package_root()
+  return strip_suffix(debug_source_path(1), "/departments/ratchet_migration_driver/main.lua")
+    or "packages/github-ratchet-migration-slicer"
+end
+
+local function slicer_tool_path()
+  return package_root() .. "/tools/ratchet_migration_slicer.py"
+end
+
+local function allowlist_exists(ratchet)
+  local path = tostring(ratchet and ratchet.allowlist_path or "")
+  if path == "" then
+    return false
+  end
+  if type(file) == "table" and type(file.exists) == "function" then
+    return file.exists(path) == true
+  end
+  local ok = pcall(file.read, path)
+  return ok == true
+end
+
 local function plan_for(ratchet)
   local result = exec_argv({
     argv = {
       "python3",
-      "scripts/ratchet_migration_slicer.py",
+      slicer_tool_path(),
       ratchet.ratchet,
+      "--repo-root",
+      ".",
       "--json",
     },
     timeout = 120,
@@ -410,6 +454,9 @@ local function parent_issue(github, repo, ratchet)
 end
 
 local function reconcile_one(github, git, repo, ratchet)
+  if not allowlist_exists(ratchet) then
+    return "not-applicable-here"
+  end
   local trusted_logins = trusted_bot_logins()
   local plan = plan_for(ratchet)
   local parent = parent_issue(github, repo, ratchet)
