@@ -80,7 +80,7 @@ local function act(event)
 
   local view = core.gh_issue_view(repo, issue_number, "title,body,updatedAt,labels,comments,state,assignees,author", 30)
   if view.exit_code ~= 0 then
-    error("github-devloop: gh issue admission view failed: " .. tostring(view.stderr))
+    error("github-devloop-intake: gh-issue-admission-view-failed: gh issue admission view failed: " .. tostring(view.stderr))
   end
   local current = core.parse_issue_view_intake_judge(view.stdout)
   current.updated_at = current.updated_at or entity.updated_at
