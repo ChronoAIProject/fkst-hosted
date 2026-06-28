@@ -38,6 +38,9 @@
 #   scripts/run.sh test-composed
 #       Run only composed graph conformance for composed package graphs.
 #
+#   scripts/run.sh test-affected
+#       Run scoped local verification for paths changed from the integration base.
+#
 #   scripts/run.sh run <package> <department> [event-json]
 #   scripts/run.sh run <package> <department> --event-file <path>
 #       One-shot run a department through fkst-framework run, decode emitted
@@ -83,6 +86,8 @@ DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 . "$ROOT/scripts/host_entry.sh"
 # shellcheck source=scripts/composed_manifest.sh
 . "$ROOT/scripts/composed_manifest.sh"
+# shellcheck source=scripts/test_affected.sh
+. "$ROOT/scripts/test_affected.sh"
 
 resolve_bin() {
   if ! resolve_bin_contract "$ROOT" "bootstrap"; then
@@ -249,6 +254,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/host_run_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_run_equivalence_test.py" || fail=1
   python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
+  python3 -B "$ROOT/scripts/run_sh_test_affected_test.py" || fail=1
   python3 -B "$ROOT/scripts/composed_manifest_test.py" || fail=1
   python3 -B "$ROOT/scripts/board_test.py" || fail=1
   python3 -B "$ROOT/scripts/dogfood_board_test.py" || fail=1
@@ -949,6 +955,7 @@ main() {
         printf '%s\n' "$_chk_out"; exit 1
       fi
       resolve_bin; ensure_fresh_bin; cmd_test "$@" ;;
+    test-affected) shift; cmd_test_affected "$@" ;;
     test-composed) shift; cmd_check; resolve_bin; ensure_fresh_bin; cmd_test_composed "$@" ;;
     run)  shift; resolve_bin; ensure_fresh_bin; cmd_run "$@" ;;
     supervise) shift; resolve_bin; ensure_fresh_bin; cmd_supervise "$@" ;;

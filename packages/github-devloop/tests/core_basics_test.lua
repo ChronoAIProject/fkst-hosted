@@ -29,6 +29,9 @@ return {
     t.eq(config.integration_branch, "dev")
     t.eq(config.rollup_merge, "auto")
     t.eq(core.test_command(exec), "scripts/run.sh test")
+    local local_command = core.local_iteration_test_command()
+    t.eq(local_command, "scripts/run.sh test-affected")
+    t.is_nil(local_command:find("FKST_DEVLOOP_TEST_COMMAND", 1, true))
 
     t.eq(core.env_present_command("GH_TOKEN"), 'if [ -n "${GH_TOKEN:-}" ]; then printf present; fi')
     responses[core.env_present_command("GH_TOKEN")] = { stdout = "present", exit_code = 0 }
@@ -50,6 +53,7 @@ return {
     t.eq(config.integration_branch, "integration/dev")
     t.eq(config.rollup_merge, "manual")
     t.eq(core.test_command(exec), "cargo build && cargo test")
+    t.eq(core.local_iteration_test_command(exec), local_command)
 
     responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "../bad", exit_code = 0 }
     t.raises(function()
