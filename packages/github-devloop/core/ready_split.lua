@@ -1,4 +1,5 @@
 local S = {}
+local replay_fields_resolver = require("devloop.replay_fields")
 
 function S.install(M)
 
@@ -105,11 +106,11 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
 end
 
 local function replay_fields(M, row, state, issue, proposal_id)
-  return M.resolve_replay_payload_fields(row, state, {
+  return replay_fields_resolver.resolve(row, state, {
     issue = issue,
     state = state,
     proposal_id = proposal_id,
-  })
+  }, M.pr_source_ref)
 end
 
 local function read_fact(facts, family)

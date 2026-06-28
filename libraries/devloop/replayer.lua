@@ -1,4 +1,6 @@
 local S = {}
+local replay_fields = require("devloop.replay_fields")
+
 function S.install(M)
 local function transition_row(state_name)
   for _, row in ipairs(M.restart_transition_table()) do
@@ -12,89 +14,8 @@ end
 function M.restart_transition_row(state_name)
   return transition_row(state_name)
 end
-local marker_aliases = {
-  ["pr-delegation"] = { pr = "pr_number", pr_proposal = "pr_proposal_id" },
-  ["pr-link"] = { pr = "pr_number" },
-  ["review-result"] = { gap = "blocking_gap" },
-  ["merge-gate"] = { review_proposal = "review_proposal_id", review_dedup = "review_dedup_key", head_sha = "reviewed_head_sha" },
-  ["merge-ready"] = { pr = "pr_number", review_proposal = "review_proposal_id", review_dedup = "review_dedup_key", head_sha = "head_sha" },
-  merging = { head_sha = "head_sha" },
-  ["review-converge-round"] = { proposal = "proposal_id", dedup = "dedup_key", round = "n" },
-}
-local function marker_source(facts, family)
-  if family == "state" then
-    return facts.state
-  end
-  if family == "pr-delegation" then
-    return facts["pr-delegation"] or facts.pr_delegation
-  end
-  if family == "child-state" then
-    return facts.child_state
-  end
-  if family == "pr-link" then
-    return facts.link
-  end
-  if family == "review-result" or family == "merge-gate" then
-    return facts.feedback
-  end
-  if family == "review-meta" or family == "fix-reflection" or family == "review-converge-round" then
-    return facts.review_meta
-  end
-  if family == "decomposed" then
-    return facts.decomposed
-  end
-  if family == "merge-ready" then
-    return facts.merge_ready or facts["merge-ready"]
-  end
-  return facts[family]
-end
-local function marker_value(facts, family, attr)
-  local source = marker_source(facts, family)
-  if source == nil then
-    return nil
-  end
-  if family == "state" and attr == "proposal" then
-    return facts.proposal_id
-  end
-  if attr == "proposal" and source.proposal_id ~= nil then
-    return source.proposal_id
-  end
-  if attr == "dedup" and source.dedup_key ~= nil then
-    return source.dedup_key
-  end
-  local aliases = marker_aliases[family] or {}
-  local key = aliases[attr] or attr
-  return source[key]
-end
 local function resolve_payload_fields(row, state, facts)
-  local resolved = {}
-  local context = facts or {}
-  context.state = state
-  for field, reference in pairs(row.payload_fields or {}) do
-    local family, attr = tostring(reference or ""):match("^marker:([^%.]+)%.(.+)$")
-    if family ~= nil then
-      resolved[field] = marker_value(context, family, attr)
-    else
-      local derivation = tostring(reference or ""):match("^source_ref:(.+)$")
-      if derivation == "issue" or derivation == "entity" then
-        resolved[field] = context.issue and context.issue.source_ref or nil
-      elseif derivation == "pr" then
-        if context.source_ref ~= nil then
-          resolved[field] = context.source_ref
-        else
-        local pr_number = context.pr_number or (context.link and context.link.pr_number)
-          or (context.feedback and context.feedback.pr_number) or (context.review_meta and context.review_meta.pr_number)
-          or (context.decomposed and context.decomposed.pr_number)
-        resolved[field] = M.pr_source_ref(context.issue and context.issue.repo or "", pr_number)
-        end
-      end
-    end
-  end
-  return resolved
-end
-
-function M.resolve_replay_payload_fields(row, state, facts)
-  return resolve_payload_fields(row, state, facts or {})
+  return replay_fields.resolve(row, state, facts or {}, M.pr_source_ref)
 end
 
 local function find_linked_pr(snapshot, pr_number)
@@ -395,7 +316,7 @@ local function gather_required_facts(row, entity, state, provided)
   end
   gathered.issue = entity
   gathered.state = state
-  gathered.proposal_id = gathered.proposal_id or marker_value({ state = state }, "state", "proposal")
+  gathered.proposal_id = gathered.proposal_id or replay_fields.marker_value({ state = state }, "state", "proposal")
 
   gathered.snapshot = gathered.snapshot or { comments = gathered.current and gathered.current.comments or {}, prs = {}, state = state }
   if gathered.current_pr ~= nil and gathered.link ~= nil then
