@@ -1,45 +1,19 @@
 #!/usr/bin/env bash
 # Changed-path local verification for implementation/fix worktrees.
-
-test_affected_ref_exists() {
-  git -C "$ROOT" rev-parse --verify --quiet "$1^{commit}" >/dev/null
-}
-
-test_affected_base_ref() {
-  local branch="${FKST_DEVLOOP_INTEGRATION_BRANCH:-}"
-  if [ -z "$branch" ]; then
-    echo "error: FKST_DEVLOOP_INTEGRATION_BRANCH is required for test-affected" >&2
-    return 1
-  fi
-  if ! git -C "$ROOT" check-ref-format --branch "$branch" >/dev/null 2>&1; then
-    echo "error: invalid FKST_DEVLOOP_INTEGRATION_BRANCH: $branch" >&2
-    return 1
-  fi
-  if test_affected_ref_exists "refs/remotes/origin/$branch"; then
-    printf '%s\n' "refs/remotes/origin/$branch"
-    return 0
-  fi
-  if test_affected_ref_exists "$branch"; then
-    printf '%s\n' "$branch"
-    return 0
-  fi
-  echo "error: integration branch ref not found: $branch" >&2
-  return 1
-}
-
-test_affected_base_commit() {
-  local base_ref="$1" fork_point
-  if fork_point="$(git -C "$ROOT" merge-base --fork-point "$base_ref" HEAD 2>/dev/null)"; then
-    printf '%s\n' "$fork_point"
-    return 0
-  fi
-  git -C "$ROOT" merge-base "$base_ref" HEAD
-}
+#
+# Scope is derived from the worktree's OWN uncommitted edits: the implement/fix
+# codex makes its changes and runs local verification BEFORE the change is
+# committed, so `git diff HEAD` + untracked files are exactly the codex's
+# changes. This needs no base branch and no env var, so it is robust across
+# branch topologies and across spawned-codex environments that do not carry
+# FKST_DEVLOOP_INTEGRATION_BRANCH. CI runs the full `scripts/run.sh test` (all
+# packages + composed conformance) as the comprehensive gate; this is fast local
+# feedback only. When nothing scoped is detected (no uncommitted package edits),
+# it falls back to the full suite.
 
 test_affected_changed_paths() {
-  local base_commit="$1"
   {
-    git -C "$ROOT" diff --name-only "$base_commit"
+    git -C "$ROOT" diff --name-only HEAD
     git -C "$ROOT" ls-files --others --exclude-standard
   } | sed '/^$/d' | LC_ALL=C sort -u
 }
@@ -75,11 +49,9 @@ test_affected_run_test() {
 }
 
 cmd_test_affected() {
-  local base_ref base_commit changed_file full=0 packages="" path package status=0
-  base_ref="$(test_affected_base_ref)" || return 1
-  base_commit="$(test_affected_base_commit "$base_ref")" || return 1
+  local changed_file full=0 packages="" path package status=0
   changed_file="$(mktemp "${TMPDIR:-/tmp}/fkst-test-affected.XXXXXX")"
-  test_affected_changed_paths "$base_commit" > "$changed_file"
+  test_affected_changed_paths > "$changed_file"
 
   while IFS= read -r path || [ -n "$path" ]; do
     [ -n "$path" ] || continue

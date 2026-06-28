@@ -83,10 +83,16 @@ class TestAffectedHarness:
         self._git("commit", "-m", "integration ahead")
         self._git("checkout", "-b", "feature")
 
-    def run(self) -> subprocess.CompletedProcess[str]:
+    def run(self, with_branch_env: bool = True) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
-        env["FKST_DEVLOOP_UPSTREAM_BRANCH"] = "dev"
-        env["FKST_DEVLOOP_INTEGRATION_BRANCH"] = "integration"
+        # Scope derives from the worktree's own uncommitted edits, so these env
+        # vars must NOT be required; spawned implement/fix codex environments do
+        # not carry them. Drop them to assert env-independence (with_branch_env=False).
+        env.pop("FKST_DEVLOOP_UPSTREAM_BRANCH", None)
+        env.pop("FKST_DEVLOOP_INTEGRATION_BRANCH", None)
+        if with_branch_env:
+            env["FKST_DEVLOOP_UPSTREAM_BRANCH"] = "dev"
+            env["FKST_DEVLOOP_INTEGRATION_BRANCH"] = "integration"
         env["FKST_TEST_AFFECTED_RUNNER"] = str(self.runner)
         env["FKST_TEST_AFFECTED_LOG"] = str(self.log)
         return subprocess.run(
@@ -106,7 +112,7 @@ class TestAffectedHarness:
 
 
 class RunShTestAffectedTest(unittest.TestCase):
-    def test_diffs_against_integration_base_not_upstream_dev(self) -> None:
+    def test_scopes_to_uncommitted_changed_package(self) -> None:
         h = TestAffectedHarness()
         try:
             h._write("packages/github-devloop/core.lua", "return {changed = true}\n")
@@ -115,6 +121,39 @@ class RunShTestAffectedTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertEqual(h.runner_args(), ["test github-devloop"])
+        finally:
+            h.close()
+
+    def test_works_without_integration_branch_env(self) -> None:
+        # Regression guard (#1619 follow-up): the spawned implement/fix codex
+        # environment does NOT carry FKST_DEVLOOP_INTEGRATION_BRANCH. The earlier
+        # base-ref derivation fail-closed here, breaking every implement. Scope
+        # must derive purely from the worktree's uncommitted edits.
+        h = TestAffectedHarness()
+        try:
+            h._write("packages/github-devloop/core.lua", "return {changed = true}\n")
+
+            result = h.run(with_branch_env=False)
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(h.runner_args(), ["test github-devloop"])
+        finally:
+            h.close()
+
+    def test_committed_only_changes_fall_back_to_full(self) -> None:
+        # Codex verifies before committing, so its edits are uncommitted at verify
+        # time. If nothing is uncommitted (e.g. already committed), fall back to the
+        # full suite rather than silently testing nothing.
+        h = TestAffectedHarness()
+        try:
+            h._write("packages/github-devloop/core.lua", "return {committed = true}\n")
+            h._git("add", ".")
+            h._git("commit", "-m", "committed change")
+
+            result = h.run()
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(h.runner_args(), ["test"])
         finally:
             h.close()
 
