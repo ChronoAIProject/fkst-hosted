@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local opts = h.opts
 local reviewing = h.reviewing
@@ -21,6 +22,10 @@ local merge_comments = h.merge_comments
 local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
 local count_calls = h.count_calls
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function mock_branch_config_env()
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
@@ -223,7 +228,7 @@ local function assert_same_fixing_raise(left, right)
 end
 
 local function assert_declared_merge_gate_fixing_replay_field_set(payload)
-  local row = core.restart_transition_row("fixing")
+  local row = restart_transition_row("fixing")
   t.is_true(row ~= nil)
   local expected = {}
   local expected_count = 0

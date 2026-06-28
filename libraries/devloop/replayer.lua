@@ -2,20 +2,16 @@ local S = {}
 local replay_fields = require("devloop.replay_fields")
 
 function S.install(M)
-local function transition_row(state_name)
-  for _, row in ipairs(M.restart_transition_table()) do
-    if row.from_state == state_name then
-      return row
-    end
-  end
-  return nil
-end
-
-function M.restart_transition_row(state_name)
-  return transition_row(state_name)
-end
 local function resolve_payload_fields(row, state, facts)
   return replay_fields.resolve(row, state, facts or {}, M.pr_source_ref)
+end
+
+local function restart_row(state_name)
+  return replay_fields.restart_transition_row(M.restart_transition_table(), state_name)
+end
+
+local function raise_effects(dept, proposal_id, apply_state, version, label_changes, effects)
+  return replay_fields.replay_raise_effects(M.log_apply, M.log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
 end
 
 local function find_linked_pr(snapshot, pr_number)
@@ -366,20 +362,6 @@ local function log_skip(dept, proposal_id, state, from_state, to_state, outcome,
 end
 
 M.replay_log_skip = log_skip
-
-local function raise_effects(dept, proposal_id, apply_state, version, label_changes, effects)
-  local queues = {}
-  for _, effect in ipairs(effects or {}) do
-    table.insert(queues, effect.queue)
-  end
-  M.log_apply(dept, proposal_id, apply_state, version, label_changes or { add = {}, remove = {} }, queues)
-  for _, effect in ipairs(effects or {}) do
-    M.log_raise(dept, proposal_id, effect.queue, effect.payload)
-  end
-  return true
-end
-
-M.replay_raise_effects = raise_effects
 
 local function build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
   local stable_version = M.strip_transition_version_suffixes(state.version)
@@ -885,7 +867,7 @@ function M.register_restart_replayer(state_name, replay)
 end
 
 function M.replay_from_table(dept, entity, state, table_row, facts)
-  local row = table_row or transition_row(state and state.state)
+  local row = table_row or restart_row(state and state.state)
   local proposal_id = facts and facts.proposal_id or nil
   if row == nil then
     return log_skip(dept, proposal_id, state, "unknown", "unknown", "skip-foreign(table-row)", "no restart transition table row is declared")

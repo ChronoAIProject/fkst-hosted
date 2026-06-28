@@ -2,11 +2,16 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local opts = h.opts
+local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function encode_json_string(value)
   return h.encode_json_string(value)
@@ -205,7 +210,7 @@ return {
   end,
 
   test_liveness_scan_reviewing_issue_side_heartbeat_is_not_read_as_pr_live = function()
-    local row = core.restart_transition_row("reviewing")
+    local row = restart_transition_row("reviewing")
     local source_ref = core.pr_source_ref(repo, 7)
     local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
     local signal = core.restart_row_liveness_signal(row, {

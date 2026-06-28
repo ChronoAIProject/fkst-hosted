@@ -166,12 +166,21 @@ class Violation:
         if path == "packages/github-devloop/departments/reconcile/main.lua":
             line = reconcile_timeout_pr_guard_lines.get((self.surface, self.kind, self.token, self.line), line)
         replayer_hidden_state_lines = {
+            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 141): "224",
             ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 145): "224",
+            ("require_marker_fact", "state-equality", "implementing", 210): "287",
             ("require_marker_fact", "state-equality", "implementing", 214): "287",
             ("require_marker_fact", "state-equality", "implementing", 293): "287",
         }
         if path == "libraries/devloop/replayer.lua":
             line = replayer_hidden_state_lines.get((self.surface, self.kind, self.token, self.line), line)
+        awaiting_pr_replayer_lines = {
+            ("M.replay_awaiting_pr_state", "cursor-read", "current_entity_state(", 117): "128",
+            ("parent_state_for_child_terminal", "state-equality", "closed-unmerged", 36): "47",
+            ("parent_state_for_child_terminal", "state-equality", "merged", 29): "40",
+        }
+        if path == "packages/github-devloop/core/awaiting_pr_replayer.lua":
+            line = awaiting_pr_replayer_lines.get((self.surface, self.kind, self.token, self.line), line)
         return path, self.surface, self.kind, self.token, line
 
     def label(self) -> str:

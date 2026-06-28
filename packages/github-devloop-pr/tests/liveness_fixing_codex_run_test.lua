@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local opts = h.opts
+local replay_fields = require("devloop.replay_fields")
 local fixing = h.fixing
 local run_fix = h.run_fix
 local mock_issue_fix_for_event = h.mock_issue_fix_for_event
@@ -18,6 +19,10 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -361,7 +366,7 @@ end
 return {
   test_fixing_live_codex_run_defers_without_redrive_or_timeout_attempt = function()
     local event = fixing()
-    local row = core.restart_transition_row("fixing")
+    local row = restart_transition_row("fixing")
     local state = fixing_state(event)
     local comments = fixing_comments(event)
     local facts = timeout_facts(event, state, comments)
@@ -398,7 +403,7 @@ return {
 
   test_fixing_no_codex_run_over_budget_escalates_to_blocked_with_why = function()
     local event = fixing()
-    local row = core.restart_transition_row("fixing")
+    local row = restart_transition_row("fixing")
     local state = fixing_state(event, event.version .. "/timeout/fixing/2")
     local comments = fixing_comments(event, state.version)
     table.insert(comments, timeout_attempt_v2_comment(row, state, comments, 1))
@@ -479,7 +484,7 @@ return {
 
   test_fixing_codex_run_match_preserves_fix_suffix = function()
     local event = fixing()
-    local row = core.restart_transition_row("fixing")
+    local row = restart_transition_row("fixing")
     local state = fixing_state(event)
     local facts = timeout_facts(event, state, fixing_comments(event))
     with_codex_runs({
@@ -499,7 +504,7 @@ return {
 
   test_review_meta_live_codex_run_defers_without_redrive_or_timeout_attempt = function()
     local event = h.review_meta_event()
-    local row = core.restart_transition_row("review-meta")
+    local row = restart_transition_row("review-meta")
     local state = {
       state = "review-meta",
       version = event.version,
@@ -539,7 +544,7 @@ return {
 
   test_review_meta_no_codex_run_over_budget_escalates = function()
     local event = h.review_meta_event()
-    local row = core.restart_transition_row("review-meta")
+    local row = restart_transition_row("review-meta")
     local state = {
       state = "review-meta",
       version = event.version .. "/timeout/review-meta/2",

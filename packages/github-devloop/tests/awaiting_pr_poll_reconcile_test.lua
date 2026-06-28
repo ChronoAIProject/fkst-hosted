@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local entity_mocks = require("tests.entity_read_mock_helpers")
 local core = h.core
 local t = h.t
+local replay_fields = require("devloop.replay_fields")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -15,6 +16,10 @@ local merge_commit_sha = "1111111111111111111111111111111111111111"
 local integration_branch = "integration/dev"
 local upstream_branch = "dev"
 local upstream_head_sha = "fedcba9876543210fedcba9876543210fedcba98"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function comment(body, author, created_at)
   return {
@@ -503,7 +508,7 @@ return {
       proposal_id = parent,
       marker_created_at = "2025-01-01T00:00:00Z",
     }
-    local row = core.restart_transition_row("awaiting-pr")
+    local row = restart_transition_row("awaiting-pr")
     local comments = parent_comments({ version = state.version, delegation_version = state.version })
     local facts = {
       proposal_id = parent,

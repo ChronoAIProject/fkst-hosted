@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local replay_fields = require("devloop.replay_fields")
 local opts = h.opts
 local reconcile = h.reconcile
 local review_reconcile = h.review_reconcile
@@ -16,6 +17,10 @@ local repo = "owner/repo"
 local issue_number = 42
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z")
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function pr_list_json(branch, base_branch)
   return '[[{"number":7,"head":{"ref":"' .. branch .. '","sha":"0123456789abcdef0123456789abcdef01234567"},"base":{"ref":"' .. base_branch .. '"},"state":"open"}]]\n'
@@ -87,7 +92,7 @@ return {
     local event = h.ready()
     local impl_version = event.dedup_key
     local state_version = impl_version .. "/timeout/implementing/2"
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = {
       state = "implementing",
       version = state_version,

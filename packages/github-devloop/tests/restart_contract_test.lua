@@ -1,6 +1,11 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local replay_fields = require("devloop.replay_fields")
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function has_value(values, expected)
   for _, value in ipairs(values or {}) do
@@ -452,7 +457,7 @@ return {
         return false
       end
       local ok, classified = pcall(function()
-        return core.replay_from_table_classified("test", {}, { state = "ready" }, core.restart_transition_row("ready"), {})
+        return core.replay_from_table_classified("test", {}, { state = "ready" }, restart_transition_row("ready"), {})
       end)
       core.replay_from_table = previous
       if not ok then error(classified) end

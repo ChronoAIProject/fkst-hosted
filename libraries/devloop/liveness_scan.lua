@@ -1,4 +1,4 @@
-local S = {}
+local S, replay_fields = {}, require("devloop.replay_fields")
 
 function S.install(M)
 local LIVENESS_SCAN_MAX_PER_TICK = 100
@@ -73,7 +73,7 @@ function M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
 end
 
 function M.liveness_scan_state_is_non_terminal(state)
-  local row = M.restart_transition_row(state and state.state)
+  local row = replay_fields.restart_transition_row(M.restart_transition_table(), state and state.state)
   return row ~= nil and row.terminal ~= true
 end
 
@@ -98,7 +98,7 @@ function M.liveness_scan_issue_entity(repo, issue_number)
 end
 
 function M.liveness_scan_maybe_timeout_action(entity, state, facts)
-  local row = M.restart_transition_row(state and state.state)
+  local row = replay_fields.restart_transition_row(M.restart_transition_table(), state and state.state)
   if row == nil or row.terminal == true then
     return nil
   end

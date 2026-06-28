@@ -1,5 +1,6 @@
 local S = {}
 local source_refs = require("contract.source_ref")
+local replay_fields = require("devloop.replay_fields")
 
 function S.install(M, shared)
 local max_timeout_attempts = shared.max_timeout_attempts
@@ -7,7 +8,7 @@ local numeric_minutes = shared.numeric_minutes
 local row_liveness_signal = shared.row_liveness_signal
 
 function M.liveness_budget_minutes(state_name)
-  local row = M.restart_transition_row(state_name)
+  local row = replay_fields.restart_transition_row(M.restart_transition_table(), state_name)
   return row and row.budget and tonumber(row.budget.minutes) or nil
 end
 
@@ -220,7 +221,7 @@ local function emit_decompose_exhausted_marker(dept, entity, state, facts, propo
 end
 
 function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, facts)
-  local row = table_row or M.restart_transition_row(state and state.state)
+  local row = table_row or replay_fields.restart_transition_row(M.restart_transition_table(), state and state.state)
   if row == nil or row.terminal == true then
     return false
   end

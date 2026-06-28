@@ -2,12 +2,17 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local opts = h.opts
+local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 local head_sha = "def456"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local lineages = {
   fix = version .. "/fix/1",
@@ -133,7 +138,7 @@ local function merge_timeout_facts(pr_comments, now_seconds)
 end
 
 local function assert_fresh_merge_wait_does_not_extend_absolute_cap(state_name, lineage_version)
-  local row = core.restart_transition_row(state_name)
+  local row = restart_transition_row(state_name)
   local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local wait_lineage = lineage_version or version
   local timeout_version = wait_lineage .. "/timeout/" .. state_name .. "/3"
@@ -163,7 +168,7 @@ local function assert_fresh_merge_wait_does_not_extend_absolute_cap(state_name, 
 end
 
 local function assert_fresh_merge_wait_defers_within_absolute_cap(state_name)
-  local row = core.restart_transition_row(state_name)
+  local row = restart_transition_row(state_name)
   local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local wait = merge_gate_wait_comment(version, "2026-06-04T00:30:00Z")
   local due, age = core.liveness_timeout_due_with_facts(
@@ -187,7 +192,7 @@ local function assert_fresh_merge_wait_defers_within_absolute_cap(state_name)
 end
 
 local function assert_stale_or_missing_merge_wait_escalates(state_name, wait_comment, lineage_version)
-  local row = core.restart_transition_row(state_name)
+  local row = restart_transition_row(state_name)
   local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local wait_lineage = lineage_version or version
   local timeout_version = wait_lineage .. "/timeout/" .. state_name .. "/3"
@@ -207,7 +212,7 @@ local function assert_stale_or_missing_merge_wait_escalates(state_name, wait_com
 end
 
 local function assert_stale_merge_wait_falls_back_to_under_budget_state_age(state_name)
-  local row = core.restart_transition_row(state_name)
+  local row = restart_transition_row(state_name)
   local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local stale_wait = merge_gate_wait_comment(version, "2026-06-03T00:00:00Z")
   local due, age = core.liveness_timeout_due_with_facts(
@@ -308,7 +313,7 @@ return {
   end,
 
   test_timeout_reconcile_why_reports_merge_gate_wait_age = function()
-    local row = core.restart_transition_row("merge-ready")
+    local row = restart_transition_row("merge-ready")
     local timeout_version = version .. "/timeout/merge-ready/3"
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
@@ -331,7 +336,7 @@ return {
   end,
 
   test_timeout_reconcile_why_reports_fix_lineage_merge_gate_wait_age = function()
-    local row = core.restart_transition_row("merge-ready")
+    local row = restart_transition_row("merge-ready")
     local timeout_version = lineages.fix .. "/timeout/merge-ready/3"
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
@@ -353,7 +358,7 @@ return {
   end,
 
   test_timeout_reconcile_why_reports_review_loop_lineage_merge_gate_wait_age = function()
-    local row = core.restart_transition_row("merge-ready")
+    local row = restart_transition_row("merge-ready")
     local timeout_version = lineages.review_loop .. "/timeout/merge-ready/3"
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391

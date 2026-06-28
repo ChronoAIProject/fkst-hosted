@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("workflow.saga")
+local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 
 local M = {}
 
@@ -68,7 +68,7 @@ local function maybe_reconcile_issue_local_orphaned_pr(issue, proposal_id, curre
   if not issue_local_pr_bound_state_matches_link(issue_state, link) then
     return false
   end
-  local row = core.restart_transition_row(issue_state.state)
+  local row = replay_fields.restart_transition_row(core.restart_transition_table(), issue_state.state)
   if row == nil or row.terminal == true then
     return false
   end
@@ -112,7 +112,7 @@ local function thinking_state_budget_exceeded(state)
 end
 
 local function replay_or_timeout(issue, proposal_id, current, link, snapshot, state, event_ts, issue_state)
-  local row = core.restart_transition_row(state.state)
+  local row = replay_fields.restart_transition_row(core.restart_transition_table(), state.state)
   local facts = {
     proposal_id = proposal_id,
     current = current,
@@ -394,7 +394,7 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
     issue.source_ref
   )
   core.log_cas_decision("observe_issue", proposal_id, state, "dependency_wait", "ready", "applied(operator-dependency-waiver)", "trusted operator command created dependency waiver")
-  core.replay_from_table("observe_issue", issue, state, core.restart_transition_row("dependency_wait"), {
+  core.replay_from_table("observe_issue", issue, state, replay_fields.restart_transition_row(core.restart_transition_table(), "dependency_wait"), {
     proposal_id = proposal_id,
     current = current,
     command_comment_request = comment_request,
@@ -526,7 +526,7 @@ local function process_issue_event(event)
       if not ensure_managed_issue_claim(issue, proposal_id, current, issue_state) then
         return
       end
-      local row = core.restart_transition_row("awaiting-pr")
+      local row = replay_fields.restart_transition_row(core.restart_transition_table(), "awaiting-pr")
       core.replay_from_table("observe_issue", issue, issue_state, row, {
         proposal_id = proposal_id,
         current = current,

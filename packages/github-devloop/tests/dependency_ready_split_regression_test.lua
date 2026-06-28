@@ -1,11 +1,16 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function source_ref()
   return {
@@ -252,7 +257,7 @@ local function replay_ready_with_comments(comments)
       state = "ready",
       version = version,
       proposal_id = proposal_id,
-    }, core.restart_transition_row("ready"), {
+    }, restart_transition_row("ready"), {
       proposal_id = proposal_id,
       current = {
         labels = { "fkst-dev:enabled", "fkst-dev:ready" },
@@ -376,7 +381,7 @@ return {
         state = "ready",
         version = marker_version,
         proposal_id = proposal_id,
-      }, core.restart_transition_row("ready"), {
+      }, restart_transition_row("ready"), {
         proposal_id = proposal_id,
         current = {
           labels = { "fkst-dev:enabled", "fkst-dev:ready" },

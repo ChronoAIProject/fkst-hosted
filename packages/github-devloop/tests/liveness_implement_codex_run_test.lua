@@ -2,8 +2,13 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local ready = h.ready
+local replay_fields = require("devloop.replay_fields")
 
 local repo = "owner/repo"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function state_for(event, version)
   return {
@@ -96,7 +101,7 @@ end
 return {
   test_implement_live_codex_run_defers_without_attempt_marker = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = state_for(event)
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
@@ -122,7 +127,7 @@ return {
 
   test_implement_live_codex_run_within_deadline_defers = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
@@ -150,7 +155,7 @@ return {
 
   test_implement_hung_codex_run_past_deadline_terminates_after_budget = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
@@ -200,7 +205,7 @@ return {
 
   test_implement_recent_codex_run_within_handoff_window_defers = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
@@ -232,7 +237,7 @@ return {
 
   test_implement_no_codex_run_over_budget_remains_actionable = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
@@ -254,7 +259,7 @@ return {
 
   test_implement_codex_runs_unavailable_before_budget_defers_without_timeout_effects = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
@@ -284,7 +289,7 @@ return {
 
   test_implement_codex_runs_unavailable_past_budget_escalates = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
@@ -336,7 +341,7 @@ return {
 
   test_implement_running_codex_run_without_deadline_before_budget_defers_then_recovers = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
@@ -379,7 +384,7 @@ return {
 
   test_implement_running_codex_run_without_deadline_past_budget_escalates = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
@@ -432,7 +437,7 @@ return {
   test_implement_codex_run_match_preserves_reimplement_suffix = function()
     local event = ready()
     local retry_version = core.implementation_attempt_version(event.dedup_key, 2)
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local state = state_for(event, retry_version)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", retry_version),

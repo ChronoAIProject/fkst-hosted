@@ -12,10 +12,15 @@ local find_causal_raise = h.find_causal_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
 local ready = h.ready
+local replay_fields = require("devloop.replay_fields")
 local mock_issue_reconcile = h.mock_issue_reconcile
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local codex_status = require("tests.codex_status_helpers")
 local ISSUE_REDRIVE_QUEUE = "devloop_observe_issue"
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function run_timeout_reconcile(payload, run_opts)
   return t.run_department("departments/reconcile/main.lua", {
@@ -647,7 +652,7 @@ return {
     local stale_version = version .. "/timeout/ready/1"
     local live_version = version .. "/timeout/ready/2"
     local payload = core.build_devloop_timeout_reconcile_payload(
-      core.restart_transition_row("ready"),
+      restart_transition_row("ready"),
       {
         state = "ready",
         version = stale_version,
@@ -679,7 +684,7 @@ return {
     local stale_version = version .. "/timeout/ready/2"
     local advanced_version = version .. "/timeout/ready/2"
     local payload = core.build_devloop_timeout_reconcile_payload(
-      core.restart_transition_row("ready"),
+      restart_transition_row("ready"),
       {
         state = "ready",
         version = stale_version,
@@ -757,7 +762,7 @@ return {
 
   test_liveness_scan_absent_codex_run_still_force_terminates_after_budget = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
     local state = {
       state = "implementing",
@@ -817,7 +822,7 @@ return {
 
   test_codex_runs_error_over_budget_escalates_timeout_decision = function()
     local event = ready()
-    local row = core.restart_transition_row("implementing")
+    local row = restart_transition_row("implementing")
     local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
     local timeout_version = event.dedup_key .. "/timeout/implementing/2"
     local state = {

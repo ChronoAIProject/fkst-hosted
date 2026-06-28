@@ -1,4 +1,4 @@
-local core = require("core")
+local core, replay_fields = require("core"), require("devloop.replay_fields")
 
 local saga = require("workflow.saga")
 
@@ -315,7 +315,7 @@ local function pipeline_timeout(event)
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(timeout reconcile marker already visible)", "timeout reconcile result marker for incoming version is already visible")
       return
     end
-    local live_row = core.restart_transition_row(state.state)
+    local live_row = replay_fields.restart_transition_row(core.restart_transition_table(), state.state)
     if state.state ~= nil and live_row ~= nil and live_row.terminal == true then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(already terminal)", "current marker is already terminal")
       return
@@ -333,7 +333,7 @@ local function pipeline_timeout(event)
       return
     end
 
-    local row = core.restart_transition_row(reconcile.state)
+    local row = replay_fields.restart_transition_row(core.restart_transition_table(), reconcile.state)
     local timeout_facts = {
       proposal_id = reconcile.proposal_id,
       current = { comments = comments },

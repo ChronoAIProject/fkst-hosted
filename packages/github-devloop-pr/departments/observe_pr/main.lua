@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("workflow.saga")
+local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 
 local M = {}
 
@@ -120,7 +120,7 @@ local function replay_pr_local_state(origin, pr_number, current_pr, state, sourc
     repo = origin.repo,
     number = origin.issue_number,
     source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref,
-  }, state, core.restart_transition_row(state.state), {
+  }, state, replay_fields.restart_transition_row(core.restart_transition_table(), state.state), {
     proposal_id = origin.proposal_id,
     current = { comments = current_pr.comments or {} },
     current_pr = current_pr,
@@ -237,7 +237,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
 end
 
 local function maybe_liveness_timeout(origin, pr_number, current_pr, state, source_ref, issue_current)
-  local row = core.restart_transition_row(state and state.state)
+  local row = replay_fields.restart_transition_row(core.restart_transition_table(), state and state.state)
   if not core.restart_row_observable_on(row, "pr") then
     return false
   end
@@ -282,7 +282,7 @@ local function build_conflict_review_fact(origin, pr_number, current_pr, version
 end
 
 local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, state, source_ref, issue_current)
-  local row = core.restart_transition_row(state and state.state)
+  local row = replay_fields.restart_transition_row(core.restart_transition_table(), state and state.state)
   local recovery = row and row.pr_recovery and row.pr_recovery.not_mergeable or nil
   if recovery == nil then
     return false

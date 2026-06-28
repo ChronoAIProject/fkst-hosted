@@ -84,6 +84,30 @@ function R.resolve(row, state, facts, pr_source_ref)
   return resolved
 end
 
+function R.restart_transition_row(transition_table, state_name)
+  -- Behavior-preserving: the pre-extraction code iterated M.restart_transition_table()
+  -- directly, so a nil/miswired table HARD-FAILS (ipairs(nil) errors) rather than
+  -- silently returning no row. Do NOT add `or {}` — fail loud, never swallow a miswire.
+  for _, row in ipairs(transition_table) do
+    if row.from_state == state_name then
+      return row
+    end
+  end
+  return nil
+end
+
+function R.replay_raise_effects(log_apply, log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
+  local queues = {}
+  for _, effect in ipairs(effects or {}) do
+    table.insert(queues, effect.queue)
+  end
+  log_apply(dept, proposal_id, apply_state, version, label_changes or { add = {}, remove = {} }, queues)
+  for _, effect in ipairs(effects or {}) do
+    log_raise(dept, proposal_id, effect.queue, effect.payload)
+  end
+  return true
+end
+
 -- Shared marker-attribute reader: also used by replayer.gather_required_facts to
 -- resolve a fallback proposal_id, so it is part of the typed module surface.
 R.marker_value = marker_value

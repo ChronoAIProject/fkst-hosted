@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local replay_fields = require("devloop.replay_fields")
 local action_label = h.action_label
 local reason_label = h.reason_label
 local opts = h.opts
@@ -18,6 +19,10 @@ local mock_pr_origin = h.mock_pr_origin
 local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+
+local function restart_transition_row(state_name)
+  return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
+end
 
 local function mock_issue_result_view(labels, comments)
   entity_read_mocks.mock_issue_view_selector(t, {
@@ -166,7 +171,7 @@ return {
     t.is_true(tostring(heartbeat.payload.body or ""):find('version="' .. core.safe_version_segment(raw_version) .. '"', 1, true) ~= nil)
     t.eq(tostring(heartbeat.payload.body or ""):find('version="' .. raw_version .. '"', 1, true), nil)
 
-    local row = core.restart_transition_row("reviewing")
+    local row = restart_transition_row("reviewing")
     local signal = core.restart_row_liveness_signal(row, {
       state = "reviewing",
       version = raw_version,

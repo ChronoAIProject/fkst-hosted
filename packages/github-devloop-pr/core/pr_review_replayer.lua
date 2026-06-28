@@ -417,7 +417,7 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
         { queue = "github-proxy.github_pr_comment_request", payload = request },
       })
     end
-    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, lineage_fact.head_sha, "applied(replay)", tostring(carry_reason or "approval-stale"))
+    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, lineage_fact.head_sha, "applied(replay)", tostring(carry_reason or "approval-stale"), tools)
   end
   local approved = {
     proposal_id = proposal_id,
@@ -448,7 +448,7 @@ local function merging_marker_fact(facts, current_pr)
   return facts.merging or M.merging_fact(comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.link.pr_number, facts.state.version, nil)
 end
 
-raise_reviewing_for_current_head = function(dept, issue, state, proposal_id, link, current_pr, old_head_sha, outcome, reason)
+raise_reviewing_for_current_head = function(dept, issue, state, proposal_id, link, current_pr, old_head_sha, outcome, reason, tools)
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return false
   end
@@ -483,7 +483,7 @@ raise_reviewing_for_current_head = function(dept, issue, state, proposal_id, lin
     tostring(current_pr.head_sha),
   })
   M.log_cas_decision(dept, proposal_id, state, "merging", "reviewing", outcome, reason)
-  return M.replay_raise_effects(dept, proposal_id, "reviewing", review_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:merging" } }, effects)
+  return tools.raise_effects(dept, proposal_id, "reviewing", review_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:merging" } }, effects)
 end
 
 local function replay_merging_state(dept, issue, state, row, facts, tools)
@@ -512,7 +512,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
   if not same_linked_head(link, current_pr)
     or tostring(current_pr.head_sha or "") ~= tostring(merge_ready.head_sha or "")
     or tostring(current_pr.head_sha or "") ~= tostring(authorized_head or "") then
-    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, authorized_head, "applied(replay)", "current PR head no longer matches merge authorization")
+    return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, authorized_head, "applied(replay)", "current PR head no longer matches merge authorization", tools)
   end
   local mergeable, mergeable_reason = M.pr_mergeable(current_pr)
   if merging == nil then

@@ -1,4 +1,5 @@
 local S = {}
+local replay_fields = require("devloop.replay_fields")
 
 function S.install(M, shared)
   local source_refs = shared.source_refs
@@ -210,7 +211,7 @@ function M.is_supported_timeout_reconcile(payload)
     return false
   end
   local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
-  local row = M.restart_transition_row(payload.state)
+  local row = replay_fields.restart_transition_row(M.restart_transition_table(), payload.state)
   return payload.schema == "github-devloop.timeout-reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
@@ -404,8 +405,8 @@ function M.timeout_reconcile_fact_for_terminal_version(comments, proposal_id, te
         and round ~= nil
         and state_name ~= nil
         and from_state == state_name
-        and M.restart_transition_row(from_state) ~= nil
-        and M.restart_transition_row(from_state).terminal == false
+        and replay_fields.restart_transition_row(M.restart_transition_table(), from_state) ~= nil
+        and replay_fields.restart_transition_row(M.restart_transition_table(), from_state).terminal == false
         and M._is_bounded_string(from_version, M._max_dedup_len)
         and dedup == expected_dedup then
         return {

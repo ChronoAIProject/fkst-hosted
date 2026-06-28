@@ -134,7 +134,7 @@ local function dependency_gate_fact(M, dept, proposal_id, state, facts)
 end
 
 function M.replay_row_and_facts_with_declared_dependency_gate(issue, proposal_id, state, current, command)
-  local row = M.restart_transition_row(state.state)
+  local row = replay_fields_resolver.restart_transition_row(M.restart_transition_table(), state.state)
   local facts = { proposal_id = proposal_id, current = current, command = command }
   for _, advancing_fact in ipairs(row and row.advancing_facts or {}) do
     if advancing_fact.fact_family == "dependency-gate" then
@@ -230,7 +230,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     issue.source_ref
   )
   M.log_cas_decision(dept, proposal_id, state, "dependency_wait", "blocked", "applied(dependency-gate-unresolvable)", gate.reason)
-  return M.replay_raise_effects(dept, proposal_id, "blocked", state.version, { add = add_labels, remove = remove_labels }, {
+  return replay_fields_resolver.replay_raise_effects(M.log_apply, M.log_raise, dept, proposal_id, "blocked", state.version, { add = add_labels, remove = remove_labels }, {
     { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
     { queue = "github-proxy.github_issue_label_request", payload = label_request },
   })
