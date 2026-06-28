@@ -6,6 +6,7 @@ from __future__ import annotations
 import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
+import check_repo_devloop_godlib
 import check_repo_hidden_state
 import check_repo_intake_default_surface
 import check_repo_intake_routing
@@ -145,6 +146,8 @@ def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violati
         c.add(violations, "G-INTAKE-DEFAULT-SURFACE", message)
     for message in check_repo_intake_routing.repository_messages(root):
         c.add(violations, "G-INTAKE-ROUTING", message)
+    for message in check_repo_devloop_godlib.repository_messages(root):
+        c.add(violations, "G-DEVLOOP-GODLIB", message)
 
 
 def run(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:
