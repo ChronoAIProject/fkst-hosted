@@ -44,6 +44,37 @@ return {
     t.is_true(not contains_error(errors, "github-devloop-pr|blocked|*: non_durable_advance exemption advanced"), table.concat(errors, "\n"))
   end,
 
+  test_hidden_state_conformance_uses_observe_pr_production_replay_path = function()
+    local seen = {}
+    local fake_core = setmetatable({
+      restart_package_name = core.restart_package_name,
+      restart_consumer_sources = core.restart_consumer_sources,
+      replay_from_table = function(dept)
+        seen[dept] = true
+        return false
+      end,
+    }, { __index = core })
+    local rows = {
+      {
+        from_state = "pr-open",
+        to_states = { "reviewing" },
+        observe_surfaces = { pr = true },
+        terminal = false,
+        advancing_facts = {
+          {
+            fact_family = "pr-link",
+            successor = "reviewing",
+            observe_surfaces = { pr = true },
+            source_ref_derivation = "source_ref:pr",
+          },
+        },
+      },
+    }
+    hidden_state.errors(fake_core, rows, {})
+    t.eq(seen.observe_pr, true)
+    t.eq(seen.behavioral_hidden_state_conformance, nil)
+  end,
+
   test_liveness_contract_binds_live_defer_surface_and_version_form = function()
     local by_state = rows_by_state(core.restart_transition_table())
     t.eq(by_state.reviewing.liveness_contract.signal.surface, "pr-comment-stream")

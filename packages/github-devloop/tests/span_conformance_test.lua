@@ -177,10 +177,41 @@ return {
     facts.now_seconds = core.iso_timestamp_epoch_seconds(state.marker_created_at) + 60
 
     local raised = capture_raises(function()
-      local issued = core.replay_from_table("behavioral_hidden_state_conformance", entity, state, row, facts)
+      local issued = core.replay_from_table("observe_issue", entity, state, row, facts)
       t.eq(issued, false)
     end)
     t.eq(find_raise(raised, "devloop_ready"), nil)
+  end,
+
+  test_hidden_state_conformance_uses_observe_issue_production_replay_path = function()
+    local seen = {}
+    local fake_core = setmetatable({
+      restart_package_name = core.restart_package_name,
+      restart_consumer_sources = core.restart_consumer_sources,
+      replay_from_table = function(dept)
+        seen[dept] = true
+        return false
+      end,
+    }, { __index = core })
+    local rows = {
+      {
+        from_state = "ready",
+        to_states = { "implementing" },
+        observe_surfaces = { issue = true },
+        terminal = false,
+        advancing_facts = {
+          {
+            fact_family = "state",
+            successor = "implementing",
+            observe_surfaces = { issue = true },
+            source_ref_derivation = "source_ref:issue",
+          },
+        },
+      },
+    }
+    hidden_state.errors(fake_core, rows, {})
+    t.eq(seen.observe_issue, true)
+    t.eq(seen.behavioral_hidden_state_conformance, nil)
   end,
 
   test_hidden_state_conformance_rejects_non_poll_declaration = function()
