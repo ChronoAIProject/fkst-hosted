@@ -225,9 +225,30 @@ ensure_run_checkout() { # $1 checkout dir, $2 org/repo slug
 sync_to_run_branch() { # $1 worktree dir
   git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || { echo "  ! $1 is not a git worktree"; return 1; }
   git -C "$1" fetch origin "$INTEGRATION_BRANCH" -q 2>/dev/null
+  local target; target=$(git -C "$1" rev-parse --short "origin/$INTEGRATION_BRANCH" 2>/dev/null)
   # checkout -B (not reset --hard): leaves the checkout actually ON the integration branch
   # tracking origin/<integration>, instead of pointing a stale local 'dev' ref at integration content.
-  echo "  $1 -> $(git -C "$1" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>&1 | tail -1; git -C "$1" rev-parse --short HEAD 2>/dev/null) ($INTEGRATION_BRANCH)"
+  local note; note=$(git -C "$1" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>&1 | tail -1)
+  # Verify the checkout actually REACHED target, then self-heal. A checkout that aborts (working-tree
+  # obstruction, a file<->symlink/dir transition racing the running supervise, a dirty tree) otherwise
+  # leaves the clone on STALE code while the function returns ok and the supervise silently launches
+  # stale — the exact "supervise silently re-running already-fixed defects" failure this tooling exists
+  # to prevent. Self-heal forcefully (reset --hard + clean reaches the fetched ref regardless of the
+  # obstruction; clean -fd keeps gitignored .fkst/ runtime), then re-assert the branch so the checkout
+  # stays ON <integration>. If it STILL cannot reach target (deep corruption ensure_run_checkout should
+  # have re-cloned), fail loud with STALE-CHECKOUT so the operator and doctor (pkg-stale) catch it.
+  if [ -n "$target" ] && [ "$(git -C "$1" rev-parse --short HEAD 2>/dev/null)" != "$target" ]; then
+    git -C "$1" reset --hard "origin/$INTEGRATION_BRANCH" -q 2>/dev/null
+    git -C "$1" clean -fdq 2>/dev/null
+    git -C "$1" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>/dev/null
+    note="self-healed stale checkout (was: ${note:-checkout-failed})"
+  fi
+  local head; head=$(git -C "$1" rev-parse --short HEAD 2>/dev/null)
+  if [ -n "$target" ] && [ "$head" != "$target" ]; then
+    echo "  $1 -> STALE-CHECKOUT: still $head, target $target ($note) ($INTEGRATION_BRANCH)"
+    return 1
+  fi
+  echo "  $1 -> $head${note:+ ($note)} ($INTEGRATION_BRANCH)"
 }
 
 # Ensure a checkout's INTEGRATION_BRANCH is >= UPSTREAM_BRANCH (dev) by merging upstream
