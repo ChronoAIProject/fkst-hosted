@@ -167,8 +167,10 @@ class Violation:
             line = reconcile_timeout_pr_guard_lines.get((self.surface, self.kind, self.token, self.line), line)
         replayer_hidden_state_lines = {
             ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 141): "224",
+            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 142): "224",
             ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 145): "224",
             ("require_marker_fact", "state-equality", "implementing", 210): "287",
+            ("require_marker_fact", "state-equality", "implementing", 211): "287",
             ("require_marker_fact", "state-equality", "implementing", 214): "287",
             ("require_marker_fact", "state-equality", "implementing", 293): "287",
         }

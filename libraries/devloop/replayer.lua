@@ -1,7 +1,8 @@
 local S = {}
 local replay_fields = require("devloop.replay_fields")
 
-function S.install(M)
+function S.install(opts)
+local M = opts.core
 local function resolve_payload_fields(row, state, facts)
   return replay_fields.resolve(row, state, facts or {}, M.pr_source_ref)
 end
@@ -837,33 +838,49 @@ end
 
 local replayers = {
   thinking = replay_thinking,
-  dependency_wait = M.replay_dependency_wait_state,
-  ready = M.replay_ready_state,
   implementing = replay_implementing,
-  ["awaiting-pr"] = M.replay_awaiting_pr_state,
   ["impl-failed"] = replay_impl_failed,
   blocked = replay_blocked,
 }
 
-if type(M.install_pr_review_replayers) == "function" then
+local function merge_replayer_registry(target, source)
+  if source == nil then
+    return
+  end
+  if type(source) ~= "table" then
+    error("github-devloop: invalid restart replayer registry")
+  end
+  for state_name, replay in pairs(source) do
+    if type(state_name) ~= "string" or state_name == "" or type(replay) ~= "function" then
+      error("github-devloop: invalid restart replayer registration")
+    end
+    target[state_name] = replay
+  end
+end
+
+merge_replayer_registry(replayers, opts.replayers)
+
+pr_review_tools = {
+  find_linked_pr = find_linked_pr,
+  log_skip = log_skip,
+  raise_effects = raise_effects,
+  resolve_payload_fields = resolve_payload_fields,
+}
+if opts.review_replayers ~= nil then
+  -- Library-owned PR-review replayers are PRE-SEEDED here (behavior-preserving): the
+  -- pre-extraction hook always set these before install_pr_review_replayers ran, so the
+  -- fixing / review-meta / merge-ready / merging states stay replayable (otherwise they
+  -- strand at skip-foreign(replayer)). The package's review_replayers add reviewing/pr-open
+  -- on top.
   replayers.fixing = replay_fixing
   replayers["review-meta"] = replay_review_meta
   replayers["merge-ready"] = replay_merge_ready_like
   replayers.merging = replay_merge_ready_like
-  pr_review_tools = {
-    find_linked_pr = find_linked_pr,
-    log_skip = log_skip,
-    raise_effects = raise_effects,
-    resolve_payload_fields = resolve_payload_fields,
-  }
-  M.install_pr_review_replayers(replayers, pr_review_tools)
-end
-
-function M.register_restart_replayer(state_name, replay)
-  if type(state_name) ~= "string" or state_name == "" or (replay ~= nil and type(replay) ~= "function") then
-    error("github-devloop: invalid restart replayer registration")
+  local review_replayers = opts.review_replayers
+  if type(review_replayers) == "function" then
+    review_replayers = review_replayers(pr_review_tools)
   end
-  replayers[state_name] = replay
+  merge_replayer_registry(replayers, review_replayers)
 end
 
 function M.replay_from_table(dept, entity, state, table_row, facts)

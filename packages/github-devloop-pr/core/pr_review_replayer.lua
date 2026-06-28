@@ -805,7 +805,8 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
   return tools.raise_effects(dept, proposal_id, nil, nil, { add = {}, remove = {} }, effects)
 end
 
-function M.install_pr_review_replayers(replayers, tools)
+local function review_replayers(tools)
+  local replayers = {}
   replayers["pr-open"] = function(dept, issue, state, row, facts)
     return replay_pr_open(dept, issue, state, row, facts, tools)
   end
@@ -828,8 +829,10 @@ function M.install_pr_review_replayers(replayers, tools)
     return terminal_linked_pr_action(dept, issue, state, proposal_id, link, pr, facts, tools)
   end
   M.terminal_linked_pr_action = tools.terminal_linked_pr_action
+  return replayers
 end
 
+return review_replayers
 end
 
 return S

@@ -243,6 +243,9 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
   return true
 end
 
+return {
+  ["awaiting-pr"] = M.replay_awaiting_pr_state,
+}
 end
 
 return S

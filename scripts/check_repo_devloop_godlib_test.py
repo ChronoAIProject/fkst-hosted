@@ -47,6 +47,19 @@ def test_live_repo_at_or_below_baseline() -> None:
     assert msgs == [], f"live repo must be at/below baseline (shrink-only); got: {msgs}"
 
 
+def test_replayer_does_not_read_package_replayers_from_ambient_m() -> None:
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "libraries" / "devloop" / "replayer.lua").read_text(encoding="utf-8")
+    forbidden = [
+        "M.replay_dependency_wait_state",
+        "M.replay_ready_state",
+        "M.replay_awaiting_pr_state",
+        "M.install_pr_review_replayers",
+    ]
+    hits = [token for token in forbidden if token in text]
+    assert hits == [], f"devloop.replayer must use package-provided registry, not ambient M: {hits}"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

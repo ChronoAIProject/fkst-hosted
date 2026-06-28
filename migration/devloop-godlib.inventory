@@ -1,9 +1,9 @@
 {
   "_comment": "G-DEVLOOP-GODLIB shrink-only baseline. Counts = devloop god-PATTERN coupling. CI fails on GROWTH above these; record progress by LOWERING them as install(M)/M-writes are converted to typed modules. Target: all 0 (+ wildcard export replaced by explicit list). See docs/superpowers/specs/2026-06-29-devloop-godpattern-dissolution-design.md",
   "counts": {
-    "install_defs": 51,
-    "m_writes": 872,
-    "package_core_installs": 188,
+    "install_defs": 50,
+    "m_writes": 871,
+    "package_core_installs": 186,
     "wildcard_exports": 1
   }
 }

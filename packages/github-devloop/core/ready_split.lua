@@ -332,6 +332,10 @@ function M.replay_ready_state(dept, issue, state, row, facts)
   return true
 end
 
+return {
+  dependency_wait = M.replay_dependency_wait_state,
+  ready = M.replay_ready_state,
+}
 end
 
 return S

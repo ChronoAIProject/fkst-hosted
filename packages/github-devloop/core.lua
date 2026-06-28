@@ -68,10 +68,17 @@ require("workflow.restart_liveness_contract").install(M, require("devloop.livene
 }))
 require("devloop.restart_responsibility_contract").install(M)
 require("devloop.restart_actionable_epoch").install(M)
-require("core.ready_split").install(M)
-require("core.awaiting_pr_replayer").install(M)
+local ready_split_replayers = require("core.ready_split").install(M)
+local awaiting_pr_replayers = require("core.awaiting_pr_replayer").install(M)
 require("devloop.replay_thinking_convergence").install(M)
-require("devloop.replayer").install(M)
+require("devloop.replayer").install({
+  core = M,
+  replayers = {
+    dependency_wait = ready_split_replayers.dependency_wait,
+    ready = ready_split_replayers.ready,
+    ["awaiting-pr"] = awaiting_pr_replayers["awaiting-pr"],
+  },
+})
 require("core.liveness_bounds").install(M)
 require("devloop.liveness").install(M, wiring.liveness(M))
 require("devloop.sweep_bounds").install(M)
