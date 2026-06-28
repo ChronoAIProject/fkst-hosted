@@ -13,6 +13,26 @@ local spec = {
 local busy_issue_threshold = 3
 local command_timeout_seconds = 120
 local github_timeout_seconds = 30
+local coverage_allowlist_path = "migration/integration-edge-coverage.allowlist"
+
+local function package_root()
+  if type(debug) == "table" and type(debug.getinfo) == "function" then
+    local info = debug.getinfo(1, "S")
+    local source = info and info.source or ""
+    if source:sub(1, 1) == "@" then
+      local path = source:sub(2)
+      local suffix = "/departments/produce/main.lua"
+      if path:sub(-#suffix) == suffix then
+        return path:sub(1, #path - #suffix)
+      end
+    end
+  end
+  return "packages/integration-coverage-producer"
+end
+
+local function checker_tool_path()
+  return package_root() .. "/tools/check_repo_integration_coverage.py"
+end
 
 local function read_env_command(name)
   if name ~= "FKST_GITHUB_REPO" then
@@ -46,12 +66,24 @@ local function done(event)
   return false
 end
 
+local function file_exists(path)
+  if type(file) == "table" and type(file.exists) == "function" then
+    return file.exists(path) == true
+  end
+  local ok = pcall(file.read, path)
+  return ok == true
+end
+
+local function coverage_substrate_exists()
+  return file_exists(coverage_allowlist_path)
+end
+
 local function run_checker()
   if type(exec_argv) ~= "function" then
     error("integration-coverage-producer: exec-argv-unavailable: exec_argv is required", 0)
   end
   local result = exec_argv({
-    argv = { "python3", "scripts/check_repo_integration_coverage.py", "--json" },
+    argv = { "python3", checker_tool_path(), "--json" },
     timeout = command_timeout_seconds,
   })
   if type(result) ~= "table" then
@@ -126,6 +158,10 @@ local function make_department(ports)
   local function act(event)
     if not is_tick(event) then
       error("integration-coverage-producer: unknown-queue: " .. tostring(event and event.queue), 0)
+    end
+    if not coverage_substrate_exists() then
+      log.info("integration-coverage-producer: skip not applicable here missing_allowlist=" .. coverage_allowlist_path)
+      return
     end
     local report = run_checker()
     local edges = core.uncovered_allowlisted_edges(report)
