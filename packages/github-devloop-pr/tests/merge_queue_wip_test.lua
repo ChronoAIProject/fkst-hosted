@@ -213,11 +213,13 @@ local function mock_merged_pr_view(event)
 end
 
 local function mock_diff_name_only(pr_number, paths)
-  t.mock_command("gh pr diff '" .. tostring(pr_number) .. "' --repo 'owner/repo' --name-only", {
-    stdout = table.concat(paths or {}, "\n") .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  for _ = 1, 3 do
+    t.mock_command("gh pr diff '" .. tostring(pr_number) .. "' --repo 'owner/repo' --name-only", {
+      stdout = table.concat(paths or {}, "\n") .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_current_base_head(base_sha)
@@ -520,6 +522,7 @@ return {
     mock_queue_pr(current, "2026-06-03T02:00:00Z")
     mock_merge_pr_view(older, "OPEN", "MERGEABLE", "CLEAN", "COMPLETED", "FAILURE")
     h.mock_required_check_runs_for(older.reviewed_head_sha, "failure")
+    mock_diff_name_only(9, { "packages/older.lua" })
     mock_claimed_issue_for_event(older, 1)
     t.mock_command("git fetch origin 'pull/9/merge'", {
       stdout = "",

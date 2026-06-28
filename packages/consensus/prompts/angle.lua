@@ -26,5 +26,6 @@ Title: {{title}}
     minimal = "Bias: minimal. Judge only the smallest coherent path that fully satisfies the stated goal and acceptance bounds; treat unproven EXTRA scope beyond that path as a reason not to approve, and name in the reply what concrete evidence or scoping would change that.",
     structural = "Bias: structural. Judge whether the proposal preserves clean module boundaries, reliable data flow, clear source-of-truth, durable output/parse and injection trust contracts, and maintainability as the system grows.",
     delete = "Bias: delete. Judge whether the proposed surface should exist at all: prefer removing it, making it a no-op, reusing an existing deterministic mechanism, or collapsing an abstraction; approve adding or keeping surface ONLY when the proposal proves the new surface is necessary.",
+    ["high-risk"] = "Bias: high-risk/security. CI/auth/dependency/scheduler/workflow/lockfile changes are prompt-injection and supply-chain vectors; the bot author may be prompt-injected. Approve ONLY if the high-risk surface is justified and safe under that threat model; abstain or reject if it is not adequately scrutinized.",
   },
 }

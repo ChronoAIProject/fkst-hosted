@@ -1,7 +1,7 @@
 local core = require("core")
 local runtime_files = require("core.merge_runtime_files")
 local ci_wait = require("core.merge_ci_wait")
-
+local high_risk_merge_gate = require("core.high_risk_merge_gate")
 local M = {}
 
 local function log_gate(merge_ready, outcome, reason)
@@ -523,6 +523,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   if not require_consensus_review_approve(current_pr.comments, merge_ready) then
     return
   end
+  high_risk_merge_gate.assert_evidence(core, log_gate, repo, current_pr.comments, merge_ready)
   log_gate(merge_ready, "write-ready", "FKST_GITHUB_WRITE=1 and trusted review-result approve")
 
   current_pr = ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
@@ -644,6 +645,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
         or tostring(origin.base_branch) ~= tostring(branches.integration) then
         return false, "pr-origin-changed"
       end
+      local evidence_ok, evidence_reason = high_risk_merge_gate.require_evidence(core, repo, rechecked_pr.comments, merge_ready)
+      if not evidence_ok then
+        return false, evidence_reason
+      end
       return true, "pr-origin-ok"
     end,
     before_merge = function()
@@ -690,6 +695,10 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     log_gate(merge_ready, "dry-run", merge_reason)
     error("github-devloop: merge wait on write-time " .. tostring(merge_reason) .. "; retrying")
   end
+  if not merge_ok and tostring(merge_reason or ""):find("retry%-pending%(high%-risk%-review%-evidence", 1) ~= nil then
+    core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merging", merge_reason, "trusted high-risk review evidence marker is not visible")
+    error("github-devloop: high-risk review evidence marker not visible at write-time; retrying")
+  end
   if not merge_ok then
     core.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merging", "fail-closed(write-gate)", "write-time PR fact failed: " .. tostring(merge_reason))
     error("github-devloop: write-time PR fact changed before merge")
@@ -698,7 +707,6 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   finalize_merged(repo, issue_number, merge_ready, rechecked_state, "PR merge confirmed merged", merge_rechecked_pr)
   return { status = "merged", pr_number = merge_ready.pr_number, merge_ready = merge_ready, queue_entries = queue_entries }
 end
-
 local function synthesize_merge_ready_from_queue_head(repo, head)
   if type(head) ~= "table"
     or head.proposal_id == nil
@@ -715,12 +723,9 @@ local function synthesize_merge_ready_from_queue_head(repo, head)
     reviewed_head_sha = head.head_sha,
   }, core.pr_source_ref(repo, head.pr_number))
 end
-
 local function merge_queue_head_all(repo, base_branch)
-  local head, entries = core.merge_queue_head(repo, base_branch)
-  return head, entries or {}
+  local head, entries = core.merge_queue_head(repo, base_branch); return head, entries or {}
 end
-
 local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
   local next_head = merge_queue_head_all(repo, branches.integration)
   if next_head == nil then
@@ -731,7 +736,6 @@ local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
     raise("devloop_merge_queue_tick", payload)
   end
 end
-
 local function queue_starvation_cause_matches_entry(cause, entry)
   local cause_pr = tonumber(cause and cause.head_pr_number)
   if cause_pr == nil or type(entry) ~= "table" then
@@ -742,7 +746,6 @@ local function queue_starvation_cause_matches_entry(cause, entry)
     and tostring(entry.proposal_id or "") == tostring(cause.proposal_id or "")
     and tostring(entry.version or "") == tostring(cause.version or "")
 end
-
 local function queue_starvation_target_entry(cause, entries)
   local target = nil
   for _, entry in ipairs(entries or {}) do
@@ -760,7 +763,6 @@ local function queue_starvation_target_entry(cause, entries)
   end
   return target, age_minutes, "aged-candidate"
 end
-
 local function process_merge_queue_tick(event)
   local cause = type(event and event.payload) == "table" and event.payload.cause or nil
   local cause_kind = type(cause) == "table" and tostring(cause.kind or "") or ""
@@ -774,7 +776,6 @@ local function process_merge_queue_tick(event)
     })
     return
   end
-
   local lock_key = core.merge_lane_lock_key(repo)
   if lock_key == nil then
     core.log_entry("merge", event, "unknown", "")
@@ -785,7 +786,6 @@ local function process_merge_queue_tick(event)
     })
     return
   end
-
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
     local branches = core.branch_config()

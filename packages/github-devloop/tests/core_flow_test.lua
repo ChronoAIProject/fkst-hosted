@@ -806,6 +806,25 @@ return {
     t.is_true(review.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(core.validate_proposal(review))
 
+    local function context_fetch_returns_high_risk()
+      return "runtime-cache:github-devloop/context-bundle-manifest/pr-review-owner-repo-7", true
+    end
+    local high_risk_review = core.build_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
+      title = "Converge narrowing",
+      body = "Body",
+    }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, {}, context_fetch_returns_high_risk())
+    t.eq(table.concat(high_risk_review.angles, ","), "minimal,structural,delete,high-risk")
+    t.is_true(high_risk_review.dedup_key:find("/loop/2", 1, true) ~= nil)
+    t.is_true(core.validate_proposal(high_risk_review))
+
+    local high_risk_board_review = core.build_board_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
+      title = "Converge narrowing",
+      body = "Body",
+    }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, "2026-06-08T00:00:00Z", {}, context_fetch_returns_high_risk())
+    t.eq(table.concat(high_risk_board_review.angles, ","), "minimal,structural,delete,high-risk")
+    t.is_true(high_risk_board_review.dedup_key:find("/loop/2", 1, true) ~= nil)
+    t.is_true(core.validate_proposal(high_risk_board_review))
+
     -- Without a converge carry the proposal stays valid and blind-compatible: the round is
     -- still tracked, but no convergence_question / prior_round_digests are injected.
     local blind = core.build_loop_proposal("owner/repo", "42", {

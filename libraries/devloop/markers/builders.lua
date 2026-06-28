@@ -231,6 +231,28 @@ function M.merge_ready_marker(issue_proposal_id, pr_number, version, review_prop
     .. '" -->'
 end
 
+function M.high_risk_review_evidence_marker(issue_proposal_id, version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest, angle_digest)
+  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+    error("github-devloop: invalid high-risk review evidence marker")
+  end
+  if not M._is_bounded_string(version, M._max_dedup_len)
+    or not M._is_bounded_string(review_proposal_id, M._max_key_len)
+    or not M._is_bounded_string(review_dedup_key, M._max_dedup_len)
+    or not M._is_bounded_string(paths_digest, M._max_key_len)
+    or not M._is_bounded_string(angle_digest, M._max_key_len) then
+    error("github-devloop: invalid high-risk review evidence marker")
+  end
+  return '<!-- fkst:github-devloop:high-risk-review-evidence:v1 proposal="' .. tostring(issue_proposal_id)
+    .. '" version="' .. tostring(version)
+    .. '" pr="' .. tostring(pr_number)
+    .. '" head_sha="' .. tostring(head_sha)
+    .. '" review_proposal="' .. tostring(review_proposal_id)
+    .. '" review_dedup="' .. tostring(review_dedup_key)
+    .. '" risk="high" angle="high-risk" verdict="approve" paths_digest="' .. tostring(paths_digest)
+    .. '" angle_digest="' .. tostring(angle_digest)
+    .. '" -->'
+end
+
 function M.review_carry_over_marker(issue_proposal_id, version, old_review_proposal_id, old_review_dedup_key, approved_head_sha, new_review_proposal_id, new_review_dedup_key, new_head_sha, base_head_sha)
   if not M._is_git_sha(approved_head_sha)
     or not M._is_git_sha(new_head_sha)

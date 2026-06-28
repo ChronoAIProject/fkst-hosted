@@ -504,6 +504,16 @@ local function run_merge(payload, run_opts)
     stderr = "",
     exit_code = 0,
   })
+  local skip_default_risk_mock = type(run_opts) == "table"
+    and type(run_opts.env) == "table"
+    and run_opts.env.FKST_TEST_SKIP_DEFAULT_RISK_MOCK == "1"
+  for _ = 1, skip_default_risk_mock and 0 or 2 do
+    t.mock_command("gh pr diff '" .. tostring(tonumber(payload and payload.pr_number) or 7) .. "' --repo 'owner/repo' --name-only", {
+      stdout = "file.lua\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
   return t.run_department("departments/merge/main.lua", {
     queue = "devloop_merge_ready",
     payload = payload,

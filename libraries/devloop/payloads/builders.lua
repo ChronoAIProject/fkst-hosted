@@ -377,7 +377,14 @@ function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n,
   return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key), repo, tick)
 end
 
-function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
+local function apply_high_risk_angles(proposal, high_risk)
+  if high_risk == true then
+    proposal.angles = { "minimal", "structural", "delete", "high-risk" }
+  end
+  return proposal
+end
+
+function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -414,7 +421,7 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
     error("github-devloop: PR review proposal exceeds bounded body")
   end
 
-  return {
+  return apply_high_risk_angles({
     schema = "consensus.proposal.v1",
     verdict_mode = "gate",
     proposal_id = review_id,
@@ -426,21 +433,21 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
       "review",
     }),
     source_ref = M.normalize_source_ref(source_ref),
-  }
+  }, high_risk)
 end
 
-function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch)
-  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch), repo, tick)
+function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch, high_risk)
+  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk), repo, tick)
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, dedup_key)
-  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch)
+function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key)
+  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
   proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, dedup_key)
-  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, dedup_key), repo, tick)
+function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, high_risk, dedup_key)
+  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key), repo, tick)
 end
 
 function M.implement_commit_subject(issue_number, current)

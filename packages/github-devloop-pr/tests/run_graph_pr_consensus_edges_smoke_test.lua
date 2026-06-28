@@ -158,6 +158,11 @@ return {
   test_run_graph_pr_consensus_reached_routes_to_review_result = function()
     mock_env()
     seed_pr_and_issue_reads("merge-ready")
+    t.mock_command("gh pr diff '7' --repo 'owner/repo' --name-only", {
+      stdout = "file.lua\n",
+      stderr = "",
+      exit_code = 0,
+    })
 
     local trace = graph.require_quiescent(graph.run(
       initial_event("consensus.consensus_reached", reached_payload()),

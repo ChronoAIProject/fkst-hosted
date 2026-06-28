@@ -1,6 +1,33 @@
 local S = {}
 
 function S.install(M)
+local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version, comments, current_head_sha)
+  local name_result = M.gh_pr_diff_name_only(repo, pr_number, 30)
+  local risk = M.github_diff_name_risk(name_result)
+  if risk.known == false then
+    return nil, "carry-over-risk-unknown: " .. tostring(risk.reason or "unknown")
+  end
+  if risk.high_risk ~= true then
+    return true, "normal-risk"
+  end
+  local new_review_proposal = M.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
+  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
+  local fact = M.high_risk_review_evidence_fact(
+    comments,
+    issue_proposal_id,
+    version,
+    pr_number,
+    current_head_sha,
+    new_review_proposal,
+    new_review_dedup,
+    M.github_paths_digest(risk.paths)
+  )
+  if fact == nil then
+    return nil, "high-risk-carry-over-evidence-missing"
+  end
+  return true, "high-risk-evidence"
+end
+
 function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, version, comments, base_branch, current_head_sha)
   if type(comments) ~= "table" or not M.is_safe_head_sha(current_head_sha) then
     return nil, "invalid-carry-over-input"
@@ -35,6 +62,10 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   local empty_delta, delta_reason = M.has_empty_resolution_delta(fact.head_sha, base_head, current_head_sha)
   if not empty_delta then
     return nil, "non-empty-resolution-delta: " .. tostring(delta_reason)
+  end
+  local risk_ok, risk_reason = carry_over_risk_gate(repo, pr_number, issue_proposal_id, version, comments, current_head_sha)
+  if not risk_ok then
+    return nil, risk_reason
   end
   local new_review_proposal = M.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
   local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"

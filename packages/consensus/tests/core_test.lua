@@ -143,6 +143,17 @@ return {
     t.is_true(meta_prompt:find("You are the consensus meta-judge.", 1, true) ~= nil)
   end,
 
+  test_high_risk_angle_prompt_carries_security_bias = function()
+    local prompt = core.build_angle_prompt(proposal({
+      angles = { "minimal", "structural", "delete", "high-risk" },
+    }), "high-risk")
+
+    t.is_true(prompt:find("Bias: high-risk/security.", 1, true) ~= nil)
+    t.is_true(prompt:find("prompt-injection and supply-chain vectors", 1, true) ~= nil)
+    t.is_true(prompt:find("Approve ONLY if the high-risk surface is justified and safe", 1, true) ~= nil)
+    t.is_true(prompt:find("Angle: high-risk", 1, true) ~= nil)
+  end,
+
   test_consensus_angle_and_meta_prompts_without_content_fetch_skip_history_directive = function()
     local angle_prompt = core.build_angle_prompt(proposal_without_content_fetch(), "minimal")
     local meta_prompt = core.build_meta_judge_prompt(proposal_without_content_fetch(), {

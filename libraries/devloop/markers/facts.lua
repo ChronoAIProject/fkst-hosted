@@ -325,6 +325,8 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->"
+  local best = nil
+  local best_seconds = nil
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
@@ -340,7 +342,7 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
         and M._is_git_sha(marker_head_sha) then
-        return {
+        local candidate = {
           proposal_id = marker_issue,
           pr_number = tonumber(marker_pr),
           version = marker_version,
@@ -350,10 +352,79 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
           reviewed_head_sha = marker_head_sha,
           comment_created_at = M._comment_created_at(comment),
         }
+        local candidate_seconds = M.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
+        if best == nil or candidate_seconds >= best_seconds then
+          best = candidate
+          best_seconds = candidate_seconds
+        end
       end
     end
   end
-  return nil
+  return best
+end
+
+function M.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  if not M._is_bounded_string(paths_digest, M._max_key_len) then
+    return nil
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:high%-risk%-review%-evidence:v1.-%-%->"
+  local best = nil
+  local best_seconds = nil
+  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
+    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      local marker_issue = marker_attr(marker, "proposal")
+      local marker_version = marker_attr(marker, "version")
+      local marker_pr = marker_attr(marker, "pr")
+      local marker_head_sha = marker_attr(marker, "head_sha")
+      local marker_review_proposal = marker_attr(marker, "review_proposal")
+      local marker_review_dedup = marker_attr(marker, "review_dedup")
+      local marker_risk = marker_attr(marker, "risk")
+      local marker_angle = marker_attr(marker, "angle")
+      local marker_verdict = marker_attr(marker, "verdict")
+      local marker_paths_digest = marker_attr(marker, "paths_digest")
+      local marker_angle_digest = marker_attr(marker, "angle_digest")
+      if marker_issue == tostring(issue_proposal_id)
+        and marker_version == tostring(issue_version)
+        and tostring(marker_pr or "") == tostring(pr_number or "")
+        and tostring(marker_head_sha or "") == tostring(head_sha or "")
+        and tostring(marker_review_proposal or "") == tostring(review_proposal_id or "")
+        and tostring(marker_review_dedup or "") == tostring(review_dedup_key or "")
+        and marker_risk == "high"
+        and marker_angle == "high-risk"
+        and marker_verdict == "approve"
+        and tostring(marker_paths_digest or "") == tostring(paths_digest)
+        and M._is_git_sha(marker_head_sha)
+        and M._is_bounded_string(marker_review_proposal, M._max_key_len)
+        and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and M._is_bounded_string(marker_paths_digest, M._max_key_len)
+        and M._is_bounded_string(marker_angle_digest, M._max_key_len) then
+        local candidate = {
+          proposal_id = marker_issue,
+          version = marker_version,
+          pr_number = tonumber(marker_pr),
+          head_sha = marker_head_sha,
+          reviewed_head_sha = marker_head_sha,
+          review_proposal_id = marker_review_proposal,
+          review_dedup_key = marker_review_dedup,
+          risk = marker_risk,
+          angle = marker_angle,
+          verdict = marker_verdict,
+          paths_digest = marker_paths_digest,
+          angle_digest = marker_angle_digest,
+          comment_created_at = M._comment_created_at(comment),
+        }
+        local candidate_seconds = M.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
+        if best == nil or candidate_seconds >= best_seconds then
+          best = candidate
+          best_seconds = candidate_seconds
+        end
+      end
+    end
+  end
+  return best
 end
 
 function M.review_result_approval_matches_event(comments, merge_ready)

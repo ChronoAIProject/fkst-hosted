@@ -93,11 +93,53 @@ return saga.department(spec, { done = function() return false end, act = functio
     core.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision
+    local comment_reached = reached
     local gate_owned_reject = reached.decision == "reject" and core.is_gate_owned_review_gap(reached.blocking_gap)
     local out_of_contract_reject = reached.decision == "reject" and core.is_out_of_contract_review_gap(reached.blocking_gap)
     if gate_owned_reject or out_of_contract_reject then
       effective_decision = "approve"
     end
+
+    local high_risk_paths = {}
+    local paths_digest = nil
+    local angle_digest = nil
+    local high_risk_angle_not_approved = false
+    if effective_decision == "approve" then
+      local name_result = core.gh_pr_diff_name_only(repo, pr_number, 30)
+      local risk = core.github_diff_name_risk(name_result)
+      high_risk_paths = risk.high_risk_paths or {}
+      if risk.known == false then
+        core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "merge-ready", "retry-pending(high-risk-review-evidence:" .. tostring(risk.reason or "unknown") .. ")", "review diff risk is undecidable")
+        error("github-devloop: review diff risk is undecidable; retrying")
+      elseif risk.high_risk == true then
+        local high_risk_approved = false
+        if type(reached.angle_results) == "table" then
+          for _, item in ipairs(reached.angle_results) do
+            if type(item) == "table"
+              and item.angle == "high-risk"
+              and item.verdict == "approve" then
+              high_risk_approved = true
+            end
+          end
+        end
+        if not high_risk_approved then
+          effective_decision = "reject"
+          high_risk_angle_not_approved = true
+          comment_reached = {}
+          for key, value in pairs(reached) do
+            comment_reached[key] = value
+          end
+          comment_reached.decision = "reject"
+          comment_reached.blocking_gap = "high-risk-angle-not-approved"
+          comment_reached.body = "High-risk PR approval did not include an approving high-risk angle."
+        end
+        if effective_decision == "approve" then
+          paths_digest = core.github_paths_digest(risk.paths)
+          angle_digest = core.converge_angles_digest(reached.angle_results)
+        end
+      end
+    end
+
     local issue_version = state.version
     local reflection_checkpoint = false
     if effective_decision == "reject" and core.version_fix_round(state.version) < core.max_fix_rounds() then
@@ -147,9 +189,12 @@ return saga.department(spec, { done = function() return false end, act = functio
         return
       end
     end
-    core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
-    local comment_reached = reached
-    if gate_owned_reject or out_of_contract_reject then
+    if high_risk_angle_not_approved then
+      core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
+    else
+      core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, core.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
+    end
+    if (gate_owned_reject or out_of_contract_reject) and not high_risk_angle_not_approved then
       comment_reached = {}
       for key, value in pairs(reached) do
         comment_reached[key] = value
@@ -166,8 +211,9 @@ return saga.department(spec, { done = function() return false end, act = functio
       comment_reached.blocking_gap = nil
     end
     if reflection_checkpoint then
+      local base_reached = comment_reached
       comment_reached = {}
-      for key, value in pairs(reached) do
+      for key, value in pairs(base_reached) do
         comment_reached[key] = value
       end
       comment_reached.reflection_checkpoint = true
@@ -176,6 +222,10 @@ return saga.department(spec, { done = function() return false end, act = functio
       comment_reached.current_head_sha = current_pr.head_sha
     end
     local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
+    local evidence_request = nil
+    if effective_decision == "approve" and #high_risk_paths > 0 then
+      evidence_request = core.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+    end
     local label_request = nil
     if origin.issue_number ~= nil then
       label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, comment_reached, core.issue_source_ref(origin.repo, origin.issue_number))
@@ -184,6 +234,9 @@ return saga.department(spec, { done = function() return false end, act = functio
     local raised = {
       "github-proxy.github_pr_comment_request",
     }
+    if evidence_request ~= nil then
+      table.insert(raised, "github-proxy.github_pr_comment_request")
+    end
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
@@ -199,6 +252,9 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     core.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
     core.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    if evidence_request ~= nil then
+      core.log_raise("review_result", origin.proposal_id, "github-proxy.github_pr_comment_request", evidence_request)
+    end
     if origin.issue_number ~= nil then
       core.log_raise("review_result", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
     end

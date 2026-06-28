@@ -65,6 +65,41 @@ local function merge_comments(event, branch, impl_version, include_review_result
   return comments
 end
 
+local function high_risk_paths()
+  return {
+    ".github/workflows/ci.yml",
+    "file.lua",
+  }
+end
+
+local function high_risk_paths_digest()
+  return core.github_paths_digest(high_risk_paths())
+end
+
+local function high_risk_review_evidence_marker(event, extra)
+  local opts = extra or {}
+  return core.high_risk_review_evidence_marker(
+    opts.proposal_id or event.proposal_id,
+    opts.version or event.version,
+    opts.pr_number or event.pr_number,
+    opts.head_sha or event.reviewed_head_sha,
+    opts.review_proposal_id or event.review_proposal_id,
+    opts.review_dedup_key or event.review_dedup_key,
+    opts.paths_digest or high_risk_paths_digest(),
+    opts.angle_digest or "high-risk-angle-digest"
+  )
+end
+
+local function merge_comments_with_high_risk_evidence(event, extra)
+  local comments = merge_comments(event)
+  table.insert(comments, {
+    body = high_risk_review_evidence_marker(event, extra),
+    author_login = "fkst-test-bot",
+    created_at = "2026-06-03T01:00:00Z",
+  })
+  return comments
+end
+
 local function pr_native_comments(event, include_review_result)
   local comments = {
     core.state_marker(event.proposal_id, "merge-ready", event.version),
@@ -333,6 +368,30 @@ local function mock_pr_merge_command(exit_code, stderr)
   })
 end
 
+local function mock_pr_diff_name_only(paths, exit_code, stderr, pr_number, repo)
+  t.mock_command("gh pr diff '" .. tostring(pr_number or 7) .. "' --repo '" .. tostring(repo or "owner/repo") .. "' --name-only", {
+    stdout = table.concat(paths or { "file.lua" }, "\n") .. "\n",
+    stderr = stderr or "",
+    exit_code = exit_code or 0,
+  })
+end
+
+local function mock_pr_high_risk_diff_name_only()
+  mock_pr_diff_name_only(high_risk_paths())
+end
+
+local function mock_pr_normal_risk_diff_name_only()
+  mock_pr_diff_name_only({ "file.lua" })
+end
+
+local function mock_pr_empty_diff_name_only()
+  mock_pr_diff_name_only({})
+end
+
+local function mock_pr_failed_diff_name_only()
+  mock_pr_diff_name_only({}, 1, "diff unavailable")
+end
+
 local function mock_pr_ready(exit_code, stderr)
   t.mock_command("gh pr ready '7' --repo 'owner/repo'", {
     stdout = "ready\n",
@@ -574,14 +633,23 @@ end
 
 return {
   merge_comments = merge_comments,
+  merge_comments_with_high_risk_evidence = merge_comments_with_high_risk_evidence,
   pr_native_comments = pr_native_comments,
   review_result_approve_marker = review_result_approve_marker,
+  high_risk_paths = high_risk_paths,
+  high_risk_paths_digest = high_risk_paths_digest,
+  high_risk_review_evidence_marker = high_risk_review_evidence_marker,
   mock_pr_origin = mock_pr_origin,
   mock_pr_origin_for = mock_pr_origin_for,
   mock_pr_merge = mock_pr_merge,
   mock_pr_merge_rollup = mock_pr_merge_rollup,
   mock_merging_comment = mock_merging_comment,
   mock_pr_merge_command = mock_pr_merge_command,
+  mock_pr_diff_name_only = mock_pr_diff_name_only,
+  mock_pr_high_risk_diff_name_only = mock_pr_high_risk_diff_name_only,
+  mock_pr_normal_risk_diff_name_only = mock_pr_normal_risk_diff_name_only,
+  mock_pr_empty_diff_name_only = mock_pr_empty_diff_name_only,
+  mock_pr_failed_diff_name_only = mock_pr_failed_diff_name_only,
   mock_pr_ready = mock_pr_ready,
   mock_required_check_runs_for = mock_required_check_runs_for,
   has_call = has_call,

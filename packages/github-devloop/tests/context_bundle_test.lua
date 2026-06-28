@@ -146,6 +146,18 @@ return {
     t.is_true(result.error:find("context bundle manifest files are unreadable", 1, true) ~= nil)
   end,
 
+  test_context_fetch_ref_preserves_unknown_risk_classification = function()
+    local result = run_probe("unknown_risk_structured", runtime_root("unknown-risk-structured"))
+
+    t.is_true(tostring(result.ref or ""):find("runtime-cache:", 1, true) == 1)
+    t.eq(result.high_risk, true)
+    t.eq(result.risk_known, false)
+    t.eq(result.risk_high, true)
+    t.eq(result.risk_reason, "diff-name-only-failed")
+    t.eq(result.high_risk_path_count, 0)
+    t.eq(result.diff_name_fetch_count, 1)
+  end,
+
   test_stale_generation_classifier_accepts_consensus_manifest_errors = function()
     t.eq(core.is_stale_generation_context_error("consensus: runtime context cache miss"), true)
     t.eq(core.is_stale_generation_context_error("consensus: runtime context manifest file is unreadable"), true)

@@ -136,7 +136,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
     local review_dedup_key = core._dedup_key({ review_id, "review" })
-    local content_fetch = core.context_fetch_ref_from_bundle({
+    local context_fetch = { core.context_fetch_ref_from_bundle({
       dept = "review_pr",
       repo = repo,
       issue_number = issue_number,
@@ -144,8 +144,10 @@ return saga.department(spec, { done = function() return false end, act = functio
       proposal_id = review_id,
       version = review_dedup_key,
       tick = event.ts,
-    })
-    local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch)
+    }) }
+    local content_fetch = context_fetch[1]
+    local high_risk = context_fetch[2]
+    local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return

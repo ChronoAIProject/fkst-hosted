@@ -128,6 +128,16 @@ local function mock_merge_command(event)
   })
 end
 
+local function mock_normal_risk_merge_gate(event)
+  for _ = 1, 2 do
+    t.mock_command("gh pr diff '" .. tostring(event.pr_number) .. "' --repo 'owner/repo' --name-only", {
+      stdout = "file.lua\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
 local function mock_merging_comment_for_event(event)
   t.mock_command("gh pr comment '" .. tostring(event.pr_number) .. "' --repo 'owner/repo' --body-file", {
     stdout = "commented\n",
@@ -186,6 +196,7 @@ return {
     mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
     mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
     mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
+    mock_normal_risk_merge_gate(stale)
     mock_merging_comment_for_event(stale)
     mock_merge_command(stale)
     mock_pr_merge(merged_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha, "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")
@@ -223,6 +234,7 @@ return {
     mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
     mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
     mock_pr_merge(merge_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha)
+    mock_normal_risk_merge_gate(stale)
     mock_merging_comment_for_event(stale)
     mock_merge_command(stale)
     mock_pr_merge(merged_comments_for_event(stale), branch_for_pr(stale.pr_number), stale.reviewed_head_sha, "MERGED", "owner/repo", false, "MERGEABLE", "CLEAN", "COMPLETED", "SUCCESS", "2026-06-03T02:03:04Z")

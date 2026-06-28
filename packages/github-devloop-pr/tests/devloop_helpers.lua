@@ -190,6 +190,11 @@ end
 local base_run_review_result = helpers.run_review_result
 helpers.run_review_result = function(...)
   mock_default_issue_claim()
+  helpers.t.mock_command("gh pr diff '7' --repo 'owner/repo' --name-only", {
+    stdout = "file.lua\n",
+    stderr = "",
+    exit_code = 0,
+  })
   return base_run_review_result(...)
 end
 

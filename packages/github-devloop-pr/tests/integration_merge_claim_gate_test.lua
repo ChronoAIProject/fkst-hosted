@@ -170,11 +170,13 @@ local function mock_issue_claim_failure(issue_number)
 end
 
 local function mock_diff_name_only(pr_number, paths)
-  t.mock_command("gh pr diff '" .. tostring(pr_number) .. "' --repo 'owner/repo' --name-only", {
-    stdout = table.concat(paths or {}, "\n") .. "\n",
-    stderr = "",
-    exit_code = 0,
-  })
+  for _ = 1, 3 do
+    t.mock_command("gh pr diff '" .. tostring(pr_number) .. "' --repo 'owner/repo' --name-only", {
+      stdout = table.concat(paths or {}, "\n") .. "\n",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
 end
 
 local function mock_current_base_head(base_sha)

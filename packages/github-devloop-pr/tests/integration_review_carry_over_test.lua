@@ -5,6 +5,7 @@ local opts = h.opts
 local mock_pr_origin = h.mock_pr_origin
 local mock_issue_reviewing = h.mock_issue_reviewing
 local merge_comments = h.merge_comments
+local mock_pr_normal_risk_diff_name_only = h.mock_pr_normal_risk_diff_name_only
 local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
@@ -99,6 +100,7 @@ return {
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_base_fetch(base_head)
     mock_resolution_delta(0)
+    mock_pr_normal_risk_diff_name_only()
 
     local result = run_observe_pr(pr_event(), opts("review-carry-over-empty-delta"))
 

@@ -60,8 +60,19 @@ local function exec_with_env(root, fixtures)
     if rendered:find("gh pr view", 1, true) ~= nil then
       return { stdout = state.pr_output, stderr = "", exit_code = 0 }
     end
+    if rendered:find("gh pr diff", 1, true) ~= nil and rendered:find("--name-only", 1, true) ~= nil then
+      return {
+        stdout = state.diff_name_output or state.diff_output,
+        stderr = state.diff_name_stderr or state.diff_stderr or "",
+        exit_code = state.diff_name_exit_code or state.diff_exit_code or 0,
+      }
+    end
     if rendered:find("gh pr diff", 1, true) ~= nil then
-      return { stdout = state.diff_output, stderr = "", exit_code = 0 }
+      return {
+        stdout = state.diff_output,
+        stderr = state.diff_stderr or "",
+        exit_code = state.diff_exit_code or 0,
+      }
     end
     if rendered:find("gh issue list", 1, true) ~= nil then
       if rendered:find("--state closed", 1, true) ~= nil then
@@ -293,6 +304,31 @@ local function run_stale_manifest_files(root)
   }
 end
 
+local function run_unknown_risk_structured(root)
+  local fixtures = {
+    diff_output = "diff --git a/file.lua b/file.lua\n+return true\n",
+    diff_name_output = "",
+    diff_name_exit_code = 1,
+    diff_name_stderr = "diff unavailable",
+  }
+  local safe_suffix = tostring(root):gsub("[^%w._-]", "-")
+  local args = build_args(root, fixtures, {
+    pr_number = 7,
+    proposal_id = "github-devloop/pr-review/owner-repo/1234567890/7/unknown-risk",
+    version = "unknown-risk-" .. safe_suffix:sub(-48),
+  })
+  local ref, high_risk, risk = core.context_fetch_ref_from_bundle(args)
+  return {
+    ref = ref,
+    high_risk = high_risk,
+    risk_known = risk and risk.known,
+    risk_high = risk and risk.high_risk,
+    risk_reason = risk and risk.reason,
+    high_risk_path_count = #(risk and risk.high_risk_paths or {}),
+    diff_name_fetch_count = count_calls(fixtures.calls, "--name-only"),
+  }
+end
+
 local function run_stale_manifest_rebuild(root)
   local old_root = root .. "/old"
   local fresh_root = root .. "/fresh"
@@ -342,6 +378,8 @@ function M.run(payload)
     return run_utf8_truncation(root)
   elseif payload.mode == "stale_manifest_files" then
     return run_stale_manifest_files(root)
+  elseif payload.mode == "unknown_risk_structured" then
+    return run_unknown_risk_structured(root)
   elseif payload.mode == "stale_manifest_rebuild" then
     return run_stale_manifest_rebuild(root)
   end
