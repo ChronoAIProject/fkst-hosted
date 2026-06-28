@@ -470,11 +470,30 @@ doctor_one() {
     "$(ps -o etime= -p $p 2>/dev/null|tr -d ' ')" "$verdict" "$(git -C "$PKGSRC" rev-parse --short HEAD 2>/dev/null)" "$panic"
 }
 
+# durable_health_one <name>: surface redb delivery-queue state (stuck-pending events + dead-letters)
+# that the supervise-LOG scan is structurally blind to — a stuck pending delivery or a dead-letter is
+# durable-queue state, not a log line. `observe` is the engine's authoritative durable-state aggregator,
+# so reuse it (don't reimplement). Flags ⚠ on any dead-letter or a pending event older than 6h (the
+# board's stale threshold). Reads a live supervise's redb via a single read transaction (no lock fight).
+durable_health_one() {
+  cfg "$1" || return 0
+  if [ ! -e "$DUR/delivery.redb" ]; then echo "  $1: no durable store"; return 0; fi
+  local summary
+  summary=$("$BIN" observe --json --durable-root "$DUR" 2>/dev/null | jq -r '
+    ([.queues[].pending]|add // 0) as $p |
+    (([.queues[].oldest_pending_age_ms]|max // 0)/3600000|floor) as $oh |
+    (.dead_letters|length) as $dl |
+    "\(.queues|length) queues, \($p) pending (oldest \($oh)h), \($dl) dead-letters"
+      + (if ($dl>0 or $oh>6) then " ⚠" else "" end)' 2>/dev/null)
+  echo "  $1: ${summary:-observe unavailable}"
+}
+
 cmd_doctor() {
   echo "engine BIN:"; bin_freshness_report | sed 's/^/  /'
   echo "supervises:"
   for n in $(expand "${1:-all}"); do doctor_one "$n"; done
   echo "upstream($UPSTREAM_BRANCH) CI:"; for n in $(expand "${1:-all}"); do upstream_ci_one "$n"; done
+  echo "durable (redb delivery state):"; for n in $(expand "${1:-all}"); do durable_health_one "$n"; done
   echo "graphql: $(gh api rate_limit --jq '.resources.graphql.remaining' 2>/dev/null||echo ?)/5000"
 }
 
