@@ -46,7 +46,7 @@ local function mock_env()
 end
 
 local function mock_checker()
-  t.mock_command("python3 scripts/check_repo_integration_coverage.py --json", {
+  t.mock_command("tools/check_repo_integration_coverage.py", {
     stdout = checker_fixture,
     stderr = "integration coverage check failed",
     exit_code = 1,

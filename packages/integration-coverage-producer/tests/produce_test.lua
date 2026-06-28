@@ -62,7 +62,7 @@ local function mock_env()
 end
 
 local function mock_checker(stdout, exit_code)
-  t.mock_command("python3 scripts/check_repo_integration_coverage.py --json", {
+  t.mock_command("tools/check_repo_integration_coverage.py", {
     stdout = stdout,
     stderr = exit_code == 0 and "" or "integration coverage check failed",
     exit_code = exit_code or 0,
@@ -107,14 +107,53 @@ local function first_request(result)
   return result.raises[1].payload
 end
 
+local function with_file_exists(existing, fn)
+  local old_file = file
+  file = {
+    exists = function(path)
+      return existing[path] == true
+    end,
+    read = function(path)
+      if existing[path] == true then
+        return ""
+      end
+      error("missing file: " .. tostring(path), 0)
+    end,
+  }
+  local ok, result = pcall(fn)
+  file = old_file
+  if not ok then
+    error(result, 0)
+  end
+  return result
+end
+
+local function with_coverage_substrate(fn)
+  return with_file_exists({
+    ["migration/integration-edge-coverage.allowlist"] = true,
+  }, fn)
+end
+
+local function checker_call()
+  for _, call in ipairs(t.command_calls()) do
+    if call.program == "python3" and tostring(call.args[1] or ""):find("tools/check_repo_integration_coverage.py", 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
 return {
   test_uncovered_edges_on_idle_board_produces_one_coverage_issue = function()
     mock_env()
     mock_checker(checker_fixture, 1)
     local dept = fake_department("[]")
 
-    local result = run(dept)
+    local result = with_coverage_substrate(function()
+      return run(dept)
+    end)
     local request = first_request(result)
+    local call = checker_call()
 
     t.eq(request.schema, "github-proxy.issue-create.v1")
     t.eq(request.repo, "owner/repo")
@@ -130,6 +169,10 @@ return {
     t.eq(dept.lists[1].fields, "number,title,state,labels")
     t.eq(#dept.searches, 1)
     t.is_true(dept.searches[1].query:find("coverage-edge-id: autochrono.reply -> github-autochrono.outbound_glue", 1, true) ~= nil)
+    t.eq(call.program, "python3")
+    t.is_true(call.args[1]:find("packages/integration-coverage-producer/tools/check_repo_integration_coverage.py", 1, true) ~= nil)
+    t.eq(call.args[2], "--json")
+    t.eq(call.args[3], nil)
   end,
 
   test_existing_open_coverage_issue_skips_edge_and_files_next_one = function()
@@ -151,7 +194,9 @@ return {
     end
     local dept = produce.make_department({ github = github })
 
-    local result = run(dept)
+    local result = with_coverage_substrate(function()
+      return run(dept)
+    end)
     local request = first_request(result)
 
     t.eq(request.title, "test: run_graph coverage for consensus.consensus_reached -> github-devloop-pr.review_result")
@@ -172,7 +217,9 @@ return {
 ]]
     local dept = fake_department(busy, "[]")
 
-    local result = run(dept)
+    local result = with_coverage_substrate(function()
+      return run(dept)
+    end)
 
     t.eq(#result.raises, 0)
     t.eq(#dept.lists, 1)
@@ -184,9 +231,24 @@ return {
     mock_checker(covered_fixture, 0)
     local dept = fake_department("[]", "[]")
 
-    local result = run(dept)
+    local result = with_coverage_substrate(function()
+      return run(dept)
+    end)
 
     t.eq(#result.raises, 0)
     t.eq(#dept.searches, 0)
+  end,
+
+  test_missing_coverage_substrate_noops_without_checker_or_github = function()
+    local dept = fake_department("[]", "[]")
+
+    local result = with_file_exists({}, function()
+      return run(dept)
+    end)
+
+    t.eq(#result.raises, 0)
+    t.eq(#dept.lists, 0)
+    t.eq(#dept.searches, 0)
+    t.eq(#t.command_calls(), 0)
   end,
 }
