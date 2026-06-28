@@ -1,7 +1,8 @@
+local poll_fakes = require("devloop.hidden_state_conformance.poll_fakes")
+
 local S = {}
 
 local ALLOWLIST_PATH = "migration/hidden-state.allowlist"
-local BOT = "fkst-test-bot"
 local REPO = "owner/repo"
 local ISSUE_NUMBER = 42
 local PR_NUMBER = 7
@@ -19,11 +20,30 @@ local function package_name(core)
   return tostring(core.restart_package_name or "github-devloop")
 end
 
-local function comment(body, when)
+local function production_replay_dept(core)
+  local package = package_name(core)
+  local dept = ({ ["github-devloop"] = "observe_issue", ["github-devloop-pr"] = "observe_pr" })[package]
+  if dept == nil then
+    error("devloop: hidden-state conformance has no production replay department for package " .. package)
+  end
+  for _, source in ipairs(core.restart_consumer_sources or {}) do
+    if tostring(source or ""):match("departments/" .. dept .. "/main%.lua$") then
+      return dept
+    end
+  end
+  error("devloop: hidden-state conformance production replay department is not declared in restart_consumer_sources: " .. dept)
+end
+
+local function marker_author(core)
+  if type(core.assert_trusted_bot_configured) == "function" then core.assert_trusted_bot_configured() end
+  if type(core.trusted_bot_login) == "function" then return core.trusted_bot_login() end
+  return tostring(core._test_bot_login or "fkst-test-bot")
+end
+local function comment(core, body, when)
   return {
     id = tostring(when or body):gsub("[^%w_%-]", "_"):sub(1, 60),
     body = body,
-    author_login = BOT,
+    author_login = marker_author(core),
     created_at = when or "2026-06-03T01:02:03Z",
   }
 end
@@ -342,7 +362,7 @@ local function base_entity(core, row, source_ref)
     state = "OPEN",
     updated_at = "2026-06-03T01:02:03Z",
     labels = labels,
-    comments = { comment(body, "2026-06-03T01:02:03Z") },
+    comments = { comment(core, body, "2026-06-03T01:02:03Z") },
     source_ref = source_ref,
   }, state
 end
@@ -370,7 +390,7 @@ local function child_pr(core, state, child_state)
     merge_commit_sha = HEAD_SHA,
     force_fresh = true,
     merged_at = child_state == "merged" and "2026-06-03T01:04:03Z" or nil,
-    comments = { comment(body, "2026-06-03T01:04:03Z") },
+    comments = { comment(core, body, "2026-06-03T01:04:03Z") },
   }
 end
 
@@ -396,7 +416,7 @@ local function add_common_pr_facts(core, entity, state, facts, include_pr_link_m
   facts.current_pr = facts.current_pr or child_pr(core, state, nil)
   if include_pr_link_marker == true then
     facts["pr-link"] = link
-    table.insert(entity.comments, comment(core.pr_link_marker(ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
+    table.insert(entity.comments, comment(core, core.pr_link_marker(ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
   else
     facts._synthetic_pr_link = true
   end
@@ -584,36 +604,36 @@ end
 
 local function install_marker(core, entity, state, family, value, is_synthetic)
   if family == "dependency-wait" then
-    table.insert(entity.comments, comment(core.dependency_wait_marker(ISSUE_PROPOSAL, state.version, value.unmet or {}, value.hold_kind, value.reason), "2026-06-03T01:03:04Z"))
+    table.insert(entity.comments, comment(core, core.dependency_wait_marker(ISSUE_PROPOSAL, state.version, value.unmet or {}, value.hold_kind, value.reason), "2026-06-03T01:03:04Z"))
   elseif family == "dependency-release" then
-    table.insert(entity.comments, comment(core.dependency_release_marker(ISSUE_PROPOSAL, state.version), "2026-06-03T01:03:05Z"))
+    table.insert(entity.comments, comment(core, core.dependency_release_marker(ISSUE_PROPOSAL, state.version), "2026-06-03T01:03:05Z"))
   elseif family == "implement-attempt" then
-    table.insert(entity.comments, comment(core.implement_attempt_marker(ISSUE_PROPOSAL, state.version, value.attempt, value.started_at), "2026-06-03T01:03:06Z"))
+    table.insert(entity.comments, comment(core, core.implement_attempt_marker(ISSUE_PROPOSAL, state.version, value.attempt, value.started_at), "2026-06-03T01:03:06Z"))
   elseif family == "implementing" then
-    table.insert(entity.comments, comment(core.implementing_marker(ISSUE_PROPOSAL, state.version, BRANCH, HEAD_SHA, BASE_BRANCH, BASE_SHA), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, core.implementing_marker(ISSUE_PROPOSAL, state.version, BRANCH, HEAD_SHA, BASE_BRANCH, BASE_SHA), "2026-06-03T01:03:07Z"))
   elseif family == "impl-failure" then
-    table.insert(entity.comments, comment(core.impl_failure_marker(ISSUE_PROPOSAL, state.version, value.reason or "codex-failed", value.attempt or 1), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, core.impl_failure_marker(ISSUE_PROPOSAL, state.version, value.reason or "codex-failed", value.attempt or 1), "2026-06-03T01:03:07Z"))
   elseif family == "decomposed" then
-    table.insert(entity.comments, comment(core.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
+    table.insert(entity.comments, comment(core, core.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
-    table.insert(entity.comments, comment(core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then
-    table.insert(entity.comments, comment(core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, core.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, core.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     if value.decision == "approve" then
-      table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core, core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
     else
-      table.insert(entity.comments, comment(core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core, core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     end
   elseif family == "review-meta" then
-    table.insert(entity.comments, comment(core.review_meta_marker(ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, core.review_meta_marker(ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-converge-round" then
     local digest = core.source_ref_digest(PR_SOURCE_REF)
     if value.action == "block" then
       for round = 1, value.n do
-        table.insert(entity.comments, comment(core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, round, state.version .. "/review-loop/" .. tostring(round), "behavioral fixture same review question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, round, state.version .. "/review-loop/" .. tostring(round), "behavioral fixture same review question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
     else
-      table.insert(entity.comments, comment(core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, value.n, value.review_dedup_key, "behavioral fixture review question", {
+      table.insert(entity.comments, comment(core, core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, value.n, value.review_dedup_key, "behavioral fixture review question", {
         { perspective = "one", verdict = "comment", digest = "a" },
         { perspective = "two", verdict = "abstain", digest = "b" },
         { perspective = "three", verdict = "abstain", digest = "c" },
@@ -621,28 +641,28 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
     end
   elseif family == "merge-ready" then
     if value.approve ~= false then
-      table.insert(entity.comments, comment(core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
+      table.insert(entity.comments, comment(core, core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
     end
-    table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "merging" then
-    table.insert(entity.comments, comment(core.review_result_marker(value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
-    table.insert(entity.comments, comment(core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
-    table.insert(entity.comments, comment(core.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, core.review_result_marker(value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
+    table.insert(entity.comments, comment(core, core.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "converge-round" then
     if value.true_stall_fixture == true then
       for round = 1, value.round do
-        table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), value.narrowed_question, value.angle_digests), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), value.narrowed_question, value.angle_digests), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
     elseif value.visible_round_sequence == true then
       for round = 1, value.round - 1 do
-        table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), "behavioral fixture narrowed question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), "behavioral fixture narrowed question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
-      table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+      table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     else
-      table.insert(entity.comments, comment(core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+      table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, core.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     end
   elseif is_synthetic == true then
-    table.insert(entity.comments, comment('<!-- fkst:github-devloop:synthetic-visible-fact:v1 proposal="' .. ISSUE_PROPOSAL
+    table.insert(entity.comments, comment(core, '<!-- fkst:github-devloop:synthetic-visible-fact:v1 proposal="' .. ISSUE_PROPOSAL
       .. '" family="' .. tostring(family):gsub('"', "'")
       .. '" version="' .. tostring(state.version):gsub('"', "'")
       .. '" -->', "2026-06-03T01:03:11Z"))
@@ -661,7 +681,7 @@ local function add_context_facts(core, row, entity, state, facts, source_ref, in
       facts.current_pr.merged_at = "2026-06-03T01:04:03Z"
       facts.current_pr.merge_commit_sha = HEAD_SHA
     end
-    table.insert(entity.comments, comment(core.pr_delegation_marker(ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
+    table.insert(entity.comments, comment(core, core.pr_delegation_marker(ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
     facts.pr_delegation = {
       proposal_id = ISSUE_PROPOSAL,
       pr_proposal_id = PR_PROPOSAL,
@@ -852,7 +872,7 @@ end
 local function replay(core, row, declared, include_fact)
   local entity, state, facts = build_fixture(core, row, declared, include_fact)
   local issued, events = with_effect_capture(core, function()
-    return core.replay_from_table("behavioral_hidden_state_conformance", entity, state, row, facts)
+    return core.replay_from_table(production_replay_dept(core), entity, state, row, facts)
   end)
   return issued, events
 end
@@ -860,47 +880,16 @@ end
 local function replay_exemption(core, row, rows, focus)
   local entity, state, facts = build_exemption_fixture(core, row, rows, focus)
   local issued, events = with_effect_capture(core, function()
-    return core.replay_from_table("behavioral_hidden_state_conformance", entity, state, row, facts)
+    return core.replay_from_table(production_replay_dept(core), entity, state, row, facts)
   end)
   return issued, events
 end
 
 local function with_poll_fakes(core, fn)
-  local previous_children = core.gh_issue_list_decompose_children
-  local previous_branch_config = core.branch_config
-  local previous_fetch_branch = core.fetch_branch
-  local previous_remote_head = core.remote_head
-  local previous_is_ancestor = core.is_ancestor
-  if type(previous_children) == "function" then
-    core.gh_issue_list_decompose_children = function()
-      return { exit_code = 0, stdout = "[]", stderr = "" }
-    end
-  end
-  core.branch_config = function()
-    return { integration = BASE_BRANCH, upstream = "dev" }
-  end
-  core.fetch_branch = function()
-    return nil
-  end
-  core.remote_head = function()
-    return HEAD_SHA
-  end
-  core.is_ancestor = function(ancestor_sha, descendant_sha)
-    return tostring(ancestor_sha or "") == tostring(HEAD_SHA)
-      and tostring(descendant_sha or "") == tostring(HEAD_SHA)
-  end
-  local ok, first, second = pcall(fn)
-  if type(previous_children) == "function" then
-    core.gh_issue_list_decompose_children = previous_children
-  end
-  core.branch_config = previous_branch_config
-  core.fetch_branch = previous_fetch_branch
-  core.remote_head = previous_remote_head
-  core.is_ancestor = previous_is_ancestor
-  if not ok then
-    error(first)
-  end
-  return first, second
+  return poll_fakes.with(core, {
+    base_branch = BASE_BRANCH,
+    head_sha = HEAD_SHA,
+  }, fn)
 end
 
 local function exemption_behavior_errors(core, rows, row)
