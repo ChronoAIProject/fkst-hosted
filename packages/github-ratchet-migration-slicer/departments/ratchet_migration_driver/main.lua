@@ -145,11 +145,11 @@ end
 
 local function require_entry_key(slice)
   if type(slice) ~= "table" or type(slice.sites) ~= "table" or type(slice.sites[1]) ~= "table" then
-    error("github-devloop: ratchet migration slice is missing entry_key")
+    error("github-ratchet-migration-slicer: missing-entry-key: ratchet migration slice is missing entry_key")
   end
   local entry_key = tostring(slice.sites[1].entry_key or "")
   if not entry_key:match("^[0-9a-f]+$") or #entry_key ~= 64 then
-    error("github-devloop: invalid ratchet migration entry_key")
+    error("github-ratchet-migration-slicer: invalid-entry-key: invalid ratchet migration entry_key")
   end
   return entry_key
 end
@@ -227,7 +227,7 @@ local function read_ledger(git, entry_key)
   local ref = core.ratchet_slice_ledger_ref(entry_key)
   local listed = git.ls_remote_ref("origin", ref, 30)
   if type(listed) ~= "table" or listed.exit_code ~= 0 then
-    error("github-devloop: git ledger ls-remote failed: " .. tostring(listed and listed.stderr or "missing result"))
+    error("github-ratchet-migration-slicer: ledger-ls-remote-failed: git ledger ls-remote failed: " .. tostring(listed and listed.stderr or "missing result"))
   end
   local sha = core.parse_ratchet_slice_ledger_ref_sha(listed.stdout)
   if sha == nil then
@@ -235,11 +235,11 @@ local function read_ledger(git, entry_key)
   end
   local fetched = git.fetch_ref("origin", ref, 30)
   if type(fetched) ~= "table" or fetched.exit_code ~= 0 then
-    error("github-devloop: git ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
+    error("github-ratchet-migration-slicer: ledger-fetch-failed: git ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
   end
   local commit = git.cat_file_pretty(sha, 30)
   if type(commit) ~= "table" or commit.exit_code ~= 0 then
-    error("github-devloop: git ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
+    error("github-ratchet-migration-slicer: ledger-cat-file-failed: git ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
   end
   return {
     ref = ref,
@@ -301,21 +301,21 @@ end
 local function commit_ledger(git, ledger, state, dedup_key)
   local head_tree = git.rev_parse_ref_tree("HEAD", 30)
   if type(head_tree) ~= "table" or head_tree.exit_code ~= 0 then
-    error("github-devloop: git ledger HEAD tree failed: " .. tostring(head_tree and head_tree.stderr or "missing result"))
+    error("github-ratchet-migration-slicer: ledger-head-tree-failed: git ledger HEAD tree failed: " .. tostring(head_tree and head_tree.stderr or "missing result"))
   end
   local tree_sha = tostring(head_tree.stdout or ""):match("(%x+)")
   if tree_sha == nil or #tree_sha ~= 40 then
-    error("github-devloop: git ledger unsafe tree sha")
+    error("github-ratchet-migration-slicer: ledger-unsafe-tree-sha: git ledger unsafe tree sha")
   end
   local path = body_file(dedup_key, "ledger")
   file.write(path, ledger_json(state) .. "\n")
   local commit = git.commit_tree(tree_sha, ledger and ledger.sha or nil, path, 30)
   if type(commit) ~= "table" or commit.exit_code ~= 0 then
-    error("github-devloop: git ledger commit-tree failed: " .. tostring(commit and commit.stderr or "missing result"))
+    error("github-ratchet-migration-slicer: ledger-commit-tree-failed: git ledger commit-tree failed: " .. tostring(commit and commit.stderr or "missing result"))
   end
   local sha = tostring(commit.stdout or ""):match("(%x+)")
   if sha == nil or #sha ~= 40 then
-    error("github-devloop: git ledger unsafe commit sha")
+    error("github-ratchet-migration-slicer: ledger-unsafe-commit-sha: git ledger unsafe commit sha")
   end
   return sha
 end
