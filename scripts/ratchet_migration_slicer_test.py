@@ -15,11 +15,12 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SLICER_PATH = REPO_ROOT / "packages" / "github-ratchet-migration-slicer" / "tools" / "ratchet_migration_slicer.py"
 
 
 def load_slicer():
-    path = Path(__file__).with_name("ratchet_migration_slicer.py")
-    spec = importlib.util.spec_from_file_location("ratchet_migration_slicer", path)
+    sys.path.insert(0, str(SLICER_PATH.parent))
+    spec = importlib.util.spec_from_file_location("ratchet_migration_slicer", SLICER_PATH)
     if spec is None or spec.loader is None:
         raise RuntimeError("could not load ratchet_migration_slicer.py")
     module = importlib.util.module_from_spec(spec)
@@ -827,7 +828,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
                 [
                     "python3",
                     "-B",
-                    "scripts/ratchet_migration_slicer.py",
+                    str(SLICER_PATH),
                     ratchet,
                     "--repo-root",
                     str(REPO_ROOT),
@@ -860,7 +861,7 @@ class RatchetMigrationSlicerTest(unittest.TestCase):
                 [
                     "python3",
                     "-B",
-                    "scripts/ratchet_migration_slicer.py",
+                    str(SLICER_PATH),
                     ratchet,
                     "--repo-root",
                     str(REPO_ROOT),

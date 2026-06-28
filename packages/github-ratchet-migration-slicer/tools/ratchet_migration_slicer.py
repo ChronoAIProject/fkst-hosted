@@ -795,7 +795,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Slice and optionally reconcile code-owned allowlist ratchets.",
     )
     parser.add_argument("ratchet", choices=(*VALID_RATCHETS, *RATCHET_ALIASES.keys(), "all"), help="Code-owned ratchet selector.")
-    parser.add_argument("--repo-root", default=Path(__file__).resolve().parents[1], type=Path)
+    parser.add_argument("--repo-root", default=Path.cwd(), type=Path)
     parser.add_argument("--slice-size", type=int, default=DEFAULT_SLICE_SIZE)
     parser.add_argument("--json", action="store_true", help="Emit the stable machine-readable slice schema.")
     parser.add_argument("--reconcile", action="store_true", help="Reconcile slice issue creation or parent closure through GitHub.")

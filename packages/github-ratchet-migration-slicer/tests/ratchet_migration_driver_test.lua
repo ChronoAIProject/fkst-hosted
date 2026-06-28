@@ -245,6 +245,10 @@ local function run_driver(opts)
   local github = new_fake_github(options.github)
   local git = new_fake_git(options.git)
   local exec_calls = {}
+  local existing_files = options.existing_files or {
+    ["migration/saga-handler.allowlist"] = true,
+    ["migration/code-dedup.allowlist"] = true,
+  }
   local old_exec_argv = exec_argv
   local old_file = file
   local files = {}
@@ -271,6 +275,9 @@ local function run_driver(opts)
     end,
     read = function(path)
       return files[path] or ""
+    end,
+    exists = function(path)
+      return files[path] ~= nil or existing_files[path] == true
     end,
   }
   log = {
@@ -361,11 +368,26 @@ return {
     t.is_true(intent.body:find("issue-create-intent:v1", 1, true) ~= nil)
     t.is_true(ledger.body:find("issue-created:v1", 1, true) ~= nil)
     t.eq(result.exec_calls[1].argv[1], "python3")
-    t.eq(result.exec_calls[1].argv[2], "scripts/ratchet_migration_slicer.py")
+    t.is_true(result.exec_calls[1].argv[2]:find("packages/github-ratchet-migration-slicer/tools/ratchet_migration_slicer.py", 1, true) ~= nil)
     t.eq(result.exec_calls[1].argv[3], "saga-handler")
-    t.eq(result.exec_calls[1].argv[4], "--json")
-    t.eq(result.exec_calls[1].argv[5], nil)
+    t.eq(result.exec_calls[1].argv[4], "--repo-root")
+    t.eq(result.exec_calls[1].argv[5], ".")
+    t.eq(result.exec_calls[1].argv[6], "--json")
+    t.eq(result.exec_calls[1].argv[7], nil)
     t.eq(result.exec_calls[1].timeout, 120)
+  end,
+
+  test_missing_allowlist_substrate_noops_without_planning = function()
+    local result = run_driver({
+      existing_files = {},
+    })
+
+    t.eq(#result.exec_calls, 0)
+    t.eq(count_kind(result.github._model.writes, "issue_view"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_create"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_add_sub_issue"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_comment"), 0)
+    t.eq(count_kind(result.github._model.writes, "issue_close"), 0)
   end,
 
   test_poll_with_in_flight_slice_noops = function()
