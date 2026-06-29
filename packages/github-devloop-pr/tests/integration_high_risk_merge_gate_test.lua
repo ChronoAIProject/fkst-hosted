@@ -109,8 +109,6 @@ return {
       gh_pr_diff_name_only = function()
         return { stdout = "", stderr = "diff unavailable", exit_code = 1 }
       end,
-      github_diff_name_risk = core.github_diff_name_risk,
-      github_paths_digest = core.github_paths_digest,
       high_risk_review_evidence_fact = function()
         evidence_checked = true
         return { verdict = "approve" }

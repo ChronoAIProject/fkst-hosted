@@ -1,4 +1,4 @@
-local convergence_shared = require("devloop.convergence.shared")
+local convergence_shared, github_risk = require("devloop.convergence.shared"), require("devloop.github_risk")
 local core, saga = require("core"), require("workflow.saga")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
@@ -107,7 +107,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local high_risk_angle_not_approved = false
     if effective_decision == "approve" then
       local name_result = core.gh_pr_diff_name_only(repo, pr_number, 30)
-      local risk = core.github_diff_name_risk(name_result)
+      local risk = github_risk.github_diff_name_risk(name_result)
       high_risk_paths = risk.high_risk_paths or {}
       if risk.known == false then
         core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "merge-ready", "retry-pending(high-risk-review-evidence:" .. tostring(risk.reason or "unknown") .. ")", "review diff risk is undecidable")
@@ -135,7 +135,7 @@ return saga.department(spec, { done = function() return false end, act = functio
           comment_reached.body = "High-risk PR approval did not include an approving high-risk angle."
         end
         if effective_decision == "approve" then
-          paths_digest = core.github_paths_digest(risk.paths)
+          paths_digest = github_risk.github_paths_digest(risk.paths)
           angle_digest = convergence_shared.converge_angles_digest(reached.angle_results)
         end
       end

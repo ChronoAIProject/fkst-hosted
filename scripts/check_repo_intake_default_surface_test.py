@@ -37,22 +37,20 @@ class IntakeDefaultSurfaceRatchetTest(unittest.TestCase):
         (root / "libraries" / "devloop" / "github_risk.lua").write_text(
             textwrap.dedent(
                 """\
-                local S = {}
-                function S.install(M)
-                function M.github_high_risk_path(path)
+                local github_risk = {}
+                function github_risk.github_high_risk_path(path)
                   return tostring(path or ""):find("^scripts/") ~= nil
                 end
-                function M.github_high_risk_paths(paths)
+                function github_risk.github_high_risk_paths(paths)
                   return {}
                 end
-                end
-                return S
+                return github_risk
                 """
             ),
             encoding="utf-8",
         )
         (root / "packages" / "github-devloop-intake-default" / "core.lua").write_text(
-            'local M = {}\nrequire("devloop.github_risk").install(M)\nreturn M\n',
+            'local M = {}\nreturn M\n',
             encoding="utf-8",
         )
         return tmp, root
@@ -80,7 +78,7 @@ class IntakeDefaultSurfaceRatchetTest(unittest.TestCase):
             )
             messages = self.messages(root)
 
-        self.assert_message_contains(messages, "expected exactly one function M.github_high_risk_path definition")
+        self.assert_message_contains(messages, "expected exactly one typed github_high_risk_path definition")
         self.assert_message_contains(messages, "packages/github-devloop-intake-default/core/github_risk.lua")
 
     def test_assigned_high_risk_path_definition_fails(self) -> None:
@@ -92,7 +90,7 @@ class IntakeDefaultSurfaceRatchetTest(unittest.TestCase):
             )
             messages = self.messages(root)
 
-        self.assert_message_contains(messages, "expected exactly one function M.github_high_risk_path definition")
+        self.assert_message_contains(messages, "expected exactly one typed github_high_risk_path definition")
         self.assert_message_contains(messages, "packages/github-devloop-intake-default/core/github_risk.lua")
 
     def test_missing_canonical_high_risk_paths_definition_fails(self) -> None:
@@ -101,18 +99,16 @@ class IntakeDefaultSurfaceRatchetTest(unittest.TestCase):
             (root / "libraries" / "devloop" / "github_risk.lua").write_text(
                 textwrap.dedent(
                     """\
-                    local S = {}
-                    function S.install(M)
-                    function M.github_high_risk_path(path) return false end
-                    end
-                    return S
+                    local github_risk = {}
+                    function github_risk.github_high_risk_path(path) return false end
+                    return github_risk
                     """
                 ),
                 encoding="utf-8",
             )
             messages = self.messages(root)
 
-        self.assert_message_contains(messages, "expected exactly one function M.github_high_risk_paths definition")
+        self.assert_message_contains(messages, "expected exactly one typed github_high_risk_paths definition")
 
     def test_package_private_capability_export_fails(self) -> None:
         tmp, root = self.make_repo()

@@ -7,6 +7,7 @@ local json_string = base.json_string
 local render_comment = base.render_comment
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
+local github_risk = require("devloop.github_risk")
 local last_merge_comments = nil
 
 local function json_literal(value)
@@ -73,7 +74,7 @@ local function high_risk_paths()
 end
 
 local function high_risk_paths_digest()
-  return core.github_paths_digest(high_risk_paths())
+  return github_risk.github_paths_digest(high_risk_paths())
 end
 
 local function high_risk_review_evidence_marker(event, extra)

@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local error_facts = require("contract.error_facts")
+local github_risk = require("devloop.github_risk")
 local t = h.t
 local source_ref = h.source_ref
 local issue = h.issue
@@ -75,7 +76,7 @@ return {
     t.is_nil(spec.rate_pool)
   end,
   test_github_high_risk_paths_cover_ci_auth_dependency_and_scheduler_surfaces = function()
-    local high = core.github_high_risk_paths({
+    local high = github_risk.github_high_risk_paths({
       ".github/workflows/ci.yml",
       "Cargo.lock",
       "scripts/run.sh",

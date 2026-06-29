@@ -12,8 +12,8 @@ INTAKE_DEFAULT_PACKAGE = "github-devloop-intake-default"
 CANONICAL_RISK_PATH = "libraries/devloop/github_risk.lua"
 DELETED_CAPABILITIES_REQUIRE = "core.github_capabilities"
 HIGH_RISK_DEF_RE = re.compile(
-    r"\b(?:function\s+M\s*\.\s*(?P<function>github_high_risk_paths?)\s*\("
-    r"|M\s*\.\s*(?P<assign>github_high_risk_paths?)\s*=\s*function\b)"
+    r"\b(?:function\s+[A-Za-z_][A-Za-z0-9_]*\s*\.\s*(?P<function>github_high_risk_paths?)\s*\("
+    r"|[A-Za-z_][A-Za-z0-9_]*\s*\.\s*(?P<assign>github_high_risk_paths?)\s*=\s*function\b)"
 )
 EXPORT_ASSIGN_RE = re.compile(
     r"\b(?:function\s+M\s*\.\s*(?P<function>[A-Za-z_][A-Za-z0-9_]*)\s*\("
@@ -150,7 +150,7 @@ def high_risk_messages(sources: list[Source]) -> list[str]:
             f"{source.relpath}:{line_number(source.text, index)}" for source, index in found
         ) or "none"
         messages.append(
-            f"expected exactly one function M.{name} definition in {CANONICAL_RISK_PATH}; found {locations}"
+            f"expected exactly one typed {name} definition in {CANONICAL_RISK_PATH}; found {locations}"
         )
     return messages
 

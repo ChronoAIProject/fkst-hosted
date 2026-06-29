@@ -1,7 +1,6 @@
-local S = {}
+local github_risk = {}
 local convergence_shared = require("devloop.convergence.shared")
 
-function S.install(M)
 local high_risk_patterns = {
   "^%.github/workflows/",
   "^%.github/actions/",
@@ -29,7 +28,7 @@ local high_risk_patterns = {
   "^libraries/forge/.+%.lua$",
 }
 
-function M.github_high_risk_path(path)
+function github_risk.github_high_risk_path(path)
   local text = tostring(path or "")
   for _, pattern in ipairs(high_risk_patterns) do
     if text:find(pattern) ~= nil then
@@ -39,17 +38,17 @@ function M.github_high_risk_path(path)
   return false
 end
 
-function M.github_high_risk_paths(paths)
+function github_risk.github_high_risk_paths(paths)
   local result = {}
   for _, path in ipairs(paths or {}) do
-    if M.github_high_risk_path(path) then
+    if github_risk.github_high_risk_path(path) then
       table.insert(result, tostring(path))
     end
   end
   return result
 end
 
-function M.github_diff_name_paths(stdout)
+function github_risk.github_diff_name_paths(stdout)
   local paths = {}
   for line in tostring(stdout or ""):gmatch("([^\r\n]+)") do
     local path = line:gsub("^%s+", ""):gsub("%s+$", "")
@@ -70,7 +69,7 @@ local function unknown_diff_name_risk(reason)
   }
 end
 
-function M.github_diff_name_risk(result)
+function github_risk.github_diff_name_risk(result)
   if type(result) ~= "table" then
     return unknown_diff_name_risk("diff-name-only-unclassifiable")
   end
@@ -80,11 +79,11 @@ function M.github_diff_name_risk(result)
   if type(result.stdout) ~= "string" then
     return unknown_diff_name_risk("diff-name-only-unclassifiable")
   end
-  local paths = M.github_diff_name_paths(result.stdout)
+  local paths = github_risk.github_diff_name_paths(result.stdout)
   if #paths == 0 then
     return unknown_diff_name_risk("diff-name-only-empty")
   end
-  local high_risk_paths = M.github_high_risk_paths(paths)
+  local high_risk_paths = github_risk.github_high_risk_paths(paths)
   return {
     high_risk = #high_risk_paths > 0,
     known = true,
@@ -94,7 +93,7 @@ function M.github_diff_name_risk(result)
   }
 end
 
-function M.github_paths_digest(paths)
+function github_risk.github_paths_digest(paths)
   local selected = {}
   for _, path in ipairs(paths or {}) do
     table.insert(selected, tostring(path))
@@ -105,6 +104,5 @@ function M.github_paths_digest(paths)
     ref = table.concat(selected, "\n"),
   })
 end
-end
 
-return S
+return github_risk

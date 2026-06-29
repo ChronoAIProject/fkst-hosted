@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("contract.strings")
+local github_risk = require("devloop.github_risk")
 local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
@@ -319,7 +320,7 @@ local function fetch_risk_from_pr_paths(args)
   local result = (function(timeout)
     return M.gh_pr_diff_name_only(args.repo, args.pr_number, timeout, args.exec)
   end)(60)
-  return clone_risk_classification(M.github_diff_name_risk(result))
+  return clone_risk_classification(github_risk.github_diff_name_risk(result))
 end
 
 function M.context_bundle_key(proposal_id, version)
@@ -481,7 +482,7 @@ function M.build_context_bundle(args)
     local name_result = (function(timeout)
       return M.gh_pr_diff_name_only(repo, args.pr_number, timeout, args.exec)
     end)(60)
-    local risk = M.github_diff_name_risk(name_result)
+    local risk = github_risk.github_diff_name_risk(name_result)
     risk_classification = clone_risk_classification(risk)
     local risk_text = risk_report(risk)
     risk_text = truncate_if_needed(risk_text, args.dept, proposal_id, risk_file_name)

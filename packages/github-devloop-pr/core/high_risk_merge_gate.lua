@@ -1,8 +1,9 @@
 local M = {}
+local github_risk = require("devloop.github_risk")
 
 function M.require_evidence(core, repo, comments, merge_ready)
   local name_result = core.gh_pr_diff_name_only(repo, merge_ready.pr_number, 30)
-  local risk = core.github_diff_name_risk(name_result)
+  local risk = github_risk.github_diff_name_risk(name_result)
   if risk.high_risk ~= true then
     return true, "normal-risk"
   end
@@ -10,7 +11,7 @@ function M.require_evidence(core, repo, comments, merge_ready)
     return false, "retry-pending(high-risk-review-evidence:" .. tostring(risk.reason or "unknown") .. ")"
   end
   local paths_digest = nil
-  paths_digest = core.github_paths_digest(risk.paths)
+  paths_digest = github_risk.github_paths_digest(risk.paths)
   local fact = core.high_risk_review_evidence_fact(
     comments,
     merge_ready.proposal_id,
