@@ -94,6 +94,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         // carries only counts (no secret) and is served on the ClusterIP-only
         // surface, so Prometheus scrapes it without a NyxID identity.
         .merge(routes::metrics::router());
+    if state.config.broker_client().is_some() {
+        top = top.merge(routes::nyxid_connect::router());
+    }
     if state.github_app_webhook_secret.is_some() {
         top = top.merge(routes::github_app_webhook::router());
         tracing::info!("github app webhook endpoint mounted (signature-verified, unauthenticated)");

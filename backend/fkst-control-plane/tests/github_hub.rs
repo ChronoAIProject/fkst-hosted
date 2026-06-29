@@ -101,6 +101,7 @@ async fn app(server: MockServer) -> TestApp {
 
     let vault = support::test_vault();
     let router = build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {

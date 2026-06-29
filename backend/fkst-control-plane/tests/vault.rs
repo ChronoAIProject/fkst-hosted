@@ -38,6 +38,7 @@ fn router(vault: VaultService) -> axum::Router {
     let goals = GoalIssueStore::new(None);
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config: Config::default(),
         sessions,
         auth_mode: AuthMode::Disabled,

@@ -52,6 +52,7 @@ async fn app() -> TestApp {
     let sessions = SessionService::new(repo.clone(), EngineConfig::default());
     let vault = support::test_vault();
     let router = build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         auth_mode: AuthMode::Disabled,

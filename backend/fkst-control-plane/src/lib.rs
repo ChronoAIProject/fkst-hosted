@@ -27,6 +27,7 @@ pub mod protocol;
 // Runtime OpenAPI 3 document (no static spec): assembled from the live
 // `#[utoipa::path]` handlers + `ToSchema` types and served at GET /openapi.json.
 pub mod k8s;
+pub mod nyxid_connect;
 pub mod openapi;
 pub mod ornn;
 pub mod reconcile;

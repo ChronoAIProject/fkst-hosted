@@ -85,6 +85,7 @@ async fn auth_app() -> AuthTestApp {
     });
     let vault = support::test_vault();
     let router = build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         auth_mode,
@@ -106,6 +107,7 @@ async fn no_auth_app() -> axum::Router {
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault();
     build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         auth_mode: AuthMode::Disabled,
@@ -284,6 +286,7 @@ async fn extractor_on_unprotected_route_with_auth_enabled_returns_500() {
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault();
     let state = AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         auth_mode: AuthMode::Enabled(NyxIdAuthSettings {
