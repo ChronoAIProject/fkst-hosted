@@ -268,7 +268,11 @@ local function liveness_model(rows)
       end,
     },
   })
-  local shared = workflow_liveness_shared.install(model, { liveness_signal_producers = {} })
+  local shared = workflow_liveness_shared.install(model, {
+    restart_package_name = model.restart_package_name,
+    restart_source_root = model.restart_source_root,
+    liveness_signal_producers = {},
+  })
   workflow_liveness_contract.install(model, shared)
   return model
 end

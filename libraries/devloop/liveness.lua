@@ -86,6 +86,8 @@ function S.install(M, resolved)
   for key, value in pairs(resolved or {}) do
     policy[key] = value
   end
+  policy.restart_package_name = M.restart_package_name
+  policy.restart_source_root = M.restart_source_root
   local shared = require("workflow.liveness.shared").install(M, policy)
   require("workflow.liveness.contract").install(M, shared, {
     pr_recovery = {

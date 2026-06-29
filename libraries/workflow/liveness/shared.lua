@@ -7,6 +7,8 @@ resolved = resolved or {}
 local shared = {}
 local max_timeout_attempts = 3
 shared.max_timeout_attempts = max_timeout_attempts
+local restart_package_name_value = resolved.restart_package_name
+local restart_source_root_value = resolved.restart_source_root
 
 local function has_required_table(row, field)
   return type(row[field]) == "table" and next(row[field]) ~= nil
@@ -63,7 +65,7 @@ local function valid_timeout(row)
 end
 shared.valid_timeout = valid_timeout
 
-local package_name = M.restart_package_name or "workflow"
+local package_name = restart_package_name_value or "workflow"
 local liveness_resolver_families = resolved.liveness_resolver_families or {}
 shared.liveness_resolver_families = liveness_resolver_families
 
@@ -136,7 +138,7 @@ local function source_contains(path, needle)
   end
   local source_path = path
   if path:sub(1, 10) ~= "libraries/" then
-    source_path = tostring(M.restart_source_root or "") .. path
+    source_path = tostring(restart_source_root_value or "") .. path
   end
   local ok, text = pcall(file.read, source_path)
   return ok and tostring(text or ""):find(needle, 1, true) ~= nil
