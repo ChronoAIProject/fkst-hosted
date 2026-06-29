@@ -16,6 +16,10 @@ REQUIRE_LITERAL_RE = re.compile(
 )
 DEVLOOP_FORGE_IMPORTS_INVENTORY = "migration/devloop-forge-imports.inventory"
 LEGACY_DEVLOOP_STD_IMPORTS_INVENTORY = "migration/devloop-std-imports.inventory"
+DEVLOOP_FORGE_VALIDATORS_FACADE = "libraries/devloop/forge_validators.lua"
+DEVLOOP_FORGE_VALIDATOR_MODULES = {
+    "forge.gitref",
+}
 FORGE_STRINGS_SPLIT_IMPORTS = {
     ("libraries/devloop/parsers/misc.lua", "forge.strings"),
 }
@@ -116,6 +120,25 @@ def devloop_forge_imports_at_base(root: Path) -> tuple[str, set[tuple[str, str]]
     return "present", entries, messages
 
 
+def is_sanctioned_devloop_forge_validator_import(path: str, module: str) -> bool:
+    return path == DEVLOOP_FORGE_VALIDATORS_FACADE and module in DEVLOOP_FORGE_VALIDATOR_MODULES
+
+
+def same_module_import_count(inventory: set[tuple[str, str]], module: str) -> int:
+    return sum(1 for _path, imported_module in inventory if imported_module == module)
+
+
+def is_replacing_existing_devloop_forge_validator_import(
+    item: tuple[str, str],
+    current_inventory: set[tuple[str, str]],
+    base_inventory: set[tuple[str, str]],
+) -> bool:
+    path, module = item
+    return (
+        is_sanctioned_devloop_forge_validator_import(path, module)
+        and same_module_import_count(current_inventory, module) < same_module_import_count(base_inventory, module)
+    )
+
 
 
 def check_devloop_visibility(root: Path, violations: list[str], add) -> None:
@@ -138,6 +161,9 @@ def check_devloop_forge_import_inventory(root: Path, violations: list[str], read
         current_inventory, inventory_errors = load_devloop_forge_import_inventory(inventory_path)
         for message in inventory_errors:
             add(violations, "G-LIB-DEP", message)
+        for path, module in sorted(devloop_forge_imports):
+            if module in DEVLOOP_FORGE_VALIDATOR_MODULES and path != DEVLOOP_FORGE_VALIDATORS_FACADE:
+                add(violations, "G-LIB-DEP", f"{path} imports {module}; use {DEVLOOP_FORGE_VALIDATORS_FACADE} instead")
         for item in sorted(devloop_forge_imports - current_inventory):
             path, module = item
             add(violations, "G-LIB-DEP", f"{path} imports {module} but is not listed in {DEVLOOP_FORGE_IMPORTS_INVENTORY}")
@@ -152,6 +178,8 @@ def check_devloop_forge_import_inventory(root: Path, violations: list[str], read
         elif base_inventory is not None:
             for item in sorted(current_inventory - base_inventory):
                 path, module = item
+                if is_replacing_existing_devloop_forge_validator_import(item, current_inventory, base_inventory):
+                    continue
                 add(violations, "G-LIB-DEP", f"{DEVLOOP_FORGE_IMPORTS_INVENTORY} grows relative to dev: {path} {module}")
 
 

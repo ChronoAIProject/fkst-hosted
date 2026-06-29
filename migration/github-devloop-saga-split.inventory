@@ -13,6 +13,7 @@
 {"path":"libraries/devloop/entity.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/entity_list_cache.lua","owner":"shared","reason":"entity-list polling cache is shared by issue intake/liveness and PR liveness scan."}
 {"path":"libraries/devloop/execution_start.lua","owner":"shared","reason":"public issue execution-start seam helpers are shared by intake routing and the issue lifecycle package."}
+{"path":"libraries/devloop/forge_validators.lua","owner":"shared","reason":"sanctioned pure forge-validator facade shared by typed devloop modules."}
 {"path":"libraries/devloop/forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
 {"path":"libraries/devloop/gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
 {"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}

@@ -1,5 +1,5 @@
 local S = {}
-local gitref = require("forge.gitref")
+local forge_validators = require("devloop.forge_validators")
 
 function S.bounded_limit(value, fallback, minimum, maximum, message)
   local n = tonumber(value or fallback)
@@ -18,23 +18,23 @@ function S.validate_fields(fields, message)
 end
 
 function S.require_safe_branch(M, name, value)
-  return gitref.require_safe_branch(name, value, "github-devloop")
+  return forge_validators.require_safe_branch(name, value, "github-devloop")
 end
 
 function S.require_safe_ref(M, name, value)
-  return gitref.require_safe_branch(name, value, "github-devloop")
+  return forge_validators.require_safe_branch(name, value, "github-devloop")
 end
 
 function S.require_safe_remote(M, remote)
-  return gitref.require_safe_remote(remote, "github-devloop")
+  return forge_validators.require_safe_remote(remote, "github-devloop")
 end
 
 function S.require_safe_sha(M, name, value)
-  return gitref.require_safe_sha(name, value, "github-devloop")
+  return forge_validators.require_safe_sha(name, value, "github-devloop")
 end
 
 function S.require_positive_pr_number(M, value)
-  return gitref.require_positive_pr_number(value, "github-devloop")
+  return forge_validators.require_positive_pr_number(value, "github-devloop")
 end
 
 function S.require_label_name(name)

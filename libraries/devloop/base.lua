@@ -3,7 +3,7 @@ local S = {}
 function S.install(M)
 local codex = require("workflow.codex")
 local error_facts = require("contract.error_facts")
-local gitref = require("forge.gitref")
+local forge_validators = require("devloop.forge_validators")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 
@@ -240,14 +240,14 @@ function M.proposal_id(repo, issue_number)
 end
 
 function M.safe_head_segment(head_sha)
-  if not gitref.is_git_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid head sha")
   end
   return tostring(head_sha)
 end
 
 function M.pr_review_proposal_id(repo, pr_number, version, head_sha)
-  if not gitref.is_positive_pr_number(pr_number) then
+  if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
   if head_sha == nil then
@@ -286,10 +286,10 @@ function M.parse_pr_review_proposal_id(id)
   if repo == nil or repo == "" or pr_number == nil or pr_number == "" or version == nil or version == "" or head_sha == nil or head_sha == "" then
     return nil
   end
-  if not gitref.is_positive_pr_number(pr_number) then
+  if not forge_validators.is_positive_pr_number(pr_number) then
     return nil
   end
-  if not gitref.is_git_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     return nil
   end
   if not is_path_safe_key(repo, 64)
@@ -308,7 +308,7 @@ function M.parse_pr_source_ref(source_ref)
   local ref = tostring(source_ref.ref or "")
   local pr_number = ref:match("#pr/(%d+)$")
   local repo = pr_number and ref:sub(1, #ref - #("#pr/" .. pr_number)) or nil
-  if repo == nil or repo == "" or not gitref.is_positive_pr_number(pr_number) then
+  if repo == nil or repo == "" or not forge_validators.is_positive_pr_number(pr_number) then
     return nil
   end
   if M.safe_repo(repo) == "" then
@@ -324,7 +324,7 @@ function M.parse_issue_source_ref(source_ref)
   local ref = tostring(source_ref.ref or "")
   local issue_number = ref:match("#issue/(%d+)$")
   local repo = issue_number and ref:sub(1, #ref - #("#issue/" .. issue_number)) or nil
-  if repo == nil or repo == "" or not gitref.is_positive_pr_number(issue_number) then
+  if repo == nil or repo == "" or not forge_validators.is_positive_pr_number(issue_number) then
     return nil
   end
   if not M.issue_ref_round_trips(repo, issue_number) then
@@ -566,7 +566,7 @@ function M.implement_branch(repo, issue_number, impl_version)
   end
 
   local branch = prefix .. safe_version .. suffix
-  if not gitref.is_git_ref_safe(branch) or #branch > max_branch_len then
+  if not forge_validators.is_git_ref_safe(branch) or #branch > max_branch_len then
     error("github-devloop: invalid deterministic implementation branch")
   end
   return branch
@@ -827,9 +827,9 @@ M._has_value = has_value
 M._is_review_meta_action = is_review_meta_action
 M.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round
 M._is_path_safe_key = is_path_safe_key
-M._is_git_ref_safe = gitref.is_git_ref_safe
-M._is_git_sha = gitref.is_git_sha
-M._is_positive_pr_number = gitref.is_positive_pr_number
+M._is_git_ref_safe = forge_validators.is_git_ref_safe
+M._is_git_sha = forge_validators.is_git_sha
+M._is_positive_pr_number = forge_validators.is_positive_pr_number
 M._dedup_key = dedup_key
 end
 

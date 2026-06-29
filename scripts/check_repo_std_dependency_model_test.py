@@ -144,6 +144,118 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
             ],
         )
 
+    def test_devloop_forge_import_inventory_allows_gitref_facade_consolidation(self) -> None:
+        current = inventory_line("libraries/devloop/forge_validators.lua", "forge.gitref")
+        base = (
+            inventory_line("libraries/devloop/base.lua", "forge.gitref")
+            + inventory_line("libraries/devloop/commands/validators.lua", "forge.gitref")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "gitref.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "forge_validators.lua", 'local gitref = require("forge.gitref")\nreturn {}\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("present", base),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(violations, [])
+
+    def test_devloop_forge_import_inventory_rejects_facade_without_same_module_shrink(self) -> None:
+        current = inventory_line("libraries/devloop/forge_validators.lua", "forge.gitref")
+        base = (
+            inventory_line("libraries/devloop/claims.lua", "forge.github")
+            + inventory_line("libraries/devloop/merge_gate.lua", "forge.github")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "gitref.lua", "return {}\n")
+            write(root / "libraries" / "forge" / "github.lua", "return {}\n")
+            write(root / "libraries" / "devloop" / "forge_validators.lua", 'local gitref = require("forge.gitref")\nreturn {}\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("present", base),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(
+            violations,
+            [
+                "G-LIB-DEP: migration/devloop-forge-imports.inventory grows relative to dev: "
+                "libraries/devloop/forge_validators.lua forge.gitref",
+            ],
+        )
+
+    def test_devloop_forge_import_inventory_rejects_check_runs_facade_piggyback(self) -> None:
+        current = (
+            inventory_line("libraries/devloop/forge_validators.lua", "forge.gitref")
+            + inventory_line("libraries/devloop/forge_validators.lua", "forge.github.check_runs")
+        )
+        base = (
+            inventory_line("libraries/devloop/base.lua", "forge.gitref")
+            + inventory_line("libraries/devloop/commands/validators.lua", "forge.gitref")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "gitref.lua", "return {}\n")
+            write(root / "libraries" / "forge" / "github" / "check_runs.lua", "return {}\n")
+            write(
+                root / "libraries" / "devloop" / "forge_validators.lua",
+                'local gitref = require("forge.gitref")\nlocal check_runs = require("forge.github.check_runs")\nreturn {}\n',
+            )
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("present", base),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(
+            violations,
+            [
+                "G-LIB-DEP: migration/devloop-forge-imports.inventory grows relative to dev: "
+                "libraries/devloop/forge_validators.lua forge.github.check_runs",
+            ],
+        )
+
+    def test_devloop_gitref_validator_imports_are_facade_only(self) -> None:
+        current = (
+            inventory_line("libraries/devloop/forge_validators.lua", "forge.gitref")
+            + inventory_line("libraries/devloop/claims.lua", "forge.gitref")
+            + inventory_line("libraries/devloop/merge_gate.lua", "forge.github.check_runs")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write(root / "libraries" / "forge" / "gitref.lua", "return {}\n")
+            write(root / "libraries" / "forge" / "github" / "check_runs.lua", "return {}\n")
+            write(
+                root / "libraries" / "devloop" / "forge_validators.lua",
+                'local gitref = require("forge.gitref")\nreturn {}\n',
+            )
+            write(root / "libraries" / "devloop" / "claims.lua", 'local gitref = require("forge.gitref")\nreturn {}\n')
+            write(root / "libraries" / "devloop" / "merge_gate.lua", 'local check_runs = require("forge.github.check_runs")\nreturn {}\n')
+            write(root / "migration" / "devloop-forge-imports.inventory", current)
+            with mock.patch.object(
+                check_repo.check_repo_std_dependency_model.ratchet_base,
+                "file_at_base",
+                return_value=("present", current),
+            ):
+                violations, _warnings = self.run_guard(root)
+
+        self.assertEqual(
+            violations,
+            [
+                "G-LIB-DEP: libraries/devloop/claims.lua imports forge.gitref; "
+                "use libraries/devloop/forge_validators.lua instead",
+            ],
+        )
+
     def test_devloop_forge_import_inventory_accepts_strings_split_path_follow(self) -> None:
         current = inventory_line("libraries/devloop/parsers/misc.lua", "forge.strings")
         with tempfile.TemporaryDirectory() as tmp:
