@@ -1,46 +1,27 @@
 local M = {}
-local avm_ingest = require("departments.observability.avm_ingest")
 
 function M.install_avm_scoreboard(core)
 local task_levels = { "L0", "L1", "L2", "L3", "L4", "unclassified" }
-local task_level_set = {
-  L0 = true,
-  L1 = true,
-  L2 = true,
-  L3 = true,
-  L4 = true,
-}
+local task_level_set = { L0 = true, L1 = true, L2 = true, L3 = true, L4 = true }
 
 local function number_value(value)
   local parsed = tonumber(value)
-  if parsed == nil or parsed < 0 then
-    return nil
-  end
-  return parsed
+  return parsed ~= nil and parsed >= 0 and parsed or nil
 end
 
 local function int_value(value)
   local parsed = number_value(value)
-  if parsed == nil then
-    return 0
-  end
-  return math.floor(parsed)
+  return parsed ~= nil and math.floor(parsed) or 0
 end
 
 local function optional_int(value)
   local parsed = number_value(value)
-  if parsed == nil or parsed ~= math.floor(parsed) then
-    return nil
-  end
-  return parsed
+  return parsed ~= nil and parsed == math.floor(parsed) and parsed or nil
 end
 
 local function normalize_task_level(value)
   local text = tostring(value or ""):upper()
-  if task_level_set[text] then
-    return text
-  end
-  return "unclassified"
+  return task_level_set[text] and text or "unclassified"
 end
 
 local function gate_state(value)
@@ -58,12 +39,21 @@ local function gate_state(value)
   return nil
 end
 
+local function safe_segment(value)
+  local text = tostring(value or "unknown")
+  text = text:gsub("[^%w%._%-/]", "-")
+  if text == "" then return "unknown" end
+  return #text > 120 and text:sub(1, 120) or text
+end
+
+local function marker_attr(marker, name)
+  return tostring(marker or ""):match(tostring(name) .. '="([^"]*)"')
+end
+
 local function comments_from_entity(entity)
   local comments = {}
   local function append_list(values)
-    if type(values) ~= "table" then
-      return
-    end
+    if type(values) ~= "table" then return end
     for _, comment in ipairs(values) do
       table.insert(comments, comment)
     end
@@ -86,9 +76,7 @@ end
 
 local function copy_fact(raw)
   local fact = {}
-  if type(raw) ~= "table" then
-    return fact
-  end
+  if type(raw) ~= "table" then return fact end
   for key, value in pairs(raw) do
     fact[key] = value
   end
@@ -150,17 +138,10 @@ local function append_pair(pairs, seen, pair)
 end
 
 local function issue_was_reopened(entity)
-  if type(entity) ~= "table" then
-    return false
-  end
+  if type(entity) ~= "table" then return false end
   local issue = entity.parent_issue or entity.issue
   if type(issue) == "table" then
-    if tostring(issue.state_reason or ""):upper() == "REOPENED" then
-      return true
-    end
-    if issue.reopened == true then
-      return true
-    end
+    return tostring(issue.state_reason or ""):upper() == "REOPENED" or issue.reopened == true
   end
   return entity.issue_reopened == true
 end
@@ -199,13 +180,9 @@ end
 
 local function scanned_pr_contains(recent_merged_prs, pr_number)
   local number = tonumber(pr_number)
-  if number == nil or type(recent_merged_prs) ~= "table" then
-    return false
-  end
+  if number == nil or type(recent_merged_prs) ~= "table" then return false end
   for _, pr in ipairs(recent_merged_prs) do
-    if tonumber(pr and pr.number) == number then
-      return true
-    end
+    if tonumber(pr and pr.number) == number then return true end
   end
   return false
 end
@@ -249,14 +226,64 @@ local function decorate_with_false_consensus(fact, entities, recent_merged_prs)
   return fact
 end
 
+local function fact_from_marker(marker, comment)
+  local proposal_id = marker_attr(marker, "proposal")
+  local pr_number = marker_attr(marker, "pr")
+  local version = marker_attr(marker, "version")
+  local head_sha = marker_attr(marker, "head_sha")
+  if proposal_id == nil or pr_number == nil or version == nil or head_sha == nil then
+    return nil, "missing_identity"
+  end
+  return core.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
+end
+
+local function log_marker_rejection(tag, reason, comment, marker)
+  local marker_context = ""
+  if marker ~= nil then
+    marker_context = " proposal=" .. safe_segment(marker_attr(marker, "proposal"))
+      .. " pr=" .. safe_segment(marker_attr(marker, "pr"))
+      .. " version=" .. safe_segment(marker_attr(marker, "version"))
+  end
+  log.warn("github-devloop dept=observability tag=" .. tostring(tag)
+    .. " reason=" .. safe_segment(reason)
+    .. " author=" .. safe_segment(core.comment_author_login(comment))
+    .. marker_context)
+end
+
 local function append_comment_facts(facts, comments, now_seconds)
-  avm_ingest.append_comment_facts(core, facts, comments, now_seconds, decorate_with_attempt_projection)
+  local trust_set = core.managed_bot_logins and core.managed_bot_logins() or nil
+  if type(trust_set) == "table" and next(trust_set) == nil then
+    trust_set = nil
+  end
+  for _, comment in ipairs(comments or {}) do
+    local body = core._comment_body(comment)
+    local function append_marker(marker)
+      local fact, reason = fact_from_marker(marker, comment)
+      if fact ~= nil then
+        table.insert(facts, decorate_with_attempt_projection(fact, comments, now_seconds))
+      else
+        log_marker_rejection("AVM_MARKER_REJECTED", reason or "parse_nil", comment, marker)
+      end
+    end
+    if core._is_trusted_comment(comment, trust_set) then
+      for marker in body:gmatch("<!%-%- fkst:github%-devloop:autonomy%-result:v1.-%-%->") do
+        append_marker(marker)
+      end
+      for marker in body:gmatch("<!%-%- fkst:github%-devloop:merged:v1.-%-%->") do
+        if marker:find('autonomy_result="v1"', 1, true) ~= nil then
+          append_marker(marker)
+        end
+      end
+    elseif body:find("fkst:github-devloop:autonomy-result:v1", 1, true)
+      or (body:find("fkst:github-devloop:merged:v1", 1, true)
+        and body:find('autonomy_result="v1"', 1, true)) then
+      log_marker_rejection("AVM_MARKER_COMMENT_REJECTED", "untrusted_author", comment)
+    end
+  end
 end
 
 local function append_direct_facts(facts, values)
-  if type(values) ~= "table" then
-    return
-  end
+  if type(values) ~= "table" then return end
   for _, value in ipairs(values) do
     if type(value) == "table" then
       table.insert(facts, copy_fact(value))
@@ -265,9 +292,7 @@ local function append_direct_facts(facts, values)
 end
 
 local function append_entity_direct_facts(facts, entity)
-  if type(entity) ~= "table" then
-    return
-  end
+  if type(entity) ~= "table" then return end
   if type(entity.autonomy_result) == "table" then
     table.insert(facts, copy_fact(entity.autonomy_result))
   end
@@ -288,29 +313,21 @@ local function append_recent_issue_facts(facts, recent_merged_issues, now_second
   end
 end
 
+local function repo_cache_segment(repo)
+  return tostring(repo or ""):gsub("[^%w%._%-%/]", "-")
+end
+
 local function recent_merged_pr_cache_key(repo)
-  return table.concat({
-    "github-devloop",
-    "avm",
-    "recent-merged-prs",
-    tostring(repo or ""):gsub("[^%w%._%-%/]", "-"),
-  }, "/")
+  return "github-devloop/avm/recent-merged-prs/" .. repo_cache_segment(repo)
 end
 
 local function recent_merged_issue_cache_key(repo)
-  return table.concat({
-    "github-devloop",
-    "avm",
-    "recent-merged-issues",
-    tostring(repo or ""):gsub("[^%w%._%-%/]", "-"),
-  }, "/")
+  return "github-devloop/avm/recent-merged-issues/" .. repo_cache_segment(repo)
 end
 
 local function recent_merged_pr_view(pr, listed)
   pr.number = tonumber(pr.number) or tonumber(listed.number)
-  if pr.title == nil or pr.title == "" then
-    pr.title = tostring(listed.title or "")
-  end
+  if pr.title == nil or pr.title == "" then pr.title = tostring(listed.title or "") end
   pr.merged_at = pr.merged_at or listed.merged_at
   if pr.head_sha == nil or pr.head_sha == "" then
     pr.head_sha = listed.head_sha
@@ -320,9 +337,7 @@ end
 
 local function recent_merged_issue_view(issue, listed)
   issue.number = tonumber(issue.number) or tonumber(listed.number)
-  if issue.title == nil or issue.title == "" then
-    issue.title = tostring(listed.title or "")
-  end
+  if issue.title == nil or issue.title == "" then issue.title = tostring(listed.title or "") end
   issue.closed_at = issue.closed_at or listed.closed_at
   issue.closedAt = issue.closedAt or listed.closedAt
   if type(issue.labels) ~= "table" then
