@@ -1,4 +1,5 @@
 local S = {}
+local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
@@ -193,7 +194,7 @@ local function substrate_commit_publishable(sha)
   local result = run_gh(function()
     return github().api_get(substrate_repo, "commits/" .. tostring(sha) .. "/check-runs", 60)
   end, "substrate upstream check-runs read")
-  local ok, reason = M.commit_check_runs_green(M.parse_commit_check_runs(result.stdout))
+  local ok, reason = check_runs.commit_check_runs_green(check_runs.parse_commit_check_runs(result.stdout))
   if ok then
     return true, "substrate-ci-green"
   end

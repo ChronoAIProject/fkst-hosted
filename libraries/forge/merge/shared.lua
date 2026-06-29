@@ -30,6 +30,8 @@ local check_run_id = check_runs.check_run_id
 local check_run_head_sha = check_runs.check_run_head_sha
 local check_run_name = check_runs.check_run_name
 local check_run_state = check_runs.check_run_state
+local parse_commit_check_runs = check_runs.parse_commit_check_runs
+local required_check_run_names = check_runs.required_check_run_names
 
 local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
   if type(M.log_line) ~= "function" then
@@ -39,7 +41,7 @@ local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
     "repo=" .. tostring(repo),
     "head_sha=" .. tostring(head_sha),
     "source=commit-check-runs",
-    "required_checks=" .. table.concat(M._required_check_run_names or {}, ","),
+    "required_checks=" .. table.concat(required_check_run_names or {}, ","),
     "check_runs=" .. tostring(type(runs) == "table" and #runs or 0),
     "reason=" .. tostring(reason or ""),
   })
@@ -53,11 +55,11 @@ local function fetch_commit_check_runs(repo, head_sha)
   if result.exit_code ~= 0 then
     return nil, "ci-unknown"
   end
-  return M.parse_commit_check_runs(result.stdout), nil
+  return parse_commit_check_runs(result.stdout), nil
 end
 
 local function required_head_check_run_status(runs, head_sha)
-  return check_runs.required_head_check_run_status(runs, head_sha, M._required_check_run_names)
+  return check_runs.required_head_check_run_status(runs, head_sha, required_check_run_names)
 end
 
 local function ci_classification(kind, reason, extra)
@@ -139,6 +141,8 @@ return {
   check_run_head_sha = check_run_head_sha,
   check_run_name = check_run_name,
   check_run_state = check_run_state,
+  parse_commit_check_runs = parse_commit_check_runs,
+  required_check_run_names = required_check_run_names,
   required_head_check_run_status = required_head_check_run_status,
   ci_classification = ci_classification,
   integration_or_external_red = integration_or_external_red,

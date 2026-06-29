@@ -1,5 +1,6 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
+local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
 
@@ -517,7 +518,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
     or tostring(current_pr.head_sha or "") ~= tostring(authorized_head or "") then
     return raise_reviewing_for_current_head(dept, issue, state, proposal_id, link, current_pr, authorized_head, "applied(replay)", "current PR head no longer matches merge authorization", tools)
   end
-  local mergeable, mergeable_reason = M.pr_mergeable(current_pr)
+  local mergeable, mergeable_reason = check_runs.pr_mergeable(current_pr)
   if merging == nil then
     local payload = M.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
       review_proposal_id = merge_ready.review_proposal_id,
@@ -530,7 +531,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
       { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
     })
   end
-  if not mergeable and M.is_not_mergeable_reason(mergeable_reason) then
+  if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
     local fix_version = M.fix_version_from_review_version(state.version)
     local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
     local request = M.build_merge_gate_fix_comment_request(issue.repo, issue.number, merge_ready, fix_version, mergeable_reason, current_pr.base_ref_oid, source_ref)
@@ -700,8 +701,8 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
       if not forge_validators.is_git_sha(pr.head_sha) then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
       end
-      local mergeable, mergeable_reason = M.pr_mergeable(pr)
-      if not mergeable and M.is_not_mergeable_reason(mergeable_reason) then
+      local mergeable, mergeable_reason = check_runs.pr_mergeable(pr)
+      if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
         local fix_version = M.next_fix_version(state.version)
         local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
         local review_fact = {

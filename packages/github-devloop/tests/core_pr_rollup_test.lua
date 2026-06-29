@@ -1,10 +1,11 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local check_runs = require("forge.github.check_runs")
 local t = h.t
 
 return {
   test_ci_rollup_requires_completed_green_conclusion = function()
-    local green, green_reason = core.pr_rollup_green({
+    local green, green_reason = check_runs.pr_rollup_green({
       status_check_rollup = {
         { state = "COMPLETED", conclusion = "SUCCESS" },
         { state = "COMPLETED", conclusion = "SKIPPED" },
@@ -14,7 +15,7 @@ return {
     t.eq(green, true)
     t.eq(green_reason, "rollup-green")
 
-    local action_required, action_reason = core.pr_rollup_green({
+    local action_required, action_reason = check_runs.pr_rollup_green({
       status_check_rollup = {
         { state = "COMPLETED", conclusion = "ACTION_REQUIRED" },
       },
@@ -22,7 +23,7 @@ return {
     t.eq(action_required, false)
     t.eq(action_reason, "rollup-red")
 
-    local neutral, neutral_reason = core.pr_rollup_green({
+    local neutral, neutral_reason = check_runs.pr_rollup_green({
       status_check_rollup = {
         { state = "COMPLETED", conclusion = "NEUTRAL" },
       },
@@ -30,7 +31,7 @@ return {
     t.eq(neutral, false)
     t.eq(neutral_reason, "rollup-red")
 
-    local failed, failed_reason = core.pr_rollup_green({
+    local failed, failed_reason = check_runs.pr_rollup_green({
       status_check_rollup = {
         { state = "COMPLETED", conclusion = "FAILURE" },
       },
@@ -38,7 +39,7 @@ return {
     t.eq(failed, false)
     t.eq(failed_reason, "rollup-red")
 
-    local pending, pending_reason = core.pr_rollup_green({
+    local pending, pending_reason = check_runs.pr_rollup_green({
       status_check_rollup = {
         { state = "IN_PROGRESS", conclusion = "" },
       },

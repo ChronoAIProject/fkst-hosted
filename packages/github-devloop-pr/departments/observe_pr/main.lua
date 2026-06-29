@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local check_runs = require("forge.github.check_runs")
 local transition_version = require("contract.transition_version")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
@@ -293,8 +294,8 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return false
   end
-  local mergeable, reason = core.pr_mergeable(current_pr)
-  if mergeable or not core.is_not_mergeable_reason(reason) then
+  local mergeable, reason = check_runs.pr_mergeable(current_pr)
+  if mergeable or not check_runs.is_not_mergeable_reason(reason) then
     return false
   end
   if core.version_fix_round(state.version) >= core.max_fix_rounds() then

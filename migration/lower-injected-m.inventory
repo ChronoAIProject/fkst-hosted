@@ -3,10 +3,10 @@
   "counts": {
     "workflow_injected_m_reads": 35,
     "workflow_injected_m_unique_symbols": 19,
-    "forge_injected_m_reads": 31,
-    "forge_injected_m_unique_symbols": 18,
-    "total_injected_m_reads": 66,
-    "total_injected_m_unique_symbols": 37
+    "forge_injected_m_reads": 20,
+    "forge_injected_m_unique_symbols": 12,
+    "total_injected_m_reads": 55,
+    "total_injected_m_unique_symbols": 31
   },
   "manifest": {
     "workflow": {
@@ -88,10 +88,6 @@
       }
     },
     "forge": {
-      "_required_check_run_names": {
-        "route": "typed_port",
-        "owner": "devloop-seam-dissolution"
-      },
       "_trim": {
         "route": "contract",
         "owner": "contract-strings"
@@ -104,10 +100,6 @@
         "route": "forge",
         "owner": "forge-merge"
       },
-      "commit_check_runs_green": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
       "git_worktree_remove_if_present": {
         "route": "forge",
         "owner": "forge-git"
@@ -115,10 +107,6 @@
       "invalidate_entity_after_write": {
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
-      },
-      "is_not_mergeable_reason": {
-        "route": "forge",
-        "owner": "forge-merge"
       },
       "is_same_repo_pr_head": {
         "route": "forge",
@@ -132,19 +120,7 @@
         "route": "workflow",
         "owner": "workflow-env"
       },
-      "parse_commit_check_runs": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
       "parse_pr_view_merge": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
-      "pr_mergeable": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
-      "pr_rollup_green": {
         "route": "forge",
         "owner": "forge-github"
       },

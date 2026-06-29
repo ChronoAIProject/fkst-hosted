@@ -1,4 +1,5 @@
 local S = {}
+local check_runs = require("forge.github.check_runs")
 local github_adapter = require("forge.github")
 local forge_validators = require("forge.gitref")
 local git_adapter = require("forge.git")
@@ -7,6 +8,7 @@ local strings = require("contract.strings")
 function S.install(M, shared, ci_gate)
 local github = github_adapter.production_handle
 local git = git_adapter.production_handle
+local pr_rollup_green = check_runs.pr_rollup_green
 
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
   local runtime_result = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
@@ -106,7 +108,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
 end
 
 local function ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_seconds, grace_seconds)
-  local green, green_reason = M.pr_rollup_green(pr)
+  local green, green_reason = pr_rollup_green(pr)
   if green or green_reason ~= "missing-status-rollup" then
     return false, green_reason
   end
@@ -124,7 +126,7 @@ local function ci_missing_status_dispatch_eligible(pr, now_seconds, first_observ
 end
 
 local function ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds, runs)
-  local green, green_reason = M.pr_rollup_green(pr)
+  local green, green_reason = pr_rollup_green(pr)
   if green or green_reason ~= "missing-status-rollup" then
     return false, green_reason
   end

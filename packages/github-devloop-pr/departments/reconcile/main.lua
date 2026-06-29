@@ -1,4 +1,5 @@
 local core, replay_fields = require("core"), require("devloop.replay_fields")
+local check_runs = require("forge.github.check_runs")
 local transition_version = require("contract.transition_version")
 
 local saga = require("workflow.saga")
@@ -61,7 +62,7 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   end
   local reason_class = core.merge_gate_reason_class(wait.reason)
   local wait_kind = tostring(wait.kind or "")
-  if core.is_ci_red_reason(reason_class) or core.is_not_mergeable_reason(reason_class) then
+  if core.is_ci_red_reason(reason_class) or check_runs.is_not_mergeable_reason(reason_class) then
     return "state-output-obligation-timeout"
   end
   if reason_class == "ci-wait"

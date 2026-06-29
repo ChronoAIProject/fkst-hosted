@@ -2,6 +2,7 @@ local core = require("core")
 local runtime_files = require("core.merge_runtime_files")
 local ci_wait = require("core.merge_ci_wait")
 local high_risk_merge_gate = require("core.high_risk_merge_gate")
+local check_runs = require("forge.github.check_runs")
 local M = {}
 local github = require("forge.github").production_handle
 
@@ -57,7 +58,7 @@ local function pr_head_contains_current_base(pr, branches)
 end
 
 local function should_wait_for_stale_mergeability(pr, branches, mergeable_reason)
-  if not core.is_not_mergeable_reason(mergeable_reason) then
+  if not check_runs.is_not_mergeable_reason(mergeable_reason) then
     return false, "not-stale-mergeability"
   end
   return pr_head_contains_current_base(pr, branches)
@@ -482,8 +483,8 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       if not revalidate_speculative_predecessors(repo, issue_number, merge_ready, state, current_pr, queue_position, speculative_fact) then
         return
       end
-      local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
-      if not mergeable and core.is_not_mergeable_reason(mergeable_reason) then
+      local mergeable, mergeable_reason = check_runs.pr_mergeable(current_pr)
+      if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
         local stale_mergeability, stale_reason = should_wait_for_stale_mergeability(current_pr, branches, mergeable_reason)
         if stale_mergeability then
           log_gate(merge_ready, "dry-run", stale_reason)
@@ -534,9 +535,9 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     error("github-devloop: PR fact changed after ready conversion")
   end
 
-  local mergeable, mergeable_reason = core.pr_mergeable(current_pr)
+  local mergeable, mergeable_reason = check_runs.pr_mergeable(current_pr)
   if not mergeable then
-    if not core.is_not_mergeable_reason(mergeable_reason) then
+    if not check_runs.is_not_mergeable_reason(mergeable_reason) then
       log_gate(merge_ready, "dry-run", mergeable_reason)
       error("github-devloop: merge wait on " .. tostring(mergeable_reason) .. "; retrying")
     end
@@ -682,7 +683,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     })
     return
   end
-  if not merge_ok and core.is_not_mergeable_reason(merge_reason) then
+  if not merge_ok and check_runs.is_not_mergeable_reason(merge_reason) then
     local stale_mergeability, stale_reason = should_wait_for_stale_mergeability(merge_rechecked_pr, branches, merge_reason)
     if stale_mergeability then
       log_gate(merge_ready, "dry-run", stale_reason)

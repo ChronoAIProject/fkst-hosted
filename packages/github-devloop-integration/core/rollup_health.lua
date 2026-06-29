@@ -1,4 +1,5 @@
 local S = {}
+local check_runs = require("forge.github.check_runs")
 local contract_time = require("contract.time")
 
 function S.install(M)
@@ -37,7 +38,7 @@ local function rollup_red_started_at(pr)
   local started_at = nil
   for _, entry in ipairs(entries) do
     local single_pr = { status_check_rollup = { entry } }
-    local green, reason = M.pr_rollup_green(single_pr)
+    local green, reason = check_runs.pr_rollup_green(single_pr)
     if not green and reason == "rollup-red" then
       local timestamp = failed_check_timestamp(entry)
         local seconds = contract_time.iso_timestamp_epoch_seconds(timestamp)
@@ -175,7 +176,7 @@ end
 function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, threshold_minutes)
   local current_seconds = tonumber(now_seconds) or now()
   local threshold = tonumber(threshold_minutes) or M.rollup_red_window_minutes()
-  local green, reason = M.pr_rollup_green(pr)
+  local green, reason = check_runs.pr_rollup_green(pr)
   if green then
     log.info("github-devloop dept=rollup_scan tag=ROLLUP_HEALTH action=no-op reason=rollup-green")
     return { action = "no-op", reason = "rollup-green" }

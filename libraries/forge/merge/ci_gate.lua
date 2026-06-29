@@ -1,5 +1,6 @@
 local S = {}
 local github_adapter = require("forge.github")
+local check_runs = require("forge.github.check_runs")
 local forge_validators = require("forge.gitref")
 
 function S.install(M, shared)
@@ -10,6 +11,11 @@ local log_check_runs_fallback = shared.log_check_runs_fallback
 local fetch_commit_check_runs = shared.fetch_commit_check_runs
 local check_run_id = shared.check_run_id
 local check_run_head_sha = shared.check_run_head_sha
+local parse_commit_check_runs = shared.parse_commit_check_runs
+local commit_check_runs_green = check_runs.commit_check_runs_green
+local pr_rollup_green = check_runs.pr_rollup_green
+local pr_mergeable = check_runs.pr_mergeable
+local is_not_mergeable_reason = check_runs.is_not_mergeable_reason
 local required_head_check_run_status = shared.required_head_check_run_status
 local ci_classification = shared.ci_classification
 local integration_or_external_red = shared.integration_or_external_red
@@ -42,14 +48,14 @@ local function commit_check_runs_merge_gate(repo, head_sha, opts)
   if result.exit_code ~= 0 then
     error("forge.merge: gh commit check-runs failed: " .. tostring(result.stderr))
   end
-  local runs = M.parse_commit_check_runs(result.stdout)
-  local green, reason = M.commit_check_runs_green(runs)
+  local runs = parse_commit_check_runs(result.stdout)
+  local green, reason = commit_check_runs_green(runs)
   log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
   return green, reason, runs
 end
 
 local function classify_pr_ci_gate(pr, opts)
-  local green, reason = M.pr_rollup_green(pr)
+  local green, reason = pr_rollup_green(pr)
   if green then
     return ci_classification("OK", "rollup-green")
   end
@@ -106,7 +112,7 @@ local function rerunnable_check_run_ids_for_head(runs, head_sha)
 end
 
 local function evaluate_ci_status_gate(pr, opts)
-  local green, green_reason = M.pr_rollup_green(pr)
+  local green, green_reason = pr_rollup_green(pr)
   local check_runs = nil
   if not green and green_reason == "missing-status-rollup" and type(opts) == "table" and opts.repo ~= nil then
     local head_sha = tostring(pr and pr.head_sha or "")
@@ -118,7 +124,7 @@ local function evaluate_ci_status_gate(pr, opts)
 end
 
 local function evaluate_ci_merge_gate(pr, opts)
-  local mergeable, mergeable_reason = M.pr_mergeable(pr)
+  local mergeable, mergeable_reason = pr_mergeable(pr)
   if not mergeable then
     return false, mergeable_reason
   end
@@ -139,7 +145,7 @@ local function merge_gate_reason_class(reason)
     return row.class
   end
   local text = tostring(reason or "")
-  if M.is_not_mergeable_reason(text) then
+  if is_not_mergeable_reason(text) then
     return text
   end
   return strings.sanitize_key(text ~= "" and text or "gate-failed", false):gsub("/", "-")

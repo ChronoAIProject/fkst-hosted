@@ -77,38 +77,6 @@ function M.parse_repo_labels(stdout)
   return items
 end
 
-local function check_run_entries(value)
-  if type(value) ~= "table" then
-    return {}
-  end
-  if type(value.check_runs) == "table" then
-    return value.check_runs
-  end
-  return value
-end
-
-function M.parse_commit_check_runs(stdout)
-  local decoded = json.decode(stdout or "{}")
-  local runs = {}
-  for _, run in ipairs(check_run_entries(decoded)) do
-    if type(run) == "table" then
-      table.insert(runs, {
-        id = run.id,
-        databaseId = run.databaseId,
-        database_id = run.database_id,
-        name = run.name,
-        status = run.status,
-        conclusion = run.conclusion,
-        head_sha = run.head_sha,
-        headSha = run.headSha,
-        check_suite = run.check_suite,
-        checkSuite = run.checkSuite,
-      })
-    end
-  end
-  return runs
-end
-
 local function comment_author_login(comment)
   -- Normalize the comment author login so an author read as "<slug>[bot]" (REST)
   -- matches a bare-"<slug>" configured bot login (GraphQL). No-op for ordinary logins.
@@ -196,25 +164,10 @@ local green_status_states = {
   SUCCESS = true,
 }
 
-local green_check_run_conclusions = {
-  SUCCESS = true,
-  NEUTRAL = true,
-  SKIPPED = true,
-}
-
 local red_status_states = {
   ERROR = true,
   FAILURE = true,
 }
-
-local required_check_run_names = {
-  "test",
-}
-
-local required_check_run_name_set = {}
-for _, name in ipairs(required_check_run_names) do
-  required_check_run_name_set[name] = true
-end
 
 local max_rollup_check_name_len = 80
 local max_rollup_failure_summary_len = 200
@@ -237,13 +190,6 @@ local function safe_rollup_check_name(M, entry)
     name = name:sub(1, max_rollup_check_name_len)
   end
   return name
-end
-
-local function check_name(entry)
-  if type(entry) ~= "table" then
-    return ""
-  end
-  return tostring(entry.name or entry.context or entry.workflowName or entry.workflow_name or "")
 end
 
 local function entry_commit_sha(entry)
@@ -282,55 +228,6 @@ local function entry_commit_sha(entry)
     end
   end
   return nil
-end
-
-function M.pr_rollup_green(pr)
-  local entries = type(pr) == "table" and pr.status_check_rollup or nil
-  if type(entries) ~= "table" or #entries == 0 then
-    return false, "missing-status-rollup"
-  end
-  for _, entry in ipairs(entries) do
-    local state, conclusion = check_entry_state(entry)
-    if state == "COMPLETED" then
-      if not green_check_conclusions[conclusion] then
-        return false, "rollup-red"
-      end
-    elseif conclusion == "" and green_status_states[state] then
-      -- Legacy StatusContext entries report state=SUCCESS without a conclusion.
-    elseif conclusion == "" and red_status_states[state] then
-      return false, "rollup-red"
-    else
-      return false, "rollup-pending"
-    end
-  end
-  return true, "rollup-green"
-end
-
-function M.commit_check_runs_green(runs)
-  if type(runs) ~= "table" or #runs == 0 then
-    return false, "missing-status-rollup"
-  end
-  local seen_required = {}
-  for _, run in ipairs(runs) do
-    local name = check_name(run)
-    if required_check_run_name_set[name] then
-      seen_required[name] = true
-      local state, conclusion = check_entry_state(run)
-      if state == "COMPLETED" then
-        if not green_check_run_conclusions[conclusion] then
-          return false, "rollup-red"
-        end
-      else
-        return false, "rollup-pending"
-      end
-    end
-  end
-  for _, name in ipairs(required_check_run_names) do
-    if not seen_required[name] then
-      return false, "missing-status-rollup"
-    end
-  end
-  return true, "rollup-green"
 end
 
 function M.pr_rollup_failure_summary(pr)
@@ -412,38 +309,6 @@ end
 
 M._max_rollup_check_name_len = max_rollup_check_name_len
 M._max_rollup_failure_summary_len = max_rollup_failure_summary_len
-M._required_check_run_names = required_check_run_names
-
-function M.pr_mergeable(pr)
-  if type(pr) ~= "table" then
-    return false, "missing-pr"
-  end
-  local mergeable = upper_text(pr.mergeable)
-  local merge_state = upper_text(pr.merge_state_status)
-  if mergeable == "UNKNOWN" then
-    return false, "mergeable-unknown"
-  end
-  if mergeable ~= "MERGEABLE" then
-    if mergeable == "" then
-      return false, "missing-mergeability"
-    end
-    return false, "mergeable-" .. mergeable:lower()
-  end
-  if merge_state ~= "CLEAN" then
-    if merge_state == "" then
-      return false, "missing-mergeability"
-    end
-    if merge_state == "UNSTABLE" then
-      local rollup_green, rollup_reason = M.pr_rollup_green(pr)
-      if not rollup_green and (rollup_reason == "rollup-red" or rollup_reason == "rollup-pending") then
-        return true, "mergeable"
-      end
-    end
-    return false, "merge-state-" .. merge_state:lower()
-  end
-  return true, "mergeable"
-end
-
 function M.is_ci_red_reason(reason)
   return tostring(reason or "") == "own-ci-red"
 end
@@ -455,14 +320,6 @@ function M.is_ci_wait_reason(reason)
     or text == "ci-unknown"
     or text == "checks-pending"
     or text == "rollup-pending"
-end
-
-function M.is_not_mergeable_reason(reason)
-  local text = tostring(reason or "")
-  return text == "mergeable-conflicting"
-    or text == "mergeable-false"
-    or text == "merge-state-dirty"
-    or text == "merge-state-conflicting"
 end
 
 M._upper_text = upper_text
