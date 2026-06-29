@@ -250,6 +250,7 @@ local function mock_observability_empty_reads()
   end
   t.mock_command(core.gh_pr_list_observe_cmd("owner/repo", 1, true), { stdout = "[]\n", stderr = "", exit_code = 0 })
   t.mock_command(core.gh_pr_list_recent_merged_cmd("owner/repo", core.observability_limits().entity_cap), { stdout = "[]\n", stderr = "", exit_code = 0 })
+  t.mock_command(core.gh_issue_list_recent_closed_cmd("owner/repo", core.observability_limits().entity_cap), { stdout = "[]\n", stderr = "", exit_code = 0 })
   t.mock_command(core.gh_dashboard_label_get_cmd("owner/repo", core.dashboard_label()), {
     stdout = '{"name":"fkst-dashboard"}\n',
     stderr = "",

@@ -1,6 +1,7 @@
 local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local t = h.t
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 require("departments.observability.main")
 
 local old_dashboard_body_cap = 12000
@@ -316,6 +317,60 @@ return {
     })
     local pairs = core.false_consensus_pairs(facts)
     t.eq(#pairs, 0)
+  end,
+
+  test_recent_merged_issues_feed_closed_issue_autonomy_markers_to_avm_scoreboard = function()
+    mock_dashboard_env()
+    local proposal_id = "github-devloop/issue/owner/repo/1646"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/1646/2026-06-29T00-40-00Z"
+    local head_sha = "abc1646"
+    local record = autonomy_record({
+      proposal_id = proposal_id,
+      issue_number = "1646",
+      pr_number = "1647",
+      version = version,
+      head_sha = head_sha,
+      task_class = "L2",
+      codex_calls = 5,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    })
+    entity_read_mocks.mock_issue_list_command(t, core.gh_issue_list_recent_closed_cmd("owner/repo", 25), {
+      {
+        number = 1646,
+        title = "AVM scoreboard reads merges=0",
+        closed_at = "2026-06-29T00:40:00Z",
+        labels = { "fkst-dev:enabled", "fkst-dev:merged" },
+      },
+    })
+    entity_read_mocks.mock_issue_view_selector(t, {
+      number = 1646,
+      title = "AVM scoreboard reads merges=0",
+      state = "CLOSED",
+      labels = { "fkst-dev:enabled", "fkst-dev:merged" },
+      comments = {
+        trusted_comment(core.autonomy_result_marker(record), "2026-06-29T00:40:00Z", 4001),
+      },
+    }, "title,comments,state,stateReason,assignees,author")
+
+    local recent_issues = core.collect_recent_merged_issues("owner/repo", core.observability_limits(), now() + 90)
+    local facts = core.collect_avm_scoreboard_facts({}, 1770000000, {}, recent_issues)
+    local rows = core.aggregate_avm_scoreboard(facts)
+    local by_level = {}
+    for _, row in ipairs(rows) do
+      by_level[row.level] = row
+    end
+
+    t.eq(#recent_issues, 1)
+    t.eq(by_level.L2.merges, 1)
+    t.eq(by_level.L2.avm_denominator, 1)
+    t.eq(core.render_avm_scoreboard_bucket(by_level.L2):find("AVM-rate=1/1 (100%)", 1, true) ~= nil, true)
   end,
 
   test_dashboard_lists_false_consensus_churn_pairs = function()

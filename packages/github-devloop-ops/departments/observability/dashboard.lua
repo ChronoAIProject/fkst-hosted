@@ -288,6 +288,7 @@ function core.render_observability_dashboard(args)
   local state_gap_report = args and args.state_gap_report or {}
   local topology_mermaid = args and args.topology_mermaid or nil
   local recent_merged_prs = args and args.recent_merged_prs or nil
+  local recent_merged_issues = args and args.recent_merged_issues or nil
   local now_seconds = args and args.now_seconds or now()
   local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds)
   local instance = core.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
@@ -344,7 +345,7 @@ function core.render_observability_dashboard(args)
 
   lines = {}
   table.insert(lines, "## AVM scoreboard by task level")
-  local avm_facts = core.collect_avm_scoreboard_facts(list, now_seconds, recent_merged_prs)
+  local avm_facts = core.collect_avm_scoreboard_facts(list, now_seconds, recent_merged_prs, recent_merged_issues)
   for _, bucket in ipairs(core.aggregate_avm_scoreboard(avm_facts)) do
     table.insert(lines, core.render_avm_scoreboard_bucket(bucket))
   end
