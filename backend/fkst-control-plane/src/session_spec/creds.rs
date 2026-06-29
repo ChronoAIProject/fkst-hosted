@@ -12,9 +12,10 @@ use std::path::{Path, PathBuf};
 /// verbatim (`crate::engine::goal_token::TOKEN_FILE_NAME`).
 pub const GITHUB_TOKEN_FILE: &str = "github-token";
 
-/// The current NyxID session token (`NYXID_ACCESS_TOKEN` for the substrate's LLM
-/// + Ornn calls). The control plane rotates this file in place as the short
-/// token is refreshed; the durable NyxID binding never enters the pod.
+/// The current NyxID session token (`NYXID_ACCESS_TOKEN`, used for the
+/// substrate's LLM and Ornn calls). The control plane rotates this file in place
+/// as the short token is refreshed; the durable NyxID binding never enters the
+/// pod.
 pub const NYXID_TOKEN_FILE: &str = "nyxid-token";
 
 /// The NyxID issuer base URL (`NYXID_URL`). Not a secret, but co-located with
