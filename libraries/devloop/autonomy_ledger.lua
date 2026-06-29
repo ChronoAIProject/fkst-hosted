@@ -610,41 +610,72 @@ function M.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_n
     no_revert_reopen = normalize_gate_state(marker:match('gate_no_revert_reopen="([^"]+)"')),
     cost_budget = normalize_gate_state(marker:match('gate_cost_budget="([^"]+)"')),
   }
-  if marker_proposal == tostring(proposal_id)
-    and tostring(marker_pr) == tostring(pr_number)
-    and tostring(marker_version) == tostring(version)
-    and tostring(marker_head_sha) == tostring(head_sha)
-    and M._is_git_sha(marker_head_sha)
-    and human_touch_count ~= nil
-    and rounds ~= nil
-    and retry_count ~= nil
-    and (valid == "true" or valid == "false" or valid == "pending") then
-    local codex_calls = nil
-    if codex_calls_raw ~= "null" then
-      codex_calls = tonumber(codex_calls_raw)
-      if codex_calls == nil or codex_calls < 0 or codex_calls % 1 ~= 0 then
-        return nil
-      end
-    end
-    return {
-      proposal_id = marker_proposal,
-      repo = marker:match('repo="([^"]+)"'),
-      issue_number = tonumber(marker:match('issue="(%d+)"')),
-      pr_number = tonumber(marker_pr),
-      version = marker_version,
-      head_sha = marker_head_sha,
-      task_class = task_class,
-      human_touch_count = human_touch_count,
-      pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
-      rounds = rounds,
-      retry_count = retry_count,
-      codex_calls = codex_calls,
-      gates = gates,
-      valid_autonomous_merge = M.autonomy_valid_autonomous_merge(gates),
-      comment_created_at = M._comment_created_at(comment),
-    }
+  if marker_proposal == nil then
+    return nil, "missing_proposal"
   end
-  return nil
+  if marker_proposal ~= tostring(proposal_id) then
+    return nil, "mismatch_proposal"
+  end
+  if marker_pr == nil then
+    return nil, "missing_pr"
+  end
+  if tostring(marker_pr) ~= tostring(pr_number) then
+    return nil, "mismatch_pr"
+  end
+  if marker_version == nil then
+    return nil, "missing_version"
+  end
+  if tostring(marker_version) ~= tostring(version) then
+    return nil, "mismatch_version"
+  end
+  if marker_head_sha == nil then
+    return nil, "missing_head_sha"
+  end
+  if tostring(marker_head_sha) ~= tostring(head_sha) then
+    return nil, "mismatch_head_sha"
+  end
+  if not M._is_git_sha(marker_head_sha) then
+    return nil, "invalid_head_sha"
+  end
+  if human_touch_count == nil then
+    return nil, "missing_human_touch_count"
+  end
+  if rounds == nil then
+    return nil, "missing_rounds"
+  end
+  if retry_count == nil then
+    return nil, "missing_retry_count"
+  end
+  if valid ~= "true" and valid ~= "false" and valid ~= "pending" then
+    return nil, "invalid_valid_autonomous_merge"
+  end
+  local codex_calls = nil
+  if codex_calls_raw == nil then
+    return nil, "missing_codex_calls"
+  end
+  if codex_calls_raw ~= "null" then
+    codex_calls = tonumber(codex_calls_raw)
+    if codex_calls == nil or codex_calls < 0 or codex_calls % 1 ~= 0 then
+      return nil, "invalid_codex_calls"
+    end
+  end
+  return {
+    proposal_id = marker_proposal,
+    repo = marker:match('repo="([^"]+)"'),
+    issue_number = tonumber(marker:match('issue="(%d+)"')),
+    pr_number = tonumber(marker_pr),
+    version = marker_version,
+    head_sha = marker_head_sha,
+    task_class = task_class,
+    human_touch_count = human_touch_count,
+    pre_merge_ci = normalize_gate_state(marker:match('pre_merge_ci="([^"]+)"')),
+    rounds = rounds,
+    retry_count = retry_count,
+    codex_calls = codex_calls,
+    gates = gates,
+    valid_autonomous_merge = M.autonomy_valid_autonomous_merge(gates),
+    comment_created_at = M._comment_created_at(comment),
+  }
 end
 
 function M.autonomy_result_fact(comments, proposal_id, pr_number, version, head_sha)

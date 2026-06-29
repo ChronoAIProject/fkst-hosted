@@ -16,6 +16,16 @@ local function mock_dashboard_env()
   end
 end
 
+local function mock_managed_bot_logins(value)
+  for _ = 1, 8 do
+    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
+      stdout = value or "",
+      stderr = "",
+      exit_code = 0,
+    })
+  end
+end
+
 local function large_mermaid(line_count)
   local lines = { "flowchart LR" }
   for index = 1, line_count do
@@ -29,6 +39,15 @@ local function trusted_comment(body, created_at, id)
     id = id,
     body = body,
     author_login = "fkst-test-bot",
+    created_at = created_at or "2026-06-03T01:00:00Z",
+  }
+end
+
+local function authored_comment(body, author_login, created_at, id)
+  return {
+    id = id,
+    body = body,
+    author_login = author_login,
     created_at = created_at or "2026-06-03T01:00:00Z",
   }
 end
@@ -70,6 +89,20 @@ local function autonomy_record(fields)
     gates = fields.gates,
   }
   return record
+end
+
+local function capture_warn_logs(fn)
+  local previous_warn = log.warn
+  local logs = {}
+  log.warn = function(message)
+    table.insert(logs, tostring(message))
+  end
+  local ok, result = pcall(fn)
+  log.warn = previous_warn
+  if not ok then
+    error(result, 0)
+  end
+  return result, logs
 end
 
 local function assert_dashboard_marker_outside_fences(body)
@@ -321,41 +354,43 @@ return {
 
   test_recent_merged_issues_feed_closed_issue_autonomy_markers_to_avm_scoreboard = function()
     mock_dashboard_env()
-    local proposal_id = "github-devloop/issue/owner/repo/1646"
-    local version = "ready/consensus-github-devloop/issue/owner/repo/1646/2026-06-29T00-40-00Z"
-    local head_sha = "abc1646"
-    local record = autonomy_record({
-      proposal_id = proposal_id,
-      issue_number = "1646",
-      pr_number = "1647",
-      version = version,
-      head_sha = head_sha,
-      task_class = "L2",
-      codex_calls = 5,
-      gates = {
-        human_touch = "pass",
-        pre_merge_ci = "pass",
-        evidence_manifest = "pass",
-        post_merge_probe = "pass",
-        no_revert_reopen = "pass",
-        cost_budget = "pass",
-      },
-    })
+    mock_managed_bot_logins("loning,ElonSG")
+    local marker = '<!-- fkst:github-devloop:autonomy-result:v1'
+      .. ' proposal="github-devloop/issue/ChronoAIProject/fkst-packages/1649"'
+      .. ' repo="ChronoAIProject/fkst-packages"'
+      .. ' issue="1649"'
+      .. ' pr="1650"'
+      .. ' version="ready/consensus-github-devloop/issue/ChronoAIProject/fkst-packages/1649/intake/1746481111/loop/1"'
+      .. ' head_sha="dc70f738081a09e25769cc7568c3c8c14f830d25"'
+      .. ' task_class="L2"'
+      .. ' human_touch_count="0"'
+      .. ' pre_merge_ci="pass"'
+      .. ' rounds="2"'
+      .. ' retry_count="0"'
+      .. ' codex_calls="5"'
+      .. ' gate_human_touch="pass"'
+      .. ' gate_evidence_manifest="pass"'
+      .. ' gate_post_merge_probe="pending"'
+      .. ' post_merge_probe_green="pending"'
+      .. ' gate_no_revert_reopen="pending"'
+      .. ' gate_cost_budget="pass"'
+      .. ' valid_autonomous_merge="pending"'
+      .. ' -->'
     entity_read_mocks.mock_issue_list_command(t, core.gh_issue_list_recent_closed_cmd("owner/repo", 25), {
       {
-        number = 1646,
-        title = "AVM scoreboard reads merges=0",
-        closed_at = "2026-06-29T00:40:00Z",
+        number = 1649,
+        title = "AVM scoreboard still reads merges=0 after #1646",
+        closed_at = "2026-06-29T03:44:36Z",
         labels = { "fkst-dev:enabled", "fkst-dev:merged" },
       },
     })
     entity_read_mocks.mock_issue_view_selector(t, {
-      number = 1646,
-      title = "AVM scoreboard reads merges=0",
+      number = 1649,
+      title = "AVM scoreboard still reads merges=0 after #1646",
       state = "CLOSED",
       labels = { "fkst-dev:enabled", "fkst-dev:merged" },
       comments = {
-        trusted_comment(core.autonomy_result_marker(record), "2026-06-29T00:40:00Z", 4001),
+        authored_comment(marker, "loning", "2026-06-29T03:44:36Z", 4001),
       },
     }, "title,comments,state,stateReason,assignees,author")
 
@@ -370,7 +405,53 @@ return {
     t.eq(#recent_issues, 1)
     t.eq(by_level.L2.merges, 1)
     t.eq(by_level.L2.avm_denominator, 1)
-    t.eq(core.render_avm_scoreboard_bucket(by_level.L2):find("AVM-rate=1/1 (100%)", 1, true) ~= nil, true)
+    t.eq(core.render_avm_scoreboard_bucket(by_level.L2):find("AVM-rate=0/1 (0%)", 1, true) ~= nil, true)
+  end,
+
+  test_avm_scoreboard_uses_managed_bot_trust_and_logs_marker_rejections = function()
+    mock_dashboard_env()
+    mock_managed_bot_logins("loning,ElonSG")
+    local record = autonomy_record({
+      proposal_id = "github-devloop/issue/owner/repo/1655",
+      issue_number = "1655",
+      pr_number = "1656",
+      version = "ready/consensus-github-devloop/issue/owner/repo/1655/2026-06-29T05-36-07Z",
+      head_sha = "dc70f738081a09e25769cc7568c3c8c14f830d25",
+      task_class = "L3",
+      codex_calls = 3,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pending",
+        no_revert_reopen = "pending",
+        cost_budget = "pass",
+      },
+    })
+    local valid_marker = core.autonomy_result_marker(record)
+    local malformed_marker = '<!-- fkst:github-devloop:autonomy-result:v1'
+      .. ' proposal="github-devloop/issue/owner/repo/1655"'
+      .. ' pr="1656"'
+      .. ' -->'
+    local comments = {
+      authored_comment(valid_marker, "ElonSG", "2026-06-29T05:40:00Z", 4101),
+      authored_comment(valid_marker, "mallory", "2026-06-29T05:41:00Z", 4102),
+      authored_comment(malformed_marker, "loning", "2026-06-29T05:42:00Z", 4103),
+    }
+
+    local facts, logs = capture_warn_logs(function()
+      return core.collect_avm_scoreboard_facts({ { comments = comments } }, 1770000000, {}, {})
+    end)
+    local rows = core.aggregate_avm_scoreboard(facts)
+    local by_level = {}
+    for _, row in ipairs(rows) do
+      by_level[row.level] = row
+    end
+    local joined_logs = table.concat(logs, "\n")
+
+    t.eq(by_level.L3.merges, 1)
+    t.is_true(joined_logs:find("tag=AVM_MARKER_COMMENT_REJECTED reason=untrusted_author author=mallory", 1, true) ~= nil)
+    t.is_true(joined_logs:find("tag=AVM_MARKER_REJECTED reason=missing_identity author=loning", 1, true) ~= nil)
   end,
 
   test_dashboard_lists_false_consensus_churn_pairs = function()

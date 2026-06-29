@@ -1,4 +1,5 @@
 local M = {}
+local avm_ingest = require("departments.observability.avm_ingest")
 
 function M.install_avm_scoreboard(core)
 local task_levels = { "L0", "L1", "L2", "L3", "L4", "unclassified" }
@@ -55,10 +56,6 @@ local function gate_state(value)
     return "pending"
   end
   return nil
-end
-
-local function marker_attr(marker, name)
-  return tostring(marker or ""):match(tostring(name) .. '="([^"]*)"')
 end
 
 local function comments_from_entity(entity)
@@ -252,35 +249,8 @@ local function decorate_with_false_consensus(fact, entities, recent_merged_prs)
   return fact
 end
 
-local function fact_from_marker(marker, comment)
-  local proposal_id = marker_attr(marker, "proposal")
-  local pr_number = marker_attr(marker, "pr")
-  local version = marker_attr(marker, "version")
-  local head_sha = marker_attr(marker, "head_sha")
-  if proposal_id == nil or pr_number == nil or version == nil or head_sha == nil then
-    return nil
-  end
-  return core.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
-end
-
 local function append_comment_facts(facts, comments, now_seconds)
-  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
-    local body = core._comment_body(comment)
-    for marker in body:gmatch("<!%-%- fkst:github%-devloop:autonomy%-result:v1.-%-%->") do
-      local fact = fact_from_marker(marker, comment)
-      if fact ~= nil then
-        table.insert(facts, decorate_with_attempt_projection(fact, comments, now_seconds))
-      end
-    end
-    for marker in body:gmatch("<!%-%- fkst:github%-devloop:merged:v1.-%-%->") do
-      if marker:find('autonomy_result="v1"', 1, true) ~= nil then
-        local fact = fact_from_marker(marker, comment)
-        if fact ~= nil then
-          table.insert(facts, decorate_with_attempt_projection(fact, comments, now_seconds))
-        end
-      end
-    end
-  end
+  avm_ingest.append_comment_facts(core, facts, comments, now_seconds, decorate_with_attempt_projection)
 end
 
 local function append_direct_facts(facts, values)

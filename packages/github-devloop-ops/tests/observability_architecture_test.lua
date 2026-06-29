@@ -43,6 +43,11 @@ return {
 
     assert_module("departments/observability/common.lua", "common")
     assert_module("departments/observability/avm_scoreboard.lua", "avm_scoreboard")
+    t.is_true(read_source("departments/observability/avm_scoreboard.lua"):find(
+      'require("departments.observability.avm_ingest")',
+      1,
+      true
+    ) ~= nil)
     assert_module("departments/observability/census.lua", "census")
     assert_module("departments/observability/dashboard.lua", "dashboard")
     assert_module("departments/observability/reaper.lua", "reaper")
