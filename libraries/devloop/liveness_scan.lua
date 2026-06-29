@@ -1,4 +1,4 @@
-local S, replay_fields = {}, require("devloop.replay_fields")
+local S, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
 
 function S.install(M)
 local LIVENESS_SCAN_MAX_PER_TICK = 100
@@ -45,7 +45,7 @@ function M.liveness_scan_update_cursor(cursor_key, cursor, total, processed)
   if cursor_key == nil then
     return
   end
-  cache_set(cursor_key, tostring(M.sweep_cursor_advance(cursor, total, processed)))
+  cache_set(cursor_key, tostring(sweep_bounds.sweep_cursor_advance(cursor, total, processed)))
 end
 
 function M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
@@ -178,7 +178,7 @@ function M.liveness_scan_activation_slice(repo, kind, items, cursor_prefix)
   if total > LIVENESS_SCAN_MAX_PER_TICK then
     local cursor_key = M.liveness_scan_cursor_key(repo, cursor_prefix)
     local cursor = cache_get(cursor_key)
-    local bounded, deferred = M.sweep_cursor_batch(
+    local bounded, deferred = sweep_bounds.sweep_cursor_batch(
       activations,
       cursor,
       LIVENESS_SCAN_MAX_PER_TICK,

@@ -1,4 +1,4 @@
-local core = require("core")
+local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local saga = require("workflow.saga")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
@@ -26,12 +26,12 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     return false
   end
 
-  if not core.sweep_has_budget(deadline) then
+  if not sweep_bounds.sweep_has_budget(deadline) then
     return nil, "deadline"
   end
   local state_view = core.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
     consumer = "liveness_scan",
-    timeout = core.sweep_call_timeout(limits, deadline),
+    timeout = sweep_bounds.sweep_call_timeout(limits, deadline),
   })
   if state_view.exit_code ~= 0 then
     if core.liveness_scan_is_timeout_result(state_view) then
@@ -102,8 +102,8 @@ local function act_liveness_scan(event)
   end
 
   local limits = core.liveness_scan_limits()
-  local deadline = core.sweep_deadline(now(), limits)
-  local timeout = core.sweep_call_timeout(limits, deadline)
+  local deadline = sweep_bounds.sweep_deadline(now(), limits)
+  local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
     core.liveness_scan_log_deferred("deadline", { entity_cap = limits.entity_cap })
     return
@@ -114,7 +114,7 @@ local function act_liveness_scan(event)
   local attempted = 0
 
   for _, activation in ipairs(activations) do
-    if not core.sweep_has_budget(deadline) then
+    if not sweep_bounds.sweep_has_budget(deadline) then
       core.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
       core.liveness_scan_log_deferred("deadline", {
         listed_prs = #prs,

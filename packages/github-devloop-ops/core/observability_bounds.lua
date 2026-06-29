@@ -1,4 +1,5 @@
 local S = {}
+local sweep_bounds = require("devloop.sweep_bounds")
 
 function S.install(M)
 local default_observability_list_page_cap = 2
@@ -7,7 +8,7 @@ local default_observability_call_timeout = 10
 local default_observability_wall_clock_budget = 90
 
 local function positive_integer(value, fallback, minimum, maximum)
-  return M.sweep_positive_integer(value, fallback, minimum, maximum)
+  return sweep_bounds.sweep_positive_integer(value, fallback, minimum, maximum)
 end
 
 function M.observability_limits()
@@ -20,32 +21,32 @@ function M.observability_limits()
 end
 
 function M.observability_deadline(now_seconds, limits)
-  return M.sweep_deadline(now_seconds, limits)
+  return sweep_bounds.sweep_deadline(now_seconds, limits)
 end
 
 function M.observability_remaining_seconds(deadline)
-  return M.sweep_remaining_seconds(deadline)
+  return sweep_bounds.sweep_remaining_seconds(deadline)
 end
 
 function M.observability_call_timeout(limits, deadline)
-  return M.sweep_call_timeout(limits, deadline)
+  return sweep_bounds.sweep_call_timeout(limits, deadline)
 end
 
 function M.observability_has_budget(deadline)
-  return M.sweep_has_budget(deadline)
+  return sweep_bounds.sweep_has_budget(deadline)
 end
 
 function M.observability_deadline_deferred_result(error_class)
-  return M.sweep_deadline_deferred_result(error_class or "observability command", "observability deadline exhausted")
+  return sweep_bounds.sweep_deadline_deferred_result(error_class or "observability command", "observability deadline exhausted")
 end
 
 function M.observability_result_deferred(result)
-  return M.sweep_result_deferred(result)
+  return sweep_bounds.sweep_result_deferred(result)
 end
 
 function M.observability_exec(cmd_or_opts, limits, deadline, error_class, exec)
-  local result = M.sweep_exec(cmd_or_opts, limits, deadline, error_class or "observability command", exec)
-  if M.sweep_result_deferred(result) then
+  local result = sweep_bounds.sweep_exec(cmd_or_opts, limits, deadline, error_class or "observability command", exec)
+  if sweep_bounds.sweep_result_deferred(result) then
     result.stderr = "observability deadline exhausted"
   end
   return result
@@ -68,19 +69,19 @@ local function bounded_page_cap(limit)
 end
 
 function M.observability_rotation_seed(event)
-  return M.sweep_rotation_seed(event)
+  return sweep_bounds.sweep_rotation_seed(event)
 end
 
 function M.observability_rotation_offset(count, seed)
-  return M.sweep_rotation_offset(count, seed)
+  return sweep_bounds.sweep_rotation_offset(count, seed)
 end
 
 function M.observability_rotate(items, seed)
-  return M.sweep_rotate(items, seed)
+  return sweep_bounds.sweep_rotate(items, seed)
 end
 
 function M.observability_batch(items, seed, cap)
-  return M.sweep_batch(items, seed, cap, default_observability_entity_cap)
+  return sweep_bounds.sweep_batch(items, seed, cap, default_observability_entity_cap)
 end
 
 function M.observability_page_window(total_pages, seed, cap)

@@ -1,18 +1,17 @@
-local S = {}
-local gh_exec_mod = require("devloop.gh_exec")
+local sweep_bounds = {}
+local gh_exec = require("devloop.gh_exec")
 local sweep = require("workflow.sweep")
 
-function S.install(M)
 local default_call_timeout = 10
 local default_wall_clock_budget = 90
 
-function M.sweep_deadline(now_seconds, limits)
+function sweep_bounds.sweep_deadline(now_seconds, limits)
   local base = tonumber(now_seconds) or now()
   local budget = sweep.positive_integer(limits and limits.wall_clock_budget, default_wall_clock_budget, 1, 3600)
   return base + budget
 end
 
-function M.sweep_remaining_seconds(deadline)
+function sweep_bounds.sweep_remaining_seconds(deadline)
   local remaining = math.floor((tonumber(deadline) or 0) - now())
   if remaining < 1 then
     return 0
@@ -20,9 +19,9 @@ function M.sweep_remaining_seconds(deadline)
   return remaining
 end
 
-function M.sweep_call_timeout(limits, deadline)
+function sweep_bounds.sweep_call_timeout(limits, deadline)
   local configured = sweep.positive_integer(limits and limits.call_timeout, default_call_timeout, 1, 300)
-  local remaining = M.sweep_remaining_seconds(deadline)
+  local remaining = sweep_bounds.sweep_remaining_seconds(deadline)
   if remaining == 0 then
     return 0
   end
@@ -32,14 +31,14 @@ function M.sweep_call_timeout(limits, deadline)
   return configured
 end
 
-function M.sweep_has_budget(deadline)
-  return M.sweep_remaining_seconds(deadline) > 0
+function sweep_bounds.sweep_has_budget(deadline)
+  return sweep_bounds.sweep_remaining_seconds(deadline) > 0
 end
 
-function M.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
-  local timeout = M.sweep_call_timeout(limits, deadline)
+function sweep_bounds.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
+  local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
-    return M.sweep_deadline_deferred_result(error_class)
+    return sweep_bounds.sweep_deadline_deferred_result(error_class)
   end
   if type(exec) == "function" then
     local opts
@@ -67,12 +66,12 @@ function M.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
   else
     opts = { cmd = cmd_or_opts, timeout = timeout }
   end
-  return gh_exec_mod.gh_exec(opts, nil, exec)
+  return gh_exec.gh_exec(opts, nil, exec)
 end
 
-function M.sweep_run_cmd(cmd, limits, deadline, error_class, exec)
-  local result = M.sweep_exec(cmd, limits, deadline, error_class, exec)
-  if M.sweep_result_deferred(result) then
+function sweep_bounds.sweep_run_cmd(cmd, limits, deadline, error_class, exec)
+  local result = sweep_bounds.sweep_exec(cmd, limits, deadline, error_class, exec)
+  if sweep_bounds.sweep_result_deferred(result) then
     return result
   end
   if result.exit_code ~= 0 then
@@ -81,7 +80,7 @@ function M.sweep_run_cmd(cmd, limits, deadline, error_class, exec)
   return result
 end
 
-function M.sweep_rotation_seed(event)
+function sweep_bounds.sweep_rotation_seed(event)
   if event and event.ts ~= nil then
     return tostring(event.ts)
   end
@@ -96,13 +95,9 @@ function M.sweep_rotation_seed(event)
   return tostring(math.floor(now() / 60))
 end
 
-M.sweep_rotation_offset = sweep.rotation_offset
+sweep_bounds.sweep_rotation_offset = sweep.rotation_offset
 
--- rotate/batch stay package-local so their facade call graph
--- (M.sweep_rotate -> M.sweep_rotation_offset, M.sweep_batch -> M.sweep_rotate)
--- is preserved exactly; only the leaf rotation_offset/positive_integer math is
--- shared from contract.sweep.
-function M.sweep_rotate(items, seed)
+function sweep_bounds.sweep_rotate(items, seed)
   local source = items or {}
   local count = #source
   if count <= 1 then
@@ -112,7 +107,7 @@ function M.sweep_rotate(items, seed)
     end
     return copy
   end
-  local offset = M.sweep_rotation_offset(count, seed)
+  local offset = sweep_bounds.sweep_rotation_offset(count, seed)
   local rotated = {}
   for i = 1, count do
     local index = ((offset + i - 1) % count) + 1
@@ -121,7 +116,7 @@ function M.sweep_rotate(items, seed)
   return rotated
 end
 
-function M.sweep_batch(items, seed, cap, default_cap)
+function sweep_bounds.sweep_batch(items, seed, cap, default_cap)
   local source = items or {}
   local bounded_cap = sweep.positive_integer(cap, default_cap or 25, 1, 1000)
   if #source <= bounded_cap then
@@ -131,7 +126,7 @@ function M.sweep_batch(items, seed, cap, default_cap)
     end
     return all_items, 0
   end
-  local rotated = M.sweep_rotate(source, seed)
+  local rotated = sweep_bounds.sweep_rotate(source, seed)
   local selected = {}
   for i, item in ipairs(rotated) do
     if i > bounded_cap then
@@ -142,12 +137,10 @@ function M.sweep_batch(items, seed, cap, default_cap)
   return selected, math.max(0, #source - #selected)
 end
 
-M.sweep_cursor_batch = sweep.cursor_batch
-M.sweep_cursor_advance = sweep.cursor_advance
-M.sweep_deadline_deferred_result = sweep.deadline_deferred_result
-M.sweep_result_deferred = sweep.result_deferred
-M.sweep_positive_integer = sweep.positive_integer
+sweep_bounds.sweep_cursor_batch = sweep.cursor_batch
+sweep_bounds.sweep_cursor_advance = sweep.cursor_advance
+sweep_bounds.sweep_deadline_deferred_result = sweep.deadline_deferred_result
+sweep_bounds.sweep_result_deferred = sweep.result_deferred
+sweep_bounds.sweep_positive_integer = sweep.positive_integer
 
-end
-
-return S
+return sweep_bounds

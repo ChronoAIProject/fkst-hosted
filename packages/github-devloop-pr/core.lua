@@ -71,7 +71,6 @@ require("devloop.replayer").install({
   review_replayers = review_replayers,
 })
 require("devloop.liveness").install(M, wiring.liveness(M))
-require("devloop.sweep_bounds").install(M)
 require("devloop.liveness_scan").install(M)
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), {

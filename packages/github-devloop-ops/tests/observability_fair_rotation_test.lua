@@ -1,16 +1,17 @@
 local h = require("tests.devloop_ops_helpers")
+local sweep_bounds = require("devloop.sweep_bounds")
 local t = h.t
 local core = h.core
 
 return {
   test_observability_deadline_helpers_delegate_to_sweep_bounds = function()
     local limits = core.observability_limits()
-    local deadline = core.sweep_deadline(1000, limits)
+    local deadline = sweep_bounds.sweep_deadline(1000, limits)
 
     t.eq(core.observability_deadline(1000, limits), deadline)
-    t.eq(core.observability_call_timeout(limits, deadline), core.sweep_call_timeout(limits, deadline))
-    t.eq(core.observability_has_budget(deadline), core.sweep_has_budget(deadline))
-    t.eq(core.observability_result_deferred(core.sweep_deadline_deferred_result("x", "observability deadline exhausted")), true)
+    t.eq(core.observability_call_timeout(limits, deadline), sweep_bounds.sweep_call_timeout(limits, deadline))
+    t.eq(core.observability_has_budget(deadline), sweep_bounds.sweep_has_budget(deadline))
+    t.eq(core.observability_result_deferred(sweep_bounds.sweep_deadline_deferred_result("x", "observability deadline exhausted")), true)
   end,
 
   test_observability_list_deadline_exhaustion_returns_empty_deferred_page = function()
