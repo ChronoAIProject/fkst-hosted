@@ -17,8 +17,8 @@ use crate::github_hub::types::{
 use crate::github_hub::{GithubProxy, ProxyResponse};
 
 /// Classification of a GitHub upstream status. One source of truth shared by
-/// the single-target and fan-out paths, reusing the journal client's
-/// rate-limit detection so both layers agree on what "rate limited" means.
+/// the single-target and fan-out paths, reusing the local rate-limit detection
+/// so both layers agree on what "rate limited" means.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Upstream {
     /// 404 — the resource does not exist.
@@ -35,11 +35,11 @@ pub enum Upstream {
 
 /// Classify a GitHub upstream status + headers + body into an [`Upstream`].
 ///
-/// Reuses [`crate::journal::github`]'s `is_rate_limited` / `reset_seconds` so a
-/// 403/429 is disambiguated identically to the journal client. The `body` is
-/// consulted only for 422 (to surface GitHub's first validation message).
+/// Uses the local [`rate_limit`] helpers to disambiguate a 403/429 (exhausted
+/// quota / explicit retry hint vs an auth refusal). The `body` is consulted only
+/// for 422 (to surface GitHub's first validation message).
 pub fn classify(status: u16, headers: &HeaderMap, body: &[u8]) -> Upstream {
-    use crate::journal::github::{is_rate_limited, reset_seconds};
+    use rate_limit::{is_rate_limited, reset_seconds};
 
     match status {
         404 => Upstream::NotFound,
@@ -54,6 +54,50 @@ pub fn classify(status: u16, headers: &HeaderMap, body: &[u8]) -> Upstream {
         }
         422 => Upstream::Unprocessable(first_error_message(body)),
         _ => Upstream::Upstream,
+    }
+}
+
+/// GitHub rate-limit header parsing, inlined from the (removed) journal client so
+/// the upstream classifier keeps disambiguating a 403/429 the same way: a 403
+/// that carries rate-limit evidence is a quota exhaustion, not an auth refusal.
+mod rate_limit {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use reqwest::header::HeaderMap;
+
+    /// Seconds until the rate-limit reset, from `retry-after` (delta seconds) or
+    /// `x-ratelimit-reset` (epoch seconds). Defaults to 60s when unparseable.
+    pub(super) fn reset_seconds(headers: &HeaderMap) -> u64 {
+        if let Some(retry_after) = headers
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            return retry_after;
+        }
+        if let Some(reset_epoch) = headers
+            .get("x-ratelimit-reset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            return reset_epoch.saturating_sub(now);
+        }
+        60
+    }
+
+    /// True when a 403 carries rate-limit evidence (exhausted quota or an
+    /// explicit retry hint) rather than an auth refusal.
+    pub(super) fn is_rate_limited(headers: &HeaderMap) -> bool {
+        let remaining_zero = headers
+            .get("x-ratelimit-remaining")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.trim() == "0")
+            .unwrap_or(false);
+        remaining_zero || headers.contains_key("retry-after")
     }
 }
 
