@@ -19,8 +19,7 @@ pub const MAX_PIN_NAME_BYTES: usize = 64;
 /// Which kind of Ornn artifact a pin refers to. Serializes lowercase on the
 /// wire (`"skill"` / `"skillset"`) so the trigger request and the persisted
 /// `SessionDoc.ornn_skills` share one stable representation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(utoipa::ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OrnnPinKind {
     /// A single Ornn skill package.
@@ -33,8 +32,7 @@ pub enum OrnnPinKind {
 ///
 /// Supplied at session trigger and persisted (resolved) onto `SessionDoc` so a
 /// failover rebuild re-injects the identical set. Carries no secret material.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(utoipa::ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct OrnnSkillPin {
     pub kind: OrnnPinKind,
     pub name: String,
@@ -84,8 +82,7 @@ pub struct ClosureResult {
 
 /// One version row from `GET .../<name>/versions` (newest-first). Tolerant:
 /// only the fields the picker needs are typed; the rest are ignored.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[derive(utoipa::ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct VersionRow {
     pub version: String,
     #[serde(default, rename = "isDeprecated")]
@@ -98,8 +95,7 @@ pub struct VersionRow {
 
 /// One search row from `GET /api/v1/skill-search` / `skillset-search`. Tolerant:
 /// search rows do not carry a full version list (loaded lazily via `/versions`).
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[derive(utoipa::ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, utoipa::ToSchema)]
 pub struct SearchRow {
     pub name: String,
     #[serde(default)]

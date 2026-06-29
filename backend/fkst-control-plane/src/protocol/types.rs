@@ -27,8 +27,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Worker lifecycle state reported on every heartbeat. `Terminated` is not a
 /// wire-reported state (a terminated worker simply stops heartbeating and is
 /// expired by the controller), so only the two reportable states exist here.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[derive(utoipa::ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleState {
     /// Accepting and running work.

@@ -414,7 +414,10 @@ impl SessionService {
         name: &str,
         reason: &str,
     ) -> Result<u64, AppError> {
-        self.inner.repo.fail_active_for_repo(owner, name, reason).await
+        self.inner
+            .repo
+            .fail_active_for_repo(owner, name, reason)
+            .await
     }
 
     /// Fail every active session whose repo owner is `owner` because the GitHub

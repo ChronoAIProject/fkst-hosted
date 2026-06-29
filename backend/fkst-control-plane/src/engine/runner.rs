@@ -692,7 +692,11 @@ impl SessionRunner {
             // atomically (#107). The expiry lets the credential helper force a
             // just-in-time re-mint near expiry; the token value is never logged.
             let token_path = runtime_dir.join(crate::engine::TOKEN_FILE_NAME);
-            crate::engine::write_token_file(&token_path, &goal.github_token, goal.token_expires_at)?;
+            crate::engine::write_token_file(
+                &token_path,
+                &goal.github_token,
+                goal.token_expires_at,
+            )?;
             tracing::debug!(
                 path = %token_path.display(),
                 "session.prepare.github_token"
@@ -2096,7 +2100,10 @@ esac
             assert_eq!(hmode & 0o777, 0o700, "helper must be mode 0700");
         }
         assert!(
-            session.runtime_dir.join(crate::engine::NONCE_FILE_NAME).is_file(),
+            session
+                .runtime_dir
+                .join(crate::engine::NONCE_FILE_NAME)
+                .is_file(),
             "mint nonce file must exist"
         );
 
