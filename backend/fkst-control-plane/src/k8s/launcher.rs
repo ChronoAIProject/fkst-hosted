@@ -94,6 +94,29 @@ fn labels(spec: &SessionSpec) -> BTreeMap<String, String> {
     ])
 }
 
+/// Job annotations the watcher reads to resolve the goal issue (owner/repo can
+/// exceed the label charset/length, so these are annotations, not labels).
+fn annotations(spec: &SessionSpec) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "fkst.chrono-ai.fun/owner".to_string(),
+            spec.repo.owner.clone(),
+        ),
+        (
+            "fkst.chrono-ai.fun/repo".to_string(),
+            spec.repo.name.clone(),
+        ),
+        (
+            "fkst.chrono-ai.fun/issue-number".to_string(),
+            spec.issue_number.to_string(),
+        ),
+        (
+            "fkst.chrono-ai.fun/log-branch".to_string(),
+            spec.log_branch.clone(),
+        ),
+    ])
+}
+
 /// Build the per-session Job (pure; no API calls). Runs `config.image` with
 /// `["run-session"]`, mounts the per-session Secret 0400, and is bounded by
 /// `backoffLimit:0` + `activeDeadlineSeconds` + `ttlSecondsAfterFinished`.
@@ -150,6 +173,7 @@ pub fn build_job(spec: &SessionSpec, config: &PodConfig) -> Result<Job, LaunchEr
             name: Some(name),
             namespace: Some(config.namespace.clone()),
             labels: Some(labels.clone()),
+            annotations: Some(annotations(spec)),
             ..Default::default()
         },
         spec: Some(JobSpec {
@@ -373,6 +397,11 @@ mod tests {
             Some(&*object_name(&spec.session_id))
         );
         assert_eq!(secret.default_mode, Some(0o400));
+
+        let ann = job.metadata.annotations.unwrap();
+        assert_eq!(ann["fkst.chrono-ai.fun/owner"], "acme");
+        assert_eq!(ann["fkst.chrono-ai.fun/repo"], "site");
+        assert_eq!(ann["fkst.chrono-ai.fun/issue-number"], "7");
     }
 
     #[test]

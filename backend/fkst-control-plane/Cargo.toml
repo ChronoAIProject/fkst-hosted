@@ -51,6 +51,8 @@ rand = "0.8"
 # Deterministic per-session ids (UUIDv5 over installation+repo+issue) so a
 # webhook redelivery maps to the same session/Job (at-most-one-Job idempotency).
 uuid = { version = "1", features = ["v5"] }
+# Stream combinators for the kube-runtime Job watch.
+futures = "0.3"
 # Kubernetes client for spawning one Job per substrate session (milestone #9).
 # rustls (no openssl), matching the reqwest rustls-tls stack.
 kube = { version = "0.96", default-features = false, features = ["client", "config", "runtime", "rustls-tls"] }

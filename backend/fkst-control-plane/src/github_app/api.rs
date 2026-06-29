@@ -90,6 +90,46 @@ pub trait GithubApi: Send + Sync {
         id: InstallationId,
         req: &InstallationTokenRequest,
     ) -> Result<InstallationToken, GithubAppError>;
+
+    /// Post an issue comment with an installation `token`. Only the HTTP
+    /// transport implements this; fakes inherit the default.
+    async fn create_issue_comment(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number, body);
+        unimplemented!("create_issue_comment is only implemented by the HTTP transport")
+    }
+
+    /// Add labels to an issue (additive; preserves existing). Default panics.
+    async fn add_issue_labels(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        labels: &[String],
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number, labels);
+        unimplemented!("add_issue_labels is only implemented by the HTTP transport")
+    }
+
+    /// Remove ONE label from an issue (404-tolerant). Default panics.
+    async fn remove_issue_label(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        label: &str,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number, label);
+        unimplemented!("remove_issue_label is only implemented by the HTTP transport")
+    }
 }
 
 /// Production HTTP transport backed by reqwest.
@@ -285,6 +325,103 @@ impl GithubApi for HttpGithubApi {
             token: SecretString::from(token_str),
             expires_at,
         })
+    }
+
+    async fn create_issue_comment(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/comments",
+            self.api_base
+        );
+        let response = self
+            .client
+            .post(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({ "body": body }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("create_issue_comment: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "create_issue_comment status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn add_issue_labels(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        labels: &[String],
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/labels",
+            self.api_base
+        );
+        let response = self
+            .client
+            .post(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({ "labels": labels }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("add_issue_labels: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "add_issue_labels status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn remove_issue_label(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        label: &str,
+    ) -> Result<(), GithubAppError> {
+        let enc = label.replace(' ', "%20");
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/labels/{enc}",
+            self.api_base
+        );
+        let response = self
+            .client
+            .delete(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("remove_issue_label: {e}")))?;
+        let status = response.status();
+        // 404 just means the label was not present — tolerate it.
+        if !status.is_success() && status != reqwest::StatusCode::NOT_FOUND {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "remove_issue_label status {status}: {body}"
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -652,5 +789,65 @@ mod tests {
         let debug = format!("{token:?}");
         assert!(!debug.contains("ghs_supersecret"), "token leaked");
         assert!(debug.contains("<redacted>"));
+    }
+
+    #[tokio::test]
+    async fn create_issue_comment_posts_to_the_issue() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/repos/acme/site/issues/7/comments"))
+            .and(header("authorization", "Bearer ghs_tok"))
+            .and(body_partial_json(serde_json::json!({"body": "done"})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"id": 1})))
+            .mount(&server)
+            .await;
+        api(&server.uri())
+            .create_issue_comment(&SecretString::from("ghs_tok"), "acme", "site", 7, "done")
+            .await
+            .expect("comment posts");
+    }
+
+    #[tokio::test]
+    async fn add_issue_labels_posts_additively() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/repos/acme/site/issues/7/labels"))
+            .and(header("authorization", "Bearer ghs_tok"))
+            .and(body_partial_json(
+                serde_json::json!({"labels": ["fkst-completed"]}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+        api(&server.uri())
+            .add_issue_labels(
+                &SecretString::from("ghs_tok"),
+                "acme",
+                "site",
+                7,
+                &["fkst-completed".to_string()],
+            )
+            .await
+            .expect("labels added");
+    }
+
+    #[tokio::test]
+    async fn remove_issue_label_tolerates_404() {
+        let server = MockServer::start().await;
+        Mock::given(method("DELETE"))
+            .and(path("/repos/acme/site/issues/7/labels/fkst-running"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        api(&server.uri())
+            .remove_issue_label(
+                &SecretString::from("ghs_tok"),
+                "acme",
+                "site",
+                7,
+                "fkst-running",
+            )
+            .await
+            .expect("404 tolerated");
     }
 }
