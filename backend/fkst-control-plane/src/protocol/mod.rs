@@ -1,20 +1,11 @@
-//! Internal controller<->worker protocol (issue #134).
+//! Ornn injection wire types.
 //!
-//! Defines the versioned, shared-secret-authenticated message vocabulary both
-//! roles speak: registration, heartbeat (with the `lifecycle_state` field), the
-//! work-pull request/response, and the four drain-related types
-//! ([`Draining`], [`Released`], [`ControlMessage::StopSession`], plus the
-//! `lifecycle_state` on [`Heartbeat`]). The controller-side registry/router and
-//! the worker-side agent/pull-loop consume these types; this module is the
-//! authoritative wire contract every later database-free issue builds on.
+//! The controller<->worker protocol (issue #134) was removed with the worker
+//! deployable in the single-crate restructure; what survives is the resolved
+//! Ornn injection plan ([`OrnnPlan`] / [`OrnnSkillRef`] / [`OrnnSource`]) that
+//! the skill resolver produces and the session runner consumes. Pod-per-session
+//! execution carries its work via [`crate::session_spec::SessionSpec`] instead.
 
 pub mod types;
 
-pub use types::{
-    check_protocol_version, CloneSpec, ControlMessage, CredentialRefreshRequest,
-    CredentialRefreshResponse, DispatchGoal, Draining, Heartbeat, HeartbeatResponse, JournalPlan,
-    LifecycleState, OrnnPlan, OrnnSkillRef, OrnnSource, ProtocolError, PullRequest, PullResponse,
-    RefreshReason, RefreshedToken, RegisterRequest, RegisterResponse, Released, ResolvedDispatch,
-    SessionStatus, StatusReport, TerminalExit, WorkAssignment, INTERNAL_AUTH_HEADER,
-    PROTOCOL_VERSION,
-};
+pub use types::{OrnnPlan, OrnnSkillRef, OrnnSource};
