@@ -38,8 +38,6 @@ fn app(webhook_secret: bool) -> axum::Router {
         goals: GoalIssueStore::new(None),
         vault: support::test_vault(),
         ornn: None,
-        claims: None,
-        worker_registry: None,
     })
     .expect("router builds")
 }
@@ -164,7 +162,6 @@ async fn components_include_key_schemas_from_all_crates() {
         "SearchRow",
         "VersionRow",
         "EnvKind",
-        "LifecycleState",
     ] {
         assert!(
             schemas.get(expected).is_some(),

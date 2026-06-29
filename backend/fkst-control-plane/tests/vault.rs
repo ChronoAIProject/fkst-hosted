@@ -47,8 +47,6 @@ fn router(vault: VaultService) -> axum::Router {
         goals,
         vault,
         ornn: None,
-        claims: None,
-        worker_registry: None,
     })
     .expect("router")
 }

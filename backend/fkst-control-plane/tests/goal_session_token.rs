@@ -1,33 +1,22 @@
-//! Regression test for issue #106: a goal session's substrate engine must
-//! receive a GitHub App installation token at t=0.
+//! API-only control plane: a goal trigger RECORDS a `Pending` session and runs
+//! NOTHING in-process.
 //!
-//! Before #106 the session driver called `runner.start(&prepared)` (which
-//! hardcodes `goal: None`), so the engine was spawned with NO GitHub
-//! credential and the trigger-time preflight token was discarded. The fix
-//! makes the driver mint the token and build a `GoalContext` BEFORE starting
-//! the engine (the `build_goal_context` -> `start_with_spec(goal: Some(..))`
-//! path).
-//!
-//! After issue #115 (package store removed), sessions are created
-//! exclusively via `POST /api/v1/goals/:id/trigger`; the driver now clones
-//! the goal repo's `.fkst/packages/` at spawn. No seeded package store is
-//! needed: `create_for_goal` only records the session in the in-memory store,
-//! and the driver proceeds to `build_goal_context` (token mint) before the
-//! clone attempt.
+//! Before the single control-plane refactor, `create_for_goal` claimed the goal
+//! and spawned an in-process driver that minted a GitHub App installation token
+//! at t=0 (issue #106). That driver is gone: the control plane is API-only, so a
+//! trigger only inserts a `Pending` `SessionDoc` and links it to the goal —
+//! pod-per-session execution (milestone #9) is what will later clone the repo
+//! and mint credentials.
 //!
 //! The facts under test:
-//!   1. POSITIVE — a goal session mints the installation token for the goal's
-//!      repo (mint count >= 1), and the session's failure reason is the
-//!      downstream engine/clone failure, NOT a mint failure (proving
-//!      `build_goal_context` succeeded and the token reached the start path).
+//!   1. a goal trigger records a `Pending` session, moves the goal to
+//!      `Triggered`, and links the session as the goal's active session;
+//!   2. NO GitHub App installation token is minted at trigger time (mint
+//!      count == 0) — credential work is deferred to pod-per-session execution.
 //!
-//! The NEGATIVE case (`package_session_does_not_mint_github_token`) was deleted
-//! by #115: `SessionService::create` (classic package session create) no longer
-//! exists; sessions are created only via a goal trigger.
-//!
-//! The controller is datastore-free (#143): the harness builds a
-//! `SessionService` over an in-memory store with no external datastore, so the
-//! test runs unconditionally on any runner.
+//! The control plane is datastore-free: the harness builds a `SessionService`
+//! over an in-memory store with no external datastore, so the test runs
+//! unconditionally on any runner.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -188,43 +177,17 @@ async fn seed_goal(goals: &GoalIssueStore, repo: RepoRef, package: &str) -> bson
     id
 }
 
-/// Poll the session document until it leaves `pending`/`validating`, returning
-/// the terminal-ish doc. Panics after ~20s. The driver fails the session at
-/// the clone/engine start (no binary), so this resolves quickly to `failed`.
-async fn poll_until_settled(
-    repo: &SessionRepo,
-    id: bson::Uuid,
-) -> fkst_control_plane::models::SessionDoc {
-    for _ in 0..200 {
-        if let Some(doc) = repo.get(id).await.expect("get session") {
-            if !matches!(
-                doc.status,
-                SessionStatus::Pending | SessionStatus::Validating
-            ) {
-                return doc;
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    panic!("session {id} never left pending/validating");
-}
-
-/// #106 — a goal session mints the GitHub App installation token for the goal's
-/// repo at startup, and the failure is the downstream engine/clone start (not a
-/// mint failure), proving the driver now delivers a token at t=0.
-///
-/// After #115: no package doc is seeded — `create_for_goal` only needs the
-/// goal doc and repo info; the driver resolves packages from the git clone
-/// AFTER minting the token. The clone will fail (no real GitHub credential /
-/// repo), but the mint is observable regardless.
+/// A goal trigger records a `Pending` session and mints NOTHING in-process: the
+/// API-only control plane defers all credential/engine work to pod-per-session
+/// execution (milestone #9). Replaces the pre-refactor #106 assertion that the
+/// in-process driver minted a token at t=0.
 #[tokio::test]
-async fn goal_session_mints_github_token_at_startup() {
+async fn goal_trigger_records_pending_session_without_minting() {
     let ctx = ctx().await;
     let repo = RepoRef {
         owner: "acme".to_string(),
         name: "site".to_string(),
     };
-    // No seed_package needed: packages come from the repo clone, not a store (#115).
     let goal_id = seed_goal(&ctx.goals, repo.clone(), "goal-pkg").await;
 
     let result = ctx
@@ -245,44 +208,48 @@ async fn goal_session_mints_github_token_at_startup() {
         .await
         .expect("create_for_goal");
 
-    // Poll via the SAME in-memory store the service drives (cloning shares the
-    // Arc-backed map); a fresh `SessionRepo::new()` would be a distinct empty
-    // map and never see the driven session (db-free store, #198).
+    // The goal moved to Triggered and the session is the goal's active session.
+    assert_eq!(result.goal_status, GoalStatus::Triggered);
+    assert_eq!(
+        ctx.goals.active_session(goal_id).await,
+        Some(result.session_id),
+        "the session must be linked as the goal's active session"
+    );
+
+    // The session is recorded as Pending and is NEVER run in-process: with no
+    // driver, it stays Pending across the whole window.
     let repo_handle = ctx.sessions.repo().clone();
-    let doc = poll_until_settled(&repo_handle, result.session_id).await;
-
-    // The driver minted a token for the goal's repo BEFORE starting the engine.
-    assert!(
-        ctx.github_api.mint_count() >= 1,
-        "the driver must mint an installation token for the goal session at t=0 (#106)"
-    );
-    assert!(
-        ctx.github_api
-            .resolved_repos()
-            .iter()
-            .any(|(owner, name)| owner == "acme" && name == "site"),
-        "the mint must target the goal's repo (acme/site)"
-    );
-
-    // The session failed at the engine/clone start, NOT at the token mint —
-    // proving build_goal_context succeeded and the token reached the start path.
-    // The error string is the runner's/clone's, never the mint sentinel.
+    let doc = repo_handle
+        .get(result.session_id)
+        .await
+        .expect("get session")
+        .expect("session exists");
     assert_eq!(
         doc.status,
-        SessionStatus::Failed,
-        "engine/clone start fails (no binary / real repo)"
+        SessionStatus::Pending,
+        "the trigger only records a pending session; nothing runs it"
     );
-    let error = doc.error.unwrap_or_default();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let still = repo_handle
+        .get(result.session_id)
+        .await
+        .expect("get session")
+        .expect("session exists");
+    assert_eq!(
+        still.status,
+        SessionStatus::Pending,
+        "no in-process driver: the session must remain pending"
+    );
+
+    // No GitHub App installation token is minted at trigger time — credential
+    // work is deferred to pod-per-session execution.
+    assert_eq!(
+        ctx.github_api.mint_count(),
+        0,
+        "the API-only control plane must NOT mint a token at trigger time"
+    );
     assert!(
-        !error.contains("failed to mint github token"),
-        "the failure must be downstream of the mint, got: {error}"
+        ctx.github_api.resolved_repos().is_empty(),
+        "no installation should be resolved at trigger time"
     );
 }
-
-// package_session_does_not_mint_github_token was deleted by #115:
-// `SessionService::create` (the classic package session create, bypassing a
-// goal) no longer exists. Sessions are created exclusively via a goal trigger
-// (`create_for_goal`), which always carries a GoalContext and therefore always
-// reaches `build_goal_context`. The NEGATIVE assertion (non-goal session never
-// mints) has no plausible code path after #115 and cannot be expressed with
-// the surviving API.

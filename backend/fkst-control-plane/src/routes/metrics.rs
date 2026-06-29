@@ -1,13 +1,14 @@
-//! `GET /metrics`: hand-rendered Prometheus text exposition for the controller
-//! (issue #144).
+//! `GET /metrics`: hand-rendered Prometheus text exposition for the control
+//! plane (issue #144).
 //!
-//! Datastore-free (#143), so there is nothing to scrape from a DB; these gauges
-//! reflect the controller's live in-memory authorities:
-//! - `fkst_pending_work`        — claims in the `Pending` (unplaced) state.
-//! - `fkst_workers_registered`  — workers currently tracked by the registry.
-//! - `fkst_workers_alive`       — of those, the ones within the liveness TTL.
+//! The control plane is API-only and datastore-free, so there is nothing to
+//! scrape from a DB and no claim/worker authority to report. These gauges
+//! reflect the in-memory session store:
+//! - `fkst_sessions_total`   — sessions currently tracked by the store.
+//! - `fkst_sessions_pending` — of those, the ones in the `Pending` state
+//!   (recorded but not yet run; pod-per-session execution lands in milestone #9).
 //!
-//! Rendered by hand (no client library): the surface is three gauges, so a
+//! Rendered by hand (no client library): the surface is two gauges, so a
 //! dependency would be unjustified. The body follows the Prometheus text format
 //! exactly — a `# HELP` line, a `# TYPE <name> gauge` line, then the sample —
 //! per metric.
@@ -51,22 +52,17 @@ fn render_gauge(out: &mut String, gauge: &Gauge) {
 
 /// Render the full exposition body from the supplied gauge values. Split out so
 /// it is unit-testable without constructing an HTTP request.
-fn render_metrics(pending_work: u64, workers_registered: u64, workers_alive: u64) -> String {
+fn render_metrics(sessions_total: u64, sessions_pending: u64) -> String {
     let gauges = [
         Gauge {
-            name: "fkst_pending_work",
-            help: "Claims in the pending (unplaced) state awaiting placement.",
-            value: pending_work,
+            name: "fkst_sessions_total",
+            help: "Sessions currently tracked by the in-memory session store.",
+            value: sessions_total,
         },
         Gauge {
-            name: "fkst_workers_registered",
-            help: "Workers currently tracked by the controller registry.",
-            value: workers_registered,
-        },
-        Gauge {
-            name: "fkst_workers_alive",
-            help: "Tracked workers within the liveness TTL (heartbeating).",
-            value: workers_alive,
+            name: "fkst_sessions_pending",
+            help: "Tracked sessions in the pending state (recorded, not yet run).",
+            value: sessions_pending,
         },
     ];
     let mut out = String::new();
@@ -76,7 +72,7 @@ fn render_metrics(pending_work: u64, workers_registered: u64, workers_alive: u64
     out
 }
 
-/// `GET /metrics`: the controller's Prometheus gauges. Unauthenticated.
+/// `GET /metrics`: the control plane's Prometheus gauges. Unauthenticated.
 #[utoipa::path(
     get,
     path = "/metrics",
@@ -92,24 +88,16 @@ fn render_metrics(pending_work: u64, workers_registered: u64, workers_alive: u64
     )
 )]
 async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
-    // Pending work: count of `Pending` claims (0 when no controller is wired).
-    let pending_work = state
-        .claims
-        .as_ref()
-        .map(|c| c.pending_count() as u64)
-        .unwrap_or(0);
+    // Counts from the in-memory session store: total tracked sessions and, of
+    // those, the ones still pending (recorded but not yet run).
+    let snapshot = state.sessions.repo().snapshot().await;
+    let sessions_total = snapshot.len() as u64;
+    let sessions_pending = snapshot
+        .iter()
+        .filter(|s| matches!(s.status, crate::models::SessionStatus::Pending))
+        .count() as u64;
 
-    // Worker counts from the registry snapshot (0/0 when none is wired).
-    let (registered, alive) = match &state.worker_registry {
-        Some(registry) => {
-            let snapshot = registry.snapshot().await;
-            let alive = snapshot.iter().filter(|w| w.alive).count() as u64;
-            (snapshot.len() as u64, alive)
-        }
-        None => (0, 0),
-    };
-
-    let body = render_metrics(pending_work, registered, alive);
+    let body = render_metrics(sessions_total, sessions_pending);
     (
         [(axum::http::header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
         body,
@@ -127,13 +115,9 @@ mod tests {
 
     #[test]
     fn renders_prometheus_text_for_each_gauge() {
-        let body = render_metrics(2, 3, 1);
+        let body = render_metrics(2, 1);
         // Each gauge has its HELP, TYPE, and sample line in the exact format.
-        for (name, value) in [
-            ("fkst_pending_work", 2),
-            ("fkst_workers_registered", 3),
-            ("fkst_workers_alive", 1),
-        ] {
+        for (name, value) in [("fkst_sessions_total", 2), ("fkst_sessions_pending", 1)] {
             assert!(
                 body.contains(&format!("# TYPE {name} gauge")),
                 "missing TYPE line for {name} in:\n{body}"
@@ -152,10 +136,11 @@ mod tests {
 
     #[test]
     fn gauge_value_reflects_the_argument() {
-        let body = render_metrics(7, 0, 0);
+        let body = render_metrics(7, 0);
         assert!(
-            body.contains("\nfkst_pending_work 7\n") || body.starts_with("fkst_pending_work 7\n"),
-            "pending gauge must read 7 in:\n{body}"
+            body.contains("\nfkst_sessions_total 7\n")
+                || body.starts_with("fkst_sessions_total 7\n"),
+            "sessions-total gauge must read 7 in:\n{body}"
         );
     }
 }

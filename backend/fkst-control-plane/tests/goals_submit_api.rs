@@ -173,8 +173,6 @@ async fn app_with_ornn(ornn: Option<fkst_control_plane::ornn::OrnnClient>) -> Te
         goals,
         vault,
         ornn,
-        claims: None,
-        worker_registry: None,
     })
     .expect("router");
 

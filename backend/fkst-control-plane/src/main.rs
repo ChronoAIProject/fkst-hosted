@@ -1,21 +1,23 @@
 //! fkst-control-plane server entrypoint: JSON tracing init, config load, router
 //! build, and serving with graceful shutdown (SIGTERM / Ctrl-C).
+//!
+//! The control plane is API-only: it records sessions but never runs an engine
+//! in-process. There is no controller, no worker fleet, no internal worker
+//! protocol, and no journaling. A goal trigger records a `Pending` session that
+//! pod-per-session execution will later run (milestone #9).
 
 use std::process::ExitCode;
 
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::controller::{ClaimMap, ControllerHandle, InternalAuth, WorkerRegistry};
 use fkst_control_plane::engine::EngineConfig;
 use fkst_control_plane::goals::GoalIssueStore;
-use fkst_control_plane::journal_config::journal_config_from_app;
 use fkst_control_plane::nyxid::NyxIdClient;
 use fkst_control_plane::reconcile::{reconcile_orphans, ReconcileConfig};
-use fkst_control_plane::router::{build_router, mount_internal};
+use fkst_control_plane::router::build_router;
 use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::startup::build_nyxid_client;
 use fkst_control_plane::state::AppState;
-use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -54,14 +56,13 @@ async fn main() -> ExitCode {
         "config loaded"
     );
 
-    // 3. The controller is datastore-free (#143): there is no database to
-    //    connect to, no indexes to ensure, and no journal/goals collection.
-    //    Goals are GitHub-Issue + in-memory backed (#137); the journal's SOLE
-    //    machine-truth is the committed GitHub file (#139); sessions live in an
-    //    in-memory store (#198-i). The store-bearing wiring below is built next.
+    // 3. The control plane is datastore-free and API-only: there is no database
+    //    to connect to and no in-process execution to wire. Goals are
+    //    GitHub-Issue + in-memory backed (#137); sessions live in an in-memory
+    //    store (#198-i). The store-bearing wiring below is built next.
 
-    // 4c. Load the engine configuration (fail-closed: a zero timeout or a
-    //     malformed value must never reach a live session).
+    // 4. Load the engine configuration (it carries the temp root the orphan
+    //    reconciler sweeps; fail-closed on a malformed value).
     let engine_config = match EngineConfig::load_from_env() {
         Ok(engine_config) => engine_config,
         Err(error) => {
@@ -74,11 +75,11 @@ async fn main() -> ExitCode {
         "engine config loaded"
     );
 
-    // 4c-bis. Load the orphan-reconcile configuration (fail-closed on a
-    //     malformed value — the SWEEP itself is fail-open later, but a bad
-    //     env value is a misconfiguration that should be caught loudly).
-    //     A clone of the engine config carries `temp_root` into the sweep,
-    //     since `engine_config` is later moved into the session service.
+    // 4b. Load the orphan-reconcile configuration (fail-closed on a malformed
+    //     value — the SWEEP itself is fail-open later, but a bad env value is a
+    //     misconfiguration that should be caught loudly). A clone of the engine
+    //     config carries `temp_root` into the sweep, since `engine_config` is
+    //     later moved into the session service.
     let reconcile_config = match ReconcileConfig::load_from_env() {
         Ok(reconcile_config) => reconcile_config,
         Err(error) => {
@@ -88,22 +89,12 @@ async fn main() -> ExitCode {
     };
     let reconcile_engine_config = engine_config.clone();
 
-    // 4d. The per-worker max-load cap used by worker-dispatch placement
-    //     (`FKST_PLACEMENT_MAX_LOAD`, 0 = uncapped). Carried over from the
-    //     deleted distribution layer (#198-ii). Only consulted under dispatch
-    //     mode; the in-process claim path never rejects on load.
-    let dispatch_max_load = config.placement_max_load;
-
-    // 4f. Build the session service (in-memory store) and sweep orphans BEFORE
+    // 4c. Build the session service (in-memory store) and sweep orphans BEFORE
     //     binding: any pre-terminal session left in the in-memory store from a
     //     prior incarnation must be failed before clients can observe stale
-    //     "running" state. A fresh controller has none, but the call is kept for
+    //     "running" state. A fresh store has none, but the call is kept for
     //     parity and the logged outcome.
     let sessions = SessionService::new(SessionRepo::new(), engine_config);
-    // Session-progress journaling (issue #25): the committed GitHub file is
-    // the sole machine-truth (#139). GitHub sync per the FKST_JOURNAL_* config
-    // (absent repo/token degrades to no-durable-floor with a warn).
-    sessions.enable_journaling(journal_config_from_app(&config));
 
     match sessions.repo().fail_orphans().await {
         Ok(count) => tracing::info!(count, "orphan sweep completed"),
@@ -113,16 +104,12 @@ async fn main() -> ExitCode {
         }
     }
 
-    // 4f-bis. Sweep orphan engine RUNTIME dirs (fkst-rt-*) left by a prior
-    //     HARD-KILLED incarnation of THIS pod (TempDir RAII cleans every
-    //     normal path; only a kill -9 / OOM leaks them — issue #26 reduced
-    //     scope). Runtime dirs are fenced against live sessions' runtime_dir
-    //     values and an mtime safety threshold. Package dirs (fkst-pkg-*) are
-    //     NOT deleted — their path is not persisted, so they cannot be fenced
-    //     (counted as skipped_unfenceable). The live fence is now OS truth
-    //     (#136): live = owner pid alive & leads its group & breadcrumb present
-    //     — no Mongo query. FAIL-OPEN + infallible: an unreadable temp_root just
-    //     yields an empty sweep; cleaning is best-effort.
+    // 4d. Sweep orphan engine RUNTIME dirs (fkst-rt-*) left by a prior
+    //     HARD-KILLED incarnation of THIS pod. Runtime dirs are fenced against
+    //     live sessions' runtime_dir values and an mtime safety threshold.
+    //     Package dirs (fkst-pkg-*) are NOT deleted (counted as
+    //     skipped_unfenceable). FAIL-OPEN + infallible: an unreadable temp_root
+    //     just yields an empty sweep; cleaning is best-effort.
     let report = reconcile_orphans(&reconcile_engine_config, &reconcile_config);
     tracing::info!(
         scanned = report.scanned,
@@ -133,11 +120,6 @@ async fn main() -> ExitCode {
         errors = report.error_count(),
         "orphan temp-dir reconciliation completed"
     );
-
-    // 4g. (removed, #198-ii) No takeover reaper: a single authoritative
-    //     controller owns every claim, so there is no cross-pod takeover to
-    //     drive. Worker reassignment (dispatch mode only) is handled by the
-    //     registry sweeper + the reassignment driver wired in step 5b.
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
@@ -165,17 +147,15 @@ async fn main() -> ExitCode {
         }
     };
 
-    // The Authorizer is given the (optional) NyxID client. Share-aware package
-    // policy was removed with the package store (#115); ownership/org checks
+    // The Authorizer is given the (optional) NyxID client. Ownership/org checks
     // remain.
     let authz = Authorizer::new(nyxid_client.clone());
 
-    // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must
-    //     never reach a live session). Installation resolution is stateless
-    //     (#141): the token service resolves on demand and caches in memory —
-    //     no durable installation store. The webhook secret (if set) is lifted
-    //     out into AppState so the router can mount the signature-verified
-    //     webhook route.
+    // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must never
+    //     reach a session). Installation resolution is stateless (#141): the
+    //     token service resolves on demand and caches in memory. The webhook
+    //     secret (if set) is lifted out into AppState so the router can mount the
+    //     signature-verified webhook route.
     let mut github_app_webhook_secret: Option<secrecy::SecretString> = None;
     let github_app = match fkst_control_plane::github_app::GithubAppConfig::load_from_env() {
         Ok(Some(config)) => {
@@ -206,29 +186,14 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 5a-bis-pre-pre. Build the session token minter for the controller's mid-run
-    //         credential-refresh channel (#151). Cloned from `github_app` BEFORE
-    //         it moves into AppState; `None` when the App is unconfigured (the
-    //         credential-refresh route then answers 503). This is the internal
-    //         router's `minter` argument below.
-    let session_minter: Option<
-        std::sync::Arc<dyn fkst_control_plane::controller::SessionTokenMinter>,
-    > = github_app.clone().map(|tokens| {
-        std::sync::Arc::new(fkst_control_plane::controller::GithubAppMinter::new(tokens))
-            as std::sync::Arc<dyn fkst_control_plane::controller::SessionTokenMinter>
-    });
-
-    // 5a-bis-pre. Build the goal store (#137): goals are GitHub-Issue +
-    //         in-memory backed. It mints the App installation token to write
-    //         the goal issues; without the App configured it is in-memory only
-    //         (the authoritative read path still works, no GitHub mirror).
+    // 5b. Build the goal store (#137): goals are GitHub-Issue + in-memory backed.
+    //     It mints the App installation token to write the goal issues; without
+    //     the App configured it is in-memory only (the authoritative read path
+    //     still works, no GitHub mirror).
     let goals = GoalIssueStore::new(github_app.clone());
 
-    // 5a-ter. Build the in-memory vault service (issue #100, database-free #138).
-    //         Secrets are supplied inline at goal trigger and held by the
-    //         controller in memory only — no at-rest key, no Mongo collection,
-    //         no index. The `FKST_HOSTED_VAULT_*` caps still bound a single
-    //         inline value's size and an owner's per-scope entry count.
+    // 5c. Build the in-memory vault service (issue #100, database-free #138).
+    //     Secrets are supplied inline at goal trigger and held in memory only.
     let vault =
         fkst_control_plane::vault::VaultService::new(fkst_control_plane::vault::VaultLimits {
             value_byte_cap: config.vault_value_byte_cap,
@@ -236,38 +201,23 @@ async fn main() -> ExitCode {
         });
     tracing::info!("vault enabled (in-memory)");
 
-    // 5a-ter-bis. Wire the vault into the session driver (issue #102): every
-    //         driver this service spawns resolves the session's inline-secret
-    //         scope into an `env_profile` and injects it into the engine run.
-    //         The VaultService is Clone (it joins AppState below too).
+    // 5d. Wire the session-execution setups (retained for pod-per-session run,
+    //     milestone #9): the vault, the per-session codex provider config, the
+    //     per-session NyxID token provisioning, the Ornn skill client, and goal
+    //     support. They are recorded on the service now so pod-per-session can
+    //     reuse them without re-plumbing; the API-only control plane does not run
+    //     an engine in-process.
     sessions.enable_vault(vault.clone());
 
-    // 5a-ter-quater. Wire per-session codex LLM-provider config into the driver
-    //         (issue #112): every session renders a per-session CODEX_HOME
-    //         config.toml selecting the provider — default the NyxID-proxied
-    //         chrono-llm, with RAW/STRUCTURED vault overrides — so the engine's
-    //         codex reaches a working LLM backend. The operator-pinned chrono-llm
-    //         DEFAULT model + base URL are fail-closed config values (validated
-    //         non-blank at load). Rendering also requires the vault (wired above);
-    //         without it the driver skips CODEX_HOME (legacy behaviour).
     sessions.enable_codex(
         config.codex_model.clone(),
         config.chrono_llm_base_url.clone(),
     );
     tracing::info!("per-session codex provider config enabled");
 
-    // 5a-ter-ter. Wire per-session NyxID token provisioning into the driver
-    //         (issue #111; TTL cleanup #216): every session mints a per-session
-    //         agent key on the triggering user's behalf and injects
-    //         NYXID_ACCESS_TOKEN + NYXID_URL into the engine env. The key
-    //         self-expires after FKST_SESSION_KEY_TTL_SECS — no service-account
-    //         revoke at teardown (NyxID rejects it on a human-minted key). The
-    //         origin is the NyxID issuer base URL (the SAME host that issues the
-    //         inbound user JWTs we mint against). Owner-only (#257): this is
-    //         gated on AUTH BEING ENABLED — the key is minted with the user's own
-    //         token, and the control plane carries no service-account credential.
-    //         When auth is disabled, provisioning stays off and the driver
-    //         behaves exactly as pre-#111.
+    // Per-session NyxID token provisioning is gated on AUTH BEING ENABLED — the
+    // key is minted with the user's own token, and the control plane carries no
+    // service-account credential.
     match (&nyxid_client, &auth_mode) {
         (Some(client), fkst_control_plane::auth::AuthMode::Enabled(settings)) => {
             sessions.enable_nyxid_token(
@@ -282,15 +232,9 @@ async fn main() -> ExitCode {
         }
     }
 
-    // 5a-ter-quinquies. Wire the Ornn skill-registry client (issue #114): when
-    //         a session pins Ornn skills/skillsets, the driver fetches them as
-    //         the session user (via the #111 NyxID token through the `ornn-api`
-    //         proxy) and installs them into the per-session CODEX_HOME (#112)
-    //         before the engine spawns. The catalog API consumes the same
-    //         client. Owner-only (#219): the Ornn proxy is reached with the
-    //         session user's token, so this needs only the NyxID client (built
-    //         whenever auth is enabled), NOT the service account. When auth is
-    //         disabled, injection stays off and the catalog answers 503.
+    // The Ornn skill-registry client also backs the catalog API (issue #114);
+    // owner-only (#219), so it needs only the NyxID client. When auth is
+    // disabled, the catalog answers 503.
     let ornn_client: Option<fkst_control_plane::ornn::OrnnClient> = match &nyxid_client {
         Some(client) => match fkst_control_plane::ornn::OrnnClient::with_nyxid(
             client.clone(),
@@ -312,48 +256,14 @@ async fn main() -> ExitCode {
         }
     };
 
-    // 5a-bis. Enable goal support in the session service: goal-status sync
-    //         writes + token refresh. Requires both the goals repo and the
-    //         GitHub App tokens service.
+    // Goal support: goal-status sync writes + token refresh. Requires both the
+    // goals repo and the GitHub App tokens service.
     if let Some(ref gh_app) = github_app {
         sessions.enable_goal_support(goals.clone(), gh_app.clone());
         tracing::info!("goal support enabled in session service");
     } else {
         tracing::info!("github app not configured; goal support disabled in session service");
     }
-
-    // Capture the internal worker-protocol config before `config` moves into
-    // AppState (issue #134). `dispatch_mode_enabled` (#151 i7b) is captured the
-    // same way: it gates whether the controller is enabled below.
-    let internal_auth_token = config.internal_auth_token.clone();
-    let worker_liveness_ttl_secs = config.worker_liveness_ttl_secs;
-    let dispatch_mode_enabled = config.dispatch_mode_enabled;
-
-    // 5a-quater. Controller-backed placement (#135, #198-ii): the in-memory
-    //     `ClaimMap` is the SINGLE claim authority for placement, so it is built
-    //     and enabled UNCONDITIONALLY — the in-process default path claims
-    //     through it, and dispatch mode places workers through it. Built BEFORE
-    //     the router so the SAME `Arc<ClaimMap>` + registry can be handed to the
-    //     observability surface (`AppState.claims` / `worker_registry`, #144) as
-    //     well as to the session service and `mount_internal` (below): a dispatch
-    //     queued via the handle is drained by the heartbeat handler, the fence a
-    //     worker echoes is checked against the live claim map, and the admin /
-    //     metrics routes read that same live state. `dispatch_mode` rides on the
-    //     handle so `create_for_goal` picks in-process vs worker-dispatch off it.
-    let ttl = std::time::Duration::from_secs(worker_liveness_ttl_secs);
-    let registry = WorkerRegistry::new(ttl);
-    let claims = std::sync::Arc::new(ClaimMap::new());
-    sessions.enable_controller(ControllerHandle::new(
-        claims.clone(),
-        registry.clone(),
-        dispatch_max_load,
-        dispatch_mode_enabled,
-    ));
-    tracing::info!(
-        dispatch_mode = dispatch_mode_enabled,
-        max_load = dispatch_max_load,
-        "controller-backed placement enabled (in-memory claim authority)"
-    );
 
     let app = match build_router(AppState {
         config,
@@ -365,11 +275,6 @@ async fn main() -> ExitCode {
         goals,
         vault,
         ornn: ornn_client,
-        // The observability surface (#144) reads the SAME live claim authority +
-        // registry the controller placement uses, so the admin/metrics view is
-        // exact (never a copy that can drift).
-        claims: Some(claims.clone()),
-        worker_registry: Some(registry.clone()),
     }) {
         Ok(router) => router,
         Err(error) => {
@@ -378,108 +283,6 @@ async fn main() -> ExitCode {
         }
     };
     tracing::info!("router built");
-
-    // 5b. Internal worker protocol (issue #134): when the shared secret is set,
-    //     spawn the stale-worker expiry sweeper (cancelled on shutdown) and merge
-    //     the shared-secret-guarded internal routes onto the top-level router,
-    //     reusing the SAME registry + claims wired above. When the secret is
-    //     absent the internal surface stays closed (not mounted), but the
-    //     in-process claim authority is still live.
-    let registry_sweeper_shutdown = CancellationToken::new();
-    let (app, registry_sweeper_handle) = match internal_auth_token {
-        Some(token) => {
-            // Workers must heartbeat several times per TTL window to avoid a
-            // false expiry; the controller is authoritative for this cadence.
-            let heartbeat_interval_secs = (worker_liveness_ttl_secs / 3).max(1);
-            let sweep_interval_secs = (worker_liveness_ttl_secs / 2).max(1);
-            tracing::info!(
-                route_prefix = "/internal/v1",
-                "internal worker protocol enabled"
-            );
-            // Dispatch mode (#151 i7b / #140, default OFF): only when the operator
-            // opts in do we wire the worker-reassignment driver. The driver MUST
-            // share the SAME registry + claims so a redo lands on the live
-            // outbound queue and re-fences the live claim. When OFF the reassign
-            // driver stays None (goal sessions run in-process; the sweeper is
-            // log-only).
-            let reassign: Option<std::sync::Arc<fkst_control_plane::controller::ReassignDriver>> =
-                if dispatch_mode_enabled {
-                    // The real re-dispatch seam (#140): re-resolves a reassigned
-                    // session's dispatch + queues it to the new worker. Shares the
-                    // SAME registry so the redo lands on the live outbound queue.
-                    let redispatch = sessions.make_redispatch(registry.clone());
-                    let driver =
-                        std::sync::Arc::new(fkst_control_plane::controller::ReassignDriver::new(
-                            claims.clone(),
-                            registry.clone(),
-                            dispatch_max_load,
-                            redispatch,
-                        ));
-                    tracing::info!(
-                        max_load = dispatch_max_load,
-                        "dispatch mode ENABLED: goal sessions are dispatched to workers; \
-                         dead/drained workers are reassigned"
-                    );
-                    Some(driver)
-                } else {
-                    None
-                };
-            // The sweeper expires stale workers; under dispatch mode it ALSO
-            // reassigns each expired worker's in-flight work onto a live worker
-            // (the abrupt-death path: fence-bump + git-idempotency keep the redo
-            // safe). With dispatch OFF (`reassign` is None) it stays log-only,
-            // byte-identical to before.
-            let sweep_registry = registry.clone();
-            let sweeper_cancel = registry_sweeper_shutdown.clone();
-            let sweep_reassign = reassign.clone();
-            let handle = tokio::spawn(async move {
-                let mut interval =
-                    tokio::time::interval(std::time::Duration::from_secs(sweep_interval_secs));
-                loop {
-                    tokio::select! {
-                        _ = interval.tick() => {
-                            let expired = sweep_registry.expire_stale().await;
-                            if !expired.is_empty() {
-                                tracing::info!(count = expired.len(), "swept stale workers");
-                                if let Some(reassign) = &sweep_reassign {
-                                    for worker_id in &expired {
-                                        let n = reassign.on_worker_dead(worker_id).await;
-                                        if n > 0 {
-                                            tracing::info!(
-                                                worker_id = %worker_id,
-                                                reassigned = n,
-                                                "reassigned a dead worker's in-flight sessions"
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        _ = sweeper_cancel.cancelled() => break,
-                    }
-                }
-            });
-            (
-                mount_internal(
-                    app,
-                    registry,
-                    InternalAuth::new(token),
-                    heartbeat_interval_secs,
-                    claims,
-                    session_minter,
-                    reassign,
-                ),
-                Some(handle),
-            )
-        }
-        None => {
-            tracing::warn!(
-                "FKST_INTERNAL_AUTH_TOKEN not set; internal worker protocol disabled \
-                 (internal routes not mounted)"
-            );
-            (app, None)
-        }
-    };
 
     // 6. Bind and serve with graceful shutdown.
     let listener = match tokio::net::TcpListener::bind(&addr).await {
@@ -496,22 +299,10 @@ async fn main() -> ExitCode {
         .await
     {
         tracing::error!(error = %error, "server error");
-        // Still stop the worker-registry sweeper and drain the session drivers:
-        // a serve error must not orphan live engine processes without a SIGTERM.
-        registry_sweeper_shutdown.cancel();
-        if let Some(handle) = registry_sweeper_handle {
-            let _ = handle.await;
-        }
         sessions.shutdown().await;
         return ExitCode::FAILURE;
     }
 
-    // 7. Stop the worker-registry sweeper, then drain the session drivers
-    //    (SIGTERM live engines, bounded wait).
-    registry_sweeper_shutdown.cancel();
-    if let Some(handle) = registry_sweeper_handle {
-        let _ = handle.await;
-    }
     sessions.shutdown().await;
 
     tracing::info!("server stopped");

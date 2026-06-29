@@ -399,10 +399,6 @@ dependencies = [
  "bson",
  "envy",
  "filetime",
- "fkst-engine",
- "fkst-journal",
- "fkst-shared",
- "fkst-worker",
  "hmac",
  "http-body-util",
  "jsonwebtoken",
@@ -426,92 +422,6 @@ dependencies = [
  "tracing-subscriber",
  "utoipa",
  "utoipa-axum",
- "wiremock",
- "zip",
-]
-
-[[package]]
-name = "fkst-engine"
-version = "0.2.3"
-dependencies = [
- "bson",
- "envy",
- "fkst-shared",
- "nix",
- "rand 0.8.6",
- "regex",
- "secrecy",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "zip",
-]
-
-[[package]]
-name = "fkst-journal"
-version = "0.2.3"
-dependencies = [
- "anyhow",
- "base64",
- "bson",
- "fkst-engine",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "wiremock",
-]
-
-[[package]]
-name = "fkst-shared"
-version = "0.2.3"
-dependencies = [
- "async-trait",
- "bson",
- "once_cell",
- "regex",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "utoipa",
- "wiremock",
-]
-
-[[package]]
-name = "fkst-worker"
-version = "0.2.3"
-dependencies = [
- "anyhow",
- "async-trait",
- "axum",
- "base64",
- "bson",
- "fkst-engine",
- "fkst-journal",
- "fkst-shared",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tokio-util",
- "tower",
- "tracing",
- "tracing-subscriber",
  "wiremock",
  "zip",
 ]

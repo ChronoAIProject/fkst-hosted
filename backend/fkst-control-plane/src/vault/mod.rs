@@ -21,7 +21,7 @@
 
 // `model` was extracted to `fkst-shared` (issue #145); re-export it so
 // `crate::vault::model::…` keeps resolving for the service and callers.
-pub use fkst_shared::vault::model;
+pub mod model;
 pub mod service;
 
 pub use model::{EnvKind, EnvScopeRef, RepoRef, ResolvedEntry};

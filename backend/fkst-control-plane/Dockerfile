@@ -1,25 +1,21 @@
 # syntax=docker/dockerfile:1
 #
 # Slim controller image for the control-plane deployable (crate
-# fkst-control-plane): the public REST API + claim/placement authority. It
-# carries ONLY the fkst-control-plane binary + ca-certificates — no engine, no
-# codex, no nyxid CLI, and no runtime volume. The build context is the repo root
-# (the dep-cache layering needs every workspace crate manifest + Cargo.lock,
-# which live under backend/).
+# fkst-control-plane): the public REST API. It
+# carries ONLY the fkst-control-plane binary + ca-certificates. The backend is a
+# single crate now (fkst-shared + fkst-engine were folded in; the worker
+# deployable was removed), so the dep-cache layer needs just the one manifest +
+# Cargo.lock under backend/. The build context is the repo root.
 #
 # Local build, from the repo root:
 #
 #   docker build -f backend/fkst-control-plane/Dockerfile \
 #     -t fkst-control-plane:dev .
 #
-# TRANSITIONAL (until #151): engine execution still lives in the control-plane
-# crate today, so the control-plane process still spawns engine children at
-# runtime. This slim image therefore BUILDS and runs (uid 10001) but cannot yet
-# run engine sessions; until #151 moves engine execution onto the worker, the
-# control-plane Deployment runs from the engine-laden worker image (see
-# backend/fkst-worker/Dockerfile and
-# backend/fkst-control-plane/k8s_sample/README.md). The slim image becomes the
-# controller's production home once #151 lands.
+# This slim image is API-only: it builds + runs (uid 10001) but carries no engine
+# toolchain (codex/git/substrate), so it cannot run sessions. The pod-per-session
+# execution image — control-plane + engine toolchain, run via a `run-session`
+# subcommand — is built by milestone #9 (the run-session-image issue).
 
 ARG RUST_VERSION=1
 ARG PRODUCT_VERSION=0.0.0
@@ -30,38 +26,24 @@ WORKDIR /app
 # 1) cache the dependency graph first (all crate manifests + lockfile +
 #    stub sources). The stubs compile, so this warm build must succeed.
 COPY backend/Cargo.toml backend/Cargo.lock ./
-COPY backend/fkst-shared/Cargo.toml fkst-shared/Cargo.toml
-COPY backend/fkst-engine/Cargo.toml fkst-engine/Cargo.toml
-COPY backend/fkst-journal/Cargo.toml fkst-journal/Cargo.toml
 COPY backend/fkst-control-plane/Cargo.toml fkst-control-plane/Cargo.toml
-COPY backend/fkst-worker/Cargo.toml fkst-worker/Cargo.toml
-RUN mkdir -p fkst-shared/src fkst-engine/src fkst-journal/src fkst-control-plane/src fkst-worker/src \
-    && echo '' > fkst-shared/src/lib.rs \
-    && echo '' > fkst-engine/src/lib.rs \
-    && echo '' > fkst-journal/src/lib.rs \
+RUN mkdir -p fkst-control-plane/src \
     && echo 'fn main() {}' > fkst-control-plane/src/main.rs \
     && echo '' > fkst-control-plane/src/lib.rs \
-    && echo 'fn main() {}' > fkst-worker/src/main.rs \
-    && echo '' > fkst-worker/src/lib.rs \
     && cargo build --release --locked --workspace
 # 2) copy the real sources and build only the control-plane binary.
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
-RUN touch fkst-shared/src/lib.rs fkst-engine/src/lib.rs fkst-journal/src/lib.rs \
-        fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
-        fkst-worker/src/main.rs fkst-worker/src/lib.rs \
+RUN touch fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
     && cargo build --release --locked -p fkst-control-plane
 RUN test -x /app/target/release/fkst-control-plane \
     || (echo "ERROR: fkst-control-plane binary not produced by the server build" && exit 1)
 
 # ---- control-plane runtime image (slim, engine-free) ----
-# The controller deployable: public REST API + claim/placement authority. No
-# engine, no codex, no nyxid CLI, no runtime volume, no FKST_SUBSTRATE_REF.
-# TRANSITIONAL: until #151 moves engine execution onto the worker, the
-# control-plane process still spawns engine children, so this slim image is not
-# yet the controller's production home (the worker image is — see header).
-# This image exists so the structure + slimming are in place for #151.
+# The controller deployable: public REST API only. No engine toolchain, no codex,
+# no nyxid CLI, no runtime volume, no FKST_SUBSTRATE_REF. The pod-per-session
+# execution image (milestone #9) is separate.
 FROM debian:bookworm-slim AS control-plane-runtime
 ARG PRODUCT_VERSION=0.0.0
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \

@@ -40,8 +40,9 @@ fn cors_layer() -> CorsLayer {
 /// every `#[utoipa::path]` operation registered here also lands in the OpenAPI
 /// document; the assembled spec is then split out and served verbatim at
 /// `GET /openapi.json` (top-level, unauthenticated — see [`crate::openapi`]).
-/// The fleet-only `/internal/v1/*` routes are mounted AFTER this function (in
-/// `main.rs`), so they never enter the spec.
+/// The control plane is API-only: there is no in-process session execution and
+/// no fleet-only `/internal/v1/*` worker protocol (removed in the single
+/// control-plane refactor).
 ///
 /// When authentication is enabled, all `/api/v1/*` routes (except health) are
 /// wrapped with the proxy-trusted identity middleware (issue #113): it reads the
@@ -122,29 +123,4 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
                     timeout,
                 )),
         ))
-}
-
-/// Merge the internal worker-protocol routes onto the top-level router (#134).
-///
-/// Internal routes live at `/internal/v1/*`, NOT under `/api/v1` and NOT behind
-/// the NyxID proxy-trust middleware: they carry their own constant-time
-/// shared-secret auth (inside `internal_router`). This keeps the public
-/// `/api/v1` surface unchanged while exposing the fleet-only internal surface.
-pub fn mount_internal(
-    top: Router,
-    registry: crate::controller::WorkerRegistry,
-    auth: crate::controller::InternalAuth,
-    heartbeat_interval_secs: u64,
-    claims: std::sync::Arc<crate::controller::ClaimMap>,
-    minter: Option<std::sync::Arc<dyn crate::controller::SessionTokenMinter>>,
-    reassign: Option<std::sync::Arc<crate::controller::ReassignDriver>>,
-) -> Router {
-    top.merge(crate::controller::internal_router(
-        registry,
-        auth,
-        heartbeat_interval_secs,
-        claims,
-        minter,
-        reassign,
-    ))
 }

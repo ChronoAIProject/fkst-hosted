@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use fkst_shared::nyxid::{NyxIdClient, NyxIdError};
+use crate::nyxid::{NyxIdClient, NyxIdError};
 
 use crate::auth::AuthMode;
 

@@ -3,7 +3,7 @@
 //!
 //! These are compile-time, non-sensitive defaults — they NEVER contain a secret,
 //! an env value, or a goal prompt. The example package satisfies the engine's
-//! #115 conformance contract (`fkst_engine::materialize::PreparedPackage::validate`):
+//! #115 conformance contract (`crate::engine::materialize::PreparedPackage::validate`):
 //! it is named `example` and carries the anchored entry file
 //! `departments/example/main.lua`. A unit test in `routes::repos` rebuilds the
 //! package from these consts and asserts `validate()` succeeds, guarding the
