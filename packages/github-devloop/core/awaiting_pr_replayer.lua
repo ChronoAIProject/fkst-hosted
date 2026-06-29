@@ -72,7 +72,33 @@ local function child_lineage_matches_delegation(state, delegation, child_state)
     and M.strip_transition_version_suffixes(child_state.version) == M.strip_transition_version_suffixes(delegation.version)
 end
 
-local function build_resume_comment_request(issue, state, next_state, child_state, delegation)
+local function autonomy_post_merge_pr(pr)
+  if type(pr) ~= "table" or type(pr.status_check_rollup) ~= "table" or #pr.status_check_rollup == 0 then
+    return nil
+  end
+  return pr
+end
+
+local function resume_terminal_markers(issue, next_state, delegation, current_pr)
+  if next_state.to_state ~= "merged" then
+    return ""
+  end
+  local head_sha = tostring(current_pr and current_pr.head_sha or "")
+  if not M._is_git_sha(head_sha) then
+    error("github-devloop: avm-ledger-missing-head-sha: awaiting-pr autonomy result requires merged PR head sha")
+  end
+  local merge_ready = {
+    proposal_id = delegation.proposal_id,
+    pr_number = delegation.pr_number,
+    version = next_state.version,
+    reviewed_head_sha = head_sha,
+  }
+  local autonomy_record = M.autonomy_result_record(issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr))
+  return "\n" .. M.merged_marker(delegation.proposal_id, delegation.pr_number, next_state.version, head_sha, autonomy_record)
+    .. "\n" .. M.autonomy_result_marker(autonomy_record)
+end
+
+local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
   local source_ref = issue.source_ref or M.issue_source_ref(issue.repo, issue.number)
   local state_marker = M.state_marker(delegation.proposal_id, next_state.to_state, next_state.version)
   return M.build_entity_comment_request({
@@ -83,7 +109,8 @@ local function build_resume_comment_request(issue, state, next_state, child_stat
     .. "\n\nChild PR: #" .. tostring(delegation.pr_number)
     .. "\nChild state: " .. tostring(child_state.state)
     .. "\nReason: " .. tostring(next_state.reason)
-    .. "\n\n" .. state_marker, M._dedup_key({
+    .. "\n\n" .. state_marker
+    .. resume_terminal_markers(issue, next_state, delegation, current_pr), M._dedup_key({
     "awaiting-pr",
     "resume",
     tostring(delegation.proposal_id),
@@ -146,7 +173,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     return log_skip(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "skip-idempotent(already at to_state)", "parent issue already reflects delegated child terminal")
   end
 
-  local comment_request = build_resume_comment_request(issue, state, next_state, child_state, delegation)
+  local comment_request = build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
   local label_request = M.build_state_label_request(
     issue.repo,
     issue.number,

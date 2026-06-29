@@ -244,6 +244,21 @@ local function resume_comment(result)
   return find_raise(result.raises, "github-proxy.github_issue_comment_request")
 end
 
+local function assert_resume_has_autonomy_result(resume)
+  t.is_true(resume ~= nil)
+  t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+  t.is_true(resume.payload.body:find("fkst:github-devloop:merged:v1", 1, true) ~= nil)
+  t.is_true(resume.payload.body:find("fkst:github-devloop:autonomy-result:v1", 1, true) ~= nil)
+  local merged_marker = resume.payload.body:match("<!%-%- fkst:github%-devloop:merged:v1.-%-%->")
+  t.is_true(merged_marker:find('autonomy_result="v1"', 1, true) ~= nil)
+  local avm = core.autonomy_result_fact({ resume.payload.body }, parent, pr_number, version, head_sha)
+  t.is_true(avm ~= nil)
+  t.eq(avm.issue_number, issue_number)
+  t.eq(avm.pr_number, pr_number)
+  t.eq(avm.valid_autonomous_merge, "pending")
+  t.eq(avm.gates.post_merge_probe, "pending")
+end
+
 return {
   test_child_merged_reconciles_parent_to_merged = function()
     mock_issue_close()
@@ -256,8 +271,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
@@ -273,8 +287,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
@@ -290,8 +303,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
@@ -307,8 +319,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
@@ -341,8 +352,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
   end,
 
@@ -357,8 +367,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_raises(result.raises, "github-proxy.github_issue_label_request"), 1)
     t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 1)
     t.eq(count_calls("git merge-base --is-ancestor " .. merge_commit_sha .. " " .. upstream_head_sha), 1)
@@ -406,8 +415,7 @@ return {
 
     t.eq(result.exit_code, 0)
     local resume = resume_comment(result)
-    t.is_true(resume ~= nil)
-    t.is_true(resume.payload.body:find('state="merged"', 1, true) ~= nil)
+    assert_resume_has_autonomy_result(resume)
     t.eq(count_calls("git fetch 'origin' '" .. upstream_branch .. "'"), 0)
     t.eq(count_calls("git merge-base --is-ancestor"), 0)
     t.eq(count_calls("gh issue close 42 --repo owner/repo"), 1)
