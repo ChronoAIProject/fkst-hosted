@@ -1,5 +1,6 @@
 local core = require("core")
 local git_adapter = require("forge.git")
+local forge_validators = require("devloop.forge_validators")
 
 local M = {}
 
@@ -47,7 +48,7 @@ local function show_pin(ref, opts)
     error("github-devloop: implement-substrate-pin-read-failed: " .. tostring(result and result.stderr or "nil git result"))
   end
   local pin = trim(result.stdout)
-  if not core._is_git_sha(pin) then
+  if not forge_validators.is_git_sha(pin) then
     error("github-devloop: implement-substrate-pin-invalid: invalid implementation substrate-ref pin")
   end
   return pin:lower()
@@ -65,7 +66,7 @@ function M.refresh(worktree, branch, base_head, merge_clean, opts)
   if not core.is_safe_head_sha(base_head) then
     error("github-devloop: implement-substrate-pin-base-unsafe: unsafe implementation base head")
   end
-  if not core._is_git_ref_safe(branch) then
+  if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: implement-substrate-pin-branch-unsafe: unsafe implementation branch")
   end
   local base_pin = show_pin(base_head, { missing_ok = true, git = opts and opts.git })
@@ -100,7 +101,7 @@ function M.is_only_pin_delta(base_head, branch)
   if not core.is_safe_head_sha(base_head) then
     error("github-devloop: implement-substrate-pin-base-unsafe: unsafe implementation base head")
   end
-  if not core._is_git_ref_safe(branch) then
+  if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: implement-substrate-pin-branch-unsafe: unsafe implementation branch")
   end
   local diff = git().diff_name_only(nil, tostring(base_head) .. "..refs/heads/" .. tostring(branch), 30)

@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local max_release_notes_len = 4000
@@ -117,10 +118,10 @@ function M.gh_pr_create_body_cmd(repo, head, base, title, body)
 end
 
 function M.gh_pr_create_body(repo, head, base, title, body, timeout)
-  if not M._is_git_ref_safe(head) then
+  if not forge_validators.is_git_ref_safe(head) then
     error("github-devloop: invalid PR head branch")
   end
-  if not M._is_git_ref_safe(base) then
+  if not forge_validators.is_git_ref_safe(base) then
     error("github-devloop: invalid PR base branch")
   end
   local normalized_body = M.normalize_release_notes(body)

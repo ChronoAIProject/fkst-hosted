@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
+local forge_validators = require("devloop.forge_validators")
 
 local M = {}
 
@@ -143,7 +144,7 @@ local function replay_pr_local_state(origin, pr_number, current_pr, state, sourc
 end
 
 local function is_stalled_reviewing(current_pr, origin, pr_number, state)
-  if state.state ~= "reviewing" or not core._is_git_sha(current_pr.head_sha) then
+  if state.state ~= "reviewing" or not forge_validators.is_git_sha(current_pr.head_sha) then
     return false
   end
   local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
@@ -206,7 +207,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
     core.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", refusal)
     return true
   end
-  if not core._is_git_sha(current_pr.head_sha) then
+  if not forge_validators.is_git_sha(current_pr.head_sha) then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(head-missing)", "operator rereview requires a current PR head")
     local refusal = core.build_operator_command_refusal_request(
       origin.repo,
@@ -263,7 +264,7 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
     source_ref = source_ref,
     head_sha = head_sha,
     fresh_current_state = state,
-    review_proposal_id = state and state.state == "reviewing" and core._is_git_sha(head_sha)
+    review_proposal_id = state and state.state == "reviewing" and forge_validators.is_git_sha(head_sha)
       and core.pr_review_proposal_id(origin.repo, pr_number, state.version, head_sha)
       or nil,
   })
@@ -271,7 +272,7 @@ end
 
 local function build_conflict_review_fact(origin, pr_number, current_pr, version, reason)
   local head_sha = tostring(current_pr.head_sha or "")
-  if not core._is_git_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     return nil, "head-missing"
   end
   return {

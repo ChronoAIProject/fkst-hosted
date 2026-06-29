@@ -1,5 +1,6 @@
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
+local forge_validators = require("devloop.forge_validators")
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -84,7 +85,7 @@ local function resume_terminal_markers(issue, next_state, delegation, current_pr
     return ""
   end
   local head_sha = tostring(current_pr and current_pr.head_sha or "")
-  if not M._is_git_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: avm-ledger-missing-head-sha: awaiting-pr autonomy result requires merged PR head sha")
   end
   local merge_ready = {
@@ -259,7 +260,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
     return true
   end
   local merge_commit_sha = tostring(current_pr and current_pr.merge_commit_sha or "")
-  if not M._is_git_sha(merge_commit_sha) then
+  if not forge_validators.is_git_sha(merge_commit_sha) then
     return false, "skip-pending(merge-commit-missing)", "canonical merged child PR has no GitHub mergeCommit.oid"
   end
   M.fetch_branch(branches.upstream, "awaiting-pr upstream fetch")

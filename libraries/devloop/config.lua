@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local env = require("workflow.env")
@@ -157,7 +158,7 @@ local function current_checkout_branch(exec)
     error("github-devloop: current checkout branch read failed")
   end
   local branch = M._trim(out.stdout)
-  if branch == "HEAD" or not M._is_git_ref_safe(branch) then
+  if branch == "HEAD" or not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid current checkout branch")
   end
   return branch
@@ -165,7 +166,7 @@ end
 
 local function validated_branch(name, branch)
   branch = M._trim(branch)
-  if not M._is_git_ref_safe(branch) then
+  if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid " .. name)
   end
   return branch

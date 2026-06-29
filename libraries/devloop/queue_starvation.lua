@@ -1,5 +1,6 @@
 local S = {}
 local github_handle = nil
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -99,7 +100,7 @@ local function merged_fact_from_issue(issue)
       if M._is_bounded_string(proposal_id, M._max_key_len)
         and M._is_positive_pr_number(pr_number)
         and M._is_bounded_string(version, M._max_dedup_len)
-        and M._is_git_sha(head_sha) then
+        and forge_validators.is_git_sha(head_sha) then
         return {
           proposal_id = proposal_id,
           pr_number = tonumber(pr_number),
@@ -310,7 +311,7 @@ local function stable_incident_identity(queue_head)
     table.insert(parts, "version")
     table.insert(parts, M.safe_version_segment(version))
   end
-  if entity.head_sha ~= nil and M._is_git_sha(entity.head_sha) then
+  if entity.head_sha ~= nil and forge_validators.is_git_sha(entity.head_sha) then
     table.insert(parts, "head")
     table.insert(parts, M.safe_head_segment(entity.head_sha))
   end

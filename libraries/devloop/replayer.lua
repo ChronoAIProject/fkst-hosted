@@ -1,6 +1,7 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local replay_fields = require("devloop.replay_fields")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(opts)
 local M = opts.core
@@ -175,14 +176,14 @@ local function require_marker_fact(facts, family)
   end
   if family == "review-meta" then
     local current_pr = current_pr_fact(facts)
-    if current_pr ~= nil and M._is_git_sha(current_pr.head_sha) then
+    if current_pr ~= nil and forge_validators.is_git_sha(current_pr.head_sha) then
       return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
     end
     return M.review_meta_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "fix-reflection" or family == "review-converge-round" then
     local current_pr = current_pr_fact(facts)
-    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+    if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
     return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
@@ -192,7 +193,7 @@ local function require_marker_fact(facts, family)
   end
   if family == "merge-gate-wait" then
     local current_pr = current_pr_fact(facts)
-    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+    if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
     return M.merge_gate_wait_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
@@ -221,14 +222,14 @@ local function require_marker_fact(facts, family)
   end
   if family == "merge-ready" then
     local current_pr = current_pr_fact(facts)
-    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+    if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
     return M.merge_ready_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
   end
   if family == "merging" then
     local current_pr = current_pr_fact(facts)
-    if current_pr == nil or not M._is_git_sha(current_pr.head_sha) then
+    if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
     return M.merging_fact(facts.snapshot.comments, facts.proposal_id, facts.link.pr_number, facts.state.version, current_pr.head_sha)
@@ -560,7 +561,7 @@ local function replay_fixing(dept, issue, state, row, facts)
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return log_skip(dept, proposal_id, state, "fixing", "fixing|reviewing", "skip-stale(pr-closed)", "linked PR is not open")
   end
-  if not M._is_git_sha(current_pr.head_sha) then
+  if not forge_validators.is_git_sha(current_pr.head_sha) then
     return log_skip(dept, proposal_id, state, "fixing", "fixing|reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
 
@@ -656,7 +657,7 @@ local function replay_review_meta(dept, issue, state, row, facts)
   if tostring(current_pr.base_ref_name or "") ~= tostring(link.base_branch or "") then
     return log_skip(dept, proposal_id, state, "review-meta", "review-meta", "skip-foreign(base)", "linked PR base branch does not match pr-link marker")
   end
-  if not M._is_git_sha(current_pr.head_sha) then
+  if not forge_validators.is_git_sha(current_pr.head_sha) then
     return log_skip(dept, proposal_id, state, "review-meta", "review-meta", "skip-foreign(head)", "linked PR head sha is missing")
   end
   local fact = M.review_meta_replay_fact(facts.snapshot.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
@@ -687,7 +688,7 @@ local function raise_reviewing_for_current_head(dept, issue, state, proposal_id,
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return log_skip(dept, proposal_id, state, "merge-ready", "reviewing", "skip-stale(pr-closed)", "linked PR is not open")
   end
-  if not M._is_git_sha(current_pr.head_sha) then
+  if not forge_validators.is_git_sha(current_pr.head_sha) then
     return log_skip(dept, proposal_id, state, "merge-ready", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
   local reviewing_payload = M.build_current_head_reviewing_payload({ repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, M.pr_source_ref(issue.repo, link.pr_number))

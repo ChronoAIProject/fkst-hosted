@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("contract.strings")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local wait_bucket_seconds = 1800
@@ -24,7 +25,7 @@ function M.merge_gate_wait_version_lineage(version)
 end
 
 function M.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sha, reason, kind)
-  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+  if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-gate-wait marker")
   end
   return '<!-- fkst:github-devloop:merge-gate-wait:v1 proposal="' .. tostring(issue_proposal_id)
@@ -81,7 +82,7 @@ function M.merge_gate_wait_fact(comments, issue_proposal_id, issue_version, pr_n
         and tostring(marker_pr) == tostring(pr_number)
         and marker_version == tostring(wait_version)
         and tostring(marker_head_sha) == tostring(head_sha)
-        and M._is_git_sha(marker_head_sha)
+        and forge_validators.is_git_sha(marker_head_sha)
         and M._is_bounded_string(marker_kind, M._max_key_len)
         and M._is_bounded_string(marker_reason, M._max_key_len) then
         return {

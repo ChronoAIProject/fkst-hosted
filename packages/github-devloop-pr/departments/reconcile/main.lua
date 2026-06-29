@@ -1,6 +1,7 @@
 local core, replay_fields = require("core"), require("devloop.replay_fields")
 
 local saga = require("workflow.saga")
+local forge_validators = require("devloop.forge_validators")
 
 local spec = {
   consumes = { "devloop_review_reconcile", "devloop_fix_reconcile", "devloop_timeout_reconcile" },
@@ -50,7 +51,7 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   end
   local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
   local head_sha = current_pr and current_pr.head_sha or nil
-  if pr_number == nil or not core._is_git_sha(head_sha) then
+  if pr_number == nil or not forge_validators.is_git_sha(head_sha) then
     return "state-output-obligation-timeout"
   end
   local wait = core.merge_gate_wait_fact(comments, reconcile.proposal_id, state.version, pr_number, head_sha)

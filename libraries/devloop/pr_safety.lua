@@ -1,18 +1,19 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 function M.is_safe_branch(branch)
-  return M._is_git_ref_safe(branch)
+  return forge_validators.is_git_ref_safe(branch)
 end
 
 function M.is_devloop_issue_branch(branch)
   return type(branch) == "string"
-    and M._is_git_ref_safe(branch)
+    and forge_validators.is_git_ref_safe(branch)
     and branch:find("^devloop/issue/[^/]+/.+/.+") ~= nil
 end
 
 function M.is_safe_head_sha(head_sha)
-  return M._is_git_sha(head_sha)
+  return forge_validators.is_git_sha(head_sha)
 end
 
 function M.is_safe_pr_number(pr_number)

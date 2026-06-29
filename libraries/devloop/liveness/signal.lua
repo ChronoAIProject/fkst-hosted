@@ -1,5 +1,6 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
 local numeric_minutes = shared.numeric_minutes
@@ -423,7 +424,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
     local source_repo, source_pr = M.parse_pr_source_ref(facts and facts.source_ref)
     if source_repo ~= nil
       and source_pr ~= nil
-      and M._is_git_sha(head_sha) then
+      and forge_validators.is_git_sha(head_sha) then
       review_proposal_id = M.pr_review_proposal_id(source_repo, source_pr, strip_liveness_timeout_suffixes(state and state.version), head_sha)
     end
     local sr_digest = convergence_shared.source_ref_digest(facts and facts.source_ref)
@@ -437,7 +438,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
   end
   if resolver == "merge-gate-wait" then
     local wait_proposal_id, wait_version, pr_number, head_sha = merge_gate_wait_identity(M, facts, state)
-    if wait_proposal_id == nil or pr_number == nil or not M._is_git_sha(head_sha) then
+    if wait_proposal_id == nil or pr_number == nil or not forge_validators.is_git_sha(head_sha) then
       return nil
     end
     return newest_matching_marker_age(M, comments, "merge-gate-wait", function(marker)

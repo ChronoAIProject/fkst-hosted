@@ -1,6 +1,7 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local registry = require("workflow.registry")
+local forge_validators = require("devloop.forge_validators")
 
 local source_ref_derivations = {
   entity = true,
@@ -299,7 +300,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
   local repo = M.parse_proposal_id(issue_proposal_id)
   if repo == nil
     or not M._is_positive_pr_number(pr_number)
-    or not M._is_git_sha(head_sha)
+    or not forge_validators.is_git_sha(head_sha)
     or not M._is_bounded_string(issue_version, M._max_dedup_len) then
     return nil
   end

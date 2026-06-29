@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
 local valid_round = shared.valid_round
@@ -18,7 +19,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
     and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
     and review_dedup == expected_dedup
     and M._is_bounded_string(review_dedup, M._max_dedup_len)
-    and M._is_git_sha(reviewed_head_sha) then
+    and forge_validators.is_git_sha(reviewed_head_sha) then
     local fact = {
       review_proposal_id = review_proposal,
       review_dedup_key = review_dedup,
@@ -240,7 +241,7 @@ function M.review_meta_decision_fact(comments, issue_proposal_id, issue_version)
         and M._is_bounded_string(marker_dedup, M._max_dedup_len) then
         local review_proposal = review_proposal_from_dedup(marker_dedup)
         local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
-        if review_proposal ~= nil and M._is_git_sha(reviewed_head_sha) then
+        if review_proposal ~= nil and forge_validators.is_git_sha(reviewed_head_sha) then
           if action == "fix" and (gap == nil or not M._is_bounded_string(gap, M._max_blocking_gap_len)) then
             return nil
           end
@@ -293,8 +294,8 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
         and M._is_bounded_string(marker_reason, M._max_key_len)
-        and M._is_git_sha(marker_head_sha)
-        and (marker_gate_baseline_sha == nil or M._is_git_sha(marker_gate_baseline_sha))
+        and forge_validators.is_git_sha(marker_head_sha)
+        and (marker_gate_baseline_sha == nil or forge_validators.is_git_sha(marker_gate_baseline_sha))
         and (marker_predecessor_set == nil or M._is_path_safe_key(marker_predecessor_set, M._max_dedup_len)) then
         local fact = {
           review_proposal_id = marker_review_proposal,
@@ -341,7 +342,7 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
         and (head_sha == nil or tostring(marker_head_sha) == tostring(head_sha))
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
-        and M._is_git_sha(marker_head_sha) then
+        and forge_validators.is_git_sha(marker_head_sha) then
         local candidate = {
           proposal_id = marker_issue,
           pr_number = tonumber(marker_pr),
@@ -396,7 +397,7 @@ function M.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
         and marker_angle == "high-risk"
         and marker_verdict == "approve"
         and tostring(marker_paths_digest or "") == tostring(paths_digest)
-        and M._is_git_sha(marker_head_sha)
+        and forge_validators.is_git_sha(marker_head_sha)
         and M._is_bounded_string(marker_review_proposal, M._max_key_len)
         and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
         and M._is_bounded_string(marker_paths_digest, M._max_key_len)
@@ -512,7 +513,7 @@ function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sh
         and tostring(marker_pr) == tostring(pr_number)
         and tostring(marker_version) == tostring(version)
         and (head_sha == nil or tostring(marker_head_sha) == tostring(head_sha))
-        and M._is_git_sha(marker_head_sha) then
+        and forge_validators.is_git_sha(marker_head_sha) then
         return {
           proposal_id = marker_issue,
           pr_number = tonumber(marker_pr),
@@ -540,7 +541,7 @@ function M.merged_fact(comments, issue_proposal_id, pr_number, version)
       if marker_issue == tostring(issue_proposal_id)
         and tostring(marker_pr) == tostring(pr_number)
         and (version == nil or tostring(marker_version) == tostring(version))
-        and M._is_git_sha(marker_head_sha) then
+        and forge_validators.is_git_sha(marker_head_sha) then
         local autonomy_result = nil
         if marker:find('autonomy_result="v1"', 1, true) ~= nil and M.autonomy_result_record_from_marker ~= nil then
           autonomy_result = M.autonomy_result_record_from_marker(marker, comment, marker_issue, marker_pr, marker_version, marker_head_sha)
@@ -672,10 +673,10 @@ function M.implementing_fact(comments, proposal_id, dedup_key)
       local marker_base_sha = marker:match('base_sha="([^"]+)"')
       if marker_proposal == proposal_id
         and marker_dedup == tostring(dedup_key)
-        and M._is_git_ref_safe(marker_branch)
-        and M._is_git_sha(marker_head_sha)
-        and M._is_git_ref_safe(marker_base_branch)
-        and M._is_git_sha(marker_base_sha) then
+        and forge_validators.is_git_ref_safe(marker_branch)
+        and forge_validators.is_git_sha(marker_head_sha)
+        and forge_validators.is_git_ref_safe(marker_base_branch)
+        and forge_validators.is_git_sha(marker_base_sha) then
         return {
           proposal_id = marker_proposal,
           dedup_key = marker_dedup,
@@ -704,9 +705,9 @@ function M.pr_link_fact(comments, proposal_id)
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
       if marker_proposal == proposal_id
         and M._is_positive_pr_number(marker_pr)
-        and M._is_git_ref_safe(marker_branch)
+        and forge_validators.is_git_ref_safe(marker_branch)
         and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
-        and M._is_git_ref_safe(marker_base_branch) then
+        and forge_validators.is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
           pr_number = tonumber(marker_pr),
@@ -771,9 +772,9 @@ function M.pr_origin_fact(comments)
       local repo, issue_number = M.parse_proposal_id(marker_proposal)
       if repo ~= nil
         and marker_issue == issue_number
-        and M._is_git_ref_safe(marker_branch)
+        and forge_validators.is_git_ref_safe(marker_branch)
         and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
-        and M._is_git_ref_safe(marker_base_branch) then
+        and forge_validators.is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
           repo = repo,
@@ -786,9 +787,9 @@ function M.pr_origin_fact(comments)
       local pr_repo, pr_number = M.parse_pr_proposal_id(marker_proposal)
       if pr_repo ~= nil
         and marker_issue == tostring(pr_number)
-        and M._is_git_ref_safe(marker_branch)
+        and forge_validators.is_git_ref_safe(marker_branch)
         and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
-        and M._is_git_ref_safe(marker_base_branch) then
+        and forge_validators.is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
           repo = pr_repo,

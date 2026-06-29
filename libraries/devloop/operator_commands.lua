@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("contract.strings")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
@@ -83,7 +84,7 @@ function M.operator_command_fact(comments, command_name)
 end
 
 function M.operator_rereview_version(current_version, head_sha)
-  if not M._is_git_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid operator rereview head sha")
   end
   local base = tostring(current_version or "")

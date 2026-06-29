@@ -1,6 +1,7 @@
 local S = {}
 local support = require("devloop.commands.support")
 local validators = require("devloop.commands.validators")
+local forge_validators = require("devloop.forge_validators")
 
 function S.worktree_parent_dir(worktree)
   local value = tostring(worktree or "")
@@ -277,7 +278,7 @@ function S.install(M)
   end
 
   function M.find_worktrees_for_branch(stdout, branch)
-    if not M._is_git_ref_safe(branch) then
+    if not forge_validators.is_git_ref_safe(branch) then
       error("github-devloop: invalid branch")
     end
     local wanted = "refs/heads/" .. tostring(branch)
@@ -307,7 +308,7 @@ function S.install(M)
   end
 
   function M.find_worktree_for_branch_under_runtime(stdout, branch, runtime_root)
-    if not M._is_git_ref_safe(branch) then
+    if not forge_validators.is_git_ref_safe(branch) then
       error("github-devloop: invalid branch")
     end
     local wanted = "refs/heads/" .. tostring(branch)

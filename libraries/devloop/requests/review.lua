@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
 local ai_sentinel = shared.ai_sentinel
@@ -274,7 +275,7 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
   if display_reason == "" then
     display_reason = "gate-failed"
   end
-  if gate_baseline_sha ~= nil and not M._is_git_sha(gate_baseline_sha) then
+  if gate_baseline_sha ~= nil and not forge_validators.is_git_sha(gate_baseline_sha) then
     error("github-devloop: invalid merge-gate baseline sha")
   end
   local test_command = M.neutralize_untrusted_comment_text(M.test_command())

@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local task_classes = {
@@ -324,7 +325,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
       if marker_proposal == proposal_id
         and M._is_bounded_string(version, M._max_dedup_len)
         and M._is_positive_pr_number(pr_number)
-        and M._is_git_sha(head_sha) then
+        and forge_validators.is_git_sha(head_sha) then
         local autonomy_result = nil
         if marker:find('autonomy_result="v1"', 1, true) ~= nil then
           autonomy_result = M.autonomy_result_record_from_marker(marker, comment, marker_proposal, pr_number, version, head_sha)
@@ -515,7 +516,7 @@ local function autonomy_result_parts(record)
     or not M._is_positive_pr_number(issue_number)
     or not M._is_positive_pr_number(pr_number)
     or not M._is_bounded_string(version, M._max_dedup_len)
-    or not M._is_git_sha(head_sha)
+    or not forge_validators.is_git_sha(head_sha)
     or human_touch_count == nil or human_touch_count < 0 or human_touch_count % 1 ~= 0
     or rounds == nil or rounds < 0 or rounds % 1 ~= 0
     or retry_count == nil or retry_count < 0 or retry_count % 1 ~= 0 then
@@ -634,7 +635,7 @@ function M.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_n
   if tostring(marker_head_sha) ~= tostring(head_sha) then
     return nil, "mismatch_head_sha"
   end
-  if not M._is_git_sha(marker_head_sha) then
+  if not forge_validators.is_git_sha(marker_head_sha) then
     return nil, "invalid_head_sha"
   end
   if human_touch_count == nil then
@@ -700,7 +701,7 @@ function M.autonomy_audit_valid_autonomous_merge(fact, opts)
   end
   local repo = tostring((type(opts) == "table" and opts.repo) or fact.repo or "")
   local head_sha = tostring((type(opts) == "table" and opts.merge_commit_sha) or fact.merge_commit_sha or fact.head_sha or "")
-  if repo == "" or not M._is_git_sha(head_sha) then
+  if repo == "" or not forge_validators.is_git_sha(head_sha) then
     return {
       valid_autonomous_merge = "invalid_self_attested",
       reason = "missing-audit-source",

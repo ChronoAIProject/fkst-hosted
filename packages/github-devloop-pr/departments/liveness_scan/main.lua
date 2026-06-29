@@ -1,5 +1,6 @@
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local saga = require("workflow.saga")
+local forge_validators = require("devloop.forge_validators")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
 
@@ -75,7 +76,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     },
     source_ref = source_ref,
     head_sha = current.head_sha,
-    review_proposal_id = state.state == "reviewing" and core._is_git_sha(current.head_sha)
+    review_proposal_id = state.state == "reviewing" and forge_validators.is_git_sha(current.head_sha)
       and core.pr_review_proposal_id(origin.repo, pr.number, state.version, current.head_sha)
       or nil,
     fresh_current_state = state,

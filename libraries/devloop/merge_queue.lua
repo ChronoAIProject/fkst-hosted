@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 require("devloop.queue").install(M)
@@ -282,7 +283,7 @@ end
 
 local function predecessor_head_sha(predecessor)
   local head_sha = tostring(predecessor or ""):match("([0-9a-fA-F]+)$")
-  if head_sha == nil or not M._is_git_sha(head_sha) then
+  if head_sha == nil or not forge_validators.is_git_sha(head_sha) then
     return nil
   end
   return head_sha
@@ -398,7 +399,7 @@ function M.merge_queue_starvation_tick_payload(repo, incident_identity, head_ent
 end
 
 function M.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, version, head_sha, incident_identity, attempt_key, outcome)
-  if not M._is_positive_pr_number(pr_number) or not M._is_git_sha(head_sha) then
+  if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid queue-starvation reconcile marker")
   end
   local incident = strings.sanitize_key(tostring(incident_identity or "merge-ready"), false)
@@ -538,7 +539,7 @@ function M.wip_admission_classification(repo, proposal_id, issue_comments, state
   if link ~= nil and merge_gate_wait_wip_states[state_name] then
     local current_pr = pr_merge_view_for_wip(M, repo, link.pr_number)
     local wait = nil
-    if type(current_pr) == "table" and M._is_git_sha(current_pr.head_sha) then
+    if type(current_pr) == "table" and forge_validators.is_git_sha(current_pr.head_sha) then
       wait = M.merge_gate_wait_fact(current_pr.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
     end
     if wait ~= nil then

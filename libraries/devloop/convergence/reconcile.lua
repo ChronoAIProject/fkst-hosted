@@ -1,5 +1,6 @@
 local S = {}
 local replay_fields = require("devloop.replay_fields")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
   local source_refs = shared.source_refs
@@ -178,7 +179,7 @@ function M.is_supported_review_reconcile(payload)
     and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
     and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
     and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
-    and M._is_git_sha(payload.head_sha)
+    and forge_validators.is_git_sha(payload.head_sha)
     and valid_round(payload.round) ~= nil
     and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
@@ -197,7 +198,7 @@ function M.is_supported_fix_reconcile(payload)
     and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
     and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
     and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
-    and M._is_git_sha(payload.head_sha)
+    and forge_validators.is_git_sha(payload.head_sha)
     and valid_round(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.issue_version)
     and M._is_positive_pr_number(payload.pr_number)

@@ -806,8 +806,6 @@ M._has_value = has_value
 M._is_review_meta_action = is_review_meta_action
 M.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round
 M._is_path_safe_key = is_path_safe_key
-M._is_git_ref_safe = forge_validators.is_git_ref_safe
-M._is_git_sha = forge_validators.is_git_sha
 M._is_positive_pr_number = forge_validators.is_positive_pr_number
 M._dedup_key = dedup_key
 end

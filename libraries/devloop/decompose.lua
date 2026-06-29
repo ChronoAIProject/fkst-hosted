@@ -1,5 +1,6 @@
 local S = {}
 local source_refs = require("contract.source_ref")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local max_decompose_issues = 3
@@ -16,7 +17,7 @@ function M.is_supported_decompose(payload)
   local valid_review_binding = not has_review_binding
     or (M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
       and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
-      and M._is_git_sha(payload.head_sha))
+      and forge_validators.is_git_sha(payload.head_sha))
   local forward_dedup = M._dedup_key({
     "decompose",
     tostring(payload.proposal_id),

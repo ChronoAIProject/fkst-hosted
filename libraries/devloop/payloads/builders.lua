@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
 local bounded_framing = shared.bounded_framing
@@ -150,7 +151,7 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     payload.blocking_gap = blocking_gap
   end
   if review_fact.gate_baseline_sha ~= nil then
-    if not M._is_git_sha(review_fact.gate_baseline_sha) then
+    if not forge_validators.is_git_sha(review_fact.gate_baseline_sha) then
       error("github-devloop: invalid gate baseline sha")
     end
     payload.gate_baseline_sha = tostring(review_fact.gate_baseline_sha)
@@ -170,7 +171,7 @@ end
 
 local function replay_fact_sha(value, fallback)
   if value ~= nil then
-    if not M._is_git_sha(value) then
+    if not forge_validators.is_git_sha(value) then
       error("github-devloop: invalid replay fact sha")
     end
     return tostring(value)

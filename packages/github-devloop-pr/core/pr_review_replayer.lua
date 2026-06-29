@@ -1,5 +1,6 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local function linked_pr_state(pr)
@@ -8,7 +9,7 @@ end
 
 local function merged_head_sha(pr)
   local head_sha = tostring(pr and pr.head_sha or "")
-  return M._is_git_sha(head_sha) and head_sha or nil
+  return forge_validators.is_git_sha(head_sha) and head_sha or nil
 end
 
 local function pr_open_state(pr)
@@ -18,7 +19,7 @@ end
 local function same_linked_head(link, pr)
   return tostring(pr and pr.head_ref_name or "") == tostring(link and link.branch or "")
     and tostring(pr and pr.base_ref_name or "") == tostring(link and link.base_branch or "")
-    and M._is_git_sha(pr and pr.head_sha)
+    and forge_validators.is_git_sha(pr and pr.head_sha)
 end
 
 local terminal_linked_pr_action
@@ -453,7 +454,7 @@ raise_reviewing_for_current_head = function(dept, issue, state, proposal_id, lin
   if tostring(current_pr.state or ""):lower() ~= "open" then
     return false
   end
-  if not M._is_git_sha(current_pr.head_sha) then
+  if not forge_validators.is_git_sha(current_pr.head_sha) then
     return false
   end
   local review_version = state.version
@@ -695,7 +696,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
       if tostring(pr.base_ref_name or "") ~= tostring(link.base_branch or "") then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(base)", "linked PR base branch does not match pr-link marker")
       end
-      if not M._is_git_sha(pr.head_sha) then
+      if not forge_validators.is_git_sha(pr.head_sha) then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
       end
       local mergeable, mergeable_reason = M.pr_mergeable(pr)

@@ -1,5 +1,6 @@
 local BranchTrain = {}
 local strings = require("contract.strings")
+local forge_validators = require("devloop.forge_validators")
 local decimal_checksum = strings.decimal_checksum
 
 function BranchTrain.install(M, shared)
@@ -73,13 +74,13 @@ function BranchTrain.install(M, shared)
     if payload.schema ~= "github-devloop.v1" then
       return false, "schema"
     end
-    if not M._is_git_ref_safe(payload.upstream_branch) then
+    if not forge_validators.is_git_ref_safe(payload.upstream_branch) then
       return false, "upstream-branch"
     end
-    if not M._is_git_ref_safe(payload.integration_branch) then
+    if not forge_validators.is_git_ref_safe(payload.integration_branch) then
       return false, "integration-branch"
     end
-    if not M._is_git_sha(payload.head_sha) then
+    if not forge_validators.is_git_sha(payload.head_sha) then
       return false, "head-sha"
     end
     if type(payload.source_ref) ~= "table" then
@@ -199,10 +200,10 @@ function BranchTrain.install(M, shared)
   function M.is_supported_sync_conflict(payload)
     if type(payload) ~= "table"
       or payload.schema ~= "github-devloop.v1"
-      or not M._is_git_ref_safe(payload.upstream_branch)
-      or not M._is_git_ref_safe(payload.integration_branch)
-      or not M._is_git_sha(payload.upstream_sha)
-      or not M._is_git_sha(payload.integration_sha)
+      or not forge_validators.is_git_ref_safe(payload.upstream_branch)
+      or not forge_validators.is_git_ref_safe(payload.integration_branch)
+      or not forge_validators.is_git_sha(payload.upstream_sha)
+      or not forge_validators.is_git_sha(payload.integration_sha)
       or type(payload.source_ref) ~= "table"
       or payload.source_ref.kind ~= "external" then
       return false

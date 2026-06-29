@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
 local strings = shared.strings
@@ -161,16 +162,16 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
 end
 
 function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
-  if not M._is_git_ref_safe(branch) then
+  if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid implementing branch")
   end
-  if not M._is_git_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid implementing head_sha")
   end
-  if not M._is_git_ref_safe(base_branch) then
+  if not forge_validators.is_git_ref_safe(base_branch) then
     error("github-devloop: invalid implementing base_branch")
   end
-  if not M._is_git_sha(base_sha) then
+  if not forge_validators.is_git_sha(base_sha) then
     error("github-devloop: invalid implementing base_sha")
   end
   local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
@@ -198,13 +199,13 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
 end
 
 function M.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
-  if not M._is_git_ref_safe(branch) then
+  if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid implementing branch")
   end
-  if not M._is_git_ref_safe(base_branch) then
+  if not forge_validators.is_git_ref_safe(base_branch) then
     error("github-devloop: invalid implementing base_branch")
   end
-  if not M._is_git_sha(base_sha) then
+  if not forge_validators.is_git_sha(base_sha) then
     error("github-devloop: invalid implementing base_sha")
   end
   local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)

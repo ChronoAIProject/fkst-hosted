@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M, shared)
 local strings = require("forge.strings")
@@ -276,7 +277,7 @@ local function entry_commit_sha(entry)
     end
   end
   for _, candidate in ipairs(candidates) do
-    if M._is_git_sha(candidate) then
+    if forge_validators.is_git_sha(candidate) then
       return tostring(candidate)
     end
   end

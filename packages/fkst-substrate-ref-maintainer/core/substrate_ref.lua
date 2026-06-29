@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -103,7 +104,7 @@ local function read_pin()
     error("github-devloop: substrate-ref pin read failed: " .. tostring(result.stderr))
   end
   local pin = M._trim(result.stdout)
-  if not M._is_git_sha(pin) then
+  if not forge_validators.is_git_sha(pin) then
     error("github-devloop: invalid .fkst/substrate-ref pin")
   end
   return pin:lower()
@@ -111,7 +112,7 @@ end
 
 local function parse_ls_remote(stdout)
   local sha, ref = tostring(stdout or ""):match("^(%x+)%s+(refs/heads/[^%s]+)")
-  if ref ~= "refs/heads/" .. substrate_branch or not M._is_git_sha(sha) then
+  if ref ~= "refs/heads/" .. substrate_branch or not forge_validators.is_git_sha(sha) then
     return nil
   end
   return sha:lower()
@@ -142,10 +143,10 @@ local function fetch_substrate_dev_ref()
 end
 
 local function substrate_pin_is_dev_ancestor(pin, target_sha)
-  if not M._is_git_sha(pin) then
+  if not forge_validators.is_git_sha(pin) then
     return false, "invalid-substrate-pin"
   end
-  if not M._is_git_sha(target_sha) then
+  if not forge_validators.is_git_sha(target_sha) then
     return false, "invalid-substrate-target"
   end
   fetch_substrate_dev_ref()
@@ -156,7 +157,7 @@ local function substrate_pin_is_dev_ancestor(pin, target_sha)
     "substrate upstream tracking ref read"
   )
   local fetched_head = M._trim(head.stdout)
-  if not M._is_git_sha(fetched_head) then
+  if not forge_validators.is_git_sha(fetched_head) then
     return false, "invalid-substrate-dev-head"
   end
   if fetched_head:lower() ~= tostring(target_sha):lower() then
@@ -186,7 +187,7 @@ local function substrate_publishability_reason(reason)
 end
 
 local function substrate_commit_publishable(sha)
-  if not M._is_git_sha(sha) then
+  if not forge_validators.is_git_sha(sha) then
     return false, "invalid-substrate-target"
   end
   local result = run_gh(function()
@@ -305,7 +306,7 @@ local function fetch_bump_branch_head()
     return git().remote_branch_head("origin", bump_branch, 30)
   end, "substrate-ref bump branch head")
   local sha = M._trim(head.stdout)
-  if not M._is_git_sha(sha) then
+  if not forge_validators.is_git_sha(sha) then
     error("github-devloop: invalid substrate-ref bump branch head")
   end
   return sha:lower()
@@ -322,7 +323,7 @@ local function remote_bump_branch_pin(branch_head)
     return nil
   end
   local pin = M._trim(result.stdout)
-  if not M._is_git_sha(pin) then
+  if not forge_validators.is_git_sha(pin) then
     return nil
   end
   return pin:lower()
@@ -479,7 +480,7 @@ validate_bump_pr = function(repo, base_branch, pr)
   if not M.is_same_repo_pr_head(pr, repo) then
     return false, "foreign-head-repository"
   end
-  if not M._is_git_sha(pr.head_sha) then
+  if not forge_validators.is_git_sha(pr.head_sha) then
     return false, "invalid-head-sha"
   end
   local paths = changed_paths(repo, pr.number)
@@ -490,7 +491,7 @@ validate_bump_pr = function(repo, base_branch, pr)
 end
 
 local function substrate_ref_merge_marker(pr, target_sha, outcome, reason)
-  if not M._is_positive_pr_number(pr and pr.number) or not M._is_git_sha(pr and pr.head_sha) or not M._is_git_sha(target_sha) then
+  if not M._is_positive_pr_number(pr and pr.number) or not forge_validators.is_git_sha(pr and pr.head_sha) or not forge_validators.is_git_sha(target_sha) then
     error("github-devloop: invalid substrate-ref merge marker")
   end
   return '<!-- fkst:github-devloop:substrate-ref-merge:v1 pr="' .. tostring(pr.number)

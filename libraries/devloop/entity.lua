@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("contract.strings")
+local forge_validators = require("devloop.forge_validators")
 
 function S.install(M)
 local previous_transition_lock_key = M.transition_lock_key
@@ -71,9 +72,9 @@ local function linked_pr_numbers(issue_comments, proposal_id)
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
       if marker_proposal == proposal_id
         and M._is_positive_pr_number(marker_pr)
-        and M._is_git_ref_safe(marker_branch)
+        and forge_validators.is_git_ref_safe(marker_branch)
         and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
-        and M._is_git_ref_safe(marker_base_branch)
+        and forge_validators.is_git_ref_safe(marker_base_branch)
         and not seen[tostring(marker_pr)] then
         seen[tostring(marker_pr)] = true
         table.insert(numbers, tonumber(marker_pr))

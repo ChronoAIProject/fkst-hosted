@@ -1,17 +1,18 @@
 local Shared = {}
+local forge_validators = require("devloop.forge_validators")
 
 function Shared.install(M)
   local helpers = {}
 
   local function require_safe_branch(name, branch)
-    if not M._is_git_ref_safe(branch) then
+    if not forge_validators.is_git_ref_safe(branch) then
       error("github-devloop: invalid " .. tostring(name))
     end
     return tostring(branch)
   end
 
   local function require_safe_sha(name, sha)
-    if not M._is_git_sha(sha) then
+    if not forge_validators.is_git_sha(sha) then
       error("github-devloop: invalid " .. tostring(name))
     end
     return tostring(sha)
