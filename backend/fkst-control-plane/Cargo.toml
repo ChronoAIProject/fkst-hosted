@@ -48,6 +48,9 @@ once_cell = "1"
 # (#138): secrets are in-memory `SecretString`s reaching the worker over the TLS
 # controller↔worker channel, so `aes-gcm`/`zeroize` are no longer needed.)
 rand = "0.8"
+# Deterministic per-session ids (UUIDv5 over installation+repo+issue) so a
+# webhook redelivery maps to the same session/Job (at-most-one-Job idempotency).
+uuid = { version = "1", features = ["v5"] }
 # `zip` unpacks Ornn skill packages into the per-session CODEX_HOME (engine).
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
