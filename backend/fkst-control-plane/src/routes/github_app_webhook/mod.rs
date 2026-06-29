@@ -26,6 +26,7 @@
 //! Secret discipline: the webhook secret is never logged; the payload is parsed
 //! only for the non-secret installation/repository fields used below.
 
+mod issue_trigger;
 mod verify;
 
 use axum::body::Bytes;
@@ -104,6 +105,8 @@ enum Handled {
     /// Acknowledged but not acted on (unknown action, or a `created`/`unsuspend`
     /// that needs no cache bust — the next on-demand resolve picks it up).
     Ignored,
+    /// A qualifying `issues.opened` drove the pod-per-session pipeline (#303).
+    Triggered,
 }
 
 // ---- Handler ---------------------------------------------------------------
@@ -154,6 +157,7 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
     let result = match event.as_str() {
         "installation" => handle_installation(&state, &body).await,
         "installation_repositories" => handle_installation_repositories(&state, &body).await,
+        "issues" => issue_trigger::handle_issues(&state, &body).await,
         other => {
             // ping / membership / etc. — acknowledged but not acted on.
             tracing::debug!(event = %other, "github webhook event ignored");
@@ -181,6 +185,7 @@ impl Handled {
         match self {
             Handled::CacheBusted => "cache_busted",
             Handled::Ignored => "ignored",
+            Handled::Triggered => "triggered",
         }
     }
 }

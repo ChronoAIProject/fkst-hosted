@@ -92,6 +92,11 @@ mod defaults {
         "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm".to_string()
     }
 
+    pub(super) fn webhook_trigger_label() -> String {
+        // Only issues carrying this label auto-trigger a session.
+        "fkst".to_string()
+    }
+
     pub(super) fn pod_namespace() -> String {
         // The namespace per-session Jobs + Secrets live in (milestone #9).
         "fkst-sessions".to_string()
@@ -167,6 +172,8 @@ struct AuthVars {
     nyxid_broker_client_secret: Option<String>,
     #[serde(default)]
     nyxid_broker_redirect_uri: Option<String>,
+    #[serde(default = "defaults::webhook_trigger_label")]
+    webhook_trigger_label: String,
 }
 
 /// `FKST_POD_*`-prefixed variables (pod-per-session dispatch, milestone #9).
@@ -259,6 +266,9 @@ pub struct Config {
     pub nyxid_broker_client_id: Option<String>,
     pub nyxid_broker_client_secret: Option<SecretString>,
     pub nyxid_broker_redirect_uri: Option<String>,
+    /// Only `issues.opened` carrying this label auto-triggers a session.
+    /// Env: `FKST_WEBHOOK_TRIGGER_LABEL`. Default `fkst`.
+    pub webhook_trigger_label: String,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
@@ -292,6 +302,7 @@ impl Default for Config {
             nyxid_broker_client_id: None,
             nyxid_broker_client_secret: None,
             nyxid_broker_redirect_uri: None,
+            webhook_trigger_label: defaults::webhook_trigger_label(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
@@ -455,6 +466,7 @@ impl Config {
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
+            webhook_trigger_label: auth.webhook_trigger_label,
             chrono_llm_base_url: http.chrono_llm_base_url,
             pod,
         })
