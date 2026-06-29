@@ -16,6 +16,7 @@
 {"path":"libraries/devloop/forge_validators.lua","owner":"shared","reason":"sanctioned pure forge-validator facade shared by typed devloop modules."}
 {"path":"libraries/devloop/forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
 {"path":"libraries/devloop/gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
+{"path":"libraries/devloop/gh_exec.lua","owner":"shared","reason":"shared GitHub argv exec primitive used by devloop scan/cache helpers across issue and PR packages."}
 {"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}

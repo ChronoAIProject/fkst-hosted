@@ -1,5 +1,6 @@
 local S = {}
 local github_view = require("forge.github_view")
+local gh_exec_mod = require("devloop.gh_exec")
 local github_handle = nil
 
 function S.install(M)
@@ -461,7 +462,7 @@ function M.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
   if type(cmd) == "function" then
     result = cmd()
   else
-    result = M.gh_exec(cmd, nil, exec)
+    result = gh_exec_mod.gh_exec(cmd, nil, exec)
   end
   if type(result) == "table" and tonumber(result.exit_code) == 0 then
     cache_set(cache_key, tostring(now() + (ttl_seconds or 60)) .. "\n" .. tostring(result.stdout or ""))

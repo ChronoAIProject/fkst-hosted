@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local gh_exec_mod = require("devloop.gh_exec")
 
 local function assert_argv_equal(actual, expected)
   t.eq(#actual, #expected)
@@ -57,7 +58,7 @@ return {
 
   test_generic_gh_exec_uses_github_argv_adapter = function()
     local calls = with_exec_argv(function()
-      core.gh_exec({ argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 })
+      gh_exec_mod.gh_exec({ argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 })
     end)
 
     assert_argv_equal(calls[1].argv, { "gh", "api", "repos/owner/repo/issues/42" })

@@ -51,7 +51,6 @@ local review_meta_label = "fkst-dev:review-meta"
 local impl_failed_label = "fkst-dev:impl-failed"
 local blocked_label = "fkst-dev:blocked"
 local blocked_on_dependency_label = "fkst-dev:blocked-on-dependency"
-local gh_program = table.concat({ "g", "h" })
 
 local label_colors = {
   [enabled_label] = "1D76DB",
@@ -753,26 +752,6 @@ function M.gh_exec_opts(cmd_or_opts, timeout)
   opts.timeout = opts.timeout or timeout or 30
   return opts
 end
-
-local function normalize_gh_argv_exec_opts(cmd_or_opts, timeout)
-  local opts = M.gh_exec_opts(cmd_or_opts, timeout)
-  if type(opts.argv) ~= "table" or opts.argv[1] ~= gh_program then
-    error("github-devloop: GitHub exec requires GitHub argv")
-  end
-  return {
-    argv = opts.argv,
-    timeout = opts.timeout,
-  }
-end
-
-function M.gh_exec(cmd_or_opts, timeout, exec)
-  local run = exec or exec_argv
-  if type(run) ~= "function" then
-    error("github-devloop: GitHub exec requires exec_argv")
-  end
-  return run(normalize_gh_argv_exec_opts(cmd_or_opts, timeout))
-end
-
 
 function M.trusted_bot_login()
   return trusted_bot_login or test_bot_login

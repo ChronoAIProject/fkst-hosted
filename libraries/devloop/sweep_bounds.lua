@@ -1,4 +1,5 @@
 local S = {}
+local gh_exec_mod = require("devloop.gh_exec")
 local sweep = require("workflow.sweep")
 
 function S.install(M)
@@ -66,7 +67,7 @@ function M.sweep_exec(cmd_or_opts, limits, deadline, error_class, exec)
   else
     opts = { cmd = cmd_or_opts, timeout = timeout }
   end
-  return M.gh_exec(opts, nil, exec)
+  return gh_exec_mod.gh_exec(opts, nil, exec)
 end
 
 function M.sweep_run_cmd(cmd, limits, deadline, error_class, exec)
