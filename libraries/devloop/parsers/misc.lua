@@ -133,18 +133,22 @@ local function comment_created_at(comment)
   return nil
 end
 
-local function is_trusted_comment(comment)
+local function is_trusted_comment(comment, trust_set)
   -- Parser-only trust filtering keeps the test default; pre-assert ownership gates use claim_owner.
-  return comment_author_login(comment) == M.trusted_bot_login()
+  local author = comment_author_login(comment)
+  if type(trust_set) == "table" then
+    return trust_set[author] == true
+  end
+  return author == M.trusted_bot_login()
 end
 
-local function trusted_marker_comments(comments)
+local function trusted_marker_comments(comments, trust_set)
   local filtered = {}
   if type(comments) ~= "table" then
     return filtered
   end
   for _, comment in ipairs(comments) do
-    if is_trusted_comment(comment) then
+    if is_trusted_comment(comment, trust_set) then
       table.insert(filtered, comment)
     end
   end
