@@ -1,24 +1,24 @@
 //! Shared application state passed to every handler.
 
-use std::sync::Arc;
-
 use crate::auth::AuthMode;
 use crate::authz::Authorizer;
 use crate::config::Config;
-use crate::controller::{ClaimMap, WorkerRegistry};
 use crate::github_app::GithubAppTokens;
 use crate::goals::GoalIssueStore;
 use crate::sessions::SessionService;
 use crate::vault::VaultService;
 
 /// Clonable state shared across the router. Every member is cheap to clone
-/// (the session service is an `Arc` handle). The controller is datastore-free
-/// (#143): there is no database handle here.
+/// (the session service is an `Arc` handle). The control plane is API-only and
+/// datastore-free: there is no database handle, no claim authority, and no
+/// worker registry here — a goal trigger only records a `Pending` session that
+/// pod-per-session execution will later run (milestone #9).
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    /// Single-pod session orchestration (sessions module); HTTP handlers go
-    /// through this, never the engine runner directly.
+    /// Session bookkeeping (sessions module): HTTP handlers create/read/stop
+    /// session documents through this. It records sessions only; it never runs
+    /// an engine in-process.
     pub sessions: SessionService,
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Determines whether the JWT middleware is active.
@@ -48,15 +48,4 @@ pub struct AppState {
     /// endpoints then answer `503`. The catalog forwards the caller's NyxID
     /// token to Ornn, which enforces all visibility; fkst-hosted adds no policy.
     pub ornn: Option<crate::ornn::OrnnClient>,
-    /// The controller's in-memory claim authority (#135/#198-ii), shared with the
-    /// observability surface (`GET /api/v1/admin/state` + `GET /metrics`, #144).
-    /// `None` in a minimal/test build that never enabled the controller — the
-    /// admin/metrics routes then report an empty claim set. The same `Arc` the
-    /// session service and the internal router hold, so the live view is exact.
-    pub claims: Option<Arc<ClaimMap>>,
-    /// The controller's in-memory worker registry (#134), shared with the
-    /// observability surface (#144). `None` in a minimal/test build with no
-    /// controller wired. Snapshotted (liveness only, never the dispatch queue)
-    /// by the admin/metrics routes.
-    pub worker_registry: Option<WorkerRegistry>,
 }

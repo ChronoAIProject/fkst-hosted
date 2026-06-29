@@ -14,10 +14,6 @@ fkst-shared = { path = "../fkst-shared", features = ["schema"] }
 # worker can drive it too (issue #151). `crate::engine` is now a re-export of
 # this crate; links neither `mongodb` nor `axum`.
 fkst-engine = { path = "../fkst-engine" }
-# Session-progress journaling, extracted so BOTH the control-plane and the worker
-# can journal RAISED events direct to GitHub (issue #151). `crate::journal` is now
-# a re-export of this crate; links neither `mongodb` nor `axum`.
-fkst-journal = { path = "../fkst-journal" }
 async-trait = "0.1"
 axum = "0.7"
 # Runtime OpenAPI 3 generation for the public HTTP surface, served at
@@ -64,11 +60,6 @@ once_cell = "1"
 rand = "0.8"
 
 [dev-dependencies]
-# The worker crate is a dev-dependency ONLY (the internal-protocol integration
-# test drives a real WorkerAgent against the controller's internal_router). The
-# non-test dependency graph never points control-plane -> worker, and worker
-# never points at control-plane, so the compiler-enforced boundary holds.
-fkst-worker = { path = "../fkst-worker" }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 # `zip` is only used now to BUILD test skill packages in the ornn module's

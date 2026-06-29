@@ -1,16 +1,14 @@
 //! Typed runtime configuration loaded from environment variables.
 //!
-//! Several envy passes over the same snapshot of variables:
-//! 1. the `FKST_HOSTED_*`-prefixed HTTP/server settings,
-//! 2. the `FKST_*`-prefixed journaling + auth settings, and
-//! 3. the unprefixed platform settings (the `GITHUB_TOKEN` secret and the
-//!    internal worker-protocol knobs). The owner-only NyxID client (#257)
-//!    needs no service-account credential. The controller is datastore-free
-//!    (#143), so there is no MongoDB configuration to load.
+//! Two envy passes over the same snapshot of variables:
+//! 1. the `FKST_HOSTED_*`-prefixed HTTP/server settings, and
+//! 2. the `FKST_*`-prefixed auth settings.
+//!
+//! The control plane is API-only and datastore-free: there is no in-process
+//! session execution, no worker fleet, no journaling, and no MongoDB, so none of
+//! the dispatch/worker/journal knobs survive. The owner-only NyxID client (#257)
+//! needs no service-account credential.
 
-use std::fmt;
-
-use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::auth::{AuthMode, NyxIdAuthSettings};
@@ -19,8 +17,9 @@ use crate::error::AppError;
 /// Prefix shared by every HTTP/server configuration environment variable.
 const ENV_PREFIX: &str = "FKST_HOSTED_";
 
-/// Prefix of the journaling variables (`FKST_JOURNAL_*` / `FKST_RAISED_*`).
-const JOURNAL_ENV_PREFIX: &str = "FKST_";
+/// Prefix of the auth variables (`FKST_AUTH_*` / `FKST_NYXID_*` /
+/// `FKST_SESSION_*`); the auth envy pass reads them with the `FKST_` prefix.
+const AUTH_ENV_PREFIX: &str = "FKST_";
 
 /// Default values, shared by serde defaults and `Config::default`.
 mod defaults {
@@ -38,46 +37,6 @@ mod defaults {
 
     pub(super) fn request_timeout_secs() -> u64 {
         30
-    }
-
-    pub(super) fn journal_flush_interval_ms() -> u64 {
-        2000
-    }
-
-    pub(super) fn journal_flush_max_batch() -> usize {
-        50
-    }
-
-    pub(super) fn journal_github_enabled() -> bool {
-        true
-    }
-
-    pub(super) fn journal_issue_comments() -> bool {
-        false
-    }
-
-    pub(super) fn journal_activity_comment_enabled() -> bool {
-        true
-    }
-
-    pub(super) fn journal_cas_max_retries() -> u32 {
-        5
-    }
-
-    pub(super) fn journal_bootstrap_read_retries() -> u32 {
-        3
-    }
-
-    pub(super) fn journal_github_branch() -> String {
-        "main".to_string()
-    }
-
-    pub(super) fn raised_identity_pointers() -> String {
-        "/department,/source,/name,/corr".to_string()
-    }
-
-    pub(super) fn raised_max_line_bytes() -> usize {
-        1_048_576
     }
 
     pub(super) fn auth_enabled() -> bool {
@@ -98,28 +57,6 @@ mod defaults {
     /// Must be > 0.
     pub(super) fn session_key_ttl_secs() -> u64 {
         86_400
-    }
-
-    /// Liveness TTL for the in-memory worker registry (#134): a worker whose
-    /// last heartbeat is older than this is dropped from `live_workers` and
-    /// expired by the sweeper. Must be > 0.
-    pub(super) fn worker_liveness_ttl_secs() -> u64 {
-        30
-    }
-
-    /// Dispatch mode is OFF by default (#151 i7b): the in-process distributor
-    /// path stays the live behaviour until an operator opts in. When false the
-    /// controller is never enabled, so goal sessions run the byte-identical
-    /// pre-#151 in-process spawn.
-    pub(super) fn dispatch_mode_enabled() -> bool {
-        false
-    }
-
-    /// Per-worker active-session placement cap (#198-ii). `0` means uncapped (a
-    /// worker is never rejected on load) — the documented default carried over
-    /// from the deleted distribution layer.
-    pub(super) fn placement_max_load() -> u64 {
-        0
     }
 
     pub(super) fn nyxid_github_proxy_slug() -> String {
@@ -183,65 +120,6 @@ struct HttpVars {
     chrono_llm_base_url: String,
 }
 
-/// Unprefixed platform variables. The controller is datastore-free (#143), so
-/// no MongoDB settings ride this pass. `GITHUB_TOKEN` is here (secret; optional
-/// — without it GitHub journaling degrades to no-durable-floor with a warn).
-/// The owner-only NyxID client (#257) needs no service-account credential, so
-/// none rides this pass.
-#[derive(Deserialize)]
-struct PlatformVars {
-    #[serde(default)]
-    github_token: Option<String>,
-    /// Shared secret authenticating internal controller<->worker requests
-    /// (#134). Env `FKST_INTERNAL_AUTH_TOKEN`. Optional on the controller: when
-    /// absent, the internal routes are not mounted (closed by default).
-    #[serde(default)]
-    fkst_internal_auth_token: Option<String>,
-    /// Liveness TTL (seconds) for the in-memory worker registry (#134). Env
-    /// `FKST_WORKER_LIVENESS_TTL_SECS`. Default 30; must be > 0.
-    #[serde(default = "defaults::worker_liveness_ttl_secs")]
-    fkst_worker_liveness_ttl_secs: u64,
-    /// Dispatch-mode master switch (#151 i7b). Env `FKST_DISPATCH_MODE`. When
-    /// `true` AND the internal protocol is enabled, goal sessions are placed +
-    /// dispatched to a worker (delivered on the worker's next heartbeat) instead
-    /// of spawning the engine in-process. Default false (the in-process path).
-    #[serde(default = "defaults::dispatch_mode_enabled")]
-    fkst_dispatch_mode: bool,
-    /// Per-worker active-session placement cap (#198-ii). Env
-    /// `FKST_PLACEMENT_MAX_LOAD`. Default 0 (uncapped); only used under dispatch
-    /// mode.
-    #[serde(default = "defaults::placement_max_load")]
-    fkst_placement_max_load: u64,
-}
-
-/// `FKST_JOURNAL_*` / `FKST_RAISED_*` variables (journaling settings; envy
-/// pass with the `FKST_` prefix).
-#[derive(Debug, Deserialize)]
-struct JournalVars {
-    #[serde(default = "defaults::journal_flush_interval_ms")]
-    journal_flush_interval_ms: u64,
-    #[serde(default = "defaults::journal_flush_max_batch")]
-    journal_flush_max_batch: usize,
-    #[serde(default = "defaults::journal_github_enabled")]
-    journal_github_enabled: bool,
-    #[serde(default = "defaults::journal_issue_comments")]
-    journal_issue_comments: bool,
-    #[serde(default = "defaults::journal_activity_comment_enabled")]
-    journal_activity_comment_enabled: bool,
-    #[serde(default = "defaults::journal_cas_max_retries")]
-    journal_cas_max_retries: u32,
-    #[serde(default = "defaults::journal_bootstrap_read_retries")]
-    journal_bootstrap_read_retries: u32,
-    #[serde(default = "defaults::journal_github_branch")]
-    journal_github_branch: String,
-    #[serde(default)]
-    journal_github_repo: Option<String>,
-    #[serde(default = "defaults::raised_identity_pointers")]
-    raised_identity_pointers: String,
-    #[serde(default = "defaults::raised_max_line_bytes")]
-    raised_max_line_bytes: usize,
-}
-
 /// `FKST_AUTH_*`-prefixed variables (authentication settings; envy pass with
 /// the `FKST_` prefix).
 #[derive(Debug, Deserialize)]
@@ -259,7 +137,7 @@ struct AuthVars {
 }
 
 /// Runtime configuration assembled from both envy passes.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     /// TCP port the HTTP server binds. Env: `FKST_HOSTED_PORT`. Default 8080.
     pub port: u16,
@@ -271,45 +149,6 @@ pub struct Config {
     /// Per-request timeout in seconds for the tower-http `TimeoutLayer`.
     /// Env: `FKST_HOSTED_REQUEST_TIMEOUT_SECS`. Default 30.
     pub request_timeout_secs: u64,
-    /// Max debounce (ms) before flushing buffered completions to GitHub.
-    /// Env: `FKST_JOURNAL_FLUSH_INTERVAL_MS`. Default 2000.
-    pub journal_flush_interval_ms: u64,
-    /// Flush early when this many new completions are buffered.
-    /// Env: `FKST_JOURNAL_FLUSH_MAX_BATCH`. Default 50.
-    pub journal_flush_max_batch: usize,
-    /// Master switch for GitHub journaling (the SOLE machine-truth, #139).
-    /// Env: `FKST_JOURNAL_GITHUB_ENABLED`. Default true.
-    pub journal_github_enabled: bool,
-    /// Enable the optional issue-comment mirroring (dormant by default).
-    /// Env: `FKST_JOURNAL_ISSUE_COMMENTS`. Default false.
-    pub journal_issue_comments: bool,
-    /// Enable the rolling activity comment on the flush cadence (#139).
-    /// Env: `FKST_JOURNAL_ACTIVITY_COMMENT_ENABLED`. Default true.
-    pub journal_activity_comment_enabled: bool,
-    /// Max optimistic-concurrency retries on the GitHub Contents write per
-    /// flush. Env: `FKST_JOURNAL_CAS_MAX_RETRIES`. Default 5.
-    pub journal_cas_max_retries: u32,
-    /// Bootstrap eventual-consistency retries: how many times the redo
-    /// skip-set load re-reads the committed file after a 404 before concluding
-    /// "fresh run". Env: `FKST_JOURNAL_BOOTSTRAP_READ_RETRIES`. Default 3.
-    pub journal_bootstrap_read_retries: u32,
-    /// Branch the journal file lives on.
-    /// Env: `FKST_JOURNAL_GITHUB_BRANCH`. Default "main".
-    pub journal_github_branch: String,
-    /// `owner/name` of the journal repo; absent => GitHub journaling is
-    /// disabled (no durable floor, warn). Env: `FKST_JOURNAL_GITHUB_REPO`.
-    pub journal_github_repo: Option<String>,
-    /// Comma-separated JSON pointers forming raised-event identity.
-    /// Env: `FKST_RAISED_IDENTITY_POINTERS`.
-    /// Default "/department,/source,/name,/corr".
-    pub raised_identity_pointers: String,
-    /// Max stdout line length parsed; longer lines are truncated + counted
-    /// as malformed. Env: `FKST_RAISED_MAX_LINE_BYTES`. Default 1048576.
-    pub raised_max_line_bytes: usize,
-    /// GitHub API token (SECRET — env/secret manager only; never logged,
-    /// redacted from Debug). Env: `GITHUB_TOKEN`. Optional: absent =>
-    /// GitHub journaling is disabled (no durable floor, warn).
-    pub github_token: Option<SecretString>,
     /// Authentication mode: disabled (local dev) or enabled with NyxID
     /// settings. Env: `FKST_AUTH_ENABLED` (default true = fail-closed).
     pub auth: AuthMode,
@@ -341,84 +180,6 @@ pub struct Config {
     /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
     /// slug; blank rejected at load. Non-secret routing config.
     pub chrono_llm_base_url: String,
-    /// Shared secret authenticating internal controller<->worker requests
-    /// (#134). Env: `FKST_INTERNAL_AUTH_TOKEN`. Optional: when absent, the
-    /// internal worker-protocol routes are NOT mounted (closed by default) and
-    /// a WARN is logged. Never logged (redacted from `Debug`).
-    pub internal_auth_token: Option<SecretString>,
-    /// Liveness TTL (seconds) for the in-memory worker registry (#134). Env:
-    /// `FKST_WORKER_LIVENESS_TTL_SECS`. Default 30; zero rejected.
-    pub worker_liveness_ttl_secs: u64,
-    /// Dispatch-mode master switch (#151 i7b). Env: `FKST_DISPATCH_MODE`.
-    /// Default false. When `true` AND the internal protocol is enabled, goal
-    /// sessions are placed + dispatched to a worker (delivered on the worker's
-    /// next heartbeat) instead of spawning the engine in-process. When false
-    /// (the default) the controller claims + runs the engine in-process; the
-    /// in-memory `ClaimMap` is the claim authority either way (#198-ii).
-    /// Non-secret routing flag.
-    pub dispatch_mode_enabled: bool,
-    /// Per-worker active-session cap used by worker-dispatch placement (#198-ii,
-    /// formerly the distribution layer's `FKST_PLACEMENT_MAX_LOAD`). `0` means
-    /// uncapped (the default). Only consulted under dispatch mode; the in-process
-    /// path never rejects on load. Non-secret routing knob.
-    pub placement_max_load: u64,
-}
-
-// Hand-written so the secret-bearing fields (the tokens) are always rendered as
-// `<redacted>` — `{:?}` can never leak a credential.
-impl fmt::Debug for Config {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Config")
-            .field("port", &self.port)
-            .field("bind_addr", &self.bind_addr)
-            .field("log_level", &self.log_level)
-            .field("request_timeout_secs", &self.request_timeout_secs)
-            .field("journal_flush_interval_ms", &self.journal_flush_interval_ms)
-            .field("journal_flush_max_batch", &self.journal_flush_max_batch)
-            .field("journal_github_enabled", &self.journal_github_enabled)
-            .field("journal_issue_comments", &self.journal_issue_comments)
-            .field(
-                "journal_activity_comment_enabled",
-                &self.journal_activity_comment_enabled,
-            )
-            .field("journal_cas_max_retries", &self.journal_cas_max_retries)
-            .field(
-                "journal_bootstrap_read_retries",
-                &self.journal_bootstrap_read_retries,
-            )
-            .field("journal_github_branch", &self.journal_github_branch)
-            .field("journal_github_repo", &self.journal_github_repo)
-            .field("raised_identity_pointers", &self.raised_identity_pointers)
-            .field("raised_max_line_bytes", &self.raised_max_line_bytes)
-            // The token value never reaches any Debug/log output.
-            .field(
-                "github_token",
-                &self.github_token.as_ref().map(|_| "<redacted>"),
-            )
-            .field("auth", &self.auth)
-            .field("nyxid_org_cache_ttl_secs", &self.nyxid_org_cache_ttl_secs)
-            .field("session_key_ttl_secs", &self.session_key_ttl_secs)
-            .field("nyxid_github_proxy_slug", &self.nyxid_github_proxy_slug)
-            // The vault master key never reaches any Debug/log output.
-            .field("vault_value_byte_cap", &self.vault_value_byte_cap)
-            .field(
-                "vault_entries_per_scope_cap",
-                &self.vault_entries_per_scope_cap,
-            )
-            // Model name + proxy route are non-secret config — show them.
-            .field("codex_model", &self.codex_model)
-            .field("chrono_llm_base_url", &self.chrono_llm_base_url)
-            // The internal-auth secret never reaches any Debug/log output.
-            .field(
-                "internal_auth_token",
-                &self.internal_auth_token.as_ref().map(|_| "<redacted>"),
-            )
-            .field("worker_liveness_ttl_secs", &self.worker_liveness_ttl_secs)
-            // Non-secret feature flag — show it.
-            .field("dispatch_mode_enabled", &self.dispatch_mode_enabled)
-            .field("placement_max_load", &self.placement_max_load)
-            .finish()
-    }
 }
 
 impl Default for Config {
@@ -428,18 +189,6 @@ impl Default for Config {
             bind_addr: defaults::bind_addr(),
             log_level: defaults::log_level(),
             request_timeout_secs: defaults::request_timeout_secs(),
-            journal_flush_interval_ms: defaults::journal_flush_interval_ms(),
-            journal_flush_max_batch: defaults::journal_flush_max_batch(),
-            journal_github_enabled: defaults::journal_github_enabled(),
-            journal_issue_comments: defaults::journal_issue_comments(),
-            journal_activity_comment_enabled: defaults::journal_activity_comment_enabled(),
-            journal_cas_max_retries: defaults::journal_cas_max_retries(),
-            journal_bootstrap_read_retries: defaults::journal_bootstrap_read_retries(),
-            journal_github_branch: defaults::journal_github_branch(),
-            journal_github_repo: None,
-            raised_identity_pointers: defaults::raised_identity_pointers(),
-            raised_max_line_bytes: defaults::raised_max_line_bytes(),
-            github_token: None,
             auth: AuthMode::Disabled,
             nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
             session_key_ttl_secs: defaults::session_key_ttl_secs(),
@@ -448,10 +197,6 @@ impl Default for Config {
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
             chrono_llm_base_url: defaults::chrono_llm_base_url(),
-            internal_auth_token: None,
-            worker_liveness_ttl_secs: defaults::worker_liveness_ttl_secs(),
-            dispatch_mode_enabled: defaults::dispatch_mode_enabled(),
-            placement_max_load: defaults::placement_max_load(),
         }
     }
 }
@@ -461,7 +206,7 @@ impl Config {
     ///
     /// Testable seam: unit tests feed explicit pairs instead of mutating the
     /// process environment. The pairs are collected once and fed to every
-    /// envy pass (prefixed HTTP/journal/auth vars, unprefixed platform vars).
+    /// envy pass (prefixed HTTP vars, prefixed auth vars).
     pub fn from_vars(vars: impl IntoIterator<Item = (String, String)>) -> Result<Config, AppError> {
         let vars: Vec<(String, String)> = vars.into_iter().collect();
 
@@ -476,45 +221,8 @@ impl Config {
             ));
         }
 
-        let journal: JournalVars = envy::prefixed(JOURNAL_ENV_PREFIX)
-            .from_iter(vars.iter().cloned())
-            .map_err(|e| AppError::Config(e.to_string()))?;
-        // A zero interval would force a GitHub round-trip per record and a
-        // zero retry budget would fail every flush instantly — reject both
-        // loudly, mirroring the timeout guards above.
-        if journal.journal_flush_interval_ms == 0 {
-            return Err(AppError::Config(
-                "FKST_JOURNAL_FLUSH_INTERVAL_MS must be at least 1".to_string(),
-            ));
-        }
-        if journal.journal_flush_max_batch == 0 {
-            return Err(AppError::Config(
-                "FKST_JOURNAL_FLUSH_MAX_BATCH must be at least 1".to_string(),
-            ));
-        }
-        if journal.journal_cas_max_retries == 0 {
-            return Err(AppError::Config(
-                "FKST_JOURNAL_CAS_MAX_RETRIES must be at least 1".to_string(),
-            ));
-        }
-        if journal.raised_max_line_bytes == 0 {
-            return Err(AppError::Config(
-                "FKST_RAISED_MAX_LINE_BYTES must be at least 1".to_string(),
-            ));
-        }
-
-        let platform: PlatformVars =
-            envy::from_iter(vars.clone()).map_err(|e| AppError::Config(e.to_string()))?;
-        // A zero worker-liveness TTL would expire every worker instantly,
-        // emptying the registry — reject it loudly, mirroring the guards above.
-        if platform.fkst_worker_liveness_ttl_secs == 0 {
-            return Err(AppError::Config(
-                "FKST_WORKER_LIVENESS_TTL_SECS must be at least 1".to_string(),
-            ));
-        }
-
         // Authentication settings pass (FKST_AUTH_* with the FKST_ prefix).
-        let auth: AuthVars = envy::prefixed(JOURNAL_ENV_PREFIX)
+        let auth: AuthVars = envy::prefixed(AUTH_ENV_PREFIX)
             .from_iter(vars.iter().cloned())
             .map_err(|e| AppError::Config(e.to_string()))?;
         if auth.nyxid_org_cache_ttl_secs == 0 {
@@ -556,12 +264,8 @@ impl Config {
             AuthMode::Disabled
         };
 
-        // Vault key/cap validation (fail-closed): the vault is always-on, so a
-        // missing or invalid master-key source is a startup error. The inline
-        // key and the path are mutually exclusive. The base64 bytes are NOT
-        // validated for length here (that is the crypto provider's job at
-        // boot); the config only resolves the source into a SecretString and
-        // names the missing/conflicting env vars.
+        // Vault cap validation (fail-closed): the vault is always-on, so a zero
+        // cap is a startup error.
         if http.vault_value_byte_cap == 0 {
             return Err(AppError::Config(
                 "FKST_HOSTED_VAULT_VALUE_BYTE_CAP must be at least 1".to_string(),
@@ -591,18 +295,6 @@ impl Config {
             bind_addr: http.bind_addr,
             log_level: http.log_level,
             request_timeout_secs: http.request_timeout_secs,
-            journal_flush_interval_ms: journal.journal_flush_interval_ms,
-            journal_flush_max_batch: journal.journal_flush_max_batch,
-            journal_github_enabled: journal.journal_github_enabled,
-            journal_issue_comments: journal.journal_issue_comments,
-            journal_activity_comment_enabled: journal.journal_activity_comment_enabled,
-            journal_cas_max_retries: journal.journal_cas_max_retries,
-            journal_bootstrap_read_retries: journal.journal_bootstrap_read_retries,
-            journal_github_branch: journal.journal_github_branch,
-            journal_github_repo: journal.journal_github_repo,
-            raised_identity_pointers: journal.raised_identity_pointers,
-            raised_max_line_bytes: journal.raised_max_line_bytes,
-            github_token: platform.github_token.map(SecretString::from),
             auth: auth_mode,
             nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
             session_key_ttl_secs: auth.session_key_ttl_secs,
@@ -611,10 +303,6 @@ impl Config {
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
             chrono_llm_base_url: http.chrono_llm_base_url,
-            internal_auth_token: platform.fkst_internal_auth_token.map(SecretString::from),
-            worker_liveness_ttl_secs: platform.fkst_worker_liveness_ttl_secs,
-            dispatch_mode_enabled: platform.fkst_dispatch_mode,
-            placement_max_load: platform.fkst_placement_max_load,
         })
     }
 
@@ -637,8 +325,8 @@ mod tests {
 
     #[test]
     fn defaults_apply_when_nothing_is_set() {
-        // The controller is datastore-free (#143): no MONGODB_* var is required
-        // at startup; an otherwise-empty environment loads cleanly.
+        // The control plane is datastore-free: no MONGODB_* var is required at
+        // startup; an otherwise-empty environment loads cleanly.
         let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
             .expect("defaults should deserialize");
         assert_eq!(config.port, 8080);
@@ -650,10 +338,9 @@ mod tests {
 
     #[test]
     fn no_mongodb_var_is_required_at_startup() {
-        // Regression guard for #143: with no MONGODB_URI set, the store-free
-        // controller must still load — there is no mandatory datastore config.
-        // (Auth is the only other fail-closed gate, disabled here to isolate
-        // the datastore assertion.)
+        // Regression guard: with no MONGODB_URI set, the store-free control plane
+        // must still load — there is no mandatory datastore config. (Auth is the
+        // only other fail-closed gate, disabled here to isolate the assertion.)
         Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
             .expect("loads without any MONGODB_* var");
     }
@@ -728,150 +415,6 @@ mod tests {
         let err = Config::from_vars(vars(&[("FKST_HOSTED_PORT", "abc")]))
             .expect_err("non-numeric port must fail");
         assert!(matches!(err, AppError::Config(_)));
-    }
-
-    #[test]
-    fn journal_defaults_apply_when_unset() {
-        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
-        assert_eq!(config.journal_flush_interval_ms, 2000);
-        assert_eq!(config.journal_flush_max_batch, 50);
-        assert!(config.journal_github_enabled);
-        assert!(!config.journal_issue_comments);
-        assert!(config.journal_activity_comment_enabled);
-        assert_eq!(config.journal_cas_max_retries, 5);
-        assert_eq!(config.journal_bootstrap_read_retries, 3);
-        assert_eq!(config.journal_github_branch, "main");
-        assert_eq!(config.journal_github_repo, None);
-        assert_eq!(
-            config.raised_identity_pointers,
-            "/department,/source,/name,/corr"
-        );
-        assert_eq!(config.raised_max_line_bytes, 1_048_576);
-        assert!(config.github_token.is_none());
-    }
-
-    #[test]
-    fn journal_vars_are_overridable() {
-        let config = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_JOURNAL_FLUSH_INTERVAL_MS", "500"),
-            ("FKST_JOURNAL_FLUSH_MAX_BATCH", "10"),
-            ("FKST_JOURNAL_GITHUB_ENABLED", "false"),
-            ("FKST_JOURNAL_ISSUE_COMMENTS", "true"),
-            ("FKST_JOURNAL_ACTIVITY_COMMENT_ENABLED", "false"),
-            ("FKST_JOURNAL_CAS_MAX_RETRIES", "9"),
-            ("FKST_JOURNAL_BOOTSTRAP_READ_RETRIES", "7"),
-            ("FKST_JOURNAL_GITHUB_BRANCH", "journal"),
-            ("FKST_JOURNAL_GITHUB_REPO", "acme/pkg-repo"),
-            ("FKST_RAISED_IDENTITY_POINTERS", "/dept,/evt"),
-            ("FKST_RAISED_MAX_LINE_BYTES", "2048"),
-        ]))
-        .expect("overrides");
-        assert_eq!(config.journal_flush_interval_ms, 500);
-        assert_eq!(config.journal_flush_max_batch, 10);
-        assert!(!config.journal_github_enabled);
-        assert!(config.journal_issue_comments);
-        assert!(!config.journal_activity_comment_enabled);
-        assert_eq!(config.journal_cas_max_retries, 9);
-        assert_eq!(config.journal_bootstrap_read_retries, 7);
-        assert_eq!(config.journal_github_branch, "journal");
-        assert_eq!(config.journal_github_repo.as_deref(), Some("acme/pkg-repo"));
-        assert_eq!(config.raised_identity_pointers, "/dept,/evt");
-        assert_eq!(config.raised_max_line_bytes, 2048);
-    }
-
-    #[test]
-    fn zero_journal_knobs_are_config_errors_naming_the_var() {
-        for (var, value) in [
-            ("FKST_JOURNAL_FLUSH_INTERVAL_MS", "0"),
-            ("FKST_JOURNAL_FLUSH_MAX_BATCH", "0"),
-            ("FKST_JOURNAL_CAS_MAX_RETRIES", "0"),
-            ("FKST_RAISED_MAX_LINE_BYTES", "0"),
-        ] {
-            let err = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false"), (var, value)]))
-                .expect_err("zero must fail");
-            assert!(matches!(err, AppError::Config(_)));
-            assert!(err.to_string().contains(var), "error must name {var}");
-        }
-    }
-
-    #[test]
-    fn non_boolean_journal_switch_is_a_config_error() {
-        let err = Config::from_vars(vars(&[("FKST_JOURNAL_GITHUB_ENABLED", "yep")]))
-            .expect_err("non-boolean must fail");
-        assert!(matches!(err, AppError::Config(_)));
-    }
-
-    #[test]
-    fn github_token_is_read_and_never_appears_in_debug() {
-        let config = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("GITHUB_TOKEN", "ghp_sneaky_value"),
-        ]))
-        .expect("token config");
-        assert!(config.github_token.is_some());
-        let rendered = format!("{config:?}");
-        assert!(!rendered.contains("ghp_sneaky_value"), "token leaked");
-        assert!(rendered.contains("<redacted>"));
-    }
-
-    #[test]
-    fn internal_auth_token_is_read_and_never_appears_in_debug() {
-        let config = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_INTERNAL_AUTH_TOKEN", "supersecret-internal-123"),
-        ]))
-        .expect("internal-auth config");
-        assert!(config.internal_auth_token.is_some());
-        let rendered = format!("{config:?}");
-        assert!(
-            !rendered.contains("supersecret-internal-123"),
-            "internal-auth token leaked into Debug"
-        );
-        assert!(rendered.contains("internal_auth_token"));
-    }
-
-    #[test]
-    fn worker_liveness_ttl_defaults_to_30_and_rejects_zero() {
-        let config =
-            Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("default ttl config");
-        assert_eq!(config.worker_liveness_ttl_secs, 30);
-
-        let err = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_WORKER_LIVENESS_TTL_SECS", "0"),
-        ]))
-        .expect_err("zero ttl must fail");
-        assert!(matches!(err, AppError::Config(_)));
-        assert!(
-            err.to_string().contains("FKST_WORKER_LIVENESS_TTL_SECS"),
-            "error must name the var"
-        );
-    }
-
-    #[test]
-    fn dispatch_mode_defaults_to_off() {
-        // Unset => OFF: the controller stays disabled and the in-process path
-        // is the live behaviour (the byte-identical pre-#151 guarantee, i7b).
-        let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")]))
-            .expect("default dispatch-mode config");
-        assert!(
-            !config.dispatch_mode_enabled,
-            "FKST_DISPATCH_MODE must default to false"
-        );
-    }
-
-    #[test]
-    fn dispatch_mode_is_overridable_via_env() {
-        let config = Config::from_vars(vars(&[
-            ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_DISPATCH_MODE", "true"),
-        ]))
-        .expect("dispatch-mode override config");
-        assert!(
-            config.dispatch_mode_enabled,
-            "FKST_DISPATCH_MODE=true must enable dispatch mode"
-        );
     }
 
     // ---- auth configuration tests ----------------------------------------------

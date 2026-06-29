@@ -11,7 +11,7 @@
 #   fkst-control-plane — the controller deployable (today's app, renamed from
 #                        fkst-hosted-api); owns the public REST API + DB.
 #   fkst-worker        — the worker deployable (a skeleton until #136/#140)
-members = ["fkst-control-plane", "fkst-engine", "fkst-journal", "fkst-shared", "fkst-worker"]
+members = ["fkst-control-plane", "fkst-engine", "fkst-shared"]
 resolver = "2"
 
 [workspace.package]
