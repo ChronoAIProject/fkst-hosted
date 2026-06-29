@@ -25,6 +25,17 @@ def load_module():
 monotone = load_module()
 
 
+def issue_1310(line: int) -> str:
+    return (
+        f"line={line}|issue=#1310|"
+        "why=classified current routing/decision read; migrate only when it is a monotone milestone gate"
+    )
+
+
+def allowline(path: str, surface: str, kind: str, token: str, line: int) -> str:
+    return f"{path}|{surface}|{kind}|{token}|{issue_1310(line)}\n"
+
+
 class MonotoneGateRatchetTest(unittest.TestCase):
     def test_undeclared_cursor_gate_is_flagged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -232,6 +243,188 @@ class MonotoneGateRatchetTest(unittest.TestCase):
         base = {original_debt}
 
         self.assertEqual(monotone.ratchet_messages(current, allowlist, base), [])
+
+    def test_v2_blank_lines_above_findings_do_not_create_growth(self) -> None:
+        current = {
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "cursor-read",
+                "current_state(",
+                22,
+            ),
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "state-equality",
+                "pr-open",
+                23,
+            ),
+        }
+        allowlist = {
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "cursor-read",
+                "current_state(",
+                2,
+            ),
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "state-equality",
+                "pr-open",
+                3,
+            ),
+        }
+
+        self.assertEqual(monotone.ratchet_messages(current, allowlist, allowlist), [])
+
+    def test_v2_duplicate_raw_read_under_existing_key_is_growth(self) -> None:
+        key = (
+            "packages/github-devloop/core/synthetic_gate.lua",
+            "planted_gate",
+            "cursor-read",
+            "current_state(",
+        )
+        current = [
+            monotone.Violation(*key, 12),
+            monotone.Violation(*key, 12),
+        ]
+        allowlist = [monotone.Violation(*key, 12)]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("grows monotone-gate debt relative to dev", joined)
+        self.assertIn("current_lines=[12, 12]", joined)
+
+    def test_v2_removed_raw_read_passes_and_reports_shrink_opportunity(self) -> None:
+        key = (
+            "packages/github-devloop/core/synthetic_gate.lua",
+            "planted_gate",
+            "cursor-read",
+            "current_state(",
+        )
+        current = [monotone.Violation(*key, 12)]
+        allowlist = [
+            monotone.Violation(*key, 12),
+            monotone.Violation(*key, 13),
+        ]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("monotone-gate debt count shrank", joined)
+        self.assertIn("current_lines=[12]", joined)
+        self.assertNotIn("grows monotone-gate", joined)
+
+    def test_v2_resolved_devloop_alias_matches_old_m_surface_without_growth(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "packages" / "github-devloop" / "core" / "synthetic_gate.lua"
+            target.parent.mkdir(parents=True)
+            target.write_text(
+                textwrap.dedent(
+                    """\
+                    local typed = require("devloop.state")
+
+                    local function planted_gate(comments, proposal_id)
+                      local current = typed.current_state(comments, proposal_id)
+                      return current ~= nil and current.state == "pr-open"
+                    end
+                    """
+                ),
+                encoding="utf-8",
+            )
+            (root / "migration").mkdir()
+            (root / monotone.MANIFEST).write_text("", encoding="utf-8")
+            (root / monotone.ALLOWLIST).write_text(
+                allowline("packages/github-devloop/core/synthetic_gate.lua", "planted_gate", "cursor-read", "M.current_state(", 4)
+                + allowline("packages/github-devloop/core/synthetic_gate.lua", "planted_gate", "state-equality", "pr-open", 5),
+                encoding="utf-8",
+            )
+
+            messages = monotone.repository_messages(root, enforce_base=False)
+
+        self.assertEqual(messages, [])
+
+    def test_v2_state_token_change_is_different_key_and_flagged(self) -> None:
+        current = {
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "state-equality",
+                "merged",
+                12,
+            )
+        }
+        allowlist = {
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "state-equality",
+                "pr-open",
+                12,
+            )
+        }
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("state-equality merged", joined)
+        self.assertIn("unclassified transient lifecycle cursor read", joined)
+
+    def test_v2_moving_read_to_different_file_is_still_growth(self) -> None:
+        current = {
+            monotone.Violation(
+                "packages/github-devloop/core/moved_gate.lua",
+                "planted_gate",
+                "cursor-read",
+                "current_state(",
+                12,
+            )
+        }
+        allowlist = {
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "planted_gate",
+                "cursor-read",
+                "current_state(",
+                12,
+            )
+        }
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("packages/github-devloop/core/moved_gate.lua:12", joined)
+        self.assertIn("unclassified transient lifecycle cursor read", joined)
+
+    def test_v2_same_bucket_relocation_within_function_passes(self) -> None:
+        # Accepted blind spot (by design, confirmed via cross-model review): a
+        # count-preserving relocation of an existing raw read WITHIN the same
+        # (path, enclosing function, kind, canonical token) bucket is not growth.
+        # The gate prevents increases in semantic raw-read debt; it does not
+        # police intra-function control-flow relocation. Pinned so a future
+        # reviewer does not rediscover this and treat it as a bug.
+        key = (
+            "packages/github-devloop/core/synthetic_gate.lua",
+            "planted_gate",
+            "cursor-read",
+            "current_state(",
+        )
+        # allowlist: one read at line 10; current: the same-bucket read relocated
+        # to line 80 (different branch / line) -- count 1 -> 1.
+        allowlist = [monotone.Violation(*key, 10)]
+        current = [monotone.Violation(*key, 80)]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertNotIn("grows monotone-gate", joined)
+        self.assertNotIn("shrank", joined)
+        self.assertEqual(messages, [])
 
 
 if __name__ == "__main__":

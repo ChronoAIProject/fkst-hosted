@@ -6,12 +6,26 @@ production packages and shared devloop library lifecycle helpers, then requires
 each occurrence to be classified. Legitimate current-routing reads live in the
 shrink-only allowlist; monotone gates use reached() or another approved
 milestone accessor instead.
+
+G-MONOTONE-GATE v2 keys debt by the semantic bucket (path, enclosing function,
+kind, canonical token) and compares COUNTS per bucket (multiplicity-preserving),
+not by exact source line. Line numbers are diagnostics only. This intentionally
+decouples the gate from pure code motion (inserting a require, rewriting
+M.foo -> typed_alias.foo, reformatting) so a behaviour-preserving refactor no
+longer false-flags growth. Accepted blind spot (by design, confirmed via
+cross-model review): the gate permits count-preserving relocation of an existing
+raw read WITHIN the same (path, enclosing function, kind, canonical token) bucket
+-- it prevents increases in semantic raw-read debt, it does not police
+intra-function control-flow relocation (that is covered by review and tests, not
+the debt gate). A different token, function, kind, or path is a different bucket
+and IS flagged; adding a duplicate read in an existing bucket IS growth.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +59,9 @@ CURSOR_RE = re.compile(r"\b(?:current_entity_state|current_state)\s*\(")
 STATE_EQ_RE = re.compile(
     r"\.\s*state\s*==\s*(?P<quote1>['\"])(?P<phase1>" + PHASE_LITERAL + r")(?P=quote1)"
     r"|(?P<quote2>['\"])(?P<phase2>" + PHASE_LITERAL + r")(?P=quote2)\s*==\s*[^)\n]*\.\s*state"
+)
+DEVLOOP_ALIAS_RE = re.compile(
+    r"^\s*local\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*require\s*\(\s*['\"]devloop\.[^'\"]+['\"]\s*\)"
 )
 FUNCTION_RE = re.compile(
     r"^\s*(?:local\s+)?function\s+"
@@ -99,7 +116,7 @@ class Violation:
     def key(self) -> tuple[str, str, str, str, str]:
         return self.path, self.surface, self.kind, self.token, str(self.line)
 
-    def canonical_key(self) -> tuple[str, str, str, str, str]:
+    def canonical_key(self) -> tuple[str, str, str, str]:
         # Migration bridge for the no-growth-vs-dev comparison ONLY: this branch
         # moved std/devloop_* -> libraries/devloop/* (the stdlib split), but dev's
         # base allowlist still records the old std/devloop_ paths. Canonicalizing
@@ -121,120 +138,20 @@ class Violation:
             path = "packages/github-devloop-ops/core/dependency_wait.lua"
         else:
             path = moved_paths.get(path, path)
-        line = "dependency_wait_fact" if path == "packages/github-devloop-ops/core/dependency_wait.lua" and self.surface == "M.dependency_wait_fact" else str(self.line)
-        implement_worktree_extraction_lines = {
-            ("recheck_implementation_write_gate", "cursor-read", "current_state(", 448): "449",
-            ("recheck_implementation_write_gate", "cursor-read", "current_state(", 551): "449",
-            ("recheck_implementation_write_gate", "state-equality", "implementing", 449): "450",
-            ("recheck_implementation_write_gate", "state-equality", "implementing", 552): "450",
-            ("recheck_implementation_write_gate", "state-equality", "impl-failed", 467): "468",
-            ("recheck_implementation_write_gate", "state-equality", "impl-failed", 570): "468",
-            ("precheck_implementation_write_gate", "cursor-read", "current_state(", 499): "500",
-            ("precheck_implementation_write_gate", "cursor-read", "current_state(", 602): "500",
-            ("precheck_implementation_write_gate", "state-equality", "implementing", 500): "501",
-            ("precheck_implementation_write_gate", "state-equality", "implementing", 603): "501",
-            ("precheck_implementation_write_gate", "state-equality", "impl-failed", 513): "514",
-            ("precheck_implementation_write_gate", "state-equality", "impl-failed", 616): "514",
-            ("process_ready_event", "cursor-read", "current_state(", 608): "609",
-            ("process_ready_event", "cursor-read", "current_state(", 711): "609",
-            ("process_ready_event", "state-equality", "implementing", 649): "650",
-            ("process_ready_event", "state-equality", "implementing", 752): "650",
-            ("process_ready_event", "state-equality", "impl-failed", 711): "712",
-            ("process_ready_event", "state-equality", "impl-failed", 814): "712",
-            ("process_ready_event", "state-equality", "blocked", 717): "718",
-            ("process_ready_event", "state-equality", "blocked", 820): "718",
-            ("process_ready_event", "state-equality", "impl-failed", 719): "720",
-            ("process_ready_event", "state-equality", "impl-failed", 822): "720",
-            ("process_ready_event", "state-equality", "implementing", 719): "720",
-            ("process_ready_event", "state-equality", "implementing", 822): "720",
-        }
-        if path == "packages/github-devloop/departments/implement/main.lua":
-            line = implement_worktree_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        observe_pr_extraction_lines = {
-            ("maybe_apply_rereview_command", "state-equality", "reviewing", 184): "185",
-            ("maybe_block_unmanaged_base", "cursor-read", "current_entity_state(", 370): "371",
-            ("maybe_block_unmanaged_base", "state-equality", "blocked", 375): "376",
-            ("maybe_liveness_timeout", "state-equality", "reviewing", 265): "266",
-            ("maybe_redrive_not_mergeable_pr", "cursor-read", "current_entity_state(", 302): "303",
-            ("maybe_redrive_not_mergeable_pr", "state-equality", "fixing", 303): "304",
-            ("process_pr_event", "cursor-read", "current_entity_state(", 455): "456",
-            ("process_pr_event", "cursor-read", "current_entity_state(", 469): "470",
-            ("process_pr_event", "state-equality", "blocked", 493): "494",
-            ("process_pr_event", "state-equality", "fixing", 470): "471",
-            ("process_pr_event", "state-equality", "merged", 493): "494",
-            ("process_pr_event", "state-equality", "pr-open", 504): "505",
-            ("process_pr_event", "state-equality", "pr-open", 508): "509",
-            ("process_pr_event", "state-equality", "reviewing", 461): "462",
-            ("replay_pr_local_state", "state-equality", "blocked", 115): "116",
-        }
-        if path == "packages/github-devloop-pr/departments/observe_pr/main.lua":
-            line = observe_pr_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        review_loop_extraction_lines = {
-            ("review_truth_table_unapproved", "cursor-read", "current_entity_state(", 123): "124",
-            ("reviewing_segment_transition_status", "state-equality", "reviewing", 52): "53",
-            ("reviewing_segment_transition_status", "state-equality", "reviewing", 59): "60",
-        }
-        if path == "packages/github-devloop-pr/departments/review_loop/main.lua":
-            line = review_loop_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        review_result_extraction_lines = {
-            ("<top-level>", "cursor-read", "current_entity_state(", 94): "95",
-        }
-        if path == "packages/github-devloop-pr/departments/review_result/main.lua":
-            line = review_result_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        loop_extraction_lines = {
-            ("<top-level>", "cursor-read", "current_state(", 47): "48",
-        }
-        if path == "packages/github-devloop/departments/loop/main.lua":
-            line = loop_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        merge_executor_extraction_lines = {
-            ("assert_merge_pr_authority", "cursor-read", "current_entity_state(", 173): "160",
-            ("process_merge_queue_tick", "state-equality", "merging", 843): "830",
-            ("process_merge_ready_locked", "cursor-read", "current_entity_state(", 369): "356",
-            ("process_merge_ready_locked", "state-equality", "merge-ready", 452): "439",
-            ("process_merge_ready_locked", "state-equality", "merged", 370): "357",
-            ("process_merge_ready_locked", "state-equality", "merging", 443): "430",
-        }
         if path == "packages/github-devloop-pr/departments/merge/main.lua":
             path = "packages/github-devloop-pr/core/merge_executor.lua"
-            line = merge_executor_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        intake_execute_start_extraction_lines = {
-            ("read_current_for_candidate", "cursor-read", "current_state(", 151): "179",
-            ("read_current_for_candidate", "cursor-read", "current_state(", 152): "179",
-        }
-        if path == "packages/github-devloop-intake/departments/intake_judge/main.lua":
-            line = intake_execute_start_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
         if path == "packages/github-devloop-intake-default/departments/intake_judge/main.lua":
             path = "packages/github-devloop-intake/departments/intake_judge/main.lua"
-            line = intake_execute_start_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
-        reconcile_timeout_pr_guard_lines = {
-            ("pipeline_thinking", "cursor-read", "current_state(", 116): "58",
-            ("pipeline_timeout", "cursor-read", "current_entity_state(", 181): "123",
-            ("pipeline_timeout", "state-equality", "blocked", 236): "175",
-        }
-        if path == "packages/github-devloop/departments/reconcile/main.lua":
-            line = reconcile_timeout_pr_guard_lines.get((self.surface, self.kind, self.token, self.line), line)
-        replayer_hidden_state_lines = {
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 141): "143",
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 142): "143",
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 145): "143",
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 224): "143",
-            ("require_marker_fact", "state-equality", "implementing", 210): "212",
-            ("require_marker_fact", "state-equality", "implementing", 211): "212",
-            ("require_marker_fact", "state-equality", "implementing", 214): "212",
-            ("require_marker_fact", "state-equality", "implementing", 287): "212",
-            ("require_marker_fact", "state-equality", "implementing", 293): "212",
-        }
-        if path == "libraries/devloop/replayer.lua":
-            line = replayer_hidden_state_lines.get((self.surface, self.kind, self.token, self.line), line)
-        awaiting_pr_replayer_lines = {
-            ("M.replay_awaiting_pr_state", "cursor-read", "current_entity_state(", 117): "128",
-            ("M.replay_awaiting_pr_state", "cursor-read", "current_entity_state(", 144): "128",
-            ("parent_state_for_child_terminal", "state-equality", "closed-unmerged", 36): "47",
-            ("parent_state_for_child_terminal", "state-equality", "merged", 29): "40",
-        }
-        if path == "packages/github-devloop/core/awaiting_pr_replayer.lua":
-            line = awaiting_pr_replayer_lines.get((self.surface, self.kind, self.token, self.line), line)
-        return path, self.surface, self.kind, self.token, line
+        return path, self.surface, self.kind, self.canonical_token()
+
+    def canonical_token(self) -> str:
+        token = self.token.replace(" ", "")
+        if self.kind == "cursor-read":
+            if token in {"current_state(", "current_entity_state("}:
+                return token
+            if token in {"M.current_state(", "M.current_entity_state("}:
+                return token.removeprefix("M.")
+        return self.token
 
     def label(self) -> str:
         return f"{self.path}:{self.line} {self.surface} {self.kind} {self.token}"
@@ -359,6 +276,40 @@ def block_for_function(source: str, function_name: str) -> Block | None:
     return None
 
 
+def devloop_aliases(source: str) -> set[str]:
+    aliases: set[str] = set()
+    for line in code_without_lua_line_comments(source).splitlines():
+        match = DEVLOOP_ALIAS_RE.match(line)
+        if match is not None:
+            aliases.add(match.group("alias"))
+    return aliases
+
+
+def cursor_pattern_for_aliases(aliases: set[str]) -> re.Pattern[str]:
+    aliases = sorted(aliases)
+    if not aliases:
+        return CURSOR_RE
+    alias_prefix = "|".join(re.escape(alias) for alias in aliases)
+    return re.compile(r"\b(?:(?:" + alias_prefix + r"|M)\s*\.\s*)?(?:current_entity_state|current_state)\s*\(")
+
+
+def cursor_pattern(source: str) -> re.Pattern[str]:
+    return cursor_pattern_for_aliases(devloop_aliases(source))
+
+
+def cursor_violation_token(raw: str, aliases: set[str]) -> str:
+    token = raw.replace(" ", "")
+    if token in {"current_state(", "current_entity_state("}:
+        return token
+    if token in {"M.current_state(", "M.current_entity_state("}:
+        return token.removeprefix("M.")
+    for alias in aliases:
+        prefix = f"{alias}."
+        if token.startswith(prefix) and token.removeprefix(prefix) in {"current_state(", "current_entity_state("}:
+            return token.removeprefix(prefix)
+    return raw.strip()
+
+
 def responsibility_blocks(source: str) -> list[Block]:
     lines = source.splitlines()
     code_lines = code_without_lua_line_comments(source).splitlines()
@@ -437,32 +388,36 @@ def is_cursor_definition(line: str, match_start: int) -> bool:
     return line.find(basename, declaration.start()) == match_start
 
 
-def block_violations(path: str, surface: str, block: Block) -> set[Violation]:
-    violations: set[Violation] = set()
+def block_violations(path: str, surface: str, block: Block, aliases: set[str] | None = None) -> list[Violation]:
+    violations: list[Violation] = []
+    visible_aliases = aliases if aliases is not None else devloop_aliases(block.source)
+    cursor_re = cursor_pattern_for_aliases(visible_aliases)
     for offset, line in enumerate(code_without_lua_line_comments(block.source).splitlines()):
         line_number = block.start + offset
-        for match in CURSOR_RE.finditer(line):
+        for match in cursor_re.finditer(line):
             if is_cursor_definition(line, match.start()):
                 continue
-            violations.add(Violation(path, surface, "cursor-read", match.group(0).strip(), line_number))
+            violations.append(Violation(path, surface, "cursor-read", cursor_violation_token(match.group(0), visible_aliases), line_number))
         for match in STATE_EQ_RE.finditer(line):
             phase = match.group("phase1") or match.group("phase2") or "state"
-            violations.add(Violation(path, surface, "state-equality", phase, line_number))
+            violations.append(Violation(path, surface, "state-equality", phase, line_number))
     return violations
 
 
-def source_violations(path: str, source: str) -> set[Violation]:
+def source_violations(path: str, source: str) -> list[Violation]:
     blocks = function_blocks(source)
-    violations: set[Violation] = set()
+    violations: list[Violation] = []
+    visible_aliases = devloop_aliases(source)
+    cursor_re = cursor_pattern_for_aliases(visible_aliases)
     for line_number, line in enumerate(code_without_lua_line_comments(source).splitlines(), start=1):
         surface = surface_for_line(blocks, line_number)
-        for match in CURSOR_RE.finditer(line):
+        for match in cursor_re.finditer(line):
             if is_cursor_definition(line, match.start()):
                 continue
-            violations.add(Violation(path, surface, "cursor-read", match.group(0).strip(), line_number))
+            violations.append(Violation(path, surface, "cursor-read", cursor_violation_token(match.group(0), visible_aliases), line_number))
         for match in STATE_EQ_RE.finditer(line):
             phase = match.group("phase1") or match.group("phase2") or "state"
-            violations.add(Violation(path, surface, "state-equality", phase, line_number))
+            violations.append(Violation(path, surface, "state-equality", phase, line_number))
     return violations
 
 
@@ -512,7 +467,7 @@ def manifest_messages(root: Path, sources: dict[str, str]) -> list[str]:
             continue
         if not accessor_references(block.source, surface.milestone_accessor):
             messages.append(f"manifest-unbound-accessor: {surface.path} {surface.function} does not reference {surface.milestone_accessor}")
-        for violation in sorted(block_violations(surface.path, surface.function, block)):
+        for violation in sorted(block_violations(surface.path, surface.function, block, devloop_aliases(source))):
             messages.append(f"{violation.label()} reads a transient cursor inside a declared monotone milestone surface; use {surface.milestone_accessor}")
     return messages
 
@@ -526,7 +481,7 @@ def responsibility_binding_messages(sources: dict[str, str]) -> list[str]:
             implementation = fields.get("milestone_implementation", "")
             if accessor not in APPROVED_ACCESSORS:
                 messages.append(f"{rel}:{block.start} monotone_milestone responsibility_signature must declare an approved milestone_accessor")
-            for violation in sorted(block_violations(rel, block.name, block)):
+            for violation in sorted(block_violations(rel, block.name, block, devloop_aliases(source))):
                 messages.append(f"{violation.label()} reads a transient cursor inside monotone_milestone responsibility metadata")
             match = IMPLEMENTATION_RE.fullmatch(implementation)
             if match is None:
@@ -544,71 +499,107 @@ def responsibility_binding_messages(sources: dict[str, str]) -> list[str]:
                 continue
             if not accessor_references(impl_block.source, accessor):
                 messages.append(f"{rel}:{block.start} monotone_milestone implementation {implementation} does not reference {accessor}")
-            for violation in sorted(block_violations(impl_path, impl_function, impl_block)):
+            for violation in sorted(block_violations(impl_path, impl_function, impl_block, devloop_aliases(impl_source))):
                 messages.append(f"{violation.label()} reads a transient cursor inside monotone_milestone implementation {implementation}")
     return messages
 
 
-def current_violations(root: Path, package_roots: list[Path] | None = None) -> tuple[set[Violation], list[str]]:
+def current_violations(root: Path, package_roots: list[Path] | None = None) -> tuple[list[Violation], list[str]]:
     sources = production_sources(root, package_roots)
-    found: set[Violation] = set()
+    found: list[Violation] = []
     for path, source in sorted(sources.items()):
-        found.update(source_violations(path, source))
+        found.extend(source_violations(path, source))
     messages = manifest_messages(root, sources)
     messages.extend(responsibility_binding_messages(sources))
     return found, messages
 
 
-def load_allowlist(path: Path) -> set[Violation]:
+def load_allowlist(path: Path) -> list[Violation]:
     if not path.exists():
-        return set()
-    return {
+        return []
+    return [
         Violation.parse(line.strip())
         for line in path.read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
-    }
+    ]
 
 
-def allowlist_at_dev_base(root: Path) -> tuple[str, set[Violation] | None]:
+def allowlist_at_dev_base(root: Path) -> tuple[str, list[Violation] | None]:
     try:
         status, shown = ratchet_base.file_at_base(root, ALLOWLIST)
         if status != "present":
             return status, None
         assert shown is not None
-        return "present", {
+        return "present", [
             Violation.parse(line.strip())
             for line in shown.splitlines()
             if line.strip() and not line.lstrip().startswith("#")
-        }
+        ]
     except Exception:
         return "unresolved", None
 
 
+def grouped_violations(violations: list[Violation] | set[Violation]) -> dict[tuple[str, str, str, str], list[Violation]]:
+    grouped: dict[tuple[str, str, str, str], list[Violation]] = defaultdict(list)
+    for violation in violations:
+        grouped[violation.canonical_key()].append(violation)
+    return {key: sorted(values) for key, values in grouped.items()}
+
+
+def key_label(key: tuple[str, str, str, str]) -> str:
+    path, surface, kind, token = key
+    return f"{path} {surface} {kind} {token}"
+
+
+def current_lines(values: list[Violation]) -> str:
+    return f"current_lines={[violation.line for violation in values]}"
+
+
 def ratchet_messages(
-    current: set[Violation],
-    allowlist: set[Violation],
-    base_allowlist: set[Violation] | None = None,
+    current: list[Violation] | set[Violation],
+    allowlist: list[Violation] | set[Violation],
+    base_allowlist: list[Violation] | set[Violation] | None = None,
 ) -> list[str]:
     messages: list[str] = []
-    for violation in sorted(current):
-        if not any(entry.canonical_key() == violation.canonical_key() for entry in allowlist):
+    current_by_key = grouped_violations(current)
+    allowlist_by_key = grouped_violations(allowlist)
+    base_by_key = grouped_violations(base_allowlist) if base_allowlist is not None else None
+    for key, current_values in sorted(current_by_key.items()):
+        allowed_count = len(allowlist_by_key.get(key, []))
+        if len(current_values) > allowed_count:
+            first = current_values[allowed_count]
             messages.append(
-                f"{violation.label()} is an unclassified transient lifecycle cursor read; migrate monotone gates to devloop.state.reached()/approved milestone accessors or classify legitimate current-routing debt in {ALLOWLIST}"
+                f"{first.label()} is an unclassified transient lifecycle cursor read; {key_label(key)} has current_count={len(current_values)} allowed_count={allowed_count} {current_lines(current_values)}; migrate monotone gates to devloop.state.reached()/approved milestone accessors or classify legitimate current-routing debt in {ALLOWLIST}"
             )
-    for entry in sorted(allowlist):
-        if not any(violation.canonical_key() == entry.canonical_key() for violation in current):
-            messages.append(f"{entry.label()} no longer matches monotone-gate debt; prune the stale entry")
-    if base_allowlist is not None:
-        for entry in sorted(allowlist):
-            if not any(base.canonical_key() == entry.canonical_key() for base in base_allowlist):
-                messages.append(f"{entry.label()} grows monotone-gate allowlist relative to dev; migrate to reached() instead")
+    for key, allowlist_values in sorted(allowlist_by_key.items()):
+        current_count = len(current_by_key.get(key, []))
+        if current_count < len(allowlist_values):
+            entry = allowlist_values[current_count]
+            messages.append(
+                f"{entry.label()} no longer matches monotone-gate debt; {key_label(key)} monotone-gate debt count shrank from allowed_count={len(allowlist_values)} to current_count={current_count} {current_lines(current_by_key.get(key, []))}; prune the stale entry"
+            )
+    if base_by_key is not None:
+        for key, allowlist_values in sorted(allowlist_by_key.items()):
+            base_count = len(base_by_key.get(key, []))
+            if len(allowlist_values) > base_count:
+                entry = allowlist_values[base_count]
+                messages.append(
+                    f"{entry.label()} grows monotone-gate allowlist relative to dev; {key_label(key)} allowlist_count={len(allowlist_values)} dev_count={base_count}; migrate to reached() instead"
+                )
+        for key, current_values in sorted(current_by_key.items()):
+            base_count = len(base_by_key.get(key, []))
+            if len(current_values) > base_count:
+                first = current_values[base_count]
+                messages.append(
+                    f"{first.label()} grows monotone-gate debt relative to dev; {key_label(key)} current_count={len(current_values)} dev_count={base_count} {current_lines(current_values)}; migrate to reached() instead"
+                )
     return messages
 
 
 def repository_messages(root: Path, enforce_base: bool = True) -> list[str]:
     current, messages = current_violations(root)
     allowlist = load_allowlist(root / ALLOWLIST)
-    base_allowlist: set[Violation] | None = None
+    base_allowlist: list[Violation] | None = None
     if enforce_base:
         base_status, base_allowlist = allowlist_at_dev_base(root)
         if base_status == "unresolved":
