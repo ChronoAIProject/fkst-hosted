@@ -31,6 +31,7 @@ pub mod ornn;
 pub mod reconcile;
 pub mod router;
 pub mod routes;
+pub mod session_spec;
 pub mod sessions;
 pub mod startup;
 pub mod state;
