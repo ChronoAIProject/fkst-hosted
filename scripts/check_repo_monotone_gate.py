@@ -228,6 +228,7 @@ class Violation:
             line = replayer_hidden_state_lines.get((self.surface, self.kind, self.token, self.line), line)
         awaiting_pr_replayer_lines = {
             ("M.replay_awaiting_pr_state", "cursor-read", "current_entity_state(", 117): "128",
+            ("M.replay_awaiting_pr_state", "cursor-read", "current_entity_state(", 144): "128",
             ("parent_state_for_child_terminal", "state-equality", "closed-unmerged", 36): "47",
             ("parent_state_for_child_terminal", "state-equality", "merged", 29): "40",
         }
