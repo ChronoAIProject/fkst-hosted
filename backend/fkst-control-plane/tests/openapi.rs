@@ -29,6 +29,7 @@ fn app(webhook_secret: bool) -> axum::Router {
     let github_app_webhook_secret = webhook_secret
         .then(|| secrecy::SecretString::new("dummy-webhook-secret".to_string().into()));
     build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config: Config::default(),
         sessions: SessionService::new(SessionRepo::new(), EngineConfig::default()),
         auth_mode: AuthMode::Disabled,

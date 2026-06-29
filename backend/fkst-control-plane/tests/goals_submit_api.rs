@@ -161,6 +161,7 @@ async fn app_with_ornn(ornn: Option<fkst_control_plane::ornn::OrnnClient>) -> Te
     let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
     let vault = support::test_vault();
     let router = build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         // Disabled => the dev AuthContext carries `fkst:admin`, which bypasses

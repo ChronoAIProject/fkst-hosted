@@ -304,6 +304,7 @@ async fn main() -> ExitCode {
     }
 
     let app = match build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions: sessions.clone(),
         auth_mode,

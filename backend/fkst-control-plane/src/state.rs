@@ -48,4 +48,18 @@ pub struct AppState {
     /// endpoints then answer `503`. The catalog forwards the caller's NyxID
     /// token to Ornn, which enforces all visibility; fkst-hosted adds no policy.
     pub ornn: Option<crate::ornn::OrnnClient>,
+    /// Durable per-owner NyxID broker-binding store (connect-at-install, #297).
+    /// Always present (empty until an owner connects); shared by the connect
+    /// routes and, later, the webhook trigger + token refresh.
+    pub binding_store: crate::nyxid_connect::BrokerBindingStore,
+}
+
+impl AppState {
+    /// The NyxID issuer base URL when auth is enabled (used by the connect flow).
+    pub fn nyxid_base_url(&self) -> Option<String> {
+        match &self.auth_mode {
+            AuthMode::Enabled(settings) => Some(settings.base_url.clone()),
+            AuthMode::Disabled => None,
+        }
+    }
 }

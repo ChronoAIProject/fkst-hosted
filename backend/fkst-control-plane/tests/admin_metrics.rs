@@ -33,6 +33,7 @@ fn router_with(sessions: SessionService) -> axum::Router {
     let goals = GoalIssueStore::new(None);
     let vault = support::test_vault();
     build_router(AppState {
+        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config,
         sessions,
         // Disabled => the dev AuthContext carries `fkst:admin`, so the admin

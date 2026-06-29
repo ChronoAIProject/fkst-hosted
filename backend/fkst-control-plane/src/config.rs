@@ -9,6 +9,7 @@
 //! the dispatch/worker/journal knobs survive. The owner-only NyxID client (#257)
 //! needs no service-account credential.
 
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use crate::auth::{AuthMode, NyxIdAuthSettings};
@@ -160,6 +161,12 @@ struct AuthVars {
     session_key_ttl_secs: u64,
     #[serde(default = "defaults::nyxid_github_proxy_slug")]
     nyxid_github_proxy_slug: String,
+    #[serde(default)]
+    nyxid_broker_client_id: Option<String>,
+    #[serde(default)]
+    nyxid_broker_client_secret: Option<String>,
+    #[serde(default)]
+    nyxid_broker_redirect_uri: Option<String>,
 }
 
 /// `FKST_POD_*`-prefixed variables (pod-per-session dispatch, milestone #9).
@@ -246,6 +253,12 @@ pub struct Config {
     /// Default `api-github` (the slug NyxID `main`/v0.7.0 seeds). Rejected when
     /// blank (fail-closed: an empty slug yields an unresolvable proxy route).
     pub nyxid_github_proxy_slug: String,
+    /// NyxID broker OAuth client (connect-at-install, #297). All three present
+    /// or the connect flow is unmounted. Env: `FKST_NYXID_BROKER_CLIENT_ID` /
+    /// `_CLIENT_SECRET` / `_REDIRECT_URI`. The secret is never logged.
+    pub nyxid_broker_client_id: Option<String>,
+    pub nyxid_broker_client_secret: Option<SecretString>,
+    pub nyxid_broker_redirect_uri: Option<String>,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
@@ -276,6 +289,9 @@ impl Default for Config {
             nyxid_org_cache_ttl_secs: defaults::nyxid_org_cache_ttl_secs(),
             session_key_ttl_secs: defaults::session_key_ttl_secs(),
             nyxid_github_proxy_slug: defaults::nyxid_github_proxy_slug(),
+            nyxid_broker_client_id: None,
+            nyxid_broker_client_secret: None,
+            nyxid_broker_redirect_uri: None,
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
@@ -428,12 +444,39 @@ impl Config {
             nyxid_org_cache_ttl_secs: auth.nyxid_org_cache_ttl_secs,
             session_key_ttl_secs: auth.session_key_ttl_secs,
             nyxid_github_proxy_slug: auth.nyxid_github_proxy_slug,
+            nyxid_broker_client_id: auth.nyxid_broker_client_id.filter(|s| !s.trim().is_empty()),
+            nyxid_broker_client_secret: auth
+                .nyxid_broker_client_secret
+                .filter(|s| !s.trim().is_empty())
+                .map(SecretString::from),
+            nyxid_broker_redirect_uri: auth
+                .nyxid_broker_redirect_uri
+                .filter(|s| !s.trim().is_empty()),
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
             chrono_llm_base_url: http.chrono_llm_base_url,
             pod,
         })
+    }
+
+    /// The NyxID broker OAuth client, when all three settings are configured.
+    /// Used by the connect-at-install flow (#297); `None` leaves it unmounted.
+    pub fn broker_client(&self) -> Option<crate::nyxid_connect::BrokerClientConfig> {
+        match (
+            &self.nyxid_broker_client_id,
+            &self.nyxid_broker_client_secret,
+            &self.nyxid_broker_redirect_uri,
+        ) {
+            (Some(id), Some(secret), Some(redirect)) => {
+                Some(crate::nyxid_connect::BrokerClientConfig {
+                    client_id: id.clone(),
+                    client_secret: secret.clone(),
+                    redirect_uri: redirect.clone(),
+                })
+            }
+            _ => None,
+        }
     }
 
     /// Load the configuration from the process environment.
