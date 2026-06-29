@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
 
 
@@ -56,7 +57,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
 
     local base_version = core.converge_base_version(unresolved.dedup_key)
-    local sr_digest = core.source_ref_digest(unresolved.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(unresolved.source_ref)
     local facts = core.converge_round_facts_for_proposal_boundary(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests)
     local round = math.max(tonumber(unresolved.round) or 0, core.max_converge_round(facts))
     if core.has_converge_round_marker(current.comments, unresolved.proposal_id, base_version, sr_digest, round) then

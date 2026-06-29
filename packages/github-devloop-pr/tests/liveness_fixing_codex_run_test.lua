@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -147,7 +148,7 @@ local function review_meta_comments(event, version)
       event.proposal_id,
       event.version,
       "def456",
-      core.source_ref_digest(core.pr_source_ref(repo, event.pr_number)),
+      convergence_shared.source_ref_digest(core.pr_source_ref(repo, event.pr_number)),
       event.n,
       event.review_dedup_key,
       "Need a meta decision.",

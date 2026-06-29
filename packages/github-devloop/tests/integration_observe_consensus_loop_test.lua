@@ -1,4 +1,6 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
+local forks = require("devloop.forks")
 require("tests.cache_seed_helpers")
 local t = h.t
 local core = h.core
@@ -148,7 +150,7 @@ return {
     local request = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
     t.eq(request.schema, "github-proxy.issue-create.v1")
     t.eq(request.assignees[1], "fkst-test-bot")
-    t.eq(request.dedup_key, core.fork_issue_dedup_key("owner/repo", 42))
+    t.eq(request.dedup_key, forks.fork_issue_dedup_key("owner/repo", 42))
     t.eq(request.post_create_blocked_by.blocked_issue_number, 42)
     t.eq(find_raise(result.raises, "consensus.proposal"), nil)
   end,
@@ -586,7 +588,7 @@ return {
         { angle = "minimal", verdict = "abstain", digest = "same" },
       },
     })
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, base_version .. "/loop/1", event.narrowed_question, event.angle_digests),
       core.converge_round_marker(event.proposal_id, base_version, sr_digest, 2, base_version .. "/loop/2", event.narrowed_question, event.angle_digests),
@@ -619,7 +621,7 @@ return {
       narrowed_question = "Question " .. tostring(cap),
       angle_digests = varying_digest(cap),
     })
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 2, base_version .. "/loop/" .. tostring(cap - 2), "Question " .. tostring(cap - 2), varying_digest(cap - 2)),
       core.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 1, base_version .. "/loop/" .. tostring(cap - 1), "Question " .. tostring(cap - 1), varying_digest(cap - 1)),
@@ -639,7 +641,7 @@ return {
   test_loop_duplicate_converge_round_marker_skips = function()
     local event = unresolved({ round = 1 })
     local base_version = core.converge_base_version(event.dedup_key)
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, event.dedup_key, nil, nil),
     })
@@ -659,7 +661,7 @@ return {
         { angle = "minimal", verdict = "abstain", digest = "same" },
       },
     })
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, base_version, sr_digest, 4, base_version .. "/loop/4", event.narrowed_question, event.angle_digests),
     })

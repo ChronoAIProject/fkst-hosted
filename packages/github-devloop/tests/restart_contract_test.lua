@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -522,7 +523,7 @@ return {
         current = {
           comments = {
             {
-              body = core.converge_round_marker("github-devloop/issue/owner/repo/42", version, core.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
+              body = core.converge_round_marker("github-devloop/issue/owner/repo/42", version, convergence_shared.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
                 { angle = "minimal", verdict = "continue", digest = "stale" },
               }),
               author_login = "fkst-test-bot",

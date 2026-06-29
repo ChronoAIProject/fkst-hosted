@@ -1,4 +1,5 @@
 local S = {}
+local convergence_shared = require("devloop.convergence.shared")
 
 function S.install(M, shared)
 local numeric_minutes = shared.numeric_minutes
@@ -408,7 +409,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
   end
   if resolver == "converge-round" then
     local source_ref = facts and facts.source_ref
-    local sr_digest = M.source_ref_digest(source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(source_ref)
     local base_version = M.version_loop_round(signal_version) > 0 and M.converge_base_version(signal_version) or signal_version
     return newest_matching_marker_age(M, comments, "converge-round", function(marker)
       return marker_attr(marker, "proposal") == tostring(proposal_id)
@@ -425,7 +426,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
       and M._is_git_sha(head_sha) then
       review_proposal_id = M.pr_review_proposal_id(source_repo, source_pr, strip_liveness_timeout_suffixes(state and state.version), head_sha)
     end
-    local sr_digest = M.source_ref_digest(facts and facts.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(facts and facts.source_ref)
     return matching_marker_age_or_zero(M, comments, "review-converge-round", function(marker)
       return marker_attr(marker, "proposal") == tostring(review_proposal_id)
         and marker_attr(marker, "issue_proposal") == tostring(proposal_id)

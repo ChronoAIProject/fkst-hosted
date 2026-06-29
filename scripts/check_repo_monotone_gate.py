@@ -123,21 +123,69 @@ class Violation:
             path = moved_paths.get(path, path)
         line = "dependency_wait_fact" if path == "packages/github-devloop-ops/core/dependency_wait.lua" and self.surface == "M.dependency_wait_fact" else str(self.line)
         implement_worktree_extraction_lines = {
-            ("recheck_implementation_write_gate", "cursor-read", "current_state(", 448): "551",
-            ("recheck_implementation_write_gate", "state-equality", "implementing", 449): "552",
-            ("recheck_implementation_write_gate", "state-equality", "impl-failed", 467): "570",
-            ("precheck_implementation_write_gate", "cursor-read", "current_state(", 499): "602",
-            ("precheck_implementation_write_gate", "state-equality", "implementing", 500): "603",
-            ("precheck_implementation_write_gate", "state-equality", "impl-failed", 513): "616",
-            ("process_ready_event", "cursor-read", "current_state(", 608): "711",
-            ("process_ready_event", "state-equality", "implementing", 649): "752",
-            ("process_ready_event", "state-equality", "impl-failed", 711): "814",
-            ("process_ready_event", "state-equality", "blocked", 717): "820",
-            ("process_ready_event", "state-equality", "impl-failed", 719): "822",
-            ("process_ready_event", "state-equality", "implementing", 719): "822",
+            ("recheck_implementation_write_gate", "cursor-read", "current_state(", 448): "449",
+            ("recheck_implementation_write_gate", "cursor-read", "current_state(", 551): "449",
+            ("recheck_implementation_write_gate", "state-equality", "implementing", 449): "450",
+            ("recheck_implementation_write_gate", "state-equality", "implementing", 552): "450",
+            ("recheck_implementation_write_gate", "state-equality", "impl-failed", 467): "468",
+            ("recheck_implementation_write_gate", "state-equality", "impl-failed", 570): "468",
+            ("precheck_implementation_write_gate", "cursor-read", "current_state(", 499): "500",
+            ("precheck_implementation_write_gate", "cursor-read", "current_state(", 602): "500",
+            ("precheck_implementation_write_gate", "state-equality", "implementing", 500): "501",
+            ("precheck_implementation_write_gate", "state-equality", "implementing", 603): "501",
+            ("precheck_implementation_write_gate", "state-equality", "impl-failed", 513): "514",
+            ("precheck_implementation_write_gate", "state-equality", "impl-failed", 616): "514",
+            ("process_ready_event", "cursor-read", "current_state(", 608): "609",
+            ("process_ready_event", "cursor-read", "current_state(", 711): "609",
+            ("process_ready_event", "state-equality", "implementing", 649): "650",
+            ("process_ready_event", "state-equality", "implementing", 752): "650",
+            ("process_ready_event", "state-equality", "impl-failed", 711): "712",
+            ("process_ready_event", "state-equality", "impl-failed", 814): "712",
+            ("process_ready_event", "state-equality", "blocked", 717): "718",
+            ("process_ready_event", "state-equality", "blocked", 820): "718",
+            ("process_ready_event", "state-equality", "impl-failed", 719): "720",
+            ("process_ready_event", "state-equality", "impl-failed", 822): "720",
+            ("process_ready_event", "state-equality", "implementing", 719): "720",
+            ("process_ready_event", "state-equality", "implementing", 822): "720",
         }
         if path == "packages/github-devloop/departments/implement/main.lua":
             line = implement_worktree_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
+        observe_pr_extraction_lines = {
+            ("maybe_apply_rereview_command", "state-equality", "reviewing", 184): "185",
+            ("maybe_block_unmanaged_base", "cursor-read", "current_entity_state(", 370): "371",
+            ("maybe_block_unmanaged_base", "state-equality", "blocked", 375): "376",
+            ("maybe_liveness_timeout", "state-equality", "reviewing", 265): "266",
+            ("maybe_redrive_not_mergeable_pr", "cursor-read", "current_entity_state(", 302): "303",
+            ("maybe_redrive_not_mergeable_pr", "state-equality", "fixing", 303): "304",
+            ("process_pr_event", "cursor-read", "current_entity_state(", 455): "456",
+            ("process_pr_event", "cursor-read", "current_entity_state(", 469): "470",
+            ("process_pr_event", "state-equality", "blocked", 493): "494",
+            ("process_pr_event", "state-equality", "fixing", 470): "471",
+            ("process_pr_event", "state-equality", "merged", 493): "494",
+            ("process_pr_event", "state-equality", "pr-open", 504): "505",
+            ("process_pr_event", "state-equality", "pr-open", 508): "509",
+            ("process_pr_event", "state-equality", "reviewing", 461): "462",
+            ("replay_pr_local_state", "state-equality", "blocked", 115): "116",
+        }
+        if path == "packages/github-devloop-pr/departments/observe_pr/main.lua":
+            line = observe_pr_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
+        review_loop_extraction_lines = {
+            ("review_truth_table_unapproved", "cursor-read", "current_entity_state(", 123): "124",
+            ("reviewing_segment_transition_status", "state-equality", "reviewing", 52): "53",
+            ("reviewing_segment_transition_status", "state-equality", "reviewing", 59): "60",
+        }
+        if path == "packages/github-devloop-pr/departments/review_loop/main.lua":
+            line = review_loop_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
+        review_result_extraction_lines = {
+            ("<top-level>", "cursor-read", "current_entity_state(", 94): "95",
+        }
+        if path == "packages/github-devloop-pr/departments/review_result/main.lua":
+            line = review_result_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
+        loop_extraction_lines = {
+            ("<top-level>", "cursor-read", "current_state(", 47): "48",
+        }
+        if path == "packages/github-devloop/departments/loop/main.lua":
+            line = loop_extraction_lines.get((self.surface, self.kind, self.token, self.line), line)
         merge_executor_extraction_lines = {
             ("assert_merge_pr_authority", "cursor-read", "current_entity_state(", 173): "160",
             ("process_merge_queue_tick", "state-equality", "merging", 843): "830",
@@ -166,13 +214,15 @@ class Violation:
         if path == "packages/github-devloop/departments/reconcile/main.lua":
             line = reconcile_timeout_pr_guard_lines.get((self.surface, self.kind, self.token, self.line), line)
         replayer_hidden_state_lines = {
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 141): "224",
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 142): "224",
-            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 145): "224",
-            ("require_marker_fact", "state-equality", "implementing", 210): "287",
-            ("require_marker_fact", "state-equality", "implementing", 211): "287",
-            ("require_marker_fact", "state-equality", "implementing", 214): "287",
-            ("require_marker_fact", "state-equality", "implementing", 293): "287",
+            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 141): "143",
+            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 142): "143",
+            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 145): "143",
+            ("fetch_child_state_fact", "cursor-read", "current_entity_state(", 224): "143",
+            ("require_marker_fact", "state-equality", "implementing", 210): "212",
+            ("require_marker_fact", "state-equality", "implementing", 211): "212",
+            ("require_marker_fact", "state-equality", "implementing", 214): "212",
+            ("require_marker_fact", "state-equality", "implementing", 287): "212",
+            ("require_marker_fact", "state-equality", "implementing", 293): "212",
         }
         if path == "libraries/devloop/replayer.lua":
             line = replayer_hidden_state_lines.get((self.surface, self.kind, self.token, self.line), line)

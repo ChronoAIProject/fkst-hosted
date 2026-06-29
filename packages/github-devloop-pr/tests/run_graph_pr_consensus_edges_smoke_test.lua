@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -127,7 +128,7 @@ local function review_converge_round_marker()
     issue_proposal_id,
     reviewed_version,
     reviewed_head_sha,
-    core.source_ref_digest(pr_source_ref()),
+    convergence_shared.source_ref_digest(pr_source_ref()),
     1,
     review_dedup_key,
     narrowed_question(),

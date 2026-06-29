@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -120,7 +121,7 @@ return {
       positive_entity.comments,
       "github-devloop/issue/owner/repo/42",
       positive_state.version,
-      core.source_ref_digest(positive_entity.source_ref)
+      convergence_shared.source_ref_digest(positive_entity.source_ref)
     )
     local positive_round = core.max_converge_round(positive_facts)
     t.eq(positive_round, 3)
@@ -131,7 +132,7 @@ return {
       negative_entity.comments,
       "github-devloop/issue/owner/repo/42",
       negative_state.version,
-      core.source_ref_digest(negative_entity.source_ref)
+      convergence_shared.source_ref_digest(negative_entity.source_ref)
     )
     local negative_round = core.max_converge_round(negative_facts)
     t.eq(negative_round, 3)

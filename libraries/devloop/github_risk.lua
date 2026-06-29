@@ -1,4 +1,5 @@
 local S = {}
+local convergence_shared = require("devloop.convergence.shared")
 
 function S.install(M)
 local high_risk_patterns = {
@@ -99,7 +100,7 @@ function M.github_paths_digest(paths)
     table.insert(selected, tostring(path))
   end
   table.sort(selected)
-  return M.source_ref_digest({
+  return convergence_shared.source_ref_digest({
     kind = "github-paths",
     ref = table.concat(selected, "\n"),
   })

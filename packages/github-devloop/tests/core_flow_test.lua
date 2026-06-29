@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -107,7 +108,7 @@ return {
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local base_version = core.converge_base_version(dedup_key .. "/loop/2")
-    local sr_digest = core.source_ref_digest(source_ref())
+    local sr_digest = convergence_shared.source_ref_digest(source_ref())
     local marker = core.converge_round_marker(proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
       { angle = "minimal", verdict = "abstain", digest = "a" },
       { angle = "structural", verdict = "approve", digest = "b" },
@@ -309,7 +310,7 @@ return {
       narrowed_question = "Which review finding should narrow?",
       angle_digests = bare_angle_digests,
     })
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local marker = core.review_converge_round_marker(
       event.proposal_id,
       issue_proposal_id,

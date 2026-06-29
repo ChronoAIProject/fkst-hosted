@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -37,8 +38,8 @@ return {
         { angle = "minimal", verdict = "abstain", digest = "digest-6" },
       },
     })
-    local current_digest = core.source_ref_digest(event.source_ref)
-    local drift_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?drift=1" })
+    local current_digest = convergence_shared.source_ref_digest(event.source_ref)
+    local drift_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?drift=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, drift_version, drift_digest, cap, drift_version .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
     })
@@ -68,7 +69,7 @@ return {
         { angle = "minimal", verdict = "abstain", digest = "digest-6" },
       },
     })
-    local old_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
+    local old_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
     })
@@ -144,7 +145,7 @@ return {
         { angle = "minimal", verdict = "abstain", digest = "current-digest" },
       },
     })
-    local old_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
+    local old_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.converge_round_marker(event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), "Unrelated old question", {
         { angle = "minimal", verdict = "approve", digest = "old-digest" },

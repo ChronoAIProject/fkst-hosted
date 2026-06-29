@@ -1,4 +1,5 @@
 local S = {}
+local convergence_shared = require("devloop.convergence.shared")
 
 function S.install(M)
 local function linked_pr_state(pr)
@@ -221,7 +222,7 @@ local function review_converge_fact(facts, state, link, current_pr)
     facts.proposal_id,
     state.version,
     current_pr.head_sha,
-    M.source_ref_digest(source_ref)
+    convergence_shared.source_ref_digest(source_ref)
   )
   local round = M.max_converge_round(records)
   local latest = nil

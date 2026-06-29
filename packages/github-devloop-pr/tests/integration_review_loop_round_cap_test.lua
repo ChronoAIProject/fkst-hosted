@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -58,7 +59,7 @@ return {
     local impl_version = reviewing().version
     local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local function varying_digest(round)
       return {
         { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(round) },
@@ -103,8 +104,8 @@ return {
     local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
     local drift_version = review_version .. "-drift"
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
-    local current_digest = core.source_ref_digest(event.source_ref)
-    local drift_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?drift=1" })
+    local current_digest = convergence_shared.source_ref_digest(event.source_ref)
+    local drift_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?drift=1" })
     mock_bot_env()
     mock_pr_origin({
       origin_marker,

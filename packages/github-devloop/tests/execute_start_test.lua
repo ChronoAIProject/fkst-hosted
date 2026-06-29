@@ -1,11 +1,12 @@
 local h = require("tests.devloop_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local execution_start = require("devloop.execution_start")
 local t = h.t
 local core = h.core
 local opts = h.opts
 
 local function execution_request(extra)
-  local payload = core.build_execution_request_payload({
+  local payload = execution_start.build_execution_request_payload({
     proposal_id = "github-devloop/issue/owner/repo/42",
     dedup_key = "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     source_ref = { kind = "external", ref = "owner/repo#issue/42" },
@@ -103,7 +104,7 @@ return {
     local current = current_issue()
     h.mock_context_bundle(request)
 
-    local effects = core.build_execution_start_effects("owner/repo", 42, request, current, "2026-06-03T01:02:04Z", "intake_judge")
+    local effects = execution_start.build_execution_start_effects(core, "owner/repo", 42, request, current, "2026-06-03T01:02:04Z", "intake_judge")
 
     t.is_true(effects ~= nil)
     local raises = {

@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -164,7 +165,7 @@ return {
     local event = issue()
     local original = core.build_proposal(event)
     local base_version = original.dedup_key
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local angle_digests = {
       { angle = "minimal", verdict = "abstain", digest = "needs-narrower-scope" },
     }
@@ -189,7 +190,7 @@ return {
     local event = issue({ updated_at = "2026-06-03T01:02:04Z" })
     local original = core.build_proposal(old_event)
     local current = core.build_proposal(event)
-    local sr_digest = core.source_ref_digest(event.source_ref)
+    local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(current.proposal_id, current.dedup_key),
       core.converge_round_marker(original.proposal_id, original.dedup_key, sr_digest, 0, original.dedup_key, "Old question", {

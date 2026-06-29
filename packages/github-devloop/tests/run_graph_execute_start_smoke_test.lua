@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local execution_start = require("devloop.execution_start")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
@@ -20,7 +21,7 @@ local function source_ref()
 end
 
 local function execution_request()
-  return core.build_execution_request_payload({
+  return execution_start.build_execution_request_payload({
     proposal_id = proposal_id,
     dedup_key = request_dedup_key,
     source_ref = source_ref(),

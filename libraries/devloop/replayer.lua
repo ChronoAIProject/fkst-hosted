@@ -1,4 +1,5 @@
 local S = {}
+local convergence_shared = require("devloop.convergence.shared")
 local replay_fields = require("devloop.replay_fields")
 
 function S.install(opts)
@@ -418,7 +419,7 @@ function M.has_thinking_converge_replay(current, proposal_id, state, source_ref)
     return false
   end
   local base_version = M.strip_transition_version_suffixes(state.version)
-  local sr_digest = M.source_ref_digest(source_ref)
+  local sr_digest = convergence_shared.source_ref_digest(source_ref)
   local facts = M.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
   local round = M.max_converge_round(facts)
   return M.latest_complete_converge_round(current.comments, proposal_id, base_version, source_ref) ~= nil

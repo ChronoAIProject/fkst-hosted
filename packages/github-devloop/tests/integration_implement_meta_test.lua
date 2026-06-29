@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local forks = require("devloop.forks")
 local t = h.t
 local core = h.core
 local gh_argv = require("testkit.gh_argv_mock")
@@ -156,7 +157,7 @@ return {
     local event = ready()
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
-      core.fork_origin_marker("owner/repo", 618, "human", core.issue_source_ref("owner/repo", 618)),
+      forks.fork_origin_marker("owner/repo", 618, "human", core.issue_source_ref("owner/repo", 618)),
     })
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 618), {
       stdout = '{"title":"Original","state":"CLOSED","labels":[{"name":"fkst-dev:merged"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',

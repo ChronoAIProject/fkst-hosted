@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -50,7 +51,7 @@ local function comment_cases()
   local converge_marker = core.converge_round_marker(
     issue_proposal_id,
     reached_with_angles.dedup_key,
-    core.source_ref_digest(source_ref()),
+    convergence_shared.source_ref_digest(source_ref()),
     2,
     reached_with_angles.dedup_key .. "/loop/2",
     "Narrow question?",

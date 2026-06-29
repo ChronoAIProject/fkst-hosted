@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -145,7 +146,7 @@ local function review_round_comment(created_at)
     proposal_id,
     version,
     "def456",
-    core.source_ref_digest(source_ref),
+    convergence_shared.source_ref_digest(source_ref),
     1,
     "consensus:" .. review_proposal_id .. "/review/loop/1",
     "Still reviewing",

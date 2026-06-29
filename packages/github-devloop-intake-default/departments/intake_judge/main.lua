@@ -1,4 +1,5 @@
 local core = require("core")
+local execution_start = require("devloop.execution_start")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -33,7 +34,7 @@ local function tracks_umbrella(action)
 end
 
 local function build_enable_request(candidate, decision_dedup_key)
-  return core.build_execution_request_payload({
+  return execution_start.build_execution_request_payload({
     proposal_id = candidate.proposal_id,
     dedup_key = decision_dedup_key or candidate.dedup_key,
     source_ref = candidate.source_ref,

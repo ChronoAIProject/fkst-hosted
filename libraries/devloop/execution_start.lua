@@ -1,95 +1,95 @@
-local S = {}
+local base_ids = require("devloop.base_ids")
 
-function S.install(M)
-  local service_classes = {
-    expedite = true,
-    standard = true,
-    background = true,
-  }
+local E = {}
 
-  function M.is_execution_service_class(value)
-    return service_classes[tostring(value or "")] == true
-  end
+local service_classes = {
+  expedite = true,
+  standard = true,
+  background = true,
+}
 
-  function M.normalize_execution_service_class(value)
-    local text = tostring(value or ""):lower()
-    if service_classes[text] then
-      return text
-    end
-    return "standard"
-  end
-
-  function M.build_execution_request_payload(source)
-    local payload = {
-      schema = "github-devloop.execution-request.v1",
-      proposal_id = source.proposal_id,
-      dedup_key = source.dedup_key,
-      source_ref = M.normalize_source_ref(source.source_ref),
-    }
-    if type(source.origin) == "table" then
-      payload.origin = source.origin
-    end
-    if source.service_class ~= nil then
-      payload.service_class = M.normalize_execution_service_class(source.service_class)
-    end
-    if source.framing ~= nil then
-      payload.framing = tostring(source.framing)
-    end
-    if type(source.context) == "table" then
-      payload.context = source.context
-    end
-    return payload
-  end
-
-  function M.execution_intake_hand_off(request)
-    return {
-      kind = "own-intake-decision",
-      proposal_id = request.proposal_id,
-      decision = "enable",
-      dedup_key = request.dedup_key,
-      source_ref = M.normalize_source_ref(request.source_ref),
-    }
-  end
-
-  function M.build_execution_start_proposal(repo, issue_number, request, current, event_ts, dept)
-    local issue = {
-      repo = repo,
-      number = issue_number,
-      title = current.title,
-      updated_at = current.updated_at,
-      source_ref = request.source_ref,
-      content_fetch = M.context_fetch_ref_from_bundle({
-        dept = dept or "execute_start",
-        repo = repo,
-        issue_number = issue_number,
-        proposal_id = request.proposal_id,
-        version = request.dedup_key,
-        tick = event_ts,
-      }),
-    }
-    local proposal = M.build_board_proposal(issue, event_ts)
-    proposal.dedup_key = request.dedup_key
-    proposal.effect_version = request.dedup_key
-    proposal.intake_hand_off = M.execution_intake_hand_off(request)
-    return M.validate_proposal(proposal) and proposal or nil
-  end
-
-  function M.build_execution_start_effects(repo, issue_number, request, current, event_ts, dept)
-    local proposal = M.build_execution_start_proposal(repo, issue_number, request, current, event_ts, dept)
-    if proposal == nil then
-      return nil
-    end
-    local issue_ref = {
-      repo = repo,
-      number = issue_number,
-      source_ref = request.source_ref,
-    }
-    return {
-      proposal = proposal,
-      thinking_comment_request = M.build_observe_comment_request(issue_ref, proposal),
-      thinking_label_request = M.build_thinking_label_request(issue_ref, proposal),
-    }
-  end
+function E.is_execution_service_class(value)
+  return service_classes[tostring(value or "")] == true
 end
 
-return S
+function E.normalize_execution_service_class(value)
+  local text = tostring(value or ""):lower()
+  if service_classes[text] then
+    return text
+  end
+  return "standard"
+end
+
+function E.build_execution_request_payload(source)
+  local payload = {
+    schema = "github-devloop.execution-request.v1",
+    proposal_id = source.proposal_id,
+    dedup_key = source.dedup_key,
+    source_ref = base_ids.normalize_source_ref(source.source_ref),
+  }
+  if type(source.origin) == "table" then
+    payload.origin = source.origin
+  end
+  if source.service_class ~= nil then
+    payload.service_class = E.normalize_execution_service_class(source.service_class)
+  end
+  if source.framing ~= nil then
+    payload.framing = tostring(source.framing)
+  end
+  if type(source.context) == "table" then
+    payload.context = source.context
+  end
+  return payload
+end
+
+function E.execution_intake_hand_off(request)
+  return {
+    kind = "own-intake-decision",
+    proposal_id = request.proposal_id,
+    decision = "enable",
+    dedup_key = request.dedup_key,
+    source_ref = base_ids.normalize_source_ref(request.source_ref),
+  }
+end
+
+function E.build_execution_start_proposal(core, repo, issue_number, request, current, event_ts, dept)
+  local issue = {
+    repo = repo,
+    number = issue_number,
+    title = current.title,
+    updated_at = current.updated_at,
+    source_ref = request.source_ref,
+    content_fetch = core.context_fetch_ref_from_bundle({
+      dept = dept or "execute_start",
+      repo = repo,
+      issue_number = issue_number,
+      proposal_id = request.proposal_id,
+      version = request.dedup_key,
+      tick = event_ts,
+    }),
+  }
+  local proposal = core.build_board_proposal(issue, event_ts)
+  proposal.dedup_key = request.dedup_key
+  proposal.effect_version = request.dedup_key
+  proposal.intake_hand_off = E.execution_intake_hand_off(request)
+  return core.validate_proposal(proposal) and proposal or nil
+end
+
+function E.build_execution_start_effects(core, repo, issue_number, request, current, event_ts, dept)
+  local proposal = E.build_execution_start_proposal(core, repo, issue_number, request, current, event_ts, dept)
+  if proposal == nil then
+    return nil
+  end
+  local issue_ref = {
+    repo = repo,
+    number = issue_number,
+    source_ref = request.source_ref,
+  }
+  return {
+    proposal = proposal,
+    thinking_comment_request = core.build_observe_comment_request(issue_ref, proposal),
+    thinking_label_request = core.build_thinking_label_request(issue_ref, proposal),
+  }
+end
+
+return E

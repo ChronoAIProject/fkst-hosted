@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -52,7 +53,7 @@ end
 local function thinking_converge_comments(event, rounds, command)
   local proposal_id = core.proposal_id(event.repo, event.number)
   local base_version = core.build_proposal(event).dedup_key
-  local sr_digest = core.source_ref_digest(event.source_ref)
+  local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local angle_digests = {
     { angle = "minimal", verdict = "abstain", digest = "same-digest" },
   }
@@ -79,7 +80,7 @@ end
 local function thinking_changing_converge_comments(event, rounds, command)
   local proposal_id = core.proposal_id(event.repo, event.number)
   local base_version = core.build_proposal(event).dedup_key
-  local sr_digest = core.source_ref_digest(event.source_ref)
+  local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local comments = {
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
@@ -217,7 +218,7 @@ return {
     local command = trusted_command("IC_rereview_stalled_reviewing")
     local review_proposal = core.pr_review_proposal_id("owner/repo", 7, impl_version, "feedface")
     local review_version = core.safe_version_segment(impl_version)
-    local sr_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
+    local sr_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local angle_digests = {
       { angle = "minimal", verdict = "abstain", digest = "same-review-digest" },
     }

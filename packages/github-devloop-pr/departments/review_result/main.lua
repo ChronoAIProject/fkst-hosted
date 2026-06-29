@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
@@ -135,7 +136,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         end
         if effective_decision == "approve" then
           paths_digest = core.github_paths_digest(risk.paths)
-          angle_digest = core.converge_angles_digest(reached.angle_results)
+          angle_digest = convergence_shared.converge_angles_digest(reached.angle_results)
         end
       end
     end

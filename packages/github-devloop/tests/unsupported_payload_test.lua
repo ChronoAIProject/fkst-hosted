@@ -1,5 +1,6 @@
 local t = fkst.test
 local core = require("core")
+local execution_start = require("devloop.execution_start")
 
 local package_root = "packages/github-devloop"
 
@@ -148,7 +149,7 @@ local function payload_for_queue(queue)
     },
     devloop_doctor_tick = { schema = "github-devloop.doctor-tick.v1" },
     devloop_ensure_repo_tick = { schema = "github-devloop.ensure-repo-tick.v1" },
-    devloop_execute_request = core.build_execution_request_payload({
+    devloop_execute_request = execution_start.build_execution_request_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       dedup_key = "intake/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
       source_ref = { kind = "external", ref = "owner/repo#issue/42" },

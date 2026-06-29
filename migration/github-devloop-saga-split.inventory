@@ -1,5 +1,6 @@
 {"path":"libraries/devloop/autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
 {"path":"libraries/devloop/base.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/base_ids.lua","owner":"shared","reason":"shared devloop id/key/dedup helpers (extracted from base.lua) used across issue and PR packages."}
 {"path":"libraries/devloop/claims.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}
@@ -32,9 +33,9 @@
 {"path":"libraries/devloop/prompts.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/queue.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/queue_starvation.lua","owner":"shared","reason":"queue starvation observation stays issue/integration-side until R2 while redrive targets the PR queue."}
-{"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/replay_fields.lua","owner":"shared","reason":"replay payload field resolver is shared by issue and PR replay paths."}
 {"path":"libraries/devloop/replay_thinking_convergence.lua","owner":"issue","reason":"issue-side thinking replay derives durable converge-round true-stall into blocked without PR package authority."}
+{"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart/issue/pr_partition_contract.lua","owner":"shared","reason":"declares inert issue/PR partition contract data."}
@@ -56,11 +57,11 @@
 {"path":"libraries/devloop/strings.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
 {"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"packages/github-devloop-intake/core/admission.lua","owner":"intake","reason":"core module owns event-driven unmanaged issue admission."}
 {"path":"packages/github-devloop-intake-default/core/devloop_wiring.lua","owner":"intake","reason":"core module resolves default intake route package-private prompt modules."}
 {"path":"packages/github-devloop-intake-default/core/intake_class.lua","owner":"intake","reason":"core module owns default intake enable policy."}
 {"path":"packages/github-devloop-intake-default/core/intake_service_class.lua","owner":"intake","reason":"core module owns default intake service-class policy."}
 {"path":"packages/github-devloop-intake-default/departments/intake_judge/main.lua","owner":"intake","reason":"owns default intake route enable and decline policy."}
+{"path":"packages/github-devloop-intake/core/admission.lua","owner":"intake","reason":"core module owns event-driven unmanaged issue admission."}
 {"path":"packages/github-devloop-intake/departments/admission/main.lua","owner":"intake","reason":"owns event-driven unmanaged issue admission."}
 {"path":"packages/github-devloop-intake/departments/test_cache_seed/main.lua","owner":"cross-cutting","reason":"supports health, test probes, or cross-saga diagnostics."}
 {"path":"packages/github-devloop-integration/core/branches.lua","owner":"integration","reason":"core module supports branch topology or integration freshness work."}

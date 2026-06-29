@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 
 local M = {}
@@ -147,7 +148,7 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
   end
   local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
   local review_version = core.safe_version_segment(state.version)
-  local sr_digest = core.source_ref_digest(core.pr_source_ref(origin.repo, pr_number))
+  local sr_digest = convergence_shared.source_ref_digest(core.pr_source_ref(origin.repo, pr_number))
   local facts = core.review_converge_round_facts(
     current_pr.comments,
     review_proposal_id,

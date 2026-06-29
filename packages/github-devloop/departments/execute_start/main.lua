@@ -1,4 +1,5 @@
 local core = require("core")
+local execution_start = require("devloop.execution_start")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -39,7 +40,7 @@ local function read_current(repo, issue_number, request)
 end
 
 local function raise_execution_start(repo, issue_number, request, current, event_ts)
-  local effects = core.build_execution_start_effects(repo, issue_number, request, current, event_ts, "execute_start")
+  local effects = execution_start.build_execution_start_effects(core, repo, issue_number, request, current, event_ts, "execute_start")
   if effects == nil then
     log.warn("github-devloop dept=execute_start proposal_id=" .. tostring(request.proposal_id) .. " tag=SKIP reason=cannot-build-valid-execution-start-effects")
     return false

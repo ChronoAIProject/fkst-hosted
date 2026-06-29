@@ -1,3 +1,4 @@
+local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -45,7 +46,7 @@ end
 
 return {
   test_converge_round_facts_ignore_non_bot_marker = function()
-    local source_digest = core.source_ref_digest(source_ref)
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
     local marker = core.converge_round_marker(
       proposal_id,
       base_version,
@@ -94,7 +95,7 @@ return {
   end,
 
   test_converge_marker_round_trips_and_digests_are_stable = function()
-    local source_digest = core.source_ref_digest(source_ref)
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
     local consensus_dedup = base_version .. "/loop/3"
     local question = "  Which boundary\n\nshould   narrow?  "
     local angle_digests = angles()
@@ -122,8 +123,8 @@ return {
     t.eq(#facts, 1)
     t.eq(facts[1].round, 3)
     t.eq(facts[1].dedup, consensus_dedup)
-    t.eq(facts[1].question, core.converge_question_digest(question))
-    t.eq(facts[1].verdicts, core.converge_verdicts_digest(angle_digests))
+    t.eq(facts[1].question, convergence_shared.converge_question_digest(question))
+    t.eq(facts[1].verdicts, convergence_shared.converge_verdicts_digest(angle_digests))
     t.eq(facts[1].narrowed_question, "Which boundary should narrow?")
     t.eq(facts[1].angle_digests[1].digest, "Small enough.")
     t.eq(core.has_converge_round_marker({ trusted(first) }, proposal_id, base_version, source_digest, 3), true)
@@ -131,7 +132,7 @@ return {
   end,
 
   test_converge_marker_replay_fields_escape_delimiters = function()
-    local source_digest = core.source_ref_digest(source_ref)
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
     local marker = core.converge_round_marker(
       proposal_id,
       base_version,
@@ -150,7 +151,7 @@ return {
   end,
 
   test_converge_round_facts_keep_last_marker_for_same_round = function()
-    local source_digest = core.source_ref_digest(source_ref)
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
     local first_question = "Which boundary should narrow first?"
     local last_question = "Which boundary should narrow last?"
     local first = core.converge_round_marker(
@@ -175,7 +176,7 @@ return {
     local facts = core.converge_round_facts({ trusted(first .. "\n" .. last) }, proposal_id, base_version, source_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].round, 2)
-    t.eq(facts[1].question, core.converge_question_digest(last_question))
+    t.eq(facts[1].question, convergence_shared.converge_question_digest(last_question))
   end,
 
   test_append_converge_round_fact_preserves_existing_facts_and_appends_digest_fact = function()
@@ -195,14 +196,14 @@ return {
     t.eq(#appended, 2)
     t.eq(appended[1], existing[1])
     t.eq(appended[2].round, 2)
-    t.eq(appended[2].question, core.converge_question_digest(question))
-    t.eq(appended[2].verdicts, core.converge_verdicts_digest(angle_digests))
+    t.eq(appended[2].question, convergence_shared.converge_question_digest(question))
+    t.eq(appended[2].verdicts, convergence_shared.converge_verdicts_digest(angle_digests))
     t.eq(appended[2].dedup, base_version .. "/loop/2")
   end,
 
   test_converge_budget_round_counts_proposal_across_drift = function()
-    local source_a = core.source_ref_digest(source_ref)
-    local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
+    local source_a = convergence_shared.source_ref_digest(source_ref)
+    local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
     local drift_version = base_version .. "/drifted"
     local boundary_question = "Same boundary"
     local boundary_angles = angles()
@@ -218,8 +219,8 @@ return {
   end,
 
   test_converge_boundary_budget_round_ignores_changed_question_verdict_boundary = function()
-    local source_a = core.source_ref_digest(source_ref)
-    local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
+    local source_a = convergence_shared.source_ref_digest(source_ref)
+    local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
     local drift_version = base_version .. "/drifted"
     local boundary_question = "Current boundary"
     local boundary_angles = angles()
@@ -234,7 +235,7 @@ return {
   end,
 
   test_review_converge_facts_are_bound_to_issue_version_and_head = function()
-    local source_digest = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
+    local source_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/v1"
     local head_sha = "abcdef1234567890"
@@ -283,8 +284,8 @@ return {
   end,
 
   test_review_converge_budget_round_counts_review_saga_across_drift = function()
-    local source_a = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
-    local source_b = core.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?loop=8" })
+    local source_a = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
+    local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?loop=8" })
     local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/v1"
     local drift_version = issue_version .. "/drifted"

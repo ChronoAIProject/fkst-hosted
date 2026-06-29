@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local forks = require("devloop.forks")
 local t = h.t
 local gh_argv = require("testkit.gh_argv_mock")
 
@@ -370,9 +371,9 @@ return {
     t.eq(raised[1].queue, "github-proxy.github_issue_create_request")
     t.eq(raised[1].payload.schema, "github-proxy.issue-create.v1")
     t.eq(raised[1].payload.assignees[1], "fkst-test-bot")
-    t.eq(raised[1].payload.dedup_key, core.fork_issue_dedup_key("owner/repo", 43))
+    t.eq(raised[1].payload.dedup_key, forks.fork_issue_dedup_key("owner/repo", 43))
     t.eq(raised[1].payload.post_create_blocked_by.blocked_issue_number, 43)
-    t.eq(raised[1].payload.post_create_blocked_by.dedup_key, core.fork_issue_dedup_key("owner/repo", 43) .. "/blocked-by")
+    t.eq(raised[1].payload.post_create_blocked_by.dedup_key, forks.fork_issue_dedup_key("owner/repo", 43) .. "/blocked-by")
   end,
 
   test_other_author_fork_revalidates_closed_issue_before_raise = function()
@@ -419,7 +420,7 @@ return {
 
   test_existing_fork_parent_ledger_skips_duplicate_fork = function()
     mock_bot("fkst-test-bot", "1")
-    local dedup_key = core.fork_issue_dedup_key("owner/repo", 42)
+    local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({
         author_login = "human",
@@ -459,7 +460,7 @@ return {
 
   test_existing_fork_parent_intent_skips_duplicate_fork = function()
     mock_bot("fkst-test-bot", "1")
-    local dedup_key = core.fork_issue_dedup_key("owner/repo", 42)
+    local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({
         author_login = "human",
@@ -499,7 +500,7 @@ return {
 
   test_forged_fork_parent_intent_does_not_suppress_fork = function()
     mock_bot("fkst-test-bot", "1")
-    local dedup_key = core.fork_issue_dedup_key("owner/repo", 42)
+    local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     cache_set(core.fork_first_observed_key("owner/repo", 42), tostring(now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({

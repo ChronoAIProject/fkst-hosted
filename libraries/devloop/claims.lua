@@ -1,10 +1,9 @@
 local S = {}
 local github_handle = nil
 local error_facts = require("contract.error_facts")
+local forks = require("devloop.forks")
 
 function S.install(M)
-require("devloop.forks").install(M)
-
 local github_view = require("forge.github_view")
 local function github()
   if github_handle ~= nil then
@@ -301,8 +300,8 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
       log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
       return false
     end
-    local dedup_key = M.fork_issue_dedup_key(repo, issue_number)
-    if M.has_trusted_issue_create_parent_marker(current and current.comments, dedup_key, owner) then
+    local dedup_key = forks.fork_issue_dedup_key(repo, issue_number)
+    if forks.has_trusted_issue_create_parent_marker(M, current and current.comments, dedup_key, owner) then
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
@@ -311,13 +310,13 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
       log_claim(dept, proposal_id, "skip-fork-grace", "other-authored unassigned issue is inside fork grace window")
       return false
     end
-    current = M.rederive_issue_state(repo, issue_number)
-    local request, request_reason = M.build_fork_issue_create_request(repo, issue_number, current, M.issue_source_ref(repo, issue_number))
+    current = forks.rederive_issue_state(M, repo, issue_number)
+    local request, request_reason = forks.build_fork_issue_create_request(M, repo, issue_number, current, M.issue_source_ref(repo, issue_number))
     if request == nil then
       log_claim(dept, proposal_id, "skip-fork-" .. tostring(request_reason or "invalid"), "fork request could not be built from current issue")
       return false
     end
-    if M.has_trusted_issue_create_parent_marker(current and current.comments, request.dedup_key, owner) then
+    if forks.has_trusted_issue_create_parent_marker(M, current and current.comments, request.dedup_key, owner) then
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end

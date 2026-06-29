@@ -1,6 +1,7 @@
-local S = {}
+local base_ids = require("devloop.base_ids")
 
-function S.install(M)
+local F = {}
+
 local max_login_len = 80
 
 local function safe_marker_attr(value)
@@ -9,34 +10,34 @@ local function safe_marker_attr(value)
   text = text:gsub("%c", " "):gsub('"', "'"):gsub("[<>]", ""):gsub("%s+", " ")
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   if #text > 240 then
-    text = M.truncate_utf8(text, 240)
+    text = base_ids.truncate_utf8(text, 240)
   end
   return text
 end
 
-function M.fork_issue_dedup_key(repo, issue_number)
-  if not M.issue_ref_round_trips(repo, issue_number) then
+function F.fork_issue_dedup_key(repo, issue_number)
+  if not base_ids.issue_ref_round_trips(repo, issue_number) then
     error("github-devloop: invalid fork issue target")
   end
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "github-devloop",
     "fork",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     "issue",
-    M.safe_issue(issue_number),
+    base_ids.safe_issue(issue_number),
     "v1",
   })
 end
 
-function M.has_trusted_issue_create_parent_marker(comments, dedup_key, bot_login)
+function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot_login)
   if type(comments) ~= "table" then
     return false
   end
   local create_pattern = "<!%-%- fkst:github%-proxy:issue%-create%-intent:v1.-%-%->"
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(comments) do
-    if M.comment_author_login(comment) == tostring(bot_login) then
-      local body = M.comment_body(comment)
+    if core.comment_author_login(comment) == tostring(bot_login) then
+      local body = core.comment_body(comment)
       for marker in body:gmatch(create_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
           return true
@@ -52,25 +53,25 @@ function M.has_trusted_issue_create_parent_marker(comments, dedup_key, bot_login
   return false
 end
 
-function M.fork_issue_title(issue_number, original_title)
+function F.fork_issue_title(issue_number, original_title)
   local title = tostring(original_title or "Issue")
   title = title:gsub("%c", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
   if title == "" then
     title = "Issue"
   end
   local prefix = "Fork of #" .. tostring(issue_number) .. ": "
-  local limit = M._max_title_len - #prefix
+  local limit = base_ids.max_title_len - #prefix
   if limit < 1 then
     limit = 1
   end
   if #title > limit then
-    title = M.truncate_utf8(title, limit)
+    title = base_ids.truncate_utf8(title, limit)
   end
   return prefix .. title
 end
 
-function M.fork_origin_marker(repo, issue_number, author_login, source_ref)
-  local normalized = M.normalize_source_ref(source_ref or M.issue_source_ref(repo, issue_number))
+function F.fork_origin_marker(repo, issue_number, author_login, source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref or base_ids.issue_source_ref(repo, issue_number))
   return '<!-- fkst:github-devloop:fork-origin:v1 repo="' .. safe_marker_attr(repo)
     .. '" issue="' .. safe_marker_attr(issue_number)
     .. '" author="' .. safe_marker_attr(author_login or "unknown")
@@ -79,13 +80,13 @@ function M.fork_origin_marker(repo, issue_number, author_login, source_ref)
     .. '" -->'
 end
 
-local function fork_origin_fact_from_text(M, text)
+local function fork_origin_fact_from_text(core, text)
   for marker in tostring(text or ""):gmatch("<!%-%- fkst:github%-devloop:fork%-origin:v1.-%-%->") do
     local source_ref = {
       kind = marker:match('source_ref_kind="([^"]+)"'),
       ref = marker:match('source_ref="([^"]+)"'),
     }
-    local repo, issue_number = M.parse_issue_source_ref(source_ref)
+    local repo, issue_number = core.parse_issue_source_ref(source_ref)
     if repo ~= nil and issue_number ~= nil then
       return {
         repo = repo,
@@ -97,26 +98,26 @@ local function fork_origin_fact_from_text(M, text)
   return nil
 end
 
-function M.fork_origin_fact(entity)
+function F.fork_origin_fact(core, entity)
   if type(entity) ~= "table" then
     return nil
   end
-  if M.issue_author_login(entity) == M.claim_owner() then
-    local body_fact = fork_origin_fact_from_text(M, entity.body)
+  if core.issue_author_login(entity) == core.claim_owner() then
+    local body_fact = fork_origin_fact_from_text(core, entity.body)
     if body_fact ~= nil then
       return body_fact
     end
   end
-  for _, comment in ipairs(M._trusted_marker_comments(entity.comments)) do
-    local comment_fact = fork_origin_fact_from_text(M, M.comment_body(comment))
+  for _, comment in ipairs(core._trusted_marker_comments(entity.comments)) do
+    local comment_fact = fork_origin_fact_from_text(core, core.comment_body(comment))
     if comment_fact ~= nil then
       return comment_fact
     end
   end
   local title_issue = tostring(entity.title or ""):match("^Fork of #(%d+):")
   if title_issue ~= nil then
-    local source_ref = M.issue_source_ref(entity.repo, title_issue)
-    local repo, issue_number = M.parse_issue_source_ref(source_ref)
+    local source_ref = base_ids.issue_source_ref(entity.repo, title_issue)
+    local repo, issue_number = core.parse_issue_source_ref(source_ref)
     if repo ~= nil and issue_number ~= nil then
       return {
         repo = repo,
@@ -128,21 +129,21 @@ function M.fork_origin_fact(entity)
   return nil
 end
 
-function M.rederive_issue_state(repo, issue_number)
-  local view = M.gh_issue_view_state(repo, issue_number, 30)
+function F.rederive_issue_state(core, repo, issue_number)
+  local view = core.gh_issue_view_state(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue source_ref state recheck failed: " .. tostring(view.stderr))
   end
-  return M.parse_issue_view_state(view.stdout)
+  return core.parse_issue_view_state(view.stdout)
 end
 
-function M.rederive_issue_is_open(repo, issue_number)
-  local current = M.rederive_issue_state(repo, issue_number)
+function F.rederive_issue_is_open(core, repo, issue_number)
+  local current = F.rederive_issue_state(core, repo, issue_number)
   return tostring(current.state or ""):upper() == "OPEN", current
 end
 
-function M.fork_issue_body(repo, issue_number, author_login, source_ref)
-  local normalized = M.normalize_source_ref(source_ref or M.issue_source_ref(repo, issue_number))
+function F.fork_issue_body(repo, issue_number, author_login, source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref or base_ids.issue_source_ref(repo, issue_number))
   return table.concat({
     "Self-owned fork for isolated implementation.",
     "",
@@ -150,26 +151,26 @@ function M.fork_issue_body(repo, issue_number, author_login, source_ref)
     "Original author: " .. tostring(author_login or "unknown"),
     "Source ref: " .. tostring(normalized.kind) .. ":" .. tostring(normalized.ref),
     "",
-    M.fork_origin_marker(repo, issue_number, author_login, normalized),
+    F.fork_origin_marker(repo, issue_number, author_login, normalized),
   }, "\n")
 end
 
-function M.build_fork_issue_create_request(repo, issue_number, current, source_ref)
+function F.build_fork_issue_create_request(core, repo, issue_number, current, source_ref)
   if tostring(current and current.state or ""):upper() ~= "OPEN" then
     return nil, "original-closed"
   end
-  local author_login = M.issue_author_login(current)
+  local author_login = core.issue_author_login(current)
   if author_login == nil or #author_login > max_login_len then
     return nil, "author-unknown"
   end
-  local dedup_key = M.fork_issue_dedup_key(repo, issue_number)
-  local normalized = M.normalize_source_ref(source_ref or M.issue_source_ref(repo, issue_number))
+  local dedup_key = F.fork_issue_dedup_key(repo, issue_number)
+  local normalized = base_ids.normalize_source_ref(source_ref or base_ids.issue_source_ref(repo, issue_number))
   return {
     schema = "github-proxy.issue-create.v1",
     repo = tostring(repo),
-    title = M.fork_issue_title(issue_number, current and current.title),
-    body = M.fork_issue_body(repo, issue_number, author_login, normalized),
-    assignees = { M.claim_owner() },
+    title = F.fork_issue_title(issue_number, current and current.title),
+    body = F.fork_issue_body(repo, issue_number, author_login, normalized),
+    assignees = { core.claim_owner() },
     dedup_key = dedup_key,
     external_effect_saga = "fork-and-block",
     external_effect_step = "create-fork",
@@ -187,6 +188,4 @@ function M.build_fork_issue_create_request(repo, issue_number, current, source_r
   }, nil
 end
 
-end
-
-return S
+return F

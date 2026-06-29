@@ -1,4 +1,5 @@
 local S = {}
+local convergence_shared = require("devloop.convergence.shared")
 local registry = require("workflow.registry")
 
 local source_ref_derivations = {
@@ -240,7 +241,7 @@ function M.restart_effect_contract_errors(rows, consumer_sources)
 end
 
 function M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
-  local sr_digest = M.source_ref_digest(source_ref)
+  local sr_digest = convergence_shared.source_ref_digest(source_ref)
   local latest = nil
   local facts = base_version ~= nil
     and M.converge_round_facts(comments, proposal_id, base_version, sr_digest)

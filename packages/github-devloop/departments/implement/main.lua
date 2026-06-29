@@ -1,6 +1,7 @@
 local core = require("core")
 local saga = require("workflow.saga")
 local pr_child_handoff = require("departments.implement.pr_child_handoff")
+local forks = require("devloop.forks")
 local slice_gate = require("departments.implement.slice_gate")
 local substrate_pin = require("departments.implement.substrate_pin")
 local transitions = require("departments.implement.transitions")
@@ -536,11 +537,11 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
 end
 
 local function backing_original_closed(current)
-  local origin = core.fork_origin_fact(current)
+  local origin = forks.fork_origin_fact(core, current)
   if origin == nil then
     return false
   end
-  local open = core.rederive_issue_is_open(origin.repo, origin.issue_number)
+  local open = forks.rederive_issue_is_open(core, origin.repo, origin.issue_number)
   return not open, origin
 end
 

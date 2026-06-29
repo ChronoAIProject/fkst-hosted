@@ -9,6 +9,9 @@ function S.install(M, shared)
   local decode_attr = shared.decode_attr
   local decode_angle_replay = shared.decode_angle_replay
   local encode_angle_replay = shared.encode_angle_replay
+  local converge_question_digest = shared.converge_question_digest
+  local converge_verdicts_digest = shared.converge_verdicts_digest
+  local converge_angles_digest = shared.converge_angles_digest
   local attr = shared.attr
   local is_digest = shared.is_digest
   local is_bounded_attr = shared.is_bounded_attr
@@ -63,8 +66,8 @@ function M.append_converge_round_fact(facts, round, narrowed_question, angle_dig
   end
   table.insert(copied, {
     round = round,
-    question = M.converge_question_digest(narrowed_question),
-    verdicts = M.converge_verdicts_digest(angle_digests),
+    question = converge_question_digest(narrowed_question),
+    verdicts = converge_verdicts_digest(angle_digests),
     dedup = dedup_key,
   })
   return copied
@@ -88,9 +91,9 @@ function M.converge_round_marker(proposal_id, base_version, source_ref_digest, r
     .. '" source_ref="' .. safe_attr(source_ref_digest, max_digest_len)
     .. '" round="' .. tostring(n)
     .. '" dedup="' .. safe_attr(consensus_dedup, M._max_dedup_len)
-    .. '" question="' .. M.converge_question_digest(narrowed_question)
-    .. '" verdicts="' .. M.converge_verdicts_digest(angle_digests)
-    .. '" angles="' .. M.converge_angles_digest(angle_digests)
+    .. '" question="' .. converge_question_digest(narrowed_question)
+    .. '" verdicts="' .. converge_verdicts_digest(angle_digests)
+    .. '" angles="' .. converge_angles_digest(angle_digests)
     .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" -->'
@@ -108,9 +111,9 @@ function M.review_converge_round_marker(review_proposal_id, issue_proposal_id, i
     .. '" source_ref="' .. safe_attr(source_ref_digest, max_digest_len)
     .. '" round="' .. tostring(n)
     .. '" dedup="' .. safe_attr(consensus_dedup, M._max_dedup_len)
-    .. '" question="' .. M.converge_question_digest(narrowed_question)
-    .. '" verdicts="' .. M.converge_verdicts_digest(angle_digests)
-    .. '" angles="' .. M.converge_angles_digest(angle_digests)
+    .. '" question="' .. converge_question_digest(narrowed_question)
+    .. '" verdicts="' .. converge_verdicts_digest(angle_digests)
+    .. '" angles="' .. converge_angles_digest(angle_digests)
     .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" -->'
@@ -141,8 +144,8 @@ function M.converge_round_facts_for_proposal(comments, proposal_id)
 end
 
 function M.converge_round_facts_for_proposal_boundary(comments, proposal_id, narrowed_question, angle_digests)
-  local question = M.converge_question_digest(narrowed_question)
-  local verdicts = M.converge_verdicts_digest(angle_digests)
+  local question = converge_question_digest(narrowed_question)
+  local verdicts = converge_verdicts_digest(angle_digests)
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(proposal_id)
       and attr(marker, "question") == question

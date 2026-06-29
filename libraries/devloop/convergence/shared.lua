@@ -140,37 +140,35 @@ local Shared = {
   is_bounded_attr = is_bounded_attr,
 }
 
-function Shared.install(M)
-function M.source_ref_digest(source_ref)
+function Shared.source_ref_digest(source_ref)
   if type(source_ref) ~= "table" then
-    return digest(M, "sr", "")
+    return digest(nil, "sr", "")
   end
-  return digest(M, "sr", tostring(source_ref.kind or "") .. "\n" .. tostring(source_ref.ref or ""))
+  return digest(nil, "sr", tostring(source_ref.kind or "") .. "\n" .. tostring(source_ref.ref or ""))
 end
 
-function M.converge_question_digest(narrowed_question)
+function Shared.converge_question_digest(narrowed_question)
   local normalized = normalize_text(narrowed_question)
   if #normalized > max_question_len then
     normalized = normalized:sub(1, max_question_len)
   end
-  return digest(M, "q", normalized)
+  return digest(nil, "q", normalized)
 end
 
-function M.converge_verdicts_digest(angle_digests)
+function Shared.converge_verdicts_digest(angle_digests)
   local parts = {}
   for _, item in ipairs(sorted_angle_items(angle_digests)) do
     table.insert(parts, item.angle .. "=" .. item.verdict)
   end
-  return digest(M, "v", table.concat(parts, "\n"))
+  return digest(nil, "v", table.concat(parts, "\n"))
 end
 
-function M.converge_angles_digest(angle_digests)
+function Shared.converge_angles_digest(angle_digests)
   local parts = {}
   for _, item in ipairs(sorted_angle_items(angle_digests)) do
     table.insert(parts, item.angle .. "=" .. item.verdict .. ":" .. item.digest)
   end
-  return digest(M, "a", table.concat(parts, "\n"))
-end
+  return digest(nil, "a", table.concat(parts, "\n"))
 end
 
 return Shared

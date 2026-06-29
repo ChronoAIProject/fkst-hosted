@@ -4,7 +4,7 @@ function S.install(M)
 local codex = require("workflow.codex")
 local error_facts = require("contract.error_facts")
 local gitref = require("forge.gitref")
-local source_refs = require("contract.source_ref")
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 
 local max_key_len = 200
@@ -18,8 +18,6 @@ local max_impl_output_len = 2000
 local max_blocking_gap_len = 240
 local max_review_ledger_len = 1200
 local max_pr_issue_context_len = 3000
-local max_repo_key_len = 100
-local max_issue_key_len = 30
 local max_update_key_len = 50
 local max_version_key_len = 40
 local max_worktree_prefix_len = 90
@@ -110,12 +108,7 @@ local one_line = error_facts.one_line
 local is_bounded_string = strings.is_bounded_string
 local decimal_checksum = strings.decimal_checksum
 
-local function sdk_truncate_utf8(value, limit)
-  if type(truncate_utf8) ~= "function" then
-    error("github-devloop: truncate_utf8 SDK primitive is required")
-  end
-  return truncate_utf8(value, limit)
-end
+local sdk_truncate_utf8 = base_ids.truncate_utf8
 
 local function has_value(values, expected)
   if type(values) ~= "table" then
@@ -177,32 +170,14 @@ function M.assert_trusted_bot_configured()
   return trusted_bot_login
 end
 
-local function dedup_key(parts)
-  local key = strings.sanitize_key(table.concat(parts, "/"), false)
-  if #key > max_dedup_len then
-    local suffix = "-" .. decimal_checksum(key)
-    key = sdk_truncate_utf8(key, max_dedup_len - #suffix):gsub("[/%-]+$", "") .. suffix
-  end
-  if not is_path_safe_key(key, max_dedup_len) then
-    error("github-devloop: invalid dedup_key")
-  end
-  return key
-end
+local dedup_key = base_ids.dedup_key
 
 function M.safe_repo(repo)
-  local safe = strings.sanitize_key(repo, max_key_len):sub(1, max_repo_key_len):gsub("/+$", "")
-  if safe == "" then
-    return "empty"
-  end
-  return safe
+  return base_ids.safe_repo(repo)
 end
 
 function M.safe_issue(issue_number)
-  local safe = strings.sanitize_key(issue_number, max_key_len):sub(1, max_issue_key_len):gsub("/+$", "")
-  if safe == "" then
-    return "empty"
-  end
-  return safe
+  return base_ids.safe_issue(issue_number)
 end
 
 function M.safe_updated_at(updated_at)
@@ -261,7 +236,7 @@ function M.is_intake_held(labels)
 end
 
 function M.proposal_id(repo, issue_number)
-  return "github-devloop/issue/" .. M.safe_repo(repo) .. "/" .. M.safe_issue(issue_number)
+  return base_ids.proposal_id(repo, issue_number)
 end
 
 function M.safe_head_segment(head_sha)
@@ -289,21 +264,7 @@ function M.pr_review_proposal_id(repo, pr_number, version, head_sha)
 end
 
 function M.parse_proposal_id(id)
-  if type(id) ~= "string" then
-    return nil
-  end
-
-  local rest = id:match("^github%-devloop/issue/(.+)$")
-  if rest == nil then
-    return nil
-  end
-
-  local issue_number = rest:match("/([^/]+)$")
-  local repo = issue_number and rest:sub(1, #rest - #issue_number - 1) or nil
-  if repo == nil or repo == "" or issue_number == nil or issue_number == "" then
-    return nil
-  end
-  return repo, issue_number
+  return base_ids.parse_proposal_id(id)
 end
 
 function M.parse_pr_review_proposal_id(id)
@@ -425,17 +386,7 @@ function M.is_safe_pr_review_result_ref(proposal_id, dedup_key)
 end
 
 function M.issue_ref_round_trips(repo, issue_number)
-  local repo_text = tostring(repo)
-  local issue_text = tostring(issue_number)
-  if M.safe_repo(repo) ~= repo_text then
-    return false
-  end
-  if M.safe_issue(issue_number) ~= issue_text then
-    return false
-  end
-
-  local parsed_repo, parsed_issue = M.parse_proposal_id(M.proposal_id(repo, issue_number))
-  return parsed_repo == repo_text and parsed_issue == issue_text
+  return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
 function M.proposal_dedup_key(proposal_id, updated_at)
@@ -787,13 +738,7 @@ function M.neutralize_untrusted_comment_text(text)
 end
 
 function M.normalize_source_ref(source_ref)
-  if not source_refs.has_bounded_source_ref(source_ref, max_key_len) then
-    error("github-devloop: invalid source_ref")
-  end
-  return {
-    kind = source_ref.kind,
-    ref = source_ref.ref,
-  }
+  return base_ids.normalize_source_ref(source_ref)
 end
 
 function M.gh_exec_opts(cmd_or_opts, timeout)
