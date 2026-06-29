@@ -32,6 +32,10 @@ pub mod ornn;
 pub mod reconcile;
 pub mod router;
 pub mod routes;
+// In-pod `run-session` subcommand (milestone #9): drives ONE substrate session
+// to completion in a Kubernetes Job, mapping the engine's terminal status onto
+// the process exit code. No ClaimMap/CAS, no `/internal/v1`, no heartbeat.
+pub mod runner;
 pub mod session_spec;
 pub mod sessions;
 pub mod startup;

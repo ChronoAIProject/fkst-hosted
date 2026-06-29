@@ -40,6 +40,16 @@ async fn main() -> ExitCode {
         tracing::warn!(directive = %raw_directive, "invalid log directive; falling back to info");
     }
 
+    // 1b. Subcommand dispatch: `run-session` is the in-pod, pod-per-session
+    //     runner (milestone #9). It drives ONE substrate engine session to
+    //     completion and exits with the session disposition — it never binds a
+    //     socket or builds the server router. Dispatched here (after the
+    //     subscriber init so its logs are structured) so the default arg-less
+    //     invocation keeps the existing API-server behaviour unchanged.
+    if std::env::args().nth(1).as_deref() == Some("run-session") {
+        return fkst_control_plane::runner::run_session_from_env().await;
+    }
+
     // 2. Load the configuration from the environment.
     let config = match Config::load_from_env() {
         Ok(config) => config,
