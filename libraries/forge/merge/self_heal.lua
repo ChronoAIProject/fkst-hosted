@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("forge.gitref")
 local strings = require("contract.strings")
 
 function S.install(M, shared)
@@ -46,10 +47,10 @@ end
 local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_seconds, age_seconds, key)
   local head_sha = tostring(pr and pr.head_sha or "")
   local head_ref = tostring(pr and pr.head_ref_name or "")
-  if not M.is_safe_head_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     return false, "ci-selfheal-invalid-head"
   end
-  if not M.is_safe_branch(head_ref) then
+  if not forge_validators.is_git_ref_safe(head_ref) then
     return false, "ci-selfheal-invalid-branch"
   end
   if not M.is_same_repo_pr_head(pr, repo) then
@@ -82,7 +83,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
     error("forge.merge: merge CI self-heal head read failed: " .. tostring(pushed_head.stderr))
   end
   local new_head_sha = tostring(pushed_head.stdout or ""):gsub("%s+$", "")
-  if not M.is_safe_head_sha(new_head_sha) or new_head_sha == head_sha then
+  if not forge_validators.is_git_sha(new_head_sha) or new_head_sha == head_sha then
     error("forge.merge: merge CI self-heal did not create a fresh head")
   end
   M.invalidate_entity_after_write(repo, "pr", pr_number)

@@ -1,5 +1,6 @@
 local S = {}
 local check_runs = require("forge.github.check_runs")
+local forge_validators = require("forge.gitref")
 local strings = require("contract.strings")
 
 local merge_gate_reason_class_entries = {
@@ -43,7 +44,7 @@ local function log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
 end
 
 local function fetch_commit_check_runs(repo, head_sha)
-  if tostring(repo or "") == "" or not M.is_safe_head_sha(head_sha) then
+  if tostring(repo or "") == "" or not forge_validators.is_git_sha(head_sha) then
     return nil, "ci-unknown"
   end
   local result = M.gh_commit_check_runs(repo, head_sha, 30)

@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("forge.gitref")
 
 function S.install(M, shared)
 local merge_attempt_limit = shared.merge_attempt_limit
@@ -26,7 +27,7 @@ function M.run_verified_pr_merge(request)
     local merge_head_sha = request and request.head_sha
     if request and request.accept_current_head == true then
       merge_head_sha = rechecked_pr.head_sha
-      if not M.is_safe_head_sha(merge_head_sha) then
+      if not forge_validators.is_git_sha(merge_head_sha) then
         return false, "invalid-current-head-sha", rechecked_pr
       end
     end

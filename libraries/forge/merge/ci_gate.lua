@@ -1,4 +1,5 @@
 local S = {}
+local forge_validators = require("forge.gitref")
 
 function S.install(M, shared)
 local strings = shared.strings
@@ -55,7 +56,7 @@ function M.classify_pr_ci_gate(pr, opts)
   end
   local repo = opts and opts.repo or nil
   local head_sha = tostring(pr and pr.head_sha or "")
-  if not M.is_safe_head_sha(head_sha) then
+  if not forge_validators.is_git_sha(head_sha) then
     return ci_classification("CI_UNKNOWN", "ci-unknown")
   end
   if tostring(repo or "") == "" then
@@ -83,7 +84,7 @@ function M.classify_pr_ci_gate(pr, opts)
 end
 
 function M.rerunnable_check_run_ids_for_head(runs, head_sha)
-  if type(runs) ~= "table" or not M.is_safe_head_sha(head_sha) then
+  if type(runs) ~= "table" or not forge_validators.is_git_sha(head_sha) then
     return {}
   end
   local ids = {}
