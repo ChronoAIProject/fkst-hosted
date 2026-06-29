@@ -19,6 +19,7 @@
 //! network-clone primitive itself is covered by `engine::clone`'s own tests.
 
 mod creds;
+mod log;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -293,6 +294,8 @@ async fn run_session_with(
         session_id: session_id.clone(),
         worker_id: run_key.clone(),
     };
+    // Capture what the log task needs before `engine_config` moves into the runner.
+    let log_temp_root = engine_config.temp_root.clone();
     let runner = SessionRunner::new(engine_config);
     let mut session = match runner.start_with_spec(&start_spec).await {
         Ok(session) => session,
@@ -308,13 +311,108 @@ async fn run_session_with(
         "run-session: engine ready; supervising to completion"
     );
 
-    // 9. Supervise to a terminal status. `prepared` + `codex_home` are dropped
-    //    AFTER the loop so their RAII guards keep the clone + CODEX_HOME on disk
-    //    for the whole session lifetime.
+    // 9. Start the best-effort session log: stream the engine's stdout into
+    //    `.fkst/log/<run_key>.log` on the dedicated branch. It runs concurrently
+    //    with the supervise loop and NEVER affects the disposition (a log error
+    //    is only a warning). Disabled when the project is not a real git clone.
+    let log_task = spawn_session_log(
+        &mut session,
+        &prepared,
+        &spec,
+        &github_token,
+        &log_temp_root,
+    );
+
+    // 10. Supervise to a terminal status. `prepared` + `codex_home` are dropped
+    //     AFTER the loop so their RAII guards keep the clone + CODEX_HOME on disk
+    //     for the whole session lifetime.
     let disposition = supervise_to_completion(&runner, &mut session, &session_id, &run_key).await;
+
+    // 11. Give the log task a bounded moment to flush its final checkpoint. The
+    //     engine's stdout closes at exit, so the task ends on its own; the
+    //     timeout just guards against a hung push.
+    if let Some(handle) = log_task {
+        if tokio::time::timeout(Duration::from_secs(15), handle)
+            .await
+            .is_err()
+        {
+            tracing::warn!(session_id = %session_id, "run-session: session log flush timed out");
+        }
+    }
+
     drop(codex_home);
     drop(prepared);
     disposition
+}
+
+/// Spawn the best-effort session-log task: take the engine's line-framed stdout
+/// and stream it into the dedicated log branch. Returns `None` (logging off) when
+/// the project is not a git clone (fixture tests), the stdout stream was already
+/// taken, or the log writer could not be initialised — none of which is fatal.
+fn spawn_session_log(
+    session: &mut crate::engine::RunningSession,
+    prepared: &PreparedRepo,
+    spec: &SessionSpec,
+    github_token: &SecretString,
+    temp_root: &Path,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if !prepared.project_root.join(".git").exists() {
+        tracing::warn!(
+            session_id = %spec.session_id,
+            "run-session: project root is not a git repo; session logging disabled"
+        );
+        return None;
+    }
+    let rx = session.take_stdout()?;
+    let writer = match log::SessionLog::new(
+        prepared.project_root.clone(),
+        &spec.session_id,
+        &spec.run_key,
+        Some(github_token.clone()),
+        temp_root,
+    ) {
+        Ok(writer) => writer,
+        Err(error) => {
+            tracing::warn!(error = %error, "run-session: failed to init session log; logging disabled");
+            return None;
+        }
+    };
+    Some(tokio::spawn(run_log_task(rx, writer)))
+}
+
+/// Drive the session log: append each engine stdout line, checkpoint on a
+/// debounce, and flush a final checkpoint when the stdout stream closes. Every
+/// failure is a warning only.
+async fn run_log_task(mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>, mut writer: log::SessionLog) {
+    let debounce = Duration::from_secs(10);
+    writer.record("session started");
+    let mut last = std::time::Instant::now();
+    loop {
+        tokio::select! {
+            line = rx.recv() => match line {
+                Some(bytes) => {
+                    writer.append_line(&bytes);
+                    if last.elapsed() >= debounce {
+                        if let Err(error) = writer.checkpoint().await {
+                            tracing::warn!(error = %error, "run-session: log checkpoint failed");
+                        }
+                        last = std::time::Instant::now();
+                    }
+                }
+                None => break,
+            },
+            _ = tokio::time::sleep(debounce) => {
+                if let Err(error) = writer.checkpoint().await {
+                    tracing::warn!(error = %error, "run-session: log checkpoint failed");
+                }
+                last = std::time::Instant::now();
+            }
+        }
+    }
+    writer.record("session ended");
+    if let Err(error) = writer.finish().await {
+        tracing::warn!(error = %error, "run-session: final log checkpoint failed");
+    }
 }
 
 /// Poll the engine's status until it reaches a terminal state, mapping a clean
