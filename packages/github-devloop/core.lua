@@ -1,5 +1,6 @@
 local M = {}
 local wiring = require("core.devloop_wiring")
+local workflow_ports = require("devloop.adapters.workflow_ports")
 
 
 function M.decompose_package_queue()
@@ -58,13 +59,15 @@ M.restart_consumer_sources = {
 }
 require("devloop.restart").install(M, wiring.restart(M))
 require("devloop.restart.issue.pr_partition_contract").install(M)
-require("workflow.restart_liveness_contract").install(M, require("devloop.liveness").with_restart_policy({
+local restart_liveness_resolved = require("devloop.liveness").with_restart_policy({
   runtime_provenance = {
     proposal_id = "github-devloop/issue/provenance/repo/1",
     version = "restart-liveness-provenance",
     marker_created_at = "2026-06-03T00:00:00Z",
   },
-}))
+})
+restart_liveness_resolved.workflow_ports = workflow_ports.from_devloop(M)
+require("workflow.restart_liveness_contract").install(M, restart_liveness_resolved)
 require("devloop.restart_responsibility_contract").install(M)
 require("devloop.restart_actionable_epoch").install(M)
 local ready_split_replayers = require("core.ready_split").install(M)

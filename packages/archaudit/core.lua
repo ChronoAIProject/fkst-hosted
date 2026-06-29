@@ -255,7 +255,13 @@ local function liveness_model(rows)
       lifecycle_states[next_state] = true
     end
   end
-  restart_liveness_contract.install(model)
+  restart_liveness_contract.install(model, {
+    workflow_ports = {
+      trusted_bot_login = function()
+        error("archaudit: workflow-port-unavailable: trusted_bot_login is not available for producer-liveness restart model")
+      end,
+    },
+  })
   local shared = workflow_liveness_shared.install(model, { liveness_signal_producers = {} })
   workflow_liveness_contract.install(model, shared)
   return model

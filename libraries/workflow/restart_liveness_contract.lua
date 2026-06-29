@@ -1,8 +1,10 @@
 local S = {}
 local contract_time = require("contract.time")
+local Ports = require("workflow.ports")
 
 function S.install(M, resolved)
 resolved = resolved or {}
+local deps = Ports.restart_liveness_contract(resolved)
 
 local epoch_sources = {
   ["state_entry:v1"] = {
@@ -516,7 +518,7 @@ local function validate_runtime_provenance(row, errors)
     local marker_created_at = provenance.marker_created_at or default_provenance_marker_created_at
     comments = {
       {
-        author_login = M.trusted_bot_login(),
+        author_login = deps.ports.trusted_bot_login(),
         created_at = marker_created_at,
         body = M.dependency_release_marker(proposal_id, version),
       },

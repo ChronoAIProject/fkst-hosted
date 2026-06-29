@@ -161,7 +161,11 @@ local function install_generic_restart_liveness_model(row)
       return {}
     end,
   }
-  require("workflow.restart_liveness_contract").install(model)
+  require("workflow.restart_liveness_contract").install(model, {
+    workflow_ports = {
+      trusted_bot_login = core.trusted_bot_login,
+    },
+  })
   return model
 end
 
