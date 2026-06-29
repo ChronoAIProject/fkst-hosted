@@ -1,4 +1,5 @@
 local core = require("core")
+local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -7,6 +8,8 @@ local spec = {
   fanout = { "devloop_branch_tick" },
   stall_window = "10m",
 }
+
+local git = git_adapter.production_handle
 
 local function done(_event)
   return false
@@ -50,9 +53,9 @@ end
 
 local function with_temp_worktree(runtime, repo, upstream, integration, integration_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, upstream, integration, integration_sha)
-  local plan = core.git_worktree_add_detached_plan(worktree, integration_sha)
+  local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, integration_sha)
   core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
-  core.run_required(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
+  core.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -107,7 +110,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     return
   end
 
-  local merge_head = trim_stdout(core.run_required(core.git_head_sha(worktree, 30), "sync head"))
+  local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "sync head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe branch sync merge head")
   end

@@ -23,14 +23,6 @@ function S.run_path_is_directory(M, path, timeout)
   return exec_sync({ cmd = M.path_is_directory_cmd(path), timeout = timeout or 30 })
 end
 
-local function require_commit_message(message)
-  local bounded_message = tostring(message or "")
-  if bounded_message == "" or #bounded_message > 200 then
-    error("github-devloop: invalid git commit message")
-  end
-  return bounded_message
-end
-
 function S.install(M)
   function M.git_status(worktree, timeout)
     return support.git().status_porcelain(worktree, timeout)
@@ -41,11 +33,11 @@ function S.install(M)
   end
 
   function M.git_commit(worktree, message, timeout)
-    return support.git().commit_message(worktree, require_commit_message(message), timeout)
-  end
-
-  function M.git_empty_commit(worktree, message, timeout)
-    return support.git().empty_commit_message(worktree, require_commit_message(message), timeout)
+    local bounded_message = tostring(message or "")
+    if bounded_message == "" or #bounded_message > 200 then
+      error("github-devloop: invalid git commit message")
+    end
+    return support.git().commit_message(worktree, bounded_message, timeout)
   end
 
   function M.git_current_branch(worktree, timeout)
@@ -53,10 +45,6 @@ function S.install(M)
       return support.git().current_branch(timeout)
     end
     return support.git().current_branch_worktree(worktree, timeout)
-  end
-
-  function M.git_head_sha(worktree, timeout)
-    return support.git().head_sha(worktree, timeout)
   end
 
   function M.git_base_head(branch, timeout)

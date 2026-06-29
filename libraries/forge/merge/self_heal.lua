@@ -1,8 +1,11 @@
 local S = {}
 local forge_validators = require("forge.gitref")
+local git_adapter = require("forge.git")
 local strings = require("contract.strings")
 
 function S.install(M, shared, ci_gate)
+local git = git_adapter.production_handle
+
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
   local runtime_result = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
@@ -61,24 +64,24 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   if remove_result.exit_code ~= 0 then
     error("forge.merge: merge CI self-heal worktree cleanup failed: " .. tostring(remove_result.stderr))
   end
-  local plan = M.git_worktree_add_detached_plan(worktree, head_sha)
+  local plan = git("forge.merge").git_worktree_add_detached_plan(worktree, head_sha)
   local mkdir_result = exec_sync({ cmd = M.mkdir_p_cmd(plan.parent_dir), timeout = 30 })
   if mkdir_result.exit_code ~= 0 then
     error("forge.merge: merge CI self-heal worktree parent setup failed: " .. tostring(mkdir_result.stderr))
   end
-  local add_result = M.git_worktree_add_detached(plan.worktree, plan.sha, 60)
+  local add_result = git("forge.merge").git_worktree_add_detached(plan.worktree, plan.sha, 60)
   if add_result.exit_code ~= 0 then
     error("forge.merge: merge CI self-heal worktree add failed: " .. tostring(add_result.stderr))
   end
-  local commit_result = M.git_empty_commit(worktree, "chore: nudge PR CI", 60)
+  local commit_result = git("forge.merge").git_empty_commit(worktree, "chore: nudge PR CI", 60)
   if commit_result.exit_code ~= 0 then
     error("forge.merge: merge CI self-heal empty commit failed: " .. tostring(commit_result.stderr))
   end
-  local push_result = M.git_push_worktree_branch_update_with_lease(worktree, head_ref, head_sha, 120)
+  local push_result = git("forge.merge").git_push_worktree_branch_update_with_lease(worktree, head_ref, head_sha, 120)
   if push_result.exit_code ~= 0 then
     error("forge.merge: merge CI self-heal push failed: " .. tostring(push_result.stderr))
   end
-  local pushed_head = M.git_head_sha(worktree, 30)
+  local pushed_head = git("forge.merge").git_head_sha(worktree, 30)
   if pushed_head.exit_code ~= 0 then
     error("forge.merge: merge CI self-heal head read failed: " .. tostring(pushed_head.stderr))
   end

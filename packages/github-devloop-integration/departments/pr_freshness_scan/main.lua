@@ -1,4 +1,5 @@
 local core = require("core")
+local git_adapter = require("forge.git")
 
 local saga = require("workflow.saga")
 
@@ -8,6 +9,8 @@ local spec = {
   fanout = { "devloop_branch_tick" },
   stall_window = "10m",
 }
+
+local git = git_adapter.production_handle
 
 local blocked_by_skew_label = "fkst-dev:blocked-by-skew"
 
@@ -38,9 +41,9 @@ end
 
 local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
-  local plan = core.git_worktree_add_detached_plan(worktree, branch_sha)
+  local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, branch_sha)
   core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
-  core.run_required(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
+  core.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -174,11 +177,11 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
     return
   end
-  local merge_head = trim_stdout(core.run_required(core.git_head_sha(worktree, 30), "PR freshness head"))
+  local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "PR freshness head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe PR freshness merge head")
   end
-  core.run_required(core.git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
+  core.run_required(git("github-devloop").git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
   core.fetch_branches(repo, { branch }, "PR freshness fetch")
   local pushed_head = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if pushed_head ~= merge_head then

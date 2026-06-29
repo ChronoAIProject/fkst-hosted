@@ -1,4 +1,5 @@
 local core = require("core")
+local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local pr_child_handoff = require("departments.implement.pr_child_handoff")
 local forks = require("devloop.forks")
@@ -20,6 +21,8 @@ local spec = {
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+local git = git_adapter.production_handle
 
 local function implement_done(_event)
   return false
@@ -372,7 +375,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     error("github-devloop: unsafe implementing branch")
   end
 
-  local head_result = core.git_head_sha(worktree, 30)
+  local head_result = git("github-devloop").git_head_sha(worktree, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
   end

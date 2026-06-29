@@ -405,7 +405,7 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
         error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
       end
     else
-      local push = M.git_push_worktree_branch_update_with_lease(worktree, bump_branch, old_branch_head, 120)
+      local push = git().git_push_worktree_branch_update_with_lease(worktree, bump_branch, old_branch_head, 120)
       if push.exit_code ~= 0 then
         error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
       end

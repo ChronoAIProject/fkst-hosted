@@ -237,15 +237,6 @@ function S.install(M)
     return git().push_worktree_branch_update(worktree, require_safe_branch("push branch", branch), nil, timeout)
   end
 
-  function M.git_push_worktree_branch_update_with_lease(worktree, branch, expected_old_sha, timeout)
-    return git().push_worktree_branch_update(
-      worktree,
-      require_safe_branch("push branch", branch),
-      require_safe_sha("expected old branch sha", expected_old_sha),
-      timeout
-    )
-  end
-
   function M.git_unmerged_paths(worktree, timeout)
     return git().unmerged_paths(worktree, timeout)
   end
@@ -264,23 +255,6 @@ function S.install(M)
 
   function M.git_commit_message_file(worktree, message_file, timeout)
     return git().commit_message_file(worktree, message_file, timeout)
-  end
-
-  function M.git_worktree_add_detached_plan(worktree, sha)
-    local value = tostring(worktree or "")
-    if value == "" or value:find("[\r\n]") ~= nil then
-      error("github-devloop: invalid worktree path")
-    end
-    return {
-      parent_dir = value:gsub("/+$", ""):match("^(.*)/[^/]+$") or ".",
-      worktree = value,
-      sha = require_safe_sha("worktree base sha", sha),
-    }
-  end
-
-  function M.git_worktree_add_detached(worktree, sha, timeout)
-    local plan = M.git_worktree_add_detached_plan(worktree, sha)
-    return git().worktree_add_detached(plan.worktree, plan.sha, timeout)
   end
 
   function M.git_worktree_remove(worktree, timeout)

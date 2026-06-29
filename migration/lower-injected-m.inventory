@@ -3,10 +3,10 @@
   "counts": {
     "workflow_injected_m_reads": 35,
     "workflow_injected_m_unique_symbols": 19,
-    "forge_injected_m_reads": 42,
-    "forge_injected_m_unique_symbols": 27,
-    "total_injected_m_reads": 77,
-    "total_injected_m_unique_symbols": 46
+    "forge_injected_m_reads": 37,
+    "forge_injected_m_unique_symbols": 22,
+    "total_injected_m_reads": 72,
+    "total_injected_m_unique_symbols": 41
   },
   "manifest": {
     "workflow": {
@@ -123,26 +123,6 @@
       "gh_pr_view_merge": {
         "route": "forge",
         "owner": "forge-github"
-      },
-      "git_empty_commit": {
-        "route": "forge",
-        "owner": "forge-git"
-      },
-      "git_head_sha": {
-        "route": "forge",
-        "owner": "forge-git"
-      },
-      "git_push_worktree_branch_update_with_lease": {
-        "route": "forge",
-        "owner": "forge-git"
-      },
-      "git_worktree_add_detached": {
-        "route": "forge",
-        "owner": "forge-git"
-      },
-      "git_worktree_add_detached_plan": {
-        "route": "forge",
-        "owner": "forge-git"
       },
       "git_worktree_remove_if_present": {
         "route": "forge",

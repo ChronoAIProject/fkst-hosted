@@ -1,5 +1,14 @@
 local M = {}
 local argv_render = require("forge.argv")
+local gitref = require("forge.gitref")
+
+local function require_commit_message(message)
+  local bounded_message = tostring(message or "")
+  if bounded_message == "" or #bounded_message > 200 then
+    error("github-devloop: invalid git commit message")
+  end
+  return bounded_message
+end
 
 local function push_branch_argv(branch)
   return { "git", "push", "-u", "origin", tostring(branch) }
@@ -466,6 +475,15 @@ function M.install(handle)
     return exec_result(handle, push_worktree_branch_update_argv(worktree, branch, expected_old_sha), timeout, "git worktree push")
   end
 
+  function handle.git_push_worktree_branch_update_with_lease(worktree, branch, expected_old_sha, timeout)
+    return handle.push_worktree_branch_update(
+      worktree,
+      gitref.require_safe_branch("push branch", branch, "github-devloop"),
+      gitref.require_safe_sha("expected old branch sha", expected_old_sha, "github-devloop"),
+      timeout
+    )
+  end
+
   function handle.unmerged_paths(worktree, timeout)
     return exec_result(handle, unmerged_paths_argv(worktree), timeout, "git ls-files -u")
   end
@@ -484,6 +502,23 @@ function M.install(handle)
 
   function handle.worktree_add_detached(worktree, sha, timeout)
     return exec_result(handle, worktree_add_detached_argv(worktree, sha), timeout, "git worktree add --detach")
+  end
+
+  function handle.git_worktree_add_detached_plan(worktree, sha)
+    local value = tostring(worktree or "")
+    if value == "" or value:find("[\r\n]") ~= nil then
+      error("github-devloop: invalid worktree path")
+    end
+    return {
+      parent_dir = value:gsub("/+$", ""):match("^(.*)/[^/]+$") or ".",
+      worktree = value,
+      sha = gitref.require_safe_sha("worktree base sha", sha, "github-devloop"),
+    }
+  end
+
+  function handle.git_worktree_add_detached(worktree, sha, timeout)
+    local plan = handle.git_worktree_add_detached_plan(worktree, sha)
+    return handle.worktree_add_detached(plan.worktree, plan.sha, timeout)
   end
 
   function handle.worktree_add_reset_branch(worktree, branch, base, timeout)
@@ -524,6 +559,14 @@ function M.install(handle)
 
   function handle.empty_commit_message(worktree, message, timeout)
     return exec_result(handle, empty_commit_message_argv(worktree, message), timeout, "git commit --allow-empty")
+  end
+
+  function handle.git_empty_commit(worktree, message, timeout)
+    return handle.empty_commit_message(worktree, require_commit_message(message), timeout)
+  end
+
+  function handle.git_head_sha(worktree, timeout)
+    return handle.head_sha(worktree, timeout)
   end
 
   function handle.status_porcelain(worktree, timeout)

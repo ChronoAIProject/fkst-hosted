@@ -1,4 +1,5 @@
 local core = require("core")
+local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -11,6 +12,8 @@ local spec = {
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+local git = git_adapter.production_handle
 
 local function fix_done(_event)
   return false
@@ -492,7 +495,7 @@ local function run_fix_attempt(plan)
   if tostring(branch_result.stdout or ""):gsub("%s+$", "") ~= plan.branch then
     error("github-devloop: PR origin fix branch mismatch")
   end
-  local head_result = core.git_head_sha(worktree, 30)
+  local head_result = git("github-devloop").git_head_sha(worktree, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
   end

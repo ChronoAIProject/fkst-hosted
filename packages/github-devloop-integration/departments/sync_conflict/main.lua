@@ -1,4 +1,5 @@
 local core = require("core")
+local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -6,6 +7,8 @@ local spec = {
   produces = { "github-proxy.github_issue_create_request" },
   stall_window = "10m",
 }
+
+local git = git_adapter.production_handle
 
 local function trim_stdout(result)
   return tostring(result.stdout or ""):gsub("%s+$", "")
@@ -33,9 +36,9 @@ local function with_temp_worktree(conflict, fn)
     conflict.integration_branch,
     conflict.integration_sha
   )
-  local plan = core.git_worktree_add_detached_plan(worktree, conflict.integration_sha)
+  local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, conflict.integration_sha)
   core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
-  core.run_required(core.git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
+  core.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree, runtime)
   cleanup_worktree(worktree)
@@ -122,7 +125,7 @@ local function push_if_real(conflict, worktree)
     return
   end
 
-  local merge_head = trim_stdout(core.run_required(core.git_head_sha(worktree, 30), "resolved sync head"))
+  local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "resolved sync head"))
   if not core.is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe resolved branch sync head")
   end
