@@ -11,6 +11,7 @@ import check_repo_hidden_state
 import check_repo_intake_default_surface
 import check_repo_intake_routing
 import check_repo_integration_coverage
+import check_repo_lower_injected_m
 import check_repo_monotone_gate
 import check_repo_namespaced_queue
 import check_repo_producer_liveness
@@ -148,6 +149,8 @@ def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violati
         c.add(violations, "G-INTAKE-ROUTING", message)
     for message in check_repo_devloop_godlib.repository_messages(root):
         c.add(violations, "G-DEVLOOP-GODLIB", message)
+    for message in check_repo_lower_injected_m.repository_messages(root):
+        c.add(violations, "G-LOWER-INJECTED-M", message)
 
 
 def run(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:

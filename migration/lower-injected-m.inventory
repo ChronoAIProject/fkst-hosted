@@ -1,0 +1,289 @@
+{
+  "_comment": "G-LOWER-INJECTED-M shrink-only baseline. Counts = lower-library member reads/calls from the injected composed M table inside any libraries/workflow or libraries/forge function body whose parameter list contains bare M. CI fails on growth above these counts, and on current M symbols without a route/owner manifest entry. Baseline raises are review-visible inventory diffs, matching the repo's shrink-only ratchet convention; CI prevents silent growth. Progress means lowering counts and pruning manifest entries as seams dissolve. See docs/superpowers/specs/2026-06-29-devloop-godpattern-dissolution-design.md.",
+  "counts": {
+    "workflow_injected_m_reads": 41,
+    "workflow_injected_m_unique_symbols": 24,
+    "forge_injected_m_reads": 73,
+    "forge_injected_m_unique_symbols": 44,
+    "total_injected_m_reads": 114,
+    "total_injected_m_unique_symbols": 68
+  },
+  "manifest": {
+    "workflow": {
+      "actionable_epoch_resolve": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "dependency_release_marker": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "is_state": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "issue_marker_liveness_sweep_contract_errors": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "issue_marker_liveness_sweep_states": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "known_liveness_contract_violations": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "lifecycle_state_set": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "liveness_contract_errors": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "liveness_contract_inventory_is_listed_violation": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "liveness_heartbeat_version": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "liveness_signal_producer_contract": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "liveness_terminal_states": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "normalized_restart_liveness_rows": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "restart_durable_marker_fields": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "restart_lifecycle_states": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "restart_liveness_epoch_sources": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "restart_liveness_inventory_errors": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "restart_package_name": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "restart_responsibility_inventory_errors": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "restart_source_root": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "restart_transition_table": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "safe_version_segment": {
+        "route": "contract",
+        "owner": "contract-transition-version"
+      },
+      "strict_restart_liveness_contract_errors": {
+        "route": "workflow",
+        "owner": "workflow-liveness"
+      },
+      "trusted_bot_login": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      }
+    },
+    "forge": {
+      "_required_check_run_names": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "_trim": {
+        "route": "contract",
+        "owner": "contract-strings"
+      },
+      "ci_missing_status_dispatch_eligible": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "ci_missing_status_first_observed_key": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "ci_selfheal_once": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "ci_selfheal_once_key": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "classify_pr_ci_gate": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "commit_check_runs_green": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "commit_check_runs_merge_gate": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "debug_stamp_marker_prefix": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "evaluate_ci_merge_gate": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "evaluate_ci_status_gate": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "gh_check_run_rerequest": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "gh_commit_check_runs": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "gh_pr_merge": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "gh_pr_view_merge": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "git_empty_commit": {
+        "route": "forge",
+        "owner": "forge-git"
+      },
+      "git_head_sha": {
+        "route": "forge",
+        "owner": "forge-git"
+      },
+      "git_push_worktree_branch_update_with_lease": {
+        "route": "forge",
+        "owner": "forge-git"
+      },
+      "git_worktree_add_detached": {
+        "route": "forge",
+        "owner": "forge-git"
+      },
+      "git_worktree_add_detached_plan": {
+        "route": "forge",
+        "owner": "forge-git"
+      },
+      "git_worktree_remove_if_present": {
+        "route": "forge",
+        "owner": "forge-git"
+      },
+      "invalidate_entity_after_write": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "is_match_head_modified_error": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "is_merged_pr": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "is_not_mergeable_reason": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "is_safe_branch": {
+        "route": "contract",
+        "owner": "contract-strings"
+      },
+      "is_safe_head_sha": {
+        "route": "contract",
+        "owner": "contract-strings"
+      },
+      "is_same_repo_pr_head": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "log_line": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "merge_gate_reason_class": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "merge_gate_reason_requires_pr_merge_product": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "mkdir_p_cmd": {
+        "route": "workflow",
+        "owner": "workflow-env"
+      },
+      "parse_commit_check_runs": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "parse_pr_view_merge": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "pr_identity_matches": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "pr_mergeable": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "pr_rollup_green": {
+        "route": "forge",
+        "owner": "forge-github"
+      },
+      "read_env": {
+        "route": "workflow",
+        "owner": "workflow-env"
+      },
+      "read_runtime_root_cmd": {
+        "route": "workflow",
+        "owner": "workflow-env"
+      },
+      "rerunnable_check_run_ids_for_head": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "rollup_failure_gate_sha": {
+        "route": "typed_port",
+        "owner": "devloop-seam-dissolution"
+      },
+      "run_verified_pr_merge": {
+        "route": "forge",
+        "owner": "forge-merge"
+      },
+      "with_github_debug_stamp": {
+        "route": "forge",
+        "owner": "forge-github"
+      }
+    }
+  }
+}
