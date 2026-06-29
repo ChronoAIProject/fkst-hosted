@@ -26,7 +26,7 @@ const ENV_KEY_PATTERN: &str = "^[A-Za-z_][A-Za-z0-9_]*$";
 /// credential injected into the engine env in memory only. Serializes lowercase
 /// on the wire (the trigger DTO tags each inline entry variable-vs-secret).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+#[derive(utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EnvKind {
     Variable,

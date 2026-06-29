@@ -25,7 +25,7 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use crate::error::RunnerError;
+use crate::engine::error::RunnerError;
 
 /// The repo-base reader + the pure AGENTS.md body composer (issue #182). Split
 /// into its own module so `skills/mod.rs` stays under the 500-line budget; it

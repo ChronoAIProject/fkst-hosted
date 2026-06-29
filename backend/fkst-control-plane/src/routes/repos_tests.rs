@@ -8,7 +8,7 @@
 
 use super::*;
 use crate::github_app::config::GithubAppConfig;
-use fkst_engine::materialize::{PackageFile, PreparedPackage};
+use crate::engine::materialize::{PackageFile, PreparedPackage};
 use secrecy::SecretString;
 use wiremock::matchers::{method, path as path_matcher};
 use wiremock::{Mock, MockServer, ResponseTemplate};

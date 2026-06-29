@@ -4,16 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-# Role-neutral models + transport clients shared with the worker (issue #145).
-# The `schema` feature pulls in the optional `utoipa::ToSchema` derives on the
-# shared wire types so they appear, full-fidelity, in the generated OpenAPI spec
-# served at /openapi.json. The worker links fkst-shared WITHOUT this feature, so
-# it stays free of utoipa.
-fkst-shared = { path = "../fkst-shared", features = ["schema"] }
-# The engine integration (the session runner), extracted from this crate so the
-# worker can drive it too (issue #151). `crate::engine` is now a re-export of
-# this crate; links neither `mongodb` nor `axum`.
-fkst-engine = { path = "../fkst-engine" }
 async-trait = "0.1"
 axum = "0.7"
 # Runtime OpenAPI 3 generation for the public HTTP surface, served at
@@ -58,14 +48,12 @@ once_cell = "1"
 # (#138): secrets are in-memory `SecretString`s reaching the worker over the TLS
 # controller↔worker channel, so `aes-gcm`/`zeroize` are no longer needed.)
 rand = "0.8"
+# `zip` unpacks Ornn skill packages into the per-session CODEX_HOME (engine).
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
-# `zip` is only used now to BUILD test skill packages in the ornn module's
-# `#[cfg(test)]` suite — the install implementation that consumed it moved to
-# `fkst-engine` (#151). It is therefore a dev-dependency, not a runtime one.
-zip = { version = "2", default-features = false, features = ["deflate"] }
 wiremock = "0.6"
 filetime = "0.2"
 rsa = { version = "0.9", features = ["pem"] }

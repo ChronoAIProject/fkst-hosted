@@ -350,8 +350,8 @@ fn ornn_client(fake: FakeOrnn) -> OrnnClient {
 // validate_submission aggregation (commit 5)
 // ---------------------------------------------------------------------------
 
-fn repo() -> fkst_shared::models::RepoRef {
-    fkst_shared::models::RepoRef {
+fn repo() -> crate::models::RepoRef {
+    crate::models::RepoRef {
         owner: "acme".into(),
         name: "site".into(),
     }

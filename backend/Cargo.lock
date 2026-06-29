@@ -399,8 +399,6 @@ dependencies = [
  "bson",
  "envy",
  "filetime",
- "fkst-engine",
- "fkst-shared",
  "hmac",
  "http-body-util",
  "jsonwebtoken",
@@ -426,45 +424,6 @@ dependencies = [
  "utoipa-axum",
  "wiremock",
  "zip",
-]
-
-[[package]]
-name = "fkst-engine"
-version = "0.2.3"
-dependencies = [
- "bson",
- "envy",
- "fkst-shared",
- "nix",
- "rand 0.8.6",
- "regex",
- "secrecy",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "zip",
-]
-
-[[package]]
-name = "fkst-shared"
-version = "0.2.3"
-dependencies = [
- "async-trait",
- "bson",
- "once_cell",
- "regex",
- "reqwest",
- "secrecy",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "utoipa",
- "wiremock",
 ]
 
 [[package]]

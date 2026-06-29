@@ -23,15 +23,15 @@ use nix::unistd::{getpgid, Pid};
 use tempfile::TempDir;
 use tokio::process::Child;
 
-use crate::breadcrumb::{
+use crate::engine::breadcrumb::{
     read_exit_breadcrumb, write_exit_breadcrumb, write_owner_breadcrumb, ExitBreadcrumb,
     OwnerBreadcrumb,
 };
-use crate::config::EngineConfig;
-use crate::error::RunnerError;
-use crate::logs::tail_child_logs;
-use crate::materialize::{materialize_packages, write_fkst_env, PreparedPackage};
-use crate::process::{
+use crate::engine::config::EngineConfig;
+use crate::engine::error::RunnerError;
+use crate::engine::logs::tail_child_logs;
+use crate::engine::materialize::{materialize_packages, write_fkst_env, PreparedPackage};
+use crate::engine::process::{
     is_panicked, is_pid_alive, is_ready, kill_group_quiet, reap_with_grace, run_conformance,
     signal_group, spawn_supervise, ChildGroupGuard, GoalEnv, OutputBuffer, SpawnedChild,
     REAP_POLL_INTERVAL, SIGKILL_REAP_POLLS,
@@ -65,7 +65,7 @@ pub struct GoalContext {
     pub goal_id: bson::Uuid,
     pub title: String,
     pub description: String,
-    pub repo: fkst_shared::models::RepoRef,
+    pub repo: crate::models::RepoRef,
     pub github_token: secrecy::SecretString,
     /// Expiry of `github_token`, written as RFC3339 into the `0600` token file
     /// so the credential helper can decide whether to force a just-in-time
@@ -195,7 +195,7 @@ fn adopted_is_live(runtime_dir: &Path, pid: i32, pgid: i32, run_nonce: &str) -> 
     // The breadcrumb's nonce must still match (a reused PID that happens to lead
     // its own group will not match the original spawn's nonce).
     matches!(
-        crate::breadcrumb::read_owner_breadcrumb(runtime_dir),
+        crate::engine::breadcrumb::read_owner_breadcrumb(runtime_dir),
         Ok(Some(bc)) if bc.pgid == pgid && bc.run_nonce == run_nonce
     )
 }
@@ -490,7 +490,7 @@ impl SessionRunner {
     }
 
     /// Liveness primitive for the pool-manager pre-takeover check
-    /// (re-export of [`crate::process::is_pid_alive`]; see the
+    /// (re-export of [`crate::engine::process::is_pid_alive`]; see the
     /// PID-reuse caveat there).
     pub fn is_pid_alive(pid: i32) -> bool {
         is_pid_alive(pid)
@@ -528,7 +528,7 @@ impl SessionRunner {
             package_guards: Vec::new(),
             runtime_guard: None,
             adopted_dirs,
-            output: OutputBuffer::new(crate::process::OUTPUT_RING_CAP_BYTES),
+            output: OutputBuffer::new(crate::engine::process::OUTPUT_RING_CAP_BYTES),
             stdout_lines: None,
             terminal_status: None,
             log_tail_lines: self.config.log_tail_lines,
@@ -691,8 +691,8 @@ impl SessionRunner {
             // Token file: JSON `{token, expires_at}` at mode 0600, written
             // atomically (#107). The expiry lets the credential helper force a
             // just-in-time re-mint near expiry; the token value is never logged.
-            let token_path = runtime_dir.join(crate::TOKEN_FILE_NAME);
-            crate::write_token_file(&token_path, &goal.github_token, goal.token_expires_at)?;
+            let token_path = runtime_dir.join(crate::engine::TOKEN_FILE_NAME);
+            crate::engine::write_token_file(&token_path, &goal.github_token, goal.token_expires_at)?;
             tracing::debug!(
                 path = %token_path.display(),
                 "session.prepare.github_token"
@@ -700,13 +700,13 @@ impl SessionRunner {
 
             // Credential helper (#107): drop the 0700 script into the runtime
             // dir; git is pointed at it via the GIT_CONFIG_* env in spawn.
-            let helper_path = crate::materialize_helper_script(&runtime_dir)?;
+            let helper_path = crate::engine::materialize_helper_script(&runtime_dir)?;
 
             // Per-session JIT mint nonce: written 0600 next to the token and
             // handed to the helper via FKST_GITHUB_MINT_NONCE so it can
             // authenticate a re-mint request to the driver's poller.
-            let mint_nonce = crate::goal_token::generate_mint_nonce();
-            crate::goal_token::write_nonce_file(&runtime_dir, &mint_nonce)?;
+            let mint_nonce = crate::engine::goal_token::generate_mint_nonce();
+            crate::engine::goal_token::write_nonce_file(&runtime_dir, &mint_nonce)?;
 
             // The token + nonce stay SecretString into GoalEnv (#109/#107);
             // clone the context's secret rather than expose-then-rewrap a String.
@@ -783,7 +783,7 @@ impl SessionRunner {
             pid,
             pgid: pid,
             goal_id: spec.goal.as_ref().map(|g| g.goal_id.to_string()),
-            run_nonce: crate::goal_token::generate_mint_nonce(),
+            run_nonce: crate::engine::goal_token::generate_mint_nonce(),
             worker_id: spec.worker_id.clone(),
         };
         if let Err(err) = write_owner_breadcrumb(&runtime_dir, &owner_bc) {
@@ -939,8 +939,8 @@ mod tests {
     use nix::unistd::Pid;
 
     use super::*;
-    use crate::materialize::PackageFile;
-    use crate::process::signal_group;
+    use crate::engine::materialize::PackageFile;
+    use crate::engine::process::signal_group;
 
     /// Conformance branch that passes; supervise body is per-test.
     fn engine_stub(dir: &Path, supervise_body: &str) -> PathBuf {
@@ -2019,7 +2019,7 @@ esac
             goal_id: bson::Uuid::parse_str("a1b2c3d4-e5f6-7890-abcd-ef1234567890").unwrap(),
             title: "Test goal".to_string(),
             description: "A test goal description.".to_string(),
-            repo: fkst_shared::models::RepoRef {
+            repo: crate::models::RepoRef {
                 owner: "acme".to_string(),
                 name: "test-repo".to_string(),
             },
@@ -2084,7 +2084,7 @@ esac
         }
 
         // Credential helper materialized 0700 + the 0600 mint nonce (#107).
-        let helper_path = session.runtime_dir.join(crate::HELPER_SCRIPT_NAME);
+        let helper_path = session.runtime_dir.join(crate::engine::HELPER_SCRIPT_NAME);
         assert!(helper_path.is_file(), "credential helper must exist");
         #[cfg(unix)]
         {
@@ -2096,7 +2096,7 @@ esac
             assert_eq!(hmode & 0o777, 0o700, "helper must be mode 0700");
         }
         assert!(
-            session.runtime_dir.join(crate::NONCE_FILE_NAME).is_file(),
+            session.runtime_dir.join(crate::engine::NONCE_FILE_NAME).is_file(),
             "mint nonce file must exist"
         );
 

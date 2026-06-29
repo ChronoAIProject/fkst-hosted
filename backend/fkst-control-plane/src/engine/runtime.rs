@@ -2,7 +2,7 @@
 //!
 //! These are engine-side facts: the session runner materializes each session's
 //! runtime root as `fkst-rt-<rand>` under `EngineConfig::temp_root`, and both
-//! the OS-truth re-adopt scan ([`crate::adopt`]) and the control-plane's
+//! the OS-truth re-adopt scan ([`crate::engine::adopt`]) and the control-plane's
 //! orphan-reconcile sweep fence on the same naming convention + mtime. They
 //! live here (engine-side) so every consumer reads ONE definition of the
 //! runtime-dir prefix and the age computation; the reconcile sweep only READS
@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime};
 /// Runtime-dir prefix — the class the orphan sweep and re-adopt scan act on. A
 /// runtime dir's path is the value persisted/observed for a live session, so it
 /// is fully fenceable against the live set. (Kept in sync with
-/// [`crate::runner`] — consumers only READ this naming convention.)
+/// [`crate::engine::runner`] — consumers only READ this naming convention.)
 pub const RUNTIME_DIR_PREFIX: &str = "fkst-rt-";
 
 /// Age of `path` relative to `now`, derived from its mtime. A future mtime

@@ -18,9 +18,9 @@ use tempfile::TempDir;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::RunnerError;
-use crate::goal_token::{CREDENTIAL_HELPER_SCRIPT, HELPER_SCRIPT_NAME};
-use crate::util::is_valid_name;
+use crate::engine::error::RunnerError;
+use crate::engine::goal_token::{CREDENTIAL_HELPER_SCRIPT, HELPER_SCRIPT_NAME};
+use crate::engine::util::is_valid_name;
 
 /// One file of a package: a relative `path` and its verbatim `content`. Files
 /// are an array (not a map) because BSON keys cannot contain dots while file

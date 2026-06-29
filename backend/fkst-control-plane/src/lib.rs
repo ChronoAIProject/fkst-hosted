@@ -11,15 +11,16 @@ pub mod config;
 // so both the control-plane and the worker can drive it. Re-exported here under
 // the same `engine` name so every existing `crate::engine::*` /
 // `fkst_control_plane::engine::*` path keeps resolving unchanged.
-pub use fkst_engine as engine;
+pub mod engine;
 pub mod error;
 pub mod github_app;
 pub mod github_hub;
 pub mod goals;
 // Role-neutral leaves extracted to `fkst-shared` (issue #145). Re-exported here
 // so every existing `crate::{models,nyxid}::…` path and test still resolves.
-pub use fkst_shared::models;
-pub use fkst_shared::nyxid;
+pub mod models;
+pub mod nyxid;
+pub mod protocol;
 // `ornn` and `vault` are split modules: their role-neutral leaves
 // (`ornn::types`, `vault::model`) live in `fkst-shared`; the control-plane
 // halves (the client/injector, the in-memory vault service) stay here.

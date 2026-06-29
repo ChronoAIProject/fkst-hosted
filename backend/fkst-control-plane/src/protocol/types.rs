@@ -28,7 +28,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// wire-reported state (a terminated worker simply stops heartbeating and is
 /// expired by the controller), so only the two reportable states exist here.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]
+#[derive(utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LifecycleState {
     /// Accepting and running work.

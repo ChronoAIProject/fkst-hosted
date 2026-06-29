@@ -18,7 +18,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::RunnerError;
+use crate::engine::error::RunnerError;
 
 /// Owner-breadcrumb file name (top level of the runtime dir).
 pub const OWNER_BREADCRUMB_FILE: &str = "owner.json";

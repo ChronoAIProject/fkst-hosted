@@ -40,8 +40,8 @@ use axum::Json;
 use secrecy::SecretString;
 use serde::Serialize;
 
-use fkst_engine::{is_department_main, is_valid_package_name, RESERVED_PACKAGE_NAME};
-use fkst_shared::models::RepoRef;
+use crate::engine::{is_department_main, is_valid_package_name, RESERVED_PACKAGE_NAME};
+use crate::models::RepoRef;
 
 use crate::auth::AuthContext;
 use crate::github_app::{ContentsReader, GithubAppError, GithubAppTokens};

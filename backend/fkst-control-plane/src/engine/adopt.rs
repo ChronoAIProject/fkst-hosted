@@ -11,10 +11,10 @@ use std::time::{Duration, SystemTime};
 
 use nix::unistd::{getpgid, Pid};
 
-use crate::breadcrumb::{read_owner_breadcrumb, OwnerBreadcrumb};
-use crate::process::is_pid_alive;
-use crate::runner::{RunningSession, SessionRunner};
-use crate::runtime::{dir_age, RUNTIME_DIR_PREFIX};
+use crate::engine::breadcrumb::{read_owner_breadcrumb, OwnerBreadcrumb};
+use crate::engine::process::is_pid_alive;
+use crate::engine::runner::{RunningSession, SessionRunner};
+use crate::engine::runtime::{dir_age, RUNTIME_DIR_PREFIX};
 
 /// Is the breadcrumb's owner still genuinely live? Alive, leading its own group
 /// (PID reuse into a different group fails this), and a valid pid.
@@ -137,8 +137,8 @@ pub fn os_truth_live_set(temp_root: &Path) -> HashSet<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::breadcrumb::write_owner_breadcrumb;
-    use crate::config::EngineConfig;
+    use crate::engine::breadcrumb::write_owner_breadcrumb;
+    use crate::engine::config::EngineConfig;
 
     fn runner(temp_root: &Path) -> SessionRunner {
         SessionRunner::new(EngineConfig {
@@ -211,7 +211,7 @@ mod tests {
         assert!(dir.exists(), "live dir is not reaped");
 
         // Kill it; now it is a dead owner and (older than 0) reaped.
-        crate::process::signal_group(pid, nix::sys::signal::Signal::SIGKILL).unwrap();
+        crate::engine::process::signal_group(pid, nix::sys::signal::Signal::SIGKILL).unwrap();
         for _ in 0..100 {
             if !is_pid_alive(pid) {
                 break;
@@ -316,6 +316,6 @@ mod tests {
         let dead_canonical = dead_dir.canonicalize().unwrap_or_else(|_| dead_dir.clone());
         assert!(!set.contains(&dead_canonical) && !set.contains(&dead_dir));
 
-        crate::process::signal_group(live_pid, nix::sys::signal::Signal::SIGKILL).unwrap();
+        crate::engine::process::signal_group(live_pid, nix::sys::signal::Signal::SIGKILL).unwrap();
     }
 }

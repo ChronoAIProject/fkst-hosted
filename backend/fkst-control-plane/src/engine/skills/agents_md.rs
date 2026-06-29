@@ -15,7 +15,7 @@
 
 use std::path::Path;
 
-use crate::error::RunnerError;
+use crate::engine::error::RunnerError;
 
 /// Maximum byte size of a repo-supplied `.fkst/AGENTS.md` seeded as the AGENTS.md
 /// base. User-authored repo content (not secret); a pathological file is

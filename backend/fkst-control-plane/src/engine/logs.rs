@@ -188,7 +188,7 @@ mod tests {
     /// in any spawn path can never surface it.
     #[test]
     fn goal_env_debug_never_leaks_the_token_to_logs() {
-        use crate::GoalEnv;
+        use crate::engine::GoalEnv;
         use secrecy::SecretString;
         use std::path::PathBuf;
 
