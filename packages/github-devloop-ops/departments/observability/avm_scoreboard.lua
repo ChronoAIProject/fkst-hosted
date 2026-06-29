@@ -312,11 +312,26 @@ local function append_recent_pr_facts(facts, recent_merged_prs, now_seconds)
   end
 end
 
+local function append_recent_issue_facts(facts, recent_merged_issues, now_seconds)
+  for _, issue in ipairs(recent_merged_issues or {}) do
+    append_comment_facts(facts, comments_from_entity({ issue = issue }), now_seconds)
+  end
+end
+
 local function recent_merged_pr_cache_key(repo)
   return table.concat({
     "github-devloop",
     "avm",
     "recent-merged-prs",
+    tostring(repo or ""):gsub("[^%w%._%-%/]", "-"),
+  }, "/")
+end
+
+local function recent_merged_issue_cache_key(repo)
+  return table.concat({
+    "github-devloop",
+    "avm",
+    "recent-merged-issues",
     tostring(repo or ""):gsub("[^%w%._%-%/]", "-"),
   }, "/")
 end
@@ -331,6 +346,19 @@ local function recent_merged_pr_view(pr, listed)
     pr.head_sha = listed.head_sha
   end
   return pr
+end
+
+local function recent_merged_issue_view(issue, listed)
+  issue.number = tonumber(issue.number) or tonumber(listed.number)
+  if issue.title == nil or issue.title == "" then
+    issue.title = tostring(listed.title or "")
+  end
+  issue.closed_at = issue.closed_at or listed.closed_at
+  issue.closedAt = issue.closedAt or listed.closedAt
+  if type(issue.labels) ~= "table" then
+    issue.labels = listed.labels
+  end
+  return issue
 end
 
 function core.collect_recent_merged_prs(repo, limits, deadline)
@@ -367,13 +395,48 @@ function core.collect_recent_merged_prs(repo, limits, deadline)
   return prs
 end
 
-function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs)
+function core.collect_recent_merged_issues(repo, limits, deadline)
+  local limit = math.max(1, math.floor(tonumber(limits and limits.entity_cap) or 25))
+  local listed = core.observability_run_cmd({
+    run = function(timeout)
+      return core.gh_issue_list_recent_closed(repo, limit, timeout)
+    end,
+    read_coalesce = {
+      key = recent_merged_issue_cache_key(repo),
+      ttl_seconds = 60,
+    },
+  }, limits, deadline, "recent merged issue list")
+  if core.observability_result_deferred(listed) then
+    return nil
+  end
+  local issues = {}
+  for _, item in ipairs(core.parse_issue_list_recent_closed(listed.stdout)) do
+    if not core.observability_has_budget(deadline) then
+      log.warn("github-devloop dept=observability tag=AVM_SCOREBOARD_DEFERRED reason=deadline processed_issues=" .. tostring(#issues))
+      break
+    end
+    local view = core.observability_run_cmd({
+      run = function(timeout)
+        return core.gh_issue_view_observe(repo, item.number, timeout)
+      end,
+    }, limits, deadline, "recent merged issue view")
+    if core.observability_result_deferred(view) then
+      log.warn("github-devloop dept=observability tag=AVM_SCOREBOARD_DEFERRED reason=deadline processed_issues=" .. tostring(#issues))
+      break
+    end
+    table.insert(issues, recent_merged_issue_view(core.parse_issue_view_observe(view.stdout), item))
+  end
+  return issues
+end
+
+function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs, recent_merged_issues)
   local facts = {}
   for _, entity in ipairs(entities or {}) do
     append_entity_direct_facts(facts, entity)
     append_comment_facts(facts, comments_from_entity(entity), now_seconds)
   end
   append_recent_pr_facts(facts, recent_merged_prs, now_seconds)
+  append_recent_issue_facts(facts, recent_merged_issues, now_seconds)
   for _, fact in ipairs(facts) do
     decorate_with_false_consensus(fact, entities, recent_merged_prs)
   end
