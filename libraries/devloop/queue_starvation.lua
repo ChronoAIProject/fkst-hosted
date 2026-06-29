@@ -2,6 +2,7 @@ local S = {}
 local github_handle = nil
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -310,7 +311,7 @@ local function stable_incident_identity(queue_head)
   local version = entity.state and entity.state.version or entity.version
   if version ~= nil then
     table.insert(parts, "version")
-    table.insert(parts, M.safe_version_segment(version))
+    table.insert(parts, transition_version.safe_version_segment(version))
   end
   if entity.head_sha ~= nil and forge_validators.is_git_sha(entity.head_sha) then
     table.insert(parts, "head")

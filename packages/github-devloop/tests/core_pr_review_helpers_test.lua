@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local fixtures = require("tests.production_fixture_helpers")
+local transition_version = require("contract.transition_version")
 local core = h.core
 local t = h.t
 
@@ -14,7 +15,7 @@ return {
     t.is_true(#id <= core._max_key_len)
     t.eq(parsed_repo, core.safe_pr_review_repo_segment(repo))
     t.eq(pr_number, "7")
-    t.eq(parsed_version, core.safe_version_segment(version))
+    t.eq(parsed_version, transition_version.safe_version_segment(version))
     t.eq(parsed_head_sha, head_sha)
     t.eq(core.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/not-number/v1/" .. head_sha), nil)
     t.eq(core.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/7/v1"), nil)
@@ -101,7 +102,7 @@ return {
     local parsed_repo, pr_number, parsed_version, parsed_head_sha = core.parse_pr_review_proposal_id(id)
     t.eq(parsed_repo, core.safe_pr_review_repo_segment(repo))
     t.eq(pr_number, "7")
-    t.eq(parsed_version, core.safe_version_segment(version))
+    t.eq(parsed_version, transition_version.safe_version_segment(version))
     t.eq(parsed_head_sha, head_sha)
 
     local proposal = core.build_pr_review_proposal(

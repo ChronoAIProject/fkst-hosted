@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local transition_version = require("contract.transition_version")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -168,7 +169,7 @@ return {
     local heartbeat = find_raise(produced.raises, "github-proxy.github_pr_comment_request")
     t.is_true(heartbeat ~= nil)
     t.is_true(tostring(heartbeat.payload.body or ""):find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
-    t.is_true(tostring(heartbeat.payload.body or ""):find('version="' .. core.safe_version_segment(raw_version) .. '"', 1, true) ~= nil)
+    t.is_true(tostring(heartbeat.payload.body or ""):find('version="' .. transition_version.safe_version_segment(raw_version) .. '"', 1, true) ~= nil)
     t.eq(tostring(heartbeat.payload.body or ""):find('version="' .. raw_version .. '"', 1, true), nil)
 
     local row = restart_transition_row("reviewing")

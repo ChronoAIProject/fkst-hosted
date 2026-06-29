@@ -634,7 +634,7 @@ return {
       core.state_marker(proposal_id, "pr-open", hyphen_version),
     }, proposal_id)
 
-    t.eq(core.safe_version_segment(slash_version), core.safe_version_segment(hyphen_version))
+    t.eq(transition_version.safe_version_segment(slash_version), transition_version.safe_version_segment(hyphen_version))
     t.eq(core.stage_rank("reviewing") > core.stage_rank("pr-open"), true)
     t.eq(current.state, "reviewing")
     t.eq(current.version, slash_version)

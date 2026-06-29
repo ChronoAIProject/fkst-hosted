@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -10,7 +11,7 @@ local repo = "owner/repo"
 local issue_number = 42
 local pr_number = 7
 local issue_proposal_id = "github-devloop/issue/owner/repo/42"
-local reviewed_version = core.safe_version_segment(h.reviewing().version)
+local reviewed_version = transition_version.safe_version_segment(h.reviewing().version)
 local reviewed_head_sha = "def456"
 local review_proposal_id = core.pr_review_proposal_id(repo, pr_number, reviewed_version, reviewed_head_sha)
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"

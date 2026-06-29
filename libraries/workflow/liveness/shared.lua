@@ -94,7 +94,7 @@ shared.strip_liveness_timeout_suffixes = strip_liveness_timeout_suffixes
 function M.liveness_heartbeat_version(version, contract)
   local heartbeat_version = strip_liveness_timeout_suffixes(version)
   if contract and contract.version_form == "safe_version_segment" then
-    return M.safe_version_segment(heartbeat_version)
+    return transition_version.safe_version_segment(heartbeat_version)
   end
   return transition_version.strip_suffixes(heartbeat_version)
 end

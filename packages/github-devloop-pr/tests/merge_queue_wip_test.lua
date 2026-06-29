@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local transition_version = require("contract.transition_version")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -310,8 +311,8 @@ end
 
 local function predecessor_set_for(event)
   return "pr" .. tostring(event.pr_number)
-    .. "-" .. core.safe_version_segment(event.proposal_id)
-    .. "-" .. core.safe_version_segment(event.version)
+    .. "-" .. transition_version.safe_version_segment(event.proposal_id)
+    .. "-" .. transition_version.safe_version_segment(event.version)
     .. "-" .. tostring(event.reviewed_head_sha)
 end
 

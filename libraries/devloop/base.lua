@@ -6,6 +6,7 @@ local error_facts = require("contract.error_facts")
 local forge_validators = require("devloop.forge_validators")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
+local transition_version = require("contract.transition_version")
 
 local max_key_len = 200
 local max_dedup_len = 512
@@ -187,22 +188,6 @@ function M.safe_updated_at(updated_at)
   return safe
 end
 
-function M.safe_version_segment(version)
-  local safe = strings.sanitize_key(version, false):gsub("[/#]", "-"):gsub("%-+", "-")
-  safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
-  if safe == "" then
-    safe = "version"
-  end
-  if #safe > max_version_key_len then
-    local suffix = "-" .. decimal_checksum(version)
-    safe = safe:sub(1, max_version_key_len - #suffix):gsub("%-+$", "") .. suffix
-  end
-  if safe == "" then
-    return "version"
-  end
-  return safe
-end
-
 function M.safe_pr_review_repo_segment(repo)
   local safe = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
@@ -257,7 +242,7 @@ function M.pr_review_proposal_id(repo, pr_number, version, head_sha)
     .. "/"
     .. M.safe_issue(pr_number)
     .. "/"
-    .. M.safe_version_segment(version)
+    .. transition_version.safe_version_segment(version)
     .. "/"
     .. M.safe_head_segment(head_sha)
 end
@@ -293,7 +278,7 @@ function M.parse_pr_review_proposal_id(id)
   end
   if not is_path_safe_key(repo, 64)
     or M.safe_issue(pr_number) ~= pr_number
-    or M.safe_version_segment(version) ~= version
+    or transition_version.safe_version_segment(version) ~= version
     or M.safe_head_segment(head_sha) ~= head_sha then
     return nil
   end

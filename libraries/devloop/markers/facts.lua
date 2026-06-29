@@ -18,7 +18,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
   if marker_issue == tostring(issue_proposal_id)
     and (expected_decision == nil or decision == expected_decision)
     and (decision == "approve" or decision == "reject")
-    and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+    and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
     and review_dedup == expected_dedup
     and M._is_bounded_string(review_dedup, M._max_dedup_len)
     and forge_validators.is_git_sha(reviewed_head_sha) then
@@ -448,7 +448,7 @@ function M.review_result_approval_matches_event(comments, merge_ready)
         and tostring(review_dedup or "") == tostring(merge_ready.review_dedup_key or "")
         and tostring(review_pr_number or "") == tostring(merge_ready.pr_number or "")
         and tostring(reviewed_head_sha or "") == tostring(merge_ready.reviewed_head_sha or "")
-        and tostring(review_version or "") == M.safe_version_segment(merge_ready.version) then
+        and tostring(review_version or "") == transition_version.safe_version_segment(merge_ready.version) then
         return true, "review-result-approve"
       end
     end
@@ -458,7 +458,7 @@ end
 
 local function review_proposal_version_matches_merge_ready(review_version, merge_ready_version, review_dedup_key)
   local merge_text = tostring(merge_ready_version or "")
-  if tostring(review_version or "") == M.safe_version_segment(merge_text) then
+  if tostring(review_version or "") == transition_version.safe_version_segment(merge_text) then
     return true
   end
   local base = merge_text:match("^(.-)/review%-loop/%d+")
@@ -466,7 +466,7 @@ local function review_proposal_version_matches_merge_ready(review_version, merge
     return false
   end
   return tostring(review_dedup_key or ""):find("review%-meta", 1) ~= nil
-    and tostring(review_version or "") == M.safe_version_segment(base)
+    and tostring(review_version or "") == transition_version.safe_version_segment(base)
     and merge_text:find("/review%-meta%-action/", 1) ~= nil
 end
 

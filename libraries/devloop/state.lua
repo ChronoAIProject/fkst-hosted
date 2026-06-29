@@ -240,7 +240,7 @@ local function version_primary_key(version)
   if updated_at ~= "" then
     return 1, updated_at
   end
-  return 0, source_ref.version_order_key(M.safe_version_segment(base))
+  return 0, source_ref.version_order_key(transition_version.safe_version_segment(base))
 end
 
 local function version_sort_key(version, stage_rank)
@@ -341,7 +341,7 @@ local function versions_equivalent(left, right)
   if tostring(left) == tostring(right) then
     return true
   end
-  return M.safe_version_segment(left) == M.safe_version_segment(right)
+  return transition_version.safe_version_segment(left) == transition_version.safe_version_segment(right)
 end
 
 comparable_transition_base = function(version)

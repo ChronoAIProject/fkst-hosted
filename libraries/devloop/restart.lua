@@ -314,7 +314,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
       if marker_issue == tostring(issue_proposal_id)
         and tostring(review_pr_number or "") == tostring(pr_number)
-        and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+        and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
         and tostring(reviewed_head_sha or "") == tostring(head_sha)
         and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
         return {
@@ -341,7 +341,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         and verdict == "checkpoint"
         and marker_version == tostring(issue_version)
         and tostring(review_pr_number or "") == tostring(pr_number)
-        and review_version == M.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
+        and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
         and tostring(reviewed_head_sha or "") == tostring(head_sha)
         and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
         local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
@@ -414,7 +414,7 @@ function M.fixing_version_matches_link(issue_version, link_version)
   if current_base == "" or linked_base == "" then
     return false
   end
-  return M.safe_version_segment(current_base) == M.safe_version_segment(linked_base)
+  return transition_version.safe_version_segment(current_base) == transition_version.safe_version_segment(linked_base)
 end
 
 end

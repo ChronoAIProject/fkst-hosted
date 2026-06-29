@@ -1,6 +1,7 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 
 function S.install(M)
 require("devloop.queue").install(M)
@@ -72,8 +73,8 @@ end
 
 local function predecessor_identity(entry)
   return "pr" .. tostring(entry.pr_number)
-    .. "-" .. M.safe_version_segment(entry.proposal_id)
-    .. "-" .. M.safe_version_segment(entry.version)
+    .. "-" .. transition_version.safe_version_segment(entry.proposal_id)
+    .. "-" .. transition_version.safe_version_segment(entry.version)
     .. "-" .. tostring(entry.head_sha)
 end
 

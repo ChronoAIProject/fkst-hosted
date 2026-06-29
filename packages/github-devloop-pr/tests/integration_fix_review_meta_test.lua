@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -628,8 +629,8 @@ return {
     })
     local _, _, review_version = core.parse_pr_review_proposal_id(proposal_id)
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
-    t.is_true(core.safe_version_segment(full_version) ~= full_version)
-    t.eq(review_version, core.safe_version_segment(full_version))
+    t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
+    t.eq(review_version, transition_version.safe_version_segment(full_version))
 
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
@@ -657,7 +658,7 @@ return {
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
-    t.is_true(core.safe_version_segment(full_version) ~= full_version)
+    t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
 
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
@@ -731,7 +732,7 @@ return {
     })
     local _, _, review_version = core.parse_pr_review_proposal_id(proposal_id)
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", issue_version, "dev")
-    t.is_true(core.safe_version_segment(issue_version) ~= review_version)
+    t.is_true(transition_version.safe_version_segment(issue_version) ~= review_version)
 
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
@@ -756,7 +757,7 @@ return {
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
     local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
-    t.is_true(core.safe_version_segment(full_version) ~= full_version)
+    t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
 
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")

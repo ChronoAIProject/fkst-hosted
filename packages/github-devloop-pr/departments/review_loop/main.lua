@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 local core = require("core")
 
 local saga = require("workflow.saga")
@@ -51,7 +52,7 @@ end
 -- version -> stale skip; not yet at reviewing -> pending retry.
 local function reviewing_segment_transition_status(state, review_version)
   if state.state == "reviewing"
-    and tostring(core.safe_version_segment(state.version or "")) == tostring(review_version) then
+    and tostring(transition_version.safe_version_segment(state.version or "")) == tostring(review_version) then
     return "apply"
   end
   if state.state ~= nil and core.stage_rank(state.state) > core.stage_rank("reviewing") then

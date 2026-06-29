@@ -1,5 +1,6 @@
 local convergence_shared, github_risk = require("devloop.convergence.shared"), require("devloop.github_risk")
 local core, saga = require("core"), require("workflow.saga")
+local transition_version = require("contract.transition_version")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -150,7 +151,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local to_state = effective_decision == "approve" and "merge-ready"
       or reflection_checkpoint and "review-meta"
       or "fixing"
-    local current_review_version = core.safe_version_segment(state.version or "")
+    local current_review_version = transition_version.safe_version_segment(state.version or "")
     local transition = core.cyclic_transition_status({
       state = state.state,
       version = current_review_version,

@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local transition_version = require("contract.transition_version")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -113,7 +114,7 @@ return {
 
   test_fix_reconcile_drop_blocks_reviewing_issue = function()
     local event = fix_reconcile()
-    t.eq(core.safe_version_segment(event.issue_version) ~= event.issue_version, true)
+    t.eq(transition_version.safe_version_segment(event.issue_version) ~= event.issue_version, true)
     mock_bot_env()
     mock_issue_review({ "fkst-dev:reviewing" }, {
       core.state_marker(event.proposal_id, "reviewing", event.issue_version),

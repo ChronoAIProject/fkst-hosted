@@ -249,7 +249,7 @@ local function pipeline_fix(event)
       error("github-devloop: reviewing state marker not yet visible for fix reconcile; retrying")
     end
     if state.state ~= "reviewing"
-      or core.safe_version_segment(tostring(state.version or "")) ~= core.safe_version_segment(tostring(reconcile.issue_version)) then
+      or transition_version.safe_version_segment(tostring(state.version or "")) ~= transition_version.safe_version_segment(tostring(reconcile.issue_version)) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-stale(version-mismatch)", "fix reconcile event does not match canonical reviewing marker")
       return
     end

@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -217,7 +218,7 @@ return {
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_stalled_reviewing")
     local review_proposal = core.pr_review_proposal_id("owner/repo", 7, impl_version, "feedface")
-    local review_version = core.safe_version_segment(impl_version)
+    local review_version = transition_version.safe_version_segment(impl_version)
     local sr_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local angle_digests = {
       { angle = "minimal", verdict = "abstain", digest = "same-review-digest" },

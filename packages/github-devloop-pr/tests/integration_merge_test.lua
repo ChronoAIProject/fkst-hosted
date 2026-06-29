@@ -1,3 +1,4 @@
+local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -745,7 +746,7 @@ return {
     )
     t.eq(review_repo, core.safe_pr_review_repo_segment("owner/repo"))
     t.eq(review_pr, tostring(event.pr_number))
-    t.eq(review_version, core.safe_version_segment(reviewing_raise.payload.version))
+    t.eq(review_version, transition_version.safe_version_segment(reviewing_raise.payload.version))
     t.eq(review_head, "feedface")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find('state="reviewing"', 1, true) ~= nil)
