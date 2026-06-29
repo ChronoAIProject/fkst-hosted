@@ -303,8 +303,21 @@ async fn main() -> ExitCode {
         tracing::info!("github app not configured; goal support disabled in session service");
     }
 
+    // Capture what the Job watcher needs BEFORE `config`/`github_app`/`auth_mode`
+    // move into `AppState`. The binding store is shared (one instance) between
+    // the connect routes (via AppState) and the watcher's refresh driver.
+    let binding_store = fkst_control_plane::nyxid_connect::BrokerBindingStore::new();
+    let pod_dispatch = config.pod.dispatch;
+    let pod_namespace = config.pod.namespace.clone();
+    let broker_client = config.broker_client();
+    let watcher_base_url = match &auth_mode {
+        fkst_control_plane::auth::AuthMode::Enabled(settings) => Some(settings.base_url.clone()),
+        fkst_control_plane::auth::AuthMode::Disabled => None,
+    };
+    let watcher_github_app = github_app.clone();
+
     let app = match build_router(AppState {
-        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
+        binding_store: binding_store.clone(),
         config,
         sessions: sessions.clone(),
         auth_mode,
@@ -322,6 +335,36 @@ async fn main() -> ExitCode {
         }
     };
     tracing::info!("router built");
+
+    // Pod-per-session: spawn the Job watcher (maps Job terminal status -> goal
+    // issue labels + summary comment, drives the NyxID refresh). Requires the
+    // GitHub App (issue mutations go through the App token) + a reachable cluster.
+    if pod_dispatch {
+        match (
+            watcher_github_app,
+            fkst_control_plane::k8s::KubeClient::from_inferred(&pod_namespace).await,
+        ) {
+            (Some(github_app), Ok(kube)) => {
+                let watcher = fkst_control_plane::k8s::JobWatcher::new(
+                    kube.client().clone(),
+                    pod_namespace,
+                    github_app,
+                    binding_store,
+                    broker_client,
+                    watcher_base_url,
+                );
+                tokio::spawn(async move { watcher.run().await });
+                tracing::info!("job watcher spawned");
+            }
+            (None, _) => tracing::warn!(
+                "pod dispatch on but github app not configured; job watcher not started"
+            ),
+            (_, Err(error)) => tracing::warn!(
+                error = %error,
+                "pod dispatch on but kubernetes client unavailable; job watcher not started"
+            ),
+        }
+    }
 
     // 6. Bind and serve with graceful shutdown.
     let listener = match tokio::net::TcpListener::bind(&addr).await {
