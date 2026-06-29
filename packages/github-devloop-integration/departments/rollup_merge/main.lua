@@ -1,5 +1,6 @@
 local core = require("core")
 local saga = require("workflow.saga")
+local github = require("forge.github").production_handle
 
 local spec = {
   consumes = { "devloop_rollup_ready" },
@@ -61,7 +62,7 @@ local function act(event)
       return
     end
 
-    local viewed = core.gh_pr_view_merge(payload.repo, payload.pr_number, 30)
+    local viewed = github("github-devloop-integration.rollup_merge").gh_pr_view_merge(payload.repo, payload.pr_number, 30)
     if viewed.exit_code ~= 0 then
       error("github-devloop: gh rollup PR view failed: " .. tostring(viewed.stderr))
     end

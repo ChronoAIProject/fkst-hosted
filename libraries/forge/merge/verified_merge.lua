@@ -1,7 +1,9 @@
 local S = {}
+local github_adapter = require("forge.github")
 local forge_validators = require("forge.gitref")
 
 function S.install(M, shared, ci_gate)
+local github = github_adapter.production_handle
 local merge_attempt_limit = shared.merge_attempt_limit
 local expected_pr_identity = shared.expected_pr_identity
 
@@ -18,7 +20,7 @@ local function run_verified_pr_merge(request)
   local pr_number = request and request.pr_number
   local max_attempts = merge_attempt_limit(request)
   for attempt = 1, max_attempts do
-    local pr_recheck = M.gh_pr_view_merge(repo, pr_number, 30)
+    local pr_recheck = github("forge.merge").gh_pr_view_merge(repo, pr_number, 30)
     if pr_recheck.exit_code ~= 0 then
       error("forge.merge: gh pr merge recheck failed: " .. tostring(pr_recheck.stderr))
     end
@@ -54,7 +56,7 @@ local function run_verified_pr_merge(request)
       request.before_merge(rechecked_pr)
     end
 
-    local merge_result = M.gh_pr_merge(repo, pr_number, merge_head_sha, 120)
+    local merge_result = github("forge.merge").gh_pr_merge(repo, pr_number, merge_head_sha, 120)
     if merge_result.exit_code ~= 0 then
       if attempt < max_attempts and is_match_head_modified_error(merge_result.stderr) then
         M.log_line("info", tostring(request.dept or "merge"), tostring(request.proposal_id or "merge"), "MATCH_HEAD_RETRY", {
@@ -71,7 +73,7 @@ local function run_verified_pr_merge(request)
     else
       M.invalidate_entity_after_write(repo, "pr", pr_number)
 
-      local merged_view = M.gh_pr_view_merge(repo, pr_number, 30)
+      local merged_view = github("forge.merge").gh_pr_view_merge(repo, pr_number, 30)
       if merged_view.exit_code ~= 0 then
         error("forge.merge: gh pr post-merge view failed: " .. tostring(merged_view.stderr))
       end

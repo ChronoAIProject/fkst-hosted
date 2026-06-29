@@ -1,5 +1,6 @@
 local core = require("core")
 local saga = require("workflow.saga")
+local github = require("forge.github").production_handle
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -55,7 +56,7 @@ local function list_open_pr(repo, integration, upstream)
 end
 
 local function fetch_rollup_pr(repo, pr_number)
-  local viewed = core.run_required(core.gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
+  local viewed = core.run_required(github("github-devloop-integration.rollup_scan").gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
   local pr = core.parse_pr_view_merge(viewed.stdout)
   pr.number = tonumber(pr_number)
   return pr

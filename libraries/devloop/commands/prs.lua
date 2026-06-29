@@ -58,12 +58,6 @@ function S.install(M)
     end)
   end
 
-  function M.gh_pr_view_merge(repo, pr_number, timeout)
-    return support.gh_result(function()
-      return support.github().pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", timeout)
-    end)
-  end
-
   function M.gh_pr_view_freshness(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", timeout)
@@ -110,31 +104,6 @@ function S.install(M)
         body,
         timeout
       )
-    end)
-  end
-
-  function M.gh_pr_merge(repo, pr_number, head_sha, timeout)
-    if tostring(head_sha or "") == "" then
-      error("github-devloop: invalid merge head sha")
-    end
-    return support.gh_result(function()
-      return support.github().pr_merge(repo, pr_number, head_sha, timeout)
-    end)
-  end
-
-  function M.gh_commit_check_runs(repo, head_sha, timeout)
-    return support.gh_result(function()
-      return support.github().api_get(repo, "commits/" .. validators.require_safe_sha(M, "commit check-runs head sha", head_sha) .. "/check-runs", timeout)
-    end)
-  end
-
-  function M.gh_check_run_rerequest(repo, check_run_id, timeout)
-    local id = tostring(check_run_id or "")
-    if id == "" or id:find("[^0-9]") ~= nil then
-      error("github-devloop: invalid check-run id")
-    end
-    return support.gh_result(function()
-      return support.github().api_method("POST", "repos/" .. tostring(repo) .. "/check-runs/" .. id .. "/rerequest", nil, nil, nil, timeout)
     end)
   end
 

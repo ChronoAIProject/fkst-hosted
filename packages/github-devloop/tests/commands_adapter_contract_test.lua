@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local gh_exec_mod = require("devloop.gh_exec")
+local github = require("forge.github").production_handle
 
 local function assert_argv_equal(actual, expected)
   t.eq(#actual, #expected)
@@ -90,8 +91,8 @@ return {
       core.gh_issue_view("owner/repo", 43, "meta", 34)
       core.gh_issue_view("owner/repo", 44, "title,state", 35)
       core.gh_issue_view("owner/repo", 45, "state", 36)
-      core.gh_pr_merge("owner/repo", 7, "def456", 32)
-      core.gh_check_run_rerequest("owner/repo", 123, 33)
+      github("commands_adapter_contract_test").gh_pr_merge("owner/repo", 7, "def456", 32)
+      github("commands_adapter_contract_test").gh_check_run_rerequest("owner/repo", 123, 33)
     end)
 
     assert_argv_equal(calls[1].argv, {

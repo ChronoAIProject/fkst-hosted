@@ -3,6 +3,7 @@ local runtime_files = require("core.merge_runtime_files")
 local ci_wait = require("core.merge_ci_wait")
 local high_risk_merge_gate = require("core.high_risk_merge_gate")
 local M = {}
+local github = require("forge.github").production_handle
 
 local function log_gate(merge_ready, outcome, reason)
   local pass = merge_ready and merge_ready._merge_pass
@@ -267,7 +268,7 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
     error("github-devloop: PR ready failed: " .. tostring(ready_result.stderr))
   end
 
-  local pr_view = core.gh_pr_view_merge(repo, merge_ready.pr_number, 30)
+  local pr_view = github("github-devloop-pr.merge_executor").gh_pr_view_merge(repo, merge_ready.pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: PR ready recheck failed: " .. tostring(pr_view.stderr))
   end
@@ -346,7 +347,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   local current_pr = initial_pr
   if current_pr == nil then
-    local pr_view = core.gh_pr_view_merge(repo, merge_ready.pr_number, 30)
+    local pr_view = github("github-devloop-pr.merge_executor").gh_pr_view_merge(repo, merge_ready.pr_number, 30)
     if pr_view.exit_code ~= 0 then
       error("github-devloop: PR merge view failed: " .. tostring(pr_view.stderr))
     end
@@ -595,7 +596,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
 
-  local pr_recheck = core.gh_pr_view_merge(repo, merge_ready.pr_number, 30)
+  local pr_recheck = github("github-devloop-pr.merge_executor").gh_pr_view_merge(repo, merge_ready.pr_number, 30)
   if pr_recheck.exit_code ~= 0 then
     error("github-devloop: PR merge recheck failed: " .. tostring(pr_recheck.stderr))
   end

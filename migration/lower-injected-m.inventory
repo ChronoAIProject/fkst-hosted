@@ -3,10 +3,10 @@
   "counts": {
     "workflow_injected_m_reads": 35,
     "workflow_injected_m_unique_symbols": 19,
-    "forge_injected_m_reads": 37,
-    "forge_injected_m_unique_symbols": 22,
-    "total_injected_m_reads": 72,
-    "total_injected_m_unique_symbols": 41
+    "forge_injected_m_reads": 31,
+    "forge_injected_m_unique_symbols": 18,
+    "total_injected_m_reads": 66,
+    "total_injected_m_unique_symbols": 37
   },
   "manifest": {
     "workflow": {
@@ -107,22 +107,6 @@
       "commit_check_runs_green": {
         "route": "forge",
         "owner": "forge-merge"
-      },
-      "gh_check_run_rerequest": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
-      "gh_commit_check_runs": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
-      "gh_pr_merge": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
-      "gh_pr_view_merge": {
-        "route": "forge",
-        "owner": "forge-github"
       },
       "git_worktree_remove_if_present": {
         "route": "forge",

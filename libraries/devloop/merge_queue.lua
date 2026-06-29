@@ -2,6 +2,7 @@ local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
+local support = require("devloop.commands.support")
 
 function S.install(M)
 require("devloop.queue").install(M)
@@ -193,7 +194,7 @@ function M.merge_queue_head(repo, base_branch, current)
   for _, pr_item in ipairs(M.parse_pr_list_merge_queue(list.stdout)) do
     local pr_number = tonumber(pr_item.number)
     if pr_number ~= nil and not seen[tostring(pr_number)] then
-      local view = M.gh_pr_view_merge(repo, pr_number, 30)
+      local view = support.github().gh_pr_view_merge(repo, pr_number, 30)
       if view.exit_code ~= 0 then
         error("github-devloop: merge queue PR view failed: " .. tostring(view.stderr))
       end
@@ -504,7 +505,7 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
 end
 
 local function pr_merge_view_for_wip(M, repo, pr_number)
-  local view = M.gh_pr_view_merge(repo, pr_number, 30)
+  local view = support.github().gh_pr_view_merge(repo, pr_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: WIP PR state view failed: " .. tostring(view.stderr))
   end

@@ -1,9 +1,11 @@
 local S = {}
+local github_adapter = require("forge.github")
 local forge_validators = require("forge.gitref")
 local git_adapter = require("forge.git")
 local strings = require("contract.strings")
 
 function S.install(M, shared, ci_gate)
+local github = github_adapter.production_handle
 local git = git_adapter.production_handle
 
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
@@ -30,7 +32,7 @@ local function rerequest_head_check_runs(repo, pr_number, head_sha, runs, propos
     return false, "ci-selfheal-no-rerunnable-check-runs"
   end
   for _, id in ipairs(ids) do
-    local result = M.gh_check_run_rerequest(repo, id, 30)
+    local result = github("forge.merge").gh_check_run_rerequest(repo, id, 30)
     if result.exit_code ~= 0 then
       error("forge.merge: check-run rerequest failed: " .. tostring(result.stderr))
     end

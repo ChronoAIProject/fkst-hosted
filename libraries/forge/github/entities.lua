@@ -1,5 +1,7 @@
 local M = {}
 local argv_render = require("forge.argv")
+local gitref = require("forge.gitref")
+local gh_result = require("forge.github.result").gh_result
 local shell = require("forge.github.shell")
 
 local function repo_owner(repo)
@@ -111,6 +113,8 @@ end
 local function pr_view_cli_argv(repo, pr_number, fields)
   return { "gh", "pr", "view", tostring(pr_number), "--repo", tostring(repo), "--json", tostring(fields) }
 end
+
+local merge_pr_fields = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 
 local function pr_diff_argv(repo, pr_number)
   return { "gh", "pr", "diff", tostring(pr_number), "--repo", tostring(repo) }
@@ -366,6 +370,12 @@ function M.install(handle)
     return handle._exec(pr_view_cli_argv(repo, pr_number, fields), timeout, "gh pr view")
   end
 
+  function handle.gh_pr_view_merge(repo, pr_number, timeout)
+    return gh_result(function()
+      return handle.pr_cli_view(repo, pr_number, merge_pr_fields, timeout)
+    end)
+  end
+
   function handle.pr_cli_view_cmd(repo, pr_number, fields)
     return render_gh_argv(pr_view_cli_argv(repo, pr_number, fields), { 4, 6 })
   end
@@ -398,6 +408,15 @@ function M.install(handle)
     return handle._exec(pr_merge_argv(repo, pr_number, head_sha), timeout, "gh pr merge")
   end
 
+  function handle.gh_pr_merge(repo, pr_number, head_sha, timeout)
+    if tostring(head_sha or "") == "" then
+      error("github-devloop: invalid merge head sha")
+    end
+    return gh_result(function()
+      return handle.pr_merge(repo, pr_number, head_sha, timeout)
+    end)
+  end
+
   function handle.pr_merge_cmd(repo, pr_number, head_sha)
     return render_gh_argv(pr_merge_argv(repo, pr_number, head_sha), { 4, 6, 9 })
   end
@@ -414,12 +433,28 @@ function M.install(handle)
     return handle._exec({ "gh", "api", "repos/" .. tostring(repo) .. "/" .. tostring(path) }, timeout, "gh api GET")
   end
 
+  function handle.gh_commit_check_runs(repo, head_sha, timeout)
+    return gh_result(function()
+      return handle.api_get(repo, "commits/" .. gitref.require_safe_sha("commit check-runs head sha", head_sha, "github-devloop") .. "/check-runs", timeout)
+    end)
+  end
+
   function handle.api_paginate_slurp(path, timeout)
     return handle._exec(api_paginate_slurp_argv(path), timeout, "gh api paginated list")
   end
 
   function handle.api_method(method, path, fields, input_file, include_headers, timeout)
     return handle._exec(api_method_argv(method, path, fields, input_file, include_headers), timeout, "gh api method")
+  end
+
+  function handle.gh_check_run_rerequest(repo, check_run_id, timeout)
+    local id = tostring(check_run_id or "")
+    if id == "" or id:find("[^0-9]") ~= nil then
+      error("github-devloop: invalid check-run id")
+    end
+    return gh_result(function()
+      return handle.api_method("POST", "repos/" .. tostring(repo) .. "/check-runs/" .. id .. "/rerequest", nil, nil, nil, timeout)
+    end)
   end
 
   function handle.issue_create(repo, title, body_file, labels, assignees, timeout)

@@ -1,5 +1,6 @@
 local S = {}
 local check_runs = require("forge.github.check_runs")
+local github_adapter = require("forge.github")
 local forge_validators = require("forge.gitref")
 local strings = require("contract.strings")
 
@@ -23,6 +24,7 @@ local merge_gate_reason_class_entries = {
 }
 
 function S.install(M)
+local github = github_adapter.production_handle
 local is_open_pr = check_runs.is_open_pr
 local check_run_id = check_runs.check_run_id
 local check_run_head_sha = check_runs.check_run_head_sha
@@ -47,7 +49,7 @@ local function fetch_commit_check_runs(repo, head_sha)
   if tostring(repo or "") == "" or not forge_validators.is_git_sha(head_sha) then
     return nil, "ci-unknown"
   end
-  local result = M.gh_commit_check_runs(repo, head_sha, 30)
+  local result = github("forge.merge").gh_commit_check_runs(repo, head_sha, 30)
   if result.exit_code ~= 0 then
     return nil, "ci-unknown"
   end

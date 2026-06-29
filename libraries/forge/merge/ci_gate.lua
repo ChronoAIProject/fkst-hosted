@@ -1,7 +1,9 @@
 local S = {}
+local github_adapter = require("forge.github")
 local forge_validators = require("forge.gitref")
 
 function S.install(M, shared)
+local github = github_adapter.production_handle
 local strings = shared.strings
 local is_open_pr = shared.is_open_pr
 local log_check_runs_fallback = shared.log_check_runs_fallback
@@ -36,7 +38,7 @@ local function pr_identity_matches(pr, expected)
 end
 
 local function commit_check_runs_merge_gate(repo, head_sha, opts)
-  local result = M.gh_commit_check_runs(repo, head_sha, 30)
+  local result = github("forge.merge").gh_commit_check_runs(repo, head_sha, 30)
   if result.exit_code ~= 0 then
     error("forge.merge: gh commit check-runs failed: " .. tostring(result.stderr))
   end
