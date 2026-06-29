@@ -349,6 +349,65 @@ class MonotoneGateRatchetTest(unittest.TestCase):
 
         self.assertEqual(messages, [])
 
+    def test_cursor_declaration_line_is_not_a_read_when_aliases_enable_m_prefix(self) -> None:
+        source = textwrap.dedent(
+            """\
+            local typed = require("devloop.state")
+
+            function M.current_entity_state(a, b)
+              return M.current_state(a, b)
+            end
+            """
+        )
+
+        violations = monotone.source_violations("libraries/devloop/entity.lua", source)
+
+        labels = [violation.label() for violation in violations]
+        self.assertEqual(labels, ["libraries/devloop/entity.lua:4 M.current_entity_state cursor-read current_state("])
+
+    def test_cursor_declaration_line_is_shift_insensitive(self) -> None:
+        body = textwrap.dedent(
+            """\
+            local typed = require("devloop.state")
+
+            function M.current_entity_state(a, b)
+              return M.current_state(a, b)
+            end
+            """
+        )
+        baseline = [
+            violation.canonical_key()
+            for violation in monotone.source_violations("libraries/devloop/entity.lua", body)
+        ]
+
+        for inserted in (
+            "\n",
+            "\n".join(f'local dep_{index} = require("devloop.dep_{index}")' for index in range(20)) + "\n",
+        ):
+            shifted = inserted + body
+            shifted_keys = [
+                violation.canonical_key()
+                for violation in monotone.source_violations("libraries/devloop/entity.lua", shifted)
+            ]
+            self.assertEqual(shifted_keys, baseline)
+
+    def test_genuine_current_entity_state_call_is_still_detected(self) -> None:
+        source = textwrap.dedent(
+            """\
+            local typed = require("devloop.state")
+
+            local function planted_gate(x, y)
+              local s = M.current_entity_state(x, y)
+              return s
+            end
+            """
+        )
+
+        violations = monotone.source_violations("libraries/devloop/entity.lua", source)
+
+        labels = [violation.label() for violation in violations]
+        self.assertEqual(labels, ["libraries/devloop/entity.lua:4 planted_gate cursor-read current_entity_state("])
+
     def test_v2_state_token_change_is_different_key_and_flagged(self) -> None:
         current = {
             monotone.Violation(

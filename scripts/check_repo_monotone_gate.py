@@ -385,7 +385,8 @@ def is_cursor_definition(line: str, match_start: int) -> bool:
     basename = name.replace(" ", "").split(".")[-1].split(":")[-1]
     if basename not in {"current_state", "current_entity_state"}:
         return False
-    return line.find(basename, declaration.start()) == match_start
+    name_start, name_end = declaration.span("name")
+    return name_start <= match_start < name_end
 
 
 def block_violations(path: str, surface: str, block: Block, aliases: set[str] | None = None) -> list[Violation]:
