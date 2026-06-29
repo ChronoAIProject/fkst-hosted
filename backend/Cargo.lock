@@ -550,6 +550,7 @@ dependencies = [
  "bson",
  "envy",
  "filetime",
+ "futures",
  "hmac",
  "http-body-util",
  "jsonwebtoken",

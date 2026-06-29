@@ -349,6 +349,59 @@ impl GithubAppTokens {
         Ok(self.token_with_expiry_for_repo(owner_repo, perms).await?.0)
     }
 
+    /// Post a comment on `owner/repo`'s issue `number` as the App: mint an
+    /// installation token, then call the GitHub issues API. Used by the Job
+    /// watcher (no user token present) to report a session's final disposition.
+    pub async fn post_issue_comment(
+        &self,
+        owner_repo: &str,
+        number: u64,
+        body: &str,
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .create_issue_comment(&token, owner, repo, number, body)
+            .await
+    }
+
+    /// Add labels to `owner/repo`'s issue `number` as the App (additive).
+    pub async fn add_issue_labels(
+        &self,
+        owner_repo: &str,
+        number: u64,
+        labels: &[String],
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .add_issue_labels(&token, owner, repo, number, labels)
+            .await
+    }
+
+    /// Remove ONE label from `owner/repo`'s issue `number` as the App.
+    pub async fn remove_issue_label(
+        &self,
+        owner_repo: &str,
+        number: u64,
+        label: &str,
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .remove_issue_label(&token, owner, repo, number, label)
+            .await
+    }
+
     /// Mint (or return cached) installation token for `owner/repo`, returning the
     /// token AND its `expires_at` (issue #107). The expiry is what the goal-token
     /// file writer records as RFC3339 so the credential helper can decide whether
