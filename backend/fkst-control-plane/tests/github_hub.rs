@@ -112,8 +112,6 @@ async fn app(server: MockServer) -> TestApp {
         goals,
         vault,
         ornn: None,
-        claims: None,
-        worker_registry: None,
     })
     .expect("router");
 

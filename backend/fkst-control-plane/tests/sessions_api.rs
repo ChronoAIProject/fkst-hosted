@@ -61,8 +61,6 @@ async fn app() -> TestApp {
         goals,
         vault,
         ornn: None,
-        claims: None,
-        worker_registry: None,
     })
     .expect("router");
     TestApp { router, repo }
