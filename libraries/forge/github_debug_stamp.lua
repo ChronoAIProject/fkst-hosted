@@ -100,16 +100,22 @@ local function production_git()
 end
 
 function S.install(M, read_env, git)
-  function M.debug_stamp_marker_prefix()
+  local function debug_stamp_marker_prefix()
     return marker_prefix
   end
 
-  function M.with_github_debug_stamp(body, context)
+  local function with_github_debug_stamp(body, context)
     return S.append(body, context, {
       read_env = read_env or M.read_env,
       git = git or production_git(),
     })
   end
+  rawset(M, "debug_stamp_marker_prefix", debug_stamp_marker_prefix)
+  rawset(M, "with_github_debug_stamp", with_github_debug_stamp)
+  return {
+    debug_stamp_marker_prefix = debug_stamp_marker_prefix,
+    with_github_debug_stamp = with_github_debug_stamp,
+  }
 end
 
 return S

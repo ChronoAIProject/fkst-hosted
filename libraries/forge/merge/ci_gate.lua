@@ -13,7 +13,7 @@ local ci_classification = shared.ci_classification
 local integration_or_external_red = shared.integration_or_external_red
 local merge_gate_reason_row = shared.merge_gate_reason_row
 
-function M.pr_identity_matches(pr, expected)
+local function pr_identity_matches(pr, expected)
   if type(pr) ~= "table" then
     return false, "missing-pr"
   end
@@ -35,7 +35,7 @@ function M.pr_identity_matches(pr, expected)
   return true, "pr-ok"
 end
 
-function M.commit_check_runs_merge_gate(repo, head_sha, opts)
+local function commit_check_runs_merge_gate(repo, head_sha, opts)
   local result = M.gh_commit_check_runs(repo, head_sha, 30)
   if result.exit_code ~= 0 then
     error("forge.merge: gh commit check-runs failed: " .. tostring(result.stderr))
@@ -46,7 +46,7 @@ function M.commit_check_runs_merge_gate(repo, head_sha, opts)
   return green, reason, runs
 end
 
-function M.classify_pr_ci_gate(pr, opts)
+local function classify_pr_ci_gate(pr, opts)
   local green, reason = M.pr_rollup_green(pr)
   if green then
     return ci_classification("OK", "rollup-green")
@@ -83,7 +83,7 @@ function M.classify_pr_ci_gate(pr, opts)
   return ci_classification("OK", "rollup-green", { check_runs = runs })
 end
 
-function M.rerunnable_check_run_ids_for_head(runs, head_sha)
+local function rerunnable_check_run_ids_for_head(runs, head_sha)
   if type(runs) ~= "table" or not forge_validators.is_git_sha(head_sha) then
     return {}
   end
@@ -103,27 +103,27 @@ function M.rerunnable_check_run_ids_for_head(runs, head_sha)
   return ids
 end
 
-function M.evaluate_ci_status_gate(pr, opts)
+local function evaluate_ci_status_gate(pr, opts)
   local green, green_reason = M.pr_rollup_green(pr)
   local check_runs = nil
   if not green and green_reason == "missing-status-rollup" and type(opts) == "table" and opts.repo ~= nil then
     local head_sha = tostring(pr and pr.head_sha or "")
     if head_sha ~= "" then
-      green, green_reason, check_runs = M.commit_check_runs_merge_gate(opts.repo, head_sha, opts)
+      green, green_reason, check_runs = commit_check_runs_merge_gate(opts.repo, head_sha, opts)
     end
   end
   return green, green_reason, check_runs
 end
 
-function M.evaluate_ci_merge_gate(pr, opts)
+local function evaluate_ci_merge_gate(pr, opts)
   local mergeable, mergeable_reason = M.pr_mergeable(pr)
   if not mergeable then
     return false, mergeable_reason
   end
-  local green, green_reason = M.evaluate_ci_status_gate(pr, opts)
+  local green, green_reason = evaluate_ci_status_gate(pr, opts)
   if not green then
     if green_reason == "rollup-red" then
-      local classification = M.classify_pr_ci_gate(pr, opts)
+      local classification = classify_pr_ci_gate(pr, opts)
       return false, classification.reason
     end
     return false, green_reason
@@ -131,7 +131,7 @@ function M.evaluate_ci_merge_gate(pr, opts)
   return true, "merge-gate-ok"
 end
 
-function M.merge_gate_reason_class(reason)
+local function merge_gate_reason_class(reason)
   local row = merge_gate_reason_row(reason)
   if row ~= nil then
     return row.class
@@ -143,13 +143,32 @@ function M.merge_gate_reason_class(reason)
   return strings.sanitize_key(text ~= "" and text or "gate-failed", false):gsub("/", "-")
 end
 
-function M.merge_gate_reason_requires_pr_merge_product(reason)
+local function merge_gate_reason_requires_pr_merge_product(reason)
   local row = merge_gate_reason_row(reason)
   if row ~= nil then
     return row.requires_pr_merge_product == true
   end
   return false
 end
+
+rawset(M, "pr_identity_matches", pr_identity_matches)
+rawset(M, "commit_check_runs_merge_gate", commit_check_runs_merge_gate)
+rawset(M, "classify_pr_ci_gate", classify_pr_ci_gate)
+rawset(M, "rerunnable_check_run_ids_for_head", rerunnable_check_run_ids_for_head)
+rawset(M, "evaluate_ci_status_gate", evaluate_ci_status_gate)
+rawset(M, "evaluate_ci_merge_gate", evaluate_ci_merge_gate)
+rawset(M, "merge_gate_reason_class", merge_gate_reason_class)
+rawset(M, "merge_gate_reason_requires_pr_merge_product", merge_gate_reason_requires_pr_merge_product)
+return {
+  pr_identity_matches = pr_identity_matches,
+  commit_check_runs_merge_gate = commit_check_runs_merge_gate,
+  classify_pr_ci_gate = classify_pr_ci_gate,
+  rerunnable_check_run_ids_for_head = rerunnable_check_run_ids_for_head,
+  evaluate_ci_status_gate = evaluate_ci_status_gate,
+  evaluate_ci_merge_gate = evaluate_ci_merge_gate,
+  merge_gate_reason_class = merge_gate_reason_class,
+  merge_gate_reason_requires_pr_merge_product = merge_gate_reason_requires_pr_merge_product,
+}
 end
 
 return S

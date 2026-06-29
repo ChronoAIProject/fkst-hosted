@@ -3,10 +3,10 @@
   "counts": {
     "workflow_injected_m_reads": 35,
     "workflow_injected_m_unique_symbols": 19,
-    "forge_injected_m_reads": 66,
-    "forge_injected_m_unique_symbols": 42,
-    "total_injected_m_reads": 101,
-    "total_injected_m_unique_symbols": 61
+    "forge_injected_m_reads": 42,
+    "forge_injected_m_unique_symbols": 27,
+    "total_injected_m_reads": 77,
+    "total_injected_m_unique_symbols": 46
   },
   "manifest": {
     "workflow": {
@@ -96,15 +96,7 @@
         "route": "contract",
         "owner": "contract-strings"
       },
-      "ci_missing_status_dispatch_eligible": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
       "ci_missing_status_first_observed_key": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "ci_selfheal_once": {
         "route": "forge",
         "owner": "forge-merge"
       },
@@ -112,27 +104,7 @@
         "route": "forge",
         "owner": "forge-merge"
       },
-      "classify_pr_ci_gate": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
       "commit_check_runs_green": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "commit_check_runs_merge_gate": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "debug_stamp_marker_prefix": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
-      "evaluate_ci_merge_gate": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "evaluate_ci_status_gate": {
         "route": "forge",
         "owner": "forge-merge"
       },
@@ -180,14 +152,6 @@
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
       },
-      "is_match_head_modified_error": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "is_merged_pr": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
       "is_not_mergeable_reason": {
         "route": "forge",
         "owner": "forge-merge"
@@ -200,14 +164,6 @@
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
       },
-      "merge_gate_reason_class": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "merge_gate_reason_requires_pr_merge_product": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
       "mkdir_p_cmd": {
         "route": "workflow",
         "owner": "workflow-env"
@@ -219,10 +175,6 @@
       "parse_pr_view_merge": {
         "route": "forge",
         "owner": "forge-github"
-      },
-      "pr_identity_matches": {
-        "route": "forge",
-        "owner": "forge-merge"
       },
       "pr_mergeable": {
         "route": "forge",
@@ -240,21 +192,9 @@
         "route": "workflow",
         "owner": "workflow-env"
       },
-      "rerunnable_check_run_ids_for_head": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
       "rollup_failure_gate_sha": {
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
-      },
-      "run_verified_pr_merge": {
-        "route": "forge",
-        "owner": "forge-merge"
-      },
-      "with_github_debug_stamp": {
-        "route": "forge",
-        "owner": "forge-github"
       }
     }
   }

@@ -1,19 +1,19 @@
 local S = {}
 local forge_validators = require("forge.gitref")
 
-function S.install(M, shared)
+function S.install(M, shared, ci_gate)
 local merge_attempt_limit = shared.merge_attempt_limit
 local expected_pr_identity = shared.expected_pr_identity
 
-function M.is_merged_pr(pr)
+local function is_merged_pr(pr)
   return tostring(pr and pr.state or ""):upper() == "MERGED" and tostring(pr and pr.merged_at or "") ~= ""
 end
 
-function M.is_match_head_modified_error(stderr)
+local function is_match_head_modified_error(stderr)
   return tostring(stderr or ""):find("Head branch was modified", 1, true) ~= nil
 end
 
-function M.run_verified_pr_merge(request)
+local function run_verified_pr_merge(request)
   local repo = tostring(request and request.repo or "")
   local pr_number = request and request.pr_number
   local max_attempts = merge_attempt_limit(request)
@@ -32,7 +32,7 @@ function M.run_verified_pr_merge(request)
       end
     end
     local expected = expected_pr_identity(request, repo, merge_head_sha)
-    local identity_ok, identity_reason = M.pr_identity_matches(rechecked_pr, expected)
+    local identity_ok, identity_reason = ci_gate.pr_identity_matches(rechecked_pr, expected)
     if not identity_ok then
       return false, identity_reason, rechecked_pr
     end
@@ -42,7 +42,7 @@ function M.run_verified_pr_merge(request)
         return false, validate_reason or "pr-validation-failed", rechecked_pr
       end
     end
-    local gate_ok, gate_reason = M.evaluate_ci_merge_gate(rechecked_pr, {
+    local gate_ok, gate_reason = ci_gate.evaluate_ci_merge_gate(rechecked_pr, {
       repo = repo,
       dept = request.dept or "merge",
       proposal_id = request.proposal_id,
@@ -56,7 +56,7 @@ function M.run_verified_pr_merge(request)
 
     local merge_result = M.gh_pr_merge(repo, pr_number, merge_head_sha, 120)
     if merge_result.exit_code ~= 0 then
-      if attempt < max_attempts and M.is_match_head_modified_error(merge_result.stderr) then
+      if attempt < max_attempts and is_match_head_modified_error(merge_result.stderr) then
         M.log_line("info", tostring(request.dept or "merge"), tostring(request.proposal_id or "merge"), "MATCH_HEAD_RETRY", {
           "repo=" .. tostring(repo),
           "pr=" .. tostring(pr_number),
@@ -77,7 +77,7 @@ function M.run_verified_pr_merge(request)
       end
       local merged_pr = M.parse_pr_view_merge(merged_view.stdout)
       merged_pr.number = pr_number
-      if not M.is_merged_pr(merged_pr) then
+      if not is_merged_pr(merged_pr) then
         return false, "merge-confirmation-pending", merged_pr
       end
       if tostring(merged_pr.head_ref_name or "") ~= tostring(expected.head_branch or "")
@@ -91,6 +91,14 @@ function M.run_verified_pr_merge(request)
   end
   error("forge.merge: gh pr merge failed: Head branch was modified after bounded retry")
 end
+rawset(M, "is_merged_pr", is_merged_pr)
+rawset(M, "is_match_head_modified_error", is_match_head_modified_error)
+rawset(M, "run_verified_pr_merge", run_verified_pr_merge)
+return {
+  is_merged_pr = is_merged_pr,
+  is_match_head_modified_error = is_match_head_modified_error,
+  run_verified_pr_merge = run_verified_pr_merge,
+}
 end
 
 return S

@@ -2,7 +2,7 @@ local S = {}
 local forge_validators = require("forge.gitref")
 local strings = require("contract.strings")
 
-function S.install(M, shared)
+function S.install(M, shared, ci_gate)
 local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
   local runtime_result = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
@@ -22,7 +22,7 @@ local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
 end
 
 local function rerequest_head_check_runs(repo, pr_number, head_sha, runs, proposal_id, first_observed_seconds, age_seconds, key)
-  local ids = M.rerunnable_check_run_ids_for_head(runs, head_sha)
+  local ids = ci_gate.rerunnable_check_run_ids_for_head(runs, head_sha)
   if #ids == 0 then
     return false, "ci-selfheal-no-rerunnable-check-runs"
   end
@@ -100,7 +100,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   return true, "ci-selfheal-head-nudged"
 end
 
-function M.ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_seconds, grace_seconds)
+local function ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_seconds, grace_seconds)
   local green, green_reason = M.pr_rollup_green(pr)
   if green or green_reason ~= "missing-status-rollup" then
     return false, green_reason
@@ -118,7 +118,7 @@ function M.ci_missing_status_dispatch_eligible(pr, now_seconds, first_observed_s
   return true, "missing-status-rollup", age_seconds
 end
 
-function M.ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds, runs)
+local function ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds, runs)
   local green, green_reason = M.pr_rollup_green(pr)
   if green or green_reason ~= "missing-status-rollup" then
     return false, green_reason
@@ -134,7 +134,7 @@ function M.ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds, run
     end
     cache_set(observed_key, tostring(first_observed_seconds))
   end
-  local eligible, reason, age_seconds = M.ci_missing_status_dispatch_eligible({
+  local eligible, reason, age_seconds = ci_missing_status_dispatch_eligible({
     status_check_rollup = pr and pr.status_check_rollup,
   }, now_seconds, first_observed_seconds, grace_seconds)
   if not eligible then
@@ -165,6 +165,12 @@ function M.ci_selfheal_once(repo, pr_number, pr, proposal_id, grace_seconds, run
   end
   return true, "ci-selfheal-triggered"
 end
+rawset(M, "ci_missing_status_dispatch_eligible", ci_missing_status_dispatch_eligible)
+rawset(M, "ci_selfheal_once", ci_selfheal_once)
+return {
+  ci_missing_status_dispatch_eligible = ci_missing_status_dispatch_eligible,
+  ci_selfheal_once = ci_selfheal_once,
+}
 end
 
 return S
