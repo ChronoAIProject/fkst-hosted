@@ -1,0 +1,59 @@
+# RBAC for pod-per-session execution (milestone #9).
+#
+# Grants the control plane the minimum it needs to spawn + watch + GC one Job
+# per substrate session, and declares the ServiceAccount the session Job pods
+# run as. Apply into the FKST_POD_NAMESPACE namespace (default: fkst-sessions).
+#
+# Bind the RoleBinding subject to whatever ServiceAccount the control-plane
+# Deployment runs as (placeholder: fkst-control-plane in namespace fkst-hosted).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fkst-session-runner
+  namespace: fkst-sessions
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+    app.kubernetes.io/component: session-runner
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fkst-pod-launcher
+  namespace: fkst-sessions
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+rules:
+  # Per-session credentials: created before the Job, mounted 0400, and
+  # patched in place to rotate the short-lived NyxID token (update/patch).
+  # They carry an ownerReference to the Job, so K8s cascade-deletes them.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
+  # One Job per session: created, watched to completion, GC'd via
+  # ttlSecondsAfterFinished (delete kept for explicit teardown).
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Read pod status for richer failure diagnostics on a failed Job.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fkst-pod-launcher
+  namespace: fkst-sessions
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fkst-pod-launcher
+subjects:
+  # The control-plane's own ServiceAccount (adjust name/namespace to match the
+  # control-plane Deployment's serviceAccountName).
+  - kind: ServiceAccount
+    name: fkst-control-plane
+    namespace: fkst-hosted
