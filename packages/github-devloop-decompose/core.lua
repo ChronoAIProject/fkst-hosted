@@ -1,6 +1,15 @@
-local M = {}
+local saga_conformance = require("devloop.saga_conformance")
+local M
 local wiring = require("core.devloop_wiring")
 
+-- fkst.toml conformance hook: function = "core.saga_conformance_errors" (delegates to typed devloop.saga_conformance.errors)
+local function saga_conformance_errors()
+  return saga_conformance.errors(M)
+end
+
+M = {
+  saga_conformance_errors = saga_conformance_errors,
+}
 
 function M.decompose_package_queue()
   return "devloop_decompose"
@@ -26,7 +35,6 @@ require("devloop.entity").install(M)
 require("devloop.validators").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.claims").install(M)
-require("devloop.saga_conformance").install(M)
 require("core.saga").install(M)
 require("core.decompose").install(M)
 

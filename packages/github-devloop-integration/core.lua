@@ -1,6 +1,15 @@
-local M = {}
+local saga_conformance = require("devloop.saga_conformance")
+local M
 local wiring = require("core.devloop_wiring")
 
+-- fkst.toml conformance hook: function = "core.saga_conformance_errors" (delegates to typed devloop.saga_conformance.errors)
+local function saga_conformance_errors()
+  return saga_conformance.errors(M)
+end
+
+M = {
+  saga_conformance_errors = saga_conformance_errors,
+}
 
 require("devloop.base").install(M)
 require("devloop.config").install(M)
@@ -22,7 +31,6 @@ require("devloop.claims").install(M)
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), { sync_conflict = true })
 require("devloop.github_proxy_entity_view").install(M)
-require("devloop.saga_conformance").install(M)
 require("core.branches").install(M)
 require("core.sync_conflict").install(M)
 require("core.rollup_health").install(M)

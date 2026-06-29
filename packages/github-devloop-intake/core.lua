@@ -1,4 +1,14 @@
-local M = {}
+local saga_conformance = require("devloop.saga_conformance")
+local M
+
+-- fkst.toml conformance hook: function = "core.saga_conformance_errors" (delegates to typed devloop.saga_conformance.errors)
+local function saga_conformance_errors()
+  return saga_conformance.errors(M)
+end
+
+M = {
+  saga_conformance_errors = saga_conformance_errors,
+}
 
 require("devloop.base").install(M)
 require("devloop.config").install(M)
@@ -21,6 +31,5 @@ require("devloop.validators").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.operator_commands").install(M)
 require("devloop.claims").install(M)
-require("devloop.saga_conformance").install(M)
 
 return M

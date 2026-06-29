@@ -1,4 +1,4 @@
-local S = {}
+local saga_conformance = {}
 
 local function record(id, message)
   return { id = id, message = tostring(message) }
@@ -10,7 +10,7 @@ local function append_records(out, id, messages)
   end
 end
 
-function S.errors(core)
+function saga_conformance.errors(core)
   if type(core) ~= "table" then
     return { record("saga.conformance", "core module is unavailable") }
   end
@@ -29,10 +29,4 @@ function S.errors(core)
   return out
 end
 
-function S.install(M)
-  function M.saga_conformance_errors()
-    return S.errors(M)
-  end
-end
-
-return S
+return saga_conformance
