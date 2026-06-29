@@ -6,5 +6,7 @@
 //! `FKST_POD_DISPATCH=true` — the control plane is Kubernetes-free by default.
 
 pub mod client;
+pub mod launcher;
 
 pub use client::{KubeClient, KubeError};
+pub use launcher::{LaunchError, LaunchOutcome, PodSessionLauncher, SessionSecrets};

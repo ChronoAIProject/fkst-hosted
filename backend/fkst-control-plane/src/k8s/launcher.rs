@@ -1,0 +1,438 @@
+//! The per-session Job + Secret launcher (issue #293).
+//!
+//! Turns a [`SessionSpec`] + the session's credentials into a running Kubernetes
+//! Job: one per-session Secret (mounted 0400) carrying the spec + tokens, and one
+//! Job running the control-plane image in `run-session` mode. The Job name is the
+//! deterministic session id, so a webhook redelivery is an at-most-one-Job no-op;
+//! the Secret is owner-referenced to the Job, so K8s cascade-deletes it on GC.
+
+use std::collections::BTreeMap;
+
+use k8s_openapi::api::batch::v1::{Job, JobSpec};
+use k8s_openapi::api::core::v1::{
+    Container, EnvVar, PodSpec, PodTemplateSpec, Secret, SecretVolumeSource, Volume, VolumeMount,
+};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
+use kube::api::{Api, PostParams};
+use kube::ResourceExt;
+use secrecy::{ExposeSecret, SecretString};
+
+use crate::config::PodConfig;
+use crate::session_spec::creds::{
+    DEFAULT_CREDS_DIR, GITHUB_TOKEN_FILE, NYXID_TOKEN_FILE, NYXID_URL_FILE,
+};
+use crate::session_spec::SessionSpec;
+
+/// Where the per-session credential Secret is mounted in the pod (must match the
+/// runner's `FKST_SESSION_CREDS_DIR` default, [`DEFAULT_CREDS_DIR`]).
+const CREDS_MOUNT_DIR: &str = DEFAULT_CREDS_DIR;
+/// The Secret key (and mounted filename) holding the serialized SessionSpec. The
+/// prompt lives in the spec, so it rides the 0400 Secret, never a ConfigMap.
+const SPEC_FILE_KEY: &str = "session-spec.json";
+/// The Secret-volume name used by both the volume and its mount.
+const CREDS_VOLUME: &str = "creds";
+/// 0400 file mode for the mounted Secret (octal; k8s wants the decimal value).
+const SECRET_FILE_MODE: i32 = 0o400;
+/// The container name inside the session pod.
+const RUNNER_CONTAINER: &str = "runner";
+
+/// Env var the runner reads for the creds dir (mirrors `runner::CREDS_DIR_ENV`).
+const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
+/// Env var the runner reads for the spec path (mirrors `runner::SPEC_PATH_ENV`).
+const SPEC_PATH_ENV: &str = "FKST_SESSION_SPEC_PATH";
+
+/// The credentials minted for one session, written into its Secret.
+pub struct SessionSecrets {
+    /// The GitHub App installation token (clone + git ops + log push).
+    pub github_token: SecretString,
+    /// The NyxID session token (LLM + Ornn), when provisioned.
+    pub nyxid_token: Option<SecretString>,
+    /// The NyxID issuer base URL, when provisioned.
+    pub nyxid_url: Option<String>,
+}
+
+/// Errors launching a session Job.
+#[derive(Debug, thiserror::Error)]
+pub enum LaunchError {
+    /// Pod dispatch is enabled but no image is configured (should be caught at
+    /// config load; guarded here too).
+    #[error("FKST_POD_IMAGE is not configured")]
+    NoImage,
+    /// Serializing the SessionSpec for the Secret failed.
+    #[error("serialize session spec: {0}")]
+    Serialize(#[from] serde_json::Error),
+    /// A Kubernetes API call failed (non-conflict).
+    #[error("kubernetes api: {0}")]
+    Kube(#[from] kube::Error),
+}
+
+/// The deterministic Job/Secret name for a session.
+fn object_name(session_id: &str) -> String {
+    format!("fkst-sess-{session_id}")
+}
+
+/// Common labels stamped on the Job + Secret (and the pod template) so a watcher
+/// can find a session's objects by selector.
+fn labels(spec: &SessionSpec) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "app.kubernetes.io/part-of".to_string(),
+            "fkst-hosted".to_string(),
+        ),
+        (
+            "app.kubernetes.io/component".to_string(),
+            "session".to_string(),
+        ),
+        (
+            "fkst.chrono-ai.fun/session-id".to_string(),
+            spec.session_id.clone(),
+        ),
+        (
+            "fkst.chrono-ai.fun/run-key".to_string(),
+            spec.run_key.clone(),
+        ),
+    ])
+}
+
+/// Build the per-session Job (pure; no API calls). Runs `config.image` with
+/// `["run-session"]`, mounts the per-session Secret 0400, and is bounded by
+/// `backoffLimit:0` + `activeDeadlineSeconds` + `ttlSecondsAfterFinished`.
+pub fn build_job(spec: &SessionSpec, config: &PodConfig) -> Result<Job, LaunchError> {
+    let image = config.image.clone().ok_or(LaunchError::NoImage)?;
+    let name = object_name(&spec.session_id);
+    let labels = labels(spec);
+
+    let container = Container {
+        name: RUNNER_CONTAINER.to_string(),
+        image: Some(image),
+        args: Some(vec!["run-session".to_string()]),
+        env: Some(vec![
+            EnvVar {
+                name: CREDS_DIR_ENV.to_string(),
+                value: Some(CREDS_MOUNT_DIR.to_string()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: SPEC_PATH_ENV.to_string(),
+                value: Some(format!("{CREDS_MOUNT_DIR}/{SPEC_FILE_KEY}")),
+                ..Default::default()
+            },
+        ]),
+        volume_mounts: Some(vec![VolumeMount {
+            name: CREDS_VOLUME.to_string(),
+            mount_path: CREDS_MOUNT_DIR.to_string(),
+            read_only: Some(true),
+            ..Default::default()
+        }]),
+        ..Default::default()
+    };
+
+    let volume = Volume {
+        name: CREDS_VOLUME.to_string(),
+        secret: Some(SecretVolumeSource {
+            secret_name: Some(name.clone()),
+            default_mode: Some(SECRET_FILE_MODE),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let pod_spec = PodSpec {
+        restart_policy: Some("Never".to_string()),
+        service_account_name: Some(config.service_account.clone()),
+        containers: vec![container],
+        volumes: Some(vec![volume]),
+        ..Default::default()
+    };
+
+    let job = Job {
+        metadata: ObjectMeta {
+            name: Some(name),
+            namespace: Some(config.namespace.clone()),
+            labels: Some(labels.clone()),
+            ..Default::default()
+        },
+        spec: Some(JobSpec {
+            backoff_limit: Some(0),
+            active_deadline_seconds: Some(config.active_deadline_secs),
+            ttl_seconds_after_finished: Some(config.run_ttl_secs),
+            template: PodTemplateSpec {
+                metadata: Some(ObjectMeta {
+                    labels: Some(labels),
+                    ..Default::default()
+                }),
+                spec: Some(pod_spec),
+            },
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    Ok(job)
+}
+
+/// Build the per-session Secret (pure; no API calls). Carries the serialized
+/// SessionSpec + the credential files; owner-referenced to the Job when `owner`
+/// is provided so K8s cascade-deletes it on Job GC.
+pub fn build_secret(
+    spec: &SessionSpec,
+    namespace: &str,
+    secrets: &SessionSecrets,
+    owner: Option<OwnerReference>,
+) -> Result<Secret, LaunchError> {
+    let mut data: BTreeMap<String, String> = BTreeMap::new();
+    data.insert(SPEC_FILE_KEY.to_string(), serde_json::to_string(spec)?);
+    data.insert(
+        GITHUB_TOKEN_FILE.to_string(),
+        secrets.github_token.expose_secret().to_string(),
+    );
+    if let Some(token) = &secrets.nyxid_token {
+        data.insert(
+            NYXID_TOKEN_FILE.to_string(),
+            token.expose_secret().to_string(),
+        );
+    }
+    if let Some(url) = &secrets.nyxid_url {
+        data.insert(NYXID_URL_FILE.to_string(), url.clone());
+    }
+
+    Ok(Secret {
+        metadata: ObjectMeta {
+            name: Some(object_name(&spec.session_id)),
+            namespace: Some(namespace.to_string()),
+            labels: Some(labels(spec)),
+            owner_references: owner.map(|o| vec![o]),
+            ..Default::default()
+        },
+        string_data: Some(data),
+        type_: Some("Opaque".to_string()),
+        ..Default::default()
+    })
+}
+
+/// Build the OwnerReference a created Job presents to its Secret.
+fn owner_reference(job: &Job) -> Option<OwnerReference> {
+    let name = job.metadata.name.clone()?;
+    let uid = job.uid()?;
+    Some(OwnerReference {
+        api_version: "batch/v1".to_string(),
+        kind: "Job".to_string(),
+        name,
+        uid,
+        controller: Some(true),
+        block_owner_deletion: Some(true),
+    })
+}
+
+/// Creates per-session Jobs + Secrets against the cluster.
+#[derive(Clone)]
+pub struct PodSessionLauncher {
+    client: kube::Client,
+    namespace: String,
+    config: PodConfig,
+}
+
+/// What a launch did: a freshly created Job, or an idempotent no-op because the
+/// Job already existed (a webhook redelivery for the same session).
+#[derive(Debug, PartialEq, Eq)]
+pub enum LaunchOutcome {
+    Created,
+    AlreadyRunning,
+}
+
+impl PodSessionLauncher {
+    /// Build a launcher from a live client + the pod config.
+    pub fn new(client: kube::Client, namespace: impl Into<String>, config: PodConfig) -> Self {
+        Self {
+            client,
+            namespace: namespace.into(),
+            config,
+        }
+    }
+
+    /// Create the session's Job, then its owner-referenced Secret. Idempotent: a
+    /// `409 AlreadyExists` on the Job (same deterministic name) is a no-op
+    /// success. The Job is created first so the Secret can carry its UID as an
+    /// ownerReference (the pod waits for the Secret to mount, within the deadline).
+    pub async fn launch(
+        &self,
+        spec: &SessionSpec,
+        secrets: SessionSecrets,
+    ) -> Result<LaunchOutcome, LaunchError> {
+        let jobs: Api<Job> = Api::namespaced(self.client.clone(), &self.namespace);
+        let secrets_api: Api<Secret> = Api::namespaced(self.client.clone(), &self.namespace);
+
+        let job = build_job(spec, &self.config)?;
+        let created = match jobs.create(&PostParams::default(), &job).await {
+            Ok(created) => created,
+            Err(kube::Error::Api(err)) if err.code == 409 => {
+                tracing::info!(
+                    session_id = %spec.session_id,
+                    "pod launch: job already exists; idempotent no-op"
+                );
+                return Ok(LaunchOutcome::AlreadyRunning);
+            }
+            Err(err) => return Err(LaunchError::Kube(err)),
+        };
+
+        let owner = owner_reference(&created);
+        let secret = build_secret(spec, &self.namespace, &secrets, owner)?;
+        match secrets_api.create(&PostParams::default(), &secret).await {
+            Ok(_) => {}
+            Err(kube::Error::Api(err)) if err.code == 409 => {
+                tracing::info!(
+                    session_id = %spec.session_id,
+                    "pod launch: secret already exists; reusing"
+                );
+            }
+            Err(err) => return Err(LaunchError::Kube(err)),
+        }
+
+        tracing::info!(
+            session_id = %spec.session_id,
+            namespace = %self.namespace,
+            "pod launch: session job created"
+        );
+        Ok(LaunchOutcome::Created)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::RepoRef;
+    use crate::session_spec::{derive_session_id, SessionGoal};
+
+    fn spec() -> SessionSpec {
+        SessionSpec {
+            session_id: derive_session_id(42, "acme", "site", 7),
+            run_key: "rk1".to_string(),
+            installation_id: 42,
+            repo: RepoRef {
+                owner: "acme".to_string(),
+                name: "site".to_string(),
+            },
+            owner_login: "acme".to_string(),
+            issue_number: 7,
+            goal: SessionGoal {
+                title: "Add dark mode".to_string(),
+                prompt: "do it".to_string(),
+            },
+            package_names: vec!["web".to_string()],
+            ornn_pins: vec![],
+            log_branch: "fkst/session-x".to_string(),
+        }
+    }
+
+    fn config() -> PodConfig {
+        PodConfig {
+            dispatch: true,
+            namespace: "fkst-sessions".to_string(),
+            image: Some("registry/fkst-control-plane:1.0".to_string()),
+            service_account: "fkst-session-runner".to_string(),
+            run_ttl_secs: 600,
+            active_deadline_secs: 3600,
+        }
+    }
+
+    #[test]
+    fn build_job_sets_the_run_session_shape() {
+        let spec = spec();
+        let job = build_job(&spec, &config()).expect("job");
+        let meta = &job.metadata;
+        assert_eq!(meta.name.as_deref(), Some(&*object_name(&spec.session_id)));
+        assert_eq!(meta.namespace.as_deref(), Some("fkst-sessions"));
+
+        let jobspec = job.spec.unwrap();
+        assert_eq!(jobspec.backoff_limit, Some(0));
+        assert_eq!(jobspec.active_deadline_seconds, Some(3600));
+        assert_eq!(jobspec.ttl_seconds_after_finished, Some(600));
+
+        let pod = jobspec.template.spec.unwrap();
+        assert_eq!(pod.restart_policy.as_deref(), Some("Never"));
+        assert_eq!(
+            pod.service_account_name.as_deref(),
+            Some("fkst-session-runner")
+        );
+
+        let c = &pod.containers[0];
+        assert_eq!(c.image.as_deref(), Some("registry/fkst-control-plane:1.0"));
+        assert_eq!(c.args.as_deref(), Some(&["run-session".to_string()][..]));
+        let env = c.env.as_ref().unwrap();
+        assert!(env.iter().any(|e| e.name == "FKST_SESSION_CREDS_DIR"
+            && e.value.as_deref() == Some("/var/run/fkst/creds")));
+        assert!(env.iter().any(|e| e.name == "FKST_SESSION_SPEC_PATH"
+            && e.value.as_deref() == Some("/var/run/fkst/creds/session-spec.json")));
+
+        let mount = &c.volume_mounts.as_ref().unwrap()[0];
+        assert_eq!(mount.mount_path, "/var/run/fkst/creds");
+        assert_eq!(mount.read_only, Some(true));
+        let vol = &pod.volumes.as_ref().unwrap()[0];
+        let secret = vol.secret.as_ref().unwrap();
+        assert_eq!(
+            secret.secret_name.as_deref(),
+            Some(&*object_name(&spec.session_id))
+        );
+        assert_eq!(secret.default_mode, Some(0o400));
+    }
+
+    #[test]
+    fn build_job_requires_an_image() {
+        let mut cfg = config();
+        cfg.image = None;
+        assert!(matches!(
+            build_job(&spec(), &cfg),
+            Err(LaunchError::NoImage)
+        ));
+    }
+
+    #[test]
+    fn build_secret_carries_spec_and_creds_with_owner() {
+        let spec = spec();
+        let owner = OwnerReference {
+            api_version: "batch/v1".to_string(),
+            kind: "Job".to_string(),
+            name: object_name(&spec.session_id),
+            uid: "job-uid-123".to_string(),
+            controller: Some(true),
+            block_owner_deletion: Some(true),
+        };
+        let secrets = SessionSecrets {
+            github_token: SecretString::from("ghs_xyz"),
+            nyxid_token: Some(SecretString::from("nyxid_tok")),
+            nyxid_url: Some("https://nyx".to_string()),
+        };
+        let secret = build_secret(&spec, "fkst-sessions", &secrets, Some(owner)).expect("secret");
+        let data = secret.string_data.unwrap();
+        // The spec round-trips out of the mounted JSON.
+        let back: SessionSpec = serde_json::from_str(&data["session-spec.json"]).unwrap();
+        assert_eq!(back, spec);
+        assert_eq!(data["github-token"], "ghs_xyz");
+        assert_eq!(data["nyxid-token"], "nyxid_tok");
+        assert_eq!(data["nyxid-url"], "https://nyx");
+        let owners = secret.metadata.owner_references.unwrap();
+        assert_eq!(owners[0].kind, "Job");
+        assert_eq!(owners[0].uid, "job-uid-123");
+    }
+
+    #[test]
+    fn build_secret_omits_absent_nyxid_keys() {
+        let secrets = SessionSecrets {
+            github_token: SecretString::from("ghs_xyz"),
+            nyxid_token: None,
+            nyxid_url: None,
+        };
+        let secret = build_secret(&spec(), "ns", &secrets, None).expect("secret");
+        let data = secret.string_data.unwrap();
+        assert!(data.contains_key("github-token"));
+        assert!(data.contains_key("session-spec.json"));
+        assert!(!data.contains_key("nyxid-token"));
+        assert!(!data.contains_key("nyxid-url"));
+        assert!(secret.metadata.owner_references.is_none());
+    }
+
+    #[test]
+    fn mount_dir_matches_the_creds_layout_default() {
+        // Drift guard: the Job mounts where the runner's CredsLayout reads.
+        assert_eq!(CREDS_MOUNT_DIR, DEFAULT_CREDS_DIR);
+    }
+}
