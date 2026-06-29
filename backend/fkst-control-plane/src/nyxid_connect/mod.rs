@@ -127,6 +127,9 @@ pub enum ConnectError {
     /// capability, or the contract changed).
     #[error("token response carried no binding_id")]
     NoBinding,
+    /// A token-exchange response carried no `access_token`.
+    #[error("token response carried no access_token")]
+    NoToken,
 }
 
 /// The broker OAuth client settings (present only when all three env vars are
@@ -195,6 +198,51 @@ pub async fn complete_callback(
         nyxid_user: pending.nyxid_user,
     };
     Ok((pending.owner, record))
+}
+
+/// The relevant field of a token-exchange response: the short access token.
+#[derive(Debug, Deserialize)]
+struct ExchangeResponse {
+    #[serde(default)]
+    access_token: Option<String>,
+}
+
+/// Exchange a stored `binding_id` OFFLINE for a short (~5-min) NyxID access
+/// token (Path B). No user is present: the binding + the broker client creds are
+/// the only inputs. The binding + returned token are secrets, never logged.
+pub async fn exchange_binding_for_token(
+    http: &reqwest::Client,
+    base_url: &str,
+    cfg: &BrokerClientConfig,
+    binding_id: &SecretString,
+) -> Result<SecretString, ConnectError> {
+    use secrecy::ExposeSecret;
+
+    let url = format!("{}/oauth/token", base_url.trim_end_matches('/'));
+    let resp = http
+        .post(&url)
+        .form(&[
+            (
+                "grant_type",
+                "urn:ietf:params:oauth:grant-type:token-exchange",
+            ),
+            ("subject_token", binding_id.expose_secret()),
+            (
+                "subject_token_type",
+                "urn:nyxid:params:oauth:token-type:binding-id",
+            ),
+            ("client_id", &cfg.client_id),
+            ("client_secret", cfg.client_secret.expose_secret()),
+        ])
+        .send()
+        .await?;
+    if !resp.status().is_success() {
+        return Err(ConnectError::Rejected(resp.status().as_u16()));
+    }
+    let body: ExchangeResponse = resp.json().await?;
+    body.access_token
+        .map(SecretString::from)
+        .ok_or(ConnectError::NoToken)
 }
 
 /// Minimal percent-encoding for the query components we build (RFC 3986
