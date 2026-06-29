@@ -43,6 +43,16 @@ return {
 
     assert_module("departments/observability/common.lua", "common")
     assert_module("departments/observability/avm_scoreboard.lua", "avm_scoreboard")
+    t.eq(read_source("departments/observability/avm_scoreboard.lua"):find(
+      'require("departments.observability.avm_ingest")',
+      1,
+      true
+    ), nil)
+    local avm_ingest = io.open(package_root .. "/departments/observability/avm_ingest.lua", "r")
+    t.eq(avm_ingest, nil)
+    if avm_ingest ~= nil then
+      avm_ingest:close()
+    end
     assert_module("departments/observability/census.lua", "census")
     assert_module("departments/observability/dashboard.lua", "dashboard")
     assert_module("departments/observability/reaper.lua", "reaper")
