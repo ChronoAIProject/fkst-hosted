@@ -520,7 +520,7 @@ local function validate_runtime_provenance(row, errors)
       {
         author_login = deps.ports.trusted_bot_login(),
         created_at = marker_created_at,
-        body = M.dependency_release_marker(proposal_id, version),
+        body = deps.ports.dependency_release_marker(proposal_id, version),
       },
     }
   elseif row.actionable_epoch.source == "live_defer_heartbeat:v1" then
@@ -550,7 +550,7 @@ end
 
 function M.normalized_restart_liveness_rows(rows)
   local normalized = {}
-  for _, row in ipairs(rows or M.restart_transition_table()) do
+  for _, row in ipairs(rows or deps.ports.restart_transition_table()) do
     table.insert(normalized, row)
   end
   return normalized

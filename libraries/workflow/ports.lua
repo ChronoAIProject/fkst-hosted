@@ -1,15 +1,21 @@
 local M = {}
 
 M.names = {
+  dependency_release_marker = "dependency_release_marker",
+  restart_transition_table = "restart_transition_table",
   trusted_bot_login = "trusted_bot_login",
 }
 
 M.types = {
+  dependency_release_marker = "function",
+  restart_transition_table = "function",
   trusted_bot_login = "function",
 }
 
 local groups = {
   restart_liveness_contract = {
+    M.names.dependency_release_marker,
+    M.names.restart_transition_table,
     M.names.trusted_bot_login,
   },
 }

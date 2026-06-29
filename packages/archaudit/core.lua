@@ -257,6 +257,12 @@ local function liveness_model(rows)
   end
   restart_liveness_contract.install(model, {
     workflow_ports = {
+      dependency_release_marker = function()
+        error("archaudit: workflow-port-unavailable: dependency_release_marker is not available for producer-liveness restart model")
+      end,
+      restart_transition_table = function(...)
+        return model.restart_transition_table(...)
+      end,
       trusted_bot_login = function()
         error("archaudit: workflow-port-unavailable: trusted_bot_login is not available for producer-liveness restart model")
       end,

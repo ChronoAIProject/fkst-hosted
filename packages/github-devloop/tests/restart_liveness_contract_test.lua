@@ -163,6 +163,10 @@ local function install_generic_restart_liveness_model(row)
   }
   require("workflow.restart_liveness_contract").install(model, {
     workflow_ports = {
+      dependency_release_marker = core.dependency_release_marker,
+      restart_transition_table = function(...)
+        return model.restart_transition_table(...)
+      end,
       trusted_bot_login = core.trusted_bot_login,
     },
   })
