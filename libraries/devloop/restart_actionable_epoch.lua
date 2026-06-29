@@ -1,9 +1,10 @@
 local S = {}
+local contract_time = require("contract.time")
 
 function S.install(M)
 
 local function comment_created_ms(comment)
-  local seconds = M.iso_timestamp_epoch_seconds(M._comment_created_at(comment))
+  local seconds = contract_time.iso_timestamp_epoch_seconds(M._comment_created_at(comment))
   if seconds == nil then
     return nil
   end
@@ -11,7 +12,7 @@ local function comment_created_ms(comment)
 end
 
 local function state_entry_ms(state)
-  local seconds = M.iso_timestamp_epoch_seconds(state and state.marker_created_at)
+  local seconds = contract_time.iso_timestamp_epoch_seconds(state and state.marker_created_at)
   if seconds == nil then
     return nil
   end
@@ -161,7 +162,7 @@ local function dependency_gate_fact(row, state, facts)
 end
 
 local function fact_created_ms(fact)
-  local seconds = M.iso_timestamp_epoch_seconds(fact and (fact.comment_created_at or fact.created_at))
+  local seconds = contract_time.iso_timestamp_epoch_seconds(fact and (fact.comment_created_at or fact.created_at))
   if seconds == nil then
     return nil
   end

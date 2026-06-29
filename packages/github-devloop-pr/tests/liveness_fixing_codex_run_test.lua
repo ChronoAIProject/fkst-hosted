@@ -1,4 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
+local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -164,7 +166,7 @@ local function timeout_attempt_v2_comment(row, state, comments, round)
     current_pr = { comments = comments or {}, head_sha = "def456" },
     source_ref = core.pr_source_ref(repo, 7),
   }
-  local eval = core.actionable_epoch_resolve(row, state, facts, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+  local eval = core.actionable_epoch_resolve(row, state, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
   return trusted_comment(core.timeout_attempt_v2_marker(
     proposal_id,
     row.from_state,
@@ -198,7 +200,7 @@ local function timeout_facts(event, state, comments)
     },
     head_sha = event.reviewed_head_sha,
     fresh_current_state = state,
-    now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
   }
 end
 
@@ -493,7 +495,7 @@ return {
         run_id = "base-only-wrong",
         role = "fix",
         proposal_id = event.proposal_id,
-        dedup_key = core.strip_transition_version_suffixes(event.version),
+        dedup_key = transition_version.strip_suffixes(event.version),
         status = "running",
       },
     }, function()

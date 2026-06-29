@@ -1,4 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
+local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -425,17 +427,17 @@ return {
       version = base,
       marker_created_at = "2026-06-03T01:02:03Z",
     }
-    local decision = core.liveness_timeout_decision(row, state, core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"))
+    local decision = core.liveness_timeout_decision(row, state, contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"))
     t.eq(decision.action, "redrive")
     t.eq(decision.attempt, 1)
     t.eq(core.version_timeout_round(decision.version, "impl-failed"), 1)
-    t.eq(core.strip_transition_version_suffixes(decision.version), core.strip_transition_version_suffixes(base))
+    t.eq(transition_version.strip_suffixes(decision.version), transition_version.strip_suffixes(base))
     local over = {
       state = "impl-failed",
       version = base .. "/timeout/impl-failed/3",
       marker_created_at = "2026-06-03T01:02:03Z",
     }
-    local escalated = core.liveness_timeout_decision(row, over, core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"))
+    local escalated = core.liveness_timeout_decision(row, over, contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"))
     t.eq(escalated.action, "escalate")
   end,
 
@@ -495,7 +497,7 @@ return {
         proposal_id = "github-devloop/issue/owner/repo/42",
         source_ref = source_ref,
         current = { comments = {} },
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+        now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
       })
       t.eq(applied, true)
       end)
@@ -531,7 +533,7 @@ return {
             },
           },
         },
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+        now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
       })
       t.eq(applied, true)
     end)
@@ -560,7 +562,7 @@ return {
         marker_created_at = "2026-06-03T01:02:03Z",
       }, row, {
         proposal_id = "github-devloop/issue/owner/repo/42",
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
+        now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z"),
       })
       t.eq(applied, true)
     end)

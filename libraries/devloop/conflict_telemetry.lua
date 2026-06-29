@@ -1,4 +1,5 @@
 local S = {}
+local contract_time = require("contract.time")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -77,7 +78,7 @@ end
 local function parse_conflict_timestamp(text)
   local timestamp = tostring(text or ""):match("ts=(%d%d%d%d%-%d%d%-%d%dT%d%d[:%-]%d%d[:%-]%d%dZ)")
     or tostring(text or ""):match("(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%dZ)")
-  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  local seconds = contract_time.iso_timestamp_epoch_seconds(timestamp)
   if seconds == nil then
     return nil, nil
   end

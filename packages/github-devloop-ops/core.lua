@@ -1,4 +1,5 @@
 local saga_conformance = require("devloop.saga_conformance")
+local contract_time = require("contract.time")
 local M
 
 -- fkst.toml conformance hook: function = "core.saga_conformance_errors" (delegates to typed devloop.saga_conformance.errors)
@@ -20,7 +21,7 @@ function M.liveness_state_age_minutes(state, now_seconds)
     return nil
   end
   if state.marker_created_at ~= nil and state.marker_created_at ~= "" then
-    local created_seconds = M.iso_timestamp_epoch_seconds(state.marker_created_at)
+    local created_seconds = contract_time.iso_timestamp_epoch_seconds(state.marker_created_at)
     local current_seconds = tonumber(now_seconds)
     if created_seconds ~= nil and current_seconds ~= nil and current_seconds >= created_seconds then
       return math.floor((current_seconds - created_seconds) / 60)

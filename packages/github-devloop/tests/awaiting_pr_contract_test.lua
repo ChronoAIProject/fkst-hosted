@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local contract_time = require("contract.time")
 local t = h.t
 
 local function has_value(values, expected)
@@ -77,7 +78,7 @@ return {
         source_ref = core.issue_source_ref("owner/repo", 42),
         current = { comments = {} },
         current_pr = { comments = {} },
-        now_seconds = core.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),
+        now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),
       })
       t.eq(applied, true)
     end)

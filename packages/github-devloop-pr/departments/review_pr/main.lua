@@ -1,4 +1,5 @@
 local core, saga = require("core"), require("workflow.saga")
+local transition_version = require("contract.transition_version")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -16,8 +17,8 @@ local function reviewing_transition_status(state, reviewing_version)
     return "pending"
   end
 
-  local state_base = core.strip_transition_version_suffixes(state.version)
-  local reviewing_base = core.strip_transition_version_suffixes(reviewing_version)
+  local state_base = transition_version.strip_suffixes(state.version)
+  local reviewing_base = transition_version.strip_suffixes(reviewing_version)
   if state.state == "reviewing" then
     if tostring(state_base) == tostring(reviewing_base) then
       return "apply"

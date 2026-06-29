@@ -1,4 +1,5 @@
 local M = {}
+local contract_time = require("contract.time")
 
 function M.install_avm_scoreboard(core)
 local task_levels = { "L0", "L1", "L2", "L3", "L4", "unclassified" }
@@ -105,7 +106,7 @@ local function title_or_body_reverts_pr(pr, target_number)
 end
 
 local function merged_seconds(value)
-  local parsed = core.iso_timestamp_epoch_seconds(value)
+  local parsed = contract_time.iso_timestamp_epoch_seconds(value)
   return parsed or 0
 end
 

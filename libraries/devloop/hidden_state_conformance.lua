@@ -1,4 +1,5 @@
 local convergence_shared, poll_fakes = require("devloop.convergence.shared"), require("devloop.hidden_state_conformance.poll_fakes")
+local contract_time = require("contract.time")
 
 local S = {}
 
@@ -727,7 +728,7 @@ local function build_fixture_base(core, row, source_ref)
     proposal_id = ISSUE_PROPOSAL,
     source_ref = source_ref,
     event_ts = "2026-06-03T01:05:00Z",
-    now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T01:05:00Z"),
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T01:05:00Z"),
   }
   facts.current = entity
   facts.current_issue = entity
@@ -757,7 +758,7 @@ local function build_fixture(core, row, declared, include_fact)
   if include_fact
     and row.from_state == "implementing"
     and declared.fact_family == "implementing" then
-    local created = core.iso_timestamp_epoch_seconds(state.marker_created_at)
+    local created = contract_time.iso_timestamp_epoch_seconds(state.marker_created_at)
     local budget = tonumber(row.budget and row.budget.minutes)
     if created ~= nil and budget ~= nil then
       facts.now_seconds = created + ((budget + 1) * 60)

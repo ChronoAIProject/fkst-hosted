@@ -1,4 +1,5 @@
 local S = {}
+local contract_time = require("contract.time")
 
 function S.install(M, resolved)
 resolved = resolved or {}
@@ -509,7 +510,7 @@ local function validate_runtime_provenance(row, errors)
   local comments = {}
   local now_seconds = 0
   if row.actionable_epoch.source == "live_defer_epoch:v1" then
-    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
     local proposal_id = provenance.proposal_id or default_provenance_proposal_id
     local version = provenance.version or default_provenance_version
     local marker_created_at = provenance.marker_created_at or default_provenance_marker_created_at
@@ -521,11 +522,11 @@ local function validate_runtime_provenance(row, errors)
       },
     }
   elseif row.actionable_epoch.source == "live_defer_heartbeat:v1" then
-    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   elseif row.actionable_epoch.source == "codex_run:v1" then
-    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   elseif row.actionable_epoch.source == "child_workflow_wait:v1" then
-    now_seconds = M.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
+    now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:00:01Z")
   end
   local ok, eval = pcall(M.actionable_epoch_resolve, row, {
     state = row.from_state,

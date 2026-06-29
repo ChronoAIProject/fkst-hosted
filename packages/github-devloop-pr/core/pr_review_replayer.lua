@@ -1,6 +1,7 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
+local transition_version = require("contract.transition_version")
 
 function S.install(M)
 local function linked_pr_state(pr)
@@ -583,7 +584,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
 end
 
 mark_child_closed_unmerged = function(dept, issue, state, proposal_id, link, tools, outcome, reason)
-  local version = M.strip_transition_version_suffixes(state and state.version)
+  local version = transition_version.strip_suffixes(state and state.version)
   local pr_number = link and link.pr_number
   local source_ref = pr_number ~= nil and M.pr_source_ref(issue.repo, pr_number) or issue.source_ref
   local comment_request = M.build_entity_comment_request({
@@ -682,7 +683,7 @@ end
 local function replay_pr_open(dept, issue, state, row, facts, tools)
   local proposal_id = facts.proposal_id
   local link = facts.link
-  if link == nil or M.strip_transition_version_suffixes(state.version) ~= M.strip_transition_version_suffixes(link.impl_version) then
+  if link == nil or transition_version.strip_suffixes(state.version) ~= transition_version.strip_suffixes(link.impl_version) then
     return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-foreign(pr-link)", "pr-open replay requires a same-version pr-link marker")
   end
   for _, item in ipairs(facts.snapshot.prs or {}) do

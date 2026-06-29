@@ -1,5 +1,6 @@
 local S = {}
 local source_ref = require("contract.source_ref")
+local transition_version = require("contract.transition_version")
 local order_number_width = 12
 
 local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", blocked = "fkst-dev:blocked" }
@@ -228,7 +229,6 @@ function M.next_review_loop_version(version)
   return base .. "/review-loop/" .. tostring(next_n)
 end
 
-local strip_transition_version_suffixes
 local comparable_transition_base
 
 local function version_primary_key(version)
@@ -344,43 +344,8 @@ local function versions_equivalent(left, right)
   return M.safe_version_segment(left) == M.safe_version_segment(right)
 end
 
-strip_transition_version_suffixes = function(version)
-  local text = tostring(version or "")
-  local previous = nil
-  while previous ~= text do
-    previous = text
-    text = text
-      :gsub("/rereview/%d+/[0-9A-Fa-f]+$", "")
-      :gsub("%-rereview%-%d+%-[0-9A-Fa-f]+$", "")
-      :gsub("/review%-meta/%d+$", "")
-      :gsub("%-review%-meta%-%d+$", "")
-      :gsub("/review%-meta%-action/%d+$", "")
-      :gsub("%-review%-meta%-action%-%d+$", "")
-      :gsub("/review%-loop/%d+$", "")
-      :gsub("%-review%-loop%-%d+$", "")
-      :gsub("/review/%d+$", "")
-      :gsub("%-review%-%d+$", "")
-      :gsub("/fix/%d+$", "")
-      :gsub("%-fix%-%d+$", "")
-      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
-      :gsub("/timeout/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
-      :gsub("/reimplement/%d+$", "")
-      :gsub("%-reimplement%-%d+$", "")
-      :gsub("/ready%-split/%d+$", "")
-      :gsub("%-ready%-split%-%d+$", "")
-      :gsub("/loop/%d+$", "")
-      :gsub("%-loop%-%d+$", "")
-  end
-  return text
-end
-
--- Normalize a transition version to its stable lineage base.
-M.strip_transition_version_suffixes = strip_transition_version_suffixes
-
 comparable_transition_base = function(version)
-  local text = strip_transition_version_suffixes(version)
+  local text = transition_version.strip_suffixes(version)
   return text:match("^consensus:(.+)$") or text
 end
 
@@ -463,7 +428,7 @@ function M.timeout_lineage_matches_current(scheduled, current)
   if tostring(current.state or "") ~= tostring(scheduled.state or "") then
     return false, "state-advanced"
   end
-  if strip_transition_version_suffixes(current.version) ~= strip_transition_version_suffixes(scheduled.version) then
+  if transition_version.strip_suffixes(current.version) ~= transition_version.strip_suffixes(scheduled.version) then
     return false, "lineage-mismatch"
   end
   return true
@@ -540,8 +505,8 @@ local function lineage_matches(version, opts)
   if options.lineage_base == nil then
     return true
   end
-  local actual = strip_transition_version_suffixes(version)
-  local expected = strip_transition_version_suffixes(options.lineage_base)
+  local actual = transition_version.strip_suffixes(version)
+  local expected = transition_version.strip_suffixes(options.lineage_base)
   return versions_equivalent(actual, expected)
 end
 

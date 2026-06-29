@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local contract_time = require("contract.time")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -153,7 +154,7 @@ return {
       end
     end
     local _, state, positive = hidden_state.fixture(core, row, declared, true)
-    local age = math.floor((positive.now_seconds - core.iso_timestamp_epoch_seconds(state.marker_created_at)) / 60)
+    local age = math.floor((positive.now_seconds - contract_time.iso_timestamp_epoch_seconds(state.marker_created_at)) / 60)
     t.eq(age, row.budget.minutes + 1)
     t.is_true(positive.implementing ~= nil)
 
@@ -175,7 +176,7 @@ return {
       end
     end
     local entity, state, facts = hidden_state.fixture(core, row, declared, true)
-    facts.now_seconds = core.iso_timestamp_epoch_seconds(state.marker_created_at) + 60
+    facts.now_seconds = contract_time.iso_timestamp_epoch_seconds(state.marker_created_at) + 60
 
     local raised = capture_raises(function()
       local issued = core.replay_from_table("observe_issue", entity, state, row, facts)

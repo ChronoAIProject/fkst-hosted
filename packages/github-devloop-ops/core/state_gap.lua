@@ -1,4 +1,5 @@
 local S = {}
+local contract_time = require("contract.time")
 
 function S.install(M)
 
@@ -17,7 +18,7 @@ end
 
 local function parse_marker_time(comment)
   local created_at = M._comment_created_at(comment)
-  local seconds = M.iso_timestamp_epoch_seconds(created_at)
+  local seconds = contract_time.iso_timestamp_epoch_seconds(created_at)
   if seconds == nil then
     return nil, nil
   end

@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local contract_time = require("contract.time")
 local t = h.t
 
 local function copy_value(value)
@@ -270,7 +271,7 @@ return {
     local errors = core.strict_restart_liveness_contract_errors({ row })
     t.eq(#errors, 0)
 
-    local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
+    local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
     local due, age = core.liveness_timeout_due_with_facts(row, {
       state = "dependency_wait",
       version = "ready/887",
@@ -299,7 +300,7 @@ return {
 
   test_awaiting_pr_child_workflow_wait_defers_on_non_terminal_child_state = function()
     local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
-    local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
+    local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
     local parent_proposal_id = "github-devloop/issue/owner/repo/1248"
     local child_pr_proposal_id = core.pr_proposal_id("owner/repo", 7)
     local version = "ready/1248"
@@ -369,7 +370,7 @@ return {
       version = version,
       proposal_id = parent_proposal_id,
       marker_created_at = "2026-06-03T09:45:00Z",
-    }, facts, core.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z"))
+    }, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z"))
     t.eq(eval.status, "actionable")
     t.eq(eval.epoch_source, "child_workflow_wait:v1")
   end,
@@ -379,7 +380,7 @@ return {
     core.actionable_epoch_resolve = function(row, state)
       return {
         status = "actionable",
-        epoch_ms = core.iso_timestamp_epoch_seconds(state.marker_created_at) * 1000,
+        epoch_ms = contract_time.iso_timestamp_epoch_seconds(state.marker_created_at) * 1000,
         epoch_source = "state_entry:v1",
         generation_key = "bad-generation",
         generation_opened_by = "bad",

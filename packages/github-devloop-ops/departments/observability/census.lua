@@ -1,4 +1,5 @@
 local common = require("departments.observability.common")
+local contract_time = require("contract.time")
 
 local M = {}
 
@@ -161,7 +162,7 @@ function core.stall_suspect_age_minutes(version, now_seconds)
   if marker_updated_at == "" then
     return nil
   end
-  local marker_seconds = core.iso_timestamp_epoch_seconds(marker_updated_at)
+  local marker_seconds = contract_time.iso_timestamp_epoch_seconds(marker_updated_at)
   local current_seconds = tonumber(now_seconds)
   if marker_seconds == nil or current_seconds == nil then
     return nil

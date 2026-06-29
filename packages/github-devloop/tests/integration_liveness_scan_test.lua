@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local contract_time = require("contract.time")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -784,7 +785,7 @@ return {
       eval = core.actionable_epoch_resolve(row, state, {
         proposal_id = event.proposal_id,
         current = { comments = { attempt_comment } },
-      }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+      }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
     end)
     local comments = {
       timeout_state_comment("implementing", timeout_version, "2026-06-03T00:00:00Z"),
@@ -848,7 +849,7 @@ return {
       source_ref = event.source_ref,
       current = { comments = comments },
       fresh_current_state = state,
-      now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
+      now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
     }
 
     with_codex_runs(function()

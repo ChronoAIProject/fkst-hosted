@@ -1,4 +1,5 @@
 local core, replay_fields = require("core"), require("devloop.replay_fields")
+local transition_version = require("contract.transition_version")
 
 local saga = require("workflow.saga")
 
@@ -196,7 +197,7 @@ local function pipeline_timeout(event)
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(state-advanced)", "current marker advanced beyond timeout reconcile state")
       return
     end
-    if core.strip_transition_version_suffixes(state.version) ~= core.strip_transition_version_suffixes(reconcile.issue_version) then
+    if transition_version.strip_suffixes(state.version) ~= transition_version.strip_suffixes(reconcile.issue_version) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(lineage-mismatch)", "timeout reconcile event does not match canonical state marker lineage")
       return
     end

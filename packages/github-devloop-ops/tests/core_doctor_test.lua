@@ -1,5 +1,6 @@
 local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
+local contract_time = require("contract.time")
 local t = h.t
 
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -36,7 +37,7 @@ end
 
 local function classify(value, opts)
   local options = opts or {}
-  options.now_seconds = options.now_seconds or core.iso_timestamp_epoch_seconds("2026-06-03T01:20:03Z")
+  options.now_seconds = options.now_seconds or contract_time.iso_timestamp_epoch_seconds("2026-06-03T01:20:03Z")
   return core.saga_doctor_classify_entity(value, options)
 end
 

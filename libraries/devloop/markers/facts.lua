@@ -1,5 +1,7 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
+local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 
 function S.install(M, shared)
 local valid_round = shared.valid_round
@@ -225,7 +227,7 @@ function M.review_meta_decision_fact(comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
-  local expected_lineage = M.strip_transition_version_suffixes(issue_version)
+  local expected_lineage = transition_version.strip_suffixes(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments)) do
     for marker in M._comment_body(comment):gmatch(marker_pattern) do
@@ -234,7 +236,7 @@ function M.review_meta_decision_fact(comments, issue_proposal_id, issue_version)
       local action = marker_attr(marker, "action")
       local version = marker_attr(marker, "version")
       local gap = decode_marker_attr(marker_attr(marker, "gap"))
-      local marker_lineage = M.strip_transition_version_suffixes(version)
+      local marker_lineage = transition_version.strip_suffixes(version)
       if marker_issue == tostring(issue_proposal_id)
         and marker_lineage == expected_lineage
         and (action == "fix" or action == "block" or action == "spec-amendment")
@@ -353,7 +355,7 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
           reviewed_head_sha = marker_head_sha,
           comment_created_at = M._comment_created_at(comment),
         }
-        local candidate_seconds = M.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
+        local candidate_seconds = contract_time.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
         if best == nil or candidate_seconds >= best_seconds then
           best = candidate
           best_seconds = candidate_seconds
@@ -417,7 +419,7 @@ function M.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
           angle_digest = marker_angle_digest,
           comment_created_at = M._comment_created_at(comment),
         }
-        local candidate_seconds = M.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
+        local candidate_seconds = contract_time.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
         if best == nil or candidate_seconds >= best_seconds then
           best = candidate
           best_seconds = candidate_seconds

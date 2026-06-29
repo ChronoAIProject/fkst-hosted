@@ -1,4 +1,5 @@
 local S = {}
+local contract_time = require("contract.time")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -10,7 +11,7 @@ local function format_timestamp(seconds)
 end
 
 local function age_minutes(timestamp, now_seconds)
-  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  local seconds = contract_time.iso_timestamp_epoch_seconds(timestamp)
   if seconds == nil then
     return nil
   end
@@ -39,9 +40,9 @@ local function rollup_red_started_at(pr)
     local green, reason = M.pr_rollup_green(single_pr)
     if not green and reason == "rollup-red" then
       local timestamp = failed_check_timestamp(entry)
-      local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+        local seconds = contract_time.iso_timestamp_epoch_seconds(timestamp)
       if seconds ~= nil then
-        local current_started_seconds = M.iso_timestamp_epoch_seconds(started_at)
+        local current_started_seconds = contract_time.iso_timestamp_epoch_seconds(started_at)
         if current_started_seconds == nil or seconds < current_started_seconds then
           started_at = timestamp
         end

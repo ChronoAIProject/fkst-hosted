@@ -1,6 +1,7 @@
 local S = {}
 local github_handle = nil
 local forge_validators = require("devloop.forge_validators")
+local contract_time = require("contract.time")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -187,7 +188,7 @@ function M.queue_starvation_recent_closed_merged_issues(repo, limits, deadline)
 end
 
 local function age_minutes(timestamp, now_seconds)
-  local seconds = M.iso_timestamp_epoch_seconds(timestamp)
+  local seconds = contract_time.iso_timestamp_epoch_seconds(timestamp)
   if seconds == nil then
     return nil
   end

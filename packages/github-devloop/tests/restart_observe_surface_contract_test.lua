@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local contract_time = require("contract.time")
 local t = h.t
 
 local function has_value(values, expected)
@@ -52,6 +53,6 @@ return {
       state = "ready",
       version = "ready/old",
       marker_created_at = "2026-06-03T00:00:00Z",
-    }, {}, core.iso_timestamp_epoch_seconds("2026-06-04T01:00:00Z")), false)
+    }, {}, contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:00:00Z")), false)
   end,
 }

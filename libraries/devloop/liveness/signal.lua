@@ -1,6 +1,7 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
+local contract_time = require("contract.time")
 
 function S.install(M, shared)
 local numeric_minutes = shared.numeric_minutes
@@ -114,7 +115,7 @@ local function timestamp_ms(M, value)
   if value == nil or value == "" then
     return nil
   end
-  local seconds = M.iso_timestamp_epoch_seconds(value)
+  local seconds = contract_time.iso_timestamp_epoch_seconds(value)
   if seconds == nil then
     return nil
   end

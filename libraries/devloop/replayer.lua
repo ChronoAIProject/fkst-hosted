@@ -2,6 +2,7 @@ local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
+local transition_version = require("contract.transition_version")
 
 function S.install(opts)
 local M = opts.core
@@ -367,7 +368,7 @@ end
 M.replay_log_skip = log_skip
 
 local function build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
-  local stable_version = M.strip_transition_version_suffixes(state.version)
+  local stable_version = transition_version.strip_suffixes(state.version)
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, stable_version, issue.source_ref)
   if latest ~= nil then
     local base_version = M.converge_proposal_base_dedup(latest.dedup)
@@ -419,7 +420,7 @@ function M.has_thinking_converge_replay(current, proposal_id, state, source_ref)
   if state.state ~= "thinking" then
     return false
   end
-  local base_version = M.strip_transition_version_suffixes(state.version)
+  local base_version = transition_version.strip_suffixes(state.version)
   local sr_digest = convergence_shared.source_ref_digest(source_ref)
   local facts = M.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
   local round = M.max_converge_round(facts)

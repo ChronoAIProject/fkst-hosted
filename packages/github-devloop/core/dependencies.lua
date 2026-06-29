@@ -1,6 +1,7 @@
 local M = {}
 local root_ref = nil
 local strings = require("forge.strings")
+local transition_version = require("contract.transition_version")
 
 local max_dependency_depth = 32
 
@@ -634,7 +635,7 @@ end
 
 function M.ready_split_version(version)
   local core = root()
-  local base = core.strip_transition_version_suffixes(version)
+  local base = transition_version.strip_suffixes(version)
   local next_n = core.version_ready_split_round(version) + 1
   return tostring(base) .. "/ready-split/" .. tostring(next_n)
 end

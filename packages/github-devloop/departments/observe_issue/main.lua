@@ -1,4 +1,6 @@
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
+local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 
 local M = {}
 
@@ -53,7 +55,7 @@ local function issue_local_pr_bound_state_matches_link(issue_state, link)
     return false
   end
   if issue_state.state == "pr-open" or issue_state.state == "reviewing" then
-    return core.strip_transition_version_suffixes(issue_state.version) == core.strip_transition_version_suffixes(link.impl_version)
+    return transition_version.strip_suffixes(issue_state.version) == transition_version.strip_suffixes(link.impl_version)
   end
   if issue_state.state == "fixing" then
     return core.fixing_version_matches_link(issue_state.version, link.impl_version)
@@ -104,7 +106,7 @@ end
 
 local function thinking_state_budget_exceeded(state)
   local threshold = core.stall_suspect_threshold_minutes("thinking")
-  local marker_seconds = core.iso_timestamp_epoch_seconds(state and state.marker_created_at)
+  local marker_seconds = contract_time.iso_timestamp_epoch_seconds(state and state.marker_created_at)
   if threshold == nil or marker_seconds == nil then
     return false
   end

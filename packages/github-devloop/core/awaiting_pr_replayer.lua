@@ -1,6 +1,8 @@
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
+local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -70,7 +72,7 @@ end
 
 local function child_lineage_matches_delegation(state, delegation, child_state)
   return tostring(delegation.version or "") == tostring(state.version or "")
-    and M.strip_transition_version_suffixes(child_state.version) == M.strip_transition_version_suffixes(delegation.version)
+    and transition_version.strip_suffixes(child_state.version) == transition_version.strip_suffixes(delegation.version)
 end
 
 local function autonomy_post_merge_pr(pr)
@@ -215,7 +217,7 @@ canonical_pr_is_merged = function(current_pr)
   if type(merged_at) ~= "string" then
     return false
   end
-  return M.iso_timestamp_epoch_seconds(merged_at) ~= nil
+  return contract_time.iso_timestamp_epoch_seconds(merged_at) ~= nil
 end
 
 origin_matches_delegation = function(issue, delegation, current_pr, branches)
@@ -224,7 +226,7 @@ origin_matches_delegation = function(issue, delegation, current_pr, branches)
     or origin.pr_native == true
     or tostring(origin.proposal_id or "") ~= tostring(delegation.proposal_id or "")
     or tostring(origin.issue_number or "") ~= tostring(issue.number or "")
-    or M.strip_transition_version_suffixes(origin.impl_version) ~= M.strip_transition_version_suffixes(delegation.version)
+    or transition_version.strip_suffixes(origin.impl_version) ~= transition_version.strip_suffixes(delegation.version)
     or tostring(origin.branch or "") ~= tostring(current_pr and current_pr.head_ref_name or "")
     or tostring(origin.base_branch or "") ~= tostring(current_pr and current_pr.base_ref_name or "") then
     return false

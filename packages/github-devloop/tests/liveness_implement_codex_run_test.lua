@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local contract_time = require("contract.time")
 local t = h.t
 local core = h.core
 local ready = h.ready
@@ -28,7 +29,7 @@ local function facts_for(event, comments, now_seconds)
       labels = { "fkst-dev:enabled", "fkst-dev:implementing" },
     },
     fresh_current_state = state_for(event),
-    now_seconds = now_seconds or core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
+    now_seconds = now_seconds or contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"),
   }
 end
 
@@ -131,7 +132,7 @@ return {
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T00:59:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:59:00Z"))
     with_codex_runs({
       {
         run_id = "implement-live-within-deadline",
@@ -160,7 +161,7 @@ return {
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", timeout_version),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
     with_codex_runs({
       {
         run_id = "implement-live-past-deadline",
@@ -209,7 +210,7 @@ return {
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T00:59:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T00:59:00Z"))
     with_codex_run_status({
       running = {},
       recent = {
@@ -242,7 +243,7 @@ return {
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", timeout_version),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
     with_codex_runs({}, function()
       local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
@@ -263,7 +264,7 @@ return {
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
     local original = fkst.codex_runs
     fkst.codex_runs = function()
       error("synthetic codex_runs failure")
@@ -294,7 +295,7 @@ return {
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", timeout_version),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
     local original = fkst.codex_runs
     fkst.codex_runs = function()
       error("synthetic codex_runs failure")
@@ -345,7 +346,7 @@ return {
     local state = state_for(event)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
     with_codex_runs({
       {
         run_id = "implement-running-missing-deadline",
@@ -370,7 +371,7 @@ return {
     with_codex_runs({}, function()
       local recovered = facts_for(event, {
         core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      }, core.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
+      }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
       local eval = core.actionable_epoch_resolve(row, state, recovered, recovered.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.signal.reason, "codex-run-not-running")
@@ -389,7 +390,7 @@ return {
     local state = state_for(event, timeout_version)
     local facts = facts_for(event, {
       core.state_marker(event.proposal_id, "implementing", timeout_version),
-    }, core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+    }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
     with_codex_runs({
       {
         run_id = "implement-running-missing-deadline",

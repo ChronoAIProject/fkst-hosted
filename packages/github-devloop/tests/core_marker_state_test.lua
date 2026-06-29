@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
+local transition_version = require("contract.transition_version")
 local t = h.t
 local gate = require("devloop.gate")
 local reached = h.reached
@@ -714,8 +715,8 @@ return {
     local base = "ready/consensus-github-devloop/issue/owner/repo/42/185/2026-06-10T13-45-26Z"
     local issue_version = base .. "/fix/1/fix/2/fix/3/fix/4/fix/5"
     local link_version = base .. "/fix/1/review-loop/2/rereview/2/feedface"
-    t.eq(core.strip_transition_version_suffixes(issue_version), base)
-    t.eq(core.strip_transition_version_suffixes(link_version), base)
+    t.eq(transition_version.strip_suffixes(issue_version), base)
+    t.eq(transition_version.strip_suffixes(link_version), base)
     t.eq(core.fixing_version_matches_link(issue_version, link_version), true)
     t.eq(core.fixing_version_matches_link(issue_version, ""), false)
     t.eq(core.fixing_version_matches_link(issue_version, base:gsub("/42/", "/43/")), false)

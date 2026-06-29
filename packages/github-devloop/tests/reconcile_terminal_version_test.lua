@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local contract_time = require("contract.time")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -16,7 +17,7 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local repo = "owner/repo"
 local issue_number = 42
 local proposal_id = "github-devloop/issue/owner/repo/42"
-local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z")
+local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z")
 
 local function restart_transition_row(state_name)
   return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)

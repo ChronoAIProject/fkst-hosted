@@ -1,5 +1,6 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
+local contract_time = require("contract.time")
 
 function S.install(M)
 local task_classes = {
@@ -171,7 +172,7 @@ local function comment_evidence(M, comment)
 end
 
 local function event_created_seconds(M, event)
-  return M.iso_timestamp_epoch_seconds(event.comment_created_at)
+  return contract_time.iso_timestamp_epoch_seconds(event.comment_created_at)
 end
 
 local function version_max_timeout_round(M, version)
@@ -358,7 +359,7 @@ end
 local function unresolved_attempt_outcome(M, row, opts)
   local options = opts or {}
   local now_seconds = tonumber(options.now_seconds)
-  local claim_seconds = M.iso_timestamp_epoch_seconds(row.claim_comment_created_at)
+  local claim_seconds = contract_time.iso_timestamp_epoch_seconds(row.claim_comment_created_at)
   if now_seconds ~= nil and claim_seconds ~= nil then
     local age = now_seconds - claim_seconds
     local timed_out_after = tonumber(options.timed_out_after_seconds)

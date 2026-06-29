@@ -1,4 +1,6 @@
 local S = {}
+local contract_time = require("contract.time")
+local transition_version = require("contract.transition_version")
 
 function S.install(M, resolved)
 resolved = resolved or {}
@@ -94,7 +96,7 @@ function M.liveness_heartbeat_version(version, contract)
   if contract and contract.version_form == "safe_version_segment" then
     return M.safe_version_segment(heartbeat_version)
   end
-  return M.strip_transition_version_suffixes(heartbeat_version)
+  return transition_version.strip_suffixes(heartbeat_version)
 end
 
 local function numeric_minutes(value)
@@ -142,7 +144,7 @@ end
 shared.source_contains = source_contains
 
 local function signal_age_from_created_at(M, created_at, now_seconds)
-  local created_seconds = M.iso_timestamp_epoch_seconds(created_at)
+  local created_seconds = contract_time.iso_timestamp_epoch_seconds(created_at)
   local current_seconds = tonumber(now_seconds)
   if created_seconds ~= nil and current_seconds ~= nil and current_seconds >= created_seconds then
     return math.floor((current_seconds - created_seconds) / 60)

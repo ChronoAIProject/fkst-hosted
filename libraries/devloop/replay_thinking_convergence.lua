@@ -1,5 +1,6 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 
 function S.install(M)
   local function visible_true_stall(issue, state, facts)
@@ -9,7 +10,7 @@ function S.install(M)
     if current == nil or type(state) ~= "table" or state.state ~= "thinking" or proposal_id == nil then
       return nil
     end
-    local base_version = M.strip_transition_version_suffixes(state.version)
+    local base_version = transition_version.strip_suffixes(state.version)
     local sr_digest = convergence_shared.source_ref_digest(source_ref)
     local converge_facts = M.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
     local round = M.max_converge_round(converge_facts)

@@ -1,5 +1,6 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
+local contract_time = require("contract.time")
 
 function S.install(M)
 require("devloop.queue").install(M)
@@ -47,7 +48,7 @@ local function entry_age_minutes(entry, now_seconds)
   if updated_at == "" then
     return nil
   end
-  local marker_seconds = M.iso_timestamp_epoch_seconds(updated_at)
+  local marker_seconds = contract_time.iso_timestamp_epoch_seconds(updated_at)
   local current_seconds = tonumber(now_seconds)
   if marker_seconds == nil or current_seconds == nil or current_seconds < marker_seconds then
     return nil

@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local contract_time = require("contract.time")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -140,7 +141,7 @@ end
 
 local function assert_fresh_merge_wait_does_not_extend_absolute_cap(state_name, lineage_version)
   local row = restart_transition_row(state_name)
-  local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
+  local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local wait_lineage = lineage_version or version
   local timeout_version = wait_lineage .. "/timeout/" .. state_name .. "/3"
   local wait = merge_gate_wait_comment(wait_lineage, "2026-06-04T00:30:00Z")
@@ -170,7 +171,7 @@ end
 
 local function assert_fresh_merge_wait_defers_within_absolute_cap(state_name)
   local row = restart_transition_row(state_name)
-  local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
+  local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local wait = merge_gate_wait_comment(version, "2026-06-04T00:30:00Z")
   local due, age = core.liveness_timeout_due_with_facts(
     row,
@@ -194,7 +195,7 @@ end
 
 local function assert_stale_or_missing_merge_wait_escalates(state_name, wait_comment, lineage_version)
   local row = restart_transition_row(state_name)
-  local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
+  local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local wait_lineage = lineage_version or version
   local timeout_version = wait_lineage .. "/timeout/" .. state_name .. "/3"
   local raised = capture_raises(function()
@@ -214,7 +215,7 @@ end
 
 local function assert_stale_merge_wait_falls_back_to_under_budget_state_age(state_name)
   local row = restart_transition_row(state_name)
-  local now_seconds = core.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
+  local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-04T01:02:03Z")
   local stale_wait = merge_gate_wait_comment(version, "2026-06-03T00:00:00Z")
   local due, age = core.liveness_timeout_due_with_facts(
     row,
