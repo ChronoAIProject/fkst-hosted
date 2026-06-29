@@ -56,6 +56,34 @@ async fn main() -> ExitCode {
         "config loaded"
     );
 
+    // 2b. Pod-per-session dispatch (milestone #9): when enabled, prove the
+    //     Kubernetes API is reachable at startup so a misconfigured cluster
+    //     surfaces in the logs immediately. Non-fatal — a transient API blip
+    //     should not crash the control plane; the Job-spawn path surfaces hard
+    //     errors per session. The control plane is Kubernetes-free when off.
+    if config.pod.dispatch {
+        match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await {
+            Ok(kube) => match kube.check_reachable().await {
+                Ok(version) => tracing::info!(
+                    namespace = %config.pod.namespace,
+                    apiserver_version = %version,
+                    "pod dispatch enabled (kubernetes reachable)"
+                ),
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    namespace = %config.pod.namespace,
+                    "pod dispatch enabled but the kubernetes apiserver is unreachable"
+                ),
+            },
+            Err(error) => tracing::warn!(
+                error = %error,
+                "pod dispatch enabled but the kubernetes client could not be built"
+            ),
+        }
+    } else {
+        tracing::info!("pod dispatch disabled (FKST_POD_DISPATCH not set)");
+    }
+
     // 3. The control plane is datastore-free and API-only: there is no database
     //    to connect to and no in-process execution to wire. Goals are
     //    GitHub-Issue + in-memory backed (#137); sessions live in an in-memory

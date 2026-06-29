@@ -21,6 +21,10 @@ const ENV_PREFIX: &str = "FKST_HOSTED_";
 /// `FKST_SESSION_*`); the auth envy pass reads them with the `FKST_` prefix.
 const AUTH_ENV_PREFIX: &str = "FKST_";
 
+/// Prefix for the pod-dispatch settings (`FKST_POD_*`). kube-client is the sole
+/// owner of these knobs; later issues read them but never redefine them.
+const POD_ENV_PREFIX: &str = "FKST_POD_";
+
 /// Default values, shared by serde defaults and `Config::default`.
 mod defaults {
     pub(super) fn port() -> u16 {
@@ -86,6 +90,28 @@ mod defaults {
         // The NyxID proxy slug for the admin-seeded chrono-llm service (#112).
         "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm".to_string()
     }
+
+    pub(super) fn pod_namespace() -> String {
+        // The namespace per-session Jobs + Secrets live in (milestone #9).
+        "fkst-sessions".to_string()
+    }
+
+    pub(super) fn pod_service_account() -> String {
+        // The ServiceAccount the session Job pods run as (minimal identity).
+        "fkst-session-runner".to_string()
+    }
+
+    pub(super) fn pod_run_ttl_secs() -> i32 {
+        // `ttlSecondsAfterFinished`: K8s GCs a finished Job (+ its pod and the
+        // owner-referenced Secret) this long after completion. 10 min.
+        600
+    }
+
+    pub(super) fn pod_active_deadline_secs() -> i64 {
+        // `activeDeadlineSeconds`: hard wall after which a still-running Job is
+        // failed. 1 hour — generous for a realistic engine run.
+        3600
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -136,6 +162,60 @@ struct AuthVars {
     nyxid_github_proxy_slug: String,
 }
 
+/// `FKST_POD_*`-prefixed variables (pod-per-session dispatch, milestone #9).
+/// kube-client owns these; `i32`/`i64` match `k8s-openapi`'s `JobSpec` fields.
+#[derive(Debug, Deserialize)]
+struct PodVars {
+    #[serde(default)]
+    dispatch: bool,
+    #[serde(default = "defaults::pod_namespace")]
+    namespace: String,
+    #[serde(default)]
+    image: Option<String>,
+    #[serde(default = "defaults::pod_service_account")]
+    service_account: String,
+    #[serde(default = "defaults::pod_run_ttl_secs")]
+    run_ttl_secs: i32,
+    #[serde(default = "defaults::pod_active_deadline_secs")]
+    active_deadline_secs: i64,
+}
+
+/// Pod-per-session dispatch configuration (milestone #9). When `dispatch` is
+/// false (the default) the control plane never touches Kubernetes.
+#[derive(Clone, Debug)]
+pub struct PodConfig {
+    /// Master switch. Env: `FKST_POD_DISPATCH`. Default false.
+    pub dispatch: bool,
+    /// Namespace for per-session Jobs + Secrets. Env: `FKST_POD_NAMESPACE`.
+    /// Default `fkst-sessions`.
+    pub namespace: String,
+    /// The image session Job pods run (the control-plane image, `run-session`
+    /// mode). Env: `FKST_POD_IMAGE`. Required when `dispatch=true`.
+    pub image: Option<String>,
+    /// ServiceAccount the Job pods run as. Env: `FKST_POD_SERVICE_ACCOUNT`.
+    /// Default `fkst-session-runner`.
+    pub service_account: String,
+    /// `ttlSecondsAfterFinished` for the Job. Env: `FKST_POD_RUN_TTL_SECS`.
+    /// Default 600; must be > 0 when `dispatch=true`.
+    pub run_ttl_secs: i32,
+    /// `activeDeadlineSeconds` for the Job. Env: `FKST_POD_ACTIVE_DEADLINE_SECS`.
+    /// Default 3600; must be > 0 when `dispatch=true`.
+    pub active_deadline_secs: i64,
+}
+
+impl Default for PodConfig {
+    fn default() -> Self {
+        Self {
+            dispatch: false,
+            namespace: defaults::pod_namespace(),
+            image: None,
+            service_account: defaults::pod_service_account(),
+            run_ttl_secs: defaults::pod_run_ttl_secs(),
+            active_deadline_secs: defaults::pod_active_deadline_secs(),
+        }
+    }
+}
+
 /// Runtime configuration assembled from both envy passes.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -180,6 +260,9 @@ pub struct Config {
     /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
     /// slug; blank rejected at load. Non-secret routing config.
     pub chrono_llm_base_url: String,
+    /// Pod-per-session dispatch settings (milestone #9). `dispatch=false` by
+    /// default: the control plane is Kubernetes-free until an operator opts in.
+    pub pod: PodConfig,
 }
 
 impl Default for Config {
@@ -197,6 +280,7 @@ impl Default for Config {
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             codex_model: defaults::codex_model(),
             chrono_llm_base_url: defaults::chrono_llm_base_url(),
+            pod: PodConfig::default(),
         }
     }
 }
@@ -290,6 +374,51 @@ impl Config {
                 "FKST_HOSTED_CHRONO_LLM_BASE_URL must not be blank".to_string(),
             ));
         }
+
+        // Pod-per-session dispatch settings (FKST_POD_*). Off by default; when
+        // an operator turns it on, the image + namespace must be real and the
+        // Job time bounds positive, or the control plane would emit unspawnable
+        // Jobs. Fail closed, naming the offending var.
+        let pod: PodVars = envy::prefixed(POD_ENV_PREFIX)
+            .from_iter(vars.iter().cloned())
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        let pod_image = pod
+            .image
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if pod.dispatch {
+            if pod_image.is_none() {
+                return Err(AppError::Config(
+                    "FKST_POD_IMAGE must be set when FKST_POD_DISPATCH=true".to_string(),
+                ));
+            }
+            if pod.namespace.trim().is_empty() {
+                return Err(AppError::Config(
+                    "FKST_POD_NAMESPACE must not be blank when FKST_POD_DISPATCH=true".to_string(),
+                ));
+            }
+            if pod.run_ttl_secs <= 0 {
+                return Err(AppError::Config(
+                    "FKST_POD_RUN_TTL_SECS must be at least 1 when FKST_POD_DISPATCH=true"
+                        .to_string(),
+                ));
+            }
+            if pod.active_deadline_secs <= 0 {
+                return Err(AppError::Config(
+                    "FKST_POD_ACTIVE_DEADLINE_SECS must be at least 1 when FKST_POD_DISPATCH=true"
+                        .to_string(),
+                ));
+            }
+        }
+        let pod = PodConfig {
+            dispatch: pod.dispatch,
+            namespace: pod.namespace,
+            image: pod_image,
+            service_account: pod.service_account,
+            run_ttl_secs: pod.run_ttl_secs,
+            active_deadline_secs: pod.active_deadline_secs,
+        };
+
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -303,6 +432,7 @@ impl Config {
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             codex_model: http.codex_model,
             chrono_llm_base_url: http.chrono_llm_base_url,
+            pod,
         })
     }
 
@@ -332,8 +462,80 @@ mod tests {
         assert_eq!(config.port, 8080);
         assert_eq!(config.bind_addr, "0.0.0.0");
         assert_eq!(config.log_level, "info");
+        // Pod dispatch is OFF by default; the control plane never touches k8s.
+        assert!(!config.pod.dispatch);
+        assert_eq!(config.pod.namespace, "fkst-sessions");
+        assert_eq!(config.pod.service_account, "fkst-session-runner");
+        assert_eq!(config.pod.run_ttl_secs, 600);
+        assert_eq!(config.pod.active_deadline_secs, 3600);
+        assert!(config.pod.image.is_none());
         assert_eq!(config.request_timeout_secs, 30);
         assert!(matches!(config.auth, AuthMode::Disabled));
+    }
+
+    #[test]
+    fn pod_dispatch_on_requires_an_image() {
+        let err = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_POD_DISPATCH", "true"),
+        ]))
+        .expect_err("dispatch with no image must fail closed");
+        assert!(err.to_string().contains("FKST_POD_IMAGE"));
+    }
+
+    #[test]
+    fn pod_dispatch_on_with_image_parses_and_keeps_overrides() {
+        let config = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "registry/fkst-control-plane:1.0"),
+            ("FKST_POD_NAMESPACE", "sessions-prod"),
+            ("FKST_POD_RUN_TTL_SECS", "900"),
+            ("FKST_POD_ACTIVE_DEADLINE_SECS", "7200"),
+        ]))
+        .expect("valid dispatch config should load");
+        assert!(config.pod.dispatch);
+        assert_eq!(
+            config.pod.image.as_deref(),
+            Some("registry/fkst-control-plane:1.0")
+        );
+        assert_eq!(config.pod.namespace, "sessions-prod");
+        assert_eq!(config.pod.run_ttl_secs, 900);
+        assert_eq!(config.pod.active_deadline_secs, 7200);
+    }
+
+    #[test]
+    fn pod_dispatch_on_rejects_nonpositive_time_bounds() {
+        let ttl = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "img"),
+            ("FKST_POD_RUN_TTL_SECS", "0"),
+        ]))
+        .expect_err("zero ttl must fail");
+        assert!(ttl.to_string().contains("FKST_POD_RUN_TTL_SECS"));
+
+        let deadline = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "img"),
+            ("FKST_POD_ACTIVE_DEADLINE_SECS", "0"),
+        ]))
+        .expect_err("zero deadline must fail");
+        assert!(deadline
+            .to_string()
+            .contains("FKST_POD_ACTIVE_DEADLINE_SECS"));
+    }
+
+    #[test]
+    fn pod_image_blank_is_treated_as_absent_when_dispatch_on() {
+        let err = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "   "),
+        ]))
+        .expect_err("blank image must fail closed");
+        assert!(err.to_string().contains("FKST_POD_IMAGE"));
     }
 
     #[test]
