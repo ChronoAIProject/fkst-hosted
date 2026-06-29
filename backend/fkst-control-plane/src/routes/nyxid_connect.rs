@@ -130,9 +130,10 @@ pub async fn callback(
 fn map_connect_error(error: ConnectError) -> AppError {
     match error {
         ConnectError::NotConfigured => AppError::Config(error.to_string()),
-        ConnectError::UnknownState | ConnectError::NoBinding | ConnectError::Rejected(_) => {
-            AppError::Validation(error.to_string())
-        }
+        ConnectError::UnknownState
+        | ConnectError::NoBinding
+        | ConnectError::NoToken
+        | ConnectError::Rejected(_) => AppError::Validation(error.to_string()),
         ConnectError::Transport(_) => AppError::Internal(anyhow::anyhow!(error.to_string())),
     }
 }

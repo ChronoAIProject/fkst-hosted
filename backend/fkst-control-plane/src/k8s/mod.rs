@@ -7,6 +7,8 @@
 
 pub mod client;
 pub mod launcher;
+pub mod refresh;
 
 pub use client::{KubeClient, KubeError};
 pub use launcher::{LaunchError, LaunchOutcome, PodSessionLauncher, SessionSecrets};
+pub use refresh::{NyxidRefresh, RefreshError, SessionSecretWriter, NYXID_REFRESH_INTERVAL};
