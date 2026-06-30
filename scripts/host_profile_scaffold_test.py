@@ -35,6 +35,7 @@ class HostProfileScaffoldTest(unittest.TestCase):
         self.assertIn("fkst.lock", doc)
         self.assertIn("There is no `--profile <name>`", doc)
         self.assertIn("Documentation beats scaffolds; explicit CLI/env beats documentation.", doc)
+        self.assertNotIn("AI:FKST", doc)
 
     def test_host_profile_scaffold_exports_existing_host_run_facts_only(self) -> None:
         scaffold = self.read("docs/user/host-profile.env.example")

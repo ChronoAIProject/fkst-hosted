@@ -99,5 +99,3 @@ Global profiles must not replace repository facts:
 - Do not put package-root lists in the profile; keep them in `.fkst/compose/package-roots`.
 - Do not use file permissions as a control mechanism.
 - Do not source issue text, comments, or other untrusted remote content as shell.
-
-⟦AI:FKST⟧
