@@ -52,6 +52,15 @@ local necessity_alternatives = {
     },
     insufficiency = "commands do not declare fkst package roots or trust boundaries",
     boundary_violation = "Host-local files would make each frontend host duplicate platform semantics that fkst-packages should validate once.",
+    ownership_conflict = {
+      actual_surface = ".fkst/compose/package-roots",
+      current_authority = "host-local package root selection",
+      must_not_own = {
+        "UI workflow trust-boundary declaration",
+        "source-ref-only UI artifact handoff",
+      },
+      reason = ".fkst/compose/package-roots is host input for selected roots, not the package-owned UI workflow profile authority.",
+    },
   },
   {
     surface = "browser-qa",
@@ -69,6 +78,15 @@ local necessity_alternatives = {
     },
     insufficiency = "browser execution does not own devloop package composition",
     boundary_violation = "Putting package composition in browser-qa would couple browser execution to GitHub issue-to-PR lifecycle orchestration.",
+    ownership_conflict = {
+      actual_surface = "browser-qa",
+      current_authority = "browser execution and visual validation",
+      must_not_own = {
+        "reusable platform package composition",
+        "GitHub devloop lifecycle ownership",
+      },
+      reason = "browser-qa validates UI runtime behavior, not the package graph or issue-to-PR lifecycle.",
+    },
   },
   {
     surface = "global-host profiles",
@@ -86,6 +104,15 @@ local necessity_alternatives = {
     },
     insufficiency = "generic host hydration does not own UI workflow artifact handoff",
     boundary_violation = "Putting UI artifact trust policy in the global host layer would couple generic host hydration to frontend workflow semantics.",
+    ownership_conflict = {
+      actual_surface = "global host profile environment",
+      current_authority = "machine-local environment and workspace wiring",
+      must_not_own = {
+        "UI workflow trust-boundary declaration",
+        "source-ref-only UI artifact handoff",
+      },
+      reason = "global host profiles intentionally exclude package roots and frontend workflow semantics.",
+    },
   },
 }
 
@@ -181,6 +208,21 @@ local function require_necessity_alternative(alternatives, expected, ctx)
   end
   if row.boundary_violation ~= expected.boundary_violation then
     error(ctx .. ": invalid boundary violation for " .. expected.surface)
+  end
+  local conflict = require_table(row, "ownership_conflict", ctx .. ": " .. expected.surface)
+  local expected_conflict = expected.ownership_conflict
+  if conflict.actual_surface ~= expected_conflict.actual_surface then
+    error(ctx .. ": invalid ownership conflict surface for " .. expected.surface)
+  end
+  if conflict.current_authority ~= expected_conflict.current_authority then
+    error(ctx .. ": invalid ownership conflict authority for " .. expected.surface)
+  end
+  local must_not_own = require_table(conflict, "must_not_own", ctx .. ": " .. expected.surface .. " ownership_conflict")
+  for _, value in ipairs(expected_conflict.must_not_own) do
+    require_list_contains(must_not_own, value, ctx .. ": " .. expected.surface .. " ownership_conflict")
+  end
+  if conflict.reason ~= expected_conflict.reason then
+    error(ctx .. ": invalid ownership conflict reason for " .. expected.surface)
   end
 end
 

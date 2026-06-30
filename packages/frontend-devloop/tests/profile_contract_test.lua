@@ -124,6 +124,37 @@ return {
     t.eq(global_host.boundary_violation, "Putting UI artifact trust policy in the global host layer would couple generic host hydration to frontend workflow semantics.")
   end,
 
+  test_necessity_proof_rules_out_existing_surface_ownership = function()
+    local proof = core.default_profile().necessity_proof
+
+    local scripts = find_by_surface(proof.alternatives, "project-local scripts")
+    t.eq(scripts.ownership_conflict.actual_surface, ".fkst/compose/package-roots")
+    t.eq(scripts.ownership_conflict.current_authority, "host-local package root selection")
+    assert_contains_all(scripts.ownership_conflict.must_not_own, {
+      "UI workflow trust-boundary declaration",
+      "source-ref-only UI artifact handoff",
+    })
+    t.eq(scripts.ownership_conflict.reason, ".fkst/compose/package-roots is host input for selected roots, not the package-owned UI workflow profile authority.")
+
+    local browser_qa = find_by_surface(proof.alternatives, "browser-qa")
+    t.eq(browser_qa.ownership_conflict.actual_surface, "browser-qa")
+    t.eq(browser_qa.ownership_conflict.current_authority, "browser execution and visual validation")
+    assert_contains_all(browser_qa.ownership_conflict.must_not_own, {
+      "reusable platform package composition",
+      "GitHub devloop lifecycle ownership",
+    })
+    t.eq(browser_qa.ownership_conflict.reason, "browser-qa validates UI runtime behavior, not the package graph or issue-to-PR lifecycle.")
+
+    local global_host = find_by_surface(proof.alternatives, "global-host profiles")
+    t.eq(global_host.ownership_conflict.actual_surface, "global host profile environment")
+    t.eq(global_host.ownership_conflict.current_authority, "machine-local environment and workspace wiring")
+    assert_contains_all(global_host.ownership_conflict.must_not_own, {
+      "UI workflow trust-boundary declaration",
+      "source-ref-only UI artifact handoff",
+    })
+    t.eq(global_host.ownership_conflict.reason, "global host profiles intentionally exclude package roots and frontend workflow semantics.")
+  end,
+
   test_default_profile_uses_source_refs_for_ui_artifacts = function()
     local profile = core.default_profile()
     local handoff = profile.handoff

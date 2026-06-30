@@ -9,13 +9,16 @@ The necessity proof is part of `frontend-devloop.profile.v1`, not an implied con
 - Project-local scripts and `.fkst/compose/package-roots` can express host-owned command execution
   and host-local package root selection, but they cannot own a reusable platform package
   composition, UI workflow trust-boundary declaration, or package-local conformance contract without
-  making every frontend host duplicate fkst-packages platform semantics.
+  making every frontend host duplicate fkst-packages platform semantics. `.fkst/compose/package-roots`
+  remains host input for selected roots; it is not the package-owned authority for UI workflow trust
+  boundaries or source-ref-only artifact handoff.
 - `browser-qa` can express browser execution and visual validation, but it cannot own reusable
   platform package composition or the GitHub devloop lifecycle without coupling browser execution to
-  issue-to-PR orchestration.
+  issue-to-PR orchestration. It validates UI runtime behavior; it does not own the package graph.
 - Global-host profiles can express generic host hydration and workspace-root wiring, but they cannot
   own UI workflow trust-boundary policy or source-ref-only UI artifact handoff without coupling the
-  generic host layer to frontend workflow semantics.
+  generic host layer to frontend workflow semantics. They intentionally exclude package roots and
+  frontend workflow semantics.
 
 Therefore `frontend-devloop` owns only the UI workflow profile contract that composes those existing surfaces.
 
