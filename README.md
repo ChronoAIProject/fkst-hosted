@@ -26,13 +26,9 @@ Everything is reached through a simple HTTP API and secured by your ChronoAI
 
 ## Using the API
 
-The **[HTTP API Reference](docs/api-reference.md)** documents everything you need
-to build against fkst-hosted: every endpoint, how to authenticate, the
-permissions each call requires, request/response formats, and worked examples.
-
-## Local Development & Auth
-
-For instructions on setting up authentication, service accounts, and GitHub integrations using local vs production profiles, see the **[Authentication & GitHub Integration Guide](docs/auth-integration.md)**.
+The control plane serves a live **OpenAPI 3.1** document at `GET /openapi.json`,
+generated at runtime from the actual routes — every public endpoint, its
+authentication, the permissions it requires, and its request/response shapes.
 
 ---
 
