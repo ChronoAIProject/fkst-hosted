@@ -1,18 +1,11 @@
-# ClusterIP only — nothing is exposed outside the cluster, and there is NO
-# Ingress (mirrors Ornn's downstream isolation). This network isolation is the
-# security backbone of the proxy-trust auth model (issue #113): fkst-hosted
-# trusts the NyxID-proxy-injected identity precisely because it is reachable
-# ONLY via the in-cluster NyxID proxy, never directly by a public client.
-# Local access is `kubectl -n fkst-hosted port-forward svc/fkst-hosted 8080:80`.
-#
-# The Service fronts the CONTROL-PLANE only (issue #145): the public REST API
-# lives on the controller. Workers have no public Service — they connect UP to
-# the controller and pull work.
+# ClusterIP only — no Ingress (mirrors the proxy-trust isolation model): the
+# control plane is reachable in-cluster (NyxID proxy / the GitHub-App webhook via
+# a relay) but never directly by a public client.
+# Local access: kubectl -n <ns> port-forward svc/fkst-control-plane 8080:80
 apiVersion: v1
 kind: Service
 metadata:
-  name: fkst-hosted
-  namespace: fkst-hosted
+  name: fkst-control-plane
   labels:
     app.kubernetes.io/name: fkst-control-plane
     app.kubernetes.io/component: control-plane
