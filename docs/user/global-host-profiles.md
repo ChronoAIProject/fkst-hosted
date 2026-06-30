@@ -6,8 +6,8 @@ registry, or named profile abstraction.
 
 The established practice is XDG-style user configuration with explicit command-line and
 environment precedence. Keep machine-specific facts outside the target repository, keep
-`fkst.workspace.toml` and `fkst.lock` as the project source of truth for platform pins, and pass
-normal `FKST_*` facts to the shared runner.
+`fkst.workspace.toml` and `fkst.lock` as the project source of truth for platform package selection,
+and pass normal `FKST_*` facts plus the trusted platform checkout to the shared runner.
 
 ## Location
 
@@ -33,7 +33,7 @@ The precedence is deliberately boring:
 
 1. Documentation beats scaffolds; explicit CLI/env beats documentation.
 2. `fkst.workspace.toml` plus `fkst.lock` remains the source of truth for the host repository's
-   platform source pin.
+   platform package selection; executable provenance must still match the trusted `--platform-root`.
 3. `.fkst/compose/package-roots` remains the source of truth for the composed package roots loaded
    by the host runner.
 4. The global host profile supplies user- and machine-local environment facts such as `BIN`,
@@ -95,7 +95,7 @@ restarts.
 
 Global profiles must not replace repository facts:
 
-- Do not put platform pins in the profile; keep them in `fkst.workspace.toml` and `fkst.lock`.
+- Do not put platform package selectors in the profile; keep them in `fkst.workspace.toml` and `fkst.lock`.
 - Do not put package-root lists in the profile; keep them in `.fkst/compose/package-roots`.
 - Do not use file permissions as a control mechanism.
 - Do not source issue text, comments, or other untrusted remote content as shell.

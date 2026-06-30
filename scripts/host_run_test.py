@@ -29,8 +29,20 @@ class HostRunHarness:
         self.runtime = self.root / "runtime"
         for pkg in ("github-proxy", "consensus"):
             (self.platform / "packages" / pkg).mkdir(parents=True, exist_ok=True)
+            (self.platform / "packages" / pkg / "fkst.toml").write_text(
+                f'kind = "package"\nname = "{pkg}"\n',
+                encoding="utf-8",
+            )
             (self.packages_host / "packages" / pkg).mkdir(parents=True, exist_ok=True)
+            (self.packages_host / "packages" / pkg / "fkst.toml").write_text(
+                f'kind = "package"\nname = "{pkg}"\n',
+                encoding="utf-8",
+            )
         (self.packages_host / "packages" / "autochrono").mkdir(parents=True)
+        (self.packages_host / "packages" / "autochrono" / "fkst.toml").write_text(
+            'kind = "package"\nname = "autochrono"\n',
+            encoding="utf-8",
+        )
         (self.website_host / ".fkst" / "local-packages" / "site-board").mkdir(parents=True)
         self.substrate_host.mkdir()
 
@@ -63,8 +75,9 @@ class HostRunHarness:
             )
         )
 
-    def write_external_sources_lock(self, entries: list[tuple[str, Path, str]]) -> None:
-        (self.website_host / "fkst.lock").write_text(
+    def write_external_sources_lock(self, entries: list[tuple[str, Path, str]], *, root: Path | None = None) -> None:
+        target_root = root or self.website_host
+        (target_root / "fkst.lock").write_text(
             "\n".join(
                 textwrap.dedent(
                     f"""\
@@ -83,24 +96,40 @@ class HostRunHarness:
             encoding="utf-8",
         )
 
-    def write_external_sources_workspace(self, entries: list[tuple[str, Path, str, list[str]]]) -> None:
-        (self.website_host / "fkst.workspace.toml").write_text(
-            "[workspace]\nunits = []\n\n"
-            + "\n".join(
+    def write_workspace_manifest(
+        self,
+        *,
+        root: Path | None = None,
+        workspace_units: list[str] | None = None,
+        workspace_packages: list[str] | None = None,
+        external_sources: list[tuple[str, Path, list[str]]] | None = None,
+    ) -> None:
+        target_root = root or self.website_host
+        units = workspace_units or [".fkst/local-packages/*"]
+        chunks = [f"[workspace]\nunits = {json.dumps(units)}\n"]
+        for package in workspace_packages or []:
+            chunks.append(
+                textwrap.dedent(
+                    f"""\
+                    [[package]]
+                    name = {json.dumps(package)}
+                    source = "workspace"
+                    version = "workspace"
+                    """
+                )
+            )
+        for source_id, repo, packages in external_sources or []:
+            chunks.append(
                 textwrap.dedent(
                     f"""\
                     [[external_sources]]
                     id = {json.dumps(source_id)}
                     git = {json.dumps(str(repo))}
-                    rev = {json.dumps(rev)}
                     packages = {json.dumps(packages)}
                     """
                 )
-                for source_id, repo, rev, packages in entries
             )
-            + "\n",
-            encoding="utf-8",
-        )
+        (target_root / "fkst.workspace.toml").write_text("".join(chunks), encoding="utf-8")
 
 
 def shell_quote(value: str | Path) -> str:
@@ -192,6 +221,7 @@ class HostRunTest(unittest.TestCase):
     def test_packages_host_uses_project_packages_for_host_packages(self) -> None:
         h = HostRunHarness()
         try:
+            h.write_workspace_manifest(root=h.packages_host, workspace_units=["packages/*"])
             result = h.package_roots(
                 [
                     "--project-root",
@@ -212,23 +242,24 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str(h.packages_host / "packages" / "github-proxy"),
-                    str(h.packages_host / "packages" / "consensus"),
+                    str((h.packages_host / "packages" / "github-proxy").resolve()),
+                    str((h.packages_host / "packages" / "consensus").resolve()),
                     str(h.packages_host / "packages" / "autochrono"),
                 ],
             )
         finally:
             h.close()
 
-    def test_substrate_host_has_only_platform_packages(self) -> None:
+    def test_workspace_platform_packages_resolve_from_workspace_units(self) -> None:
         h = HostRunHarness()
         try:
+            h.write_workspace_manifest(root=h.packages_host, workspace_units=["packages/*"])
             result = h.package_roots(
                 [
                     "--project-root",
-                    str(h.substrate_host),
+                    str(h.packages_host),
                     "--platform-root",
-                    str(h.platform),
+                    str(h.packages_host),
                     "--platform-packages",
                     "github-proxy consensus",
                     "--durable-root",
@@ -241,8 +272,49 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str(h.platform / "packages" / "github-proxy"),
-                    str(h.platform / "packages" / "consensus"),
+                    str((h.packages_host / "packages" / "github-proxy").resolve()),
+                    str((h.packages_host / "packages" / "consensus").resolve()),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_substrate_host_has_only_platform_packages(self) -> None:
+        h = HostRunHarness()
+        try:
+            platform_repo, platform_rev = create_git_source(
+                h.root,
+                "substrate-platform-source",
+                {
+                    "packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n',
+                    "packages/consensus/fkst.toml": 'kind = "package"\nname = "consensus"\n',
+                },
+            )
+            h.write_workspace_manifest(
+                root=h.substrate_host,
+                external_sources=[("fkst-packages-platform", platform_repo, ["github-proxy", "consensus"])],
+            )
+            h.write_external_sources_lock([("fkst-packages-platform", platform_repo, platform_rev)], root=h.substrate_host)
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.substrate_host),
+                    "--platform-root",
+                    str(platform_repo),
+                    "--platform-packages",
+                    "github-proxy consensus",
+                    "--durable-root",
+                    str(h.durable),
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str((h.substrate_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
+                    str((h.substrate_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "consensus").resolve()),
                 ],
             )
         finally:
@@ -251,12 +323,24 @@ class HostRunTest(unittest.TestCase):
     def test_website_host_uses_fkst_local_packages_for_host_packages(self) -> None:
         h = HostRunHarness()
         try:
+            platform_repo, platform_rev = create_git_source(
+                h.root,
+                "website-platform-source",
+                {
+                    "packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n',
+                    "packages/consensus/fkst.toml": 'kind = "package"\nname = "consensus"\n',
+                },
+            )
+            h.write_workspace_manifest(
+                external_sources=[("fkst-packages-platform", platform_repo, ["github-proxy", "consensus"])],
+            )
+            h.write_external_sources_lock([("fkst-packages-platform", platform_repo, platform_rev)])
             result = h.package_roots(
                 [
                     "--project-root",
                     str(h.website_host),
                     "--platform-root",
-                    str(h.platform),
+                    str(platform_repo),
                     "--platform-packages",
                     "github-proxy consensus",
                     "--host-packages",
@@ -271,8 +355,8 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str(h.platform / "packages" / "github-proxy"),
-                    str(h.platform / "packages" / "consensus"),
+                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
+                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "consensus").resolve()),
                     str(h.website_host / ".fkst" / "local-packages" / "site-board"),
                 ],
             )
@@ -283,13 +367,20 @@ class HostRunTest(unittest.TestCase):
         h = HostRunHarness()
         custom_local = h.root / "custom-local-packages"
         try:
+            platform_repo, platform_rev = create_git_source(
+                h.root,
+                "custom-local-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            h.write_workspace_manifest(external_sources=[("fkst-packages-platform", platform_repo, ["github-proxy"])])
+            h.write_external_sources_lock([("fkst-packages-platform", platform_repo, platform_rev)])
             (custom_local / "site-board").mkdir(parents=True)
             result = h.package_roots(
                 [
                     "--project-root",
                     str(h.website_host),
                     "--platform-root",
-                    str(h.platform),
+                    str(platform_repo),
                     "--local-packages",
                     str(custom_local),
                     "--platform-packages",
@@ -306,10 +397,179 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str(h.platform / "packages" / "github-proxy"),
+                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
                     str(custom_local / "site-board"),
                 ],
             )
+        finally:
+            h.close()
+
+    def test_host_supervise_requires_target_workspace_manifest(self) -> None:
+        h = HostRunHarness()
+        try:
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("target fkst.workspace.toml is required for host supervise", result.stderr)
+        finally:
+            h.close()
+
+    def test_platform_package_roots_are_resolved_from_target_workspace_external_source(self) -> None:
+        h = HostRunHarness()
+        try:
+            platform_repo, platform_rev = create_git_source(
+                h.root,
+                "platform-source",
+                {
+                    "packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n',
+                    "packages/consensus/fkst.toml": 'kind = "package"\nname = "consensus"\n',
+                },
+            )
+            tools_repo, tools_rev = create_git_source(
+                h.root,
+                "tools-source",
+                {"tools/probe.txt": "tool source\n"},
+            )
+            h.write_workspace_manifest(
+                external_sources=[
+                    ("fkst-packages-platform", platform_repo, ["github-proxy"]),
+                    ("site-tools", tools_repo, ["site-tools"]),
+                ]
+            )
+            h.write_external_sources_lock(
+                [
+                    ("fkst-packages-platform", platform_repo, platform_rev),
+                    ("site-tools", tools_repo, tools_rev),
+                ]
+            )
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(platform_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
+                    host_run_print_package_roots
+                    """
+                )
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            platform_checkout = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            platform_checkout = platform_checkout.resolve()
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    f"platform={platform_checkout}",
+                    str(platform_checkout / "packages" / "github-proxy"),
+                ],
+            )
+            self.assertTrue((platform_checkout / "packages" / "github-proxy").is_dir())
+            self.assertFalse((h.website_host / ".fkst" / "run" / "site-tools").exists())
+        finally:
+            h.close()
+
+    def test_external_platform_source_must_match_trusted_platform_root(self) -> None:
+        h = HostRunHarness()
+        try:
+            trusted_repo, _trusted_rev = create_git_source(
+                h.root,
+                "trusted-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            attacker_repo, attacker_rev = create_git_source(
+                h.root,
+                "attacker-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            h.write_workspace_manifest(
+                external_sources=[("fkst-packages-platform", attacker_repo, ["github-proxy"])],
+            )
+            h.write_external_sources_lock([("fkst-packages-platform", attacker_repo, attacker_rev)])
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(trusted_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("does not match trusted --platform-root", result.stderr)
+            self.assertFalse((h.website_host / ".fkst" / "run" / "fkst-packages-platform").exists())
+        finally:
+            h.close()
+
+    def test_workspace_platform_package_requires_trusted_platform_root(self) -> None:
+        h = HostRunHarness()
+        try:
+            trusted_repo, _trusted_rev = create_git_source(
+                h.root,
+                "trusted-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            (h.website_host / "packages" / "github-proxy").mkdir(parents=True)
+            (h.website_host / "packages" / "github-proxy" / "fkst.toml").write_text(
+                'kind = "package"\nname = "github-proxy"\n',
+                encoding="utf-8",
+            )
+            h.write_workspace_manifest(workspace_units=["packages/*"])
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(trusted_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires trusted --platform-root", result.stderr)
+            self.assertNotIn(str(h.website_host / "packages" / "github-proxy"), result.stdout)
+        finally:
+            h.close()
+
+    def test_ambiguous_target_workspace_platform_package_fails_closed(self) -> None:
+        h = HostRunHarness()
+        try:
+            platform_repo, platform_rev = create_git_source(
+                h.root,
+                "platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            h.write_workspace_manifest(
+                workspace_packages=["github-proxy"],
+                external_sources=[("fkst-packages-platform", platform_repo, ["github-proxy"])],
+            )
+            h.write_external_sources_lock([("fkst-packages-platform", platform_repo, platform_rev)])
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("ambiguous target fkst.workspace.toml platform package 'github-proxy'", result.stderr)
         finally:
             h.close()
 
@@ -332,44 +592,41 @@ class HostRunTest(unittest.TestCase):
                     ("site-tools", tools_repo, tools_rev),
                 ]
             )
-            h.write_external_sources_workspace(
-                [("fkst-packages-platform", platform_repo, platform_rev, ["github-proxy"])]
+            h.write_workspace_manifest(
+                external_sources=[
+                    ("fkst-packages-platform", platform_repo, ["github-proxy"]),
+                    ("site-tools", tools_repo, ["site-tools"]),
+                ]
             )
             result = h.run_helper(
                 textwrap.dedent(
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(platform_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_validate_shape
-                    host_run_resolve_target_platform_root
-                    host_run_hydrate_external_sources
                     host_run_build_package_roots
                     printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
                     host_run_print_package_roots
                     """
                 )
             )
+            platform_checkout = (h.website_host / ".fkst" / "run" / "fkst-packages-platform").resolve()
             self.assertEqual(result.returncode, 0, result.stderr)
-            resolved_platform = (h.website_host / ".fkst" / "run" / "fkst-packages-platform").resolve()
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    f"platform={resolved_platform}",
-                    str(resolved_platform / "packages" / "github-proxy"),
+                    f"platform={platform_checkout}",
+                    str(platform_checkout / "packages" / "github-proxy"),
                 ],
             )
-            for source_id, rev in (
-                ("fkst-packages-platform", platform_rev),
-                ("site-tools", tools_rev),
-            ):
-                checkout = h.website_host / ".fkst" / "run" / source_id
-                self.assertTrue((checkout / ".git").is_dir(), f"{checkout} is not a checkout")
-                head = run_argv(["git", "rev-parse", "HEAD"], cwd=checkout)
-                self.assertEqual(head.returncode, 0, head.stderr)
-                self.assertEqual(head.stdout.strip(), rev)
-            self.assertTrue((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").is_dir())
-            self.assertTrue((h.website_host / ".fkst" / "run" / "site-tools" / "tools" / "probe.txt").is_file())
+            checkout = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
+            self.assertTrue((checkout / ".git").is_dir(), f"{checkout} is not a checkout")
+            head = run_argv(["git", "rev-parse", "HEAD"], cwd=checkout)
+            self.assertEqual(head.returncode, 0, head.stderr)
+            self.assertEqual(head.stdout.strip(), platform_rev)
+            self.assertTrue((checkout / "packages" / "github-proxy").is_dir())
+            self.assertFalse((h.website_host / ".fkst" / "run" / "site-tools").exists())
         finally:
             h.close()
 
@@ -386,6 +643,7 @@ class HostRunTest(unittest.TestCase):
                 "stale",
                 {"stale.txt": "stale\n"},
             )
+            h.write_workspace_manifest(external_sources=[("fkst-packages-platform", source_repo, ["github-proxy"])])
             h.write_external_sources_lock([("fkst-packages-platform", source_repo, source_rev)])
             checkout = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
             checkout.parent.mkdir(parents=True, exist_ok=True)
@@ -397,8 +655,8 @@ class HostRunTest(unittest.TestCase):
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
-                    host_run_hydrate_external_sources
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(source_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_build_package_roots
                     """
                 )
             )
@@ -415,6 +673,11 @@ class HostRunTest(unittest.TestCase):
     def test_host_external_source_fails_closed_on_invalid_lock(self) -> None:
         h = HostRunHarness()
         try:
+            h.write_workspace_manifest(
+                external_sources=[
+                    ("fkst-packages-platform", Path("https://example.invalid/fkst-packages.git"), ["github-proxy"])
+                ]
+            )
             h.write_external_sources_lock(
                 [("fkst-packages-platform", Path("https://example.invalid/fkst-packages.git"), "not-a-sha")]
             )
@@ -424,7 +687,7 @@ class HostRunTest(unittest.TestCase):
                     set -euo pipefail
                     source scripts/host_run.sh
                     host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
-                    host_run_hydrate_external_sources
+                    host_run_build_package_roots
                     """
                 )
             )
@@ -446,10 +709,8 @@ class HostRunTest(unittest.TestCase):
                 "source",
                 {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
             )
+            h.write_workspace_manifest(external_sources=[("fkst-packages-platform", source_repo, ["github-proxy"])])
             h.write_external_sources_lock([("fkst-packages-platform", source_repo, source_rev)])
-            h.write_external_sources_workspace(
-                [("fkst-packages-platform", source_repo, source_rev, ["github-proxy"])]
-            )
             fake_bin.write_text(
                 textwrap.dedent(
                     f"""\
@@ -474,7 +735,7 @@ class HostRunTest(unittest.TestCase):
                     set -euo pipefail
                     source scripts/host_run.sh
                     BIN={shell_quote(fake_bin)}
-                    host_run_supervise_contract --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_supervise_contract --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(source_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     """
                 )
             )
@@ -489,7 +750,7 @@ class HostRunTest(unittest.TestCase):
                     "--project-root",
                     str(h.website_host),
                     "--package-root",
-                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
+                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform").resolve() / "packages" / "github-proxy"),
                     "--framework-bin",
                     str(fake_bin),
                 ],
@@ -530,13 +791,13 @@ class HostRunTest(unittest.TestCase):
                     source scripts/host_run.sh
                     host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_validate_shape
-                    host_run_resolve_target_platform_root
+                    host_run_build_package_roots
                     """
                 )
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
-                "fkst.workspace.toml external_sources(id=fkst-packages-platform) must declare packages = [...]",
+                "target fkst.workspace.toml does not declare platform package 'github-proxy'",
                 result.stderr,
             )
         finally:
