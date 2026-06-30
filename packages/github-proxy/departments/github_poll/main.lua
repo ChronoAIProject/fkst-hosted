@@ -45,19 +45,26 @@ local function is_intake_candidate_snapshot(entity_type, entity, poll_label_pref
     and not has_configured_label_prefix(entity.labels, poll_label_prefixes)
 end
 
+local function is_unassigned_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
+  return is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
+    and #(entity.assignees or {}) == 0
+end
+
 local function collect_changed(repo, entity_type, entities, fresh_changes, replay_candidates, poll_label_prefixes)
   for _, entity in ipairs(entities) do
     local key = core.entity_cache_key(repo, entity_type, entity.number)
     local cached_updated_at = cache_get(key)
-    if cached_updated_at ~= entity.updated_at then
+    local level_replay = is_unassigned_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes)
+    if level_replay or cached_updated_at ~= entity.updated_at then
       local item = {
         entity_type = entity_type,
         entity = entity,
         key = key,
+        level_replay = level_replay,
         replay = cached_updated_at == nil,
       }
       item.entity.type = entity_type
-      if item.replay and not is_intake_candidate_snapshot(entity_type, entity, poll_label_prefixes) then
+      if item.replay and not item.level_replay then
         table.insert(replay_candidates, item)
       else
         table.insert(fresh_changes, item)
@@ -77,11 +84,20 @@ local function replay_allowance(replay_candidates, budget)
   return allowed
 end
 
-local function raise_changed_item(repo, item)
+local function item_dedup_key(repo, item, poll_token)
+  local entity = item.entity
+  local dedup_key = core.entity_dedup_key(repo, item.entity_type, entity.number, entity.updated_at)
+  if item.level_replay then
+    return dedup_key .. "/poll/" .. tostring(poll_token or now())
+  end
+  return dedup_key
+end
+
+local function raise_changed_item(repo, item, poll_token)
   with_lock(item.key, function()
     local entity = item.entity
-    if cache_get(item.key) ~= entity.updated_at then
-      local dedup_key = core.entity_dedup_key(repo, item.entity_type, entity.number, entity.updated_at)
+    if item.level_replay or cache_get(item.key) ~= entity.updated_at then
+      local dedup_key = item_dedup_key(repo, item, poll_token)
       -- At-least-once: raise before cache_set. If this process crashes
       -- before the write, the next tick raises the same dedup_key again.
       raise("github_entity_changed", {
@@ -101,17 +117,19 @@ local function raise_changed_item(repo, item)
         -- this event is routed to a reliable subscription).
         source_ref = core.entity_source_ref(repo, item.entity_type, entity.number),
       })
-      cache_set(item.key, entity.updated_at)
+      if not item.level_replay then
+        cache_set(item.key, entity.updated_at)
+      end
     end
   end)
 end
 
-local function raise_changed(repo, fresh_changes, replay_changes)
+local function raise_changed(repo, fresh_changes, replay_changes, poll_token)
   for _, item in ipairs(fresh_changes or {}) do
-    raise_changed_item(repo, item)
+    raise_changed_item(repo, item, poll_token)
   end
   for _, item in ipairs(replay_changes or {}) do
-    raise_changed_item(repo, item)
+    raise_changed_item(repo, item, poll_token)
   end
 end
 
@@ -147,7 +165,7 @@ local function act(event)
   local fresh_changes = {}
   local replay_candidates = {}
   poll_entities(repo, event, fresh_changes, replay_candidates, poll_label_prefixes)
-  raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget))
+  raise_changed(repo, fresh_changes, replay_allowance(replay_candidates, replay_budget), event and event.ts)
 end
 
 return saga.department(spec, {

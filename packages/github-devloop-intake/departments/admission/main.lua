@@ -1,5 +1,6 @@
 local core = require("core")
 local operator_commands = require("devloop.operator_commands")
+local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -62,16 +63,9 @@ local function done(_event)
   return false
 end
 
-local function act(event)
-  local entity = event.payload or {}
+local function admit_issue_event(event, entity)
+  entity = entity or event.payload or {}
   core.log_entry("admission", event, "github-devloop/intake", core.payload_field(entity, "dedup_key"))
-  if entity.type ~= "issue" then
-    return
-  end
-  if tostring(entity.state or ""):upper() ~= "OPEN" then
-    return
-  end
-
   local repo, issue_number = core.parse_issue_source_ref(entity.source_ref)
   if repo == nil or issue_number == nil then
     core.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "entity", "candidate", "skip-foreign(source_ref)", "invalid issue source_ref")
@@ -120,6 +114,28 @@ local function act(event)
     "devloop_intake_candidate",
   })
   core.log_raise("admission", proposal_id, "devloop_intake_candidate", payload)
+end
+
+local function act_entity_changed(event)
+  local entity = event.payload or {}
+  if entity.type ~= "issue" then
+    return
+  end
+  if tostring(entity.state or ""):upper() ~= "OPEN" then
+    return
+  end
+  admit_issue_event(event, entity)
+end
+
+local handlers = {
+  ["github-proxy.github_entity_changed"] = act_entity_changed,
+}
+
+local function act(event)
+  local handled = queue.dispatch_consumed_queue("admission", spec, event, handlers, "github-devloop-intake")
+  if not handled then
+    error("github-devloop-intake: consumed-queue-unrouted: " .. tostring(event and event.queue or ""))
+  end
 end
 
 return saga.department(spec, {

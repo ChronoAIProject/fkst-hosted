@@ -50,7 +50,7 @@ end
 local function mock_admission_view(fields)
   local f = fields or {}
   entity_read_mocks.mock_issue_view_selector(t, {
-    number = 42,
+    number = f.number or 42,
     title = "External request",
     body = "",
     updated_at = f.updated_at or "2026-06-03T01:02:03Z",
@@ -64,7 +64,7 @@ end
 
 local function mock_state_view(fields)
   local f = fields or {}
-  t.mock_command(core.gh_issue_view_state_cmd("owner/repo", "42"), {
+  t.mock_command(core.gh_issue_view_state_cmd("owner/repo", tostring(f.number or 42)), {
     stdout = '{"title":"External request","updatedAt":"' .. tostring(f.updated_at or "2026-06-03T01:02:03Z") .. '","state":"' .. tostring(f.state or "OPEN") .. '","labels":[],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
     stderr = "",
     exit_code = 0,

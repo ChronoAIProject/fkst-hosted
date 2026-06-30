@@ -111,6 +111,16 @@ fi
 
 
 class BoardScriptTest(unittest.TestCase):
+    def no_revert_scan(self) -> dict[str, object]:
+        return {
+            "schema": "github-devloop.no-revert-reopen-scan.v1",
+            "since_at": "2026-06-03T08:00:00Z",
+            "until_at": "2026-06-10T08:00:00Z",
+            "pr_reverts_complete": True,
+            "revert_commits_complete": True,
+            "issue_reopens_complete": True,
+        }
+
     def test_avm_aggregation_deduplicates_identity_and_keeps_unclassified(self) -> None:
         observe = {
             "avm_facts": [
@@ -161,7 +171,8 @@ class BoardScriptTest(unittest.TestCase):
         self.assertEqual(buckets["L1"]["false_consensus_denominator"], 1)
         self.assertEqual(buckets["unclassified"]["merges"], 1)
         self.assertEqual(buckets["unclassified"]["avm_denominator"], 1)
-        self.assertEqual(buckets["unclassified"]["revert_numerator"], 1)
+        self.assertEqual(buckets["unclassified"]["revert_numerator"], 0)
+        self.assertEqual(buckets["unclassified"]["revert_denominator"], 0)
         self.assertEqual(buckets["unclassified"]["false_consensus_numerator"], 0)
         self.assertEqual(buckets["unclassified"]["false_consensus_denominator"], 0)
 
@@ -194,12 +205,94 @@ class BoardScriptTest(unittest.TestCase):
         self.assertEqual(buckets["L2"]["revert_numerator"], 1)
         self.assertEqual(buckets["L2"]["revert_denominator"], 1)
 
-    def test_avm_aggregation_requires_exact_revert_pr_reference(self) -> None:
+    def test_avm_aggregation_detects_direct_revert_commit(self) -> None:
         observe = {
             "autonomy_facts": [
                 {
                     "schema": "github-devloop.autonomy-result.v1",
+                    "proposal_id": "github-devloop/issue/owner/repo/31",
+                    "pr_number": 42,
+                    "version": "v31",
+                    "head_sha": "abc",
+                    "task_class": "L2",
+                    "valid_autonomous_merge": "true",
+                    "codex_calls": 5,
+                    "rounds": 2,
+                    "gates": {"no_revert_reopen": "pass"},
+                    "merged_at": "2026-06-14T08:00:00Z",
+                }
+            ],
+            "recent_merged_prs": [
+                {"number": 42, "title": "Implement detector", "merged_at": "2026-06-14T08:00:00Z"},
+            ],
+            "revert_commits": [
+                {
+                    "sha": "abc1234",
+                    "subject": 'Revert "Implement detector"',
+                    "message": "This reverts PR #42.",
+                    "committed_at": "2026-06-14T09:00:00Z",
+                }
+            ],
+        }
+
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L2"]["false_consensus_numerator"], 1)
+        self.assertEqual(buckets["L2"]["false_consensus_denominator"], 1)
+        self.assertEqual(buckets["L2"]["revert_numerator"], 1)
+        self.assertEqual(buckets["L2"]["revert_denominator"], 1)
+
+    def test_avm_aggregation_promotes_no_revert_gate_after_clean_window(self) -> None:
+        observe = {
+            "now": "2026-06-14T10:00:00Z",
+            "autonomy_facts": [
+                {
+                    "schema": "github-devloop.autonomy-result.v1",
+                    "proposal_id": "github-devloop/issue/owner/repo/33",
+                    "issue_number": 33,
+                    "pr_number": 52,
+                    "version": "v33",
+                    "head_sha": "abc",
+                    "task_class": "L1",
+                    "valid_autonomous_merge": "pending",
+                    "codex_calls": 3,
+                    "rounds": 2,
+                    "merged_at": "2026-06-03T08:00:00Z",
+                    "gates": {
+                        "human_touch": "pass",
+                        "pre_merge_ci": "pass",
+                        "evidence_manifest": "pass",
+                        "post_merge_probe": "pass",
+                        "no_revert_reopen": "pending",
+                        "cost_budget": "pass",
+                    },
+                }
+            ],
+            "recent_merged_prs": [
+                {"number": 52, "title": "Implement stable AVM gate", "merged_at": "2026-06-03T08:00:00Z"},
+            ],
+            "recent_merged_issues": [
+                {"number": 33, "title": "Implement stable AVM gate", "state": "CLOSED", "stateReason": "COMPLETED"},
+            ],
+        }
+
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L1"]["avm_numerator"], 0)
+
+        observe["no_revert_reopen_scan"] = self.no_revert_scan()
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L1"]["avm_numerator"], 1)
+        self.assertEqual(buckets["L1"]["avm_denominator"], 1)
+        self.assertEqual(buckets["L1"]["revert_numerator"], 0)
+        self.assertEqual(buckets["L1"]["revert_denominator"], 1)
+
+    def test_avm_aggregation_requires_exact_revert_pr_reference(self) -> None:
+        observe = {
+            "now": "2026-06-22T10:00:00Z",
+            "autonomy_facts": [
+                {
+                    "schema": "github-devloop.autonomy-result.v1",
                     "proposal_id": "github-devloop/issue/owner/repo/32",
+                    "issue_number": 32,
                     "pr_number": 12,
                     "version": "v32",
                     "head_sha": "abc",
@@ -207,11 +300,22 @@ class BoardScriptTest(unittest.TestCase):
                     "valid_autonomous_merge": "true",
                     "gates": {"no_revert_reopen": "pass"},
                     "merged_at": "2026-06-14T08:00:00Z",
+                    "no_revert_reopen_scan": {
+                        "schema": "github-devloop.no-revert-reopen-scan.v1",
+                        "since_at": "2026-06-14T08:00:00Z",
+                        "until_at": "2026-06-21T08:00:00Z",
+                        "pr_reverts_complete": True,
+                        "revert_commits_complete": True,
+                        "issue_reopens_complete": True,
+                    },
                 }
             ],
             "recent_merged_prs": [
                 {"number": 12, "title": "Feature", "merged_at": "2026-06-14T08:00:00Z"},
                 {"number": 13, "title": "Revert unrelated change (#123)", "body": "Reverts #123.", "merged_at": "2026-06-14T09:00:00Z"},
+            ],
+            "recent_merged_issues": [
+                {"number": 32, "title": "Feature", "state": "CLOSED", "stateReason": "COMPLETED"},
             ],
         }
 
@@ -326,22 +430,41 @@ class BoardScriptTest(unittest.TestCase):
                         "head_sha": "abc",
                         "task_class": "L0",
                         "valid_autonomous_merge": "true",
+                        "issue_number": 10,
                         "codex_calls": 4,
                         "rounds": 1,
-                        "gates": {"no_revert_reopen": "pass"},
+                        "merged_at": "2026-06-03T08:00:00Z",
+                        "no_revert_reopen_scan": self.no_revert_scan(),
+                        "gates": {
+                            "human_touch": "pass",
+                            "pre_merge_ci": "pass",
+                            "evidence_manifest": "pass",
+                            "post_merge_probe": "pass",
+                            "no_revert_reopen": "pass",
+                            "cost_budget": "pass",
+                        },
                         "false_consensus": False,
                     },
                     {
                         "schema": "github-devloop.autonomy-result.v1",
                         "proposal_id": "github-devloop/issue/owner/repo/11",
                         "pr_number": 21,
+                        "issue_number": 11,
                         "version": "v11",
                         "head_sha": "def",
                         "task_class": "L4",
                         "valid_autonomous_merge": "false",
                         "codex_calls": 8,
                         "rounds": 5,
-                        "gates": {"no_revert_reopen": "fail"},
+                        "merged_at": "2026-06-03T08:00:00Z",
+                        "gates": {
+                            "human_touch": "pass",
+                            "pre_merge_ci": "pass",
+                            "evidence_manifest": "pass",
+                            "post_merge_probe": "pass",
+                            "no_revert_reopen": "fail",
+                            "cost_budget": "pass",
+                        },
                     },
                     {
                         "schema": "github-devloop.autonomy-result.v1",
@@ -354,6 +477,15 @@ class BoardScriptTest(unittest.TestCase):
                         "rounds": 2,
                         "gates": {"no_revert_reopen": "pending"},
                     },
+                ],
+                "recent_merged_prs": [
+                    {"number": 20, "title": "Docs", "merged_at": "2026-06-03T08:00:00Z"},
+                    {"number": 21, "title": "Risky change", "merged_at": "2026-06-03T08:00:00Z"},
+                    {"number": 23, "title": "Revert risky change (#21)", "body": "Reverts #21.", "merged_at": "2026-06-04T08:00:00Z"},
+                ],
+                "recent_merged_issues": [
+                    {"number": 10, "title": "Docs", "state": "CLOSED", "stateReason": "COMPLETED"},
+                    {"number": 11, "title": "Risky change", "state": "CLOSED", "stateReason": "COMPLETED"},
                 ],
             }
         )
@@ -368,7 +500,7 @@ class BoardScriptTest(unittest.TestCase):
             )
             self.assertIn(
                 "- L4 merges=1 AVM-rate=0/1 (0%) cost-per-AVM=n/a "
-                "revert-rate=1/1 (100%) median-rounds=5 false-consensus-rate=n/a",
+                "revert-rate=1/1 (100%) median-rounds=5 false-consensus-rate=1/1 (100%)",
                 result.stdout,
             )
             self.assertIn("- unclassified merges=1 AVM-rate=0/1 (0%) cost-per-AVM=unknown", result.stdout)

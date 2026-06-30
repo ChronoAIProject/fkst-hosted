@@ -561,6 +561,13 @@ return {
     t.eq(entities[1].labels[2], "two")
   end,
 
+  test_parse_entity_list_accepts_assignees_and_author = function()
+    local entities = core.parse_entity_list('[[{"number":7,"title":"Fix","html_url":"https://example.test/7","updated_at":"2026-06-03T00:00:00Z","state":"open","assignees":[{"login":"fkst-test-bot"}],"user":{"login":"human"}}]]')
+    t.eq(#entities[1].assignees, 1)
+    t.eq(entities[1].assignees[1], "fkst-test-bot")
+    t.eq(entities[1].author_login, "human")
+  end,
+
   test_parse_entity_list_empty_array = function()
     local entities = core.parse_entity_list("[]")
     t.eq(#entities, 0)

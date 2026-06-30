@@ -7,6 +7,16 @@ from typing import Any
 
 
 TASK_LEVELS = ("L0", "L1", "L2", "L3", "L4", "unclassified")
+NO_REVERT_REOPEN_WINDOW_SECONDS = 7 * 24 * 60 * 60
+NO_REVERT_REOPEN_SCAN_SCHEMA = "github-devloop.no-revert-reopen-scan.v1"
+REQUIRED_GATE_NAMES = (
+    "human_touch",
+    "pre_merge_ci",
+    "evidence_manifest",
+    "post_merge_probe",
+    "no_revert_reopen",
+    "cost_budget",
+)
 
 
 def list_from_any(value: Any) -> list[Any]:
@@ -160,10 +170,43 @@ def timestamp_order(value: Any) -> float | None:
         return None
 
 
-def later_than_reverted_pair(revert_pr: dict[str, Any], fact: dict[str, Any]) -> bool:
-    reverted = timestamp_order(fact.get("merged_at") or fact.get("comment_created_at"))
-    reverter = timestamp_order(revert_pr.get("merged_at") or revert_pr.get("mergedAt"))
-    return reverted is None or reverter is None or reverter >= reverted
+def timestamp_from_first(*values: Any) -> float | None:
+    for value in values:
+        parsed = timestamp_order(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def no_revert_merge_seconds(fact: dict[str, Any]) -> float | None:
+    return timestamp_from_first(fact.get("merged_at"), fact.get("mergedAt"), fact.get("comment_created_at"))
+
+
+def evidence_seconds(raw: dict[str, Any]) -> float | None:
+    return timestamp_from_first(
+        raw.get("merged_at"),
+        raw.get("mergedAt"),
+        raw.get("committed_at"),
+        raw.get("committedAt"),
+        raw.get("authored_at"),
+        raw.get("authoredAt"),
+        raw.get("pushed_at"),
+        raw.get("pushedAt"),
+        raw.get("reopened_at"),
+        raw.get("reopenedAt"),
+        raw.get("updated_at"),
+        raw.get("updatedAt"),
+        raw.get("closed_at"),
+        raw.get("closedAt"),
+    )
+
+
+def evidence_within_no_revert_window(fact: dict[str, Any], raw: dict[str, Any]) -> bool:
+    merged = no_revert_merge_seconds(fact)
+    evidence = evidence_seconds(raw)
+    if merged is None or evidence is None:
+        return True
+    return merged <= evidence <= merged + NO_REVERT_REOPEN_WINDOW_SECONDS
 
 
 def pr_records(data: Any) -> list[dict[str, Any]]:
@@ -201,7 +244,53 @@ def issue_reopened(entity: dict[str, Any]) -> bool:
             return True
         if issue.get("reopened") is True:
             return True
+    if str(entity.get("state_reason") or entity.get("stateReason") or "").upper() == "REOPENED":
+        return True
+    if entity.get("reopened") is True:
+        return True
     return entity.get("issue_reopened") is True
+
+
+def revert_commit_records(fact: dict[str, Any], data: Any) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    scan = fact.get("no_revert_reopen_scan")
+    if isinstance(scan, dict):
+        for raw in list_from_any(scan.get("revert_commits")):
+            if isinstance(raw, dict):
+                records.append(raw)
+    if isinstance(data, dict):
+        scan = data.get("no_revert_reopen_scan")
+        if isinstance(scan, dict):
+            for raw in list_from_any(scan.get("revert_commits")):
+                if isinstance(raw, dict):
+                    records.append(raw)
+        for key in ("revert_commits", "recent_revert_commits"):
+            for raw in list_from_any(data.get(key)):
+                if isinstance(raw, dict):
+                    records.append(raw)
+    return records
+
+
+def commit_reverts_pr(commit: dict[str, Any], target_number: int) -> bool:
+    explicit = parse_pr_number(
+        commit.get("reverted_pr")
+        or commit.get("reverted_pr_number")
+        or commit.get("target_pr")
+        or commit.get("target_pr_number")
+    )
+    if explicit is not None:
+        return explicit == target_number
+    return title_or_body_reverts_pr(
+        {
+            "title": commit.get("message_head") or commit.get("subject") or commit.get("title"),
+            "body": commit.get("message_body") or commit.get("body") or commit.get("message"),
+        },
+        target_number,
+    )
+
+
+def commit_identity(commit: dict[str, Any]) -> str:
+    return str(commit.get("sha") or commit.get("oid") or commit.get("commit_sha") or commit.get("revert_commit") or commit.get("id") or "")
 
 
 def detect_false_consensus(fact: dict[str, Any], data: Any) -> list[dict[str, Any]]:
@@ -212,7 +301,7 @@ def detect_false_consensus(fact: dict[str, Any], data: Any) -> list[dict[str, An
     seen: set[tuple[Any, Any, Any]] = set()
 
     def add(pair: dict[str, Any]) -> None:
-        key = (pair.get("reverted_pr"), pair.get("revert_pr") or pair.get("issue_number"), pair.get("evidence"))
+        key = (pair.get("reverted_pr"), pair.get("revert_pr") or pair.get("issue_number") or pair.get("revert_commit"), pair.get("evidence"))
         if key in seen:
             return
         seen.add(key)
@@ -222,13 +311,25 @@ def detect_false_consensus(fact: dict[str, Any], data: Any) -> list[dict[str, An
         number = parse_pr_number(pr.get("number"))
         if number is None or number == pr_number:
             continue
-        if title_or_body_reverts_pr(pr, pr_number) and later_than_reverted_pair(pr, fact):
+        if title_or_body_reverts_pr(pr, pr_number) and evidence_within_no_revert_window(fact, pr):
             add({"reverted_pr": pr_number, "revert_pr": number, "evidence": "explicit-revert-pr"})
+    for commit in revert_commit_records(fact, data):
+        if commit_reverts_pr(commit, pr_number) and evidence_within_no_revert_window(fact, commit):
+            add({"reverted_pr": pr_number, "revert_commit": commit_identity(commit), "evidence": "revert-commit"})
     for entity in raw_entity_records(data):
         if not isinstance(entity, dict):
             continue
-        if parse_pr_number(entity.get("pr_number")) == pr_number and issue_reopened(entity):
+        if parse_pr_number(entity.get("pr_number")) == pr_number and issue_reopened(entity) and evidence_within_no_revert_window(
+            fact,
+            entity.get("parent_issue") if isinstance(entity.get("parent_issue"), dict) else entity.get("issue") if isinstance(entity.get("issue"), dict) else entity,
+        ):
             add({"reverted_pr": pr_number, "issue_number": parse_pr_number(entity.get("issue_number")), "evidence": "issue-reopened"})
+    issue_number = parse_pr_number(fact.get("issue_number") or fact.get("issue"))
+    for issue in list_from_any(data.get("recent_merged_issues") if isinstance(data, dict) else None):
+        if not isinstance(issue, dict) or issue_number is None:
+            continue
+        if parse_pr_number(issue.get("number") or issue.get("issue_number")) == issue_number and issue_reopened(issue) and evidence_within_no_revert_window(fact, issue):
+            add({"reverted_pr": pr_number, "issue_number": issue_number, "evidence": "issue-reopened"})
     return pairs
 
 
@@ -243,6 +344,100 @@ def scanned_pr_numbers(data: Any) -> set[int]:
         if number is not None:
             numbers.add(number)
     return numbers
+
+
+def scanned_issue_numbers(data: Any) -> set[int]:
+    numbers: set[int] = set()
+    if not isinstance(data, dict):
+        return numbers
+    for raw in list_from_any(data.get("recent_merged_issues")):
+        if not isinstance(raw, dict):
+            continue
+        number = parse_pr_number(raw.get("number") or raw.get("issue_number"))
+        if number is not None:
+            numbers.add(number)
+    for entity in raw_entity_records(data):
+        if not isinstance(entity, dict):
+            continue
+        number = parse_pr_number(entity.get("issue_number"))
+        if number is not None:
+            numbers.add(number)
+    return numbers
+
+
+def valid_autonomous_merge(gates: dict[str, Any]) -> str:
+    has_pending = False
+    for name in REQUIRED_GATE_NAMES:
+        state = gate_state(gates.get(name))
+        if state == "fail":
+            return "false"
+        if state != "pass":
+            has_pending = True
+    return "pending" if has_pending else "true"
+
+
+def no_revert_sources_complete(fact: dict[str, Any], data: Any) -> bool:
+    if not isinstance(data, dict):
+        return False
+    pr_number = parse_pr_number(fact.get("pr_number") or fact.get("pr"))
+    issue_number = parse_pr_number(fact.get("issue_number") or fact.get("issue"))
+    if pr_number is None or issue_number is None:
+        return False
+    return pr_number in scanned_pr_numbers(data) and issue_number in scanned_issue_numbers(data)
+
+
+def truthy(value: Any) -> bool:
+    return value is True or str(value or "").strip().lower() == "true"
+
+
+def scan_timestamp(scan: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        parsed = timestamp_order(scan.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def no_revert_full_window_scan_covers(fact: dict[str, Any], data: Any) -> bool:
+    scan = fact.get("no_revert_reopen_scan")
+    if not isinstance(scan, dict) and isinstance(data, dict):
+        scan = data.get("no_revert_reopen_scan")
+    if not isinstance(scan, dict) or scan.get("schema") != NO_REVERT_REOPEN_SCAN_SCHEMA:
+        return False
+    if not truthy(scan.get("pr_reverts_complete")) or not truthy(scan.get("revert_commits_complete")) or not truthy(scan.get("issue_reopens_complete")):
+        return False
+    merged = no_revert_merge_seconds(fact)
+    since = scan_timestamp(scan, "since", "since_at", "since_seconds")
+    until = scan_timestamp(scan, "until", "until_at", "until_seconds")
+    if merged is None or since is None or until is None:
+        return False
+    return since <= merged and until >= merged + NO_REVERT_REOPEN_WINDOW_SECONDS
+
+
+def no_revert_reopen_gate(fact: dict[str, Any], data: Any, now: Any = None) -> str:
+    if detect_false_consensus(fact, data):
+        return "fail"
+    if not no_revert_sources_complete(fact, data):
+        return "pending"
+    merged = no_revert_merge_seconds(fact)
+    now_seconds = timestamp_order(now)
+    if now_seconds is None and isinstance(data, dict):
+        now_seconds = timestamp_order(data.get("now") or data.get("generated_at") or data.get("cached_at"))
+    if merged is None or now_seconds is None:
+        return "pending"
+    if now_seconds < merged + NO_REVERT_REOPEN_WINDOW_SECONDS:
+        return "pending"
+    return "pass" if no_revert_full_window_scan_covers(fact, data) else "pending"
+
+
+def apply_no_revert_reopen_gate(fact: dict[str, Any], data: Any, now: Any = None) -> dict[str, Any]:
+    gate = no_revert_reopen_gate(fact, data, now)
+    decorated = dict(fact)
+    gates = dict(decorated.get("gates") or {})
+    gates["no_revert_reopen"] = gate
+    decorated["gates"] = gates
+    decorated["valid_autonomous_merge"] = valid_autonomous_merge(gates)
+    return decorated
 
 
 def decorate_false_consensus(fact: dict[str, Any], data: Any) -> dict[str, Any]:
@@ -316,7 +511,7 @@ def avm_fact_identity(fact: dict[str, Any]) -> str | None:
     return None
 
 
-def avm_facts(data: Any) -> list[dict[str, Any]]:
+def avm_facts(data: Any, now: Any = None) -> list[dict[str, Any]]:
     facts: list[dict[str, Any]] = []
     seen: set[str] = set()
     for raw in raw_avm_sources(data):
@@ -327,23 +522,30 @@ def avm_facts(data: Any) -> list[dict[str, Any]]:
             if identity in seen:
                 continue
             seen.add(identity)
-        facts.append(decorate_false_consensus(raw, data))
+        facts.append(decorate_false_consensus(apply_no_revert_reopen_gate(raw, data, now), data))
     return facts
 
 
-def false_consensus_pairs(data: Any) -> list[dict[str, Any]]:
+def false_consensus_pairs(data: Any, now: Any = None) -> list[dict[str, Any]]:
     pairs: list[dict[str, Any]] = []
     seen: set[tuple[Any, Any, Any]] = set()
-    for fact in avm_facts(data):
+    for fact in avm_facts(data, now):
         for pair in list_from_any(fact.get("false_consensus_pairs")):
             if not isinstance(pair, dict):
                 continue
-            key = (pair.get("reverted_pr"), pair.get("revert_pr") or pair.get("issue_number"), pair.get("evidence"))
+            key = (pair.get("reverted_pr"), pair.get("revert_pr") or pair.get("issue_number") or pair.get("revert_commit"), pair.get("evidence"))
             if key in seen:
                 continue
             seen.add(key)
             pairs.append(pair)
-    pairs.sort(key=lambda row: (int_value(row.get("reverted_pr")), int_value(row.get("revert_pr") or row.get("issue_number")), str(row.get("evidence") or "")))
+    pairs.sort(
+        key=lambda row: (
+            int_value(row.get("reverted_pr")),
+            int_value(row.get("revert_pr") or row.get("issue_number")),
+            str(row.get("revert_commit") or ""),
+            str(row.get("evidence") or ""),
+        )
+    )
     return pairs
 
 
@@ -397,9 +599,9 @@ def explicit_false_consensus_parts(fact: dict[str, Any]) -> tuple[int, int] | No
     return None
 
 
-def aggregate_avm_scoreboard(data: Any) -> list[dict[str, Any]]:
+def aggregate_avm_scoreboard(data: Any, now: Any = None) -> list[dict[str, Any]]:
     buckets = {level: empty_bucket(level) for level in TASK_LEVELS}
-    for fact in avm_facts(data):
+    for fact in avm_facts(data, now):
         bucket = buckets[task_level(fact.get("task_level") or fact.get("task_class") or fact.get("risk_tier"))]
         bucket["merges"] += 1
 

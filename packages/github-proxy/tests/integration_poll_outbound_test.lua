@@ -62,7 +62,7 @@ end
 
 local function issue_json(number, updated_at)
   return string.format(
-    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"adapter-enabled"}]}',
+    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"adapter-enabled"}],"assignees":[{"login":"fkst-test-bot"}]}',
     number, number, number, updated_at
   )
 end
@@ -357,10 +357,10 @@ return {
   end,
 
   test_inbound_poll_prioritizes_cold_intake_candidates_over_replay_budget = function()
-    local event = { queue = "github_poll_tick", payload = {} }
+    local event = { queue = "github_poll_tick", payload = {}, ts = "poll-cold" }
     local run_opts = opts("cold-intake-before-replay", { FKST_GITHUB_PROXY_REPLAY_BUDGET = "1" })
     mock_poll_env("1")
-    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}]}'
+    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}],"assignees":[]}'
     mock_issue_list(issue_list_from({ issue_json(42, "2026-06-03T01:02:00Z"), issue_json(43, "2026-06-03T01:03:00Z"), intake }))
     mock_pr_list("[]\n")
     local result = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -373,9 +373,72 @@ return {
     t.eq(result.raises[1].payload.number, 50)
     t.eq(result.raises[1].payload.state, "OPEN")
     t.eq(result.raises[1].payload.labels[1], "bug")
-    t.eq(result.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z")
+    t.eq(result.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z/poll/poll-cold")
     t.eq(result.raises[1].payload.source_ref.kind, "external")
     t.eq(result.raises[1].payload.source_ref.ref, "owner/x#issue/50")
+  end,
+
+  test_inbound_poll_level_replays_stateless_intake_candidates = function()
+    local run_opts = opts("stateless-intake-level-replay", { FKST_GITHUB_PROXY_REPLAY_BUDGET = "1" })
+    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}],"assignees":[]}'
+    local managed = issue_json(42, "2026-06-03T01:02:00Z")
+
+    mock_poll_env("1")
+    mock_issue_list(issue_list_from({ managed, intake }))
+    mock_pr_list("[]\n")
+    local first = t.run_department("departments/github_poll/main.lua", {
+      queue = "github_poll_tick",
+      payload = {},
+      ts = "poll-1",
+    }, run_opts)
+    t.eq(first.exit_code, 0)
+    t.eq(#first.raises, 2)
+    t.eq(numbers(first.raises), "50,42")
+    t.eq(first.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z/poll/poll-1")
+    t.eq(first.raises[2].payload.dedup_key, "owner/x#issue#42@2026-06-03T01:02:00Z")
+
+    mock_poll_env("1")
+    mock_issue_list(issue_list_from({ managed, intake }))
+    mock_pr_list("[]\n")
+    local second = t.run_department("departments/github_poll/main.lua", {
+      queue = "github_poll_tick",
+      payload = {},
+      ts = "poll-2",
+    }, run_opts)
+    t.eq(second.exit_code, 0)
+    t.eq(#second.raises, 1)
+    t.eq(second.raises[1].payload.number, 50)
+    t.eq(second.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z/poll/poll-2")
+
+    mock_poll_env("1")
+    mock_issue_list(issue_list_from({
+      '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"adapter-enabled"},{"name":"bug"}],"assignees":[]}',
+      managed,
+    }))
+    mock_pr_list("[]\n")
+    local labelled = t.run_department("departments/github_poll/main.lua", {
+      queue = "github_poll_tick",
+      payload = {},
+      ts = "poll-3",
+    }, run_opts)
+    t.eq(labelled.exit_code, 0)
+    t.eq(#labelled.raises, 1)
+    t.eq(labelled.raises[1].payload.number, 50)
+    t.eq(labelled.raises[1].payload.dedup_key, "owner/x#issue#50@2026-06-03T01:04:00Z")
+
+    mock_poll_env("1")
+    mock_issue_list(issue_list_from({
+      '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"adapter-enabled"},{"name":"bug"}],"assignees":[]}',
+      managed,
+    }))
+    mock_pr_list("[]\n")
+    local cached_labelled = t.run_department("departments/github_poll/main.lua", {
+      queue = "github_poll_tick",
+      payload = {},
+      ts = "poll-4",
+    }, run_opts)
+    t.eq(cached_labelled.exit_code, 0)
+    t.eq(#cached_labelled.raises, 0)
   end,
 
   test_inbound_poll_rejects_invalid_replay_budget = function()

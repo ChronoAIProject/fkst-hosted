@@ -994,4 +994,5 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(find_raise(result.raises, ISSUE_REDRIVE_QUEUE), nil)
   end,
+
 }
