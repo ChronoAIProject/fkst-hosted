@@ -697,13 +697,19 @@ def fetch_observe(args: argparse.Namespace) -> Any:
     command = [
         args.bin,
         "observe",
-        "--project-root",
-        args.project_root,
         "--durable-root",
         args.durable_root,
         "--json",
     ]
-    result = subprocess.run(command, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    result = subprocess.run(
+        command,
+        cwd=args.project_root,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
         raise RuntimeError(
