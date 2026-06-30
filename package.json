@@ -2,11 +2,5 @@
   "name": "fkst-hosted",
   "version": "0.2.3",
   "private": true,
-  "description": "Unified version source of truth for fkst-hosted (backend + frontend). Managed by Changesets; the version is mirrored into Cargo.toml / the frontend package.json once those exist.",
-  "scripts": {
-    "changeset": "changeset"
-  },
-  "devDependencies": {
-    "@changesets/cli": "^2.27.7"
-  }
+  "description": "Unified product version for fkst-hosted (backend + frontend). The Docker build reads this version."
 }
