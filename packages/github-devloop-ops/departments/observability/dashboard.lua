@@ -1,4 +1,5 @@
 local common = require("departments.observability.common")
+local dashboard_commands = require("devloop.commands.dashboard")
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 
@@ -19,7 +20,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local existing = core.observability_exec({
     run = function(timeout)
-      return core.gh_dashboard_label_get(repo, dashboard_label, timeout)
+      return dashboard_commands.gh_dashboard_label_get(repo, dashboard_label, timeout)
     end,
   }, limits, deadline, "dashboard label get")
   if core.observability_result_deferred(existing) then return "deferred" end
@@ -33,7 +34,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local created = core.observability_exec({
     run = function(timeout)
-      return core.gh_dashboard_label_create(repo, dashboard_label, timeout)
+      return dashboard_commands.gh_dashboard_label_create(repo, dashboard_label, timeout)
     end,
   }, limits, deadline, "dashboard label create")
   if core.observability_result_deferred(created) then return "deferred" end
@@ -431,7 +432,7 @@ end
 local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
   local listed = core.observability_exec({
     run = function(timeout)
-      return core.gh_dashboard_issue_list(repo, dashboard_label, timeout)
+      return dashboard_commands.gh_dashboard_issue_list(repo, dashboard_label, timeout)
     end,
   }, limits, deadline, "dashboard issue list")
   if core.observability_result_deferred(listed) then
@@ -463,7 +464,7 @@ end
 local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login, limits, deadline)
   local view = core.observability_run_cmd({
     run = function(timeout)
-      return core.gh_dashboard_issue_get(repo, issue_number, timeout)
+      return dashboard_commands.gh_dashboard_issue_get(repo, issue_number, timeout)
     end,
   }, limits, deadline, "dashboard issue get")
   if core.observability_result_deferred(view) then
@@ -521,7 +522,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
     local path = write_dashboard_input(repo, dashboard_title, dashboard.body)
     local created = core.observability_run_cmd({
       run = function(timeout)
-        return core.gh_dashboard_issue_create(repo, path, timeout)
+        return dashboard_commands.gh_dashboard_issue_create(repo, path, timeout)
       end,
     }, limits, deadline, "dashboard issue create")
     if core.observability_result_deferred(created) then return "deferred" end
@@ -567,7 +568,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local updated = core.observability_exec({
     run = function(timeout)
-      return core.gh_dashboard_issue_update(repo, current.number, path, timeout)
+      return dashboard_commands.gh_dashboard_issue_update(repo, current.number, path, timeout)
     end,
   }, limits, deadline, "dashboard issue update")
   if core.observability_result_deferred(updated) then return "deferred" end

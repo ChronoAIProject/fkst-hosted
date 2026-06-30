@@ -2,6 +2,7 @@ local S = {}
 
 function S.install(M)
 local strings = require("contract.strings")
+local dashboard = require("devloop.commands.dashboard")
 local labels = require("devloop.commands.labels")
 local dashboard_title = "fkst-dev board"
 local dashboard_label = "fkst-dashboard"
@@ -237,7 +238,7 @@ local function ensure_dashboard_anchor_label(repo, mode, issue)
     return false
   end
   run_gh(function(timeout)
-    return M.gh_dashboard_issue_add_label(repo, issue.number, dashboard_label, timeout)
+    return dashboard.gh_dashboard_issue_add_label(repo, issue.number, dashboard_label, timeout)
   end, 30, "gh dashboard anchor label add")
   log_ensure("dashboard-anchor-label", "added", {
     "mode=real",
@@ -272,7 +273,7 @@ local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
 
   local path = write_dashboard_anchor_input(repo)
   run_gh(function(timeout)
-    return M.gh_dashboard_issue_create(repo, path, timeout)
+    return dashboard.gh_dashboard_issue_create(repo, path, timeout)
   end, 30, "gh dashboard anchor create")
   log_ensure("dashboard-anchor", "created", {
     "mode=real",
@@ -360,7 +361,7 @@ function M.ensure_repo()
   end, 30, "gh label list").stdout)
   local dashboard_issues = M.parse_dashboard_issue_list(
     run_gh(function(timeout)
-      return M.gh_dashboard_issue_all_open(repo, timeout)
+      return dashboard.gh_dashboard_issue_all_open(repo, timeout)
     end, 30, "gh dashboard issue list").stdout
   )
   local topology_result = ensure_topology({
