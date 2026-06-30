@@ -1,3 +1,5 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
 local S = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
@@ -63,8 +65,8 @@ local function linked_pr_numbers(issue_comments, proposal_id)
   local numbers = {}
   local seen = {}
   local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-link:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(issue_comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, issue_comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_branch = marker:match('branch="([^"]+)"')
@@ -112,7 +114,7 @@ function M.linked_pr_surface_snapshot(repo, proposal_id, issue_comments, opts)
         error("github-devloop: linked PR state view failed: " .. tostring(pr_view.stderr))
       end
     else
-      local current_pr = M.parse_pr_view_origin(pr_view.stdout)
+      local current_pr = parsers_pr.parse_pr_view_origin(M, pr_view.stdout)
       if type(current_pr.comments) ~= "table" or tostring(current_pr.state or "") == "" then
         error("github-devloop: linked PR state view malformed")
       end

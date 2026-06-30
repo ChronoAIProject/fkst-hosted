@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
@@ -314,8 +315,8 @@ function M.has_reconcile_marker(comments, proposal_id, base_version, round)
   end
   local version = M.reconcile_state_version(base_version, n)
   local marker_pattern = "<!%-%- fkst:github%-devloop:reconcile:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == version
         and valid_round(attr(marker, "round")) == n then
@@ -333,8 +334,8 @@ function M.has_review_reconcile_marker(comments, issue_proposal_id, issue_versio
   end
   local version = M.review_reconcile_state_version(issue_version, n)
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-reconcile:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(issue_proposal_id)
         and attr(marker, "version") == version
         and valid_round(attr(marker, "round")) == n then
@@ -351,8 +352,8 @@ function M.has_fix_reconcile_marker(comments, proposal_id, issue_version)
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:fix%-reconcile:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == tostring(issue_version)
         and valid_round(attr(marker, "round")) == n then
@@ -370,8 +371,8 @@ function M.has_timeout_reconcile_marker(comments, proposal_id, issue_version, st
   end
   local version = M.timeout_reconcile_state_version(issue_version, state_name, n)
   local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "version") == version
         and attr(marker, "state") == tostring(state_name)
@@ -388,8 +389,8 @@ function M.timeout_reconcile_fact_for_terminal_version(comments, proposal_id, te
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_proposal = attr(marker, "proposal")
       local version = attr(marker, "version")
       local state_name = attr(marker, "state")
@@ -423,7 +424,7 @@ function M.timeout_reconcile_fact_for_terminal_version(comments, proposal_id, te
             kind = attr(marker, "source_ref_kind"),
             ref = attr(marker, "source_ref"),
           },
-          comment_created_at = M._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(M, comment),
         }
       end
     end

@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local saga = require("workflow.saga")
 local strings = require("contract.strings")
@@ -61,7 +63,7 @@ local function read_current_pr(repo, pr_number)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr decompose view failed: " .. tostring(pr_view.stderr))
   end
-  return core.parse_pr_view_origin(pr_view.stdout)
+  return parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
 end
 
 local function read_decompose_issue(repo, issue_number)
@@ -69,7 +71,7 @@ local function read_decompose_issue(repo, issue_number)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
   end
-  return core.parse_issue_view_decompose(issue_view.stdout)
+  return parsers_issue.parse_issue_view_decompose(core, issue_view.stdout)
 end
 
 local function read_decompose_child_issues(repo, proposal_id)

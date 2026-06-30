@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
 local context_bundle = require("devloop.context_bundle")
@@ -45,7 +46,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       error("github-devloop: gh issue loop view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_issue_view_loop(view.stdout)
+    local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     core.log_forged_markers("loop", unresolved.proposal_id, current.comments)
     local state = core.current_state(current.comments, unresolved.proposal_id)
     local transition = core.transition_status(state, { "thinking" }, "blocked")

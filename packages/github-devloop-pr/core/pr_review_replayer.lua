@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
@@ -564,7 +565,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
       { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
     })
   end
-  if M.is_ci_red_reason(ci_reason) then
+  if parsers_misc.is_ci_red_reason(M, ci_reason) then
     local fix_version = M.fix_version_from_review_version(state.version)
     local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
     local request = M.build_merge_gate_fix_comment_request(issue.repo, issue.number, merge_ready, fix_version, ci_reason, current_pr.base_ref_oid, source_ref)

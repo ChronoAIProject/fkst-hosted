@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local git_adapter = require("forge.git")
 local queue = require("devloop.queue")
@@ -451,7 +452,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
-  local current = core.parse_issue_view_implement(view.stdout)
+  local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
   core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
   local state = core.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
@@ -502,7 +503,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
-  local current = core.parse_issue_view_implement(view.stdout)
+  local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
   core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
   local state = core.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
@@ -597,7 +598,7 @@ local function process_ready_event(event)
       error("github-devloop: gh issue implement view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_issue_view_implement(view.stdout)
+    local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
     current.repo = repo
     current.number = issue_number
     core.log_forged_markers("implement", ready.proposal_id, current.comments)

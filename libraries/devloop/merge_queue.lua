@@ -1,3 +1,6 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
@@ -99,8 +102,8 @@ end
 local function current_any_entity_state(M, entity_comments)
   local best = nil
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(entity_comments or {})) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, entity_comments or {})) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       if marker_proposal ~= nil and M.parse_entity_proposal_id(marker_proposal) ~= nil then
         local candidate = M.current_state(entity_comments, marker_proposal)
@@ -140,8 +143,8 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
   local current_head_sha = tostring(pr.head_sha or "")
   local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
   if fact == nil then
-    for _, comment in ipairs(M._trusted_marker_comments(pr.comments)) do
-      for marker in M._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
+    for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, pr.comments)) do
+      for marker in parsers_misc._comment_body(M, comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
         local marker_issue = marker:match('proposal="([^"]+)"')
         if marker_issue ~= nil then
           local candidate_state = M.current_entity_state(pr.comments, marker_issue)
@@ -191,14 +194,14 @@ function M.merge_queue_head(repo, base_branch, current)
   if list.exit_code ~= 0 then
     error("github-devloop: merge queue PR list failed: " .. tostring(list.stderr))
   end
-  for _, pr_item in ipairs(M.parse_pr_list_merge_queue(list.stdout)) do
+  for _, pr_item in ipairs(parsers_pr.parse_pr_list_merge_queue(M, list.stdout)) do
     local pr_number = tonumber(pr_item.number)
     if pr_number ~= nil and not seen[tostring(pr_number)] then
       local view = support.github().gh_pr_view_merge(repo, pr_number, 30)
       if view.exit_code ~= 0 then
         error("github-devloop: merge queue PR view failed: " .. tostring(view.stderr))
       end
-      local pr = M.parse_pr_view_merge(view.stdout)
+      local pr = parsers_pr.parse_pr_view_merge(M, view.stdout)
       local entry = merge_queue_entry_from_pr(M, repo, pr_number, pr, base_branch)
       if entry ~= nil then
         table.insert(entries, entry)
@@ -480,14 +483,14 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
   end
 
   local count = 0
-  for _, issue in ipairs(M.parse_issue_number_list(list.stdout)) do
+  for _, issue in ipairs(parsers_issue.parse_issue_number_list(M, list.stdout)) do
     local issue_number = tonumber(issue.number)
     if issue_number ~= nil and tostring(issue_number) ~= tostring(current_issue_number) then
       local view = M.gh_issue_view_state(repo, issue_number, 30)
       if view.exit_code ~= 0 then
         error("github-devloop: WIP issue state view failed: " .. tostring(view.stderr))
       end
-      local current = M.parse_issue_view_state(view.stdout)
+      local current = parsers_issue.parse_issue_view_state(M, view.stdout)
       local proposal_id = M.proposal_id(repo, issue_number)
       local state = M.current_state(current.comments, proposal_id)
       local classification = M.wip_admission_classification(repo, proposal_id, current.comments, state, integration_branch)
@@ -509,7 +512,7 @@ local function pr_merge_view_for_wip(M, repo, pr_number)
   if view.exit_code ~= 0 then
     error("github-devloop: WIP PR state view failed: " .. tostring(view.stderr))
   end
-  return M.parse_pr_view_merge(view.stdout)
+  return parsers_pr.parse_pr_view_merge(M, view.stdout)
 end
 
 local merge_gate_wait_wip_states = {

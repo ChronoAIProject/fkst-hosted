@@ -1,5 +1,7 @@
 local M = {}
 local wiring = require("core.devloop_wiring")
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
 local workflow_ports = require("devloop.adapters.workflow_ports")
 local _hidden_state_conformance = require("devloop.hidden_state_conformance")
 
@@ -12,13 +14,20 @@ function M.decompose_package_queue()
   return "github-devloop-decompose.devloop_decompose"
 end
 
+function M.parse_pr_view_merge(stdout)
+  return parsers_pr.parse_pr_view_merge(M, stdout)
+end
+
+function M.rollup_failure_gate_sha(pr)
+  return parsers_misc.rollup_failure_gate_sha(M, pr)
+end
+
 require("devloop.base").install(M)
 require("forge.github_debug_stamp").install(M)
 require("devloop.commands").install(M)
 require("forge.merge_commands").install(M)
 require("devloop.github_proxy_entity_view").install(M)
 require("devloop.git_mechanics").install(M)
-require("devloop.parsers").install(M)
 require("forge.merge").install(M)
 require("devloop.merge_gate_wait").install(M)
 require("core.review_carry_over").install(M)

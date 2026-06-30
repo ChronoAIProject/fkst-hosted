@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local execution_start = require("devloop.execution_start")
 local saga = require("workflow.saga")
@@ -22,7 +23,7 @@ local function read_current(repo, issue_number, request)
   if view.exit_code ~= 0 then
     error("github-devloop: gh-issue-execute-start-view-failed: " .. tostring(view.stderr))
   end
-  local current = core.parse_issue_view_intake_judge(view.stdout)
+  local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
   current.repo, current.number = repo, issue_number
   core.log_forged_markers("execute_start", request.proposal_id, current.comments)
   if current.state ~= "OPEN" then

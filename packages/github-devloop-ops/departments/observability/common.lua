@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local strings = require("contract.strings")
 local config = require("devloop.config")
 
@@ -84,7 +86,7 @@ function M.fetch_issue(core, repo, issue_number, limits, deadline)
   if core.observability_result_deferred(view) then
     return nil
   end
-  return core.parse_issue_view_observe(view.stdout)
+  return parsers_issue.parse_issue_view_observe(core, view.stdout)
 end
 
 function M.fetch_pr(core, repo, pr_number, limits, deadline)
@@ -96,7 +98,7 @@ function M.fetch_pr(core, repo, pr_number, limits, deadline)
   if core.observability_result_deferred(view) then
     return nil
   end
-  return core.parse_pr_view_origin(view.stdout)
+  return parsers_pr.parse_pr_view_origin(core, view.stdout)
 end
 
 return M

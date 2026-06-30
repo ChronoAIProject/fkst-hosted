@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local autonomy_ledger = require("devloop.autonomy_ledger")
@@ -522,8 +523,8 @@ return {
   end,
 
   test_merge_ci_red_uses_bounded_safe_rollup_summary = function()
-    local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", core._max_rollup_check_name_len + 40)
-    local summary = core.pr_rollup_failure_summary({
+    local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", parsers_misc.max_rollup_check_name_len + 40)
+    local summary = parsers_misc.pr_rollup_failure_summary(core, {
       status_check_rollup = {
         { name = bad_name, state = "COMPLETED", conclusion = "FAILURE" },
         { name = "second", state = "COMPLETED", conclusion = "FAILURE" },
@@ -531,7 +532,7 @@ return {
         { name = "fourth", state = "COMPLETED", conclusion = "FAILURE" },
       },
     })
-    t.is_true(#summary <= core._max_rollup_failure_summary_len)
+    t.is_true(#summary <= parsers_misc.max_rollup_failure_summary_len)
     t.is_true(summary:find("%c") == nil)
     t.is_true(summary:find("<!-- fkst:", 1, true) == nil)
     t.is_true(summary:find("danger check", 1, true) ~= nil)

@@ -1,3 +1,4 @@
+local parsers_pr = require("devloop.parsers.pr")
 local config = require("devloop.config")
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
@@ -64,7 +65,7 @@ local function read_delegated_child_pr(dept, issue, delegation)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: awaiting-pr-child-view-failed: " .. tostring(pr_view.stderr))
   end
-  local current_pr = M.parse_pr_view_origin(pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(M, pr_view.stdout)
   current_pr.number, current_pr.force_fresh = delegation.pr_number, true
   return current_pr
 end

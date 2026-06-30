@@ -1,11 +1,9 @@
-local S = {}
 local forge_validators = require("devloop.forge_validators")
-
-function S.install(M, shared)
+local shared = require("devloop.parsers.shared")
 local strings = require("forge.strings")
-local each_paginated_item = shared.each_paginated_item
+local C = {}
 
-function M.comments_from_json(comments_json)
+function C.comments_from_json(M, comments_json)
   local comments = {}
   for _, comment in ipairs(comments_json or {}) do
     if type(comment) == "table" and comment.body ~= nil then
@@ -33,13 +31,13 @@ function M.comments_from_json(comments_json)
   return comments
 end
 
-function M.parse_dashboard_issue_list(stdout)
+function C.parse_dashboard_issue_list(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
   if type(decoded) ~= "table" then
     return items
   end
-  each_paginated_item(decoded, function(issue)
+  shared.each_paginated_item(M, decoded, function(issue)
     if type(issue) == "table" and tonumber(issue.number) ~= nil then
       local author_login = nil
       if type(issue.author) == "table" and issue.author.login ~= nil then
@@ -62,10 +60,10 @@ function M.parse_dashboard_issue_list(stdout)
   return items
 end
 
-function M.parse_repo_labels(stdout)
+function C.parse_repo_labels(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
-  each_paginated_item(decoded, function(label)
+  shared.each_paginated_item(M, decoded, function(label)
     if type(label) == "table" and label.name ~= nil then
       table.insert(items, {
         name = tostring(label.name),
@@ -77,7 +75,7 @@ function M.parse_repo_labels(stdout)
   return items
 end
 
-local function comment_author_login(comment)
+local function comment_author_login(M, comment)
   -- Normalize the comment author login so an author read as "<slug>[bot]" (REST)
   -- matches a bare-"<slug>" configured bot login (GraphQL). No-op for ordinary logins.
   if type(comment) == "table" then
@@ -95,53 +93,66 @@ local function comment_author_login(comment)
   return M._test_bot_login
 end
 
-local function comment_created_at(comment)
+local function comment_created_at(_M, comment)
   if type(comment) == "table" then
     return comment.created_at
   end
   return nil
 end
 
-local function is_trusted_comment(comment, trust_set)
+local function is_trusted_comment(M, comment, trust_set)
   -- Parser-only trust filtering keeps the test default; pre-assert ownership gates use claim_owner.
-  local author = comment_author_login(comment)
+  local author = comment_author_login(M, comment)
   if type(trust_set) == "table" then
     return trust_set[author] == true
   end
   return author == M.trusted_bot_login()
 end
 
-local function trusted_marker_comments(comments, trust_set)
+local function trusted_marker_comments(M, comments, trust_set)
   local filtered = {}
   if type(comments) ~= "table" then
     return filtered
   end
   for _, comment in ipairs(comments) do
-    if is_trusted_comment(comment, trust_set) then
+    if is_trusted_comment(M, comment, trust_set) then
       table.insert(filtered, comment)
     end
   end
   return filtered
 end
 
-function M.comment_body(comment)
+function C.comment_body(_M, comment)
   return strings.comment_body(comment)
 end
 
-function M.comment_author_login(comment)
-  return comment_author_login(comment)
+function C.comment_author_login(M, comment)
+  return comment_author_login(M, comment)
 end
 
-function M.comment_created_at(comment)
-  return comment_created_at(comment)
+function C.comment_created_at(M, comment)
+  return comment_created_at(M, comment)
 end
 
+function C._comment_body(M, comment)
+  return C.comment_body(M, comment)
+end
 
-M._comment_body = strings.comment_body
-M._comment_author_login = comment_author_login
-M._comment_created_at = comment_created_at
-M._is_trusted_comment = is_trusted_comment
-M._trusted_marker_comments = trusted_marker_comments
+function C._comment_author_login(M, comment)
+  return C.comment_author_login(M, comment)
+end
+
+function C._comment_created_at(M, comment)
+  return C.comment_created_at(M, comment)
+end
+
+function C._is_trusted_comment(M, comment, trust_set)
+  return is_trusted_comment(M, comment, trust_set)
+end
+
+function C._trusted_marker_comments(M, comments, trust_set)
+  return trusted_marker_comments(M, comments, trust_set)
+end
 
 local function upper_text(value)
   return tostring(value or ""):upper()
@@ -230,7 +241,7 @@ local function entry_commit_sha(entry)
   return nil
 end
 
-function M.pr_rollup_failure_summary(pr)
+function C.pr_rollup_failure_summary(M, pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
     return ""
@@ -278,7 +289,7 @@ function M.pr_rollup_failure_summary(pr)
   return summary
 end
 
-function M.rollup_failure_gate_sha(pr)
+function C.rollup_failure_gate_sha(_M, pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
     return nil
@@ -307,13 +318,14 @@ function M.rollup_failure_gate_sha(pr)
   return gate_sha
 end
 
-M._max_rollup_check_name_len = max_rollup_check_name_len
-M._max_rollup_failure_summary_len = max_rollup_failure_summary_len
-function M.is_ci_red_reason(reason)
+C.max_rollup_check_name_len = max_rollup_check_name_len
+C.max_rollup_failure_summary_len = max_rollup_failure_summary_len
+
+function C.is_ci_red_reason(_M, reason)
   return tostring(reason or "") == "own-ci-red"
 end
 
-function M.is_ci_wait_reason(reason)
+function C.is_ci_wait_reason(_M, reason)
   local text = tostring(reason or "")
   return text == "external-ci-red"
     or text == "integration-ci-red"
@@ -322,7 +334,8 @@ function M.is_ci_wait_reason(reason)
     or text == "rollup-pending"
 end
 
-M._upper_text = upper_text
+function C._upper_text(_M, value)
+  return upper_text(value)
 end
 
-return S
+return C

@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local check_runs = require("forge.github.check_runs")
 local contract_time = require("contract.time")
@@ -201,7 +202,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     return { action = "suppress", reason = "red-window", age_minutes = age }
   end
 
-  local failing_check = M.pr_rollup_failure_summary(pr)
+  local failing_check = parsers_misc.pr_rollup_failure_summary(M, pr)
   if failing_check == "" then
     failing_check = "rollup-red"
   end

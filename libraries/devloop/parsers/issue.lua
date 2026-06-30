@@ -1,16 +1,13 @@
-local S = {}
+local C = {}
+local shared = require("devloop.parsers.shared")
+local parsers_misc = require("devloop.parsers.misc")
 
-function S.install(M, shared)
-local label_names = shared.label_names
-local each_paginated_item = shared.each_paginated_item
-local parse_numbered_list = shared.parse_numbered_list
-
-function M.parse_issue_view_state(stdout)
+function C.parse_issue_view_state(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  return M.issue_state_from_json(decoded)
+  return C.issue_state_from_json(M, decoded)
 end
 
-function M.issue_state_from_json(decoded)
+function C.issue_state_from_json(M, decoded)
   local labels = {}
   for _, label in ipairs(decoded.labels or {}) do
     if type(label) == "table" and label.name ~= nil then
@@ -25,14 +22,14 @@ function M.issue_state_from_json(decoded)
     created_at = decoded.createdAt or decoded.created_at,
     updated_at = decoded.updatedAt or decoded.updated_at,
     labels = labels,
-    comments = M.comments_from_json(decoded.comments),
+    comments = parsers_misc.comments_from_json(M, decoded.comments),
     state = decoded.state,
     assignees = M.assignee_logins(decoded.assignees),
     author_login = M.issue_author_login(decoded),
   }
 end
 
-function M.parse_issue_list_intake(stdout, limit)
+function C.parse_issue_list_intake(M, stdout, limit)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
   if type(decoded) ~= "table" then
@@ -42,7 +39,7 @@ function M.parse_issue_list_intake(stdout, limit)
   if max_items < 1 then
     return issues
   end
-  each_paginated_item(decoded, function(issue)
+  shared.each_paginated_item(M, decoded, function(issue)
     local number = type(issue) == "table" and tonumber(issue.number) or nil
     if number ~= nil and issue.pull_request == nil and #issues < max_items then
       table.insert(issues, {
@@ -51,7 +48,7 @@ function M.parse_issue_list_intake(stdout, limit)
         body = tostring(issue.body or ""),
         created_at = issue.createdAt or issue.created_at,
         updated_at = issue.updatedAt or issue.updated_at,
-        labels = label_names(issue.labels),
+        labels = shared.label_names(M, issue.labels),
         assignees = M.assignee_logins(issue.assignees),
         author_login = M.issue_author_login(issue),
       })
@@ -60,13 +57,13 @@ function M.parse_issue_list_intake(stdout, limit)
   return issues
 end
 
-function M.parse_issue_list_recent_closed(stdout)
+function C.parse_issue_list_recent_closed(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
   if type(decoded) ~= "table" then
     error("github-devloop: recent closed issue list decode failed")
   end
-  each_paginated_item(decoded, function(issue)
+  shared.each_paginated_item(M, decoded, function(issue)
     local number = type(issue) == "table" and tonumber(issue.number) or nil
     local title = type(issue) == "table" and issue.title or nil
     local closed_at = type(issue) == "table" and (issue.closedAt or issue.closed_at) or nil
@@ -78,19 +75,19 @@ function M.parse_issue_list_recent_closed(stdout)
       title = tostring(title),
       closed_at = tostring(closed_at),
       closedAt = tostring(closed_at),
-      labels = label_names(issue.labels),
+      labels = shared.label_names(M, issue.labels),
     })
   end)
   return issues
 end
 
-function M.parse_issue_number_list(stdout)
+function C.parse_issue_number_list(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
   if type(decoded) ~= "table" then
     return issues
   end
-  each_paginated_item(decoded, function(issue)
+  shared.each_paginated_item(M, decoded, function(issue)
     local number = type(issue) == "table" and tonumber(issue.number) or nil
     if number ~= nil then
       table.insert(issues, {
@@ -101,11 +98,11 @@ function M.parse_issue_number_list(stdout)
   return issues
 end
 
-function M.parse_issue_list_observe(stdout)
-  local issues = parse_numbered_list(stdout)
+function C.parse_issue_list_observe(M, stdout)
+  local issues = shared.parse_numbered_list(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local by_number = {}
-  each_paginated_item(decoded, function(item)
+  shared.each_paginated_item(M, decoded, function(item)
     if type(item) == "table" and tonumber(item.number) ~= nil then
       by_number[tostring(tonumber(item.number))] = item.title
     end
@@ -116,9 +113,9 @@ function M.parse_issue_list_observe(stdout)
   return issues
 end
 
-function M.parse_issue_view_result(stdout)
+function C.parse_issue_view_result(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local state = M.issue_state_from_json(decoded)
+  local state = C.issue_state_from_json(M, decoded)
 
   return {
     labels = state.labels,
@@ -128,9 +125,9 @@ function M.parse_issue_view_result(stdout)
   }
 end
 
-function M.parse_issue_view_loop(stdout)
+function C.parse_issue_view_loop(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_result(stdout)
+  local result = C.parse_issue_view_result(M, stdout)
   return {
     title = tostring(decoded.title or ""),
     created_at = decoded.createdAt or decoded.created_at,
@@ -143,9 +140,9 @@ function M.parse_issue_view_loop(stdout)
   }
 end
 
-function M.parse_issue_view_intake_judge(stdout)
+function C.parse_issue_view_intake_judge(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_result(stdout)
+  local result = C.parse_issue_view_result(M, stdout)
   return {
     title = tostring(decoded.title or ""),
     body = tostring(decoded.body or ""),
@@ -159,9 +156,9 @@ function M.parse_issue_view_intake_judge(stdout)
   }
 end
 
-function M.parse_issue_view_meta(stdout)
+function C.parse_issue_view_meta(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_result(stdout)
+  local result = C.parse_issue_view_result(M, stdout)
   return {
     title = tostring(decoded.title or ""),
     labels = result.labels,
@@ -169,18 +166,18 @@ function M.parse_issue_view_meta(stdout)
   }
 end
 
-function M.parse_issue_view_implement(stdout)
+function C.parse_issue_view_implement(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_meta(stdout)
+  local result = C.parse_issue_view_meta(M, stdout)
   result.body = tostring(decoded.body or "")
   result.state = decoded.state
   result.author_login = M.issue_author_login(decoded)
   return result
 end
 
-function M.parse_issue_view_open_pr(stdout)
+function C.parse_issue_view_open_pr(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_result(stdout)
+  local result = C.parse_issue_view_result(M, stdout)
   return {
     title = tostring(decoded.title or ""),
     labels = result.labels,
@@ -190,21 +187,21 @@ function M.parse_issue_view_open_pr(stdout)
   }
 end
 
-function M.parse_issue_view_reviewing(stdout)
-  return M.parse_issue_view_result(stdout)
+function C.parse_issue_view_reviewing(M, stdout)
+  return C.parse_issue_view_result(M, stdout)
 end
 
-function M.parse_issue_view_review(stdout)
+function C.parse_issue_view_review(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_meta(stdout)
+  local result = C.parse_issue_view_meta(M, stdout)
   result.assignees = M.assignee_logins(decoded.assignees)
   result.author_login = M.issue_author_login(decoded)
   return result
 end
 
-function M.parse_issue_view_decompose(stdout)
+function C.parse_issue_view_decompose(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_result(stdout)
+  local result = C.parse_issue_view_result(M, stdout)
   return {
     title = tostring(decoded.title or ""),
     body = tostring(decoded.body or ""),
@@ -215,38 +212,37 @@ function M.parse_issue_view_decompose(stdout)
   }
 end
 
-function M.parse_issue_view_fix(stdout)
-  return M.parse_issue_view_meta(stdout)
+function C.parse_issue_view_fix(M, stdout)
+  return C.parse_issue_view_meta(M, stdout)
 end
 
-function M.parse_issue_view_review_loop(stdout)
+function C.parse_issue_view_review_loop(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_meta(stdout)
+  local result = C.parse_issue_view_meta(M, stdout)
   result.assignees = M.assignee_logins(decoded.assignees)
   result.author_login = M.issue_author_login(decoded)
   return result
 end
 
-function M.parse_issue_view_merge(stdout)
+function C.parse_issue_view_merge(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_issue_view_result(stdout)
+  local result = C.parse_issue_view_result(M, stdout)
   result.title = tostring(decoded.title or "")
   result.state = decoded.state
   return result
 end
 
-function M.parse_issue_view_observe(stdout)
+function C.parse_issue_view_observe(M, stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     title = tostring(decoded.title or ""),
     created_at = decoded.createdAt or decoded.created_at,
     state = decoded.state,
     state_reason = decoded.stateReason or decoded.state_reason,
-    comments = M.comments_from_json(decoded.comments),
+    comments = parsers_misc.comments_from_json(M, decoded.comments),
     assignees = M.assignee_logins(decoded.assignees),
     author_login = M.issue_author_login(decoded),
   }
 end
-end
 
-return S
+return C

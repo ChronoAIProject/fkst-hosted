@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local gh = require("forge.github")
 local issue_adapter = require("forge.github.issue")
 local core = require("core")
@@ -66,7 +67,7 @@ return {
     local stdout = '{"state":"OPEN","title":"t","updatedAt":"2026-06-15T00:00:00Z","labels":[{"name":"fkst-dev:enabled"},{"name":"bug"}],"comments":[{"id":1,"body":"b","author":{"login":"bot"},"createdAt":"2026-06-14T00:00:00Z"}],"assignees":[{"login":"dev"}],"author":{"login":"author"}}'
     local ref = { kind = "external", ref = "owner/repo#issue/42" }
     local normalized = issue_adapter.normalize_issue(stdout, ref)
-    local old = core.parse_issue_view_loop(stdout)
+    local old = parsers_issue.parse_issue_view_loop(core, stdout)
 
     assert(normalized.title == old.title)
     assert(normalized.updated_at == old.updated_at)

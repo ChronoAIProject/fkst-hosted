@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local transition_version = require("contract.transition_version")
@@ -830,7 +831,7 @@ return {
   test_current_state_ignores_authorless_state_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     core.configure_trusted_bot_login(nil)
-    local parsed = core.parse_issue_view_state('{"comments":[{"body":"'
+    local parsed = parsers_issue.parse_issue_view_state(core, '{"comments":[{"body":"'
       .. core.state_marker(proposal_id, "ready", "v2"):gsub('"', '\\"')
       .. '","author":null},{"body":"'
       .. core.state_marker(proposal_id, "thinking", "v1"):gsub('"', '\\"')

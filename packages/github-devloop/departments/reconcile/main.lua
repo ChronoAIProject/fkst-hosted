@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local core, replay_fields = require("core"), require("devloop.replay_fields")
 local transition_version = require("contract.transition_version")
 
@@ -112,7 +113,7 @@ local function pipeline_thinking(event)
       error("github-devloop: gh issue reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_issue_view_loop(view.stdout)
+    local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = core.current_state(current.comments, reconcile.proposal_id)
     if core.has_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.base_version, reconcile.round) then
@@ -176,7 +177,7 @@ local function pipeline_timeout(event)
       error("github-devloop: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_issue_view_loop(view.stdout)
+    local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     local comments = current.comments or {}
     core.log_forged_markers("reconcile", reconcile.proposal_id, comments)
     local state = core.current_entity_state(comments, reconcile.proposal_id)

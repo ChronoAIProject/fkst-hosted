@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local operator_commands = require("devloop.operator_commands")
 local queue = require("devloop.queue")
@@ -78,7 +79,7 @@ local function admit_issue_event(event, entity)
   if view.exit_code ~= 0 then
     error("github-devloop-intake: gh-issue-admission-view-failed: gh issue admission view failed: " .. tostring(view.stderr))
   end
-  local current = core.parse_issue_view_intake_judge(view.stdout)
+  local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
   current.updated_at = current.updated_at or entity.updated_at
   current.number = issue_number
 

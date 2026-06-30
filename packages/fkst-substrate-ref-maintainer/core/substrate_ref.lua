@@ -1,3 +1,4 @@
+local parsers_pr = require("devloop.parsers.pr")
 local S = {}
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
@@ -451,7 +452,7 @@ local function read_pr(pr_number_value, repo)
       30
     )
   end, "substrate-ref PR view")
-  local pr = M.parse_pr_view_merge(viewed.stdout)
+  local pr = parsers_pr.parse_pr_view_merge(M, viewed.stdout)
   pr.number = pr_number_value
   return pr
 end

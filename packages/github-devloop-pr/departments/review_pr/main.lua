@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local transition_version = require("contract.transition_version")
 
@@ -66,7 +68,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr review head view failed: " .. tostring(pr_view.stderr))
     end
-    local current_pr = core.parse_pr_view_origin(pr_view.stdout)
+    local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
     core.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, reviewing.proposal_id)
     local transition = reviewing_transition_status(state, reviewing.version)
@@ -130,7 +132,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review view failed: " .. tostring(issue_view.stderr))
       end
-      current_issue = core.parse_issue_view_review(issue_view.stdout)
+      current_issue = parsers_issue.parse_issue_view_review(core, issue_view.stdout)
     end
     if not core.verify_pr_review_issue_claim("review_pr", repo, issue_number, current_issue, reviewing.proposal_id) then
       return

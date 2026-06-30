@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local error_facts = require("contract.error_facts")
 local logging = require("workflow.logging")
@@ -145,13 +146,13 @@ function M.log_forged_markers(dept, proposal_id, comments)
 
   local marker_pattern = "<!%-%- fkst:github%-devloop:([%w%-]+):v1.-%-%->"
   for _, comment in ipairs(comments) do
-    if not M._is_trusted_comment(comment) then
-      for marker, marker_kind in M._comment_body(comment):gmatch("(" .. marker_pattern .. ")") do
+    if not parsers_misc._is_trusted_comment(M, comment) then
+      for marker, marker_kind in parsers_misc._comment_body(M, comment):gmatch("(" .. marker_pattern .. ")") do
         local marker_proposal = marker:match('proposal="([^"]+)"')
         if marker_proposal == proposal_id then
           M.log_line("warn", dept, proposal_id, "FORGE", {
             "marker_kind=" .. tostring(marker_kind),
-            "ignored_author=" .. tostring(M._comment_author_login(comment) or ""),
+            "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),
             "trusted_bot=" .. tostring(M.trusted_bot_login()),
           })
         end

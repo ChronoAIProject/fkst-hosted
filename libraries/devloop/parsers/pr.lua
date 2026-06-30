@@ -1,18 +1,15 @@
-local S = {}
+local C = {}
+local shared = require("devloop.parsers.shared")
+local parsers_misc = require("devloop.parsers.misc")
 
-function S.install(M, shared)
-local label_names = shared.label_names
-local each_paginated_item = shared.each_paginated_item
-local parse_numbered_list = shared.parse_numbered_list
-
-function M.parse_pr_list_observe(stdout)
-  return parse_numbered_list(stdout)
+function C.parse_pr_list_observe(M, stdout)
+  return shared.parse_numbered_list(M, stdout)
 end
 
-function M.parse_pr_list_freshness(stdout)
+function C.parse_pr_list_freshness(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local prs = {}
-  each_paginated_item(decoded, function(pr)
+  shared.each_paginated_item(M, decoded, function(pr)
     if type(pr) == "table" and tonumber(pr.number) ~= nil then
       table.insert(prs, {
         number = tonumber(pr.number),
@@ -28,17 +25,17 @@ function M.parse_pr_list_freshness(stdout)
   return prs
 end
 
-function M.parse_pr_list_merge_queue(stdout)
-  return M.parse_pr_list_head_base(stdout)
+function C.parse_pr_list_merge_queue(M, stdout)
+  return C.parse_pr_list_head_base(M, stdout)
 end
 
-function M.parse_pr_list_recent_merged(stdout)
+function C.parse_pr_list_recent_merged(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local prs = {}
   if type(decoded) ~= "table" then
     return prs
   end
-  each_paginated_item(decoded, function(pr)
+  shared.each_paginated_item(M, decoded, function(pr)
     local number = type(pr) == "table" and tonumber(pr.number) or nil
     if number ~= nil then
       table.insert(prs, {
@@ -80,7 +77,7 @@ local function repository_name_with_owner(head_repository, head_repository_owner
   return nil
 end
 
-function M.parse_pr_view_origin(stdout)
+function C.parse_pr_view_origin(M, stdout)
   local decoded = json.decode(stdout or "{}")
   local head_repo = repository_name_with_owner(
     decoded.headRepository or decoded.head_repository,
@@ -105,8 +102,8 @@ function M.parse_pr_view_origin(stdout)
       or decoded.mergeCommitOid
       or decoded.merge_commit_oid
       or decoded.merge_commit_sha,
-    labels = label_names(decoded.labels),
-    comments = M.comments_from_json(decoded.comments),
+    labels = shared.label_names(M, decoded.labels),
+    comments = parsers_misc.comments_from_json(M, decoded.comments),
     head_repository = head_repo,
     is_cross_repository = is_cross_repository,
     mergeable = decoded.mergeable,
@@ -114,8 +111,8 @@ function M.parse_pr_view_origin(stdout)
   }
 end
 
-function M.parse_pr_view_fix(stdout)
-  return M.parse_pr_view_origin(stdout)
+function C.parse_pr_view_fix(M, stdout)
+  return C.parse_pr_view_origin(M, stdout)
 end
 
 local function status_rollup_entries(value)
@@ -128,9 +125,9 @@ local function status_rollup_entries(value)
   return value
 end
 
-function M.parse_pr_view_merge(stdout)
+function C.parse_pr_view_merge(M, stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = M.parse_pr_view_origin(stdout)
+  local result = C.parse_pr_view_origin(M, stdout)
   result.is_draft = decoded.isDraft
   if result.is_draft == nil then
     result.is_draft = decoded.is_draft
@@ -139,17 +136,17 @@ function M.parse_pr_view_merge(stdout)
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
-  result.labels = label_names(decoded.labels)
+  result.labels = shared.label_names(M, decoded.labels)
   return result
 end
 
-function M.parse_pr_list_head_base(stdout)
+function C.parse_pr_list_head_base(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local prs = {}
   if type(decoded) ~= "table" then
     return prs
   end
-  each_paginated_item(decoded, function(pr)
+  shared.each_paginated_item(M, decoded, function(pr)
     local number = type(pr) == "table" and tonumber(pr.number) or nil
     if number ~= nil then
       local head_ref_name = pr.headRefName or pr.head_ref_name
@@ -174,7 +171,7 @@ function M.parse_pr_list_head_base(stdout)
   return prs
 end
 
-function M.parse_pr_view_head_state(stdout)
+function C.parse_pr_view_head_state(_M, stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     head_ref_name = decoded.headRefName or decoded.head_ref_name,
@@ -182,6 +179,5 @@ function M.parse_pr_view_head_state(stdout)
     state = decoded.state,
   }
 end
-end
 
-return S
+return C

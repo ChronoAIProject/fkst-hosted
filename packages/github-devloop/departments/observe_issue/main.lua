@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local contract_time = require("contract.time")
 local operator_commands = require("devloop.operator_commands")
@@ -517,7 +519,7 @@ local function process_issue_event(event)
       error("github-devloop: gh issue state view failed: " .. tostring(state_view.stderr))
     end
 
-    local current = core.parse_issue_view_state(state_view.stdout)
+    local current = parsers_issue.parse_issue_view_state(core, state_view.stdout)
     current.updated_at = current.updated_at or issue.updated_at
     if current.state ~= "OPEN" then
       core.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-advanced-or-diverged", "issue is not open")
@@ -716,7 +718,7 @@ local function process_pr_event(event)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: observe-issue-pr-view-failed: " .. tostring(pr_view.stderr))
   end
-  local current_pr = core.parse_pr_view_origin(pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
   current_pr.number = pr.number
   current_pr.force_fresh = true
   local origin = core.pr_origin_fact(current_pr.comments)
