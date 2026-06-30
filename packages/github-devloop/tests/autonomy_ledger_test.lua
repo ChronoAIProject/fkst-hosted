@@ -19,6 +19,7 @@ local function no_revert_scan()
     since_at = "2026-06-03T01:30:00Z",
     until_at = "2026-06-10T01:30:00Z",
     pr_reverts_complete = true,
+    revert_commits_complete = true,
     issue_reopens_complete = true,
   }
 end
@@ -235,6 +236,17 @@ return {
     })
     t.eq(after_window_without_scan, "pending")
 
+    local incomplete_commit_scan = no_revert_scan()
+    incomplete_commit_scan.revert_commits_complete = nil
+    local after_window_without_commit_scan = no_revert_reopen.gate(fact, {
+      issue = clean_scan.issue,
+      recent_merged_prs = clean_scan.recent_merged_prs,
+      recent_merged_issues = clean_scan.recent_merged_issues,
+      no_revert_reopen_scan = incomplete_commit_scan,
+      now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
+    })
+    t.eq(after_window_without_commit_scan, "pending")
+
     local after_window = no_revert_reopen.gate(fact, {
       issue = clean_scan.issue,
       recent_merged_prs = clean_scan.recent_merged_prs,
@@ -243,6 +255,23 @@ return {
       now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
     })
     t.eq(after_window, "pass")
+
+    local commit_reverted = no_revert_reopen.gate(fact, {
+      issue = clean_scan.issue,
+      recent_merged_prs = clean_scan.recent_merged_prs,
+      recent_merged_issues = clean_scan.recent_merged_issues,
+      revert_commits = {
+        {
+          sha = "abc1234",
+          subject = "Revert \"Implement AVM fact\"",
+          message = "This reverts PR #7.",
+          committed_at = "2026-06-04T01:30:00Z",
+        },
+      },
+      no_revert_reopen_scan = no_revert_scan(),
+      now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
+    })
+    t.eq(commit_reverted, "fail")
   end,
 
   test_merged_marker_carries_canonical_autonomy_result_record = function()

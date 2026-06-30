@@ -117,6 +117,7 @@ class BoardScriptTest(unittest.TestCase):
             "since_at": "2026-06-03T08:00:00Z",
             "until_at": "2026-06-10T08:00:00Z",
             "pr_reverts_complete": True,
+            "revert_commits_complete": True,
             "issue_reopens_complete": True,
         }
 
@@ -204,6 +205,42 @@ class BoardScriptTest(unittest.TestCase):
         self.assertEqual(buckets["L2"]["revert_numerator"], 1)
         self.assertEqual(buckets["L2"]["revert_denominator"], 1)
 
+    def test_avm_aggregation_detects_direct_revert_commit(self) -> None:
+        observe = {
+            "autonomy_facts": [
+                {
+                    "schema": "github-devloop.autonomy-result.v1",
+                    "proposal_id": "github-devloop/issue/owner/repo/31",
+                    "pr_number": 42,
+                    "version": "v31",
+                    "head_sha": "abc",
+                    "task_class": "L2",
+                    "valid_autonomous_merge": "true",
+                    "codex_calls": 5,
+                    "rounds": 2,
+                    "gates": {"no_revert_reopen": "pass"},
+                    "merged_at": "2026-06-14T08:00:00Z",
+                }
+            ],
+            "recent_merged_prs": [
+                {"number": 42, "title": "Implement detector", "merged_at": "2026-06-14T08:00:00Z"},
+            ],
+            "revert_commits": [
+                {
+                    "sha": "abc1234",
+                    "subject": 'Revert "Implement detector"',
+                    "message": "This reverts PR #42.",
+                    "committed_at": "2026-06-14T09:00:00Z",
+                }
+            ],
+        }
+
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L2"]["false_consensus_numerator"], 1)
+        self.assertEqual(buckets["L2"]["false_consensus_denominator"], 1)
+        self.assertEqual(buckets["L2"]["revert_numerator"], 1)
+        self.assertEqual(buckets["L2"]["revert_denominator"], 1)
+
     def test_avm_aggregation_promotes_no_revert_gate_after_clean_window(self) -> None:
         observe = {
             "now": "2026-06-14T10:00:00Z",
@@ -268,6 +305,7 @@ class BoardScriptTest(unittest.TestCase):
                         "since_at": "2026-06-14T08:00:00Z",
                         "until_at": "2026-06-21T08:00:00Z",
                         "pr_reverts_complete": True,
+                        "revert_commits_complete": True,
                         "issue_reopens_complete": True,
                     },
                 }

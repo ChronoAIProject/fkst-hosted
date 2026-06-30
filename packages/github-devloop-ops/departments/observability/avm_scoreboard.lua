@@ -104,11 +104,12 @@ local function append_pair(pairs, seen, pair)
   table.insert(pairs, pair)
 end
 
-local function detect_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues)
+local function detect_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   local pairs = no_revert_reopen.evidence(fact, {
     entities = entities,
     recent_merged_prs = recent_merged_prs,
     recent_merged_issues = recent_merged_issues,
+    recent_revert_commits = recent_revert_commits,
   })
   return #pairs > 0, pairs
 end
@@ -146,8 +147,8 @@ local function decorate_with_attempt_projection(fact, comments, now_seconds)
   return fact
 end
 
-local function decorate_with_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues)
-  local detected, pairs = detect_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues)
+local function decorate_with_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
+  local detected, pairs = detect_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   if detected then
     fact.false_consensus = true
     fact.false_consensus_pairs = pairs
@@ -206,7 +207,7 @@ local function fact_scan_for_gate(fact, recent_merged_prs, recent_merged_issues)
   return nil
 end
 
-local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues)
+local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   if type(fact) ~= "table" then
     return fact
   end
@@ -216,6 +217,7 @@ local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recen
     entities = entities,
     recent_merged_prs = recent_merged_prs,
     recent_merged_issues = recent_merged_issues,
+    recent_revert_commits = recent_revert_commits,
     no_revert_reopen_scan = fact_scan_for_gate(fact, recent_merged_prs, recent_merged_issues),
   })
   if type(fact.gates) ~= "table" then
@@ -424,7 +426,7 @@ function core.collect_recent_merged_issues(repo, limits, deadline)
   return issues
 end
 
-function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs, recent_merged_issues)
+function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   local facts = {}
   for _, entity in ipairs(entities or {}) do
     append_entity_direct_facts(facts, entity)
@@ -433,8 +435,8 @@ function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_
   append_recent_pr_facts(facts, recent_merged_prs, now_seconds)
   append_recent_issue_facts(facts, recent_merged_issues, now_seconds)
   for _, fact in ipairs(facts) do
-    decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues)
-    decorate_with_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues)
+    decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
+    decorate_with_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   end
   return facts
 end

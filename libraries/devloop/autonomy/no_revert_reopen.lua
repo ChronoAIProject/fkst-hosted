@@ -79,6 +79,12 @@ local function evidence_seconds(source)
   return first_timestamp_seconds(
     source and source.merged_at,
     source and source.mergedAt,
+    source and source.committed_at,
+    source and source.committedAt,
+    source and source.authored_at,
+    source and source.authoredAt,
+    source and source.pushed_at,
+    source and source.pushedAt,
     source and source.reopened_at,
     source and source.reopenedAt,
     source and source.updated_at,
@@ -103,7 +109,7 @@ end
 local function append_pair(pairs, seen, pair)
   local key = tostring(pair.reverted_pr or "")
     .. "->"
-    .. tostring(pair.revert_pr or pair.issue_number or "")
+    .. tostring(pair.revert_pr or pair.issue_number or pair.revert_commit or "")
     .. ":"
     .. tostring(pair.evidence or "")
   if seen[key] then
@@ -133,6 +139,38 @@ local function issue_from_entity(entity)
     return entity.issue
   end
   return entity
+end
+
+local function source_list(...)
+  local values = {}
+  for index = 1, select("#", ...) do
+    local source = select(index, ...)
+    if type(source) == "table" then
+      for _, value in ipairs(source) do
+        table.insert(values, value)
+      end
+    end
+  end
+  return values
+end
+
+local function commit_reverts_pr(commit, target_number)
+  local number = positive_number(target_number)
+  if number == nil or type(commit) ~= "table" then
+    return false
+  end
+  local reverted = positive_number(commit.reverted_pr or commit.reverted_pr_number or commit.target_pr or commit.target_pr_number)
+  if reverted ~= nil then
+    return reverted == number
+  end
+  return title_or_body_reverts_pr({
+    title = commit.message_head or commit.subject or commit.title,
+    body = commit.message_body or commit.body or commit.message,
+  }, number)
+end
+
+local function commit_identity(commit)
+  return tostring(commit and (commit.sha or commit.oid or commit.commit_sha or commit.revert_commit or commit.id) or "")
 end
 
 local function pr_source_contains_target(fact, opts)
@@ -194,7 +232,9 @@ local function full_window_scan_covers(fact, opts)
   if type(scan) ~= "table" or tostring(scan.schema or "") ~= scan_schema then
     return false
   end
-  if not is_true(scan.pr_reverts_complete) or not is_true(scan.issue_reopens_complete) then
+  if not is_true(scan.pr_reverts_complete)
+    or not is_true(scan.revert_commits_complete)
+    or not is_true(scan.issue_reopens_complete) then
     return false
   end
   local merged = merge_seconds(fact, options)
@@ -209,8 +249,17 @@ local function full_window_scan_covers(fact, opts)
   return since <= merged and until_value >= merged + no_revert_reopen_window_seconds
 end
 
+local function scan_from(fact, opts)
+  local options = opts or {}
+  local scan = options.no_revert_reopen_scan
+    or options.scan
+    or (type(fact) == "table" and fact.no_revert_reopen_scan or nil)
+  return type(scan) == "table" and scan or nil
+end
+
 local function evidence_pairs(fact, opts)
   local options = opts or {}
+  local scan = scan_from(fact, options)
   local pairs = {}
   local seen = {}
   local pr_number = positive_number(type(fact) == "table" and (fact.pr_number or fact.pr) or nil)
@@ -228,6 +277,20 @@ local function evidence_pairs(fact, opts)
         reverted_pr = pr_number,
         revert_pr = revert_number,
         evidence = "explicit-revert-pr",
+      })
+    end
+  end
+
+  for _, commit in ipairs(source_list(
+    scan and scan.revert_commits or nil,
+    options.revert_commits,
+    options.recent_revert_commits
+  )) do
+    if commit_reverts_pr(commit, pr_number) and evidence_within_window(fact, options, commit) then
+      append_pair(pairs, seen, {
+        reverted_pr = pr_number,
+        revert_commit = commit_identity(commit),
+        evidence = "revert-commit",
       })
     end
   end

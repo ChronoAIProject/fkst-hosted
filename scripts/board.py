@@ -551,6 +551,9 @@ def render_false_consensus_pair(pair: dict[str, Any]) -> str | None:
     issue_number = int_value(pair.get("issue_number"))
     if issue_number > 0:
         return f"- PR #{reverted} issue=#{issue_number} evidence={evidence}"
+    revert_commit = str(pair.get("revert_commit") or "")
+    if revert_commit:
+        return f"- PR #{reverted} reverted-by commit {revert_commit} evidence={evidence}"
     return None
 
 

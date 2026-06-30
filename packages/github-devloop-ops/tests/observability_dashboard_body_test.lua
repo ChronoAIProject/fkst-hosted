@@ -23,6 +23,7 @@ local function no_revert_scan()
     since_at = "2026-06-03T01:30:00Z",
     until_at = "2026-06-10T01:30:00Z",
     pr_reverts_complete = true,
+    revert_commits_complete = true,
     issue_reopens_complete = true,
   }
 end
@@ -330,6 +331,60 @@ return {
     t.eq(pairs[1].reverted_pr, 9)
     t.eq(pairs[1].revert_pr, 10)
     t.eq(pairs[1].evidence, "explicit-revert-pr")
+  end,
+
+  test_false_consensus_detector_flags_direct_revert_commit = function()
+    mock_dashboard_env()
+    local proposal_id = "github-devloop/issue/owner/repo/45"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/45/2026-06-03T01-02-03Z"
+    local head_sha = "abcdef2"
+    local record = autonomy_record({
+      proposal_id = proposal_id,
+      issue_number = "45",
+      pr_number = "11",
+      version = version,
+      head_sha = head_sha,
+      task_class = "L2",
+      codex_calls = 3,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pass",
+        cost_budget = "pass",
+      },
+    })
+    local facts = core.collect_avm_scoreboard_facts({}, 1770000000, {
+      {
+        number = 11,
+        title = "Implement AVM fact",
+        merged_at = "2026-06-03T01:30:00Z",
+        comments = {
+          trusted_comment(core.merged_marker(proposal_id, "11", version, head_sha, record), "2026-06-03T01:30:00Z", 2021),
+        },
+      },
+    }, {}, {
+      {
+        sha = "abc1234",
+        subject = "Revert \"Implement AVM fact\"",
+        message = "This reverts PR #11.",
+        committed_at = "2026-06-04T01:30:00Z",
+      },
+    })
+    local rows = core.aggregate_avm_scoreboard(facts)
+    local by_level = {}
+    for _, row in ipairs(rows) do
+      by_level[row.level] = row
+    end
+
+    t.eq(by_level.L2.false_consensus_numerator, 1)
+    t.eq(by_level.L2.revert_numerator, 1)
+    local pairs = core.false_consensus_pairs(facts)
+    t.eq(#pairs, 1)
+    t.eq(pairs[1].reverted_pr, 11)
+    t.eq(pairs[1].revert_commit, "abc1234")
+    t.eq(pairs[1].evidence, "revert-commit")
   end,
 
   test_avm_scoreboard_promotes_no_revert_gate_after_clean_window = function()
