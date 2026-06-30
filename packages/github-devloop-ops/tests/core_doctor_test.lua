@@ -1,4 +1,5 @@
 local h = require("tests.devloop_ops_core_helpers")
+local m_facts = require("devloop.markers.facts")
 local core = h.core
 local contract_time = require("contract.time")
 local t = h.t
@@ -101,7 +102,7 @@ return {
       state_comment("pr-open"),
       bot_comment(core.pr_link_marker(proposal_id, 7, "devloop/issue/owner/repo/42/v", version, "dev")),
     })
-    t.eq(core.pr_link_fact(current.comments, proposal_id).pr_number, 7)
+    t.eq(m_facts.pr_link_fact(core, current.comments, proposal_id).pr_number, 7)
 
     local result = classify(current, {
       facts = {

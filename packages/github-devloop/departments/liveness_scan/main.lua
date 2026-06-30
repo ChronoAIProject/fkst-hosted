@@ -1,5 +1,6 @@
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
+local m_facts = require("devloop.markers.facts")
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local liveness_scan = require("devloop.liveness_scan")
 local entity_list_cache = require("devloop.entity_list_cache")
@@ -54,7 +55,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     return false
   end
   local snapshot = { comments = current.comments or {}, prs = {}, absent_prs = {}, state = state }
-  local delegation = state.state == "awaiting-pr" and core.pr_delegation_fact(current.comments, proposal_id, state.version) or nil
+  local delegation = state.state == "awaiting-pr" and m_facts.pr_delegation_fact(core, current.comments, proposal_id, state.version) or nil
   local current_pr = nil
   if delegation ~= nil then
     local pr_view = core.fetch_pr_view_origin(repo, delegation.pr_number, nil, {

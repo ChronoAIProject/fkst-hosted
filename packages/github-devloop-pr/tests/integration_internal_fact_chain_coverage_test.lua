@@ -1,6 +1,7 @@
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local m_facts = require("devloop.markers.facts")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -730,7 +731,7 @@ return {
     t.is_true(defective_replay.dedup_key ~= fixing_raise.payload.dedup_key)
     t.is_true(defective_replay.dedup_key:find("/nobase/nopred/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
     t.is_true(fixing_raise.payload.dedup_key:find("/" .. fixture.gate_baseline_sha .. "/nopred/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
-    local matching_fact = core.merge_gate_fix_fact(fixture.pr_comments, event.proposal_id, fixture.fixing_version, {
+    local matching_fact = m_facts.merge_gate_fix_fact(core, fixture.pr_comments, event.proposal_id, fixture.fixing_version, {
       review_proposal_id = fixture.review_proposal,
       review_dedup_key = fixture.review_dedup,
       gate_baseline_sha = fixing_raise.payload.gate_baseline_sha,

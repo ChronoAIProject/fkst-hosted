@@ -5,6 +5,7 @@ local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local m_facts = require("devloop.markers.facts")
 local core = h.core
 local t = h.t
 
@@ -201,13 +202,13 @@ return {
         author_login = core.trusted_bot_login(),
       },
     }, issue_proposal_id, issue_version, 7).reason, "operator-waiver")
-    t.eq(core.review_reject_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
-    t.eq(core.review_meta_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
-    t.eq(core.merge_gate_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").reviewed_head_sha, "def456")
-    t.eq(core.merge_gate_fix_fact(review_comments, issue_proposal_id, issue_version .. "/fix/1").gate_baseline_sha, "abc123")
-    t.eq(core.merge_ready_fact(review_comments, issue_proposal_id, issue_version, 7).head_sha, "def456")
-    t.eq(core.implementing_fact(implementation_comments, issue_proposal_id, "impl:v1").branch, "devloop-owner-repo-42")
-    t.eq(core.pr_link_fact(implementation_comments, issue_proposal_id).pr_number, 7)
+    t.eq(m_facts.review_reject_fact(core, review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
+    t.eq(m_facts.review_meta_fix_fact(core, review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")
+    t.eq(m_facts.merge_gate_fix_fact(core, review_comments, issue_proposal_id, issue_version .. "/fix/1").reviewed_head_sha, "def456")
+    t.eq(m_facts.merge_gate_fix_fact(core, review_comments, issue_proposal_id, issue_version .. "/fix/1").gate_baseline_sha, "abc123")
+    t.eq(m_facts.merge_ready_fact(core, review_comments, issue_proposal_id, issue_version, 7).head_sha, "def456")
+    t.eq(m_facts.implementing_fact(core, implementation_comments, issue_proposal_id, "impl:v1").branch, "devloop-owner-repo-42")
+    t.eq(m_facts.pr_link_fact(core, implementation_comments, issue_proposal_id).pr_number, 7)
     t.eq(core.has_impl_failure_marker(implementation_comments, issue_proposal_id, "impl:v1"), true)
   end,
 }

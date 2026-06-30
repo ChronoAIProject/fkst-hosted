@@ -1,6 +1,7 @@
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
+local m_facts = require("devloop.markers.facts")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local registry = require("workflow.registry")
@@ -347,7 +348,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
         and tostring(reviewed_head_sha or "") == tostring(head_sha)
         and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
-        local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+        local reject_fact = m_facts.review_reject_fact(M, comments, issue_proposal_id, issue_version)
         if reject_fact == nil
           or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
           or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
@@ -369,7 +370,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       end
     end
   end
-  local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+  local reject_fact = m_facts.review_reject_fact(M, comments, issue_proposal_id, issue_version)
   local _, reject_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
   if reject_fact ~= nil
     and tostring(reject_pr_number or "") == tostring(pr_number)
@@ -395,15 +396,15 @@ function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version, p
 end
 
 function M.fixing_replay_feedback_fact(comments, issue_proposal_id, issue_version)
-  local reject_fact = M.review_reject_fact(comments, issue_proposal_id, issue_version)
+  local reject_fact = m_facts.review_reject_fact(M, comments, issue_proposal_id, issue_version)
   if reject_fact ~= nil then
     return reject_fact
   end
-  local meta_fix_fact = M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
+  local meta_fix_fact = m_facts.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)
   if meta_fix_fact ~= nil then
     return meta_fix_fact
   end
-  return M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
+  return m_facts.merge_gate_fix_fact(M, comments, issue_proposal_id, issue_version)
 end
 
 function M.fixing_version_matches_link(issue_version, link_version)

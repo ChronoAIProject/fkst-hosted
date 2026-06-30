@@ -6,6 +6,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
 local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
+local m_facts = require("devloop.markers.facts")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local operator_commands = require("devloop.operator_commands")
@@ -53,7 +54,7 @@ local function pr_context(event)
 end
 
 local function origin_from_pr(repo, pr_number, current_pr)
-  local origin = core.pr_origin_fact(current_pr.comments)
+  local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin ~= nil then
     return origin, true
   end
@@ -478,7 +479,7 @@ local function process_pr_event(event)
     end
     local merge_gate_feedback = nil
     if state.state == "reviewing" and origin.issue_number ~= nil then
-      merge_gate_feedback = core.merge_gate_fix_fact(current_pr.comments, origin.proposal_id, core.next_fix_version(state.version))
+      merge_gate_feedback = m_facts.merge_gate_fix_fact(core, current_pr.comments, origin.proposal_id, core.next_fix_version(state.version))
     end
     if merge_gate_feedback ~= nil then
       if issue_current == nil or issue_current.comments == nil then

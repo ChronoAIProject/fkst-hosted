@@ -10,6 +10,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local v_ready = require("devloop.validators.ready")
 local v_fixing = require("devloop.validators.fixing")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
+local m_facts = require("devloop.markers.facts")
 local core = h.core
 local t = h.t
 local decompose_lib = require("devloop.decompose")
@@ -504,19 +505,19 @@ return {
 
     local marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
-    t.eq(core.has_implementing_marker({ marker }, ready.proposal_id, ready.dedup_key), true)
+    t.eq(m_facts.has_implementing_marker(core, { marker }, ready.proposal_id, ready.dedup_key), true)
     local branch_marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
-    local fact = core.implementing_fact({ branch_marker }, ready.proposal_id, ready.dedup_key)
+    local fact = m_facts.implementing_fact(core, { branch_marker }, ready.proposal_id, ready.dedup_key)
     t.eq(fact.branch, "devloop-owner-repo-42-01HY")
     t.eq(fact.head_sha, "abc123")
     t.eq(fact.base_branch, "dev")
     t.eq(fact.base_sha, "abc123")
-    t.is_nil(core.implementing_fact({
+    t.is_nil(m_facts.implementing_fact(core, {
       '<!-- fkst:github-devloop:implementing:v1 proposal="' .. ready.proposal_id
         .. '" dedup="' .. ready.dedup_key
         .. '" branch="devloop-owner-repo-42-01HY" head_sha="abc123" base_sha="abc123" -->',
     }, ready.proposal_id, ready.dedup_key))
-    t.is_nil(core.implementing_fact({
+    t.is_nil(m_facts.implementing_fact(core, {
       '<!-- fkst:github-devloop:implementing:v1 proposal="' .. ready.proposal_id
         .. '" dedup="' .. ready.dedup_key
         .. '" branch="devloop-owner-repo-42-01HY" head_sha="abc123" base_branch="dev" -->',
@@ -593,23 +594,23 @@ return {
     t.eq(current.state, "impl-failed")
     t.eq(current.version, ready.dedup_key)
 
-    local origin = core.pr_origin_fact({
+    local origin = m_facts.pr_origin_fact(core, {
       core.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     })
     t.eq(origin.proposal_id, ready.proposal_id)
     t.eq(origin.issue_number, "42")
     t.eq(origin.branch, "devloop-owner-repo-42-01HY")
-    t.is_nil(core.pr_origin_fact({
+    t.is_nil(m_facts.pr_origin_fact(core, {
       '<!-- fkst:github-devloop:pr-origin:v1 proposal="' .. ready.proposal_id
         .. '" issue="42" branch="devloop-owner-repo-42-01HY" impl_version="' .. ready.dedup_key .. '" -->',
     }))
 
-    local link = core.pr_link_fact({
+    local link = m_facts.pr_link_fact(core, {
       core.pr_link_marker(ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     }, ready.proposal_id)
     t.eq(link.pr_number, 7)
     t.eq(link.base_branch, "dev")
-    t.is_nil(core.pr_link_fact({
+    t.is_nil(m_facts.pr_link_fact(core, {
       '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. ready.proposal_id
         .. '" pr="7" branch="devloop-owner-repo-42-01HY" impl_version="' .. ready.dedup_key .. '" -->',
     }, ready.proposal_id))

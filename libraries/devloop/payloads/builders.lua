@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local m_facts = require("devloop.markers.facts")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.payloads.shared")
@@ -110,7 +111,7 @@ end
 
 function C.build_current_head_reviewing_payload(M, origin, pr_number, current_pr, state, source_ref)
   local review_proposal_id = M.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
-  if M.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
+  if m_facts.has_any_review_result_marker(M, current_pr.comments, review_proposal_id, origin.proposal_id) then
     return nil
   end
   return C.build_devloop_reviewing_payload(M, {
@@ -410,7 +411,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
     .. "\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment."
     .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and M.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
-  local ledger = M.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
+  local ledger = m_facts.review_prior_round_ledger(M, pr_comments, issue_proposal_id, version)
   if ledger ~= nil and ledger ~= "" then
     body = body
       .. "\nPrior review ledger:\n"

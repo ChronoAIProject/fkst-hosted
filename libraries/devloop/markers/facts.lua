@@ -1,11 +1,11 @@
 local parsers_misc = require("devloop.parsers.misc")
-local S = {}
+local C = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
+local shared = require("devloop.markers.shared")
 
-function S.install(M, shared)
 local valid_round = shared.valid_round
 local marker_attr = shared.marker_attr
 local decode_marker_attr = shared.decode_marker_attr
@@ -53,7 +53,7 @@ local function review_proposal_from_dedup(dedup_key)
   return tostring(dedup_key or ""):match("^consensus:(.+)/review$")
 end
 
-function M.intake_decision_fact(comments, issue_proposal_id)
+function C.intake_decision_fact(M, comments, issue_proposal_id)
   if type(comments) ~= "table" then
     return nil
   end
@@ -81,11 +81,11 @@ function M.intake_decision_fact(comments, issue_proposal_id)
   return nil
 end
 
-function M.has_intake_decision_marker(comments, issue_proposal_id)
-  return M.intake_decision_fact(comments, issue_proposal_id) ~= nil
+function C.has_intake_decision_marker(M, comments, issue_proposal_id)
+  return C.intake_decision_fact(M, comments, issue_proposal_id) ~= nil
 end
 
-function M.review_reject_fact(comments, issue_proposal_id, issue_version)
+function C.review_reject_fact(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -101,7 +101,7 @@ function M.review_reject_fact(comments, issue_proposal_id, issue_version)
   return nil
 end
 
-function M.review_result_fact(comments, issue_proposal_id, issue_version, expected_decision)
+function C.review_result_fact(M, comments, issue_proposal_id, issue_version, expected_decision)
   if type(comments) ~= "table" then
     return nil
   end
@@ -144,7 +144,7 @@ local function highest_state_fix_round(M, body, issue_proposal_id)
   return highest
 end
 
-function M.review_prior_round_ledger(comments, issue_proposal_id, issue_version)
+function C.review_prior_round_ledger(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -193,7 +193,7 @@ function M.review_prior_round_ledger(comments, issue_proposal_id, issue_version)
   return M.neutralize_untrusted_prompt_text(ledger)
 end
 
-function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
+function C.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -225,7 +225,7 @@ function M.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
   return nil
 end
 
-function M.review_meta_decision_fact(comments, issue_proposal_id, issue_version)
+function C.review_meta_decision_fact(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -277,7 +277,7 @@ local function merge_gate_fix_fact_matches_bindings(fact, opts)
       or (opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha == tostring(opts.gate_baseline_sha))
       or (opts.gate_baseline_sha == nil and fact.gate_baseline_sha == nil))
 end
-function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
+function C.merge_gate_fix_fact(M, comments, issue_proposal_id, issue_version, opts)
   if type(comments) ~= "table" then
     return nil
   end
@@ -325,7 +325,7 @@ function M.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
   return first_fact
 end
 
-function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
+function C.merge_ready_fact(M, comments, issue_proposal_id, issue_version, pr_number, head_sha)
   if type(comments) ~= "table" then
     return nil
   end
@@ -368,7 +368,7 @@ function M.merge_ready_fact(comments, issue_proposal_id, issue_version, pr_numbe
   return best
 end
 
-function M.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest)
+function C.high_risk_review_evidence_fact(M, comments, issue_proposal_id, issue_version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest)
   if type(comments) ~= "table" then
     return nil
   end
@@ -432,7 +432,7 @@ function M.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
   return best
 end
 
-function M.review_result_approval_matches_event(comments, merge_ready)
+function C.review_result_approval_matches_event(M, comments, merge_ready)
   if type(comments) ~= "table" or type(merge_ready) ~= "table" then
     return false, "missing-review-result-approve"
   end
@@ -472,7 +472,7 @@ local function review_proposal_version_matches_merge_ready(review_version, merge
     and merge_text:find("/review%-meta%-action/", 1) ~= nil
 end
 
-function M.merge_ready_approval_matches_event(fact, merge_ready)
+function C.merge_ready_approval_matches_event(M, fact, merge_ready)
   if type(fact) ~= "table" or type(merge_ready) ~= "table" then
     return false, "missing-merge-ready-approval"
   end
@@ -502,7 +502,7 @@ function M.merge_ready_approval_matches_event(fact, merge_ready)
   return true, "merge-ready-approval"
 end
 
-function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sha)
+function C.merging_fact(M, comments, issue_proposal_id, pr_number, version, head_sha)
   if type(comments) ~= "table" then
     return nil
   end
@@ -531,7 +531,7 @@ function M.merging_fact(comments, issue_proposal_id, pr_number, version, head_sh
   return nil
 end
 
-function M.merged_fact(comments, issue_proposal_id, pr_number, version)
+function C.merged_fact(M, comments, issue_proposal_id, pr_number, version)
   if type(comments) ~= "table" then
     return nil
   end
@@ -564,12 +564,12 @@ function M.merged_fact(comments, issue_proposal_id, pr_number, version)
   return nil
 end
 
-function M.has_merged_marker(comments, issue_proposal_id, pr_number, version, head_sha)
-  local fact = M.merged_fact(comments, issue_proposal_id, pr_number, version)
+function C.has_merged_marker(M, comments, issue_proposal_id, pr_number, version, head_sha)
+  local fact = C.merged_fact(M, comments, issue_proposal_id, pr_number, version)
   return fact ~= nil and tostring(fact.head_sha) == tostring(head_sha)
 end
 
-function M.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
+function C.has_review_result_marker(M, comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
   if type(comments) ~= "table" then
     return false
   end
@@ -587,7 +587,7 @@ function M.has_review_result_marker(comments, review_proposal_id, issue_proposal
   return false
 end
 
-function M.has_review_meta_marker(comments, issue_proposal_id, dedup_key)
+function C.has_review_meta_marker(M, comments, issue_proposal_id, dedup_key)
   if type(comments) ~= "table" then
     return false
   end
@@ -605,7 +605,7 @@ function M.has_review_meta_marker(comments, issue_proposal_id, dedup_key)
   return false
 end
 
-function M.has_fix_marker(comments, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+function C.has_fix_marker(M, comments, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
   if type(comments) ~= "table" then
     return false
   end
@@ -618,7 +618,7 @@ function M.has_fix_marker(comments, issue_proposal_id, review_proposal_id, revie
   return false
 end
 
-function M.has_any_review_result_marker(comments, review_proposal_id, issue_proposal_id)
+function C.has_any_review_result_marker(M, comments, review_proposal_id, issue_proposal_id)
   if type(comments) ~= "table" then
     return false
   end
@@ -646,7 +646,7 @@ local function has_versioned_marker(comments, marker)
   return false
 end
 
-function M.has_implementing_marker(comments, proposal_id, dedup_key)
+function C.has_implementing_marker(M, comments, proposal_id, dedup_key)
   if type(comments) ~= "table" then
     return false
   end
@@ -662,7 +662,7 @@ function M.has_implementing_marker(comments, proposal_id, dedup_key)
   return false
 end
 
-function M.implementing_fact(comments, proposal_id, dedup_key)
+function C.implementing_fact(M, comments, proposal_id, dedup_key)
   if type(comments) ~= "table" then
     return nil
   end
@@ -695,7 +695,7 @@ function M.implementing_fact(comments, proposal_id, dedup_key)
   return nil
 end
 
-function M.pr_link_fact(comments, proposal_id)
+function C.pr_link_fact(M, comments, proposal_id)
   if type(comments) ~= "table" then
     return nil
   end
@@ -725,7 +725,7 @@ function M.pr_link_fact(comments, proposal_id)
   return nil
 end
 
-function M.pr_delegation_fact(comments, proposal_id, version, delegation)
+function C.pr_delegation_fact(M, comments, proposal_id, version, delegation)
   if type(comments) ~= "table" then
     return nil
   end
@@ -761,7 +761,7 @@ function M.pr_delegation_fact(comments, proposal_id, version, delegation)
   return nil
 end
 
-function M.pr_origin_fact(comments)
+function C.pr_origin_fact(M, comments)
   if type(comments) ~= "table" then
     return nil
   end
@@ -810,7 +810,7 @@ function M.pr_origin_fact(comments)
   return nil
 end
 
-function M.has_orphan_reaped_marker(comments, proposal_id, pr_number)
+function C.has_orphan_reaped_marker(M, comments, proposal_id, pr_number)
   if type(comments) ~= "table" then
     return false
   end
@@ -825,6 +825,5 @@ function M.has_orphan_reaped_marker(comments, proposal_id, pr_number)
   end
   return false
 end
-end
 
-return S
+return C

@@ -2,6 +2,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local payloads_builders = require("devloop.payloads.builders")
+local m_facts = require("devloop.markers.facts")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
@@ -142,7 +143,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     return nil
   end
   local current_head_sha = tostring(pr.head_sha or "")
-  local fact = M.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
+  local fact = m_facts.merge_ready_fact(M, pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
   if fact == nil then
     for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, pr.comments)) do
       for marker in parsers_misc._comment_body(M, comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
@@ -152,7 +153,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
           local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
           if merge_queue_lane_states[candidate_state.state]
             and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then
-            fact = M.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
+            fact = m_facts.merge_ready_fact(M, pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
             state = candidate_state
             break
           end
@@ -531,7 +532,7 @@ function M.wip_admission_classification(repo, proposal_id, issue_comments, state
     }
   end
 
-  local link = M.pr_link_fact(issue_comments, proposal_id)
+  local link = m_facts.pr_link_fact(M, issue_comments, proposal_id)
   if link ~= nil and tostring(link.base_branch or "") ~= tostring(integration_branch or "") then
     return {
       counts = false,

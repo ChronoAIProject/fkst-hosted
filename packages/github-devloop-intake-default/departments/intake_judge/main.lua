@@ -8,6 +8,7 @@ local saga = require("workflow.saga")
 local context_bundle = require("devloop.context_bundle")
 local v_execution_request = require("devloop.validators.execution_request")
 local v_intake_candidate = require("devloop.validators.intake_candidate")
+local m_facts = require("devloop.markers.facts")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -119,7 +120,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
 
   local reintake_command = operator_commands.operator_command_fact(core, current.comments, "reintake")
   local has_pending_reintake = reintake_command ~= nil and not operator_commands.has_operator_command_response(core, current.comments, reintake_command)
-  if has_pending_reintake and not core.has_intake_decision_marker(current.comments, candidate.proposal_id) then
+  if has_pending_reintake and not m_facts.has_intake_decision_marker(core, current.comments, candidate.proposal_id) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(
       core,
       repo,
@@ -157,7 +158,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-stale(decision-dedup-changed)", "issue intake inputs changed while codex was running")
     return nil
   end
-  local intake_fact = core.intake_decision_fact(current.comments, candidate.proposal_id)
+  local intake_fact = m_facts.intake_decision_fact(core, current.comments, candidate.proposal_id)
   local authoritative_state = core.current_state(current.comments, candidate.proposal_id)
   local can_replay_enable_successor = intake_fact ~= nil
     and intake_fact.decision == "enable"

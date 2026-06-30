@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local m_facts = require("devloop.markers.facts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -209,7 +210,7 @@ return {
     local comment = find_worktree_ready_comment(result.raises)
     t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "implementing", ready.dedup_key .. "/reimplement/2"), 1, true) ~= nil)
-    t.eq(core.implementing_fact({ comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
+    t.eq(m_facts.implementing_fact(core, { comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
   end,
 
   test_blocked_reimplement_receiver_writes_fresh_attempt_version = function()
@@ -248,6 +249,6 @@ return {
     local comment = find_worktree_ready_comment(result.raises)
     t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "implementing", ready.dedup_key .. "/reimplement/2"), 1, true) ~= nil)
-    t.eq(core.implementing_fact({ comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
+    t.eq(m_facts.implementing_fact(core, { comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
   end,
 }

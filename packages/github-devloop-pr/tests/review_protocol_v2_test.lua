@@ -2,6 +2,7 @@ local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local m_facts = require("devloop.markers.facts")
 local core = h.core
 local t = h.t
 
@@ -517,7 +518,7 @@ return {
       event.source_ref
     )
     t.is_true(request.body:find('gap="first line second"', 1, true) ~= nil)
-    local fact = core.review_reject_fact({ { body = request.body, author_login = "fkst-test-bot" } }, "github-devloop/issue/owner/repo/42", fix_version)
+    local fact = m_facts.review_reject_fact(core, { { body = request.body, author_login = "fkst-test-bot" } }, "github-devloop/issue/owner/repo/42", fix_version)
     t.eq(fact.blocking_gap, "first line second")
   end,
 
@@ -534,11 +535,11 @@ return {
       author_login = "fkst-test-bot",
     }
 
-    local fact = core.review_reject_fact({ foreign }, "github-devloop/issue/owner/repo/42", fix_version)
+    local fact = m_facts.review_reject_fact(core, { foreign }, "github-devloop/issue/owner/repo/42", fix_version)
     t.is_nil(fact)
-    fact = core.review_reject_fact({ foreign, current }, "github-devloop/issue/owner/repo/42", fix_version)
+    fact = m_facts.review_reject_fact(core, { foreign, current }, "github-devloop/issue/owner/repo/42", fix_version)
     t.eq(fact.blocking_gap, "current gap")
-    local ledger = core.review_prior_round_ledger({ foreign }, "github-devloop/issue/owner/repo/42", core.next_fix_version(fix_version))
+    local ledger = m_facts.review_prior_round_ledger(core, { foreign }, "github-devloop/issue/owner/repo/42", core.next_fix_version(fix_version))
     t.is_nil(ledger)
   end,
 
@@ -556,7 +557,7 @@ return {
       author_login = "mallory",
     }
     local fix_version = core.next_fix_version(current_version)
-    t.is_nil(core.review_prior_round_ledger({ trusted_stale, untrusted_current }, "github-devloop/issue/owner/repo/42", fix_version))
+    t.is_nil(m_facts.review_prior_round_ledger(core, { trusted_stale, untrusted_current }, "github-devloop/issue/owner/repo/42", fix_version))
   end,
 
   test_prior_round_ledger_uses_highest_round_when_comments_are_out_of_order = function()
@@ -579,7 +580,7 @@ return {
       author_login = "fkst-test-bot",
     }
 
-    local ledger = core.review_prior_round_ledger({ round2, round1 }, "github-devloop/issue/owner/repo/42", core.next_fix_version(round3_fix))
+    local ledger = m_facts.review_prior_round_ledger(core, { round2, round1 }, "github-devloop/issue/owner/repo/42", core.next_fix_version(round3_fix))
     t.is_true(ledger:find("Last named blocking gap: round three gap", 1, true) ~= nil)
     t.is_true(ledger:find("Latest fix-round summary: Closed round three.", 1, true) ~= nil)
     t.is_nil(ledger:find("round one", 1, true))
@@ -607,7 +608,7 @@ return {
       author_login = "fkst-test-bot",
     }
 
-    local ledger = core.review_prior_round_ledger({ reject, fix }, "github-devloop/issue/owner/repo/42", core.next_fix_version(fix_version))
+    local ledger = m_facts.review_prior_round_ledger(core, { reject, fix }, "github-devloop/issue/owner/repo/42", core.next_fix_version(fix_version))
     assert_valid_utf8(ledger)
     t.is_true(#ledger <= core._max_review_ledger_len)
   end,

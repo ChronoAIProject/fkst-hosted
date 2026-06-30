@@ -3,6 +3,7 @@ local core = require("core")
 local operator_commands = require("devloop.operator_commands")
 local queue = require("devloop.queue")
 local saga = require("workflow.saga")
+local m_facts = require("devloop.markers.facts")
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed" },
@@ -37,7 +38,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an open issue", source_ref)
     return true
   end
-  if not core.has_intake_decision_marker(current.comments, proposal_id) then
+  if not m_facts.has_intake_decision_marker(core, current.comments, proposal_id) then
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an existing intake decision", source_ref)
     return true
   end
@@ -102,7 +103,7 @@ local function admit_issue_event(event, entity)
     core.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-known-state", "fresh issue labels show an active devloop state")
     return
   end
-  if core.has_intake_decision_marker(current.comments, proposal_id) then
+  if m_facts.has_intake_decision_marker(core, current.comments, proposal_id) then
     core.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-intake-decision", "trusted intake decision marker is already visible")
     return
   end

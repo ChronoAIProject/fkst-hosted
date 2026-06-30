@@ -1,5 +1,6 @@
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
+local m_facts = require("devloop.markers.facts")
 local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 local decompose_lib = require("devloop.decompose")
@@ -77,7 +78,7 @@ local function ok_reason(row, state, age)
 end
 
 local function pr_open_orphan(M, entity, _state, facts)
-  local link = M.pr_link_fact(entity.comments, entity.proposal_id)
+  local link = m_facts.pr_link_fact(M, entity.comments, entity.proposal_id)
   if link == nil then
     return true, "state pr-open has no trusted pr-link marker", "restore the pr-link fact or re-run observe/open-pr"
   end
@@ -92,7 +93,7 @@ local function pr_open_orphan(M, entity, _state, facts)
 end
 
 local function blocked_orphan(M, entity, state, facts)
-  local link = M.pr_link_fact(entity.comments, entity.proposal_id)
+  local link = m_facts.pr_link_fact(M, entity.comments, entity.proposal_id)
   local decomposed = decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id, state and state.version, link and link.pr_number)
     or decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id)
   if decomposed == nil then
@@ -206,7 +207,7 @@ local function fetch_pr_entity(repo, pr)
     error("github-devloop: saga-doctor-pr-view-failed: " .. tostring(view.stderr))
   end
   local current = parsers_pr.parse_pr_view_origin(M, view.stdout)
-  local origin = M.pr_origin_fact(current.comments)
+  local origin = m_facts.pr_origin_fact(M, current.comments)
   local proposal_id = origin and origin.proposal_id or M.pr_proposal_id(repo, pr.number)
   return {
     kind = "pr",

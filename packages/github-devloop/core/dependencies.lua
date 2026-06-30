@@ -1,6 +1,7 @@
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
+local m_facts = require("devloop.markers.facts")
 local M = {}
 local root_ref = nil
 local strings = require("forge.strings")
@@ -206,7 +207,7 @@ local function blocker_merged(repo, blocker_number)
     return true, nil
   end
 
-  local link = core.pr_link_fact(current.comments, blocker_proposal_id)
+  local link = m_facts.pr_link_fact(core, current.comments, blocker_proposal_id)
   if link == nil then
     return core.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)
   end
@@ -221,7 +222,7 @@ local function blocker_merged(repo, blocker_number)
   if not pr_ok or type(pr_current) ~= "table" then
     return nil, "malformed-pr-json"
   end
-  local origin = core.pr_origin_fact(pr_current.comments)
+  local origin = m_facts.pr_origin_fact(core, pr_current.comments)
   if origin == nil
     or tostring(origin.proposal_id or "") ~= blocker_proposal_id
     or tostring(origin.repo or "") ~= tostring(repo)
@@ -236,7 +237,7 @@ local function blocker_merged(repo, blocker_number)
   if type(pr_state) ~= "table" or pr_state.state ~= "merged" then
     return false, nil
   end
-  local merged = core.merged_fact(pr_current.comments, blocker_proposal_id, link.pr_number, pr_state.version)
+  local merged = m_facts.merged_fact(core, pr_current.comments, blocker_proposal_id, link.pr_number, pr_state.version)
   return merged ~= nil, nil
 end
 
@@ -658,7 +659,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   }) then
     return false, nil
   end
-  local delegation = core.pr_delegation_fact(current.comments, blocker_proposal_id, state.version)
+  local delegation = m_facts.pr_delegation_fact(core, current.comments, blocker_proposal_id, state.version)
   if delegation == nil then
     return false, nil
   end
@@ -678,7 +679,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   if not pr_ok or type(pr_current) ~= "table" then
     return nil, "malformed-pr-json"
   end
-  local origin = core.pr_origin_fact(pr_current.comments)
+  local origin = m_facts.pr_origin_fact(core, pr_current.comments)
   if origin == nil
     or tostring(origin.proposal_id or "") ~= blocker_proposal_id
     or tostring(origin.repo or "") ~= tostring(repo)
@@ -691,7 +692,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   }) then
     return false, nil
   end
-  local merged = core.merged_fact(pr_current.comments, blocker_proposal_id, delegation.pr_number, delegation.version)
+  local merged = m_facts.merged_fact(core, pr_current.comments, blocker_proposal_id, delegation.pr_number, delegation.version)
   return merged ~= nil, nil
 end
 

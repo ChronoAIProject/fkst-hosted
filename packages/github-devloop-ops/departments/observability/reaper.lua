@@ -3,6 +3,7 @@ local common = require("departments.observability.common")
 local strings = require("contract.strings")
 local decompose_lib = require("devloop.decompose")
 local config = require("devloop.config")
+local m_facts = require("devloop.markers.facts")
 
 local M = {}
 
@@ -131,7 +132,7 @@ local function reap_orphan_pr(repo, entity)
   if tostring(entity.pr.state or ""):upper() ~= "OPEN" then
     return
   end
-  if core.has_orphan_reaped_marker(entity.pr.comments, proposal_id, pr_number) then
+  if m_facts.has_orphan_reaped_marker(core, entity.pr.comments, proposal_id, pr_number) then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip-idempotent", "orphan-reaped-marker-visible"))
     return
   end

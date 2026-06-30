@@ -15,6 +15,7 @@ local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local v_pr_review_unresolved = require("devloop.validators.pr_review_unresolved")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
+local m_facts = require("devloop.markers.facts")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -99,7 +100,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     error("github-devloop: gh pr origin view failed for review loop: " .. tostring(pr_view.stderr))
   end
   local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
-  local origin = core.pr_origin_fact(current_pr.comments)
+  local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin == nil then
     origin = core.pr_native_origin(repo, pr_number, current_pr)
   end

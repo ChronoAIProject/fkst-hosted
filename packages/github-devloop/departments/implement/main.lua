@@ -19,6 +19,7 @@ local fork_gate = require("departments.implement.fork_gate")
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local v_ready = require("devloop.validators.ready")
+local m_facts = require("devloop.markers.facts")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -214,7 +215,7 @@ end
 local function implementing_mismatch_is_durable(current, proposal_id, state)
   local version = state and state.version
   return core.latest_implement_attempt_fact(current and current.comments, proposal_id, version) ~= nil
-    or core.implementing_fact(current and current.comments, proposal_id, version) ~= nil
+    or m_facts.implementing_fact(core, current and current.comments, proposal_id, version) ~= nil
 end
 
 local function live_implement_attempt_visible(comments, proposal_id, version)
@@ -463,12 +464,12 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   local state = core.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
-    local link = core.pr_link_fact(current.comments, marker_ready.proposal_id)
+    local link = m_facts.pr_link_fact(core, current.comments, marker_ready.proposal_id)
     if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
       handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
       return false
     end
-    local fact = core.implementing_fact(current.comments, marker_ready.proposal_id, marker_ready.dedup_key)
+    local fact = m_facts.implementing_fact(core, current.comments, marker_ready.proposal_id, marker_ready.dedup_key)
     if fact ~= nil then
       core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "implementing", "skip-idempotent(implementation marker already visible)", "implementation fact marker already visible")
       return false
@@ -514,7 +515,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   local state = core.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
-    local link = core.pr_link_fact(current.comments, marker_ready.proposal_id)
+    local link = m_facts.pr_link_fact(core, current.comments, marker_ready.proposal_id)
     if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
       handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
       return false
@@ -567,7 +568,7 @@ local function operator_blocked_reimplement_allowed(ready, current, state)
     or tostring(state.version or "") ~= tostring(reentry.state_version or "") then
     return false
   end
-  local link = core.pr_link_fact(current.comments, ready.proposal_id)
+  local link = m_facts.pr_link_fact(core, current.comments, ready.proposal_id)
   return link ~= nil
     and tonumber(link.pr_number) == tonumber(reentry.pr_number)
     and tostring(link.impl_version or "") == tostring(reentry.impl_version or "")
@@ -673,12 +674,12 @@ local function process_ready_event(event)
         handle_implementing_version_mismatch(repo, issue_number, current, ready, state, marker_ready.dedup_key)
         return
       end
-      local link = core.pr_link_fact(current.comments, ready.proposal_id)
+      local link = m_facts.pr_link_fact(core, current.comments, ready.proposal_id)
       if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
         handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
         return
       end
-      local fact = core.implementing_fact(current.comments, ready.proposal_id, marker_ready.dedup_key)
+      local fact = m_facts.implementing_fact(core, current.comments, ready.proposal_id, marker_ready.dedup_key)
       if fact == nil and live_implement_attempt_visible(current.comments, ready.proposal_id, marker_ready.dedup_key) then
         core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation attempt heartbeat is still live")
         return

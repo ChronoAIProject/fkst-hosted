@@ -1,5 +1,6 @@
 local parsers_misc = require("devloop.parsers.misc")
 local conv_rounds = require("devloop.convergence.rounds")
+local m_facts = require("devloop.markers.facts")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
@@ -324,12 +325,12 @@ local function pr_delegation_child_state_proposal_id(M, facts, parent_proposal_i
   if child_state_proposal_id ~= nil then
     return child_state_proposal_id
   end
-  if type(M.pr_delegation_fact) ~= "function" then
+  if type(m_facts.pr_delegation_fact) ~= "function" then
     return nil
   end
   return fact_child_state_proposal_id(
     M,
-    M.pr_delegation_fact(delegation_comments(facts), parent_proposal_id, delegation_version),
+    m_facts.pr_delegation_fact(M, delegation_comments(facts), parent_proposal_id, delegation_version),
     parent_proposal_id,
     delegation_version
   )

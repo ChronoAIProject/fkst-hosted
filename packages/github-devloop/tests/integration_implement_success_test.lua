@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local m_facts = require("devloop.markers.facts")
 local t = h.t
 local core = h.core
 local git_fake = require("forge.git_fake")
@@ -167,13 +168,13 @@ return {
     t.eq(attempt_raise.payload.body, state_raise.payload.body)
     t.is_true(state_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true) ~= nil)
     t.is_true(state_raise.payload.body:find("fkst:github-devloop:implement-attempt:v1", 1, true) ~= nil)
-    t.eq(core.implementing_fact({ state_raise.payload.body }, event.proposal_id, event.dedup_key), nil)
+    t.eq(m_facts.implementing_fact(core, { state_raise.payload.body }, event.proposal_id, event.dedup_key), nil)
     t.is_true(comment_raise.payload.body:find("github-devloop implementation output published", 1, true) ~= nil)
     t.eq(comment_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true), nil)
     local outcome_attempt_raise = find_comment_with(result.raises, "github-devloop implementation attempt started")
     t.is_true(outcome_attempt_raise ~= nil)
     t.eq(outcome_attempt_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true), nil)
-    local fact = core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key)
+    local fact = m_facts.implementing_fact(core, { comment_raise.payload.body }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
     local calls = t.command_calls()

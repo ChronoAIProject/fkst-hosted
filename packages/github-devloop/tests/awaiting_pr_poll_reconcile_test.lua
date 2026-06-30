@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local entity_mocks = require("tests.entity_read_mock_helpers")
 local contract_time = require("contract.time")
+local m_facts = require("devloop.markers.facts")
 local core = h.core
 local t = h.t
 local replay_fields = require("devloop.replay_fields")
@@ -525,7 +526,7 @@ return {
       source_ref = core.issue_source_ref(repo, issue_number),
       current = { comments = comments },
       current_pr = { comments = {} },
-      ["pr-delegation"] = core.pr_delegation_fact(comments, parent, state.version),
+      ["pr-delegation"] = m_facts.pr_delegation_fact(core, comments, parent, state.version),
       fresh_current_state = state,
       now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),
     }

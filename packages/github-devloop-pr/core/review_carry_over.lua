@@ -1,4 +1,5 @@
 local requests_review = require("devloop.requests.review")
+local m_facts = require("devloop.markers.facts")
 local S = {}
 local github_risk = require("devloop.github_risk")
 
@@ -14,7 +15,7 @@ local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version,
   end
   local new_review_proposal = M.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
   local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
-  local fact = M.high_risk_review_evidence_fact(
+  local fact = m_facts.high_risk_review_evidence_fact(M, 
     comments,
     issue_proposal_id,
     version,
@@ -34,7 +35,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if type(comments) ~= "table" or not M.is_safe_head_sha(current_head_sha) then
     return nil, "invalid-carry-over-input"
   end
-  local fact = M.merge_ready_fact(comments, issue_proposal_id, version, pr_number)
+  local fact = m_facts.merge_ready_fact(M, comments, issue_proposal_id, version, pr_number)
   if fact == nil then
     return nil, "missing-merge-ready-fact"
   end
@@ -49,7 +50,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
     review_dedup_key = fact.review_dedup_key,
     reviewed_head_sha = fact.head_sha,
   }
-  local approval_ok = M.review_result_approval_matches_event(comments, approved)
+  local approval_ok = m_facts.review_result_approval_matches_event(M, comments, approved)
   if not approval_ok then
     return nil, "missing-review-result-approve"
   end

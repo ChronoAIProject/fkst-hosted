@@ -1,4 +1,5 @@
 local parsers_pr = require("devloop.parsers.pr")
+local m_facts = require("devloop.markers.facts")
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local liveness_scan = require("devloop.liveness_scan")
 local entity_list_cache = require("devloop.entity_list_cache")
@@ -46,7 +47,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
 
   local current = parsers_pr.parse_pr_view_origin(core, state_view.stdout)
   current.number = pr.number
-  local origin = core.pr_origin_fact(current.comments)
+  local origin = m_facts.pr_origin_fact(core, current.comments)
   local proposal_id = origin and origin.proposal_id or core.pr_proposal_id(repo, pr.number)
   if origin == nil then
     core.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "PR has no origin marker")

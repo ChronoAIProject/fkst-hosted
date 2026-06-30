@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local m_facts = require("devloop.markers.facts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -176,7 +177,7 @@ return {
 
   test_high_risk_evidence_lookup_requires_paths_digest = function()
     local event = merge_ready()
-    local fact = core.high_risk_review_evidence_fact(
+    local fact = m_facts.high_risk_review_evidence_fact(core, 
       merge_comments_with_high_risk_evidence(event),
       event.proposal_id,
       event.version,
@@ -191,7 +192,7 @@ return {
 
   test_high_risk_evidence_lookup_uses_newest_valid_matching_digest = function()
     local event = merge_ready()
-    local fact = core.high_risk_review_evidence_fact(
+    local fact = m_facts.high_risk_review_evidence_fact(core, 
       comments_with_older_matching_evidence_before_newer(event),
       event.proposal_id,
       event.version,

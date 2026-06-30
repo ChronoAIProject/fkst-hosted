@@ -1,6 +1,7 @@
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local config = require("devloop.config")
+local m_facts = require("devloop.markers.facts")
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
@@ -222,7 +223,7 @@ canonical_pr_is_merged = function(current_pr)
 end
 
 origin_matches_delegation = function(issue, delegation, current_pr, branches)
-  local origin = M.pr_origin_fact(current_pr and current_pr.comments)
+  local origin = m_facts.pr_origin_fact(M, current_pr and current_pr.comments)
   if origin == nil
     or origin.pr_native == true
     or tostring(origin.proposal_id or "") ~= tostring(delegation.proposal_id or "")

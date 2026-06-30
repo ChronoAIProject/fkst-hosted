@@ -2,6 +2,7 @@ local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
+local m_facts = require("devloop.markers.facts")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local contract_time = require("contract.time")
 local operator_commands = require("devloop.operator_commands")
@@ -447,7 +448,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
     core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
-  local link = core.pr_link_fact(current.comments, proposal_id)
+  local link = m_facts.pr_link_fact(core, current.comments, proposal_id)
   local blocked_reentry = state.state == "blocked" and linked_open_pr(snapshot, link and link.pr_number) ~= nil
   if state.state ~= "impl-failed" and not blocked_reentry then
     core.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed or blocked state with an open linked PR")
@@ -537,7 +538,7 @@ local function process_issue_event(event)
       return
     end
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
-    local link = core.pr_link_fact(current.comments, proposal_id)
+    local link = m_facts.pr_link_fact(core, current.comments, proposal_id)
     local issue_state = core.current_state(current.comments, proposal_id)
     if core.is_intake_held(current.labels) then
       core.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-held", "fkst-dev:hold label is present")
@@ -728,7 +729,7 @@ local function process_pr_event(event)
   local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
   current_pr.number = pr.number
   current_pr.force_fresh = true
-  local origin = core.pr_origin_fact(current_pr.comments)
+  local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin == nil or origin.pr_native == true or origin.repo ~= pr.repo or tonumber(origin.issue_number) == nil then
     core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr-origin)", "PR entity change has no issue-backed devloop origin")

@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local m_facts = require("devloop.markers.facts")
 local S = {}
 local strings = require("contract.strings")
 
@@ -131,7 +132,7 @@ function M.implementation_attempt_version(version, attempt)
 end
 
 function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)
-  return M.has_implementing_marker(comments, proposal_id, dedup_key)
+  return m_facts.has_implementing_marker(M, comments, proposal_id, dedup_key)
     or M.has_impl_failure_marker(comments, proposal_id, dedup_key)
 end
 end

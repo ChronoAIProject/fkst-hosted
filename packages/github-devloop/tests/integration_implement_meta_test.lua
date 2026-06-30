@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
 local payloads_builders = require("devloop.payloads.builders")
+local m_facts = require("devloop.markers.facts")
 local t = h.t
 local core = h.core
 local gh_argv = require("testkit.gh_argv_mock")
@@ -123,7 +124,7 @@ local function assert_worktree_ready_state(raises, event)
   t.is_true(comment_raise ~= nil)
   t.is_true(comment_raise.payload.body:find(core.state_marker(event.proposal_id, "implementing", event.dedup_key), 1, true) ~= nil)
   t.is_true(comment_raise.payload.body:find("fkst:github-devloop:implement-attempt:v1", 1, true) ~= nil)
-  t.eq(core.implementing_fact({ comment_raise.payload.body }, event.proposal_id, event.dedup_key), nil)
+  t.eq(m_facts.implementing_fact(core, { comment_raise.payload.body }, event.proposal_id, event.dedup_key), nil)
   t.is_true(find_label_with_added(raises, "fkst-dev:implementing") ~= nil)
 end
 
@@ -302,7 +303,7 @@ return {
     assert_worktree_ready_state(result.raises, event)
     t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
     local comment = find_comment_with(result.raises, "fkst:github-devloop:implementing:v1").payload.body
-    local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
+    local fact = m_facts.implementing_fact(core, { comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
     t.eq(count_calls("git worktree add"), 0)
@@ -389,7 +390,7 @@ return {
     assert_worktree_ready_state(result.raises, event)
     t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
     local comment = find_comment_with(result.raises, "fkst:github-devloop:implementing:v1").payload.body
-    local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
+    local fact = m_facts.implementing_fact(core, { comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
     t.eq(count_calls("impl-failed"), 0)
@@ -445,7 +446,7 @@ return {
     assert_worktree_ready_state(result.raises, event)
     t.eq(find_label_with_added(result.raises, "fkst-dev:implementing").payload.add_labels[1], "fkst-dev:implementing")
     local comment = find_comment_with(result.raises, "fkst:github-devloop:implementing:v1").payload.body
-    local fact = core.implementing_fact({ comment }, event.proposal_id, event.dedup_key)
+    local fact = m_facts.implementing_fact(core, { comment }, event.proposal_id, event.dedup_key)
     t.eq(fact.branch, branch)
     t.eq(fact.head_sha, "def456")
     t.is_true(comment:find(worktree, 1, true) ~= nil)
