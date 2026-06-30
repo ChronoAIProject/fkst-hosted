@@ -237,7 +237,7 @@ local function assert_stale_merge_wait_falls_back_to_under_budget_state_age(stat
   t.eq(#raised, 0)
 end
 
-local function run_timeout_reconcile(payload, comments, name)
+local function run_timeout_reconcile(payload, comments, name, now_seconds)
   local source_repo, source_pr = core.parse_pr_source_ref(payload and payload.source_ref)
   local common_issue = {
     repo = repo,
@@ -265,10 +265,50 @@ local function run_timeout_reconcile(payload, comments, name)
       times = 1,
     })
   end
-  return t.run_department("departments/reconcile/main.lua", {
-    queue = "devloop_timeout_reconcile",
-    payload = payload,
-  }, opts(name or "liveness-timeout-clock"))
+  if now_seconds == nil then
+    return t.run_department("departments/reconcile/main.lua", {
+      queue = "devloop_timeout_reconcile",
+      payload = payload,
+    }, opts(name or "liveness-timeout-clock"))
+  end
+
+  local raised = {}
+  local original_raise = raise
+  local original_now = now
+  raise = function(queue, raised_payload)
+    table.insert(raised, { queue = queue, payload = raised_payload })
+  end
+  now = function()
+    return now_seconds
+  end
+  local ok, err = pcall(function()
+    local department = require("departments.reconcile.main")
+    department.pipeline({
+      queue = "devloop_timeout_reconcile",
+      payload = payload,
+    })
+  end)
+  now = original_now
+  raise = original_raise
+  if not ok then
+    return {
+      exit_code = 1,
+      error = tostring(err),
+      raises = raised,
+    }
+  end
+  return {
+    exit_code = 0,
+    raises = raised,
+  }
+end
+
+local function timestamp_minutes_before(now_seconds, age_minutes)
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds - age_minutes * 60)
+end
+
+local function timeout_reconcile_age_clock()
+  return contract_time.iso_timestamp_epoch_seconds("2026-06-03T06:31:00Z")
 end
 
 return {
@@ -319,6 +359,7 @@ return {
     local timeout_version = version .. "/timeout/merge-ready/3"
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
+    local now_seconds = timeout_reconcile_age_clock()
     local payload = core.build_devloop_timeout_reconcile_payload(row, {
       state = "merge-ready",
       version = timeout_version,
@@ -327,12 +368,12 @@ return {
       state_comment("merge-ready", timeout_version, "2026-06-03T00:00:00Z"),
       timeout_attempt_comment("merge-ready", version, 1, source_ref),
       timeout_attempt_comment("merge-ready", version, 2, source_ref),
-      merge_gate_wait_comment(version, os.date("!%Y-%m-%dT%H:%M:%SZ", now() - wait_age_minutes * 60)),
-    }, "timeout-reconcile-merge-gate-wait-age")
+      merge_gate_wait_comment(version, timestamp_minutes_before(now_seconds, wait_age_minutes)),
+    }, "timeout-reconcile-merge-gate-wait-age", now_seconds)
     t.eq(result.exit_code, 0)
     local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment ~= nil)
-    t.is_true(comment.payload.body:find("age_minutes=" .. tostring(wait_age_minutes), 1, true) == nil)
+    t.is_true(comment.payload.body:find("age_minutes=" .. tostring(wait_age_minutes), 1, true) ~= nil)
     t.is_true(comment.payload.body:find("reason_class=external-ci-wait-expired", 1, true) ~= nil)
     t.is_true(comment.payload.body:find("reason_class=\"external-ci-wait-expired\"", 1, true) ~= nil)
   end,
@@ -342,6 +383,7 @@ return {
     local timeout_version = lineages.fix .. "/timeout/merge-ready/3"
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
+    local now_seconds = timeout_reconcile_age_clock()
     local payload = core.build_devloop_timeout_reconcile_payload(row, {
       state = "merge-ready",
       version = timeout_version,
@@ -350,12 +392,12 @@ return {
       state_comment("merge-ready", timeout_version, "2026-06-03T00:00:00Z"),
       timeout_attempt_comment("merge-ready", lineages.fix, 1, source_ref),
       timeout_attempt_comment("merge-ready", lineages.fix, 2, source_ref),
-      merge_gate_wait_comment(lineages.fix, os.date("!%Y-%m-%dT%H:%M:%SZ", now() - wait_age_minutes * 60)),
-    }, "timeout-reconcile-fix-lineage-merge-gate-wait-age")
+      merge_gate_wait_comment(lineages.fix, timestamp_minutes_before(now_seconds, wait_age_minutes)),
+    }, "timeout-reconcile-fix-lineage-merge-gate-wait-age", now_seconds)
     t.eq(result.exit_code, 0)
     local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment ~= nil)
-    t.is_true(comment.payload.body:find("age_minutes=" .. tostring(wait_age_minutes), 1, true) == nil)
+    t.is_true(comment.payload.body:find("age_minutes=" .. tostring(wait_age_minutes), 1, true) ~= nil)
     t.is_true(comment.payload.body:find("reason_class=external-ci-wait-expired", 1, true) ~= nil)
   end,
 
@@ -364,6 +406,7 @@ return {
     local timeout_version = lineages.review_loop .. "/timeout/merge-ready/3"
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
+    local now_seconds = timeout_reconcile_age_clock()
     local payload = core.build_devloop_timeout_reconcile_payload(row, {
       state = "merge-ready",
       version = timeout_version,
@@ -372,12 +415,12 @@ return {
       state_comment("merge-ready", timeout_version, "2026-06-03T00:00:00Z"),
       timeout_attempt_comment("merge-ready", lineages.review_loop, 1, source_ref),
       timeout_attempt_comment("merge-ready", lineages.review_loop, 2, source_ref),
-      merge_gate_wait_comment(lineages.review_loop, os.date("!%Y-%m-%dT%H:%M:%SZ", now() - wait_age_minutes * 60)),
-    }, "timeout-reconcile-review-loop-lineage-merge-gate-wait-age")
+      merge_gate_wait_comment(lineages.review_loop, timestamp_minutes_before(now_seconds, wait_age_minutes)),
+    }, "timeout-reconcile-review-loop-lineage-merge-gate-wait-age", now_seconds)
     t.eq(result.exit_code, 0)
     local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
     t.is_true(comment ~= nil)
-    t.is_true(comment.payload.body:find("age_minutes=" .. tostring(wait_age_minutes), 1, true) == nil)
+    t.is_true(comment.payload.body:find("age_minutes=" .. tostring(wait_age_minutes), 1, true) ~= nil)
     t.is_true(comment.payload.body:find("reason_class=external-ci-wait-expired", 1, true) ~= nil)
   end,
 }
