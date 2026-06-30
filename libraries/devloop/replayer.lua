@@ -1,5 +1,6 @@
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
+local replay_thinking_convergence = require("devloop.replay_thinking_convergence")
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
@@ -430,11 +431,9 @@ end
 
 local function replay_thinking(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
-  if type(M.replay_thinking_true_stall_blocked) == "function" then
-    local terminal = M.replay_thinking_true_stall_blocked(dept, issue, state, facts, log_skip, raise_effects)
-    if terminal ~= nil then
-      return terminal
-    end
+  local terminal = replay_thinking_convergence.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_skip, raise_effects)
+  if terminal ~= nil then
+    return terminal
   end
   M.log_cas_decision(dept, proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
   local proposal = build_thinking_replay_proposal(issue, proposal_id, state, facts.current, facts.event_ts)

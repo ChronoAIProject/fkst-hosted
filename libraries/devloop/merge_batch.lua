@@ -1,7 +1,6 @@
-local S = {}
+local C = {}
 
-function S.install(M)
-local function log_batch_window(proposal_id, fields)
+local function log_batch_window(M, proposal_id, fields)
   local facts = { "batch_window=true" }
   for _, field in ipairs(fields or {}) do
     table.insert(facts, field)
@@ -9,10 +8,10 @@ local function log_batch_window(proposal_id, fields)
   M.log_line("info", "merge", proposal_id or "merge", "BATCH_WINDOW", facts)
 end
 
-local function record_merged_files(repo, entry, merged_files)
+local function record_merged_files(M, repo, entry, merged_files)
   local files, reason = M.merge_queue_changed_files(repo, entry)
   if files == nil then
-    log_batch_window(entry.proposal_id, {
+    log_batch_window(M, entry.proposal_id, {
       "action=stop",
       "pr=" .. tostring(entry.pr_number),
       "reason=" .. tostring(reason),
@@ -20,7 +19,7 @@ local function record_merged_files(repo, entry, merged_files)
     return false
   end
   table.insert(merged_files, files)
-  log_batch_window(entry.proposal_id, {
+  log_batch_window(M, entry.proposal_id, {
     "action=sample",
     "pr=" .. tostring(entry.pr_number),
     "base=" .. tostring(files.base_sha or ""),
@@ -30,7 +29,7 @@ local function record_merged_files(repo, entry, merged_files)
   return true
 end
 
-local function files_disjoint_from_window(files, merged_files)
+local function files_disjoint_from_window(M, files, merged_files)
   for _, merged in ipairs(merged_files or {}) do
     local disjoint, path = M.merge_queue_files_disjoint(files, merged)
     if not disjoint then
@@ -40,7 +39,7 @@ local function files_disjoint_from_window(files, merged_files)
   return true, "disjoint", nil
 end
 
-local function current_base_head(branches)
+local function current_base_head(M, branches)
   local base_head, reason = M.current_base_head(branches.integration)
   if base_head == nil then
     return nil, reason
@@ -48,7 +47,7 @@ local function current_base_head(branches)
   return base_head, "current-base-ok"
 end
 
-local function head_contains_base(base_head, entry)
+local function head_contains_base(M, base_head, entry)
   local head_sha = tostring(entry and entry.head_sha or "")
   if not M.is_safe_head_sha(base_head)
     or not M.is_safe_head_sha(head_sha)
@@ -74,13 +73,13 @@ local function head_contains_base(base_head, entry)
   return false, "current-base-not-contained"
 end
 
-local function entry_issue_number(entry)
+local function entry_issue_number(M, entry)
   local entity = M.parse_entity_proposal_id(entry and entry.proposal_id)
   return entity and entity.issue_number or nil
 end
 
-local function batch_entry_claim_ok(repo, entry)
-  return M.verify_pr_review_issue_claim("merge_batch", repo, entry_issue_number(entry), nil, entry and entry.proposal_id)
+local function batch_entry_claim_ok(M, repo, entry)
+  return M.verify_pr_review_issue_claim("merge_batch", repo, entry_issue_number(M, entry), nil, entry and entry.proposal_id)
 end
 
 local function find_queue_entry(entries, merge_ready)
@@ -94,10 +93,10 @@ local function find_queue_entry(entries, merge_ready)
   return nil, nil
 end
 
-function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entries, options, process_merge_ready)
+function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_entries, options, process_merge_ready)
   local first_entry, first_index = find_queue_entry(queue_entries, first_merge_ready)
   if first_entry == nil or first_index == nil then
-    log_batch_window(first_merge_ready.proposal_id, {
+    log_batch_window(M, first_merge_ready.proposal_id, {
       "action=complete",
       "size=1",
       "reason=head-not-initial-queue",
@@ -107,15 +106,15 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
 
   local merged_files = {}
   local merged_count = 1
-  if not record_merged_files(repo, first_entry, merged_files) then
+  if not record_merged_files(M, repo, first_entry, merged_files) then
     return first_entry.pr_number
   end
   local last_merged_pr_number = first_entry.pr_number
 
   local previous_base_head = tostring(first_entry.base_sha or "")
-  local required_base_head, base_reason = current_base_head(branches)
+  local required_base_head, base_reason = current_base_head(M, branches)
   if required_base_head == nil then
-    log_batch_window(first_merge_ready.proposal_id, {
+    log_batch_window(M, first_merge_ready.proposal_id, {
       "action=stop",
       "pr=" .. tostring(first_entry.pr_number),
       "reason=" .. tostring(base_reason),
@@ -124,7 +123,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
     return last_merged_pr_number
   end
   if previous_base_head == required_base_head then
-    log_batch_window(first_merge_ready.proposal_id, {
+    log_batch_window(M, first_merge_ready.proposal_id, {
       "action=stop",
       "pr=" .. tostring(first_entry.pr_number),
       "reason=current-base-not-advanced",
@@ -137,7 +136,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
   for index = first_index + 1, #(queue_entries or {}) do
     local entry = queue_entries[index]
     if entry.state ~= "merge-ready" then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=lane-state-" .. tostring(entry.state),
@@ -145,8 +144,8 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
       })
       return last_merged_pr_number
     end
-    if not batch_entry_claim_ok(repo, entry) then
-      log_batch_window(entry.proposal_id, {
+    if not batch_entry_claim_ok(M, repo, entry) then
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=claim-not-owned",
@@ -154,9 +153,9 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
       })
       return last_merged_pr_number
     end
-    local base_ok, head_base_reason = head_contains_base(required_base_head, entry)
+    local base_ok, head_base_reason = head_contains_base(M, required_base_head, entry)
     if not base_ok then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=" .. tostring(head_base_reason),
@@ -168,7 +167,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
     end
     local files, file_reason = M.merge_queue_changed_files(repo, entry)
     if files == nil then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=" .. tostring(file_reason),
@@ -176,9 +175,9 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
       })
       return last_merged_pr_number
     end
-    local disjoint, path, conflicting_pr = files_disjoint_from_window(files, merged_files)
+    local disjoint, path, conflicting_pr = files_disjoint_from_window(M, files, merged_files)
     if not disjoint then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=file-overlap",
@@ -190,7 +189,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
       })
       return last_merged_pr_number
     end
-    log_batch_window(entry.proposal_id, {
+    log_batch_window(M, entry.proposal_id, {
       "action=try",
       "pr=" .. tostring(entry.pr_number),
       "reason=disjoint",
@@ -200,7 +199,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
     })
     local merge_ready = M.merge_ready_payload_from_queue_entry(entry, M.pr_source_ref(repo, entry.pr_number))
     if merge_ready == nil then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=invalid-merge-ready-payload",
@@ -215,7 +214,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
       write_mode = options and options.write_mode or nil,
     })
     if outcome == nil or outcome.status ~= "merged" then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=gate-not-merged",
@@ -228,9 +227,9 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
     merged_count = merged_count + 1
     last_merged_pr_number = entry.pr_number
     previous_base_head = tostring(files.base_sha or "")
-    required_base_head, base_reason = current_base_head(branches)
+    required_base_head, base_reason = current_base_head(M, branches)
     if required_base_head == nil then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=" .. tostring(base_reason),
@@ -239,7 +238,7 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
       return last_merged_pr_number
     end
     if previous_base_head == required_base_head then
-      log_batch_window(entry.proposal_id, {
+      log_batch_window(M, entry.proposal_id, {
         "action=stop",
         "pr=" .. tostring(entry.pr_number),
         "reason=current-base-not-advanced",
@@ -250,12 +249,11 @@ function M.run_merge_batch_window(repo, branches, first_merge_ready, queue_entri
     end
   end
 
-  log_batch_window(first_merge_ready.proposal_id, {
+  log_batch_window(M, first_merge_ready.proposal_id, {
     "action=complete",
     "size=" .. tostring(merged_count),
   })
   return last_merged_pr_number
 end
-end
 
-return S
+return C

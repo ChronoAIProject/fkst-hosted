@@ -1,9 +1,8 @@
-local S = {}
+local C = {}
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 
-function S.install(M)
-  local function visible_true_stall(issue, state, facts)
+local function visible_true_stall(M, issue, state, facts)
     local current = facts and facts.current or issue
     local proposal_id = facts and facts.proposal_id
     local source_ref = (facts and facts.source_ref) or (issue and issue.source_ref)
@@ -24,12 +23,12 @@ function S.install(M)
       dedup_key = "reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(round),
       source_ref = M.normalize_source_ref(source_ref),
     }
-  end
+end
 
-  function M.replay_thinking_true_stall_blocked(dept, issue, state, facts, log_skip, raise_effects)
+function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_skip, raise_effects)
     local proposal_id = facts and facts.proposal_id
     local current = facts and facts.current or issue
-    local reconcile = visible_true_stall(issue, state, facts)
+    local reconcile = visible_true_stall(M, issue, state, facts)
     if reconcile == nil then
       return nil
     end
@@ -51,7 +50,6 @@ function S.install(M)
       { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
       { queue = "github-proxy.github_issue_label_request", payload = label_request },
     })
-  end
 end
 
-return S
+return C

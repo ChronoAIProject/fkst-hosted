@@ -21,7 +21,6 @@ require("devloop.queue").install(M)
 require("forge.merge").install(M)
 require("devloop.merge_gate_wait").install(M)
 require("devloop.merge_queue").install(M)
-require("devloop.merge_batch").install(M)
 require("devloop.queue_starvation").install(M)
 require("devloop.git_mechanics").install(M)
 require("devloop.claims").install(M)
@@ -72,7 +71,6 @@ require("devloop.restart_responsibility_contract").install(M)
 require("devloop.restart_actionable_epoch").install(M)
 local ready_split_replayers = require("core.ready_split").install(M)
 local awaiting_pr_replayers = require("core.awaiting_pr_replayer").install(M)
-require("devloop.replay_thinking_convergence").install(M)
 require("devloop.replayer").install({
   core = M,
   replayers = {

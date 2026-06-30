@@ -3,6 +3,7 @@ local runtime_files = require("core.merge_runtime_files")
 local ci_wait = require("core.merge_ci_wait")
 local high_risk_merge_gate = require("core.high_risk_merge_gate")
 local check_runs = require("forge.github.check_runs")
+local merge_batch = require("devloop.merge_batch")
 local M = {}
 local github = require("forge.github").production_handle
 
@@ -867,7 +868,7 @@ local function process_merge_queue_tick(event)
     if outcome ~= nil and outcome.status == "merged" then
       local last_merged_pr_number = outcome.pr_number
       if cause_kind ~= "queue-starvation" or selected_is_fifo_head then
-        last_merged_pr_number = core.run_merge_batch_window(repo, branches, merge_ready, entries, { write_mode = write_mode }, process_merge_ready_locked)
+        last_merged_pr_number = merge_batch.run_merge_batch_window(core, repo, branches, merge_ready, entries, { write_mode = write_mode }, process_merge_ready_locked)
       end
       chain_merge_queue_if_non_empty(repo, branches, last_merged_pr_number or outcome.pr_number)
     end
