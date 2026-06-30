@@ -1,4 +1,5 @@
 local core = require("core")
+local operator_commands = require("devloop.operator_commands")
 local saga = require("workflow.saga")
 
 local spec = {
@@ -13,7 +14,8 @@ local spec = {
 }
 
 local function raise_reintake_refusal(repo, issue_number, proposal_id, command, reason, source_ref)
-  local request = core.build_operator_issue_command_refusal_request(
+  local request = operator_commands.build_operator_issue_command_refusal_request(
+    core,
     repo,
     tostring(issue_number),
     command,

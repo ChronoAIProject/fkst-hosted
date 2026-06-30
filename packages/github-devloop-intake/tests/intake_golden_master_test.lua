@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local operator_commands = require("devloop.operator_commands")
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
@@ -135,7 +136,7 @@ return {
 
   test_golden_admission_refuses_reintake_without_existing_intake = function()
     local command = trusted_reintake_command("IC_reintake_no_marker")
-    local command_fact = core.operator_command_fact({ command }, "reintake")
+    local command_fact = operator_commands.operator_command_fact(core, { command }, "reintake")
     h.mock_bot_env()
     mock_repo_env()
     mock_issue({ number = 42, labels = {}, comments = { command } })

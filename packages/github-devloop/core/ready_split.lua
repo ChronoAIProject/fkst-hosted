@@ -1,4 +1,5 @@
 local S = {}
+local operator_commands = require("devloop.operator_commands")
 local replay_fields_resolver = require("devloop.replay_fields")
 
 function S.install(M)
@@ -189,7 +190,7 @@ local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, cu
   end
   local command_comment_request = nil
   if command ~= nil then
-    command_comment_request = M.build_operator_issue_reready_comment_request(issue.repo, issue.number, command, "dependency-hold", issue.source_ref)
+    command_comment_request = operator_commands.build_operator_issue_reready_comment_request(M, issue.repo, issue.number, command, "dependency-hold", issue.source_ref)
     table.insert(raised, "github-proxy.github_issue_comment_request")
   end
   if #raised > 0 then
@@ -250,7 +251,7 @@ function M.replay_dependency_wait_state(dept, issue, state, row, facts)
   end
   M.log_cas_decision(dept, proposal_id, state, "dependency_wait", "ready", "release-dependency-hold", gate.reason)
   local command_comment_request = facts.command_comment_request or (facts.command ~= nil
-    and M.build_operator_issue_reready_comment_request(issue.repo, issue.number, facts.command, "dependency-release", issue.source_ref)
+    and operator_commands.build_operator_issue_reready_comment_request(M, issue.repo, issue.number, facts.command, "dependency-release", issue.source_ref)
     or nil)
   return raise_dependency_release(M, dept, issue, proposal_id, state, facts.current, command_comment_request, gate, read_fact(facts, "dependency-release"))
 end
@@ -266,7 +267,7 @@ local function ready_redrive_round(M, comments, proposal_id, marker_version, row
     marker_version,
     row.from_state
   ) or 0
-  local command_round = M.operator_command_response_count(comments, "reready", "applied", "ready")
+  local command_round = operator_commands.operator_command_response_count(M, comments, "reready", "applied", "ready")
   return math.max(timeout_round, command_round) + 1
 end
 
@@ -320,7 +321,7 @@ function M.replay_ready_state(dept, issue, state, row, facts)
   local raised = { "devloop_ready" }
   local command_comment_request = nil
   if facts.command ~= nil then
-    command_comment_request = M.build_operator_issue_reready_comment_request(issue.repo, issue.number, facts.command, "ready", issue.source_ref)
+    command_comment_request = operator_commands.build_operator_issue_reready_comment_request(M, issue.repo, issue.number, facts.command, "ready", issue.source_ref)
     table.insert(raised, "github-proxy.github_issue_comment_request")
   end
   M.log_cas_decision(dept, proposal_id, state, "ready", "implementing", "applied(replay)", "dependency gate is satisfied")

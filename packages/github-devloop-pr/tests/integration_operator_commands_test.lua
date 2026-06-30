@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local operator_commands = require("devloop.operator_commands")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local t = h.t
@@ -243,7 +244,7 @@ return {
   test_rereview_command_duplicate_response_is_idempotent = function()
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_duplicate")
-    local command_fact = core.operator_command_fact({ command }, "rereview")
+    local command_fact = operator_commands.operator_command_fact(core, { command }, "rereview")
     local response = core.build_operator_rereview_comment_request(
       "owner/repo",
       7,

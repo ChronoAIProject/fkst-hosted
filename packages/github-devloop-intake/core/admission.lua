@@ -1,4 +1,5 @@
 local S = {}
+local operator_commands = require("devloop.operator_commands")
 
 function S.install(M)
 local function has_devloop_state_label(labels)
@@ -15,8 +16,8 @@ function M.should_skip_known_intake_issue(labels)
 end
 
 function M.pending_reintake_command(comments)
-  local command = M.operator_command_fact(comments, "reintake")
-  if command ~= nil and not M.has_operator_command_response(comments, command) then
+  local command = operator_commands.operator_command_fact(M, comments, "reintake")
+  if command ~= nil and not operator_commands.has_operator_command_response(M, comments, command) then
     return command
   end
   return nil

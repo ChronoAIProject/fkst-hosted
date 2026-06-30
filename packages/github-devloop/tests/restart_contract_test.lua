@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
+local operator_commands = require("devloop.operator_commands")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
@@ -290,7 +291,7 @@ return {
   test_reentry_commands_are_supported_by_operator_parser = function()
     for _, row in ipairs(core.restart_transition_table()) do
       for _, command_name in ipairs(row.reentry_commands or {}) do
-        local fact = core.operator_command_fact({
+        local fact = operator_commands.operator_command_fact(core, {
           {
             id = "IC_" .. tostring(row.from_state) .. "_" .. tostring(command_name),
             body = "fkst: " .. tostring(command_name),

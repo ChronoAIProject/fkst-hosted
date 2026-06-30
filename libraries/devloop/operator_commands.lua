@@ -1,11 +1,10 @@
-local S = {}
+local C = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
 
-function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 
-local function command_key(comment, fallback_index)
+local function command_key(M, comment, fallback_index)
   if type(comment) == "table" and comment.id ~= nil and tostring(comment.id) ~= "" then
     return M._dedup_key({
       "operator-command",
@@ -23,7 +22,7 @@ local function command_key(comment, fallback_index)
   })
 end
 
-local function first_command_line(body)
+local function first_command_line(M, body)
   for line in tostring(body or ""):gmatch("[^\r\n]+") do
     local trimmed = M._trim(line):lower()
     if trimmed ~= "" then
@@ -33,8 +32,8 @@ local function first_command_line(body)
   return ""
 end
 
-local function parse_command(body)
-  local line = first_command_line(body)
+local function parse_command(M, body)
+  local line = first_command_line(M, body)
   local command = line:match("^fkst:%s*([%w_-]+)")
   if command == "rereview" or command == "reready" or command == "reintake" or command == "reimplement" then
     return {
@@ -53,18 +52,18 @@ local function parse_command(body)
   return nil
 end
 
-function M.operator_command_fact(comments, command_name)
+function C.operator_command_fact(M, comments, command_name)
   if type(comments) ~= "table" then
     return nil
   end
   local latest = nil
   for index, comment in ipairs(comments) do
-    local parsed = parse_command(M._comment_body(comment))
+    local parsed = parse_command(M, M._comment_body(comment))
     if parsed ~= nil and parsed.command == command_name then
       if M._is_trusted_comment(comment) then
         latest = {
           command = parsed.command,
-          key = command_key(comment, index),
+          key = command_key(M, comment, index),
           author_login = M._comment_author_login(comment),
           created_at = M._comment_created_at(comment),
           body = M._comment_body(comment),
@@ -83,7 +82,7 @@ function M.operator_command_fact(comments, command_name)
   return latest
 end
 
-function M.operator_rereview_version(current_version, head_sha)
+function C.operator_rereview_version(M, current_version, head_sha)
   if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid operator rereview head sha")
   end
@@ -92,7 +91,7 @@ function M.operator_rereview_version(current_version, head_sha)
   return base .. "/review-loop/" .. tostring(next_n) .. "/rereview/" .. tostring(next_n) .. "/" .. tostring(head_sha)
 end
 
-function M.has_operator_command_response(comments, command)
+function C.has_operator_command_response(M, comments, command)
   if type(comments) ~= "table" or type(command) ~= "table" then
     return false
   end
@@ -108,7 +107,7 @@ function M.has_operator_command_response(comments, command)
   return false
 end
 
-function M.operator_command_response_count(comments, command_name, outcome, reason)
+function C.operator_command_response_count(M, comments, command_name, outcome, reason)
   if type(comments) ~= "table" then
     return 0
   end
@@ -132,7 +131,7 @@ function M.operator_command_response_count(comments, command_name, outcome, reas
   return count
 end
 
-function M.operator_command_marker(command, outcome, reason)
+function C.operator_command_marker(M, command, outcome, reason)
   if type(command) ~= "table"
     or (command.command ~= "rereview"
       and command.command ~= "reready"
@@ -152,8 +151,8 @@ function M.operator_command_marker(command, outcome, reason)
     .. '" -->'
 end
 
-function M.build_operator_issue_rereview_comment_request(repo, issue_number, command, proposal, source_ref)
-  local marker = M.operator_command_marker(command, "applied", "rereview")
+function C.build_operator_issue_rereview_comment_request(M, repo, issue_number, command, proposal, source_ref)
+  local marker = C.operator_command_marker(M, command, "applied", "rereview")
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -169,8 +168,8 @@ function M.build_operator_issue_rereview_comment_request(repo, issue_number, com
   }), source_ref)
 end
 
-function M.build_operator_issue_reready_comment_request(repo, issue_number, command, outcome_reason, source_ref)
-  local marker = M.operator_command_marker(command, "applied", outcome_reason or "reready")
+function C.build_operator_issue_reready_comment_request(M, repo, issue_number, command, outcome_reason, source_ref)
+  local marker = C.operator_command_marker(M, command, "applied", outcome_reason or "reready")
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -186,8 +185,8 @@ function M.build_operator_issue_reready_comment_request(repo, issue_number, comm
   }), source_ref)
 end
 
-function M.build_operator_issue_reimplement_comment_request(repo, issue_number, command, attempt, source_ref)
-  local marker = M.operator_command_marker(command, "applied", "reimplement")
+function C.build_operator_issue_reimplement_comment_request(M, repo, issue_number, command, attempt, source_ref)
+  local marker = C.operator_command_marker(M, command, "applied", "reimplement")
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -205,9 +204,9 @@ function M.build_operator_issue_reimplement_comment_request(repo, issue_number, 
   }), source_ref)
 end
 
-function M.build_operator_issue_dependency_waiver_comment_request(repo, issue_number, command, proposal_id, version, blocker_number, source_ref)
+function C.build_operator_issue_dependency_waiver_comment_request(M, repo, issue_number, command, proposal_id, version, blocker_number, source_ref)
   local waiver_marker = M.dependency_waiver_marker(proposal_id, version, blocker_number, "operator-waiver")
-  local command_marker = M.operator_command_marker(command, "applied", "dependency-waiver")
+  local command_marker = C.operator_command_marker(M, command, "applied", "dependency-waiver")
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -226,8 +225,8 @@ function M.build_operator_issue_dependency_waiver_comment_request(repo, issue_nu
   }), source_ref)
 end
 
-function M.build_operator_issue_reintake_comment_request(repo, issue_number, command, candidate, source_ref)
-  local marker = M.operator_command_marker(command, "applied", "reintake")
+function C.build_operator_issue_reintake_comment_request(M, repo, issue_number, command, candidate, source_ref)
+  local marker = C.operator_command_marker(M, command, "applied", "reintake")
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -243,9 +242,9 @@ function M.build_operator_issue_reintake_comment_request(repo, issue_number, com
   }), source_ref)
 end
 
-function M.build_operator_command_refusal_request(repo, pr_number, command, reason, source_ref)
+function C.build_operator_command_refusal_request(M, repo, pr_number, command, reason, source_ref)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "invalid command state")
-  local marker = M.operator_command_marker(command, "refused", reason)
+  local marker = C.operator_command_marker(M, command, "refused", reason)
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -261,9 +260,9 @@ function M.build_operator_command_refusal_request(repo, pr_number, command, reas
   }), source_ref)
 end
 
-function M.build_operator_issue_command_refusal_request(repo, issue_number, command, reason, source_ref)
+function C.build_operator_issue_command_refusal_request(M, repo, issue_number, command, reason, source_ref)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "invalid command state")
-  local marker = M.operator_command_marker(command, "refused", reason)
+  local marker = C.operator_command_marker(M, command, "refused", reason)
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -278,6 +277,5 @@ function M.build_operator_issue_command_refusal_request(repo, issue_number, comm
     tostring(reason or "invalid"),
   }), source_ref)
 end
-end
 
-return S
+return C

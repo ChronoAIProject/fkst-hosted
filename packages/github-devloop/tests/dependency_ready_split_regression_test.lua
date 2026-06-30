@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local operator_commands = require("devloop.operator_commands")
 local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
@@ -356,7 +357,7 @@ return {
       command = "reready",
       key = "operator-command/IC_reready_ready",
     }
-    local accepted = core.operator_command_marker(command, "applied", "ready")
+    local accepted = operator_commands.operator_command_marker(core, command, "applied", "ready")
     local raises = replay_ready_with_comments({
       trusted_comment("IC_ready_visible", marker),
       trusted_comment("IC_reready_response", accepted, "2026-06-03T01:01:00Z"),

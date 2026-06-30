@@ -1,5 +1,6 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
+local operator_commands = require("devloop.operator_commands")
 
 function S.install(M, shared)
 local ai_sentinel = shared.ai_sentinel
@@ -118,7 +119,7 @@ end
 
 function M.build_operator_rereview_comment_request(repo, pr_number, proposal_id, new_version, command, source_ref)
   local state_marker = M.state_marker(proposal_id, "reviewing", new_version)
-  local marker = M.operator_command_marker(command, "applied", "rereview")
+  local marker = operator_commands.operator_command_marker(M, command, "applied", "rereview")
   local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,

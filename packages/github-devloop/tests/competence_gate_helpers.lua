@@ -1,4 +1,5 @@
 local core = require("core")
+local operator_commands = require("devloop.operator_commands")
 local M = setmetatable({}, { __index = core })
 
 local required_negative_controls = {
@@ -83,7 +84,8 @@ local function operator_dependency_waiver_contract(opts)
   local forbidden_ready_marker = M.state_marker(proposal_id, "ready", version)
   local request = nil
   if options.operator_dependency_waiver_request_body == nil then
-    request = M.build_operator_issue_dependency_waiver_comment_request(
+    request = operator_commands.build_operator_issue_dependency_waiver_comment_request(
+      core,
       options.repo or "owner/repo",
       options.issue_number or 42,
       command,

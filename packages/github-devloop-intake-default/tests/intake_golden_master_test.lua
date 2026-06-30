@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local operator_commands = require("devloop.operator_commands")
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
@@ -413,7 +414,7 @@ return {
   test_golden_judge_reintake_active_state_refusal = function()
     local command = trusted_reintake_command("IC_reintake_active")
     local base = candidate()
-    local command_fact = core.operator_command_fact({ command }, "reintake")
+    local command_fact = operator_commands.operator_command_fact(core, { command }, "reintake")
     local payload = candidate({
       effect_id = decision_key(base, nil, command),
       reintake_command_created_at = command.created_at,

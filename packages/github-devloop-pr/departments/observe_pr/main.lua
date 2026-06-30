@@ -4,6 +4,7 @@ local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
+local operator_commands = require("devloop.operator_commands")
 
 local M = {}
 
@@ -166,17 +167,18 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
 end
 
 local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)
-  local command = core.operator_command_fact(current_pr.comments, "rereview")
+  local command = operator_commands.operator_command_fact(core, current_pr.comments, "rereview")
   if command == nil then
     return false
   end
-  if core.has_operator_command_response(current_pr.comments, command) then
+  if operator_commands.has_operator_command_response(core, current_pr.comments, command) then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
   if state.state ~= "blocked" and state.state ~= "review-meta" and state.state ~= "reviewing" then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(invalid-state)", "operator rereview precondition failed")
-    local refusal = core.build_operator_command_refusal_request(
+    local refusal = operator_commands.build_operator_command_refusal_request(
+      core,
       origin.repo,
       pr_number,
       command,
@@ -188,7 +190,8 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if state.state == "reviewing" and not is_stalled_reviewing(current_pr, origin, pr_number, state) then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|stalled-reviewing", "reviewing", "refused(active-reviewing)", "operator rereview requires stalled reviewing")
-    local refusal = core.build_operator_command_refusal_request(
+    local refusal = operator_commands.build_operator_command_refusal_request(
+      core,
       origin.repo,
       pr_number,
       command,
@@ -200,7 +203,8 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if tostring(current_pr.state or ""):lower() ~= "open" then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(pr-closed)", "operator rereview requires an open PR")
-    local refusal = core.build_operator_command_refusal_request(
+    local refusal = operator_commands.build_operator_command_refusal_request(
+      core,
       origin.repo,
       pr_number,
       command,
@@ -212,7 +216,8 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if not forge_validators.is_git_sha(current_pr.head_sha) then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(head-missing)", "operator rereview requires a current PR head")
-    local refusal = core.build_operator_command_refusal_request(
+    local refusal = operator_commands.build_operator_command_refusal_request(
+      core,
       origin.repo,
       pr_number,
       command,
@@ -223,7 +228,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
     return true
   end
 
-  local new_version = core.operator_rereview_version(state.version, current_pr.head_sha)
+  local new_version = operator_commands.operator_rereview_version(core, state.version, current_pr.head_sha)
   local comment_request = core.build_operator_rereview_comment_request(
     origin.repo,
     pr_number,
