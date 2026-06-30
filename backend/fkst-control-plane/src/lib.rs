@@ -14,7 +14,6 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod github_app;
-pub mod github_hub;
 pub mod goals;
 // Role-neutral leaves extracted to `fkst-shared` (issue #145). Re-exported here
 // so every existing `crate::{models,nyxid}::…` path and test still resolves.
@@ -30,7 +29,6 @@ pub mod k8s;
 pub mod nyxid_connect;
 pub mod openapi;
 pub mod ornn;
-pub mod reconcile;
 pub mod router;
 pub mod routes;
 // In-pod `run-session` subcommand (milestone #9): drives ONE substrate session
@@ -41,4 +39,3 @@ pub mod session_spec;
 pub mod sessions;
 pub mod startup;
 pub mod state;
-pub mod vault;

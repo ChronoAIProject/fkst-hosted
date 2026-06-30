@@ -406,8 +406,7 @@ fn prepare_codex_home(temp_root: &Path) -> Result<TempDir, String> {
     let model = std::env::var(CODEX_MODEL_ENV).unwrap_or_else(|_| DEFAULT_CODEX_MODEL.to_string());
     let base_url = std::env::var(CHRONO_LLM_BASE_URL_ENV)
         .unwrap_or_else(|_| DEFAULT_CHRONO_LLM_BASE_URL.to_string());
-    let config_toml = render_codex_config(&ProviderChoice::DefaultChronoLlm, &model, &base_url)
-        .map_err(|error| format!("render codex config: {error}"))?;
+    let config_toml = render_codex_config(&ProviderChoice::DefaultChronoLlm, &model, &base_url);
     std::fs::write(dir.path().join("config.toml"), config_toml)
         .map_err(|error| format!("write config.toml: {error}"))?;
     Ok(dir)

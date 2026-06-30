@@ -22,14 +22,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use fkst_control_plane::vault::{VaultLimits, VaultService};
-
-/// Build the in-memory `VaultService` (#138) with the default per-scope limits.
-/// The controller is datastore-free (#143), so this takes no handle.
-pub fn test_vault() -> VaultService {
-    VaultService::new(VaultLimits::default())
-}
-
 /// Default binary location inside the engine image / engine-based pods.
 pub const IMAGE_ENGINE_BIN: &str = "/usr/local/bin/fkst-framework";
 

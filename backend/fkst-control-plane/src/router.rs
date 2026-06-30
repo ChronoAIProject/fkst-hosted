@@ -52,15 +52,7 @@ fn cors_layer() -> CorsLayer {
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
 
-    let api_routes = routes::sessions::router()
-        .merge(routes::goals::router())
-        .merge(routes::github::router())
-        .merge(routes::catalog::router())
-        .merge(routes::repos::router())
-        // Admin live-state view (#144): inside the `/api/v1` nest so it sits
-        // behind the proxy-trusted identity layer; the handler itself gates on
-        // the `fkst:admin` permission.
-        .merge(routes::admin_state::router());
+    let api_routes = routes::sessions::router();
 
     let api_routes = match &state.auth_mode {
         AuthMode::Enabled(settings) => {
