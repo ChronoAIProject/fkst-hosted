@@ -64,10 +64,7 @@ require("devloop.restart_responsibility_contract").install(M)
 require("devloop.restart_actionable_epoch").install(M)
 require("core.review_redrive").install(M)
 local review_replayers = require("core.pr_review_replayer").install(M)
-require("devloop.replayer").install({
-  core = M,
-  review_replayers = review_replayers,
-})
+M.replayer_review_registry = review_replayers
 require("devloop.liveness").install(M, wiring.liveness(M))
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), {

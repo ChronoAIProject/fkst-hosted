@@ -1,6 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local operator_commands = require("devloop.operator_commands")
+local replayer = require("devloop.replayer")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
@@ -452,18 +453,15 @@ return {
       "skip-stale(head-advanced)",
     }
     for _, outcome in ipairs(declined) do
-      local previous = core.replay_from_table
-      core.replay_from_table = function()
-        if core._replay_skip_capture ~= nil then
-          core._replay_skip_capture.outcome = outcome
-          core._replay_skip_capture.reason = "declined"
-        end
+      local previous = replayer.replay_from_table
+      replayer.replay_from_table = function()
+        replayer.replay_log_skip(core, "test", nil, { state = "ready" }, "ready", "ready", outcome, "declined")
         return false
       end
       local ok, classified = pcall(function()
-        return core.replay_from_table_classified("test", {}, { state = "ready" }, restart_transition_row("ready"), {})
+        return replayer.replay_from_table_classified(core, "test", {}, { state = "ready" }, restart_transition_row("ready"), {})
       end)
-      core.replay_from_table = previous
+      replayer.replay_from_table = previous
       if not ok then error(classified) end
       t.eq(classified.kind, "stuck")
       t.eq(classified.outcome, outcome)
@@ -669,7 +667,7 @@ return {
 
   test_observe_issue_replay_is_table_driven = function()
     local text = file.read("packages/github-devloop/departments/observe_issue/main.lua")
-    t.is_true(text:find("core.replay_from_table", 1, true) ~= nil)
+    t.is_true(text:find("replayer.replay_from_table", 1, true) ~= nil)
     t.eq(text:find("build_replayed_fixing_payload", 1, true), nil)
     t.eq(text:find("build_devloop_review_meta_payload", 1, true), nil)
     t.eq(text:find("build_decompose_replay_payload", 1, true), nil)

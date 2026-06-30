@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local replayer = require("devloop.replayer")
 local hidden_state = require("devloop.hidden_state_conformance")
 
 local function copy_rows(rows)
@@ -49,11 +50,13 @@ return {
     local fake_core = setmetatable({
       restart_package_name = core.restart_package_name,
       restart_consumer_sources = core.restart_consumer_sources,
-      replay_from_table = function(dept)
-        seen[dept] = true
-        return false
-      end,
     }, { __index = core })
+    local previous = replayer.replay_from_table
+    replayer.replay_from_table = function(replay_core, dept)
+      t.eq(replay_core, fake_core)
+      seen[dept] = true
+      return false
+    end
     local rows = {
       {
         from_state = "pr-open",
@@ -70,7 +73,11 @@ return {
         },
       },
     }
-    hidden_state.hidden_state_conformance_errors(fake_core, rows, {})
+    local ok, err = pcall(function()
+      hidden_state.hidden_state_conformance_errors(fake_core, rows, {})
+    end)
+    replayer.replay_from_table = previous
+    if not ok then error(err) end
     t.eq(seen.observe_pr, true)
     t.eq(seen.behavioral_hidden_state_conformance, nil)
   end,

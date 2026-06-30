@@ -2,6 +2,7 @@ local S = {}
 local contract_time = require("contract.time")
 local source_refs = require("contract.source_ref")
 local replay_fields = require("devloop.replay_fields")
+local replayer = require("devloop.replayer")
 
 function S.install(M, shared)
 local max_timeout_attempts = shared.max_timeout_attempts
@@ -263,7 +264,7 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
     end
     return false
   end
-  local replay = M.replay_from_table_classified(dept, entity, {
+  local replay = replayer.replay_from_table_classified(M, dept, entity, {
     state = state.state,
     version = state.version,
     proposal_id = state.proposal_id,

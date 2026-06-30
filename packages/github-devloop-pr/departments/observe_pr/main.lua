@@ -6,6 +6,7 @@ local core, saga, replay_fields = require("core"), require("workflow.saga"), req
 local forge_validators = require("devloop.forge_validators")
 local operator_commands = require("devloop.operator_commands")
 local decompose_lib = require("devloop.decompose")
+local replayer = require("devloop.replayer")
 
 local M = {}
 
@@ -123,7 +124,7 @@ local function replay_pr_local_state(origin, pr_number, current_pr, state, sourc
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
     return false
   end
-  return core.replay_from_table("observe_pr", {
+  return replayer.replay_from_table(core, "observe_pr", {
     repo = origin.repo,
     number = origin.issue_number,
     source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref,

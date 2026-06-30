@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
+local replayer = require("devloop.replayer")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -179,7 +180,7 @@ return {
     facts.now_seconds = contract_time.iso_timestamp_epoch_seconds(state.marker_created_at) + 60
 
     local raised = capture_raises(function()
-      local issued = core.replay_from_table("observe_issue", entity, state, row, facts)
+      local issued = replayer.replay_from_table(core, "observe_issue", entity, state, row, facts)
       t.eq(issued, false)
     end)
     t.eq(find_raise(raised, "devloop_ready"), nil)
@@ -190,11 +191,13 @@ return {
     local fake_core = setmetatable({
       restart_package_name = core.restart_package_name,
       restart_consumer_sources = core.restart_consumer_sources,
-      replay_from_table = function(dept)
-        seen[dept] = true
-        return false
-      end,
     }, { __index = core })
+    local previous = replayer.replay_from_table
+    replayer.replay_from_table = function(replay_core, dept)
+      t.eq(replay_core, fake_core)
+      seen[dept] = true
+      return false
+    end
     local rows = {
       {
         from_state = "ready",
@@ -211,7 +214,11 @@ return {
         },
       },
     }
-    hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
+    local ok, err = pcall(function()
+      hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
+    end)
+    replayer.replay_from_table = previous
+    if not ok then error(err) end
     t.eq(seen.observe_issue, true)
     t.eq(seen.behavioral_hidden_state_conformance, nil)
   end,
@@ -283,15 +290,17 @@ return {
     local fake_core
     fake_core = setmetatable({
       restart_package_name = core.restart_package_name,
-      replay_from_table = function(dept, issue, state, row, facts)
-        if state.state ~= "impl-failed" or facts.impl_failure == nil then
-          return false
-        end
-        fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-false-exemption)", "synthetic durable impl-failure advanced an exempt row")
-        fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
-        return true
-      end,
     }, { __index = core })
+    local previous = replayer.replay_from_table
+    replayer.replay_from_table = function(replay_core, dept, issue, state, row, facts)
+      t.eq(replay_core, fake_core)
+      if state.state ~= "impl-failed" or facts.impl_failure == nil then
+        return false
+      end
+      fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-false-exemption)", "synthetic durable impl-failure advanced an exempt row")
+      fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
+      return true
+    end
     local rows = {
       {
         from_state = "impl-failed",
@@ -322,7 +331,11 @@ return {
         },
       },
     }
-    local errors = hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
+    local ok, errors = pcall(function()
+      return hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
+    end)
+    replayer.replay_from_table = previous
+    if not ok then error(errors) end
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("github-devloop|impl-failed|*: non_durable_advance exemption advanced to successor implementing", 1, true) ~= nil, joined)
   end,
@@ -331,15 +344,17 @@ return {
     local fake_core
     fake_core = setmetatable({
       restart_package_name = core.restart_package_name,
-      replay_from_table = function(dept, issue, state, row, facts)
-        if state.state ~= "impl-failed" or facts["hidden-durable-trigger"] == nil then
-          return false
-        end
-        fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-row-local-false-exemption)", "synthetic row-local durable fact advanced an exempt row")
-        fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
-        return true
-      end,
     }, { __index = core })
+    local previous = replayer.replay_from_table
+    replayer.replay_from_table = function(replay_core, dept, issue, state, row, facts)
+      t.eq(replay_core, fake_core)
+      if state.state ~= "impl-failed" or facts["hidden-durable-trigger"] == nil then
+        return false
+      end
+      fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-row-local-false-exemption)", "synthetic row-local durable fact advanced an exempt row")
+      fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
+      return true
+    end
     local rows = {
       {
         from_state = "impl-failed",
@@ -356,7 +371,11 @@ return {
         },
       },
     }
-    local errors = hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
+    local ok, errors = pcall(function()
+      return hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
+    end)
+    replayer.replay_from_table = previous
+    if not ok then error(errors) end
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("github-devloop|impl-failed|*: non_durable_advance exemption advanced to successor implementing", 1, true) ~= nil, joined)
   end,

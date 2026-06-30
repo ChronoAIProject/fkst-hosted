@@ -4,6 +4,7 @@ local operator_commands = require("devloop.operator_commands")
 local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
 local context_bundle = require("devloop.context_bundle")
+local replayer = require("devloop.replayer")
 
 local M = {}
 
@@ -156,11 +157,11 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
   if issue.source ~= "liveness-scan"
     and state_is_issue_local
     and core.restart_observe_replay_due(row, "issue", state, facts, now()) then
-    return core.replay_from_table("observe_issue", issue, state, row, facts)
+    return replayer.replay_from_table(core, "observe_issue", issue, state, row, facts)
   end
   if core.restart_row_observable_on(row, "issue")
     and state_is_issue_local
-    and core.replay_from_table("observe_issue", issue, state, row, facts) then
+    and replayer.replay_from_table(core, "observe_issue", issue, state, row, facts) then
     return true
   end
   if core.restart_row_observable_on(row, "issue") then
@@ -208,7 +209,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
     core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return true
   end
-  if not core.has_thinking_converge_replay(current, proposal_id, state, issue.source_ref)
+  if not replayer.has_thinking_converge_replay(core, current, proposal_id, state, issue.source_ref)
     and not thinking_state_budget_exceeded(state) then
     core.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "refused(active-thinking)", "operator rereview requires stalled thinking")
     local refusal = operator_commands.build_operator_issue_command_refusal_request(
@@ -223,7 +224,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
     return true
   end
 
-  local proposal = core.build_thinking_replay_proposal(issue, proposal_id, state, current, event_ts)
+  local proposal = replayer.build_thinking_replay_proposal(core, issue, proposal_id, state, current, event_ts)
   if proposal == nil then
     core.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "refused(cannot-rebuild-proposal)", "operator rereview could not rebuild thinking proposal")
     local refusal = operator_commands.build_operator_issue_command_refusal_request(
@@ -335,7 +336,7 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
     issue, proposal_id, replay_state,
     current, command
   )
-  core.replay_from_table("observe_issue", issue, replay_state, row, replay_facts)
+  replayer.replay_from_table(core, "observe_issue", issue, replay_state, row, replay_facts)
   return true
 end
 
@@ -407,7 +408,7 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
     issue.source_ref
   )
   core.log_cas_decision("observe_issue", proposal_id, state, "dependency_wait", "ready", "applied(operator-dependency-waiver)", "trusted operator command created dependency waiver")
-  core.replay_from_table("observe_issue", issue, state, replay_fields.restart_transition_row(core.restart_transition_table(), "dependency_wait"), {
+  replayer.replay_from_table(core, "observe_issue", issue, state, replay_fields.restart_transition_row(core.restart_transition_table(), "dependency_wait"), {
     proposal_id = proposal_id,
     current = current,
     command_comment_request = comment_request,
@@ -542,7 +543,7 @@ local function process_issue_event(event)
         return
       end
       local row = replay_fields.restart_transition_row(core.restart_transition_table(), "awaiting-pr")
-      core.replay_from_table("observe_issue", issue, issue_state, row, {
+      replayer.replay_from_table(core, "observe_issue", issue, issue_state, row, {
         proposal_id = proposal_id,
         current = current,
         current_issue = current,

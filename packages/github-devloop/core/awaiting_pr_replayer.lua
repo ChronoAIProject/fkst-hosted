@@ -1,5 +1,6 @@
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
+local replayer = require("devloop.replayer")
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
@@ -12,11 +13,7 @@ local child_terminal_states = {
 }
 local canonical_pr_is_merged, origin_matches_delegation, canonical_merged_child_state, merged_child_landed_on_upstream
 local function log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
-  if type(M.replay_log_skip) == "function" then
-    return M.replay_log_skip(dept, proposal_id, state, from_state, to_state, outcome, reason)
-  end
-  M.log_cas_decision(dept, proposal_id, state, from_state, to_state, outcome, reason)
-  return false
+  return replayer.replay_log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
 end
 
 local function raise_effects(dept, proposal_id, apply_state, version, label_changes, effects)

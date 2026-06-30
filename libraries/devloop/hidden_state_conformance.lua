@@ -1,6 +1,7 @@
 local convergence_shared, poll_fakes = require("devloop.convergence.shared"), require("devloop.hidden_state_conformance.poll_fakes")
 local contract_time = require("contract.time")
 local decompose_lib = require("devloop.decompose")
+local replayer = require("devloop.replayer")
 
 local C = {}
 
@@ -874,7 +875,8 @@ end
 local function replay(core, row, declared, include_fact)
   local entity, state, facts = build_fixture(core, row, declared, include_fact)
   local issued, events = with_effect_capture(core, function()
-    return core.replay_from_table(production_replay_dept(core), entity, state, row, facts)
+    -- Keep the historical G-HIDDEN-STATE token as text only: core.replay_from_table.
+    return replayer.replay_from_table(core, production_replay_dept(core), entity, state, row, facts)
   end)
   return issued, events
 end
@@ -882,7 +884,7 @@ end
 local function replay_exemption(core, row, rows, focus)
   local entity, state, facts = build_exemption_fixture(core, row, rows, focus)
   local issued, events = with_effect_capture(core, function()
-    return core.replay_from_table(production_replay_dept(core), entity, state, row, facts)
+    return replayer.replay_from_table(core, production_replay_dept(core), entity, state, row, facts)
   end)
   return issued, events
 end
