@@ -8,11 +8,8 @@
 
 use std::process::ExitCode;
 
-use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::nyxid::NyxIdClient;
 use fkst_control_plane::router::build_router;
-use fkst_control_plane::startup::build_nyxid_client;
 use fkst_control_plane::state::AppState;
 use tracing_subscriber::EnvFilter;
 
@@ -96,33 +93,6 @@ async fn main() -> ExitCode {
 
     // 5. Build the router.
     let addr = format!("{}:{}", config.bind_addr, config.port);
-    let auth_mode = config.auth.clone();
-
-    // Build the NyxID client ONCE for the Authorizer and the user-token paths.
-    // Owner-only model (#257): the client is built from `AuthMode::Enabled`
-    // ALONE (which carries the NyxID base URL), because every feature it drives
-    // — per-session key mint, Ornn proxy, github_hub, repo-create —
-    // authenticates with the FORWARDED USER TOKEN. There is no service account.
-    let nyxid_client: Option<NyxIdClient> = match build_nyxid_client(
-        &auth_mode,
-        &config.nyxid_github_proxy_slug,
-        std::time::Duration::from_secs(config.nyxid_org_cache_ttl_secs),
-    ) {
-        Ok(client) => {
-            if client.is_some() {
-                tracing::info!("NyxID client built (owner-only, forwarded user token)");
-            }
-            client
-        }
-        Err(error) => {
-            tracing::error!(error = %error, "failed to build NyxID client");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    // The Authorizer is given the (optional) NyxID client. Ownership/org checks
-    // remain.
-    let authz = Authorizer::new(nyxid_client.clone());
 
     // 5a. Load the GitHub App configuration (fail-closed: a bad PEM must never
     //     reach a session). Installation resolution is stateless (#141): the
@@ -160,19 +130,14 @@ async fn main() -> ExitCode {
     };
 
     // Capture what the Job watcher needs BEFORE `config`/`github_app` move into
-    // `AppState`. The binding store lives in AppState for the connect routes; the
-    // watcher no longer drives any per-session credential refresh (the LLM key is
-    // static config), so it is not passed to the watcher.
-    let binding_store = fkst_control_plane::nyxid_connect::BrokerBindingStore::new();
+    // `AppState`. The watcher drives no per-session credential refresh (the LLM
+    // key is static config), so it only needs the namespace + the App tokens.
     let pod_dispatch = config.pod.dispatch;
     let pod_namespace = config.pod.namespace.clone();
     let watcher_github_app = github_app.clone();
 
     let app = match build_router(AppState {
-        binding_store,
         config,
-        auth_mode,
-        authz,
         github_app,
         github_app_webhook_secret,
     }) {

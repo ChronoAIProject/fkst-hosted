@@ -10,8 +10,6 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fkst_control_plane::auth::AuthMode;
-use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::state::AppState;
@@ -20,10 +18,7 @@ use tower::ServiceExt;
 
 fn test_router() -> axum::Router {
     build_router(AppState {
-        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config: Config::default(),
-        auth_mode: AuthMode::Disabled,
-        authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
     })

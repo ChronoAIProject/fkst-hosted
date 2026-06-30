@@ -25,9 +25,8 @@ pub enum AppError {
     /// The request conflicts with the current state. Renders as 409.
     #[error("conflict: {0}")]
     Conflict(String),
-    /// A required dependency (e.g. NyxID or the credential proxy) is
-    /// unreachable. Renders as 503. The message must be safe for clients
-    /// (no connection detail).
+    /// A required dependency (e.g. the GitHub API) is unreachable. Renders as
+    /// 503. The message must be safe for clients (no connection detail).
     #[error("unavailable: {0}")]
     Unavailable(String),
     /// BSON serialization failure. Renders as 500.
@@ -88,23 +87,6 @@ pub struct ErrorEnvelope {
     /// Human-readable, client-safe description of the failure.
     #[schema(example = "invalid request: title must not be empty")]
     pub message: String,
-}
-
-/// Map auth-domain errors onto the unified type.
-///
-/// fkst-hosted does not authenticate users (the NyxID proxy does, #113), so the
-/// only auth-domain failure is a missing proxy-injected identity — a 401 that is
-/// only reachable when the proxy is misconfigured or absent in front of the
-/// service.
-impl From<crate::auth::AuthError> for AppError {
-    fn from(err: crate::auth::AuthError) -> Self {
-        use crate::auth::AuthError;
-        match err {
-            AuthError::MissingIdentity => {
-                AppError::Unauthorized("missing proxy-injected identity".to_string())
-            }
-        }
-    }
 }
 
 /// Map GitHub-App-domain errors onto the unified type:
@@ -308,10 +290,10 @@ mod tests {
     #[tokio::test]
     async fn unavailable_renders_503_unavailable() {
         let (status, body, _headers) =
-            render(AppError::Unavailable("nyxid unreachable".into())).await;
+            render(AppError::Unavailable("github unreachable".into())).await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["error"], "unavailable");
-        assert_eq!(body["message"], "nyxid unreachable");
+        assert_eq!(body["message"], "github unreachable");
     }
 
     #[tokio::test]
@@ -335,15 +317,6 @@ mod tests {
         assert_eq!(body["message"], "insufficient scope");
         let www = headers.iter().find(|(k, _)| k == "www-authenticate");
         assert!(www.is_none(), "Forbidden must NOT set WWW-Authenticate");
-    }
-
-    #[tokio::test]
-    async fn auth_error_missing_identity_maps_to_401() {
-        let err: AppError = crate::auth::AuthError::MissingIdentity.into();
-        let (status, body, _headers) = render(err).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED);
-        assert_eq!(body["error"], "unauthorized");
-        assert_eq!(body["message"], "missing proxy-injected identity");
     }
 
     #[tokio::test]

@@ -12,8 +12,6 @@ use tower_http::trace::TraceLayer;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::middleware;
-use crate::auth::AuthMode;
 use crate::error::AppError;
 use crate::openapi;
 use crate::routes;
@@ -44,51 +42,33 @@ fn cors_layer() -> CorsLayer {
 /// no fleet-only `/internal/v1/*` worker protocol (removed in the single
 /// control-plane refactor).
 ///
-/// When authentication is enabled, all `/api/v1/*` routes (except health) are
-/// wrapped with the proxy-trusted identity middleware (issue #113): it reads the
-/// NyxID-injected identity headers — it does NOT verify a user token or fetch
-/// JWKS. Health endpoints (`/health` and `/api/v1/health`) remain public by
-/// construction.
+/// There is no application-level authentication: the `/api/v1/*` routes are
+/// open, read-only, and network-isolated. Identity is the HMAC-verified GitHub
+/// webhook actor — the only authenticated inbound is the signature-verified
+/// GitHub App webhook (which lives outside the `/api/v1` nest, like `/health`).
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
 
     let api_routes = routes::sessions::router();
 
-    let api_routes = match &state.auth_mode {
-        AuthMode::Enabled(settings) => {
-            tracing::info!(
-                base_url = %settings.base_url,
-                "proxy-trusted identity enforced (decode-only; no JWKS, no user-token verify)"
-            );
-            middleware::protect(api_routes)
-        }
-        AuthMode::Disabled => {
-            tracing::warn!("AUTHENTICATION DISABLED — all /api/v1 routes are open");
-            api_routes
-        }
-    };
-
-    // The GitHub App webhook (issue #108) is UNAUTHENTICATED — GitHub presents
-    // no NyxID identity — but signature-verified inside the handler over the
-    // raw body. It must therefore live OUTSIDE the `protect()` nest (like
-    // `/health`). It is only mounted when a webhook secret is configured; with
-    // no secret there is nothing to verify against, so the route is absent and
-    // installation resolution degrades to on-demand (a warning is logged). When
-    // unmounted it is likewise absent from the generated spec (the spec reflects
-    // what is actually served).
+    // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
+    // but signature-verified inside the handler over the raw body. It lives at
+    // the top level (like `/health`), outside the `/api/v1` nest. It is only
+    // mounted when a webhook secret is configured; with no secret there is
+    // nothing to verify against, so the route is absent and installation
+    // resolution degrades to on-demand (a warning is logged). When unmounted it
+    // is likewise absent from the generated spec (the spec reflects what is
+    // actually served).
     let mut top = OpenApiRouter::with_openapi(openapi::api_doc())
         .routes(routes!(routes::health::health))
         // The literal /api/v1/health route coexists with the /api/v1 nest:
         // axum nesting registers the inner routes individually (no catch-all),
         // so /api/v1/health keeps answering (asserted by integration test).
         .routes(routes!(routes::health::health_v1))
-        // `/metrics` (#144) is TOP-level and UNAUTHENTICATED like `/health`: it
-        // carries only counts (no secret) and is served on the ClusterIP-only
-        // surface, so Prometheus scrapes it without a NyxID identity.
+        // `/metrics` (#144) is TOP-level like `/health`: it carries only counts
+        // (no secret) and is served on the ClusterIP-only surface, so Prometheus
+        // scrapes it directly.
         .merge(routes::metrics::router());
-    if state.config.broker_client().is_some() {
-        top = top.merge(routes::nyxid_connect::router());
-    }
     if state.github_app_webhook_secret.is_some() {
         top = top.merge(routes::github_app_webhook::router());
         tracing::info!("github app webhook endpoint mounted (signature-verified, unauthenticated)");
@@ -99,9 +79,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         );
     }
 
-    // Nest the protected API, then split the assembled router from its OpenAPI
-    // document. The spec is rendered + served by a top-level `/openapi.json`
-    // route (no identity required), merged back onto the concrete axum router.
+    // Nest the (open, read-only) API under `/api/v1`, then split the assembled
+    // router from its OpenAPI document. The spec is rendered + served by a
+    // top-level `/openapi.json` route, merged back onto the concrete axum router.
     let (router, spec) = top.nest("/api/v1", api_routes).split_for_parts();
 
     Ok(router

@@ -143,9 +143,9 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
         .token_for_repo(&owner_repo, None)
         .await
         .map_err(|e| format!("mint app token: {e}"))?;
-    // The LLM credential is now a static config value (FKST_LLM_API_KEY), not a
-    // per-session NyxID token. It is written into the session Secret and read by
-    // the engine's codex provider under LLM_API_KEY.
+    // The LLM credential is a static config value (FKST_LLM_API_KEY). It is
+    // written into the session Secret and read by the engine's codex provider
+    // under LLM_API_KEY.
     let secrets = SessionSecrets {
         github_token,
         llm_api_key: state.config.llm_api_key.clone(),

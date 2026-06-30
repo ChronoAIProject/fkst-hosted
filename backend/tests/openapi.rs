@@ -1,15 +1,15 @@
 //! `GET /openapi.json` integration tests against the REAL `build_router`.
 //!
 //! Assert the v1 contract: the spec is generated from the LIVE routes (no static
-//! file), it documents only the trimmed v1 surface (sessions + nyxid-connect +
-//! the webhook + health/metrics), it does NOT document the removed legacy API
-//! (goals / GitHub proxy / catalog / admin / repo-scaffold), it EXCLUDES any
-//! `/internal/*` path, and the conditionally-mounted webhook tracks config.
+//! file), it documents only the trimmed v1 surface (sessions + the webhook +
+//! health/metrics), it does NOT document the removed legacy API (goals / GitHub
+//! proxy / catalog / admin / repo-scaffold), it registers NO security scheme
+//! (the API is open, read-only, network-isolated — there is no NyxID auth), it
+//! EXCLUDES any `/internal/*` path, and the conditionally-mounted webhook tracks
+//! config.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use fkst_control_plane::auth::AuthMode;
-use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::state::AppState;
@@ -23,10 +23,7 @@ fn app(webhook_secret: bool) -> axum::Router {
     let github_app_webhook_secret = webhook_secret
         .then(|| secrecy::SecretString::new("dummy-webhook-secret".to_string().into()));
     build_router(AppState {
-        binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
         config: Config::default(),
-        auth_mode: AuthMode::Disabled,
-        authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret,
     })
@@ -67,8 +64,10 @@ async fn serves_a_valid_openapi3_document_with_metadata() {
     assert_eq!(spec["info"]["title"], "fkst-hosted control plane API");
     assert_eq!(spec["info"]["version"], env!("CARGO_PKG_VERSION"));
     assert!(
-        spec["components"]["securitySchemes"]["NyxIdIdentity"].is_object(),
-        "NyxIdIdentity security scheme must be present"
+        spec["components"]["securitySchemes"]
+            .get("NyxIdIdentity")
+            .is_none(),
+        "NyxIdIdentity security scheme must be ABSENT (no application-level auth)"
     );
 }
 
@@ -134,16 +133,21 @@ async fn components_include_the_session_schemas_and_not_the_removed_ones() {
 }
 
 #[tokio::test]
-async fn protected_paths_require_identity_public_paths_do_not() {
-    let spec = fetch_spec(app(false)).await;
+async fn no_operation_requires_security_the_whole_surface_is_open() {
+    let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];
-    let protected = &paths["/api/v1/sessions/{owner}/{repo}/{issue}"]["get"]["security"];
+    // The sessions GET/stop operations are now open (no NyxID identity).
     assert!(
-        protected
-            .as_array()
-            .map(|reqs| reqs.iter().any(|r| r.get("NyxIdIdentity").is_some()))
-            .unwrap_or(false),
-        "GET session must require NyxIdIdentity, got {protected:?}"
+        paths["/api/v1/sessions/{owner}/{repo}/{issue}"]["get"]
+            .get("security")
+            .is_none(),
+        "GET session must NOT require security (open read-only surface)"
+    );
+    assert!(
+        paths["/api/v1/sessions/{owner}/{repo}/{issue}/stop"]["post"]
+            .get("security")
+            .is_none(),
+        "stop session must NOT require security (open read-only surface)"
     );
     assert!(
         paths["/health"]["get"].get("security").is_none(),

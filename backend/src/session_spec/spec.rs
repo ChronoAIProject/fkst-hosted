@@ -62,7 +62,7 @@ pub struct SessionSpec {
     pub installation_id: i64,
     /// The target repository the session clones and works in.
     pub repo: RepoRef,
-    /// The repo owner's GitHub login (the NyxID binding is keyed on this owner).
+    /// The repo owner's GitHub login.
     pub owner_login: String,
     /// The triggering issue number (progress is reported back to it).
     pub issue_number: i64,
@@ -150,7 +150,6 @@ mod tests {
         // structural property: no `SecretString` and no token-shaped value.
         let rendered = format!("{:?}", sample());
         assert!(!rendered.contains("ghs_"));
-        assert!(!rendered.contains("nyxid_ag_"));
         assert!(!rendered.to_lowercase().contains("secretstring"));
     }
 }
