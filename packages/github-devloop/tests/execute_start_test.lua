@@ -43,7 +43,7 @@ local function current_issue(extra)
 end
 
 local function mock_execute_start_issue(fields)
-  entity_read_mocks.mock_issue_view_selector(t, current_issue(fields), "title,body,updatedAt,labels,comments,state,assignees,author", 1)
+  entity_read_mocks.mock_issue_view_selector(t, current_issue(fields), "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 1)
 end
 
 local function run_execute_start(payload, run_opts)

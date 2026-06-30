@@ -152,7 +152,7 @@ local function mock_intake_judge_view(labels, comments, extra)
     encode_json_string(fields.updated_at or "2026-06-03T01:02:03Z"), encode_json_string(fields.state or "OPEN"),
     encode_labels_json(labels or {}), comments_json(comments or {}), assignees_json,
     encode_json_string(fields.author_login or "fkst-test-bot"))
-  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state,assignees,author", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", {
     stdout = assignee_stdout,
   }, 2)
   entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {

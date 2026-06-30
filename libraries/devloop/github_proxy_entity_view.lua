@@ -163,6 +163,7 @@ local function rest_issue_to_view_json(issue_stdout, comments_stdout)
     .. ',"body":' .. json_value(issue.body)
     .. ',"labels":' .. labels_json(issue.labels)
     .. ',"state":' .. json_value(rest_state(issue.state))
+    .. ',"createdAt":' .. json_value(issue.created_at or issue.createdAt)
     .. ',"updatedAt":' .. json_value(issue.updated_at or issue.updatedAt)
     .. ',"assignees":' .. assignees_json(issue.assignees)
     .. ',"author":{"login":' .. json_value(author_login) .. "}"

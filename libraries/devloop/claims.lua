@@ -1,6 +1,7 @@
 local S = {}
 local github_handle = nil
 local error_facts = require("contract.error_facts")
+local contract_time = require("contract.time")
 local forks = require("devloop.forks")
 local config = require("devloop.config")
 
@@ -228,20 +229,6 @@ function M.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue,
   return false
 end
 
-function M.fork_first_observed_key(repo, issue_number, progress_key)
-  local parts = {
-    "github-devloop",
-    "fork-first-observed",
-    M.safe_repo(repo),
-    "issue",
-    M.safe_issue(issue_number),
-  }
-  if progress_key ~= nil and tostring(progress_key) ~= "" then
-    table.insert(parts, M.safe_updated_at(progress_key))
-  end
-  return M._dedup_key(parts)
-end
-
 function M.fork_grace_seconds(exec)
   local raw = M.read_env("FKST_DEVLOOP_FORK_GRACE_HOURS", exec)
   raw = M._trim(raw or "")
@@ -259,19 +246,23 @@ function M.fork_grace_elapsed(repo, issue_number, current, now_seconds, grace_se
   local current_seconds = tonumber(now_seconds)
   local grace = tonumber(grace_seconds)
   if current_seconds == nil or grace == nil then
-    return false, "fork-grace-age-unknown"
+    return false, "fork-grace-age-unknown", nil
   end
-  local progress_key = current and (current.updated_at or current.updatedAt)
-  local observed_key = M.fork_first_observed_key(repo, issue_number, progress_key)
-  local first_observed_seconds = tonumber(cache_get(observed_key) or "")
-  if first_observed_seconds == nil then
-    cache_set(observed_key, tostring(current_seconds))
-    return false, "fork-grace-started"
+
+  local created_seconds = contract_time.iso_timestamp_epoch_seconds(current and (current.created_at or current.createdAt))
+  if created_seconds == nil then
+    return false, "fork-grace-age-unknown", nil
   end
-  if current_seconds - first_observed_seconds < grace then
-    return false, "fork-grace-pending"
+
+  local age_seconds = current_seconds - created_seconds
+  if age_seconds < 0 then
+    age_seconds = 0
   end
-  return true, "fork-grace-elapsed", current_seconds - first_observed_seconds
+
+  if age_seconds < grace then
+    return false, "fork-grace-pending", age_seconds
+  end
+  return true, "fork-grace-elapsed", age_seconds
 end
 
 function M.claim_issue_for_management(dept, repo, issue_number, current, proposal_id)
@@ -306,9 +297,14 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
-    local elapsed = M.fork_grace_elapsed(repo, issue_number, current, now(), M.fork_grace_seconds())
+    local grace_seconds = M.fork_grace_seconds()
+    local elapsed, grace_reason, age_seconds = M.fork_grace_elapsed(repo, issue_number, current, now(), grace_seconds)
     if not elapsed then
-      log_claim(dept, proposal_id, "skip-fork-grace", "other-authored unassigned issue is inside fork grace window")
+      local reason = "other-authored unassigned issue is inside fork grace window"
+        .. " reason=" .. tostring(grace_reason)
+        .. " age_seconds=" .. tostring(age_seconds or "unknown")
+        .. " grace_seconds=" .. tostring(grace_seconds)
+      log_claim(dept, proposal_id, "skip-fork-grace", reason)
       return false
     end
     current = forks.rederive_issue_state(M, repo, issue_number)

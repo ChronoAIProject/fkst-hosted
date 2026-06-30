@@ -179,7 +179,7 @@ local function mock_reads(issue_comments, pr_comments, opts)
     comments = issue_comments,
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
-  }, "title,body,comments,labels,state,updatedAt,assignees,author")
+  }, "title,body,comments,labels,state,createdAt,updatedAt,assignees,author")
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = options.pr_number or pr_number,

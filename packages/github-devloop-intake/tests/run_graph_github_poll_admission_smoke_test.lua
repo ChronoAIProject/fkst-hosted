@@ -49,7 +49,7 @@ local function mock_admission_issue_view()
     comments = {},
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
-  }, "title,body,updatedAt,labels,comments,state,assignees,author")
+  }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author")
 end
 
 return {

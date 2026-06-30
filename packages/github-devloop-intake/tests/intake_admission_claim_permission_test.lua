@@ -46,7 +46,7 @@ local function mock_admission_view(number)
     comments = {},
     assignees = {},
     author_login = "fkst-test-bot",
-  }, "title,body,updatedAt,labels,comments,state,assignees,author")
+  }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author")
 end
 
 local function source_ref(number)
