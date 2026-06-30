@@ -240,6 +240,11 @@ local function false_consensus_pair_line(pair)
       .. " issue=#" .. tostring(pair.issue_number)
       .. " evidence=" .. tostring(pair.evidence or "issue-reopened")
   end
+  if tostring(pair.revert_commit or "") ~= "" then
+    return "- PR #" .. tostring(reverted)
+      .. " reverted-by commit " .. tostring(pair.revert_commit)
+      .. " evidence=" .. tostring(pair.evidence or "revert-commit")
+  end
   return nil
 end
 

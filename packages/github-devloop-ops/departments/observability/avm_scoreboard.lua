@@ -1,5 +1,7 @@
 local M = {}
 local contract_time = require("contract.time")
+local no_revert_reopen = require("devloop.autonomy.no_revert_reopen")
+local autonomy_projection = require("devloop.autonomy.projection")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 
 function M.install_avm_scoreboard(core)
@@ -85,43 +87,6 @@ local function copy_fact(raw)
   return fact
 end
 
-local function normalize_text(value)
-  return tostring(value or ""):lower():gsub("%s+", " ")
-end
-
-local function title_or_body_reverts_pr(pr, target_number)
-  local number = tonumber(target_number)
-  if number == nil then
-    return false
-  end
-  local text = normalize_text(tostring(pr and pr.title or "") .. "\n" .. tostring(pr and pr.body or ""))
-  if text:find("revert", 1, true) == nil then
-    return false
-  end
-  local escaped = tostring(number):gsub("([^%w])", "%%%1")
-  local suffix = "%f[%D]"
-  return text:find("#" .. escaped .. suffix) ~= nil
-    or text:find("pull/" .. escaped .. suffix) ~= nil
-    or text:find("pull request " .. escaped .. suffix) ~= nil
-    or text:find("pr " .. escaped .. suffix) ~= nil
-end
-
-local function merged_seconds(value)
-  local parsed = contract_time.iso_timestamp_epoch_seconds(value)
-  return parsed or 0
-end
-
-local function later_than_reverted_pair(revert_pr, fact)
-  local fact_merged_at = fact.merged_at or fact.comment_created_at
-  local revert_merged_at = revert_pr and revert_pr.merged_at
-  if fact_merged_at == nil or revert_merged_at == nil then
-    return true
-  end
-  local left = merged_seconds(revert_merged_at)
-  local right = merged_seconds(fact_merged_at)
-  return left == 0 or right == 0 or left >= right
-end
-
 local function pair_key(pair)
   return tostring(pair.reverted_pr or "")
     .. "->"
@@ -139,44 +104,13 @@ local function append_pair(pairs, seen, pair)
   table.insert(pairs, pair)
 end
 
-local function issue_was_reopened(entity)
-  if type(entity) ~= "table" then return false end
-  local issue = entity.parent_issue or entity.issue
-  if type(issue) == "table" then
-    return tostring(issue.state_reason or ""):upper() == "REOPENED" or issue.reopened == true
-  end
-  return entity.issue_reopened == true
-end
-
-local function detect_false_consensus(fact, entities, recent_merged_prs)
-  local pairs = {}
-  local seen = {}
-  local pr_number = tonumber(fact and fact.pr_number)
-  if pr_number == nil then
-    return false, pairs
-  end
-  for _, pr in ipairs(recent_merged_prs or {}) do
-    local revert_number = tonumber(pr and pr.number)
-    if revert_number ~= nil
-      and revert_number ~= pr_number
-      and title_or_body_reverts_pr(pr, pr_number)
-      and later_than_reverted_pair(pr, fact) then
-      append_pair(pairs, seen, {
-        reverted_pr = pr_number,
-        revert_pr = revert_number,
-        evidence = "explicit-revert-pr",
-      })
-    end
-  end
-  for _, entity in ipairs(entities or {}) do
-    if tonumber(entity and entity.pr_number) == pr_number and issue_was_reopened(entity) then
-      append_pair(pairs, seen, {
-        reverted_pr = pr_number,
-        issue_number = tonumber(entity.issue_number),
-        evidence = "issue-reopened",
-      })
-    end
-  end
+local function detect_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
+  local pairs = no_revert_reopen.evidence(fact, {
+    entities = entities,
+    recent_merged_prs = recent_merged_prs,
+    recent_merged_issues = recent_merged_issues,
+    recent_revert_commits = recent_revert_commits,
+  })
   return #pairs > 0, pairs
 end
 
@@ -213,8 +147,8 @@ local function decorate_with_attempt_projection(fact, comments, now_seconds)
   return fact
 end
 
-local function decorate_with_false_consensus(fact, entities, recent_merged_prs)
-  local detected, pairs = detect_false_consensus(fact, entities, recent_merged_prs)
+local function decorate_with_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
+  local detected, pairs = detect_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   if detected then
     fact.false_consensus = true
     fact.false_consensus_pairs = pairs
@@ -228,6 +162,77 @@ local function decorate_with_false_consensus(fact, entities, recent_merged_prs)
   return fact
 end
 
+local function fact_issue_for_gate(fact, entities, recent_merged_issues)
+  local issue_number = tonumber(fact and fact.issue_number)
+  if issue_number == nil then
+    return nil
+  end
+  for _, entity in ipairs(entities or {}) do
+    local issue = type(entity) == "table" and (entity.parent_issue or entity.issue or entity) or nil
+    local candidate = tonumber(issue and (issue.number or issue.issue_number)) or tonumber(entity and entity.issue_number)
+    if candidate == issue_number then
+      return issue
+    end
+  end
+  for _, issue in ipairs(recent_merged_issues or {}) do
+    local candidate = tonumber(issue and (issue.number or issue.issue_number))
+    if candidate == issue_number then
+      return issue
+    end
+  end
+  return nil
+end
+
+local function fact_scan_for_gate(fact, recent_merged_prs, recent_merged_issues)
+  if type(fact) ~= "table" then
+    return nil
+  end
+  if type(fact.no_revert_reopen_scan) == "table" then
+    return fact.no_revert_reopen_scan
+  end
+  local pr_number = tonumber(fact.pr_number)
+  for _, pr in ipairs(recent_merged_prs or {}) do
+    if pr_number ~= nil and tonumber(pr and (pr.number or pr.pr_number)) == pr_number
+      and type(pr.no_revert_reopen_scan) == "table" then
+      return pr.no_revert_reopen_scan
+    end
+  end
+  local issue_number = tonumber(fact.issue_number)
+  for _, issue in ipairs(recent_merged_issues or {}) do
+    if issue_number ~= nil and tonumber(issue and (issue.number or issue.issue_number)) == issue_number
+      and type(issue.no_revert_reopen_scan) == "table" then
+      return issue.no_revert_reopen_scan
+    end
+  end
+  return nil
+end
+
+local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
+  if type(fact) ~= "table" then
+    return fact
+  end
+  local gate = no_revert_reopen.gate(fact, {
+    now_seconds = now_seconds,
+    issue = fact_issue_for_gate(fact, entities, recent_merged_issues),
+    entities = entities,
+    recent_merged_prs = recent_merged_prs,
+    recent_merged_issues = recent_merged_issues,
+    recent_revert_commits = recent_revert_commits,
+    no_revert_reopen_scan = fact_scan_for_gate(fact, recent_merged_prs, recent_merged_issues),
+  })
+  if type(fact.gates) ~= "table" then
+    fact.gates = {}
+  end
+  fact.gates.no_revert_reopen = gate
+  fact.valid_autonomous_merge = autonomy_ledger.autonomy_valid_autonomous_merge(core, fact.gates)
+  if type(fact.attempt_projection) == "table" then
+    autonomy_projection.apply_audited_fact(fact.attempt_projection, fact)
+    fact.avm_rate_numerator = fact.attempt_projection.valid_merges
+    fact.avm_rate_denominator = fact.attempt_projection.total_attempts
+  end
+  return fact
+end
+
 local function fact_from_marker(marker, comment)
   local proposal_id = marker_attr(marker, "proposal")
   local pr_number = marker_attr(marker, "pr")
@@ -236,7 +241,12 @@ local function fact_from_marker(marker, comment)
   if proposal_id == nil or pr_number == nil or version == nil or head_sha == nil then
     return nil, "missing_identity"
   end
-  return autonomy_ledger.autonomy_result_record_from_marker(core, marker, comment, proposal_id, pr_number, version, head_sha)
+  local fact, reason = autonomy_ledger.autonomy_result_record_from_marker(core, marker, comment, proposal_id, pr_number, version, head_sha)
+  if fact ~= nil and fact.issue_number == nil and core.parse_proposal_id ~= nil then
+    local _, issue_number = core.parse_proposal_id(proposal_id)
+    fact.issue_number = tonumber(issue_number)
+  end
+  return fact, reason
 end
 
 local function log_marker_rejection(tag, reason, comment, marker)
@@ -416,7 +426,7 @@ function core.collect_recent_merged_issues(repo, limits, deadline)
   return issues
 end
 
-function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs, recent_merged_issues)
+function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   local facts = {}
   for _, entity in ipairs(entities or {}) do
     append_entity_direct_facts(facts, entity)
@@ -425,7 +435,8 @@ function core.collect_avm_scoreboard_facts(entities, now_seconds, recent_merged_
   append_recent_pr_facts(facts, recent_merged_prs, now_seconds)
   append_recent_issue_facts(facts, recent_merged_issues, now_seconds)
   for _, fact in ipairs(facts) do
-    decorate_with_false_consensus(fact, entities, recent_merged_prs)
+    decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
+    decorate_with_false_consensus(fact, entities, recent_merged_prs, recent_merged_issues, recent_revert_commits)
   end
   return facts
 end

@@ -19,6 +19,8 @@ version = "workspace"
 public = [
   "devloop.adapters.workflow_ports",
   "devloop.autonomy_ledger",
+  "devloop.autonomy.no_revert_reopen",
+  "devloop.autonomy.projection",
   "devloop.base",
   "devloop.base_ids",
   "devloop.claims",
