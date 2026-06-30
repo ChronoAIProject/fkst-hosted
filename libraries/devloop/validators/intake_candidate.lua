@@ -1,7 +1,7 @@
 local source_refs = require("contract.source_ref")
 
-return function(M)
-function M.is_supported_intake_candidate(payload)
+local C = {}
+function C.is_supported_intake_candidate(M, payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-devloop.intake-candidate.v1"
     or not M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
@@ -17,4 +17,5 @@ function M.is_supported_intake_candidate(payload)
     and tostring(issue_number) == tostring(payload.issue_number)
     and tostring(payload.proposal_id) == M.proposal_id(repo, issue_number)
 end
-end
+
+return C

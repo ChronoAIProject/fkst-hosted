@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local transition_version = require("contract.transition_version")
 local payloads_builders = require("devloop.payloads.builders")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local core = h.core
 local t = h.t
 
@@ -45,7 +46,7 @@ return {
     t.is_true(proposal.content_fetch:find("/tmp/ctx/issue.json", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("/tmp/ctx/diff.patch", 1, true) ~= nil)
     t.is_nil(proposal.content_fetch:find("gh ", 1, true))
-    t.eq(core.validate_proposal(proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
 
     local marker = core.review_result_marker(id, issue_proposal_id, "approve", "consensus:v1")
     t.eq(core.has_review_result_marker({ marker }, id, issue_proposal_id, "approve", "consensus:v1"), true)
@@ -119,7 +120,7 @@ return {
       { kind = "external", ref = repo .. "#pr/7" }
     )
     t.is_true(#proposal.proposal_id <= 200)
-    t.eq(core.validate_proposal(proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
   end,
   test_pr_review_proposal_uses_fetch_instruction_when_issue_body_is_long = function()
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -145,6 +146,6 @@ return {
     t.is_true(proposal.content_fetch:find("/tmp/ctx/issue.json", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("/tmp/ctx/diff.patch", 1, true) ~= nil)
     t.is_nil(proposal.content_fetch:find("gh ", 1, true))
-    t.eq(core.validate_proposal(proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
   end,
 }

@@ -7,6 +7,9 @@ local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local v_ready = require("devloop.validators.ready")
+local v_fixing = require("devloop.validators.fixing")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local core = h.core
 local t = h.t
 local decompose_lib = require("devloop.decompose")
@@ -405,11 +408,11 @@ return {
     t.eq(ready.proposal_id, source.proposal_id)
     t.eq(ready.framing, source.framing)
     t.eq(ready.source_ref.ref, "owner/repo#issue/42")
-    t.eq(core.is_supported_ready(ready), true)
+    t.eq(v_ready.is_supported_ready(core, ready), true)
     local ready_without_framing = payloads_builders.build_devloop_ready_payload(core, reached())
     t.is_nil(ready_without_framing.framing)
     t.is_nil(ready_without_framing.ready_hand_off)
-    t.eq(core.is_supported_ready(ready_without_framing), true)
+    t.eq(v_ready.is_supported_ready(core, ready_without_framing), true)
     local ready_with_hand_off = payloads_builders.build_devloop_ready_payload(core, copy_table(reached(), {
       include_ready_hand_off = true,
       ready_comment_id = "IC_123",
@@ -417,20 +420,20 @@ return {
     t.eq(ready_with_hand_off.ready_hand_off.kind, "own-state-marker")
     t.eq(ready_with_hand_off.ready_hand_off.event_version, ready_with_hand_off.dedup_key)
     t.eq(ready_with_hand_off.ready_hand_off.comment_id, "IC_123")
-    t.eq(core.is_supported_ready(ready_with_hand_off), true)
+    t.eq(v_ready.is_supported_ready(core, ready_with_hand_off), true)
     ready_with_hand_off.ready_hand_off.effects = "alternate-ready-producer"
-    t.eq(core.is_supported_ready(ready_with_hand_off), true)
+    t.eq(v_ready.is_supported_ready(core, ready_with_hand_off), true)
     ready_with_hand_off.ready_hand_off.state = "reviewing"
-    t.eq(core.is_supported_ready(ready_with_hand_off), false)
+    t.eq(v_ready.is_supported_ready(core, ready_with_hand_off), false)
     ready_with_hand_off.ready_hand_off.state = "ready"
     ready_with_hand_off.ready_hand_off.event_version = "ready/other"
-    t.eq(core.is_supported_ready(ready_with_hand_off), false)
+    t.eq(v_ready.is_supported_ready(core, ready_with_hand_off), false)
     ready_with_hand_off = payloads_builders.build_devloop_ready_payload(core, copy_table(reached(), {
       include_ready_hand_off = true,
       impl_retry_attempt = 2,
     }))
     t.is_nil(ready_with_hand_off.ready_hand_off)
-    t.eq(core.is_supported_ready(ready_with_hand_off), true)
+    t.eq(v_ready.is_supported_ready(core, ready_with_hand_off), true)
 
     t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
     local deterministic_branch = core.implement_branch("owner/repo", "42", ready.dedup_key)
@@ -730,7 +733,7 @@ return {
       framing = "Fix the bounded source_ref migration only; do not raise payload limits.",
     }, source_ref())
     t.eq(fix.framing, "Fix the bounded source_ref migration only; do not raise payload limits.")
-    t.eq(core.is_supported_fixing(fix), true)
+    t.eq(v_fixing.is_supported_fixing(core, fix), true)
   end,
 
   test_replayed_fixing_dedup_binds_merge_gate_fact_identity = function()
@@ -760,9 +763,9 @@ return {
     t.is_true(defective.dedup_key:find("/nobase/nopred/def456", 1, true) ~= nil)
     t.is_true(corrected.dedup_key:find("/828df8d3/nopred/def456", 1, true) ~= nil)
     t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/def456", 1, true) ~= nil)
-    t.eq(core.is_supported_fixing(defective), true)
-    t.eq(core.is_supported_fixing(corrected), true)
-    t.eq(core.is_supported_fixing(new_predecessors), true)
+    t.eq(v_fixing.is_supported_fixing(core, defective), true)
+    t.eq(v_fixing.is_supported_fixing(core, corrected), true)
+    t.eq(v_fixing.is_supported_fixing(core, new_predecessors), true)
   end,
 
   test_parse_pr_view_origin_falls_back_on_empty_name_with_owner = function()
@@ -801,7 +804,7 @@ return {
     t.eq(#thinking.prior_round_digests, 2)
     t.eq(thinking.prior_round_digests[2].verdict, "abstain")
     t.is_true(thinking.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(core.validate_proposal(thinking))
+    t.is_true(v_validate_proposal.validate_proposal(core, thinking))
 
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local review = payloads_builders.build_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
@@ -813,7 +816,7 @@ return {
     t.eq(review.convergence_question, converge.narrowed_question)
     t.eq(#review.prior_round_digests, 2)
     t.is_true(review.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(core.validate_proposal(review))
+    t.is_true(v_validate_proposal.validate_proposal(core, review))
 
     local function context_fetch_returns_high_risk()
       return "runtime-cache:github-devloop/context-bundle-manifest/pr-review-owner-repo-7", true
@@ -824,7 +827,7 @@ return {
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, {}, context_fetch_returns_high_risk())
     t.eq(table.concat(high_risk_review.angles, ","), "minimal,structural,delete,high-risk")
     t.is_true(high_risk_review.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(core.validate_proposal(high_risk_review))
+    t.is_true(v_validate_proposal.validate_proposal(core, high_risk_review))
 
     local high_risk_board_review = payloads_builders.build_board_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",
@@ -832,7 +835,7 @@ return {
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, "2026-06-08T00:00:00Z", {}, context_fetch_returns_high_risk())
     t.eq(table.concat(high_risk_board_review.angles, ","), "minimal,structural,delete,high-risk")
     t.is_true(high_risk_board_review.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(core.validate_proposal(high_risk_board_review))
+    t.is_true(v_validate_proposal.validate_proposal(core, high_risk_board_review))
 
     -- Without a converge carry the proposal stays valid and blind-compatible: the round is
     -- still tracked, but no convergence_question / prior_round_digests are injected.
@@ -845,6 +848,6 @@ return {
     t.eq(blind.verdict_mode, "converge")
     t.eq(blind.convergence_question, nil)
     t.eq(blind.prior_round_digests, nil)
-    t.is_true(core.validate_proposal(blind))
+    t.is_true(v_validate_proposal.validate_proposal(core, blind))
   end,
 }

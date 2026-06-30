@@ -9,6 +9,8 @@ local config = require("devloop.config")
 
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
+local v_unresolved = require("devloop.validators.unresolved")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -22,7 +24,7 @@ local spec = {
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
-  if not core.is_supported_unresolved(unresolved) then
+  if not v_unresolved.is_supported_unresolved(core, unresolved) then
     core.log_entry("loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
     core.log_cas_decision("loop", "unknown", { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
@@ -116,7 +118,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
     }, event.ts, content_fetch, next_dedup)
-    if not core.validate_proposal(proposal) then
+    if not v_validate_proposal.validate_proposal(core, proposal) then
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return
     end

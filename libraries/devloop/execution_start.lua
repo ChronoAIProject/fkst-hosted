@@ -4,6 +4,7 @@ local base_ids = require("devloop.base_ids")
 local context_bundle = require("devloop.context_bundle")
 
 local payloads_builders = require("devloop.payloads.builders")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local E = {}
 
 local service_classes = {
@@ -76,7 +77,7 @@ function E.build_execution_start_proposal(core, repo, issue_number, request, cur
   proposal.dedup_key = request.dedup_key
   proposal.effect_version = request.dedup_key
   proposal.intake_hand_off = E.execution_intake_hand_off(request)
-  return core.validate_proposal(proposal) and proposal or nil
+  return v_validate_proposal.validate_proposal(core, proposal) and proposal or nil
 end
 
 function E.build_execution_start_effects(core, repo, issue_number, request, current, event_ts, dept)

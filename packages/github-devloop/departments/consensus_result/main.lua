@@ -3,6 +3,7 @@ local requests_lifecycle = require("devloop.requests.lifecycle")
 local core = require("core")
 local ports_seam = require("forge.ports")
 local saga = require("workflow.saga")
+local v_result = require("devloop.validators.result")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -128,7 +129,7 @@ local function make_department(ports)
       core.log_cas_decision("consensus_result", tostring(reached.proposal_id or "unknown"), { state = nil, version = nil }, "thinking", "ready", "skip-unsupported(decision)", "issue consensus does not support reject")
       return
     end
-    if not core.is_supported_result(reached) then
+    if not v_result.is_supported_result(core, reached) then
       core.log_entry("consensus_result", event, "unknown", core.payload_field(reached, "dedup_key"))
       core.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
       return

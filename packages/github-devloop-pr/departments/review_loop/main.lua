@@ -13,6 +13,8 @@ local saga = require("workflow.saga")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local v_pr_review_unresolved = require("devloop.validators.pr_review_unresolved")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -76,7 +78,7 @@ end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
-  if not core.is_supported_pr_review_unresolved(unresolved) then
+  if not v_pr_review_unresolved.is_supported_pr_review_unresolved(core, unresolved) then
     core.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
     core.log_cas_decision("review_loop", "unknown", { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
@@ -231,7 +233,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
     }, event.ts, current_pr.comments, content_fetch, high_risk, next_dedup)
-    if not core.validate_proposal(proposal) then
+    if not v_validate_proposal.validate_proposal(core, proposal) then
       log.warn("github-devloop dept=review_loop proposal_id=" .. tostring(origin.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-loop-proposal")
       return
     end

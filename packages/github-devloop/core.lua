@@ -84,7 +84,6 @@ require("devloop.entity").install(M)
 require("core.implement_attempt").install(M)
 require("core.ratchet_slice_ledger").install(M)
 require("core.dependencies").install(M)
-require("devloop.validators").install(M)
 require("core.span_conformance").install(M)
 
 return M

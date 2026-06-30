@@ -1,7 +1,7 @@
 local source_refs = require("contract.source_ref")
 
-return function(M)
-function M.is_supported_result(payload)
+local C = {}
+function C.is_supported_result(M, payload)
   return type(payload) == "table"
     and payload.schema == "consensus.consensus_reached.v1"
     and payload.decision == "approve"
@@ -11,4 +11,5 @@ function M.is_supported_result(payload)
     and (payload.framing == nil or M._is_bounded_string(payload.framing, M._max_framing_len))
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
-end
+
+return C

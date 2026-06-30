@@ -1,8 +1,8 @@
 local source_refs = require("contract.source_ref")
 
 local payloads_predicates = require("devloop.payloads.predicates")
-return function(M)
-function M.is_supported_reviewing(payload)
+local C = {}
+function C.is_supported_reviewing(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.reviewing.v1"
     and M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
@@ -17,4 +17,5 @@ function M.is_supported_reviewing(payload)
       }))
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
-end
+
+return C

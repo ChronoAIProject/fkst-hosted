@@ -3,6 +3,7 @@ local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local C = {}
 local convergence_shared = require("devloop.convergence.shared")
 local replay_thinking_convergence = require("devloop.replay_thinking_convergence")
@@ -397,7 +398,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
       narrowed_question = latest.narrowed_question,
       angle_digests = latest.angle_digests,
     }, event_ts, content_fetch, next_dedup)
-    return M.validate_proposal(proposal) and proposal or nil
+    return v_validate_proposal.validate_proposal(M, proposal) and proposal or nil
   end
 
   local replay_issue = {}
@@ -417,7 +418,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   })
   local proposal = payloads_builders.build_board_proposal(M, replay_issue, event_ts)
   proposal.dedup_key = replay_dedup
-  return M.validate_proposal(proposal) and proposal or nil
+  return v_validate_proposal.validate_proposal(M, proposal) and proposal or nil
 end
 
 function C.build_thinking_replay_proposal(M, issue, proposal_id, state, current, event_ts)

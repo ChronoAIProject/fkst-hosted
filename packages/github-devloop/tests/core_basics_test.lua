@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 local core = h.core
 local error_facts = require("contract.error_facts")
 local github_risk = require("devloop.github_risk")
@@ -263,6 +264,6 @@ return {
     t.is_nil(proposal.content_fetch)
     t.eq(proposal.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
-    t.eq(core.validate_proposal(proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
   end,
 }

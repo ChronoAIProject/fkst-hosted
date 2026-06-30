@@ -9,6 +9,7 @@ local config = require("devloop.config")
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local v_review_result = require("devloop.validators.review_result")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -27,7 +28,7 @@ local spec = {
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reached = event.payload or {}
-  if not core.is_supported_review_result(reached) then
+  if not v_review_result.is_supported_review_result(core, reached) then
     core.log_entry("review_result", event, "unknown", core.payload_field(reached, "dedup_key"))
     core.log_cas_decision("review_result", "unknown", { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "unsupported event payload")
     return

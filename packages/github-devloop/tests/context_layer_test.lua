@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 require("tests.board_digest_probe_helpers")
 local core = h.core
 local t = h.t
@@ -398,7 +399,7 @@ return {
       t.is_true(proposal.body:find("BEGIN UNTRUSTED ISSUE DATA", 1, true) ~= nil)
       t.is_true(proposal.body:find("Open items snapshot:", 1, true) ~= nil)
       t.is_true(proposal.body:find("Recent closed issues for recurrence judgment:", 1, true) ~= nil)
-      t.is_true(core.validate_proposal(proposal))
+      t.is_true(v_validate_proposal.validate_proposal(core, proposal))
     end
     t.eq(loop.round, 2)
     t.eq(review_loop.round, 3)

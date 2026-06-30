@@ -658,7 +658,6 @@ local SCANNED_SOURCE_FILES = {
   "libraries/devloop/sweep_bounds.lua",
   "libraries/devloop/validators.lua",
   "libraries/devloop/validators/fixing.lua",
-  "libraries/devloop/validators/index.lua",
   "libraries/devloop/validators/intake_candidate.lua",
   "libraries/devloop/validators/issue.lua",
   "libraries/devloop/validators/merge_ready.lua",

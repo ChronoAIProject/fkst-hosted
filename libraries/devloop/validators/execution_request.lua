@@ -1,8 +1,8 @@
 local execution_start = require("devloop.execution_start")
 local source_refs = require("contract.source_ref")
 
-return function(M)
-function M.is_supported_execution_request(payload)
+local C = {}
+function C.is_supported_execution_request(M, payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-devloop.execution-request.v1"
     or not M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
@@ -18,4 +18,5 @@ function M.is_supported_execution_request(payload)
     and issue_number ~= nil
     and tostring(payload.proposal_id) == M.proposal_id(repo, issue_number)
 end
-end
+
+return C

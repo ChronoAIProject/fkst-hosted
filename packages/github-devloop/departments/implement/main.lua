@@ -18,6 +18,7 @@ local fork_gate = require("departments.implement.fork_gate")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
+local v_ready = require("devloop.validators.ready")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -574,7 +575,7 @@ end
 
 local function process_ready_event(event)
   local ready = event.payload or {}
-  if not core.is_supported_ready(ready) then
+  if not v_ready.is_supported_ready(core, ready) then
     core.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
     core.log_cas_decision("implement", "unknown", { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "unsupported event payload")
     return

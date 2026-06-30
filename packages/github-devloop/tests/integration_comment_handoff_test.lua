@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local v_ready = require("devloop.validators.ready")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -41,7 +42,7 @@ return {
     t.eq(ready.ready_hand_off.comment_id, "IC_ready_1")
     t.eq(ready.ready_hand_off.marker_version, version)
     t.eq(ready.ready_hand_off.event_version, ready.dedup_key)
-    t.eq(core.is_supported_ready(ready), true)
+    t.eq(v_ready.is_supported_ready(core, ready), true)
   end,
 
   test_comment_written_ready_ack_preserves_effect_version_marker_identity = function()
@@ -82,7 +83,7 @@ return {
     t.eq(ready.ready_hand_off.comment_id, "IC_ready_effect_1")
     t.eq(ready.ready_hand_off.marker_version, marker_version)
     t.eq(ready.ready_hand_off.event_version, ready.dedup_key)
-    t.eq(core.is_supported_ready(ready), true)
+    t.eq(v_ready.is_supported_ready(core, ready), true)
   end,
 
 }

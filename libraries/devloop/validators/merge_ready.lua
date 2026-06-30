@@ -1,8 +1,8 @@
 local source_refs = require("contract.source_ref")
 local forge_validators = require("devloop.forge_validators")
 
-return function(M)
-function M.is_supported_merge_ready(payload)
+local C = {}
+function C.is_supported_merge_ready(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.merge-ready.v1"
     and M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
@@ -12,4 +12,5 @@ function M.is_supported_merge_ready(payload)
     and forge_validators.is_git_sha(payload.reviewed_head_sha)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
-end
+
+return C

@@ -1,7 +1,7 @@
 local source_refs = require("contract.source_ref")
 
-return function(M)
-function M.is_intake_hand_off(hand_off, proposal)
+local C = {}
+function C.is_intake_hand_off(M, hand_off, proposal)
   if type(hand_off) ~= "table" or type(proposal) ~= "table" then
     return false
   end
@@ -15,7 +15,7 @@ function M.is_intake_hand_off(hand_off, proposal)
     and tostring(hand_off.source_ref.ref or "") == tostring(proposal.source_ref.ref or "")
 end
 
-function M.validate_proposal(proposal)
+function C.validate_proposal(M, proposal)
   if type(proposal) ~= "table" then
     return false
   end
@@ -51,6 +51,7 @@ function M.validate_proposal(proposal)
   if proposal.effect_version ~= nil and not M._is_bounded_string(proposal.effect_version, M._max_dedup_len) then
     return false
   end
-  return proposal.intake_hand_off == nil or M.is_intake_hand_off(proposal.intake_hand_off, proposal)
+  return proposal.intake_hand_off == nil or C.is_intake_hand_off(M, proposal.intake_hand_off, proposal)
 end
-end
+
+return C

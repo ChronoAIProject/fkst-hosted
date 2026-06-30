@@ -13,6 +13,7 @@ local decompose_lib = require("devloop.decompose")
 local replayer = require("devloop.replayer")
 local config = require("devloop.config")
 local conv_rounds = require("devloop.convergence.rounds")
+local v_pr = require("devloop.validators.pr")
 
 local M = {}
 
@@ -39,7 +40,7 @@ end
 
 local function pr_context(event)
   local payload = event.payload or {}
-  if core.is_supported_pr(payload) then
+  if v_pr.is_supported_pr(core, payload) then
     return {
       source = "poll",
       repo = payload.repo,

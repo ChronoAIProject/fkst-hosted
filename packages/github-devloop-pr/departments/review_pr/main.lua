@@ -5,6 +5,8 @@ local transition_version = require("contract.transition_version")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
+local v_reviewing = require("devloop.validators.reviewing")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -42,7 +44,7 @@ end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reviewing = event.payload or {}
-  if not core.is_supported_reviewing(reviewing) then
+  if not v_reviewing.is_supported_reviewing(core, reviewing) then
     core.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
     core.log_cas_decision("review_pr", "unknown", { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(payload)", "unsupported event payload")
     return
@@ -153,7 +155,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local content_fetch = context_fetch[1]
     local high_risk = context_fetch[2]
     local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
-    if not core.validate_proposal(proposal) then
+    if not v_validate_proposal.validate_proposal(core, proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return
     end

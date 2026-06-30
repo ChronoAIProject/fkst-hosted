@@ -1,6 +1,7 @@
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
+local v_review_meta = require("devloop.validators.review_meta")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -16,7 +17,7 @@ local spec = {
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local review_meta = event.payload or {}
-  if not core.is_supported_review_meta(review_meta) then
+  if not v_review_meta.is_supported_review_meta(core, review_meta) then
     core.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
     core.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return

@@ -1,5 +1,8 @@
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local v_reviewing = require("devloop.validators.reviewing")
+local v_fixing = require("devloop.validators.fixing")
+local v_merge_ready = require("devloop.validators.merge_ready")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -56,7 +59,7 @@ return {
     t.eq(reviewing.reviewing_hand_off.comment_id, "IC_reviewing_1")
     t.eq(reviewing.reviewing_hand_off.marker_version, version)
     t.eq(reviewing.reviewing_hand_off.event_version, version)
-    t.eq(core.is_supported_reviewing(reviewing), true)
+    t.eq(v_reviewing.is_supported_reviewing(core, reviewing), true)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.eq(label.expected_proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(label.expected_state, "reviewing")
@@ -124,7 +127,7 @@ return {
     t.eq(reviewing.pr_number, 7)
     t.eq(reviewing.version, version)
     t.eq(reviewing.reviewing_hand_off.comment_id, "IC_pr_native_reviewing_1")
-    t.eq(core.is_supported_reviewing(reviewing), true)
+    t.eq(v_reviewing.is_supported_reviewing(core, reviewing), true)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.eq(label.expected_proposal_id, proposal_id)
     t.eq(label.expected_state, "reviewing")
@@ -207,7 +210,7 @@ return {
     t.eq(fixing.dedup_key, expected_replay.dedup_key)
     t.eq(fixing.source_ref.kind, expected.source_ref.kind)
     t.eq(fixing.source_ref.ref, expected.source_ref.ref)
-    t.eq(core.is_supported_fixing(fixing), true)
+    t.eq(v_fixing.is_supported_fixing(core, fixing), true)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.eq(label.expected_proposal_id, proposal_id)
     t.eq(label.expected_state, "fixing")
@@ -261,7 +264,7 @@ return {
     t.eq(merge_ready.dedup_key, expected.dedup_key)
     t.eq(merge_ready.source_ref.kind, expected.source_ref.kind)
     t.eq(merge_ready.source_ref.ref, expected.source_ref.ref)
-    t.eq(core.is_supported_merge_ready(merge_ready), true)
+    t.eq(v_merge_ready.is_supported_merge_ready(core, merge_ready), true)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.eq(label.expected_proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(label.expected_state, "merge-ready")

@@ -11,6 +11,7 @@ local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 
 local payloads_builders = require("devloop.payloads.builders")
+local v_fixing = require("devloop.validators.fixing")
 local spec = {
   consumes = { "devloop_fixing" },
   produces = {
@@ -620,7 +621,7 @@ end
 
 local function act_fix(event)
   local fix = event.payload or {}
-  if not core.is_supported_fixing(fix) then
+  if not v_fixing.is_supported_fixing(core, fix) then
     core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
     core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return

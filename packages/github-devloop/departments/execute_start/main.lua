@@ -2,6 +2,7 @@ local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local execution_start = require("devloop.execution_start")
 local saga = require("workflow.saga")
+local v_execution_request = require("devloop.validators.execution_request")
 
 local spec = {
   consumes = { "devloop_execute_request" },
@@ -64,7 +65,7 @@ end
 
 local function act_execute_start(event)
   local request = event.payload or {}
-  if not core.is_supported_execution_request(request) then
+  if not v_execution_request.is_supported_execution_request(core, request) then
     core.log_entry("execute_start", event, "unknown", core.payload_field(request, "dedup_key"))
     core.log_cas_decision("execute_start", "unknown", { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(payload)", "unsupported event payload")
     return

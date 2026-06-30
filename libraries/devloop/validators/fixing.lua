@@ -2,8 +2,8 @@ local parsers_misc = require("devloop.parsers.misc")
 local source_refs = require("contract.source_ref")
 local forge_validators = require("devloop.forge_validators")
 
-return function(M)
-function M.is_supported_fixing(payload)
+local C = {}
+function C.is_supported_fixing(M, payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-devloop.fixing.v1"
     or not M.is_safe_pr_number(payload.pr_number)
@@ -39,4 +39,5 @@ function M.is_supported_fixing(payload)
   })
   return tostring(payload.dedup_key) == replay_dedup
 end
-end
+
+return C

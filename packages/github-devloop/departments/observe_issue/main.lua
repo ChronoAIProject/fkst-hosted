@@ -12,6 +12,9 @@ local replayer = require("devloop.replayer")
 
 local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local v_issue = require("devloop.validators.issue")
+local v_validate_proposal = require("devloop.validators.validate_proposal")
+local v_pr = require("devloop.validators.pr")
 local M = {}
 
 local spec = {
@@ -504,7 +507,7 @@ end
 
 local function process_issue_event(event)
   local issue = event.payload or {}
-  if not core.is_supported_issue(issue) then
+  if not v_issue.is_supported_issue(core, issue) then
     core.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "unmanaged", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
@@ -688,7 +691,7 @@ local function process_issue_event(event)
       tick = event.ts,
     })
     local proposal = payloads_builders.build_board_proposal(core, issue, event.ts)
-    if not core.validate_proposal(proposal) then
+    if not v_validate_proposal.validate_proposal(core, proposal) then
       log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")
       return
     end
@@ -709,7 +712,7 @@ end
 
 local function process_pr_event(event)
   local pr = event.payload or {}
-  if not core.is_supported_pr(pr) then
+  if not v_pr.is_supported_pr(core, pr) then
     core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr)", "unsupported PR payload")
     return

@@ -6,6 +6,8 @@ local execution_start = require("devloop.execution_start")
 local operator_commands = require("devloop.operator_commands")
 local saga = require("workflow.saga")
 local context_bundle = require("devloop.context_bundle")
+local v_execution_request = require("devloop.validators.execution_request")
+local v_intake_candidate = require("devloop.validators.intake_candidate")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -57,7 +59,7 @@ local function raise_enable_successor(dept, repo, issue_number, candidate, curre
   local _ = current
   local __ = event_ts
   local execution_request = build_enable_request(candidate, decision_dedup_key)
-  if not core.is_supported_execution_request(execution_request) then
+  if not v_execution_request.is_supported_execution_request(core, execution_request) then
     log.warn("github-devloop dept=" .. tostring(dept) .. " proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-execution-request")
     return false
   end
@@ -192,7 +194,7 @@ end
 
 local function act_intake_judge(event)
   local candidate = event.payload or {}
-  if not core.is_supported_intake_candidate(candidate) then
+  if not v_intake_candidate.is_supported_intake_candidate(core, candidate) then
     core.log_entry("intake_judge", event, "unknown", core.payload_field(candidate, "dedup_key"))
     core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return

@@ -1,26 +1,16 @@
-local S = {}
-local registry = require("workflow.registry")
-
-local validators_index = require("devloop.validators.index")
-local validators = {
-  require("devloop.validators.execution_request"),
-  require("devloop.validators.fixing"),
-  require("devloop.validators.intake_candidate"),
-  require("devloop.validators.issue"),
-  require("devloop.validators.merge_ready"),
-  require("devloop.validators.pr"),
-  require("devloop.validators.pr_review_unresolved"),
-  require("devloop.validators.ready"),
-  require("devloop.validators.result"),
-  require("devloop.validators.review_meta"),
-  require("devloop.validators.review_result"),
-  require("devloop.validators.reviewing"),
-  require("devloop.validators.unresolved"),
-  require("devloop.validators.validate_proposal"),
+return {
+  execution_request = require("devloop.validators.execution_request"),
+  fixing = require("devloop.validators.fixing"),
+  intake_candidate = require("devloop.validators.intake_candidate"),
+  issue = require("devloop.validators.issue"),
+  merge_ready = require("devloop.validators.merge_ready"),
+  pr = require("devloop.validators.pr"),
+  pr_review_unresolved = require("devloop.validators.pr_review_unresolved"),
+  ready = require("devloop.validators.ready"),
+  result = require("devloop.validators.result"),
+  review_meta = require("devloop.validators.review_meta"),
+  review_result = require("devloop.validators.review_result"),
+  reviewing = require("devloop.validators.reviewing"),
+  unresolved = require("devloop.validators.unresolved"),
+  validate_proposal = require("devloop.validators.validate_proposal"),
 }
-
-function S.install(M)
-  registry.install_indexed_installers("devloop.validators.index", validators_index, validators, M, M.restart_package_name or "github-devloop")
-end
-
-return S

@@ -19,7 +19,6 @@ require("devloop.state").install(M)
 require("devloop.markers").install(M)
 require("core.admission").install(M)
 require("devloop.entity").install(M)
-require("devloop.validators").install(M)
 require("devloop.claims").install(M)
 
 return M

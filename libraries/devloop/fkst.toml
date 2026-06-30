@@ -114,7 +114,6 @@ public = [
   "devloop.validators",
   "devloop.validators.execution_request",
   "devloop.validators.fixing",
-  "devloop.validators.index",
   "devloop.validators.intake_candidate",
   "devloop.validators.issue",
   "devloop.validators.merge_ready",

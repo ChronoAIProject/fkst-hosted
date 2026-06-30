@@ -1,7 +1,7 @@
 local source_refs = require("contract.source_ref")
 
-return function(M)
-function M.is_supported_unresolved(payload)
+local C = {}
+function C.is_supported_unresolved(M, payload)
   return type(payload) == "table"
     and payload.schema == "consensus.consensus_converge.v1"
     and M.is_safe_consensus_result_ref(payload.proposal_id, payload.dedup_key)
@@ -10,4 +10,5 @@ function M.is_supported_unresolved(payload)
     and payload.decision == nil
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
-end
+
+return C
