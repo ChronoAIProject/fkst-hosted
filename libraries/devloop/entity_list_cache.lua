@@ -1,9 +1,7 @@
-local S = {}
-
-function S.install(M)
 local strings = require("contract.strings")
 local github_view = require("forge.github_view")
 
+local C = {}
 local json_string = github_view.json_string
 
 local function normalize_poll_key(value)
@@ -14,7 +12,7 @@ local function normalize_poll_key(value)
   return nil
 end
 
-local function list_cache_key(repo, kind, scope, poll_key)
+local function list_cache_key(M, repo, kind, scope, poll_key)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
     error("github-devloop: invalid entity list kind")
@@ -49,8 +47,8 @@ local function encode_cached_list(stdout)
   return '{"stdout":' .. json_string(stdout or "") .. "}"
 end
 
-local function fetch_shared_list(repo, kind, scope, poll_key, exec_spec)
-  local key = list_cache_key(repo, kind, scope, poll_key)
+local function fetch_shared_list(M, repo, kind, scope, poll_key, exec_spec)
+  local key = list_cache_key(M, repo, kind, scope, poll_key)
   if key == nil then
     return exec_spec()
   end
@@ -66,11 +64,11 @@ local function fetch_shared_list(repo, kind, scope, poll_key, exec_spec)
   return result
 end
 
-function M.entity_list_cache_key(repo, kind, scope, poll_key)
-  return list_cache_key(repo, kind, scope, poll_key)
+function C.entity_list_cache_key(M, repo, kind, scope, poll_key)
+  return list_cache_key(M, repo, kind, scope, poll_key)
 end
 
-function M.entity_list_poll_key(event)
+function C.entity_list_poll_key(M, event)
   if type(event) == "table" then
     if event.ts ~= nil then
       return tostring(event.ts)
@@ -87,24 +85,22 @@ function M.entity_list_poll_key(event)
   return nil
 end
 
-function M.fetch_shared_issue_observe_list(repo, opts)
+function C.fetch_shared_issue_observe_list(M, repo, opts)
   local options = opts or {}
   local exec_opts = M.gh_issue_list_observe_opts(repo)
   exec_opts.timeout = options.timeout or exec_opts.timeout
-  return fetch_shared_list(repo, "issue", "open", options.poll_key, function()
+  return fetch_shared_list(M, repo, "issue", "open", options.poll_key, function()
     return exec_opts.run(exec_opts.timeout)
   end)
 end
 
-function M.fetch_shared_pr_observe_list(repo, opts)
+function C.fetch_shared_pr_observe_list(M, repo, opts)
   local options = opts or {}
   local exec_opts = M.gh_pr_list_observe_opts(repo)
   exec_opts.timeout = options.timeout or exec_opts.timeout
-  return fetch_shared_list(repo, "pr", "open", options.poll_key, function()
+  return fetch_shared_list(M, repo, "pr", "open", options.poll_key, function()
     return exec_opts.run(exec_opts.timeout)
   end)
 end
 
-end
-
-return S
+return C

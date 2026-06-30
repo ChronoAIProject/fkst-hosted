@@ -1,5 +1,6 @@
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local liveness_scan = require("devloop.liveness_scan")
+local entity_list_cache = require("devloop.entity_list_cache")
 local saga = require("workflow.saga")
 local forge_validators = require("devloop.forge_validators")
 
@@ -110,7 +111,7 @@ local function act_liveness_scan(event)
     liveness_scan.liveness_scan_log_deferred(core, "deadline", { entity_cap = limits.entity_cap })
     return
   end
-  local prs = liveness_scan.liveness_scan_list_open_prs(core, repo, timeout, core.entity_list_poll_key(event))
+  local prs = liveness_scan.liveness_scan_list_open_prs(core, repo, timeout, entity_list_cache.entity_list_poll_key(core, event))
   local activations, deferred_by_cap, cursor_key, cursor, total = liveness_scan.liveness_scan_activation_slice(core, repo, "pr", prs, LIVENESS_SCAN_CURSOR_PREFIX)
   local processed = 0
   local attempted = 0

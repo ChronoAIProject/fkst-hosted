@@ -1,4 +1,5 @@
 local C, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
+local entity_list_cache = require("devloop.entity_list_cache")
 
 local LIVENESS_SCAN_MAX_PER_TICK = 100
 local LIVENESS_SCAN_CALL_TIMEOUT = 10
@@ -140,7 +141,7 @@ function C.liveness_scan_observe_queue(M, kind)
 end
 
 function C.liveness_scan_list_open_issues(M, repo, timeout, poll_key)
-  local list = M.fetch_shared_issue_observe_list(repo, {
+  local list = entity_list_cache.fetch_shared_issue_observe_list(M, repo, {
     timeout = timeout or 60,
     poll_key = poll_key,
   })
@@ -151,7 +152,7 @@ function C.liveness_scan_list_open_issues(M, repo, timeout, poll_key)
 end
 
 function C.liveness_scan_list_open_prs(M, repo, timeout, poll_key)
-  local list = M.fetch_shared_pr_observe_list(repo, {
+  local list = entity_list_cache.fetch_shared_pr_observe_list(M, repo, {
     timeout = timeout or 60,
     poll_key = poll_key,
   })

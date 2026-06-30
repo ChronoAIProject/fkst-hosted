@@ -1,6 +1,7 @@
 local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 local decompose_lib = require("devloop.decompose")
+local entity_list_cache = require("devloop.entity_list_cache")
 
 function S.install(M)
 local verdict_rank = {
@@ -218,7 +219,7 @@ local function fetch_pr_entity(repo, pr)
 end
 
 local function list_open_issues(repo, poll_key)
-  local result = M.fetch_shared_issue_observe_list(repo, {
+  local result = entity_list_cache.fetch_shared_issue_observe_list(M, repo, {
     timeout = 60,
     poll_key = poll_key,
   })
@@ -229,7 +230,7 @@ local function list_open_issues(repo, poll_key)
 end
 
 local function list_open_prs(repo, poll_key)
-  local result = M.fetch_shared_pr_observe_list(repo, {
+  local result = entity_list_cache.fetch_shared_pr_observe_list(M, repo, {
     timeout = 60,
     poll_key = poll_key,
   })

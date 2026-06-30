@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local gh_argv = require("testkit.gh_argv_mock")
+local entity_list_cache = require("devloop.entity_list_cache")
 
 local function count_calls(needle)
   local count = 0
@@ -15,9 +16,9 @@ end
 
 return {
   test_entity_list_cache_key_is_readable_and_scoped_to_exact_poll_key = function()
-    local first = core.entity_list_cache_key("owner/repo", "issue", "open", "2026-06-03T01:02:03Z")
-    local second = core.entity_list_cache_key("owner/repo", "issue", "open", "2026-06-03T01:02:04Z")
-    local missing = core.entity_list_cache_key("owner/repo", "issue", "open", nil)
+    local first = entity_list_cache.entity_list_cache_key(core, "owner/repo", "issue", "open", "2026-06-03T01:02:03Z")
+    local second = entity_list_cache.entity_list_cache_key(core, "owner/repo", "issue", "open", "2026-06-03T01:02:04Z")
+    local missing = entity_list_cache.entity_list_cache_key(core, "owner/repo", "issue", "open", nil)
 
     t.is_true(first:find("^github%-devloop/entity%-list/owner/repo/issue/open/poll%-") ~= nil)
     t.eq(first == second, false)
@@ -38,13 +39,13 @@ return {
       exit_code = 0,
     })
 
-    local first = core.fetch_shared_issue_observe_list(repo, {
+    local first = entity_list_cache.fetch_shared_issue_observe_list(core, repo, {
       poll_key = "2026-06-03T01:02:03Z",
     })
-    local second = core.fetch_shared_issue_observe_list(repo, {
+    local second = entity_list_cache.fetch_shared_issue_observe_list(core, repo, {
       poll_key = "2026-06-03T01:02:03Z",
     })
-    local next_poll = core.fetch_shared_issue_observe_list(repo, {
+    local next_poll = entity_list_cache.fetch_shared_issue_observe_list(core, repo, {
       poll_key = "2026-06-03T01:03:03Z",
     })
 
@@ -70,10 +71,10 @@ return {
       exit_code = 0,
     })
 
-    local first = core.fetch_shared_pr_observe_list(repo, {
+    local first = entity_list_cache.fetch_shared_pr_observe_list(core, repo, {
       poll_key = "2026-06-03T01:02:03Z",
     })
-    local second = core.fetch_shared_pr_observe_list(repo, {
+    local second = entity_list_cache.fetch_shared_pr_observe_list(core, repo, {
       poll_key = "2026-06-03T01:02:03Z",
     })
 
