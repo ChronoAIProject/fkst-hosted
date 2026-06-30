@@ -465,9 +465,9 @@ mod tests {
         assert_eq!(back, spec);
         assert_eq!(data["github-token"], "ghs_xyz");
         assert_eq!(data["llm-api-key"], "sk-test");
-        // The legacy NyxID token files are no longer written.
-        assert!(!data.contains_key("nyxid-token"));
-        assert!(!data.contains_key("nyxid-url"));
+        // The session Secret carries ONLY the github token + LLM key — no other
+        // credential files are written.
+        assert_eq!(data.len(), 3);
         let owners = secret.metadata.owner_references.unwrap();
         assert_eq!(owners[0].kind, "Job");
         assert_eq!(owners[0].uid, "job-uid-123");

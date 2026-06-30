@@ -17,7 +17,6 @@ use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
-use crate::auth::AuthContext;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::k8s::{job_disposition, JobDisposition, KubeClient};
 use crate::state::AppState;
@@ -126,7 +125,6 @@ async fn job_pod(kube: &KubeClient, job_name: &str) -> Option<Pod> {
         ("repo" = String, Path, description = "GitHub repo name"),
         ("issue" = i64, Path, description = "GitHub issue number"),
     ),
-    security(("NyxIdIdentity" = [])),
     responses(
         (status = 200, description = "The session view", body = SessionView),
         (status = 404, description = "No session for this issue", body = ErrorEnvelope),
@@ -134,7 +132,6 @@ async fn job_pod(kube: &KubeClient, job_name: &str) -> Option<Pod> {
 )]
 async fn get_one(
     State(state): State<AppState>,
-    _ctx: AuthContext,
     Path((owner, repo, issue)): Path<(String, String, i64)>,
 ) -> Result<Json<SessionView>, AppError> {
     let kube = kube_client(&state).await?;
@@ -176,14 +173,12 @@ async fn get_one(
         ("repo" = String, Path, description = "GitHub repo name"),
         ("issue" = i64, Path, description = "GitHub issue number"),
     ),
-    security(("NyxIdIdentity" = [])),
     responses(
         (status = 200, description = "Stop issued (or already gone)", body = StopResponse),
     )
 )]
 async fn stop(
     State(state): State<AppState>,
-    _ctx: AuthContext,
     Path((owner, repo, issue)): Path<(String, String, i64)>,
 ) -> Result<Json<StopResponse>, AppError> {
     let kube = kube_client(&state).await?;

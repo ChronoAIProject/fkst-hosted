@@ -1,8 +1,8 @@
 //! GitHub App webhook endpoint (issue #108): `POST /api/v1/github/app/webhook`.
 //!
-//! UNAUTHENTICATED but signature-verified. GitHub does not present a NyxID
-//! identity, so this route is mounted OUTSIDE the `/api/v1` auth nest (like
-//! `/health`) and instead authenticates the *sender* by an HMAC over the body:
+//! UNAUTHENTICATED at the app layer but signature-verified. This route is
+//! mounted at the top level (like `/health`) and authenticates the *sender* by
+//! an HMAC over the body:
 //!
 //! 1. Read the body as raw [`Bytes`] — verification MUST run on the exact bytes
 //!    GitHub signed. Deserializing then reserializing changes the bytes and
@@ -123,7 +123,7 @@ enum Handled {
         content = serde_json::Value,
         content_type = "application/json",
         description = "Raw GitHub App webhook event (installation / installation_repositories). \
-            Authenticated by the `X-Hub-Signature-256` HMAC over the exact body — NOT by a NyxID identity."
+            Authenticated by the `X-Hub-Signature-256` HMAC over the exact body."
     ),
     responses(
         (status = 200, description = "Event handled (e.g. installation caches busted)"),

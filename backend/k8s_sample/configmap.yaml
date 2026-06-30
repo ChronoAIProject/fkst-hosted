@@ -18,15 +18,9 @@ data:
   FKST_HOSTED_LOG_LEVEL: "info,fkst_control_plane=debug,tower_http=info"
   FKST_HOSTED_REQUEST_TIMEOUT_SECS: "30" # >= 1
 
-  # --- Auth: NyxID proxy-trust identity (decode-only; no JWKS / token verify).
-  # When FKST_AUTH_ENABLED=true, FKST_AUTH_NYXID_BASE_URL is required. ---
-  FKST_AUTH_ENABLED: "true"
-  FKST_AUTH_NYXID_BASE_URL: "http://nyxid-backend.ornn-cluster:3001"
-  FKST_NYXID_ORG_CACHE_TTL_SECS: "30" # >= 1
-  # Per-session NyxID agent-key TTL (self-expires; no SA revoke). >= 1.
-  FKST_SESSION_KEY_TTL_SECS: "86400"
-  # Slug of the NyxID GitHub proxy service. Non-blank (fail-closed).
-  FKST_NYXID_GITHUB_PROXY_SLUG: "api-github"
+  # The session read/stop API is open, read-only, and network-isolated — there
+  # is no application-level auth to configure. The only authenticated inbound is
+  # the signature-verified GitHub App webhook (secret in secret.example.yaml).
 
   # --- LLM provider (config-driven; injected into each session pod) ---
   # The model/base URL/wire_api are injected as plain pod env (session pods do

@@ -1,13 +1,11 @@
 //! GitHub App Contents READ helper (#179): a minimal `GET /repos/{o}/{r}/
 //! contents/{path}` over the App-installation token path.
 //!
-//! WHY this lives with the App layer (not `github_hub::service`): a per-repo
-//! Contents READ on an arbitrary user repo must resolve the per-repo App
-//! installation and present an INSTALLATION token (the App holds `contents:write`
-//! ⊇ read via `default_permissions`), surfacing the typed
-//! [`GithubAppError::NotInstalled { install_url }`] when the App is absent. The
-//! `github_hub::service` issue ops route through the user's *connected* GitHub
-//! account via the NyxID proxy and cannot do this — so the helper belongs here.
+//! WHY this lives with the App layer: a per-repo Contents READ on an arbitrary
+//! user repo must resolve the per-repo App installation and present an
+//! INSTALLATION token (the App holds `contents:write` ⊇ read via
+//! `default_permissions`), surfacing the typed
+//! [`GithubAppError::NotInstalled { install_url }`] when the App is absent.
 //!
 //! Read-only: this never PUTs/DELETEs contents (write capability belongs to a
 //! sibling scaffold issue). It mints via the existing

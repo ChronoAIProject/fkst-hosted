@@ -64,9 +64,8 @@ mod tests {
         // wire_api is a parameter and defaults to `chat`, NEVER `responses`.
         assert!(toml.contains("wire_api = \"chat\""));
         assert!(!toml.contains("responses"));
-        // The engine reads the key from `LLM_API_KEY`, never `NYXID_ACCESS_TOKEN`.
+        // The engine reads the LLM credential from the `LLM_API_KEY` env key.
         assert!(toml.contains("env_key = \"LLM_API_KEY\""));
-        assert!(!toml.contains("NYXID_ACCESS_TOKEN"));
         assert!(toml.contains("disable_response_storage = true"));
     }
 
