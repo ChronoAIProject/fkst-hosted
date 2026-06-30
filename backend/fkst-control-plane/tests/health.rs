@@ -13,32 +13,19 @@ use axum::http::{Request, StatusCode};
 use fkst_control_plane::auth::AuthMode;
 use fkst_control_plane::authz::Authorizer;
 use fkst_control_plane::config::Config;
-use fkst_control_plane::engine::EngineConfig;
-use fkst_control_plane::goals::GoalIssueStore;
 use fkst_control_plane::router::build_router;
-use fkst_control_plane::sessions::{SessionRepo, SessionService};
 use fkst_control_plane::state::AppState;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
-mod support;
-
 fn test_router() -> axum::Router {
-    let config = Config::default();
-    let goals = GoalIssueStore::new(None);
-    let sessions = SessionService::new(SessionRepo::new(), EngineConfig::default());
-    let vault = support::test_vault();
     build_router(AppState {
         binding_store: fkst_control_plane::nyxid_connect::BrokerBindingStore::new(),
-        config,
-        sessions,
+        config: Config::default(),
         auth_mode: AuthMode::Disabled,
         authz: Authorizer::disabled(),
         github_app: None,
         github_app_webhook_secret: None,
-        goals,
-        vault,
-        ornn: None,
     })
     .expect("router")
 }

@@ -226,35 +226,17 @@ impl CacheBust for AppState {
     }
 
     async fn fail_repo(&self, owner: &str, name: &str, reason: &str) {
-        match self
-            .sessions
-            .fail_for_uninstalled_repo(owner, name, reason)
-            .await
-        {
-            Ok(count) if count > 0 => {
-                tracing::warn!(repo = %format!("{owner}/{name}"), count, "failed active sessions after github app uninstall");
-            }
-            Ok(_) => {}
-            Err(error) => {
-                tracing::error!(repo = %format!("{owner}/{name}"), error = %error, "failed to fail sessions after uninstall");
-            }
-        }
+        // v1 has no in-memory session store: a session is a Kubernetes Job, so an
+        // App uninstall needs no in-process teardown here — a running session's
+        // next token refresh fails and the Job ends on its own. Token caches are
+        // evicted by `evict_repo` above.
+        tracing::info!(repo = %format!("{owner}/{name}"), reason, "github app uninstalled for repo");
     }
 
     async fn fail_owner(&self, owner: &str, reason: &str) {
-        match self
-            .sessions
-            .fail_for_uninstalled_owner(owner, reason)
-            .await
-        {
-            Ok(count) if count > 0 => {
-                tracing::warn!(owner = %owner, count, "failed active sessions after github app account uninstall/suspend");
-            }
-            Ok(_) => {}
-            Err(error) => {
-                tracing::error!(owner = %owner, error = %error, "failed to fail sessions after account uninstall/suspend");
-            }
-        }
+        // No in-memory sessions to fail (see `fail_repo`); token caches are
+        // evicted by `evict_owner`.
+        tracing::info!(owner, reason, "github app uninstalled for owner");
     }
 }
 
