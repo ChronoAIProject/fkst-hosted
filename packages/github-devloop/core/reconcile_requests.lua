@@ -1,4 +1,5 @@
 local S = {}
+local comment_strings = require("devloop.strings")
 
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
@@ -54,8 +55,8 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("reconcile_action_prefix") .. tostring(action)
-      .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
+    body = comment_strings.comment_string(M, "reconcile_action_prefix") .. tostring(action)
+      .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
       .. "\n\n"
       .. state_marker .. "\n" .. marker
       .. "\n" .. ai_sentinel,
@@ -78,8 +79,8 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, M.comment_string("fix_reconcile_action_prefix") .. tostring(action)
-    .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
+  }, comment_strings.comment_string(M, "fix_reconcile_action_prefix") .. tostring(action)
+    .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
     .. "\n" .. ai_sentinel, M._dedup_key({
@@ -99,8 +100,8 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, M.comment_string("review_reconcile_action_prefix") .. tostring(action)
-    .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
+  }, comment_strings.comment_string(M, "review_reconcile_action_prefix") .. tostring(action)
+    .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
     .. "\n" .. ai_sentinel, M._dedup_key({

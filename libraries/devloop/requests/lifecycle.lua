@@ -1,5 +1,6 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
+local comment_strings = require("devloop.strings")
 
 function S.install(M, shared)
 local strings = shared.strings
@@ -12,7 +13,7 @@ function M.build_observe_comment_request(issue, proposal)
     schema = "github-proxy.v1",
     repo = issue.repo,
     issue_number = issue.number,
-    body = M.comment_string("thinking_started") .. "\n\n"
+    body = comment_strings.comment_string(M, "thinking_started") .. "\n\n"
       .. M.state_marker(proposal.proposal_id, "thinking", tostring(proposal.effect_version or proposal.dedup_key)),
     dedup_key = M._dedup_key({
       tostring(proposal.proposal_id),
@@ -30,7 +31,7 @@ function M.build_result_comment_request(repo, issue_number, reached, state_name)
   local state_marker = M.state_marker(reached.proposal_id, canonical_state, tostring(reached.effect_version or reached.dedup_key), effects)
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
-  local body = M.comment_string("decision_prefix") .. tostring(reached.decision)
+  local body = comment_strings.comment_string(M, "decision_prefix") .. tostring(reached.decision)
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
@@ -72,7 +73,7 @@ function M.build_converge_round_comment_request(repo, issue_number, unresolved, 
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = build_convergence_display(M.comment_string("convergence_round_prefix"), unresolved, round)
+    body = build_convergence_display(comment_strings.comment_string(M, "convergence_round_prefix"), unresolved, round)
       .. "\n\n" .. tostring(marker_body)
       .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
@@ -95,8 +96,8 @@ function M.build_dependency_hold_comment_request(repo, issue_number, proposal_id
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("dependency_hold_prefix") .. tostring(gate and gate.kind or "unknown")
-      .. "\n\n" .. M.comment_string("reason_inline_label") .. reason
+    body = comment_strings.comment_string(M, "dependency_hold_prefix") .. tostring(gate and gate.kind or "unknown")
+      .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. reason
       .. "\n\n" .. tostring(marker),
     dedup_key = M._dedup_key({ "dependency", "comment", tostring(proposal_id), tostring(version), tostring(gate and gate.kind or "unknown") }),
     source_ref = M.normalize_source_ref(source_ref),
@@ -117,8 +118,8 @@ function M.build_dependency_release_comment_request(repo, issue_number, proposal
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("dependency_release_prefix") .. reason
-      .. "\n\n" .. M.comment_string("reason_inline_label") .. reason
+    body = comment_strings.comment_string(M, "dependency_release_prefix") .. reason
+      .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. reason
       .. "\n\n" .. markers,
     dedup_key = M._dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(version), reason }),
     source_ref = M.normalize_source_ref(source_ref),
@@ -133,23 +134,23 @@ function M.build_intake_decision_comment_request(repo, issue_number, candidate, 
   local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
-    safe_reason = M.comment_string("no_reason_provided")
+    safe_reason = comment_strings.comment_string(M, "no_reason_provided")
   end
   if #safe_reason > M._max_meta_reason_len then
     safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)
   end
   local detail = ""
   if decision == "track" then
-    detail = "\n\n" .. M.comment_string("intake_tracking_ack")
+    detail = "\n\n" .. comment_strings.comment_string(M, "intake_tracking_ack")
   end
   return M.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("intake_decision_prefix") .. tostring(decision)
+    body = comment_strings.comment_string(M, "intake_decision_prefix") .. tostring(decision)
       .. "\nService class: " .. normalized_class
       .. detail
-      .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. safe_reason
+      .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
       .. "\n\n" .. marker,
     dedup_key = M._dedup_key({
       "intake",
@@ -180,12 +181,12 @@ function M.build_implementing_comment_request(repo, issue_number, ready, worktre
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("implementation_output_published")
-      .. "\n\n" .. M.comment_string("worktree_label") .. tostring(worktree)
-      .. "\n" .. M.comment_string("branch_label") .. tostring(branch)
-      .. "\n" .. M.comment_string("head_label") .. tostring(head_sha)
-      .. "\n" .. M.comment_string("base_branch_label") .. tostring(base_branch)
-      .. "\n" .. M.comment_string("base_head_label") .. tostring(base_sha)
+    body = comment_strings.comment_string(M, "implementation_output_published")
+      .. "\n\n" .. comment_strings.comment_string(M, "worktree_label") .. tostring(worktree)
+      .. "\n" .. comment_strings.comment_string(M, "branch_label") .. tostring(branch)
+      .. "\n" .. comment_strings.comment_string(M, "head_label") .. tostring(head_sha)
+      .. "\n" .. comment_strings.comment_string(M, "base_branch_label") .. tostring(base_branch)
+      .. "\n" .. comment_strings.comment_string(M, "base_head_label") .. tostring(base_sha)
       .. "\n\n" .. attempt_marker
       .. "\n" .. marker,
     dedup_key = M._dedup_key({
@@ -215,10 +216,10 @@ function M.build_implementing_state_comment_request(repo, issue_number, ready, w
     repo = repo,
     issue_number = issue_number,
     body = "github-devloop implementation worktree ready"
-      .. "\n\n" .. M.comment_string("worktree_label") .. tostring(worktree)
-      .. "\n" .. M.comment_string("branch_label") .. tostring(branch)
-      .. "\n" .. M.comment_string("base_branch_label") .. tostring(base_branch)
-      .. "\n" .. M.comment_string("base_head_label") .. tostring(base_sha)
+      .. "\n\n" .. comment_strings.comment_string(M, "worktree_label") .. tostring(worktree)
+      .. "\n" .. comment_strings.comment_string(M, "branch_label") .. tostring(branch)
+      .. "\n" .. comment_strings.comment_string(M, "base_branch_label") .. tostring(base_branch)
+      .. "\n" .. comment_strings.comment_string(M, "base_head_label") .. tostring(base_sha)
       .. "\n\n" .. state_marker
       .. "\n" .. attempt_marker,
     dedup_key = M._dedup_key({
@@ -276,7 +277,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
     text = M.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
-    text = M.comment_string("no_implementation_output")
+    text = comment_strings.comment_string(M, "no_implementation_output")
   end
   text = M.neutralize_untrusted_comment_text(text)
 
@@ -286,7 +287,7 @@ function M.build_impl_failure_comment_request(repo, issue_number, ready, reason,
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = M.comment_string("implementation_failed_prefix") .. safe_reason
+    body = comment_strings.comment_string(M, "implementation_failed_prefix") .. safe_reason
       .. "\n\n" .. text
       .. "\n\n" .. state_marker
       .. "\n" .. marker,

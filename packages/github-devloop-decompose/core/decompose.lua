@@ -2,6 +2,7 @@ local S = {}
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
 local decompose_lib = require("devloop.decompose")
+local comment_strings = require("devloop.strings")
 
 function S.install(M)
 local max_decompose_issues = decompose_lib.max_decompose_issues(M)
@@ -65,7 +66,7 @@ function M.fallback_decompose_plan(decompose)
 end
 
 function M.decomposed_comment_body(decompose, count)
-  return M.comment_string("decomposed_prefix") .. tostring(count) .. M.comment_string("decomposed_suffix")
+  return comment_strings.comment_string(M, "decomposed_prefix") .. tostring(count) .. comment_strings.comment_string(M, "decomposed_suffix")
     .. "\n\n" .. decompose_lib.decomposed_marker(M, decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 

@@ -4,6 +4,7 @@ local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
 local config = require("devloop.config")
+local comment_strings = require("devloop.strings")
 
 function S.install(M)
 local function linked_pr_state(pr)
@@ -622,7 +623,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
   if head_sha == nil then
     return tools.log_skip(dept, proposal_id, state, state.state, "merged", "skip-foreign(head)", "merged linked PR head sha is missing")
   end
-  local merged_body = M.comment_string("merged_pr_prefix") .. tostring(link.pr_number)
+  local merged_body = comment_strings.comment_string(M, "merged_pr_prefix") .. tostring(link.pr_number)
     .. "\n\n" .. M.state_marker(proposal_id, "merged", state.version)
     .. "\n" .. M.merged_marker(proposal_id, link.pr_number, state.version, head_sha)
   local source_ref = M.pr_source_ref(issue.repo, link.pr_number)

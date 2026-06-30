@@ -10,7 +10,6 @@ end
 
 require("devloop.base").install(M)
 require("forge.github_debug_stamp").install(M)
-require("devloop.strings").install(M)
 require("core.github_graphql").install(M)
 require("devloop.commands").install(M)
 require("forge.merge_commands").install(M)

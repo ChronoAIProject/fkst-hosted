@@ -1,6 +1,5 @@
-local S = {}
+local C = {}
 
-function S.install(M)
 local strings = {
   en = {
     convergence_suffix = " - no three-angle consensus; narrowing",
@@ -164,7 +163,7 @@ for _, key in ipairs(human_comment_keys) do
   table.insert(template_audit, { id = key, classification = "human" })
 end
 
-local configured_output_lang = nil
+local configured_output_lang = setmetatable({}, { __mode = "k" })
 
 local function normalize_output_lang(value)
   local lang = tostring(value or ""):lower()
@@ -174,13 +173,13 @@ local function normalize_output_lang(value)
   return "en"
 end
 
-function M.configure_output_lang(lang)
-  configured_output_lang = lang and normalize_output_lang(lang) or nil
+function C.configure_output_lang(M, lang)
+  configured_output_lang[M] = lang and normalize_output_lang(lang) or nil
 end
 
-function M.output_lang(exec)
-  if configured_output_lang ~= nil then
-    return configured_output_lang
+function C.output_lang(M, exec)
+  if configured_output_lang[M] ~= nil then
+    return configured_output_lang[M]
   end
   local ok, value = pcall(function()
     return M.read_env("FKST_OUTPUT_LANG", exec)
@@ -191,18 +190,18 @@ function M.output_lang(exec)
   return normalize_output_lang(value)
 end
 
-function M.comment_string(key, exec)
-  local lang = M.output_lang(exec)
+function C.comment_string(M, key, exec)
+  local lang = C.output_lang(M, exec)
   local lang_strings = strings[lang] or strings.en
   return lang_strings[key] or strings.en[key] or tostring(key)
 end
 
-function M.comment_strings(lang)
+function C.comment_strings(M, lang)
   local normalized = normalize_output_lang(lang)
   return strings[normalized] or strings.en
 end
 
-function M.comment_template_audit()
+function C.comment_template_audit(M)
   local copy = {}
   for _, row in ipairs(template_audit) do
     table.insert(copy, {
@@ -212,6 +211,5 @@ function M.comment_template_audit()
   end
   return copy
 end
-end
 
-return S
+return C

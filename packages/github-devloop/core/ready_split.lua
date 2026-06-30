@@ -1,6 +1,7 @@
 local S = {}
 local operator_commands = require("devloop.operator_commands")
 local replay_fields_resolver = require("devloop.replay_fields")
+local comment_strings = require("devloop.strings")
 
 function S.install(M)
 
@@ -18,7 +19,7 @@ function M.build_ready_split_canonicalized_comment_request(repo, issue_number, p
     repo = repo,
     issue_number = issue_number,
     body = "github-devloop ready split canonicalized"
-      .. "\n\n" .. M.comment_string("reason_inline_label") .. tostring(gate and gate.reason or "ready_split_rederive")
+      .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. tostring(gate and gate.reason or "ready_split_rederive")
       .. "\n\n" .. markers,
     dedup_key = M._dedup_key({ "ready-split", "canonicalized", tostring(proposal_id), tostring(from_version), tostring(to_version) }),
     source_ref = M.normalize_source_ref(source_ref),
@@ -217,7 +218,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     repo = issue.repo,
     issue_number = issue.number,
     body = "github-devloop dependency gate blocked"
-      .. "\n\n" .. M.comment_string("reason_block_label") .. "\n" .. tostring(gate.reason or "dependency-gate-unresolvable")
+      .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. tostring(gate.reason or "dependency-gate-unresolvable")
       .. "\n\n" .. M.state_marker(proposal_id, "blocked", state.version),
     dedup_key = M._dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
     source_ref = M.normalize_source_ref(issue.source_ref),

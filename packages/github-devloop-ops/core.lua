@@ -44,7 +44,6 @@ end
 
 require("devloop.base").install(M)
 require("forge.github_debug_stamp").install(M)
-require("devloop.strings").install(M)
 require("devloop.commands").install(M)
 require("devloop.github_proxy_entity_view").install(M)
 require("devloop.pr_safety").install(M)

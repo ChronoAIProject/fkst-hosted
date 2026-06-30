@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local comment_strings = require("devloop.strings")
 
 local issue_proposal_id = "github-devloop/issue/owner/repo/42"
 local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -28,11 +29,11 @@ end
 
 return {
   test_decomposed_comment_localization_keeps_machine_markers_stable = function()
-    core.configure_output_lang("en")
+    comment_strings.configure_output_lang(core, "en")
     local en = decompose_case()
-    core.configure_output_lang("zh")
+    comment_strings.configure_output_lang(core, "zh")
     local zh = decompose_case()
-    core.configure_output_lang(nil)
+    comment_strings.configure_output_lang(core, nil)
 
     t.eq(collect_markers(en.request.body), collect_markers(zh.request.body))
     t.is_true(strip_markers(en.request.body):find("github-devloop decomposed blocked PR into 2 follow-up issue", 1, true) ~= nil)

@@ -121,7 +121,7 @@ end
 local function comment_strings(sources)
   local values = {}
   for _, path in ipairs(sorted_keys(sources)) do
-    if path:sub(-#"core/strings.lua") == "core/strings.lua" then
+    if path == "libraries/devloop/strings.lua" or path:sub(-#"core/strings.lua") == "core/strings.lua" then
       for key, value in pairs(key_value_strings(sources[path])) do
         values[key] = value
       end
@@ -195,6 +195,13 @@ local function comment_string_calls(body)
     local arg_start = end_pos + 1
     while body:sub(arg_start, arg_start):match("%s") do
       arg_start = arg_start + 1
+    end
+    local _, first_end = body:find("[A-Za-z_][A-Za-z0-9_%.:]*%s*,%s*", arg_start)
+    if first_end ~= nil then
+      arg_start = first_end + 1
+      while body:sub(arg_start, arg_start):match("%s") do
+        arg_start = arg_start + 1
+      end
     end
     local value, next_pos = parse_quoted_at(body, arg_start)
     if value ~= nil and value:match("^[A-Za-z0-9_]+$") then

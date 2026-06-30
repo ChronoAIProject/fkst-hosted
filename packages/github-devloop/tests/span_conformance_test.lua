@@ -387,7 +387,7 @@ local strings = { en = { implementation_started = "github-devloop implementation
 ]],
       ["packages/github-devloop/core/requests/lifecycle.lua"] = [[
 function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha)
-  return { body = M.comment_string("implementation_started") .. "\nHead: " .. tostring(head_sha) }
+  return { body = comment_strings.comment_string(M, "implementation_started") .. "\nHead: " .. tostring(head_sha) }
 end
 ]],
     })

@@ -1,4 +1,5 @@
 local convergence_shared = require("devloop.convergence.shared")
+local comment_strings = require("devloop.strings")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -106,9 +107,9 @@ local audited_english_skeletons = {
 }
 
 local function render_cases(lang)
-  core.configure_output_lang(lang)
+  comment_strings.configure_output_lang(core, lang)
   local rendered = comment_cases()
-  core.configure_output_lang(nil)
+  comment_strings.configure_output_lang(core, nil)
   return rendered
 end
 
@@ -118,10 +119,10 @@ end
 
 return {
   test_comment_template_audit_has_complete_language_table = function()
-    local en = core.comment_strings("en")
-    local zh = core.comment_strings("zh")
+    local en = comment_strings.comment_strings(core, "en")
+    local zh = comment_strings.comment_strings(core, "zh")
     local human = 0
-    for _, row in ipairs(core.comment_template_audit()) do
+    for _, row in ipairs(comment_strings.comment_template_audit(core)) do
       if row.classification == "human" then
         human = human + 1
         t.is_true(en[row.id] ~= nil)

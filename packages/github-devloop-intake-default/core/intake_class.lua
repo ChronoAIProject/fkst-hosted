@@ -1,4 +1,5 @@
 local S = {}
+local comment_strings = require("devloop.strings")
 
 function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
@@ -191,7 +192,7 @@ function M.build_intake_class_followup_comment_request(repo, issue_number, candi
   local marker = M.intake_class_followup_marker(candidate.proposal_id, carrier_number, outcome, candidate.dedup_key)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
-    safe_reason = M.comment_string("no_reason_provided")
+    safe_reason = comment_strings.comment_string(M, "no_reason_provided")
   end
   if #safe_reason > M._max_meta_reason_len then
     safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)

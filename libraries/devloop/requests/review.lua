@@ -2,6 +2,7 @@ local S = {}
 local forge_validators = require("devloop.forge_validators")
 local operator_commands = require("devloop.operator_commands")
 local config = require("devloop.config")
+local comment_strings = require("devloop.strings")
 
 function S.install(M, shared)
 local ai_sentinel = shared.ai_sentinel
@@ -71,7 +72,7 @@ function M.build_review_converge_round_comment_request(repo, issue_number, unres
     kind = "pr",
     repo = repo,
     number = unresolved.pr_number or select(2, M.parse_pr_source_ref(unresolved.source_ref)),
-  }, build_convergence_display(M.comment_string("pr_review_convergence_round_prefix"), unresolved, round)
+  }, build_convergence_display(comment_strings.comment_string(M, "pr_review_convergence_round_prefix"), unresolved, round)
     .. "\n\n" .. tostring(marker_body)
     .. "\n" .. ai_sentinel, M._dedup_key({
     "review-converge-round",
@@ -87,7 +88,7 @@ function M.build_issue_review_converge_round_comment_request(repo, issue_number,
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
-    body = build_convergence_display(M.comment_string("pr_review_convergence_round_prefix"), unresolved, round)
+    body = build_convergence_display(comment_strings.comment_string(M, "pr_review_convergence_round_prefix"), unresolved, round)
       .. "\n\n" .. tostring(marker_body)
       .. "\n" .. ai_sentinel,
     dedup_key = M._dedup_key({
@@ -107,7 +108,7 @@ function M.build_reviewing_comment_request(repo, issue_number, origin, pr_number
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, M.comment_string("pr_ready_for_review")
+  }, comment_strings.comment_string(M, "pr_ready_for_review")
     .. "\n\n" .. state_marker, M._dedup_key({
     "observe-pr",
     "comment",
@@ -190,12 +191,12 @@ function M.build_review_result_comment_request(repo, issue_number, issue_proposa
   end
   local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = build_verdict_summary(reached.angle_results)
-  local body = M.comment_string("pr_review_decision_prefix") .. tostring(reached.decision)
+  local body = comment_strings.comment_string(M, "pr_review_decision_prefix") .. tostring(reached.decision)
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
   if reached.decision == "reject" and blocking_gap ~= nil then
-    body = body .. "\n" .. M.comment_string("blocking_gap_label") .. M.neutralize_untrusted_comment_text(blocking_gap)
+    body = body .. "\n" .. comment_strings.comment_string(M, "blocking_gap_label") .. M.neutralize_untrusted_comment_text(blocking_gap)
   end
   local _, pr_number = M.parse_pr_source_ref(source_ref)
   local request = M.build_entity_comment_request({
@@ -297,8 +298,8 @@ function M.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready,
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
-  }, M.comment_string("merge_gate_failed_prefix") .. display_reason
-    .. "\n" .. M.comment_string("reproduce_locally_prefix") .. test_command .. M.comment_string("reproduce_locally_suffix")
+  }, comment_strings.comment_string(M, "merge_gate_failed_prefix") .. display_reason
+    .. "\n" .. comment_strings.comment_string(M, "reproduce_locally_prefix") .. test_command .. comment_strings.comment_string(M, "reproduce_locally_suffix")
     .. "\n\n" .. state_marker
     .. "\n" .. marker, M._dedup_key({
     "merge",
@@ -332,15 +333,15 @@ function M.build_fix_reviewing_comment_request(repo, issue_number, fix, old_head
   local marker = M.fix_marker(fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
   local summary = ""
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
-    summary = "\n" .. M.comment_string("fix_round_summary_label") .. M.neutralize_untrusted_comment_text(fix.fix_summary)
+    summary = "\n" .. comment_strings.comment_string(M, "fix_round_summary_label") .. M.neutralize_untrusted_comment_text(fix.fix_summary)
   end
   local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = fix.pr_number,
-  }, M.comment_string("fix_pushed_for_rereview")
-    .. "\n\n" .. M.comment_string("previous_reviewed_head_label") .. tostring(old_head_sha)
-    .. "\n" .. M.comment_string("new_head_label") .. tostring(new_head_sha)
+  }, comment_strings.comment_string(M, "fix_pushed_for_rereview")
+    .. "\n\n" .. comment_strings.comment_string(M, "previous_reviewed_head_label") .. tostring(old_head_sha)
+    .. "\n" .. comment_strings.comment_string(M, "new_head_label") .. tostring(new_head_sha)
     .. summary
     .. "\n\n" .. state_marker
     .. "\n" .. marker, M._dedup_key({
@@ -391,9 +392,9 @@ function M.build_merge_head_reviewing_comment_request(repo, issue_number, merge_
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
-  }, M.comment_string("pr_head_advanced")
-    .. "\n\n" .. M.comment_string("previous_reviewed_head_label") .. tostring(old_head_sha)
-    .. "\n" .. M.comment_string("current_head_label") .. tostring(new_head_sha)
+  }, comment_strings.comment_string(M, "pr_head_advanced")
+    .. "\n\n" .. comment_strings.comment_string(M, "previous_reviewed_head_label") .. tostring(old_head_sha)
+    .. "\n" .. comment_strings.comment_string(M, "current_head_label") .. tostring(new_head_sha)
     .. "\n\n" .. state_marker, M._dedup_key({
     "merge",
     "comment",

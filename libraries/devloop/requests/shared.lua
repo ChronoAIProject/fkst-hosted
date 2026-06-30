@@ -1,4 +1,5 @@
 local S = {}
+local comment_strings = require("devloop.strings")
 
 function S.new(M)
 local shared = {}
@@ -43,12 +44,12 @@ end
 
 local function build_convergence_display(header, unresolved, round)
   local lines = {
-    header .. tostring(round) .. M.comment_string("convergence_suffix"),
+    header .. tostring(round) .. comment_strings.comment_string(M, "convergence_suffix"),
   }
   local question = bounded_neutralized_text(unresolved and unresolved.narrowed_question or "", max_display_question_len)
   if question ~= "" then
     table.insert(lines, "")
-    table.insert(lines, M.comment_string("narrowed_question_label") .. question)
+    table.insert(lines, comment_strings.comment_string(M, "narrowed_question_label") .. question)
   end
   local angle_lines = {}
   if type(unresolved) == "table" and type(unresolved.angle_digests) == "table" then
@@ -61,7 +62,7 @@ local function build_convergence_display(header, unresolved, round)
   end
   if #angle_lines > 0 then
     table.insert(lines, "")
-    table.insert(lines, M.comment_string("angle_stances_label"))
+    table.insert(lines, comment_strings.comment_string(M, "angle_stances_label"))
     for _, line in ipairs(angle_lines) do
       table.insert(lines, line)
     end
@@ -91,7 +92,7 @@ local function build_verdict_summary(angle_results)
   if #parts == 0 then
     return nil
   end
-  local summary = M.comment_string("verdict_summary_label") .. table.concat(parts, " ")
+  local summary = comment_strings.comment_string(M, "verdict_summary_label") .. table.concat(parts, " ")
   if #summary > max_verdict_summary_len then
     summary = M.truncate_utf8(summary, max_verdict_summary_len)
   end
