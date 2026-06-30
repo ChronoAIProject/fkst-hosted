@@ -299,6 +299,89 @@ class MonotoneGateRatchetTest(unittest.TestCase):
         self.assertIn("grows monotone-gate debt relative to dev", joined)
         self.assertIn("current_lines=[12, 12]", joined)
 
+    def test_v2_install_m_to_typed_c_surface_rename_is_not_growth(self) -> None:
+        path = "packages/github-devloop/core/synthetic_gate.lua"
+        allowlist = [
+            monotone.Violation(path, "M.foo", "state-equality", "ready", 12),
+        ]
+        current = [
+            monotone.Violation(path, "C.foo", "state-equality", "ready", 80),
+        ]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        self.assertEqual(messages, [])
+
+    def test_v2_new_read_after_surface_canonicalization_still_grows(self) -> None:
+        path = "packages/github-devloop/core/synthetic_gate.lua"
+        allowlist = [
+            monotone.Violation(path, "M.foo", "state-equality", "ready", 12),
+        ]
+        current = [
+            monotone.Violation(path, "C.foo", "state-equality", "ready", 80),
+            monotone.Violation(path, "C.bar", "state-equality", "open", 81),
+        ]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("C.bar state-equality open", joined)
+        self.assertIn("grows monotone-gate debt relative to dev", joined)
+
+    def test_v2_second_identical_read_after_surface_canonicalization_still_grows(self) -> None:
+        path = "packages/github-devloop/core/synthetic_gate.lua"
+        allowlist = [
+            monotone.Violation(path, "M.foo", "state-equality", "ready", 12),
+        ]
+        current = [
+            monotone.Violation(path, "C.foo", "state-equality", "ready", 80),
+            monotone.Violation(path, "C.foo", "state-equality", "ready", 81),
+        ]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("C.foo state-equality ready", joined)
+        self.assertIn("current_lines=[80, 81]", joined)
+        self.assertIn("grows monotone-gate debt relative to dev", joined)
+
+    def test_v2_cross_file_surface_rename_still_grows(self) -> None:
+        allowlist = [
+            monotone.Violation(
+                "packages/github-devloop/core/synthetic_gate.lua",
+                "M.foo",
+                "state-equality",
+                "ready",
+                12,
+            ),
+        ]
+        current = [
+            monotone.Violation(
+                "packages/github-devloop/core/moved_gate.lua",
+                "C.foo",
+                "state-equality",
+                "ready",
+                80,
+            ),
+        ]
+
+        messages = monotone.ratchet_messages(current, allowlist, allowlist)
+
+        joined = "\n".join(messages)
+        self.assertIn("packages/github-devloop/core/moved_gate.lua:80", joined)
+        self.assertIn("grows monotone-gate debt relative to dev", joined)
+
+    def test_v2_bare_local_surface_canonicalizes_to_itself(self) -> None:
+        violation = monotone.Violation(
+            "packages/github-devloop/core/synthetic_gate.lua",
+            "helper_fn",
+            "state-equality",
+            "ready",
+            12,
+        )
+
+        self.assertEqual(violation.canonical_surface(), "helper_fn")
+
     def test_v2_removed_raw_read_passes_and_reports_shrink_opportunity(self) -> None:
         key = (
             "packages/github-devloop/core/synthetic_gate.lua",

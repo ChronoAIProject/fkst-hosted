@@ -73,6 +73,7 @@ GATE_KIND_RE = re.compile(r"\bgate_kind\s*=\s*['\"]monotone_milestone['\"]")
 RESPONSIBILITY_RE = re.compile(r"\bresponsibility_signature\s*\(")
 STRING_FIELD_RE = re.compile(r"\b(?P<field>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<quote>['\"])(?P<value>[^'\"]*)(?P=quote)")
 IMPLEMENTATION_RE = re.compile(r"^(?P<path>packages/github-devloop[^/]*/[^:]+\.lua):(?P<function>[A-Za-z_][A-Za-z0-9_.:]*)$")
+SURFACE_TABLE_PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.")
 
 
 @dataclass(frozen=True, order=True)
@@ -142,7 +143,10 @@ class Violation:
             path = "packages/github-devloop-pr/core/merge_executor.lua"
         if path == "packages/github-devloop-intake-default/departments/intake_judge/main.lua":
             path = "packages/github-devloop-intake/departments/intake_judge/main.lua"
-        return path, self.surface, self.kind, self.canonical_token()
+        return path, self.canonical_surface(), self.kind, self.canonical_token()
+
+    def canonical_surface(self) -> str:
+        return SURFACE_TABLE_PREFIX_RE.sub("", self.surface, count=1)
 
     def canonical_token(self) -> str:
         token = self.token.replace(" ", "")
