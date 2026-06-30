@@ -4,6 +4,7 @@ local ci_wait = require("core.merge_ci_wait")
 local high_risk_merge_gate = require("core.high_risk_merge_gate")
 local check_runs = require("forge.github.check_runs")
 local merge_batch = require("devloop.merge_batch")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 local M = {}
 local github = require("forge.github").production_handle
 
@@ -301,7 +302,7 @@ end
 
 local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)
   local merged_source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
-  local autonomy_record = issue_number ~= nil and core.autonomy_result_record(repo, issue_number, merge_ready, nil, merged_pr) or nil
+  local autonomy_record = issue_number ~= nil and autonomy_ledger.autonomy_result_record(core, repo, issue_number, merge_ready, nil, merged_pr) or nil
   local merged_body = core.build_merged_comment_body(merge_ready, autonomy_record)
   local comment_request = core.build_entity_comment_request({
     kind = "pr",
