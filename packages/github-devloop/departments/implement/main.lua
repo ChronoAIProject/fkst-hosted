@@ -7,6 +7,7 @@ local slice_gate = require("departments.implement.slice_gate")
 local substrate_pin = require("departments.implement.substrate_pin")
 local transitions = require("departments.implement.transitions")
 local worktree_lifecycle = require("departments.implement.worktree")
+local dispatch_live_run = require("devloop.dispatch_live_run")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
@@ -799,7 +800,7 @@ local function process_ready_event(event)
       attempt_plan.expected_from_states,
       attempt_plan.accepted_ready_hand_off
     ) then
-      if core.dispatch_live_run_dedup("implement", attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key) then
+      if dispatch_live_run.dispatch_live_run_dedup(core, "implement", attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key) then
         core.log_cas_decision(
           "implement",
           attempt_plan.marker_ready.proposal_id,

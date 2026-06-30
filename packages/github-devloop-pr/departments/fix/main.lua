@@ -1,6 +1,7 @@
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
+local dispatch_live_run = require("devloop.dispatch_live_run")
 
 local spec = {
   consumes = { "devloop_fixing" },
@@ -803,7 +804,7 @@ local function act_fix(event)
   local pre_spawn_gate_ok = false
   with_lock(lock_key, function()
     pre_spawn_gate_ok = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
-    if pre_spawn_gate_ok and core.dispatch_live_run_dedup("fix", fix.proposal_id, fix.version) then
+    if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup(core, "fix", fix.proposal_id, fix.version) then
       core.log_cas_decision(
         "fix",
         fix.proposal_id,

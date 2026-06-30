@@ -1,8 +1,6 @@
-local S = {}
+local C = {}
 
-function S.install(M)
-
-function M.dispatch_live_run_exec_ref(role, proposal_id, dedup_key)
+function C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
   if tostring(role or "") == "implement" then
     return M._dedup_key({
       "implement-exec",
@@ -50,15 +48,15 @@ local function codex_runs_status(M, role)
   return status
 end
 
-function M.dispatch_live_run_dedup(role, proposal_id, dedup_key, status)
+function C.dispatch_live_run_dedup(M, role, proposal_id, dedup_key, status)
   if type(role) ~= "string" or role == "" then
     return false
   end
-  local exec_ref = M.dispatch_live_run_exec_ref(role, proposal_id, dedup_key)
-  return M.dispatch_live_run_exec_ref_running(role, exec_ref, status)
+  local exec_ref = C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
+  return C.dispatch_live_run_exec_ref_running(M, role, exec_ref, status)
 end
 
-function M.dispatch_live_run_exec_ref_running(role, exec_ref, status)
+function C.dispatch_live_run_exec_ref_running(M, role, exec_ref, status)
   if type(role) ~= "string" or role == "" or type(exec_ref) ~= "string" or exec_ref == "" then
     return false
   end
@@ -67,13 +65,11 @@ function M.dispatch_live_run_exec_ref_running(role, exec_ref, status)
     if type(run) == "table"
       and tostring(run.status or "running") == "running"
       and tostring(run.role or "") == role
-      and M.dispatch_live_run_exec_ref(run.role, run.proposal_id, run.dedup_key) == exec_ref then
+      and C.dispatch_live_run_exec_ref(M, run.role, run.proposal_id, run.dedup_key) == exec_ref then
       return true
     end
   end
   return false
 end
 
-end
-
-return S
+return C

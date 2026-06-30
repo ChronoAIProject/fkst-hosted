@@ -1,6 +1,7 @@
 local M = {}
 local wiring = require("core.devloop_wiring")
 local workflow_ports = require("devloop.adapters.workflow_ports")
+local _hidden_state_conformance = require("devloop.hidden_state_conformance")
 
 
 function M.pr_package_queue(queue)
@@ -34,7 +35,6 @@ require("devloop.pr_safety").install(M)
 require("devloop.payloads").install(M)
 require("devloop.convergence").install(M)
 require("devloop.decompose").install(M)
-require("devloop.dispatch_live_run").install(M)
 M.restart_package_name = "github-devloop-pr"
 M.restart_lifecycle_states = {
   "pr-open",
@@ -88,7 +88,6 @@ require("devloop.queue_starvation").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.operator_commands").install(M)
 require("devloop.claims").install(M)
-require("devloop.hidden_state_conformance").install(M)
 require("core.span_conformance").install(M)
 
 return M

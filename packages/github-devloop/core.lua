@@ -1,6 +1,7 @@
 local M = {}
 local wiring = require("core.devloop_wiring")
 local workflow_ports = require("devloop.adapters.workflow_ports")
+local _hidden_state_conformance = require("devloop.hidden_state_conformance")
 
 
 function M.decompose_package_queue()
@@ -36,7 +37,6 @@ require("core.impl_failure").install(M)
 require("devloop.payloads").install(M)
 require("devloop.convergence").install(M)
 require("devloop.decompose").install(M)
-require("devloop.dispatch_live_run").install(M)
 M.restart_package_name = "github-devloop"
 M.restart_lifecycle_states = {
   "thinking",
@@ -93,7 +93,6 @@ require("core.dependencies").install(M)
 require("devloop.validators").install(M)
 require("devloop.context_bundle").install(M)
 require("devloop.operator_commands").install(M)
-require("core.hidden_state_conformance").install(M)
 require("core.span_conformance").install(M)
 
 return M

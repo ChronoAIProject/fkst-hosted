@@ -4,7 +4,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local span = require("core.span_conformance")
-local hidden_state = require("core.hidden_state_conformance")
+local hidden_state_conformance = require("devloop.hidden_state_conformance")
 
 local function contains_error(errors, needle)
   for _, err in ipairs(errors or {}) do
@@ -69,7 +69,7 @@ return {
   end,
 
   test_hidden_state_conformance_passes_with_seeded_allowlist = function()
-    local errors = core.hidden_state_conformance_errors()
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(core)
     t.is_true(#errors == 0, join_error_messages(errors))
     local by_state = {}
     for _, row in ipairs(core.restart_transition_table()) do
@@ -97,7 +97,7 @@ return {
         declared = fact
       end
     end
-    local entity, state, facts = hidden_state.fixture(core, row, declared, true)
+    local entity, state, facts = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, true)
     t.eq(entity.repo, "owner/repo")
     t.eq(state.state, "dependency_wait")
     t.is_true(facts.current == entity)
@@ -117,7 +117,7 @@ return {
         declared = fact
       end
     end
-    local positive_entity, positive_state = hidden_state.fixture(core, row, declared, true)
+    local positive_entity, positive_state = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, true)
     local positive_facts = core.converge_round_facts(
       positive_entity.comments,
       "github-devloop/issue/owner/repo/42",
@@ -128,7 +128,7 @@ return {
     t.eq(positive_round, 3)
     t.is_true(core.is_true_stall(positive_facts, positive_round))
 
-    local negative_entity, negative_state = hidden_state.fixture(core, row, declared, false)
+    local negative_entity, negative_state = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, false)
     local negative_facts = core.converge_round_facts(
       negative_entity.comments,
       "github-devloop/issue/owner/repo/42",
@@ -153,12 +153,12 @@ return {
         declared = fact
       end
     end
-    local _, state, positive = hidden_state.fixture(core, row, declared, true)
+    local _, state, positive = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, true)
     local age = math.floor((positive.now_seconds - contract_time.iso_timestamp_epoch_seconds(state.marker_created_at)) / 60)
     t.eq(age, row.budget.minutes + 1)
     t.is_true(positive.implementing ~= nil)
 
-    local _, _, negative = hidden_state.fixture(core, row, declared, false)
+    local _, _, negative = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, false)
     t.eq(negative.implementing, nil)
   end,
 
@@ -175,7 +175,7 @@ return {
         declared = fact
       end
     end
-    local entity, state, facts = hidden_state.fixture(core, row, declared, true)
+    local entity, state, facts = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, true)
     facts.now_seconds = contract_time.iso_timestamp_epoch_seconds(state.marker_created_at) + 60
 
     local raised = capture_raises(function()
@@ -211,7 +211,7 @@ return {
         },
       },
     }
-    hidden_state.errors(fake_core, rows, {})
+    hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
     t.eq(seen.observe_issue, true)
     t.eq(seen.behavioral_hidden_state_conformance, nil)
   end,
@@ -234,7 +234,7 @@ return {
         },
       },
     }
-    local errors = hidden_state.errors(core, rows, {})
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(core, rows, {})
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("poll observe surface", 1, true) ~= nil, joined)
   end,
@@ -248,7 +248,7 @@ return {
         terminal = false,
       },
     }
-    local errors = hidden_state.errors(core, rows, {})
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(core, rows, {})
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("non-terminal row must declare advancing_facts", 1, true) ~= nil, joined)
   end,
@@ -266,7 +266,7 @@ return {
         },
       },
     }
-    local errors = hidden_state.errors(core, rows, {})
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(core, rows, {})
     t.eq(#errors, 0)
   end,
 
@@ -275,7 +275,7 @@ return {
     for index, row in ipairs(core.restart_transition_table()) do
       rows[index] = row
     end
-    local errors = hidden_state.errors(core, rows, {})
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(core, rows, {})
     t.is_true(not contains_error(errors, "github-devloop|blocked|*: non_durable_advance exemption advanced"), join_error_messages(errors))
   end,
 
@@ -322,7 +322,7 @@ return {
         },
       },
     }
-    local errors = hidden_state.errors(fake_core, rows, {})
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("github-devloop|impl-failed|*: non_durable_advance exemption advanced to successor implementing", 1, true) ~= nil, joined)
   end,
@@ -356,7 +356,7 @@ return {
         },
       },
     }
-    local errors = hidden_state.errors(fake_core, rows, {})
+    local errors = hidden_state_conformance.hidden_state_conformance_errors(fake_core, rows, {})
     local joined = table.concat(errors, "\n")
     t.is_true(joined:find("github-devloop|impl-failed|*: non_durable_advance exemption advanced to successor implementing", 1, true) ~= nil, joined)
   end,
@@ -581,7 +581,8 @@ local function run_fix_attempt(plan)
 end
 
 precheck_fix_write_gate(repo, fix, branch)
-if core.dispatch_live_run_dedup("fix", attempt_plan.fix.proposal_id, attempt_plan.fix.version) then
+local dispatch_live_run = require("devloop.dispatch_live_run")
+if dispatch_live_run.dispatch_live_run_dedup(core, "fix", attempt_plan.fix.proposal_id, attempt_plan.fix.version) then
   return
 end
 local outcome = run_fix_attempt(attempt_plan)

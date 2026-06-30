@@ -1,4 +1,5 @@
 local S = {}
+local hidden_state_conformance = require("devloop.hidden_state_conformance")
 
 local function record(id, message)
   return { id = id, message = message }
@@ -11,10 +12,8 @@ function S.errors(core)
       table.insert(out, record("gspan.span-contract", tostring(message)))
     end
   end
-  if type(core.hidden_state_conformance_errors) == "function" then
-    for _, message in ipairs(core.hidden_state_conformance_errors()) do
-      table.insert(out, record("gspan.hidden-state", tostring(message)))
-    end
+  for _, message in ipairs(hidden_state_conformance.hidden_state_conformance_errors(core)) do
+    table.insert(out, record("gspan.hidden-state", tostring(message)))
   end
   return out
 end

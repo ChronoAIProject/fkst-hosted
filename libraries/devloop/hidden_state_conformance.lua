@@ -1,7 +1,7 @@
 local convergence_shared, poll_fakes = require("devloop.convergence.shared"), require("devloop.hidden_state_conformance.poll_fakes")
 local contract_time = require("contract.time")
 
-local S = {}
+local C = {}
 
 local ALLOWLIST_PATH = "migration/hidden-state.allowlist"
 local REPO = "owner/repo"
@@ -973,7 +973,8 @@ local function behavioral_errors(core, rows, allowlist)
   return messages
 end
 
-function S.errors(core, rows, allowlist)
+function C.hidden_state_conformance_errors(M, rows, allowlist)
+  local core = M
   local effective_rows = rows or core.restart_transition_table()
   local effective_allowlist = allowlist or load_allowlist()
   local messages = declaration_errors(core, effective_rows, effective_allowlist)
@@ -984,18 +985,9 @@ function S.errors(core, rows, allowlist)
   return messages
 end
 
-function S.fixture(core, row, declared, include_fact)
+function C.hidden_state_behavior_fixture(M, row, declared, include_fact)
+  local core = M
   return build_fixture(core, row, declared, include_fact)
 end
 
-function S.install(M)
-  function M.hidden_state_conformance_errors(rows, allowlist)
-    return S.errors(M, rows, allowlist)
-  end
-
-  function M.hidden_state_behavior_fixture(row, declared, include_fact)
-    return S.fixture(M, row, declared, include_fact)
-  end
-end
-
-return S
+return C

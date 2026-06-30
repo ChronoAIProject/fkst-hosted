@@ -40,7 +40,7 @@ end
 
 return {
   test_hidden_state_conformance_accepts_pr_blocked_exemption_with_all_durable_facts = function()
-    local errors = hidden_state.errors(core, core.restart_transition_table(), {})
+    local errors = hidden_state.hidden_state_conformance_errors(core, core.restart_transition_table(), {})
     t.is_true(not contains_error(errors, "github-devloop-pr|blocked|*: non_durable_advance exemption advanced"), table.concat(errors, "\n"))
   end,
 
@@ -70,7 +70,7 @@ return {
         },
       },
     }
-    hidden_state.errors(fake_core, rows, {})
+    hidden_state.hidden_state_conformance_errors(fake_core, rows, {})
     t.eq(seen.observe_pr, true)
     t.eq(seen.behavioral_hidden_state_conformance, nil)
   end,
