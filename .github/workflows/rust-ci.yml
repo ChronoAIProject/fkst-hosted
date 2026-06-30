@@ -3,60 +3,55 @@ name: Rust CI
 on:
   pull_request:
     branches: [develop, develop-auto]
-    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   contents: read
 
+defaults:
+  run:
+    working-directory: backend
+
 jobs:
-  rust-ci:
-    name: fmt, clippy, build, test
+  lint:
+    name: rust lint
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Skip on release-automation PRs
-        id: gate
-        working-directory: .
-        env:
-          IS_AUTOMATION: ${{ contains(github.event.pull_request.labels.*.name, 'release-automation') }}
-        run: |
-          set -euo pipefail
-          if [ "$IS_AUTOMATION" = "true" ]; then
-            echo "INFO: 'release-automation' PR — Rust CI is a no-op (only version/changelog touched)."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ ! -f backend/Cargo.toml ]; then
-            echo "INFO: backend/Cargo.toml absent — Rust CI is a no-op (no backend workspace yet)."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Install Rust toolchain
-        if: steps.gate.outputs.skip != 'true'
         run: rustup show && rustup component add rustfmt clippy
-
       - name: Cache cargo
-        if: steps.gate.outputs.skip != 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: backend
-
-      - name: fmt --check
-        if: steps.gate.outputs.skip != 'true'
+      - name: rustfmt --check
         run: cargo fmt --all -- --check
-
       - name: clippy -D warnings
-        if: steps.gate.outputs.skip != 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  build:
+    name: rust build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
       - name: build
-        if: steps.gate.outputs.skip != 'true'
         run: cargo build --workspace --locked
 
+  test:
+    name: rust test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        run: rustup show
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
       - name: test
-        if: steps.gate.outputs.skip != 'true'
         run: cargo test --workspace --locked
