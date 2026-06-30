@@ -695,6 +695,49 @@ class HostRunTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_supervise_fails_closed_when_target_workspace_does_not_declare_platform_packages(self) -> None:
+        h = HostRunHarness()
+        try:
+            source_repo, source_rev = create_git_source(
+                h.root,
+                "source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            h.write_external_sources_lock([("fkst-packages-platform", source_repo, source_rev)])
+            (h.website_host / "fkst.workspace.toml").write_text(
+                textwrap.dedent(
+                    f"""\
+                    [workspace]
+                    units = []
+
+                    [[external_sources]]
+                    id = "fkst-packages-platform"
+                    git = {json.dumps(str(source_repo))}
+                    rev = {json.dumps(source_rev)}
+                    libraries = ["contract"]
+                    """
+                ),
+                encoding="utf-8",
+            )
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "target fkst.workspace.toml does not declare platform package 'github-proxy'",
+                result.stderr,
+            )
+        finally:
+            h.close()
+
     def test_missing_durable_root_fails_closed(self) -> None:
         h = HostRunHarness()
         try:

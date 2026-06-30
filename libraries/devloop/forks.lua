@@ -55,6 +55,27 @@ function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot
   return false
 end
 
+function F.trusted_issue_created_number(core, comments, dedup_key, bot_login)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(comments) do
+    if parsers_misc.comment_author_login(core, comment) == tostring(bot_login) then
+      local body = parsers_misc.comment_body(core, comment)
+      for marker in body:gmatch(created_pattern) do
+        if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
+          local issue_number = tonumber(marker:match('issue="(%d+)"'))
+          if issue_number ~= nil and issue_number > 0 and issue_number % 1 == 0 then
+            return math.floor(issue_number)
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
 function F.fork_issue_title(issue_number, original_title)
   local title = tostring(original_title or "Issue")
   title = title:gsub("%c", " "):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")

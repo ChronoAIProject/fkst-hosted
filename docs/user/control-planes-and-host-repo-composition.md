@@ -63,8 +63,8 @@ the dogfood directory layout.
 
 If the target manifest is absent, does not declare a requested platform package, or declares that package in
 more than one source, host supervise fails before launch with a narrow diagnostic. `--platform-root` remains a
-compatibility argument for the delegated call shape, but it is not the authority for platform package-root
-wiring when the target workspace declares external platform packages.
+compatibility argument for the delegated call shape and self-host fallback, but it is not the authority for
+platform package-root wiring when the target workspace declares external platform packages.
 
 ## 3. Host-repo conformance — no per-repo rebuild
 
@@ -94,6 +94,24 @@ providing ONLY its config (its package roots + its own waivers). It carries **no
 - **`.fkst/` is the host runtime/interface directory** (tracked + ignored mix): committed host-owned bits
   (`local-packages`, `local-libraries`, `conformance`, `compose`) plus gitignored engine scratch
   (`runtime/`, `durable/`).
+
+### Frontend application workflow profile
+
+Frontend application hosts use the same host-repo composition contract as any other non-Lua host repo. The
+profile is composition, not a separate platform package:
+
+- Load the platform packages that own the lifecycle: `github-proxy`, `consensus`, `github-devloop`,
+  `github-devloop-pr`, and `github-devloop-intake`.
+- Put host-specific UI adapters, boards, browser probes, or app metadata under
+  `.fkst/local-packages/<host-package>/`.
+- List those host-owned package roots in `.fkst/compose/package-roots` so the shared conformance tiers test
+  them with the pinned platform graph.
+- Keep frontend-specific checks as host package behavior or host CI commands. The platform `github-devloop`
+  lifecycle remains the single source of truth for issue intake, implementation, PR review, fixing, and merge.
+
+Do not add a standalone `frontend-devloop` package/profile unless it has a distinct lifecycle contract that
+cannot be represented by host composition. This keeps frontend workflow support on the same DRY, single-owner
+path as the existing `github-devloop` platform instead of creating a second source of truth.
 
 ## 5. The big picture
 

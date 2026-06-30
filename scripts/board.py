@@ -41,7 +41,6 @@ def parse_args() -> argparse.Namespace:
         description="Render a read-only github-devloop board from fkst-framework observe --json.",
     )
     parser.add_argument("--bin", required=True, help="Path to fkst-framework.")
-    parser.add_argument("--project-root", required=True, help="Package repository root.")
     parser.add_argument("--durable-root", required=True, help="FKST_DURABLE_ROOT to observe.")
     parser.add_argument("--cache", required=True, help="Local board cache JSON path.")
     parser.add_argument("--refresh", action="store_true", help="Bypass the TTL cache and re-read observe data.")
@@ -703,7 +702,6 @@ def fetch_observe(args: argparse.Namespace) -> Any:
     ]
     result = subprocess.run(
         command,
-        cwd=args.project_root,
         env=env,
         text=True,
         stdout=subprocess.PIPE,
