@@ -38,7 +38,7 @@ host_run_same_path() {
 
 host_run_resolve_target_platform_roots() {
   local output line
-  output="$(python3 - "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_PACKAGES" <<'PY'
+  output="$(python3 - "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_PACKAGES" "$HOST_RUN_PLATFORM_ROOT" <<'PY'
 import re
 import shutil
 import subprocess
@@ -46,6 +46,7 @@ import sys
 import tomllib
 from glob import glob
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 ID_RE = re.compile(r"[A-Za-z0-9._-]+")
 REV_RE = re.compile(r"[0-9a-fA-F]{40}")
@@ -163,6 +164,46 @@ def validate_source(source: dict[str, object]) -> tuple[str, str, str]:
     return source_id, git_url, rev.lower()
 
 
+def is_scp_like_url(value: str) -> bool:
+    return bool(re.match(r"^[A-Za-z0-9_.-]+@[^:]+:", value))
+
+
+def git_ref_names(value: str, *, base: Path) -> set[str]:
+    text = value.rstrip("/")
+    refs = {text}
+    parsed = urlparse(text)
+    if parsed.scheme == "file":
+        refs.add(str(Path(unquote(parsed.path)).resolve()))
+    elif "://" not in text and not is_scp_like_url(text):
+        path = Path(text)
+        if not path.is_absolute():
+            path = base / path
+        refs.add(str(path.resolve()))
+    return refs
+
+
+def same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve() == right.resolve()
+    except OSError:
+        return False
+
+
+def trusted_platform_identity(platform_root: Path) -> tuple[str, set[str]]:
+    if not platform_root.is_dir():
+        fail(f"trusted --platform-root does not exist: {platform_root}")
+    head = git_output(["rev-parse", "HEAD"], cwd=platform_root).lower()
+    if not REV_RE.fullmatch(head):
+        fail(f"trusted --platform-root HEAD is not a full git SHA: {platform_root}")
+    top = Path(git_output(["rev-parse", "--show-toplevel"], cwd=platform_root)).resolve()
+    refs = git_ref_names(str(top), base=top)
+    refs.update(git_ref_names(str(platform_root), base=top))
+    origin = git_output_optional(["config", "--get", "remote.origin.url"], cwd=platform_root)
+    if origin:
+        refs.update(git_ref_names(origin, base=top))
+    return head, refs
+
+
 def read_workspace(workspace_path: Path) -> dict[str, object]:
     if not workspace_path.is_file():
         fail(f"target fkst.workspace.toml is required for host supervise: {workspace_path}")
@@ -197,6 +238,7 @@ def hydrate_source(project_root: Path, source_id: str, git_url: str, rev: str) -
 
 project_root = Path(sys.argv[1]).resolve()
 requested_packages = [item for item in sys.argv[2].split() if item]
+trusted_platform_root = Path(sys.argv[3]).resolve()
 workspace_path = project_root / "fkst.workspace.toml"
 workspace = read_workspace(workspace_path)
 workspace_packages: dict[str, str] = {}
@@ -258,6 +300,11 @@ if needed_external_source_ids:
         lock_by_id[source_id] = (git_url, rev)
 
 source_roots: dict[str, Path] = {}
+trusted_platform_head = ""
+trusted_platform_refs: set[str] = set()
+if needed_external_source_ids:
+    trusted_platform_head, trusted_platform_refs = trusted_platform_identity(trusted_platform_root)
+
 for source_id in sorted(needed_external_source_ids):
     if source_id not in lock_by_id:
         fail(f"fkst.lock has no external_source(id={source_id}) for target platform packages")
@@ -265,12 +312,18 @@ for source_id in sorted(needed_external_source_ids):
     git_url, rev = lock_by_id[source_id]
     if git_url != expected_git:
         fail(f"fkst.workspace.toml external_sources(id={source_id}) git does not match fkst.lock")
+    if rev != trusted_platform_head:
+        fail(f"fkst.lock external_source(id={source_id}) resolved.rev does not match trusted --platform-root HEAD")
+    if trusted_platform_refs.isdisjoint(git_ref_names(git_url, base=project_root)):
+        fail(f"fkst.workspace.toml external_sources(id={source_id}) git does not match trusted --platform-root")
     source_roots[source_id] = hydrate_source(project_root, source_id, git_url, rev)
 
 package_roots: list[Path] = []
 platform_roots: set[Path] = set()
 for package, kind, source_id in selected:
     if kind == "workspace":
+        if not same_path(project_root, trusted_platform_root):
+            fail(f"workspace platform package '{package}' requires trusted --platform-root")
         root = project_root / "packages" / package
         platform_roots.add(project_root)
     else:

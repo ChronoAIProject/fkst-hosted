@@ -10,7 +10,7 @@ without rebuilding any infrastructure.
 | Plane | Lives in | Owns | Must NOT own |
 |---|---|---|---|
 | **PRODUCT** | `packages/`, `libraries/` | the platform itself: agent packages (the `github-devloop` trio + the rest) and workspace libraries (`contract` / `workflow` / `testkit` / `forge` / `devloop`), targeting the engine ABI | how a host launches; multi-host orchestration |
-| **HOST-RUN contract** | `scripts/host_run.sh` (invoked via `scripts/run.sh supervise`) | ALL launch invariants for **one** host: BIN resolve + freshness rebuild, target `fkst.workspace.toml` + `fkst.lock` platform resolution, runtime-scratch, `--durable-root` (mandatory, fail-closed — never defaulted), the 3-host-shape `--package-root` wiring, `FKST_GITHUB_WRITE` posture, pidfile-based `--restart` (kill -9 + verify-dead, refuses a 2nd supervise on the same durable root) | which hosts run; product logic |
+| **HOST-RUN contract** | `scripts/host_run.sh` (invoked via `scripts/run.sh supervise`) | ALL launch invariants for **one** host: BIN resolve + freshness rebuild, target `fkst.workspace.toml` package selection, trusted `--platform-root` provenance, runtime-scratch, `--durable-root` (mandatory, fail-closed — never defaulted), the 3-host-shape `--package-root` wiring, `FKST_GITHUB_WRITE` posture, pidfile-based `--restart` (kill -9 + verify-dead, refuses a 2nd supervise on the same durable root) | which hosts run; product logic |
 | **DOGFOOD-OPERATOR** | `.claude/skills/dogfood-github-devloop/dogfood.sh` | coordinating **N** hosts: per-machine config, run-checkout sync, `board` / `doctor` / `sync` / `stop`, the integration topology | how **one** host supervises itself — it **delegates** that to the host-run contract |
 
 **Keystone rule**: a single host MUST be runnable without `.claude/skills`. The dogfood operator coordinates
@@ -47,7 +47,7 @@ It does NOT vendor or copy the platform; it **composes** it and **pins** version
   └── .fkst/conformance/allowlists/           # host conformance allowlists, see ADR 0002
         │ composes (pkg.queue limited names; no cross-require, no vendoring)
         ▼
-  PLATFORM (from the target repo's locked fkst-packages-platform external source)
+  PLATFORM (from the trusted fkst-packages checkout supplied as --platform-root)
     packages/{github-devloop, github-devloop-pr, github-devloop-intake, …, consensus, github-proxy, archaudit, idle-detector}
     libraries/{contract, workflow, testkit, forge, devloop}
         │ runs on
@@ -57,14 +57,17 @@ It does NOT vendor or copy the platform; it **composes** it and **pins** version
 
 The host supervise resolves the requested platform package names against the target
 `fkst.workspace.toml`, hydrates only the external source IDs that own those packages from `fkst.lock`, and
-loads those package roots from `<HOST>/.fkst/run/<id>/packages/<pkg>`. Host-owned packages still come from
-`.fkst/local-packages/`, all on the same engine BIN — see `docs/user/github-devloop-dogfood-topology.md` for
-the dogfood directory layout.
+loads those package roots from `<HOST>/.fkst/run/<id>/packages/<pkg>`. For external platform sources, the
+target manifest and lock must match the trusted `--platform-root` git URL/path and `HEAD` before hydration;
+target files select package ownership but cannot redirect executable platform provenance. Target `workspace`
+packages can supply platform packages only when the target root is the trusted platform root itself. Host-owned
+packages still come from `.fkst/local-packages/`, all on the same engine BIN — see
+`docs/user/github-devloop-dogfood-topology.md` for the dogfood directory layout.
 
 If the target manifest is absent, does not declare a requested platform package, or declares that package in
-more than one source, host supervise fails before launch with a narrow diagnostic. `--platform-root` remains a
-compatibility argument for the delegated call shape and self-host fallback, but it is not the authority for
-platform package-root wiring when the target workspace declares external platform packages.
+more than one source, host supervise fails before launch with a narrow diagnostic. `--platform-root` is the
+trusted provenance authority for platform execution; target `fkst.workspace.toml` and `fkst.lock` must agree
+with it when the target workspace declares external platform packages.
 
 ## 3. Host-repo conformance — no per-repo rebuild
 
@@ -78,16 +81,17 @@ the check_repo infrastructure. Three tiers by ownership:
 | **Shared source ratchets** | fkst-packages `scripts/check_repo.py --project-root <repo>` | the generic source ratchets run over ANY repo's tree (discovering packages from both `<root>/packages/*` and `<root>/.fkst/local-packages/*`); library-B-specific ratchets gate on own-repo |
 | **Engine-run Lua** | `libraries/testkit` | execution conformance (saga runtime, namespaced dispatch) via the engine in test mode |
 
-A host repo's `scripts/run.sh check` invokes the **shared** `check_repo.py` from the fkst-packages checkout
-resolved by `fkst.workspace.toml` `[[external_sources]]` and `fkst.lock`, plus `fkst-framework conformance`,
-providing ONLY its config (its package roots + its own waivers). It carries **no copied check_repo**.
+A host repo's `scripts/run.sh check` invokes the **shared** `check_repo.py` from the trusted fkst-packages
+checkout supplied as `--platform-root`, plus `fkst-framework conformance`, providing ONLY its config (its
+package roots + its own waivers). It carries **no copied check_repo**.
 (fkst-website's former 610-line copy is gone.)
 
 ## 4. Conventions a new host repo follows
 
-- **The platform packages pin** is `fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock`, with
-  `fkst-packages-platform` as the source identity. `.fkst-substrate-ref` remains the engine toolchain pin when
-  a host uses a checked-out substrate build.
+- **The platform packages selector** is `fkst.workspace.toml` `[[external_sources]]` plus `fkst.lock`, with
+  `fkst-packages-platform` as the source identity. Its git URL/path and locked rev must match the trusted
+  `--platform-root` checkout before host supervise executes platform packages. `.fkst-substrate-ref` remains
+  the engine toolchain pin when a host uses a checked-out substrate build.
 - **The host's own package(s)** live under `.fkst/local-packages/<pkg>/`.
 - **Host composition roots** live under `.fkst/compose/package-roots`; host conformance allowlists stay under
   `.fkst/conformance/allowlists/`. See [`docs/adr/0002-host-fkst-layout.md`](../adr/0002-host-fkst-layout.md).

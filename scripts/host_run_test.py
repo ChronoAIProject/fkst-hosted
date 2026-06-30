@@ -300,7 +300,7 @@ class HostRunTest(unittest.TestCase):
                     "--project-root",
                     str(h.substrate_host),
                     "--platform-root",
-                    str(h.platform),
+                    str(platform_repo),
                     "--platform-packages",
                     "github-proxy consensus",
                     "--durable-root",
@@ -340,7 +340,7 @@ class HostRunTest(unittest.TestCase):
                     "--project-root",
                     str(h.website_host),
                     "--platform-root",
-                    str(h.platform),
+                    str(platform_repo),
                     "--platform-packages",
                     "github-proxy consensus",
                     "--host-packages",
@@ -380,7 +380,7 @@ class HostRunTest(unittest.TestCase):
                     "--project-root",
                     str(h.website_host),
                     "--platform-root",
-                    str(h.platform),
+                    str(platform_repo),
                     "--local-packages",
                     str(custom_local),
                     "--platform-packages",
@@ -456,7 +456,7 @@ class HostRunTest(unittest.TestCase):
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(platform_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_validate_shape
                     host_run_build_package_roots
                     printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
@@ -476,6 +476,71 @@ class HostRunTest(unittest.TestCase):
             )
             self.assertTrue((platform_checkout / "packages" / "github-proxy").is_dir())
             self.assertFalse((h.website_host / ".fkst" / "run" / "site-tools").exists())
+        finally:
+            h.close()
+
+    def test_external_platform_source_must_match_trusted_platform_root(self) -> None:
+        h = HostRunHarness()
+        try:
+            trusted_repo, _trusted_rev = create_git_source(
+                h.root,
+                "trusted-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            attacker_repo, attacker_rev = create_git_source(
+                h.root,
+                "attacker-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            h.write_workspace_manifest(
+                external_sources=[("fkst-packages-platform", attacker_repo, ["github-proxy"])],
+            )
+            h.write_external_sources_lock([("fkst-packages-platform", attacker_repo, attacker_rev)])
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(trusted_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("does not match trusted --platform-root", result.stderr)
+            self.assertFalse((h.website_host / ".fkst" / "run" / "fkst-packages-platform").exists())
+        finally:
+            h.close()
+
+    def test_workspace_platform_package_requires_trusted_platform_root(self) -> None:
+        h = HostRunHarness()
+        try:
+            trusted_repo, _trusted_rev = create_git_source(
+                h.root,
+                "trusted-platform-source",
+                {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+            )
+            (h.website_host / "packages" / "github-proxy").mkdir(parents=True)
+            (h.website_host / "packages" / "github-proxy" / "fkst.toml").write_text(
+                'kind = "package"\nname = "github-proxy"\n',
+                encoding="utf-8",
+            )
+            h.write_workspace_manifest(workspace_units=["packages/*"])
+            result = h.run_helper(
+                textwrap.dedent(
+                    f"""\
+                    set -euo pipefail
+                    source scripts/host_run.sh
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(trusted_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_validate_shape
+                    host_run_build_package_roots
+                    """
+                )
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("requires trusted --platform-root", result.stderr)
+            self.assertNotIn(str(h.website_host / "packages" / "github-proxy"), result.stdout)
         finally:
             h.close()
 
@@ -538,7 +603,7 @@ class HostRunTest(unittest.TestCase):
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(platform_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_validate_shape
                     host_run_build_package_roots
                     printf 'platform=%s\\n' "$HOST_RUN_PLATFORM_ROOT"
@@ -590,7 +655,7 @@ class HostRunTest(unittest.TestCase):
                     f"""\
                     set -euo pipefail
                     source scripts/host_run.sh
-                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(source_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     host_run_build_package_roots
                     """
                 )
@@ -670,7 +735,7 @@ class HostRunTest(unittest.TestCase):
                     set -euo pipefail
                     source scripts/host_run.sh
                     BIN={shell_quote(fake_bin)}
-                    host_run_supervise_contract --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
+                    host_run_supervise_contract --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(source_repo)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
                     """
                 )
             )
