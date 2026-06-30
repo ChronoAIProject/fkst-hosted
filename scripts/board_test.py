@@ -356,8 +356,8 @@ class BoardScriptTest(unittest.TestCase):
             self.assertIn("- devloop_ready ready=2 leased=1 retry=0 dlq=0", result.stdout)
             self.assertIn("DLQ total=1", result.stdout)
             self.assertTrue(h.cache.exists())
-            self.assertIn("observe --project-root", h.calls())
-            self.assertIn(f"--durable-root {h.durable} --json", h.calls())
+            self.assertNotIn("--project-root", h.calls())
+            self.assertIn(f"observe --durable-root {h.durable} --json", h.calls())
         finally:
             h.close()
 
@@ -643,7 +643,8 @@ class BoardScriptTest(unittest.TestCase):
             result = h.run_health("--refresh", "--stall", "1800")
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertEqual(result.stdout.strip(), "HEALTHY")
-            self.assertIn("observe --project-root", h.calls())
+            self.assertNotIn("--project-root", h.calls())
+            self.assertIn(f"observe --durable-root {h.durable} --json", h.calls())
         finally:
             h.close()
 
