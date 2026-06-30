@@ -2,6 +2,7 @@ local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 
 function S.install(M, shared)
 local valid_round = shared.valid_round
@@ -545,8 +546,8 @@ function M.merged_fact(comments, issue_proposal_id, pr_number, version)
         and (version == nil or tostring(marker_version) == tostring(version))
         and forge_validators.is_git_sha(marker_head_sha) then
         local autonomy_result = nil
-        if marker:find('autonomy_result="v1"', 1, true) ~= nil and M.autonomy_result_record_from_marker ~= nil then
-          autonomy_result = M.autonomy_result_record_from_marker(marker, comment, marker_issue, marker_pr, marker_version, marker_head_sha)
+        if marker:find('autonomy_result="v1"', 1, true) ~= nil then
+          autonomy_result = autonomy_ledger.autonomy_result_record_from_marker(M, marker, comment, marker_issue, marker_pr, marker_version, marker_head_sha)
         end
         return {
           proposal_id = marker_issue,

@@ -4,6 +4,7 @@ local contract_time = require("contract.time")
 local core = h.core
 local t = h.t
 local replay_fields = require("devloop.replay_fields")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -252,7 +253,7 @@ local function assert_resume_has_autonomy_result(resume)
   t.is_true(resume.payload.body:find("fkst:github-devloop:autonomy-result:v1", 1, true) ~= nil)
   local merged_marker = resume.payload.body:match("<!%-%- fkst:github%-devloop:merged:v1.-%-%->")
   t.is_true(merged_marker:find('autonomy_result="v1"', 1, true) ~= nil)
-  local avm = core.autonomy_result_fact({ resume.payload.body }, parent, pr_number, version, head_sha)
+  local avm = autonomy_ledger.autonomy_result_fact(core, { resume.payload.body }, parent, pr_number, version, head_sha)
   t.is_true(avm ~= nil)
   t.eq(avm.issue_number, issue_number)
   t.eq(avm.pr_number, pr_number)

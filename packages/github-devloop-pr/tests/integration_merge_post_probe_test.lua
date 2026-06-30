@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -33,7 +34,7 @@ return {
     local result = run_merge(event, opts("merge-post-merge-probe-red", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
-    local avm = core.autonomy_result_fact({ comment_raise.payload.body }, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha)
+    local avm = autonomy_ledger.autonomy_result_fact(core, { comment_raise.payload.body }, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha)
     t.eq(avm.gates.post_merge_probe, "fail")
     t.eq(avm.valid_autonomous_merge, "false")
     t.is_true(comment_raise.payload.body:find('post_merge_probe_green="fail"', 1, true) ~= nil)

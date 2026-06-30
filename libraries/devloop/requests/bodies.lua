@@ -1,4 +1,5 @@
 local S = {}
+local autonomy_ledger = require("devloop.autonomy_ledger")
 
 function S.install(M, shared)
 function M.build_merging_comment_body(merge_ready)
@@ -10,7 +11,7 @@ end
 function M.build_merged_comment_body(merge_ready, autonomy_record)
   local autonomy_marker = ""
   if autonomy_record ~= nil then
-    autonomy_marker = "\n" .. M.autonomy_result_marker(autonomy_record)
+    autonomy_marker = "\n" .. autonomy_ledger.autonomy_result_marker(M, autonomy_record)
   end
   return M.comment_string("merged_pr_prefix") .. tostring(merge_ready.pr_number)
     .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)

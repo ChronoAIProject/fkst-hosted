@@ -3,6 +3,7 @@ local core = h.core
 local t = h.t
 local contract_time = require("contract.time")
 local no_revert_reopen = require("devloop.autonomy.no_revert_reopen")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 
 local function mock_check_runs(json)
   t.mock_command("gh api 'repos/owner/repo/commits/def456/check-runs'", {
@@ -36,11 +37,11 @@ local function ledger_event(fields)
 end
 
 local function assert_not_before(left, right)
-  t.eq(core._autonomy_event_before(left, right), false)
+  t.eq(autonomy_ledger._autonomy_event_before(core, left, right), false)
 end
 
 local function assert_strictly_before(left, right)
-  t.is_true(core._autonomy_event_before(left, right))
+  t.is_true(autonomy_ledger._autonomy_event_before(core, left, right))
   assert_not_before(right, left)
 end
 
@@ -48,8 +49,8 @@ local function assert_transitive(events)
   for _, a in ipairs(events) do
     for _, b in ipairs(events) do
       for _, c in ipairs(events) do
-        if core._autonomy_event_before(a, b) and core._autonomy_event_before(b, c) then
-          t.is_true(core._autonomy_event_before(a, c))
+        if autonomy_ledger._autonomy_event_before(core, a, b) and autonomy_ledger._autonomy_event_before(core, b, c) then
+          t.is_true(autonomy_ledger._autonomy_event_before(core, a, c))
         end
       end
     end
@@ -88,16 +89,16 @@ return {
       no_revert_reopen = "pending",
       cost_budget = "pending",
     }
-    t.eq(core.autonomy_valid_autonomous_merge(gates), "pending")
+    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(core, gates), "pending")
 
     gates.evidence_manifest = "pass"
     gates.post_merge_probe = "pass"
     gates.no_revert_reopen = "pass"
     gates.cost_budget = "pass"
-    t.eq(core.autonomy_valid_autonomous_merge(gates), "true")
+    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(core, gates), "true")
 
     gates.cost_budget = "fail"
-    t.eq(core.autonomy_valid_autonomous_merge(gates), "false")
+    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(core, gates), "false")
   end,
 
   test_autonomy_result_marker_recomputes_pending_predicate = function()
@@ -125,11 +126,11 @@ return {
       valid_autonomous_merge = "true",
     }
 
-    local marker = core.autonomy_result_marker(record)
+    local marker = autonomy_ledger.autonomy_result_marker(core, record)
     t.is_true(marker:find('valid_autonomous_merge="pending"', 1, true) ~= nil)
     t.is_true(marker:find('codex_calls="null"', 1, true) ~= nil)
     t.is_true(marker:find('post_merge_probe_green="pending"', 1, true) ~= nil)
-    local fact = core.autonomy_result_fact({ marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
+    local fact = autonomy_ledger.autonomy_result_fact(core, { marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
     t.eq(fact.valid_autonomous_merge, "pending")
     t.eq(fact.task_class, "L2")
     t.eq(fact.retry_count, 2)
@@ -137,7 +138,7 @@ return {
   end,
 
   test_post_merge_probe_gate_uses_existing_rollup_and_fails_closed = function()
-    local green_gate = core.autonomy_post_merge_probe_gate({
+    local green_gate = autonomy_ledger.autonomy_post_merge_probe_gate(core, {
       head_sha = "def456",
       status_check_rollup = {
         { status = "COMPLETED", conclusion = "SUCCESS" },
@@ -145,7 +146,7 @@ return {
     })
     t.eq(green_gate, "pass")
 
-    local red_gate = core.autonomy_post_merge_probe_gate({
+    local red_gate = autonomy_ledger.autonomy_post_merge_probe_gate(core, {
       head_sha = "def456",
       status_check_rollup = {
         { status = "COMPLETED", conclusion = "FAILURE" },
@@ -154,7 +155,7 @@ return {
     t.eq(red_gate, "fail")
 
     mock_check_runs('{"total_count":0,"check_runs":[]}\n')
-    local missing_gate = core.autonomy_post_merge_probe_gate({
+    local missing_gate = autonomy_ledger.autonomy_post_merge_probe_gate(core, {
       head_sha = "def456",
       status_check_rollup = {},
     }, { repo = "owner/repo" })
@@ -281,11 +282,11 @@ return {
       },
     }
 
-    local marker = core.autonomy_result_marker(record):gsub(
+    local marker = autonomy_ledger.autonomy_result_marker(core, record):gsub(
       'valid_autonomous_merge="pending"',
       'valid_autonomous_merge="true"'
     )
-    local fact = core.autonomy_result_fact({ marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
+    local fact = autonomy_ledger.autonomy_result_fact(core, { marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
     t.eq(fact.valid_autonomous_merge, "pending")
   end,
 
@@ -314,8 +315,9 @@ return {
     }
 
     mock_check_runs('{"total_count":0,"check_runs":[]}\n')
-    local marker = core.autonomy_result_marker(record)
-    local fact = core.autonomy_audited_result_fact(
+    local marker = autonomy_ledger.autonomy_result_marker(core, record)
+    local fact = autonomy_ledger.autonomy_audited_result_fact(
+      core,
       { marker },
       record.proposal_id,
       record.pr_number,
@@ -356,11 +358,12 @@ return {
     }
     local comments = {
       trusted_comment(core.implement_attempt_marker(proposal_id, version, 1, "100"), "2026-06-03T01:00:00Z", 1101),
-      trusted_comment(core.autonomy_result_marker(autonomy_record), "2026-06-03T01:31:00Z", 1103),
+      trusted_comment(autonomy_ledger.autonomy_result_marker(core, autonomy_record), "2026-06-03T01:31:00Z", 1103),
       trusted_comment(core.merged_marker(proposal_id, "7", version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1102),
     }
 
-    local fact = core.autonomy_audited_result_fact(
+    local fact = autonomy_ledger.autonomy_audited_result_fact(
+      core,
       comments,
       proposal_id,
       "7",
@@ -425,7 +428,7 @@ return {
       trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
     }
 
-    local projection = core.autonomy_attempt_projection(comments, "owner/repo", "42")
+    local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, "owner/repo", "42")
     t.eq(projection.total_attempts, 2)
     t.eq(projection.outcomes.blocked, 1)
     t.eq(projection.outcomes.merged, 1)
@@ -435,7 +438,7 @@ return {
     t.eq(projection.attempts[2].claim_marker_id, 1003)
     t.eq(projection.attempts[2].outcome, "merged")
     t.eq(projection.attempts[2].autonomy_result.valid_autonomous_merge, "true")
-    t.eq(core.autonomy_attempt_denominator(comments, "owner/repo", "42"), 2)
+    t.eq(autonomy_ledger.autonomy_attempt_denominator(core, comments, "owner/repo", "42"), 2)
   end,
 
   test_autonomy_attempt_projection_ignores_untrusted_attempt_markers = function()
@@ -450,7 +453,7 @@ return {
       trusted_comment(core.implement_attempt_marker(proposal_id, version, 1, "100"), "2026-06-03T01:01:00Z", 1001),
     }
 
-    local projection = core.autonomy_attempt_projection(comments, "owner/repo", "42")
+    local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, "owner/repo", "42")
     t.eq(projection.total_attempts, 1)
     t.eq(projection.attempts[1].claim_marker_id, 1001)
   end,
@@ -485,11 +488,12 @@ return {
       trusted_comment(core.implement_attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
       trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
       trusted_comment(core.implement_attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
-      trusted_comment(core.autonomy_result_marker(autonomy_record), "2026-06-03T01:31:00Z", 1005),
+      trusted_comment(autonomy_ledger.autonomy_result_marker(core, autonomy_record), "2026-06-03T01:31:00Z", 1005),
       trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
     }
 
-    local fact = core.autonomy_audited_result_fact(
+    local fact = autonomy_ledger.autonomy_audited_result_fact(
+      core,
       comments,
       proposal_id,
       "7",
@@ -525,15 +529,15 @@ return {
   end,
 
   test_task_class_uses_explicit_label_before_title_fallback = function()
-    t.eq(core.autonomy_task_class({
+    t.eq(autonomy_ledger.autonomy_task_class(core, {
       title = "fix scheduler regression",
       labels = { "fkst-avm:L4" },
     }), "L4")
-    t.eq(core.autonomy_task_class({
+    t.eq(autonomy_ledger.autonomy_task_class(core, {
       title = "docs: update readme",
       labels = {},
     }), "L0")
-    t.eq(core.autonomy_task_class({
+    t.eq(autonomy_ledger.autonomy_task_class(core, {
       title = "Add useful thing",
       labels = {},
     }), "unknown")

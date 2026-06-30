@@ -2,6 +2,7 @@ local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local t = h.t
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 require("departments.observability.main")
 
 local old_dashboard_body_cap = 12000
@@ -484,7 +485,7 @@ return {
         cost_budget = "pass",
       },
     })
-    local valid_marker = core.autonomy_result_marker(record)
+    local valid_marker = autonomy_ledger.autonomy_result_marker(core, record)
     local malformed_marker = '<!-- fkst:github-devloop:autonomy-result:v1'
       .. ' proposal="github-devloop/issue/owner/repo/1655"'
       .. ' pr="1656"'

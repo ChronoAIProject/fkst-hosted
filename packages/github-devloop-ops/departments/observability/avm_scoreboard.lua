@@ -2,6 +2,7 @@ local M = {}
 local contract_time = require("contract.time")
 local no_revert_reopen = require("devloop.autonomy.no_revert_reopen")
 local autonomy_projection = require("devloop.autonomy.projection")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 
 function M.install_avm_scoreboard(core)
 local task_levels = { "L0", "L1", "L2", "L3", "L4", "unclassified" }
@@ -131,7 +132,7 @@ local function decorate_with_attempt_projection(fact, comments, now_seconds)
   if fact.repo == nil or fact.issue_number == nil then
     return fact
   end
-  local projection = core.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
+  local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, fact.repo, fact.issue_number, {
     proposal_id = fact.proposal_id,
     now_seconds = now_seconds,
   })
@@ -196,7 +197,7 @@ local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recen
     fact.gates = {}
   end
   fact.gates.no_revert_reopen = gate
-  fact.valid_autonomous_merge = core.autonomy_valid_autonomous_merge(fact.gates)
+  fact.valid_autonomous_merge = autonomy_ledger.autonomy_valid_autonomous_merge(core, fact.gates)
   if type(fact.attempt_projection) == "table" then
     autonomy_projection.apply_audited_fact(fact.attempt_projection, fact)
     fact.avm_rate_numerator = fact.attempt_projection.valid_merges
@@ -213,7 +214,7 @@ local function fact_from_marker(marker, comment)
   if proposal_id == nil or pr_number == nil or version == nil or head_sha == nil then
     return nil, "missing_identity"
   end
-  local fact, reason = core.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
+  local fact, reason = autonomy_ledger.autonomy_result_record_from_marker(core, marker, comment, proposal_id, pr_number, version, head_sha)
   if fact ~= nil and fact.issue_number == nil and core.parse_proposal_id ~= nil then
     local _, issue_number = core.parse_proposal_id(proposal_id)
     fact.issue_number = tonumber(issue_number)
