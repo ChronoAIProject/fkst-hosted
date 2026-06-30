@@ -2,6 +2,7 @@ local S = {}
 
 function S.install(M)
 local strings = require("contract.strings")
+local labels = require("devloop.commands.labels")
 local dashboard_title = "fkst-dev board"
 local dashboard_label = "fkst-dashboard"
 local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
@@ -144,7 +145,7 @@ local function ensure_labels(repo, mode, existing_labels)
   local created = 0
   for _, desired in ipairs(missing) do
     run_gh(function(timeout)
-      return M.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
+      return labels.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
     end, 30, "gh label create")
     created = created + 1
     log_ensure("label", "created", {
@@ -156,7 +157,7 @@ local function ensure_labels(repo, mode, existing_labels)
   local updated = 0
   for _, desired in ipairs(drifted) do
     run_gh(function(timeout)
-      return M.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
+      return labels.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
     end, 30, "gh label update")
     updated = updated + 1
     log_ensure("label", "updated", {
@@ -192,7 +193,7 @@ local function ensure_label(repo, mode, existing_labels, desired)
   end
   if current ~= nil then
     run_gh(function(timeout)
-      return M.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
+      return labels.gh_repo_label_update(repo, desired.name, desired.color, desired.description, timeout)
     end, 30, "gh label update")
     log_ensure("label", "updated", {
       "mode=real",
@@ -202,7 +203,7 @@ local function ensure_label(repo, mode, existing_labels, desired)
     return { missing = 0, drifted = 1, created = 0, updated = 1 }
   end
   run_gh(function(timeout)
-    return M.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
+    return labels.gh_repo_label_create(repo, desired.name, desired.color, desired.description, timeout)
   end, 30, "gh label create")
   log_ensure("label", "created", {
     "mode=real",
@@ -354,8 +355,8 @@ function M.ensure_repo()
   if cfg.write_mode == "real" then
     M.assert_trusted_bot_configured()
   end
-  local labels = M.parse_repo_labels(run_gh(function(timeout)
-    return M.gh_repo_labels_list(repo, timeout)
+  local repo_labels = M.parse_repo_labels(run_gh(function(timeout)
+    return labels.gh_repo_labels_list(repo, timeout)
   end, 30, "gh label list").stdout)
   local dashboard_issues = M.parse_dashboard_issue_list(
     run_gh(function(timeout)
@@ -370,8 +371,8 @@ function M.ensure_repo()
   if topology_result.held then
     apply_mode = "held"
   end
-  local label_result = ensure_labels(repo, apply_mode, labels)
-  local dashboard_label_result = ensure_label(repo, apply_mode, labels, {
+  local label_result = ensure_labels(repo, apply_mode, repo_labels)
+  local dashboard_label_result = ensure_label(repo, apply_mode, repo_labels, {
     name = dashboard_label,
     color = "ededed",
     description = "fkst observability dashboard singleton",
@@ -380,7 +381,7 @@ function M.ensure_repo()
   -- the deployment opts into label-mode so assignee-mode repos stay unchanged.
   local claim_label_result = nil
   if M.claim_mode() == "label" then
-    claim_label_result = ensure_label(repo, apply_mode, labels, {
+    claim_label_result = ensure_label(repo, apply_mode, repo_labels, {
       name = M.claimed_label(),
       color = "0E8A16",
       description = "fkst-dev-label-mode-ownership-claim",

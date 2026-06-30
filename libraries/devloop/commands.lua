@@ -6,7 +6,6 @@ local modules = {
   "devloop.commands.issue_reads",
   "devloop.commands.observe_lists",
   "devloop.commands.dashboard",
-  "devloop.commands.labels",
   "devloop.commands.prs",
   "devloop.commands.git_ops",
 }
