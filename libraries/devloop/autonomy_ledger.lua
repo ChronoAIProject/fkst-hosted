@@ -1,6 +1,8 @@
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
+local no_revert_reopen = require("devloop.autonomy.no_revert_reopen")
+local autonomy_projection = require("devloop.autonomy.projection")
 
 function S.install(M)
 local task_classes = {
@@ -465,12 +467,21 @@ function M.autonomy_result_record(repo, issue_number, merge_ready, issue, post_m
       proposal_id = tostring(merge_ready.proposal_id),
     })
   end
+  local no_revert_reopen_gate = no_revert_reopen.gate({
+    repo = repo,
+    issue_number = issue_number,
+    pr_number = merge_ready.pr_number,
+    merged_at = post_merge_pr and post_merge_pr.merged_at or nil,
+  }, {
+    merged_pr = post_merge_pr,
+    issue = issue,
+  })
   local gates = {
     human_touch = human_touch_count == 0 and "pass" or "fail",
     pre_merge_ci = "pass",
     evidence_manifest = "pending",
     post_merge_probe = post_merge_probe,
-    no_revert_reopen = "pending",
+    no_revert_reopen = no_revert_reopen_gate,
     cost_budget = "pending",
   }
   return {
@@ -481,6 +492,7 @@ function M.autonomy_result_record(repo, issue_number, merge_ready, issue, post_m
     pr_number = tostring(merge_ready.pr_number),
     version = tostring(merge_ready.version),
     head_sha = tostring(merge_ready.reviewed_head_sha),
+    merged_at = post_merge_pr and post_merge_pr.merged_at or nil,
     task_class = M.autonomy_task_class(issue),
     human_touch_count = human_touch_count,
     pre_merge_ci = gates.pre_merge_ci,
@@ -700,6 +712,7 @@ function M.autonomy_audit_valid_autonomous_merge(fact, opts)
   if type(fact) ~= "table" then
     return nil
   end
+  local no_revert_reopen_gate = no_revert_reopen.gate(fact, opts)
   local repo = tostring((type(opts) == "table" and opts.repo) or fact.repo or "")
   local head_sha = tostring((type(opts) == "table" and opts.merge_commit_sha) or fact.merge_commit_sha or fact.head_sha or "")
   if repo == "" or not forge_validators.is_git_sha(head_sha) then
@@ -725,12 +738,13 @@ function M.autonomy_audit_valid_autonomous_merge(fact, opts)
         pre_merge_ci = type(fact.gates) == "table" and fact.gates.pre_merge_ci or nil,
         evidence_manifest = type(fact.gates) == "table" and fact.gates.evidence_manifest or nil,
         post_merge_probe = "pass",
-        no_revert_reopen = type(fact.gates) == "table" and fact.gates.no_revert_reopen or nil,
+        no_revert_reopen = no_revert_reopen_gate,
         cost_budget = type(fact.gates) == "table" and fact.gates.cost_budget or nil,
       }),
       reason = "audited",
       gates = {
         post_merge_probe = "pass",
+        no_revert_reopen = no_revert_reopen_gate,
       },
     }
   end
@@ -740,6 +754,7 @@ function M.autonomy_audit_valid_autonomous_merge(fact, opts)
       reason = tostring(reason or "missing-post-merge-probe-run"),
       gates = {
         post_merge_probe = "fail",
+        no_revert_reopen = no_revert_reopen_gate,
       },
     }
   end
@@ -752,6 +767,7 @@ function M.autonomy_audit_valid_autonomous_merge(fact, opts)
     reason = tostring(reason or "post-merge-probe-not-green"),
     gates = {
       post_merge_probe = "fail",
+      no_revert_reopen = no_revert_reopen_gate,
     },
   }
 end
@@ -776,12 +792,12 @@ function M.autonomy_audited_result_fact(comments, proposal_id, pr_number, versio
       end
     end
   end
-  fact.attempt_projection = M.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
+  fact.attempt_projection = autonomy_projection.apply_audited_fact(M.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
     proposal_id = proposal_id,
     now_seconds = type(opts) == "table" and opts.now_seconds or nil,
     timed_out_after_seconds = type(opts) == "table" and opts.timed_out_after_seconds or nil,
     abandoned_after_seconds = type(opts) == "table" and opts.abandoned_after_seconds or nil,
-  })
+  }), fact)
   fact.attempts = fact.attempt_projection.attempts
   fact.attempt_outcomes = fact.attempt_projection.outcomes
   fact.avm_rate_numerator = fact.attempt_projection.valid_merges

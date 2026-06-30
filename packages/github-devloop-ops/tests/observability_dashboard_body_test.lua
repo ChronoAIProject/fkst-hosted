@@ -202,14 +202,14 @@ return {
       task_class = "L4",
       rounds = 2,
       codex_calls = 8,
-      gates = {
-        human_touch = "pass",
-        pre_merge_ci = "pass",
-        evidence_manifest = "pass",
-        post_merge_probe = "pass",
-        no_revert_reopen = "fail",
-        cost_budget = "pass",
-      },
+        gates = {
+          human_touch = "pass",
+          pre_merge_ci = "pass",
+          evidence_manifest = "pass",
+          post_merge_probe = "pass",
+          no_revert_reopen = "pending",
+          cost_budget = "pass",
+        },
     })
     local comments = {
       trusted_comment(attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
@@ -256,7 +256,7 @@ return {
 
     t.is_true(dashboard.body:find("## AVM scoreboard by task level", 1, true) ~= nil)
     t.is_true(dashboard.body:find(
-      "- L4 merges=1 AVM-rate=0/2 (0%) cost-per-AVM=n/a revert-rate=1/1 (100%) median-rounds=2 false-consensus-rate=n/a",
+      "- L4 merges=1 AVM-rate=0/2 (0%) cost-per-AVM=n/a revert-rate=n/a median-rounds=2 false-consensus-rate=n/a",
       1,
       true
     ) ~= nil)
@@ -319,6 +319,62 @@ return {
     t.eq(pairs[1].reverted_pr, 9)
     t.eq(pairs[1].revert_pr, 10)
     t.eq(pairs[1].evidence, "explicit-revert-pr")
+  end,
+
+  test_avm_scoreboard_promotes_no_revert_gate_after_clean_window = function()
+    mock_dashboard_env()
+    local proposal_id = "github-devloop/issue/owner/repo/47"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/47/2026-06-03T01-02-03Z"
+    local head_sha = "abc4747"
+    local record = autonomy_record({
+      proposal_id = proposal_id,
+      issue_number = "47",
+      pr_number = "14",
+      version = version,
+      head_sha = head_sha,
+      task_class = "L1",
+      codex_calls = 2,
+      gates = {
+        human_touch = "pass",
+        pre_merge_ci = "pass",
+        evidence_manifest = "pass",
+        post_merge_probe = "pass",
+        no_revert_reopen = "pending",
+        cost_budget = "pass",
+      },
+    })
+    local recent_prs = {
+      {
+        number = 14,
+        title = "Implement stable AVM gate",
+        merged_at = "2026-06-03T01:30:00Z",
+        comments = {
+          trusted_comment(core.merged_marker(proposal_id, "14", version, head_sha, record), "2026-06-03T01:30:00Z", 2011),
+        },
+      },
+    }
+    local recent_issues = {
+      {
+        number = 47,
+        title = "Implement stable AVM gate",
+        state = "CLOSED",
+        state_reason = "COMPLETED",
+        comments = {},
+      },
+    }
+    local facts = core.collect_avm_scoreboard_facts({}, 1781227800, recent_prs, recent_issues)
+    local rows = core.aggregate_avm_scoreboard(facts)
+    local by_level = {}
+    for _, row in ipairs(rows) do
+      by_level[row.level] = row
+    end
+
+    t.eq(facts[1].gates.no_revert_reopen, "pass")
+    t.eq(facts[1].valid_autonomous_merge, "true")
+    t.eq(by_level.L1.avm_numerator, 1)
+    t.eq(by_level.L1.avm_denominator, 1)
+    t.eq(by_level.L1.revert_numerator, 0)
+    t.eq(by_level.L1.revert_denominator, 1)
   end,
 
   test_false_consensus_detector_requires_exact_pr_reference = function()
