@@ -84,7 +84,7 @@ local function mock_execute_start_issue()
     comments = {},
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
-  }, "title,body,updatedAt,labels,comments,state,assignees,author", 1)
+  }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 1)
 end
 
 local function mock_consensus_approval()

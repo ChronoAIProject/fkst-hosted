@@ -69,7 +69,7 @@ end
 
 return {
   test_awaiting_pr_parent_replay_noops_while_child_pr_is_nonterminal = function()
-    mock_issue_at_awaiting_pr("number,title,body,comments,labels,state,updatedAt,assignees,author")
+    mock_issue_at_awaiting_pr("number,title,body,comments,labels,state,createdAt,updatedAt,assignees,author")
     mock_pr_with_comments({
       core.pr_origin_marker(issue_proposal_id, 42, branch, impl_version, "dev"),
       core.state_marker(issue_proposal_id, "reviewing", impl_version),

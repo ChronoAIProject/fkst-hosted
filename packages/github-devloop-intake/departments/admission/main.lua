@@ -75,7 +75,7 @@ local function admit_issue_event(event, entity)
   local proposal_id = core.proposal_id(repo, issue_number)
   core.assert_trusted_bot_configured()
 
-  local view = core.gh_issue_view(repo, issue_number, "title,body,updatedAt,labels,comments,state,assignees,author", 30)
+  local view = core.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)
   if view.exit_code ~= 0 then
     error("github-devloop-intake: gh-issue-admission-view-failed: gh issue admission view failed: " .. tostring(view.stderr))
   end

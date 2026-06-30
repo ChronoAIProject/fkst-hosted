@@ -67,7 +67,7 @@ local function mock_intake_judge_view(labels, comments, extra)
     assignees_json,
     h.encode_json_string(fields.author_login or "fkst-test-bot")
   )
-  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state,assignees,author", {
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", {
     stdout = stdout_with_assignees,
   }, 2)
   entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {

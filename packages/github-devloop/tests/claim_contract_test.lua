@@ -68,6 +68,7 @@ local function issue_state_json(fields)
       .. ',"author":{"login":' .. encode_json_string(comment.author_login or "fkst-test-bot") .. "}}")
   end
   return '{"title":' .. encode_json_string(selected.title or "Implement fork isolation")
+    .. ',"createdAt":' .. encode_json_string(selected.created_at or "2026-06-03T01:00:00Z")
     .. ',"updatedAt":' .. encode_json_string(selected.updated_at or "2026-06-03T01:02:03Z")
     .. ',"state":' .. encode_json_string(selected.state or "OPEN")
     .. ',"labels":[],"comments":[' .. table.concat(comments, ",")
@@ -90,7 +91,21 @@ local function self_current(extra)
     state = fields.state or "OPEN",
     author_login = fields.author_login or "fkst-test-bot",
     comments = fields.comments or {},
+    created_at = fields.created_at or "2026-06-03T01:00:00Z",
+    updated_at = fields.updated_at,
   }
+end
+
+local function iso_at(seconds)
+  return os.date("!%Y-%m-%dT%H:%M:%SZ", seconds)
+end
+
+local function created_inside_grace()
+  return iso_at(now())
+end
+
+local function created_after_grace()
+  return iso_at(now() - (3 * 60 * 60) - 1)
 end
 
 local function capture_raises(fn)
@@ -139,6 +154,31 @@ local function capture_info_logs(fn)
 end
 
 return {
+  test_fork_grace_elapsed_uses_created_at_and_clamps_future_age = function()
+    local elapsed, reason, age = core.fork_grace_elapsed("owner/repo", 42, {
+      created_at = "2026-06-03T00:00:00Z",
+      updated_at = "2026-06-03T23:59:00Z",
+    }, 1782835200, 3 * 60 * 60)
+    t.eq(elapsed, true)
+    t.eq(reason, "fork-grace-elapsed")
+    t.is_true(age >= 3 * 60 * 60)
+
+    elapsed, reason, age = core.fork_grace_elapsed("owner/repo", 42, {
+      created_at = "2999-01-01T00:00:00Z",
+      updated_at = "2026-06-03T01:02:03Z",
+    }, 1782835200, 3 * 60 * 60)
+    t.eq(elapsed, false)
+    t.eq(reason, "fork-grace-pending")
+    t.eq(age, 0)
+
+    elapsed, reason, age = core.fork_grace_elapsed("owner/repo", 42, {
+      updated_at = "2026-06-03T01:02:03Z",
+    }, 1782835200, 3 * 60 * 60)
+    t.eq(elapsed, false)
+    t.eq(reason, "fork-grace-age-unknown")
+    t.eq(age, nil)
+  end,
+
   test_issue_claim_state_is_current_assignees_only = function()
     t.eq(core.issue_claim_state({}, "fkst-test-bot"), "unassigned")
     t.eq(core.issue_claim_state({ { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
@@ -296,32 +336,39 @@ return {
   test_other_author_unassigned_issue_inside_grace_skips_without_forking = function()
     mock_bot("fkst-test-bot", "1")
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 44), {
-      stdout = issue_state_json({ author_login = "human" }),
+      stdout = issue_state_json({ author_login = "human", created_at = created_inside_grace() }),
       stderr = "",
       exit_code = 0,
     })
 
-    local ok, raised = capture_raises(function()
-      return core.claim_issue_for_management(
-        "claim_contract",
-        "owner/repo",
-        44,
-        self_current({ author_login = "human" }),
-        "github-devloop/issue/owner/repo/44"
-      )
+    local ok, logs
+    local _, raised = capture_raises(function()
+      ok, logs = capture_info_logs(function()
+        return core.claim_issue_for_management(
+          "claim_contract",
+          "owner/repo",
+          44,
+          self_current({ author_login = "human", created_at = created_inside_grace() }),
+          "github-devloop/issue/owner/repo/44"
+        )
+      end)
     end)
 
     t.eq(ok, false)
     t.eq(count_calls("gh issue edit"), 0)
     t.eq(#raised, 0)
+    local joined = table.concat(logs, "\n")
+    t.is_true(joined:find("outcome=skip-fork-grace", 1, true) ~= nil)
+    t.is_true(joined:find("reason=fork-grace-pending", 1, true) ~= nil)
+    t.is_true(joined:find("age_seconds=", 1, true) ~= nil)
+    t.is_true(joined:find("grace_seconds=10800", 1, true) ~= nil)
   end,
 
   test_managed_bot_author_unassigned_issue_after_grace_skips_without_forking = function()
     mock_bot("fkst-test-bot", "1")
     mock_managed_bot_logins("peer-bot[bot],other-peer")
-    cache_set(core.fork_first_observed_key("owner/repo", 45), tostring(now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 45), {
-      stdout = issue_state_json({ author_login = "peer-bot[bot]" }),
+      stdout = issue_state_json({ author_login = "peer-bot[bot]", created_at = created_after_grace() }),
       stderr = "",
       exit_code = 0,
     })
@@ -332,7 +379,7 @@ return {
           "claim_contract",
           "owner/repo",
           45,
-          self_current({ author_login = "peer-bot[bot]" }),
+          self_current({ author_login = "peer-bot[bot]", created_at = created_after_grace() }),
           "github-devloop/issue/owner/repo/45"
         )
       end)
@@ -348,9 +395,8 @@ return {
 
   test_other_author_unassigned_issue_after_grace_raises_self_assigned_fork = function()
     mock_bot("fkst-test-bot", "1")
-    cache_set(core.fork_first_observed_key("owner/repo", 43), tostring(now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 43), {
-      stdout = issue_state_json({ author_login = "human" }),
+      stdout = issue_state_json({ author_login = "human", created_at = created_after_grace() }),
       stderr = "",
       exit_code = 0,
     })
@@ -360,7 +406,7 @@ return {
         "claim_contract",
         "owner/repo",
         43,
-        self_current({ author_login = "human" }),
+        self_current({ author_login = "human", created_at = created_after_grace() }),
         "github-devloop/issue/owner/repo/43"
       )
     end)
@@ -378,9 +424,8 @@ return {
 
   test_other_author_fork_revalidates_closed_issue_before_raise = function()
     mock_bot("fkst-test-bot", "1")
-    cache_set(core.fork_first_observed_key("owner/repo", 43), tostring(now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 43), {
-      stdout = issue_state_json({ state = "CLOSED", author_login = "human" }),
+      stdout = issue_state_json({ state = "CLOSED", author_login = "human", created_at = created_after_grace() }),
       stderr = "",
       exit_code = 0,
     })
@@ -390,7 +435,7 @@ return {
         "claim_contract",
         "owner/repo",
         43,
-        self_current({ author_login = "human", state = "OPEN" }),
+        self_current({ author_login = "human", state = "OPEN", created_at = created_after_grace() }),
         "github-devloop/issue/owner/repo/43"
       )
     end)
@@ -501,10 +546,10 @@ return {
   test_forged_fork_parent_intent_does_not_suppress_fork = function()
     mock_bot("fkst-test-bot", "1")
     local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
-    cache_set(core.fork_first_observed_key("owner/repo", 42), tostring(now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({
         author_login = "human",
+        created_at = created_after_grace(),
         comments = {
           {
             body = '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. dedup_key .. '" -->',
@@ -523,6 +568,7 @@ return {
         42,
         self_current({
           author_login = "human",
+          created_at = created_after_grace(),
           comments = {
             {
               body = '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. dedup_key .. '" -->',

@@ -2,7 +2,6 @@ local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
 local config = require("devloop.config")
-require("tests.cache_seed_helpers")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -85,16 +84,6 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
 
-local function seed_cache(key, value, run_opts)
-  return t.run_department("departments/test_cache_seed/main.lua", {
-    queue = "cache_seed",
-    payload = {
-      key = key,
-      value = tostring(value),
-    },
-  }, run_opts)
-end
-
 return {
   test_observe_opt_in_issue_raises_proposal_and_thinking_label = function()
     mock_issue_state({ "fkst-dev:enabled" })
@@ -120,9 +109,9 @@ return {
   end,
 
   test_observe_other_authored_unmanaged_issue_inside_grace_does_not_fork = function()
-    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human", os.date("!%Y-%m-%dT%H:%M:%SZ", now()))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
-      stdout = '{"title":"Issue title","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+      stdout = '{"title":"Issue title","createdAt":"' .. os.date("!%Y-%m-%dT%H:%M:%SZ", now()) .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
       stderr = "",
       exit_code = 0,
     })
@@ -136,11 +125,9 @@ return {
 
   test_observe_other_authored_unmanaged_issue_after_grace_raises_fork_request_only = function()
     local run_opts = opts("observe-other-author-fork")
-    local seeded = seed_cache(core.fork_first_observed_key("owner/repo", 42, "2026-06-03T01:02:03Z"), now() - (3 * 60 * 60) - 1, run_opts)
-    t.eq(seeded.exit_code, 0)
-    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human")
+    mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {}, {}, "human", os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1))
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
-      stdout = '{"title":"Issue title","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
+      stdout = '{"title":"Issue title","createdAt":"' .. os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (3 * 60 * 60) - 1) .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"assignees":[],"author":{"login":"human"}}\n',
       stderr = "",
       exit_code = 0,
     })
