@@ -1,0 +1,21 @@
+title = "fkst-hosted gitleaks config"
+
+# Use gitleaks' built-in rule set; this file only adds an allowlist for known,
+# verified non-secrets. Never allowlist a real credential here.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Build artifacts + documented placeholder/test PEMs (verified: no real secrets)."
+# Cargo build artifacts (absent in a fresh CI checkout; excluded for local runs).
+paths = [
+  '''^backend/target/''',
+  # Template files that hold placeholder secrets by design (MIIE… / CHANGE_ME).
+  '''(^|/)\.env\.example$''',
+  '''(^|/)secret\.example\.yaml$''',
+]
+# The fake PEM in the error-redaction unit test (backend/src/error.rs): a literal
+# "-----BEGIN RSA PRIVATE KEY-----\nSECRET\n-----END RSA PRIVATE KEY-----".
+regexes = [
+  '''BEGIN RSA PRIVATE KEY-----\\nSECRET\\n-----END''',
+]
