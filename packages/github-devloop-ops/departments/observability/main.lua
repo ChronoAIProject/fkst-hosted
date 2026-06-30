@@ -3,6 +3,7 @@ local common = require("departments.observability.common")
 local avm_scoreboard = require("departments.observability.avm_scoreboard")
 local census = require("departments.observability.census")
 local dashboard = require("departments.observability.dashboard")
+local queue_starvation = require("devloop.queue_starvation")
 local reaper = require("departments.observability.reaper")
 local topology = require("departments.observability.topology")
 
@@ -47,7 +48,7 @@ function core.observe_devloop_entities(event)
   local recent_merged_issues = core.collect_recent_merged_issues(repo, limits, deadline)
 
   core.reap_orphan_prs(repo, observed.list)
-  local queue_starvation = core.observe_queue_starvation(repo, observed.list, limits, deadline, observed.now_seconds)
+  local queue_starvation_result = queue_starvation.observe_queue_starvation(core, repo, observed.list, limits, deadline, observed.now_seconds)
   local conflict_hotspot = core.observe_conflict_hotspots(repo, core.observability_call_timeout(limits, deadline))
   local rendered_dashboard = core.render_observability_dashboard({
     entities = observed.list,
@@ -64,7 +65,7 @@ function core.observe_devloop_entities(event)
   return {
     entity_count = #observed.list,
     counts = observed.counts,
-    queue_starvation = queue_starvation,
+    queue_starvation = queue_starvation_result,
     conflict_hotspot = conflict_hotspot,
     state_gap_report = observed.state_gap_report,
     dashboard_hash = rendered_dashboard.hash,
