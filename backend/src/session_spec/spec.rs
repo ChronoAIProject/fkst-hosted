@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::models::RepoRef;
-use crate::ornn::types::OrnnSkillPin;
 
 /// Fixed namespace for the deterministic per-session UUIDv5. Constant so the
 /// same `(installation_id, owner, name, issue_number)` always derives the same
@@ -46,11 +45,11 @@ pub struct SessionGoal {
 
 /// The non-secret descriptor of one substrate session.
 ///
-/// Carries NO credentials — the GitHub App token, the NyxID token, and the
-/// NyxID URL live in the mounted Secret volume described by
-/// [`crate::session_spec::CredsLayout`]. This separation is what lets the
-/// control plane write the SessionSpec freely while keeping every token off the
-/// descriptor (and out of any `{:?}` rendering).
+/// Carries NO credentials — the GitHub App token and the static LLM API key live
+/// in the mounted Secret volume described by [`crate::session_spec::CredsLayout`].
+/// This separation is what lets the control plane write the SessionSpec freely
+/// while keeping every token off the descriptor (and out of any `{:?}`
+/// rendering).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SessionSpec {
@@ -71,8 +70,6 @@ pub struct SessionSpec {
     pub goal: SessionGoal,
     /// The `.fkst/packages/<name>` packages named in the issue.
     pub package_names: Vec<String>,
-    /// The user's pinned Ornn skills/skillsets to inject (may be empty).
-    pub ornn_pins: Vec<OrnnSkillPin>,
     /// The dedicated branch the pod commits its `.fkst/log/<run_key>.log`
     /// checkpoints to (e.g. `fkst/session-<id>`), keeping the code PR clean.
     pub log_branch: String,
@@ -81,7 +78,6 @@ pub struct SessionSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ornn::types::OrnnPinKind;
 
     fn sample() -> SessionSpec {
         SessionSpec {
@@ -99,11 +95,6 @@ mod tests {
                 prompt: "Implement a dark-mode toggle in settings.".into(),
             },
             package_names: vec!["web".into()],
-            ornn_pins: vec![OrnnSkillPin {
-                kind: OrnnPinKind::Skillset,
-                name: "frontend".into(),
-                version: "1.2".into(),
-            }],
             log_branch: "fkst/session-x".into(),
         }
     }

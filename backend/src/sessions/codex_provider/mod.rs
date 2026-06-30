@@ -1,56 +1,47 @@
 //! The per-session codex `config.toml` renderer.
 //!
-//! v1 runs every session against the NyxID-proxied chrono-llm DEFAULT provider:
-//! the model + base URL are operator-pinned (`FKST_HOSTED_CODEX_MODEL` /
-//! `FKST_HOSTED_CHRONO_LLM_BASE_URL`), and the per-session NyxID token rides the
-//! `env_key` ([`DEFAULT_ENV_KEY`]) — never embedded in the config. (The old
+//! v1 runs every session against a single, operator-pinned LLM provider. The
+//! model, base URL, and wire_api are config-driven (`FKST_LLM_MODEL` /
+//! `FKST_LLM_BASE_URL` / `FKST_LLM_WIRE_API`), and the static LLM API key rides
+//! the `env_key` ([`LLM_ENV_KEY`]) — never embedded in the config. (The old
 //! vault-driven Raw/Structured provider selection was removed with the in-memory
 //! vault; a custom-provider path can return as a typed layer if v1 needs it.)
 
-/// `env_key` for the chrono-llm DEFAULT: the per-session NyxID user token (#111),
-/// sent as `Authorization: Bearer` to the NyxID proxy.
-pub const DEFAULT_ENV_KEY: &str = "NYXID_ACCESS_TOKEN";
+/// `env_key` the engine's codex reads the LLM API key from.
+///
+/// MUST be `LLM_API_KEY`, NOT `FKST_LLM_API_KEY`: the engine's
+/// `is_reserved_env_key` strips any `FKST_`-prefixed env var, so an `FKST_`-named
+/// key would be silently dropped and the engine would 401. `FKST_LLM_API_KEY` is
+/// the CONTROL-PLANE config var name only.
+pub const LLM_ENV_KEY: &str = "LLM_API_KEY";
 
-/// wire_api for the chrono-llm DEFAULT: the OpenAI Responses API the proxy serves.
-pub const DEFAULT_WIRE_API: &str = "responses";
+/// Default `wire_api` for the LLM provider.
+///
+/// MUST be `chat`: chrono-llm serves only `/chat/completions`; `responses`
+/// returns 502 (a verified bug). Never default to `responses`.
+pub const DEFAULT_WIRE_API: &str = "chat";
 
-/// `model_provider` id + provider name for the chrono-llm DEFAULT.
-pub const CHRONO_LLM_PROVIDER_ID: &str = "chrono-llm";
+/// `model_provider` id + provider name. Neutral (no vendor coupling) so the same
+/// renderer serves any OpenAI-compatible backend.
+pub const LLM_PROVIDER_ID: &str = "llm";
 
-/// The resolved provider layer. v1 has a single layer (the chrono-llm DEFAULT);
-/// kept as an enum so a future custom-provider layer can be added without
-/// changing the renderer's call sites.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderChoice {
-    /// The NyxID-proxied `chrono-llm` default.
-    DefaultChronoLlm,
-}
-
-/// Render the codex `config.toml` body for the chosen layer. `default_model` /
-/// `default_base_url` are the operator-pinned chrono-llm values.
-pub fn render_codex_config(
-    choice: &ProviderChoice,
-    default_model: &str,
-    default_base_url: &str,
-) -> String {
-    match choice {
-        ProviderChoice::DefaultChronoLlm => render_default(default_model, default_base_url),
-    }
-}
-
-/// Render the chrono-llm DEFAULT toml. `disable_response_storage = true` because
-/// the proxy is stateless for the session user.
-fn render_default(default_model: &str, default_base_url: &str) -> String {
+/// Render the codex `config.toml` body for the operator-pinned LLM provider.
+///
+/// `model` / `base_url` / `wire_api` are the config-driven provider values and
+/// `env_key` is the environment variable the codex reads the API key from (the
+/// caller passes [`LLM_ENV_KEY`]). `disable_response_storage = true` because the
+/// provider is stateless for the session.
+pub fn render_codex_config(model: &str, base_url: &str, wire_api: &str, env_key: &str) -> String {
     format!(
-        "model_provider = \"{CHRONO_LLM_PROVIDER_ID}\"\n\
-         model = \"{default_model}\"\n\
+        "model_provider = \"{LLM_PROVIDER_ID}\"\n\
+         model = \"{model}\"\n\
          disable_response_storage = true\n\
          \n\
-         [model_providers.{CHRONO_LLM_PROVIDER_ID}]\n\
-         name = \"{CHRONO_LLM_PROVIDER_ID}\"\n\
-         base_url = \"{default_base_url}\"\n\
-         wire_api = \"{DEFAULT_WIRE_API}\"\n\
-         env_key = \"{DEFAULT_ENV_KEY}\"\n"
+         [model_providers.{LLM_PROVIDER_ID}]\n\
+         name = \"{LLM_PROVIDER_ID}\"\n\
+         base_url = \"{base_url}\"\n\
+         wire_api = \"{wire_api}\"\n\
+         env_key = \"{env_key}\"\n"
     )
 }
 
@@ -59,17 +50,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_renders_chrono_llm_with_pinned_model_and_token_env_key() {
+    fn renders_pinned_model_with_neutral_provider_and_llm_env_key() {
         let toml = render_codex_config(
-            &ProviderChoice::DefaultChronoLlm,
             "gpt-5-codex",
             "https://nyx/p",
+            DEFAULT_WIRE_API,
+            LLM_ENV_KEY,
         );
-        assert!(toml.contains("model_provider = \"chrono-llm\""));
+        assert!(toml.contains("model_provider = \"llm\""));
+        assert!(toml.contains("[model_providers.llm]"));
         assert!(toml.contains("model = \"gpt-5-codex\""));
         assert!(toml.contains("base_url = \"https://nyx/p\""));
-        assert!(toml.contains("wire_api = \"responses\""));
-        assert!(toml.contains("env_key = \"NYXID_ACCESS_TOKEN\""));
+        // wire_api is a parameter and defaults to `chat`, NEVER `responses`.
+        assert!(toml.contains("wire_api = \"chat\""));
+        assert!(!toml.contains("responses"));
+        // The engine reads the key from `LLM_API_KEY`, never `NYXID_ACCESS_TOKEN`.
+        assert!(toml.contains("env_key = \"LLM_API_KEY\""));
+        assert!(!toml.contains("NYXID_ACCESS_TOKEN"));
         assert!(toml.contains("disable_response_storage = true"));
+    }
+
+    #[test]
+    fn wire_api_is_a_render_parameter() {
+        let toml = render_codex_config("m", "https://b", "responses", LLM_ENV_KEY);
+        // The renderer honours whatever wire_api the caller passes (the safe
+        // default is enforced by the caller / config, not hard-coded here).
+        assert!(toml.contains("wire_api = \"responses\""));
     }
 }

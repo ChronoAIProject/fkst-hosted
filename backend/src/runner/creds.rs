@@ -1,11 +1,11 @@
 //! Credential-file readers for the `run-session` pod.
 //!
 //! The per-session Kubernetes Secret is mounted as a 0400 file volume described
-//! by [`crate::session_spec::CredsLayout`]. These helpers read those files,
-//! trimming the trailing newline a `kubectl`/Secret write leaves behind, and
-//! keep the secret values inside [`SecretString`] so a caller cannot accidentally
-//! log them. Values are NEVER logged here — only the path (which is non-secret)
-//! appears in error context.
+//! by [`crate::session_spec::CredsLayout`]. [`read_required_secret`] reads a
+//! credential file, trimming the trailing newline a `kubectl`/Secret write
+//! leaves behind, and keeps the secret value inside [`SecretString`] so a caller
+//! cannot accidentally log it. Values are NEVER logged here — only the path
+//! (which is non-secret) appears in error context.
 
 use std::path::Path;
 
@@ -24,23 +24,6 @@ pub fn read_required_secret(path: &Path) -> Result<SecretString, String> {
         return Err(format!("credential file {} is empty", path.display()));
     }
     Ok(SecretString::from(trimmed.to_string()))
-}
-
-/// Read an OPTIONAL credential/config file, returning its trimmed contents only
-/// when the file exists and is non-empty. A missing or empty file yields `None`
-/// (the NyxID token + URL are optional: a session may run without an LLM token).
-pub fn read_optional_nonempty(path: &Path) -> Option<String> {
-    match std::fs::read_to_string(path) {
-        Ok(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        Err(_) => None,
-    }
 }
 
 #[cfg(test)]
@@ -74,19 +57,11 @@ mod tests {
     }
 
     #[test]
-    fn optional_nonempty_returns_value_or_none() {
+    fn required_secret_reads_the_llm_api_key() {
         let dir = tempfile::tempdir().expect("dir");
-        let present = dir.path().join("nyxid-token");
-        std::fs::write(&present, "nyxid_ag_token\n").expect("write");
-        assert_eq!(
-            read_optional_nonempty(&present).as_deref(),
-            Some("nyxid_ag_token")
-        );
-
-        let empty = dir.path().join("nyxid-url");
-        std::fs::write(&empty, "\n").expect("write");
-        assert_eq!(read_optional_nonempty(&empty), None);
-
-        assert_eq!(read_optional_nonempty(&dir.path().join("absent")), None);
+        let path = dir.path().join("llm-api-key");
+        std::fs::write(&path, "sk-test-key\n").expect("write");
+        let secret = read_required_secret(&path).expect("present key");
+        assert_eq!(secret.expose_secret(), "sk-test-key");
     }
 }

@@ -5,9 +5,9 @@
 //! ClaimMap/CAS, no `/internal/v1` worker protocol, and no heartbeat. This
 //! module is that process: it reads the non-secret [`SessionSpec`] and the
 //! mounted credential files ([`CredsLayout`]), clones the goal repo, renders a
-//! per-session `CODEX_HOME`, injects any pinned Ornn skills, drives the engine
-//! to a terminal status, and maps that status onto the process exit code
-//! (`0` on a clean completion, non-zero on any failure).
+//! per-session `CODEX_HOME`, drives the engine to a terminal status, and maps
+//! that status onto the process exit code (`0` on a clean completion, non-zero
+//! on any failure).
 //!
 //! ## Abstraction seam (testability)
 //!
@@ -35,10 +35,8 @@ use crate::engine::{
     StartSpec,
 };
 use crate::models::RepoRef;
-use crate::nyxid::{NyxIdClient, DEFAULT_GITHUB_PROXY_SLUG};
-use crate::ornn::{inject_pins, OrnnClient, DEFAULT_ORNN_SLUG};
 use crate::session_spec::{CredsLayout, SessionSpec};
-use crate::sessions::codex_provider::{render_codex_config, ProviderChoice, DEFAULT_ENV_KEY};
+use crate::sessions::codex_provider::{render_codex_config, LLM_ENV_KEY};
 
 /// Env var naming the SessionSpec JSON path; defaults to [`DEFAULT_SPEC_PATH`].
 const SPEC_PATH_ENV: &str = "FKST_SESSION_SPEC_PATH";
@@ -48,26 +46,22 @@ const DEFAULT_SPEC_PATH: &str = "/var/run/fkst/session-spec.json";
 /// default mount.
 const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
 
-/// Operator-pinned codex model + chrono-llm base URL for the DEFAULT provider.
-/// Read directly from the environment (not threaded through the HTTP `Config`):
-/// the pod boots the runner path only, so loading the full server `Config`
-/// — with its bind addr / auth / NyxID requirements — would be needless
-/// coupling. The defaults MIRROR `crate::config`'s `codex_model` /
-/// `chrono_llm_base_url` defaults so the two paths never diverge.
-const CODEX_MODEL_ENV: &str = "FKST_HOSTED_CODEX_MODEL";
-const DEFAULT_CODEX_MODEL: &str = "gpt-5-codex";
-const CHRONO_LLM_BASE_URL_ENV: &str = "FKST_HOSTED_CHRONO_LLM_BASE_URL";
-const DEFAULT_CHRONO_LLM_BASE_URL: &str = "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm";
-
-/// Env var holding the NyxID issuer base URL, injected into the engine child so
-/// the substrate's NyxID-aware tooling can reach the issuer. Not a reserved
-/// platform key, so it may ride the `env_profile`.
-const NYXID_URL_ENV: &str = "NYXID_URL";
-
-/// Cache TTL for the in-pod NyxID client built solely to fetch Ornn pins. The
-/// pod is single-session and short-lived, so the value only needs to be
-/// non-zero; org-list caching is irrelevant here.
-const ORNN_NYXID_CACHE_TTL: Duration = Duration::from_secs(60);
+/// Static LLM provider config for the per-session codex provider, injected into
+/// the pod by `build_job` (session pods do NOT inherit the control-plane
+/// ConfigMap). Read directly from the environment (not threaded through the HTTP
+/// `Config`): the pod boots the runner path only, so loading the full server
+/// `Config` — with its bind addr / auth requirements — would be needless
+/// coupling. The defaults MIRROR `crate::config`'s `llm_model` / `llm_base_url` /
+/// `llm_wire_api` defaults so the two paths never diverge.
+const LLM_MODEL_ENV: &str = "FKST_LLM_MODEL";
+const DEFAULT_LLM_MODEL: &str = "gpt-5-codex";
+const LLM_BASE_URL_ENV: &str = "FKST_LLM_BASE_URL";
+const DEFAULT_LLM_BASE_URL: &str = "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm";
+const LLM_WIRE_API_ENV: &str = "FKST_LLM_WIRE_API";
+/// Default `wire_api`: `chat` (chrono-llm 502s on `responses`). Mirrors
+/// `crate::config`'s `llm_wire_api` default and
+/// `crate::sessions::codex_provider::DEFAULT_WIRE_API`.
+const DEFAULT_LLM_WIRE_API: &str = "chat";
 
 /// Poll interval of the supervise loop. The engine's status is cheap (`try_wait`
 /// / OS truth), so a half-second cadence keeps the loop responsive without
@@ -202,7 +196,6 @@ async fn run_session_with(
         name = %spec.repo.name,
         issue_number = spec.issue_number,
         package_count = spec.package_names.len(),
-        ornn_pins = spec.ornn_pins.len(),
         "run-session: spec loaded"
     );
 
@@ -255,19 +248,24 @@ async fn run_session_with(
         }
     };
 
-    // 5. Per-session env: the NyxID token (the codex `env_key`) + the issuer URL,
-    //    injected only when their files are present + non-empty.
+    // 5. Per-session env: the static LLM API key under the codex `env_key`
+    //    ([`LLM_ENV_KEY`] = "LLM_API_KEY"). It is REQUIRED — an engine with no LLM
+    //    credential 401s on every call, so a missing/empty key aborts loudly
+    //    before the engine starts.
+    let llm_api_key = match creds::read_required_secret(&creds.llm_api_key()) {
+        Ok(key) => key,
+        Err(error) => {
+            tracing::error!(session_id = %session_id, error = %error, "run-session: missing llm api key");
+            return ExitCode::FAILURE;
+        }
+    };
     let mut env_profile: BTreeMap<String, SecretString> = BTreeMap::new();
-    if let Some(token) = creds::read_optional_nonempty(&creds.nyxid_token()) {
-        env_profile.insert(DEFAULT_ENV_KEY.to_string(), SecretString::from(token));
-    }
-    if let Some(url) = creds::read_optional_nonempty(&creds.nyxid_url()) {
-        env_profile.insert(NYXID_URL_ENV.to_string(), SecretString::from(url));
-    }
+    env_profile.insert(LLM_ENV_KEY.to_string(), llm_api_key);
 
-    // 6. Render the per-session CODEX_HOME (0700 dir + DEFAULT chrono-llm
-    //    config.toml). The pod has no vault, so the runner renders the DEFAULT
-    //    provider layer directly rather than resolving from vault entries.
+    // 6. Render the per-session CODEX_HOME (0700 dir + the operator-pinned LLM
+    //    provider config.toml). The pod has no vault, so the runner renders the
+    //    single config-driven provider directly rather than resolving from vault
+    //    entries.
     let codex_home = match prepare_codex_home(&engine_config.temp_root) {
         Ok(home) => home,
         Err(error) => {
@@ -276,14 +274,7 @@ async fn run_session_with(
         }
     };
 
-    // 7. Inject pinned Ornn skills, if any. A pin set with no NyxID token/URL is
-    //    a loud failure (the pins cannot be fetched as the user).
-    if let Err(error) = inject_ornn_if_pinned(&spec, creds, codex_home.path()).await {
-        tracing::error!(session_id = %session_id, error = %error, "run-session: ornn injection failed");
-        return ExitCode::FAILURE;
-    }
-
-    // 8. Build the StartSpec for the repo-scoped, pod-per-session shape and start
+    // 7. Build the StartSpec for the repo-scoped, pod-per-session shape and start
     //    the engine.
     let start_spec = StartSpec {
         packages: Vec::new(),
@@ -312,7 +303,7 @@ async fn run_session_with(
         "run-session: engine ready; supervising to completion"
     );
 
-    // 9. Start the best-effort session log: stream the engine's stdout into
+    // 8. Start the best-effort session log: stream the engine's stdout into
     //    `.fkst/log/<run_key>.log` on the dedicated branch. It runs concurrently
     //    with the supervise loop and NEVER affects the disposition (a log error
     //    is only a warning). Disabled when the project is not a real git clone.
@@ -324,12 +315,12 @@ async fn run_session_with(
         &log_temp_root,
     );
 
-    // 10. Supervise to a terminal status. `prepared` + `codex_home` are dropped
+    // 9. Supervise to a terminal status. `prepared` + `codex_home` are dropped
     //     AFTER the loop so their RAII guards keep the clone + CODEX_HOME on disk
     //     for the whole session lifetime.
     let disposition = supervise_to_completion(&runner, &mut session, &session_id, &run_key).await;
 
-    // 11. Give the log task a bounded moment to flush its final checkpoint. The
+    // 10. Give the log task a bounded moment to flush its final checkpoint. The
     //     engine's stdout closes at exit, so the task ends on its own; the
     //     timeout just guards against a hung push.
     if let Some(handle) = log_handle {
@@ -390,9 +381,12 @@ fn load_spec(path: &Path) -> Result<SessionSpec, String> {
         .map_err(|error| format!("parse session spec {}: {error}", path.display()))
 }
 
-/// Create a fresh 0700 CODEX_HOME under `temp_root` and write the DEFAULT
-/// chrono-llm `config.toml` into it. The directory shares the engine temp root so
-/// it inherits the same cleanup/reconcile filesystem as the runtime dirs.
+/// Create a fresh 0700 CODEX_HOME under `temp_root` and write the operator-pinned
+/// LLM provider `config.toml` into it. The model/base URL/wire_api are read from
+/// the pod-injected `FKST_LLM_*` env (falling back to the config-mirroring
+/// defaults); the API key is NOT embedded — it rides the `env_key`
+/// ([`LLM_ENV_KEY`]). The directory shares the engine temp root so it inherits
+/// the same cleanup/reconcile filesystem as the runtime dirs.
 fn prepare_codex_home(temp_root: &Path) -> Result<TempDir, String> {
     use std::os::unix::fs::PermissionsExt;
 
@@ -403,49 +397,15 @@ fn prepare_codex_home(temp_root: &Path) -> Result<TempDir, String> {
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))
         .map_err(|error| format!("chmod CODEX_HOME to 0700: {error}"))?;
 
-    let model = std::env::var(CODEX_MODEL_ENV).unwrap_or_else(|_| DEFAULT_CODEX_MODEL.to_string());
-    let base_url = std::env::var(CHRONO_LLM_BASE_URL_ENV)
-        .unwrap_or_else(|_| DEFAULT_CHRONO_LLM_BASE_URL.to_string());
-    let config_toml = render_codex_config(&ProviderChoice::DefaultChronoLlm, &model, &base_url);
+    let model = std::env::var(LLM_MODEL_ENV).unwrap_or_else(|_| DEFAULT_LLM_MODEL.to_string());
+    let base_url =
+        std::env::var(LLM_BASE_URL_ENV).unwrap_or_else(|_| DEFAULT_LLM_BASE_URL.to_string());
+    let wire_api =
+        std::env::var(LLM_WIRE_API_ENV).unwrap_or_else(|_| DEFAULT_LLM_WIRE_API.to_string());
+    let config_toml = render_codex_config(&model, &base_url, &wire_api, LLM_ENV_KEY);
     std::fs::write(dir.path().join("config.toml"), config_toml)
         .map_err(|error| format!("write config.toml: {error}"))?;
     Ok(dir)
-}
-
-/// Inject the spec's pinned Ornn skills into `codex_home`, if any. A no-op when
-/// there are no pins. Pins present without a mounted NyxID token + URL is a loud
-/// failure: the pins are fetched AS the user and cannot be resolved otherwise.
-async fn inject_ornn_if_pinned(
-    spec: &SessionSpec,
-    creds: &CredsLayout,
-    codex_home: &Path,
-) -> Result<(), String> {
-    if spec.ornn_pins.is_empty() {
-        return Ok(());
-    }
-
-    let token = creds::read_optional_nonempty(&creds.nyxid_token())
-        .ok_or_else(|| "ornn pins are present but no NyxID token is mounted".to_string())?;
-    let url = creds::read_optional_nonempty(&creds.nyxid_url())
-        .ok_or_else(|| "ornn pins are present but no NyxID URL is mounted".to_string())?;
-
-    let nyxid = NyxIdClient::new(&url, DEFAULT_GITHUB_PROXY_SLUG, ORNN_NYXID_CACHE_TTL)
-        .map_err(|error| format!("build NyxID client for ornn: {error}"))?;
-    let ornn = OrnnClient::with_nyxid(nyxid, DEFAULT_ORNN_SLUG)
-        .map_err(|error| format!("build ornn client: {error}"))?;
-    inject_pins(
-        &ornn,
-        &SecretString::from(token),
-        codex_home,
-        &spec.ornn_pins,
-    )
-    .await
-    .map_err(|error| format!("inject ornn pins: {error}"))?;
-    tracing::info!(
-        pin_count = spec.ornn_pins.len(),
-        "run-session: ornn pins injected"
-    );
-    Ok(())
 }
 
 #[cfg(test)]

@@ -20,15 +20,11 @@ pub mod goals;
 pub mod models;
 pub mod nyxid;
 pub mod protocol;
-// `ornn` and `vault` are split modules: their role-neutral leaves
-// (`ornn::types`, `vault::model`) live in `fkst-shared`; the control-plane
-// halves (the client/injector, the in-memory vault service) stay here.
 // Runtime OpenAPI 3 document (no static spec): assembled from the live
 // `#[utoipa::path]` handlers + `ToSchema` types and served at GET /openapi.json.
 pub mod k8s;
 pub mod nyxid_connect;
 pub mod openapi;
-pub mod ornn;
 pub mod router;
 pub mod routes;
 // In-pod `run-session` subcommand (milestone #9): drives ONE substrate session

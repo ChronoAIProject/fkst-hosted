@@ -121,7 +121,7 @@ fn engine_config(bin: &Path, temp_root: &Path) -> EngineConfig {
     }
 }
 
-/// A CODEX-free, Ornn-free SessionSpec for the one fixture package.
+/// A minimal SessionSpec for the one fixture package.
 fn sample_spec() -> SessionSpec {
     SessionSpec {
         session_id: derive_session_id(1, "acme", "site", 1),
@@ -138,7 +138,6 @@ fn sample_spec() -> SessionSpec {
             prompt: "Implement the thing.".into(),
         },
         package_names: vec!["demo".into()],
-        ornn_pins: Vec::new(),
         log_branch: "fkst/session-x".into(),
     }
 }
@@ -151,10 +150,13 @@ fn write_spec(spec: &SessionSpec) -> (TempDir, PathBuf) {
     (dir, path)
 }
 
-/// A creds dir holding a non-empty `github-token`; return (dir, layout).
-fn creds_with_github_token() -> (TempDir, CredsLayout) {
+/// A creds dir holding the two REQUIRED files (`github-token` + `llm-api-key`);
+/// return (dir, layout). Both are required by the runner before the engine
+/// starts, so the happy-path tests need both present.
+fn creds_with_required_secrets() -> (TempDir, CredsLayout) {
     let dir = tempfile::tempdir().expect("creds dir");
     fs::write(dir.path().join("github-token"), "ghs_test_token\n").expect("write token");
+    fs::write(dir.path().join("llm-api-key"), "sk-test-key\n").expect("write llm key");
     let layout = CredsLayout::new(dir.path());
     (dir, layout)
 }
@@ -168,7 +170,7 @@ async fn clean_engine_completion_exits_success() {
 
     let spec = sample_spec();
     let (_spec_dir, spec_path) = write_spec(&spec);
-    let (_creds_dir, creds) = creds_with_github_token();
+    let (_creds_dir, creds) = creds_with_required_secrets();
     let source = FixtureRepoSource {
         repo_dir: repo.path().to_path_buf(),
     };
@@ -195,7 +197,7 @@ async fn engine_failure_exits_nonzero() {
 
     let spec = sample_spec();
     let (_spec_dir, spec_path) = write_spec(&spec);
-    let (_creds_dir, creds) = creds_with_github_token();
+    let (_creds_dir, creds) = creds_with_required_secrets();
     let source = FixtureRepoSource {
         repo_dir: repo.path().to_path_buf(),
     };
@@ -249,6 +251,45 @@ async fn missing_github_token_exits_nonzero_without_starting() {
 }
 
 #[tokio::test]
+async fn missing_llm_api_key_exits_nonzero_without_starting() {
+    let stub_dir = tempfile::tempdir().expect("stub dir");
+    let temp_root = tempfile::tempdir().expect("temp root");
+    let repo = fixture_repo();
+    let bin = framework_stub(stub_dir.path(), &ready_then_exit(0));
+
+    let spec = sample_spec();
+    let (_spec_dir, spec_path) = write_spec(&spec);
+    // A creds dir with a github-token but NO llm-api-key file: the LLM key is
+    // REQUIRED, so the runner must abort before the engine starts.
+    let creds_dir = tempfile::tempdir().expect("creds dir");
+    fs::write(creds_dir.path().join("github-token"), "ghs_test_token\n").expect("write token");
+    let creds = CredsLayout::new(creds_dir.path());
+    let source = FixtureRepoSource {
+        repo_dir: repo.path().to_path_buf(),
+    };
+
+    let code = run_session_with(
+        &source,
+        &spec_path,
+        &creds,
+        engine_config(&bin, temp_root.path()),
+    )
+    .await;
+
+    assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+    // No engine ran: the temp root holds no fkst-* session dirs.
+    let leaked = fs::read_dir(temp_root.path())
+        .expect("read temp root")
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("fkst-"))
+        .count();
+    assert_eq!(
+        leaked, 0,
+        "no engine dirs created when the llm api key is missing"
+    );
+}
+
+#[tokio::test]
 async fn invalid_spec_exits_nonzero() {
     let stub_dir = tempfile::tempdir().expect("stub dir");
     let temp_root = tempfile::tempdir().expect("temp root");
@@ -259,7 +300,7 @@ async fn invalid_spec_exits_nonzero() {
     let spec_dir = tempfile::tempdir().expect("spec dir");
     let spec_path = spec_dir.path().join("session-spec.json");
     fs::write(&spec_path, b"{ not valid json").expect("write bad spec");
-    let (_creds_dir, creds) = creds_with_github_token();
+    let (_creds_dir, creds) = creds_with_required_secrets();
     let source = FixtureRepoSource {
         repo_dir: repo.path().to_path_buf(),
     };
