@@ -1,12 +1,12 @@
 {
   "_comment": "G-LOWER-INJECTED-M shrink-only baseline. Counts = lower-library member reads/calls from the injected composed M table inside any libraries/workflow or libraries/forge function body whose parameter list contains bare M. CI fails on growth above these counts, and on current M symbols without a route/owner manifest entry. Baseline raises are review-visible inventory diffs, matching the repo's shrink-only ratchet convention; CI prevents silent growth. Progress means lowering counts and pruning manifest entries as seams dissolve. See docs/superpowers/specs/2026-06-29-devloop-godpattern-dissolution-design.md.",
   "counts": {
-    "workflow_injected_m_reads": 35,
-    "workflow_injected_m_unique_symbols": 19,
+    "workflow_injected_m_reads": 15,
+    "workflow_injected_m_unique_symbols": 7,
     "forge_injected_m_reads": 20,
     "forge_injected_m_unique_symbols": 12,
-    "total_injected_m_reads": 55,
-    "total_injected_m_unique_symbols": 31
+    "total_injected_m_reads": 35,
+    "total_injected_m_unique_symbols": 19
   },
   "manifest": {
     "workflow": {
@@ -18,45 +18,9 @@
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
       },
-      "issue_marker_liveness_sweep_contract_errors": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "issue_marker_liveness_sweep_states": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "known_liveness_contract_violations": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
       "lifecycle_state_set": {
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
-      },
-      "liveness_contract_errors": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "liveness_contract_inventory_is_listed_violation": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "liveness_heartbeat_version": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "liveness_signal_producer_contract": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "liveness_terminal_states": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "normalized_restart_liveness_rows": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
       },
       "restart_durable_marker_fields": {
         "route": "typed_port",
@@ -66,14 +30,6 @@
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
       },
-      "restart_liveness_epoch_sources": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
-      "restart_liveness_inventory_errors": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
-      },
       "restart_responsibility_inventory_errors": {
         "route": "workflow",
         "owner": "workflow-liveness"
@@ -81,10 +37,6 @@
       "restart_transition_table": {
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
-      },
-      "strict_restart_liveness_contract_errors": {
-        "route": "workflow",
-        "owner": "workflow-liveness"
       }
     },
     "forge": {

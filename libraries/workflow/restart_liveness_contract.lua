@@ -1,6 +1,21 @@
 local S = {}
 local contract_time = require("contract.time")
+local liveness_shared = require("workflow.liveness.shared")
 local Ports = require("workflow.ports")
+local installed = setmetatable({}, { __mode = "k" })
+
+local function installed_function(M, name)
+  local binding = installed[M]
+  return binding and binding[name] or nil
+end
+
+function S.restart_liveness_inventory_errors(M, rows, inventory)
+  local fn = installed_function(M, "restart_liveness_inventory_errors")
+  if type(fn) ~= "function" then
+    error("workflow.restart_liveness_contract: restart_liveness_inventory_errors not installed")
+  end
+  return fn(rows, inventory)
+end
 
 function S.install(M, resolved)
 resolved = resolved or {}
@@ -97,13 +112,15 @@ local function copy_table(map)
   return out
 end
 
-function M.restart_liveness_epoch_sources()
+local function restart_liveness_epoch_sources()
   return copy_table(epoch_sources)
 end
+rawset(M, "restart_liveness_epoch_sources", restart_liveness_epoch_sources)
 
-function M.known_liveness_contract_violations()
+local function known_liveness_contract_violations_fn()
   return copy_table(known_liveness_contract_violations)
 end
+rawset(M, "known_liveness_contract_violations", known_liveness_contract_violations_fn)
 
 local function state_name(row)
   return tostring(row and (row.from_state or row.state) or "?")
@@ -228,9 +245,7 @@ local function registered_heartbeat_producer(row, defer)
   if signal.family ~= defer.producer then
     return false
   end
-  local binding = type(M.liveness_signal_producer_contract) == "function"
-    and M.liveness_signal_producer_contract(defer.producer)
-    or nil
+  local binding = liveness_shared.liveness_signal_producer_contract(M, defer.producer)
   return type(binding) == "table"
 end
 
@@ -432,9 +447,7 @@ local function validate_child_workflow_wait_defer(row, errors)
   if signal.surface ~= expected_surface then
     table.insert(errors, state .. ": child_workflow_wait defer signal must use " .. tostring(expected_surface))
   end
-  local binding = type(M.liveness_signal_producer_contract) == "function"
-    and M.liveness_signal_producer_contract(signal.producer)
-    or nil
+  local binding = liveness_shared.liveness_signal_producer_contract(M, signal.producer)
   if type(binding) ~= "table" or binding.resolver ~= expected_signal_resolver then
     table.insert(errors, state .. ": child_workflow_wait defer producer must bind the " .. tostring(expected_signal_resolver) .. " resolver")
   end
@@ -548,30 +561,32 @@ local function validate_runtime_provenance(row, errors)
   end
 end
 
-function M.normalized_restart_liveness_rows(rows)
+local function normalized_restart_liveness_rows(rows)
   local normalized = {}
   for _, row in ipairs(rows or deps.ports.restart_transition_table()) do
     table.insert(normalized, row)
   end
   return normalized
 end
+rawset(M, "normalized_restart_liveness_rows", normalized_restart_liveness_rows)
 
-function M.strict_restart_liveness_contract_errors(rows)
+local function strict_restart_liveness_contract_errors(rows)
   local errors = {}
-  for _, row in ipairs(M.normalized_restart_liveness_rows(rows)) do
+  for _, row in ipairs(normalized_restart_liveness_rows(rows)) do
     validate_row(row, errors)
     validate_runtime_provenance(row, errors)
   end
   return errors
 end
+rawset(M, "strict_restart_liveness_contract_errors", strict_restart_liveness_contract_errors)
 
 local function error_state(error_text)
   local state = tostring(error_text or ""):match("^([^:]+):")
   return state
 end
 
-function M.restart_liveness_inventory_errors(rows, inventory)
-  local strict_errors = M.strict_restart_liveness_contract_errors(rows)
+local function restart_liveness_inventory_errors(rows, inventory)
+  local strict_errors = strict_restart_liveness_contract_errors(rows)
   local listed = inventory or known_liveness_contract_violations
   local observed_listed_errors = {}
   local errors = {}
@@ -594,8 +609,9 @@ function M.restart_liveness_inventory_errors(rows, inventory)
   end
   return errors
 end
+rawset(M, "restart_liveness_inventory_errors", restart_liveness_inventory_errors)
 
-function M.liveness_contract_inventory_is_listed_violation(state, errors)
+local function liveness_contract_inventory_is_listed_violation(state, errors)
   for _, err in ipairs(errors or {}) do
     if error_state(err) == state then
       return true
@@ -603,6 +619,11 @@ function M.liveness_contract_inventory_is_listed_violation(state, errors)
   end
   return false
 end
+rawset(M, "liveness_contract_inventory_is_listed_violation", liveness_contract_inventory_is_listed_violation)
+
+installed[M] = {
+  restart_liveness_inventory_errors = restart_liveness_inventory_errors,
+}
 
 end
 

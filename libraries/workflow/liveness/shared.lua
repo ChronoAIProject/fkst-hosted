@@ -1,6 +1,41 @@
 local S = {}
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
+local installed = setmetatable({}, { __mode = "k" })
+
+local function strip_liveness_timeout_suffixes(version)
+  local text = tostring(version or "")
+  local previous = nil
+  while previous ~= text do
+    previous = text
+    text = text
+      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
+      :gsub("/timeout/[%w%-]+/%d+$", "")
+      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
+  end
+  return text
+end
+
+local function liveness_heartbeat_version(version, contract)
+  local heartbeat_version = strip_liveness_timeout_suffixes(version)
+  if contract and contract.version_form == "safe_version_segment" then
+    return transition_version.safe_version_segment(heartbeat_version)
+  end
+  return transition_version.strip_suffixes(heartbeat_version)
+end
+
+function S.liveness_signal_producer_contract(M, family)
+  local binding = installed[M]
+  if binding == nil then
+    return nil
+  end
+  return binding.liveness_signal_producer_contract(family)
+end
+
+function S.liveness_heartbeat_version(_M, version, contract)
+  return liveness_heartbeat_version(version, contract)
+end
 
 function S.install(M, resolved)
 resolved = resolved or {}
@@ -74,32 +109,19 @@ shared.liveness_signal_producers = liveness_signal_producers
 shared.allowed_signal_surfaces = resolved.allowed_signal_surfaces or {}
 shared.signal_max_age_optional_resolvers = resolved.signal_max_age_optional_resolvers or {}
 
-function M.liveness_signal_producer_contract(family)
+local function liveness_signal_producer_contract(family)
   return liveness_signal_producers[tostring(family or "")]
 end
+shared.liveness_signal_producer_contract = liveness_signal_producer_contract
+rawset(M, "liveness_signal_producer_contract", liveness_signal_producer_contract)
 
-local function strip_liveness_timeout_suffixes(version)
-  local text = tostring(version or "")
-  local previous = nil
-  while previous ~= text do
-    previous = text
-    text = text
-      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
-      :gsub("/timeout/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
-  end
-  return text
-end
 shared.strip_liveness_timeout_suffixes = strip_liveness_timeout_suffixes
 
-function M.liveness_heartbeat_version(version, contract)
-  local heartbeat_version = strip_liveness_timeout_suffixes(version)
-  if contract and contract.version_form == "safe_version_segment" then
-    return transition_version.safe_version_segment(heartbeat_version)
-  end
-  return transition_version.strip_suffixes(heartbeat_version)
-end
+shared.liveness_heartbeat_version = liveness_heartbeat_version
+rawset(M, "liveness_heartbeat_version", liveness_heartbeat_version)
+installed[M] = {
+  liveness_signal_producer_contract = liveness_signal_producer_contract,
+}
 
 local function numeric_minutes(value)
   local minutes = tonumber(value)
