@@ -134,10 +134,11 @@ end
 function M.issue_view_stdout(fields)
   local f = fields or {}
   return string.format(
-    '{"number":%d,"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n',
+    '{"number":%d,"title":"%s","body":"%s","createdAt":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"assignees":[%s],"author":{"login":"%s"}}\n',
     tonumber(f.number) or 42,
     encode_json_string(f.title or "Implement decision recorder"),
     encode_json_string(f.body or ""),
+    encode_json_string(f.created_at or "2026-06-03T01:00:00Z"),
     encode_json_string(f.updated_at or "2026-06-03T01:02:03Z"),
     encode_json_string(f.state or "OPEN"),
     encode_labels_json(f.labels),
@@ -181,11 +182,12 @@ end
 local function issue_rest_stdout(fields)
   local f = fields or {}
   return string.format(
-    '{"number":%d,"title":"%s","body":"%s","state":"%s","updated_at":"%s","labels":[%s],"user":{"login":"%s"},"assignees":[%s]}\n',
+    '{"number":%d,"title":"%s","body":"%s","state":"%s","created_at":"%s","updated_at":"%s","labels":[%s],"user":{"login":"%s"},"assignees":[%s]}\n',
     tonumber(f.number) or 42,
     encode_json_string(f.title or "Implement decision recorder"),
     encode_json_string(f.body or ""),
     encode_json_string(tostring(f.state or "OPEN"):lower()),
+    encode_json_string(f.created_at or "2026-06-03T01:00:00Z"),
     encode_json_string(f.updated_at or "2026-06-03T01:02:03Z"),
     encode_labels_json(f.labels),
     encode_json_string(f.author_login or "fkst-test-bot"),
@@ -258,9 +260,9 @@ end
 local issue_view_selectors = {
   "number,title",
   "title,body,comments,labels,state,updatedAt,assignees",
-  "title,body,comments,labels,state,updatedAt,assignees,author",
+  "title,body,comments,labels,state,createdAt,updatedAt,assignees,author",
   "title,body,updatedAt,labels,comments,state",
-  "title,body,updatedAt,labels,comments,state,assignees,author",
+  "title,body,createdAt,updatedAt,labels,comments,state,assignees,author",
   "title,comments,state",
   "title,labels,state,comments,assignees,author",
   "title,comments,state,stateReason,assignees,author",
@@ -421,7 +423,7 @@ function M.mock_issue_view_selector(t, fields, selector, times)
   register_view_commands(t, {
     issue_view_command(repo, number, selector),
   }, M.issue_view_stdout(f), times or 1)
-  if selector == "title,body,comments,labels,state,updatedAt,assignees,author" then
+  if selector == "title,body,comments,labels,state,createdAt,updatedAt,assignees,author" then
     register_view_commands(t, {
       issue_rest_command(repo, number),
     }, issue_rest_stdout(f), times or 1)
@@ -545,6 +547,7 @@ function M.mock_issue_read_with_defaults(t, labels, comments, extra)
     number = fields.number,
     title = fields.title,
     body = fields.body,
+    created_at = fields.created_at,
     updated_at = fields.updated_at,
     state = fields.state,
     labels = labels,

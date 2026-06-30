@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
 local t = h.t
 local core = h.core
@@ -19,6 +20,7 @@ local mock_issue_reconcile = h.mock_issue_reconcile
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local codex_status = require("tests.codex_status_helpers")
 local ISSUE_REDRIVE_QUEUE = "devloop_observe_issue"
+local _cache_seed_helpers = cache_seed_helpers
 
 local function restart_transition_row(state_name)
   return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)

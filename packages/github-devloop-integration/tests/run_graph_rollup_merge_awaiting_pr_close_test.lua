@@ -177,7 +177,7 @@ local function mock_liveness_scan_inputs(child_state)
     comments = parent_comments(),
     assignees = { core._test_bot_login },
     author_login = core._test_bot_login,
-  }, "title,body,comments,labels,state,updatedAt,assignees,author")
+  }, "title,body,comments,labels,state,createdAt,updatedAt,assignees,author")
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = child_pr_number,
@@ -227,7 +227,7 @@ local function mock_observe_issue_inputs(child_state, landed)
     comments = parent_comments(),
     assignees = { core._test_bot_login },
     author_login = core._test_bot_login,
-  }, "title,body,comments,labels,state,updatedAt,assignees,author")
+  }, "title,body,comments,labels,state,createdAt,updatedAt,assignees,author")
   entity_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = child_pr_number,

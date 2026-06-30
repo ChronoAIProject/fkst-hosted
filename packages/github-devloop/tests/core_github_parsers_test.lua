@@ -128,15 +128,16 @@ return {
 
     t.eq(
       core.gh_issue_view_state_cmd("owner/repo", 42),
-      "gh issue view '42' --repo 'owner/repo' --json title,updatedAt,labels,state,comments,assignees,author"
+      "gh issue view '42' --repo 'owner/repo' --json title,createdAt,updatedAt,labels,state,comments,assignees,author"
     )
     t.eq(
       core.gh_issue_view_result_cmd("owner/repo", 42),
       "gh issue view '42' --repo 'owner/repo' --json labels,comments"
     )
 
-    local state = core.parse_issue_view_state('{"updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"body":"hello","author":{"login":"fkst-test-bot"}}]}')
+    local state = core.parse_issue_view_state('{"createdAt":"2026-06-03T01:00:00Z","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"body":"hello","author":{"login":"fkst-test-bot"}}]}')
     t.eq(state.state, "OPEN")
+    t.eq(state.created_at, "2026-06-03T01:00:00Z")
     t.eq(state.updated_at, "2026-06-03T01:02:03Z")
     t.eq(state.labels[1], "fkst-dev:enabled")
     t.eq(core.comment_body(state.comments[1]), "hello")
@@ -208,8 +209,8 @@ return {
 
   test_gh_issue_view_commands_match_existing_strings = function()
     local cases = {
-      { core.gh_issue_view_intake_judge_cmd, "title,body,updatedAt,labels,comments,state,assignees,author" },
-      { core.gh_issue_view_state_cmd, "title,updatedAt,labels,state,comments,assignees,author" },
+      { core.gh_issue_view_intake_judge_cmd, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author" },
+      { core.gh_issue_view_state_cmd, "title,createdAt,updatedAt,labels,state,comments,assignees,author" },
       { core.gh_issue_view_result_cmd, "labels,comments" },
       { core.gh_issue_view_loop_cmd, "title,updatedAt,labels,comments,state" },
       { core.gh_issue_view_meta_cmd, "title,labels,comments" },
@@ -239,13 +240,14 @@ return {
   test_intake_judge_parse_keeps_full_issue_body = function()
     local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
     local parsed = core.parse_issue_view_intake_judge(
-      '{"title":"Long intake","body":"' .. long_body .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"bug"}],"comments":[]}'
+      '{"title":"Long intake","body":"' .. long_body .. '","createdAt":"2026-06-03T01:00:00Z","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"bug"}],"comments":[]}'
     )
 
     t.eq(parsed.title, "Long intake")
     t.eq(parsed.body, long_body)
     t.is_true(#parsed.body > core.max_body_len())
     t.is_true(parsed.body:find("FULL_BODY_TAIL", 1, true) ~= nil)
+    t.eq(parsed.created_at, "2026-06-03T01:00:00Z")
     t.eq(parsed.updated_at, "2026-06-03T01:02:03Z")
     t.eq(parsed.state, "OPEN")
     t.eq(parsed.labels[1], "bug")

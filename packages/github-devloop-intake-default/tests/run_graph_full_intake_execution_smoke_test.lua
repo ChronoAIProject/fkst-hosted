@@ -88,7 +88,7 @@ local function mock_issue_reads()
     comments = {},
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
-  }, "title,body,updatedAt,labels,comments,state,assignees,author", 4)
+  }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 4)
   entity_read_mocks.mock_issue_view_raw_selector(t, {
     repo = repo,
     number = issue_number,

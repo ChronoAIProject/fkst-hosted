@@ -22,6 +22,7 @@ function M.issue_state_from_json(decoded)
 
   return {
     title = decoded.title ~= nil and tostring(decoded.title) or nil,
+    created_at = decoded.createdAt or decoded.created_at,
     updated_at = decoded.updatedAt or decoded.updated_at,
     labels = labels,
     comments = M.comments_from_json(decoded.comments),
@@ -132,6 +133,7 @@ function M.parse_issue_view_loop(stdout)
   local result = M.parse_issue_view_result(stdout)
   return {
     title = tostring(decoded.title or ""),
+    created_at = decoded.createdAt or decoded.created_at,
     updated_at = decoded.updatedAt or decoded.updated_at,
     state = decoded.state,
     labels = result.labels,
@@ -147,6 +149,7 @@ function M.parse_issue_view_intake_judge(stdout)
   return {
     title = tostring(decoded.title or ""),
     body = tostring(decoded.body or ""),
+    created_at = decoded.createdAt or decoded.created_at,
     updated_at = decoded.updatedAt or decoded.updated_at,
     state = decoded.state,
     labels = result.labels,
@@ -236,6 +239,7 @@ function M.parse_issue_view_observe(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     title = tostring(decoded.title or ""),
+    created_at = decoded.createdAt or decoded.created_at,
     state = decoded.state,
     state_reason = decoded.stateReason or decoded.state_reason,
     comments = M.comments_from_json(decoded.comments),

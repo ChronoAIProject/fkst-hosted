@@ -141,7 +141,7 @@ local function mock_implement_issue_read()
     state = "CLOSED",
     labels = { "fkst-dev:ready" },
     comments = { state_marker("ready", ready_version) },
-  }, "title,body,comments,labels,state,updatedAt,assignees,author", 1)
+  }, "title,body,comments,labels,state,createdAt,updatedAt,assignees,author", 1)
   entity_read_mocks.mock_issue_view_selector(t, {
     repo = "owner/repo",
     number = 42,

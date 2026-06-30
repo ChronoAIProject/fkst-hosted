@@ -51,7 +51,7 @@ local function mock_issue(fields)
     comments = f.comments or {},
     assignees = f.assignees or { "fkst-test-bot" },
     author_login = f.author_login or "fkst-test-bot",
-  }, "title,body,updatedAt,labels,comments,state,assignees,author")
+  }, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author")
 end
 
 local function trusted_reintake_command(id)

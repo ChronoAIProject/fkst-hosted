@@ -589,7 +589,7 @@ local function mock_issue_state(labels, state, comments, assignees, author_login
     author_login = author_login,
   })
   entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:enabled" }, comments = selected_comments, state = state or "OPEN", assignees = assignees, author_login = author_login }, "title,body,comments,labels,state,updatedAt,assignees")
-  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:enabled" }, comments = selected_comments, state = state or "OPEN", assignees = assignees, author_login = author_login }, "title,body,comments,labels,state,updatedAt,assignees,author")
+  entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:enabled" }, comments = selected_comments, state = state or "OPEN", assignees = assignees, author_login = author_login }, "title,body,comments,labels,state,createdAt,updatedAt,assignees,author")
 end
 
 local function state_from_labels(labels)
