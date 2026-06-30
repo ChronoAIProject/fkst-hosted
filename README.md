@@ -76,6 +76,13 @@ a sibling `../fkst-substrate`, then the `.fkst/substrate-ref` source-cache fallb
 non-CI runs. Invalid explicit `BIN` values fail closed. CI builds the engine itself and does not
 silently use a stale binary.
 
+For host-local, no-repo-pollution runs, keep machine facts in an XDG-style profile such as
+`${XDG_CONFIG_HOME:-$HOME/.config}/fkst/host.env`; see
+[`docs/user/global-host-profiles.md`](docs/user/global-host-profiles.md) and
+[`docs/user/host-profile.env.example`](docs/user/host-profile.env.example). The profile feeds the
+existing explicit `scripts/run.sh host --host-root ... --platform-root ... -- ...` contract; it does
+not introduce a named profile resolver.
+
 ## Package Layout
 
 Each package root follows this shape:

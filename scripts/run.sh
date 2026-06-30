@@ -253,6 +253,7 @@ cmd_check() {
   python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_entry_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_run_test.py" || fail=1
+  python3 -B "$ROOT/scripts/host_profile_scaffold_test.py" || fail=1
   python3 -B "$ROOT/scripts/host_run_equivalence_test.py" || fail=1
   python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
   python3 -B "$ROOT/scripts/run_sh_test_affected_test.py" || fail=1
@@ -840,7 +841,6 @@ cmd_board() {
   local cache="$FKST_DIR/run/board-cache.json"
   python3 -B "$ROOT/scripts/board.py" \
     --bin "$BIN" \
-    --project-root "$ROOT" \
     --durable-root "$durable" \
     --cache "$cache" \
     "$@"
