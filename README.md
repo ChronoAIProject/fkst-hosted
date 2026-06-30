@@ -141,6 +141,8 @@ Composed packages:
 - `github-devloop`: composes `github-proxy` and `consensus` into the autonomous GitHub issue to PR
   loop, using trusted GitHub marker facts, version-CAS state transitions, head-bound PR review, and
   deterministic merge gates.
+- `frontend-devloop`: declares the UI-application host profile for composing the existing GitHub
+  devloop package family with frontend host scripts and source-ref-only UI artifact handoff.
 
 ## Architecture Overview
 
