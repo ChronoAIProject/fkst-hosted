@@ -1,10 +1,10 @@
 //! `issues.opened` -> pod session pipeline (issue #303).
 //!
 //! The token-less entrypoint: a qualifying GitHub `issues.opened` webhook drives
-//! the whole pipeline — parse the issue, look up the owner's stored NyxID
-//! binding, mint the first credentials, build the SessionSpec + per-session
-//! Secret, and launch the Job. Everything flows from `installation.id` + the
-//! stored binding; no user token is present.
+//! the whole pipeline — parse the issue, mint the GitHub App installation token,
+//! attach the static LLM API key from config, build the SessionSpec +
+//! per-session Secret, and launch the Job. Everything flows from
+//! `installation.id`; no user token is present.
 
 use serde::Deserialize;
 
@@ -13,7 +13,6 @@ use crate::goals::issue_parse::{parse_goal_issue_body, ParsedGoal};
 use crate::goals::labels::GOAL_LABEL;
 use crate::k8s::{KubeClient, PodSessionLauncher, SessionSecrets};
 use crate::models::RepoRef;
-use crate::nyxid_connect::exchange_binding_for_token;
 use crate::session_spec::{derive_session_id, SessionGoal, SessionSpec};
 use crate::state::AppState;
 
@@ -92,7 +91,6 @@ pub(super) fn build_session_spec(
             prompt: parsed.description.clone(),
         },
         package_names: parsed.package_names.clone(),
-        ornn_pins: parsed.ornn_skills.clone(),
     }
 }
 
@@ -141,30 +139,16 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
         &parsed,
     );
 
-    let binding = state
-        .binding_store
-        .binding_for_owner(owner)
-        .ok_or_else(|| format!("no NyxID binding for owner {owner}; connect NyxID first"))?;
-    let broker = state
-        .config
-        .broker_client()
-        .ok_or("nyxid connect is not configured")?;
-    let base_url = state
-        .nyxid_base_url()
-        .ok_or("auth (NyxID base URL) is not enabled")?;
-
-    let http = reqwest::Client::new();
-    let nyxid_token = exchange_binding_for_token(&http, &base_url, &broker, &binding.binding_id)
-        .await
-        .map_err(|e| format!("first nyxid token exchange: {e}"))?;
     let github_token = github_app
         .token_for_repo(&owner_repo, None)
         .await
         .map_err(|e| format!("mint app token: {e}"))?;
+    // The LLM credential is now a static config value (FKST_LLM_API_KEY), not a
+    // per-session NyxID token. It is written into the session Secret and read by
+    // the engine's codex provider under LLM_API_KEY.
     let secrets = SessionSecrets {
         github_token,
-        nyxid_token: Some(nyxid_token),
-        nyxid_url: Some(base_url),
+        llm_api_key: state.config.llm_api_key.clone(),
     };
 
     let kube = KubeClient::from_inferred(&state.config.pod.namespace)
@@ -248,7 +232,6 @@ mod tests {
         let parsed = ParsedGoal {
             description: "do it".to_string(),
             package_names: vec!["web".to_string()],
-            ornn_skills: vec![],
         };
         let a = build_session_spec(42, "acme", "site", 7, "T", &parsed);
         let b = build_session_spec(42, "acme", "site", 7, "T", &parsed);

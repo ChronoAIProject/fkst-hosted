@@ -26,6 +26,12 @@ const AUTH_ENV_PREFIX: &str = "FKST_";
 /// owner of these knobs; later issues read them but never redefine them.
 const POD_ENV_PREFIX: &str = "FKST_POD_";
 
+/// Prefix for the static LLM-provider settings (`FKST_LLM_*`). The per-session
+/// codex provider is config-driven: the model/base URL/wire_api are injected into
+/// the session pod and the API key rides the per-session Secret. Replaces the
+/// former per-session NyxID token as the engine's LLM credential.
+const LLM_ENV_PREFIX: &str = "FKST_LLM_";
+
 /// Default values, shared by serde defaults and `Config::default`.
 mod defaults {
     pub(super) fn port() -> u16 {
@@ -80,16 +86,23 @@ mod defaults {
         100
     }
 
-    pub(super) fn codex_model() -> String {
-        // The model the chrono-llm DEFAULT codex provider serves (#112). The
-        // operator pins it to whatever chrono-llm currently serves; this is a
-        // sensible non-empty default, never a literal placeholder.
+    pub(super) fn llm_model() -> String {
+        // The model the per-session codex provider serves. The operator pins it
+        // to whatever the LLM backend currently serves; this is a sensible
+        // non-empty default, never a literal placeholder.
         "gpt-5-codex".to_string()
     }
 
-    pub(super) fn chrono_llm_base_url() -> String {
-        // The NyxID proxy slug for the admin-seeded chrono-llm service (#112).
+    pub(super) fn llm_base_url() -> String {
+        // Base URL of the LLM provider the session codex talks to.
         "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm".to_string()
+    }
+
+    pub(super) fn llm_wire_api() -> String {
+        // The codex `wire_api`. MUST default to `chat`: chrono-llm serves only
+        // `/chat/completions`; `responses` returns 502 (a verified bug). Never
+        // default to `responses`.
+        "chat".to_string()
     }
 
     pub(super) fn webhook_trigger_label() -> String {
@@ -139,17 +152,6 @@ struct HttpVars {
     /// `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP`. Default 100, zero rejected.
     #[serde(default = "defaults::vault_entries_per_scope_cap")]
     vault_entries_per_scope_cap: usize,
-    /// Operator-pinned model the chrono-llm DEFAULT codex provider serves
-    /// (#112). Env: `FKST_HOSTED_CODEX_MODEL`. Default `gpt-5-codex`; blank
-    /// rejected at load (a misconfigured default must fail closed, never render
-    /// an unusable codex config).
-    #[serde(default = "defaults::codex_model")]
-    codex_model: String,
-    /// NyxID proxy base URL for the chrono-llm DEFAULT codex provider (#112).
-    /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
-    /// slug; blank rejected at load. Non-secret (it is a route).
-    #[serde(default = "defaults::chrono_llm_base_url")]
-    chrono_llm_base_url: String,
 }
 
 /// `FKST_AUTH_*`-prefixed variables (authentication settings; envy pass with
@@ -194,6 +196,24 @@ struct PodVars {
     active_deadline_secs: i64,
 }
 
+/// `FKST_LLM_*`-prefixed variables (static LLM-provider config). The session
+/// codex provider is config-driven (model/base URL/wire_api injected into the
+/// pod) with a static API key (`FKST_LLM_API_KEY`) that rides the per-session
+/// Secret — replacing the former per-session NyxID token.
+#[derive(Debug, Deserialize)]
+struct LlmVars {
+    #[serde(default = "defaults::llm_model")]
+    model: String,
+    #[serde(default = "defaults::llm_base_url")]
+    base_url: String,
+    #[serde(default = "defaults::llm_wire_api")]
+    wire_api: String,
+    /// The static LLM API key. Optional at parse time; REQUIRED non-blank when
+    /// `FKST_POD_DISPATCH=true` (an engine with no LLM credential 401s).
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
 /// Pod-per-session dispatch configuration (milestone #9). When `dispatch` is
 /// false (the default) the control plane never touches Kubernetes.
 #[derive(Clone, Debug)]
@@ -215,6 +235,16 @@ pub struct PodConfig {
     /// `activeDeadlineSeconds` for the Job. Env: `FKST_POD_ACTIVE_DEADLINE_SECS`.
     /// Default 3600; must be > 0 when `dispatch=true`.
     pub active_deadline_secs: i64,
+    /// LLM provider base URL injected into the session pod as `FKST_LLM_BASE_URL`
+    /// (session pods do NOT inherit the control-plane ConfigMap, so build_job
+    /// injects it explicitly). Env: `FKST_LLM_BASE_URL`.
+    pub llm_base_url: String,
+    /// LLM model injected into the session pod as `FKST_LLM_MODEL`.
+    /// Env: `FKST_LLM_MODEL`.
+    pub llm_model: String,
+    /// codex `wire_api` injected into the session pod as `FKST_LLM_WIRE_API`.
+    /// Env: `FKST_LLM_WIRE_API`. Default `chat`.
+    pub llm_wire_api: String,
 }
 
 impl Default for PodConfig {
@@ -226,6 +256,9 @@ impl Default for PodConfig {
             service_account: defaults::pod_service_account(),
             run_ttl_secs: defaults::pod_run_ttl_secs(),
             active_deadline_secs: defaults::pod_active_deadline_secs(),
+            llm_base_url: defaults::llm_base_url(),
+            llm_model: defaults::llm_model(),
+            llm_wire_api: defaults::llm_wire_api(),
         }
     }
 }
@@ -275,14 +308,11 @@ pub struct Config {
     /// Max vault entries an owner may hold per scope. Env:
     /// `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP`. Default 100, zero rejected.
     pub vault_entries_per_scope_cap: usize,
-    /// Operator-pinned model the chrono-llm DEFAULT codex provider serves
-    /// (#112). Env: `FKST_HOSTED_CODEX_MODEL`. Default `gpt-5-codex`; blank
-    /// rejected at load (fail-closed). Non-secret routing config.
-    pub codex_model: String,
-    /// NyxID proxy base URL for the chrono-llm DEFAULT codex provider (#112).
-    /// Env: `FKST_HOSTED_CHRONO_LLM_BASE_URL`. Default the seeded chrono-llm
-    /// slug; blank rejected at load. Non-secret routing config.
-    pub chrono_llm_base_url: String,
+    /// The static LLM API key the session engine authenticates with (read by the
+    /// webhook trigger into the per-session Secret). Env: `FKST_LLM_API_KEY`.
+    /// Empty when unset; REQUIRED non-blank when `FKST_POD_DISPATCH=true`. Never
+    /// logged. The model/base URL/wire_api live on [`PodConfig`] (pod-injected).
+    pub llm_api_key: SecretString,
     /// Pod-per-session dispatch settings (milestone #9). `dispatch=false` by
     /// default: the control plane is Kubernetes-free until an operator opts in.
     pub pod: PodConfig,
@@ -305,8 +335,7 @@ impl Default for Config {
             webhook_trigger_label: defaults::webhook_trigger_label(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
-            codex_model: defaults::codex_model(),
-            chrono_llm_base_url: defaults::chrono_llm_base_url(),
+            llm_api_key: SecretString::from(String::new()),
             pod: PodConfig::default(),
         }
     }
@@ -387,20 +416,31 @@ impl Config {
                 "FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP must be at least 1".to_string(),
             ));
         }
-        // Codex chrono-llm DEFAULT (fail-closed): both values have serde
-        // defaults so the default path works out of the box, but a blank
-        // override would render an unusable codex config.toml (no model /
-        // unroutable base_url). Reject it loudly at startup, naming the var.
-        if http.codex_model.trim().is_empty() {
+        // Static LLM provider config (FKST_LLM_*). The model/base URL/wire_api
+        // have serde defaults so the default path works out of the box, but a
+        // blank override would render an unusable codex config.toml (no model /
+        // unroutable base_url / empty wire_api). Reject it loudly, naming the
+        // var. The API key requirement is enforced in the pod-dispatch block
+        // below (it is only mandatory when sessions actually run).
+        let llm: LlmVars = envy::prefixed(LLM_ENV_PREFIX)
+            .from_iter(vars.iter().cloned())
+            .map_err(|e| AppError::Config(e.to_string()))?;
+        if llm.model.trim().is_empty() {
             return Err(AppError::Config(
-                "FKST_HOSTED_CODEX_MODEL must not be blank".to_string(),
+                "FKST_LLM_MODEL must not be blank".to_string(),
             ));
         }
-        if http.chrono_llm_base_url.trim().is_empty() {
+        if llm.base_url.trim().is_empty() {
             return Err(AppError::Config(
-                "FKST_HOSTED_CHRONO_LLM_BASE_URL must not be blank".to_string(),
+                "FKST_LLM_BASE_URL must not be blank".to_string(),
             ));
         }
+        if llm.wire_api.trim().is_empty() {
+            return Err(AppError::Config(
+                "FKST_LLM_WIRE_API must not be blank".to_string(),
+            ));
+        }
+        let llm_api_key = llm.api_key.filter(|s| !s.trim().is_empty());
 
         // Pod-per-session dispatch settings (FKST_POD_*). Off by default; when
         // an operator turns it on, the image + namespace must be real and the
@@ -436,6 +476,15 @@ impl Config {
                         .to_string(),
                 ));
             }
+            // A session that actually runs needs a real LLM credential, or the
+            // engine 401s on every call. Fail closed when dispatch is on but no
+            // key is configured. (Checked last so the image/namespace/time-bound
+            // errors above surface first for an otherwise-empty dispatch config.)
+            if llm_api_key.is_none() {
+                return Err(AppError::Config(
+                    "FKST_LLM_API_KEY must be set when FKST_POD_DISPATCH=true".to_string(),
+                ));
+            }
         }
         let pod = PodConfig {
             dispatch: pod.dispatch,
@@ -444,6 +493,9 @@ impl Config {
             service_account: pod.service_account,
             run_ttl_secs: pod.run_ttl_secs,
             active_deadline_secs: pod.active_deadline_secs,
+            llm_base_url: llm.base_url,
+            llm_model: llm.model,
+            llm_wire_api: llm.wire_api,
         };
 
         Ok(Config {
@@ -465,9 +517,8 @@ impl Config {
                 .filter(|s| !s.trim().is_empty()),
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
-            codex_model: http.codex_model,
+            llm_api_key: SecretString::from(llm_api_key.unwrap_or_default()),
             webhook_trigger_label: auth.webhook_trigger_label,
-            chrono_llm_base_url: http.chrono_llm_base_url,
             pod,
         })
     }
@@ -500,6 +551,7 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
 
     fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         pairs
@@ -547,6 +599,7 @@ mod tests {
             ("FKST_POD_NAMESPACE", "sessions-prod"),
             ("FKST_POD_RUN_TTL_SECS", "900"),
             ("FKST_POD_ACTIVE_DEADLINE_SECS", "7200"),
+            ("FKST_LLM_API_KEY", "sk-test"),
         ]))
         .expect("valid dispatch config should load");
         assert!(config.pod.dispatch);
@@ -557,6 +610,18 @@ mod tests {
         assert_eq!(config.pod.namespace, "sessions-prod");
         assert_eq!(config.pod.run_ttl_secs, 900);
         assert_eq!(config.pod.active_deadline_secs, 7200);
+        assert_eq!(config.llm_api_key.expose_secret(), "sk-test");
+    }
+
+    #[test]
+    fn pod_dispatch_on_requires_an_llm_api_key() {
+        let err = Config::from_vars(vars(&[
+            ("FKST_AUTH_ENABLED", "false"),
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "img"),
+        ]))
+        .expect_err("dispatch with no llm api key must fail closed");
+        assert!(err.to_string().contains("FKST_LLM_API_KEY"));
     }
 
     #[test]
@@ -848,39 +913,41 @@ mod tests {
         }
     }
 
-    // ---- codex chrono-llm DEFAULT configuration tests (#112) ------------------
+    // ---- static LLM provider configuration tests -------------------------------
 
     #[test]
-    fn codex_defaults_apply_when_unset() {
+    fn llm_defaults_apply_when_unset() {
         let config = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false")])).expect("defaults");
-        assert_eq!(config.codex_model, "gpt-5-codex");
+        assert_eq!(config.pod.llm_model, "gpt-5-codex");
         assert_eq!(
-            config.chrono_llm_base_url,
+            config.pod.llm_base_url,
             "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm"
         );
+        // The wire_api MUST default to `chat` (chrono-llm 502s on `responses`).
+        assert_eq!(config.pod.llm_wire_api, "chat");
+        // No key configured (dispatch off) => empty, never a placeholder.
+        assert_eq!(config.llm_api_key.expose_secret(), "");
     }
 
     #[test]
-    fn codex_vars_are_overridable() {
+    fn llm_vars_are_overridable() {
         let config = Config::from_vars(vars(&[
             ("FKST_AUTH_ENABLED", "false"),
-            ("FKST_HOSTED_CODEX_MODEL", "gpt-4.1"),
-            (
-                "FKST_HOSTED_CHRONO_LLM_BASE_URL",
-                "https://proxy.example/s/chrono-llm",
-            ),
+            ("FKST_LLM_MODEL", "gpt-4.1"),
+            ("FKST_LLM_BASE_URL", "https://proxy.example/s/llm"),
+            ("FKST_LLM_WIRE_API", "responses"),
+            ("FKST_LLM_API_KEY", "sk-abc"),
         ]))
         .expect("overrides");
-        assert_eq!(config.codex_model, "gpt-4.1");
-        assert_eq!(
-            config.chrono_llm_base_url,
-            "https://proxy.example/s/chrono-llm"
-        );
+        assert_eq!(config.pod.llm_model, "gpt-4.1");
+        assert_eq!(config.pod.llm_base_url, "https://proxy.example/s/llm");
+        assert_eq!(config.pod.llm_wire_api, "responses");
+        assert_eq!(config.llm_api_key.expose_secret(), "sk-abc");
     }
 
     #[test]
-    fn blank_codex_vars_are_config_errors_naming_the_var() {
-        for var in ["FKST_HOSTED_CODEX_MODEL", "FKST_HOSTED_CHRONO_LLM_BASE_URL"] {
+    fn blank_llm_vars_are_config_errors_naming_the_var() {
+        for var in ["FKST_LLM_MODEL", "FKST_LLM_BASE_URL", "FKST_LLM_WIRE_API"] {
             let err = Config::from_vars(vars(&[("FKST_AUTH_ENABLED", "false"), (var, "   ")]))
                 .expect_err("blank must fail");
             assert!(matches!(err, AppError::Config(_)));

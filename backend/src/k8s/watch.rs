@@ -1,10 +1,9 @@
 //! The Job watcher: maps a session Job's terminal status onto its goal issue
-//! (lifecycle labels + a final summary comment via the App token) and keeps the
-//! NyxID token fresh while the session runs (issue #301).
+//! (lifecycle labels + a final summary comment via the App token).
 //!
 //! The pure mappers ([`job_disposition`], [`summary_comment`], [`terminal_labels`])
-//! are unit-tested; the live watch loop + refresh ticker are integration glue
-//! (they need a cluster), structured here over those tested pieces.
+//! are unit-tested; the live watch loop is integration glue (it needs a
+//! cluster), structured here over those tested pieces.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -16,8 +15,6 @@ use kube::runtime::{watcher, WatchStreamExt};
 
 use crate::github_app::GithubAppTokens;
 use crate::goals::labels::{LABEL_COMPLETED, LABEL_FAILED, LABEL_RUNNING};
-use crate::k8s::refresh::{NyxidRefresh, SessionSecretWriter, NYXID_REFRESH_INTERVAL};
-use crate::nyxid_connect::{BrokerBindingStore, BrokerClientConfig};
 
 /// A session Job's disposition derived from its status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,49 +99,33 @@ fn issue_ref(job: &Job) -> Option<JobIssueRef> {
     })
 }
 
-/// Watches session Jobs and reports their terminal disposition to the goal
-/// issue, while driving the per-session NyxID token refresh.
+/// Watches session Jobs and reports their terminal disposition to the goal issue.
 #[derive(Clone)]
 pub struct JobWatcher {
     client: kube::Client,
     namespace: String,
     github_app: GithubAppTokens,
-    bindings: BrokerBindingStore,
-    broker: Option<BrokerClientConfig>,
-    nyxid_base_url: Option<String>,
-    http: reqwest::Client,
     /// Sessions terminally reported (so a re-Applied event does not double-post).
     reported: Arc<Mutex<HashSet<String>>>,
-    /// Sessions with a refresh ticker already running.
-    refreshing: Arc<Mutex<HashSet<String>>>,
 }
 
 impl JobWatcher {
     /// Assemble a watcher from the shared services.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: kube::Client,
         namespace: impl Into<String>,
         github_app: GithubAppTokens,
-        bindings: BrokerBindingStore,
-        broker: Option<BrokerClientConfig>,
-        nyxid_base_url: Option<String>,
     ) -> Self {
         Self {
             client,
             namespace: namespace.into(),
             github_app,
-            bindings,
-            broker,
-            nyxid_base_url,
-            http: reqwest::Client::new(),
             reported: Arc::new(Mutex::new(HashSet::new())),
-            refreshing: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
     /// Run the watch loop until the stream ends (or errors). Each applied Job is
-    /// handled: a running session gets a refresh ticker; a terminal session is
+    /// handled: a still-running session is ignored; a terminal session is
     /// reported to its goal issue exactly once.
     pub async fn run(&self) {
         let api: Api<Job> = Api::namespaced(self.client.clone(), &self.namespace);
@@ -168,44 +149,11 @@ impl JobWatcher {
             return;
         };
         match job_disposition(&job) {
-            JobDisposition::Running => self.ensure_refresh(&reference),
+            // A still-running session needs no action: there is no per-session
+            // credential to refresh (the LLM key is static config).
+            JobDisposition::Running => {}
             terminal => self.report_terminal(&reference, terminal).await,
         }
-    }
-
-    /// Start a self-terminating refresh ticker for a session once (idempotent).
-    fn ensure_refresh(&self, reference: &JobIssueRef) {
-        let (Some(broker), Some(base_url)) = (self.broker.clone(), self.nyxid_base_url.clone())
-        else {
-            return; // connect not configured: no refresh to drive.
-        };
-        let Some(binding) = self.bindings.binding_for_owner(&reference.owner) else {
-            tracing::warn!(owner = %reference.owner, "job watcher: no nyxid binding; token refresh disabled for session");
-            return;
-        };
-        {
-            let mut set = self.refreshing.lock().expect("refreshing lock");
-            if !set.insert(reference.session_id.clone()) {
-                return; // already ticking
-            }
-        }
-        let refresh = NyxidRefresh::new(
-            SessionSecretWriter::new(self.client.clone(), self.namespace.clone()),
-            self.http.clone(),
-            base_url,
-            broker,
-            binding.binding_id,
-            reference.session_id.clone(),
-        );
-        let session_id = reference.session_id.clone();
-        let refreshing = self.refreshing.clone();
-        tokio::spawn(async move {
-            run_refresh_ticker(refresh, &session_id).await;
-            refreshing
-                .lock()
-                .expect("refreshing lock")
-                .remove(&session_id);
-        });
     }
 
     /// Report a session's terminal disposition to its goal issue exactly once.
@@ -253,29 +201,6 @@ impl JobWatcher {
             ?disposition,
             "job watcher: session disposition reported"
         );
-    }
-}
-
-/// The self-terminating refresh loop: rotate the session token every interval
-/// until the per-session Secret is gone (the Job was GC'd) or the session ends.
-async fn run_refresh_ticker(refresh: NyxidRefresh, session_id: &str) {
-    let mut tick = tokio::time::interval(NYXID_REFRESH_INTERVAL);
-    tick.tick().await; // the immediate first tick: spawn already minted the first token
-    loop {
-        tick.tick().await;
-        match refresh.refresh_session_token().await {
-            Ok(()) => {}
-            Err(crate::k8s::refresh::RefreshError::Patch(kube::Error::Api(e))) if e.code == 404 => {
-                tracing::info!(
-                    session_id,
-                    "job watcher: session secret gone; stopping refresh"
-                );
-                return;
-            }
-            Err(error) => {
-                tracing::warn!(error = %error, session_id, "job watcher: token refresh failed; retrying next tick");
-            }
-        }
     }
 }
 

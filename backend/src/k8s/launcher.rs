@@ -18,9 +18,7 @@ use kube::ResourceExt;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
-use crate::session_spec::creds::{
-    DEFAULT_CREDS_DIR, GITHUB_TOKEN_FILE, NYXID_TOKEN_FILE, NYXID_URL_FILE,
-};
+use crate::session_spec::creds::{DEFAULT_CREDS_DIR, GITHUB_TOKEN_FILE, LLM_API_KEY_FILE};
 use crate::session_spec::SessionSpec;
 
 /// Where the per-session credential Secret is mounted in the pod (must match the
@@ -40,15 +38,22 @@ const RUNNER_CONTAINER: &str = "runner";
 const CREDS_DIR_ENV: &str = "FKST_SESSION_CREDS_DIR";
 /// Env var the runner reads for the spec path (mirrors `runner::SPEC_PATH_ENV`).
 const SPEC_PATH_ENV: &str = "FKST_SESSION_SPEC_PATH";
+/// LLM provider env vars injected into the session pod. Session pods do NOT
+/// inherit the control-plane ConfigMap (build_job sets only explicit env), so
+/// these are injected as plain EnvVars sourced from [`PodConfig`]; without them
+/// the runner would fall back to its hard-coded defaults.
+const LLM_BASE_URL_ENV: &str = "FKST_LLM_BASE_URL";
+const LLM_MODEL_ENV: &str = "FKST_LLM_MODEL";
+const LLM_WIRE_API_ENV: &str = "FKST_LLM_WIRE_API";
 
 /// The credentials minted for one session, written into its Secret.
 pub struct SessionSecrets {
     /// The GitHub App installation token (clone + git ops + log push).
     pub github_token: SecretString,
-    /// The NyxID session token (LLM + Ornn), when provisioned.
-    pub nyxid_token: Option<SecretString>,
-    /// The NyxID issuer base URL, when provisioned.
-    pub nyxid_url: Option<String>,
+    /// The static LLM API key the engine's codex provider authenticates with
+    /// (sourced from the control plane's `FKST_LLM_API_KEY` config). Always
+    /// written — an engine with no LLM credential 401s.
+    pub llm_api_key: SecretString,
 }
 
 /// Errors launching a session Job.
@@ -140,6 +145,21 @@ pub fn build_job(spec: &SessionSpec, config: &PodConfig) -> Result<Job, LaunchEr
                 value: Some(format!("{CREDS_MOUNT_DIR}/{SPEC_FILE_KEY}")),
                 ..Default::default()
             },
+            EnvVar {
+                name: LLM_BASE_URL_ENV.to_string(),
+                value: Some(config.llm_base_url.clone()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: LLM_MODEL_ENV.to_string(),
+                value: Some(config.llm_model.clone()),
+                ..Default::default()
+            },
+            EnvVar {
+                name: LLM_WIRE_API_ENV.to_string(),
+                value: Some(config.llm_wire_api.clone()),
+                ..Default::default()
+            },
         ]),
         volume_mounts: Some(vec![VolumeMount {
             name: CREDS_VOLUME.to_string(),
@@ -209,15 +229,11 @@ pub fn build_secret(
         GITHUB_TOKEN_FILE.to_string(),
         secrets.github_token.expose_secret().to_string(),
     );
-    if let Some(token) = &secrets.nyxid_token {
-        data.insert(
-            NYXID_TOKEN_FILE.to_string(),
-            token.expose_secret().to_string(),
-        );
-    }
-    if let Some(url) = &secrets.nyxid_url {
-        data.insert(NYXID_URL_FILE.to_string(), url.clone());
-    }
+    // The static LLM API key is always written (no longer an optional token).
+    data.insert(
+        LLM_API_KEY_FILE.to_string(),
+        secrets.llm_api_key.expose_secret().to_string(),
+    );
 
     Ok(Secret {
         metadata: ObjectMeta {
@@ -342,7 +358,6 @@ mod tests {
                 prompt: "do it".to_string(),
             },
             package_names: vec!["web".to_string()],
-            ornn_pins: vec![],
             log_branch: "fkst/session-x".to_string(),
         }
     }
@@ -355,6 +370,9 @@ mod tests {
             service_account: "fkst-session-runner".to_string(),
             run_ttl_secs: 600,
             active_deadline_secs: 3600,
+            llm_base_url: "https://llm.example/p".to_string(),
+            llm_model: "gpt-5-codex".to_string(),
+            llm_wire_api: "chat".to_string(),
         }
     }
 
@@ -386,6 +404,17 @@ mod tests {
             && e.value.as_deref() == Some("/var/run/fkst/creds")));
         assert!(env.iter().any(|e| e.name == "FKST_SESSION_SPEC_PATH"
             && e.value.as_deref() == Some("/var/run/fkst/creds/session-spec.json")));
+        // The LLM provider config is injected explicitly (pods don't inherit the
+        // control-plane ConfigMap) so the runner reads the operator's values, not
+        // its hard-coded fallbacks.
+        assert!(env.iter().any(|e| e.name == "FKST_LLM_BASE_URL"
+            && e.value.as_deref() == Some("https://llm.example/p")));
+        assert!(env
+            .iter()
+            .any(|e| e.name == "FKST_LLM_MODEL" && e.value.as_deref() == Some("gpt-5-codex")));
+        assert!(env
+            .iter()
+            .any(|e| e.name == "FKST_LLM_WIRE_API" && e.value.as_deref() == Some("chat")));
 
         let mount = &c.volume_mounts.as_ref().unwrap()[0];
         assert_eq!(mount.mount_path, "/var/run/fkst/creds");
@@ -427,8 +456,7 @@ mod tests {
         };
         let secrets = SessionSecrets {
             github_token: SecretString::from("ghs_xyz"),
-            nyxid_token: Some(SecretString::from("nyxid_tok")),
-            nyxid_url: Some("https://nyx".to_string()),
+            llm_api_key: SecretString::from("sk-test"),
         };
         let secret = build_secret(&spec, "fkst-sessions", &secrets, Some(owner)).expect("secret");
         let data = secret.string_data.unwrap();
@@ -436,26 +464,26 @@ mod tests {
         let back: SessionSpec = serde_json::from_str(&data["session-spec.json"]).unwrap();
         assert_eq!(back, spec);
         assert_eq!(data["github-token"], "ghs_xyz");
-        assert_eq!(data["nyxid-token"], "nyxid_tok");
-        assert_eq!(data["nyxid-url"], "https://nyx");
+        assert_eq!(data["llm-api-key"], "sk-test");
+        // The legacy NyxID token files are no longer written.
+        assert!(!data.contains_key("nyxid-token"));
+        assert!(!data.contains_key("nyxid-url"));
         let owners = secret.metadata.owner_references.unwrap();
         assert_eq!(owners[0].kind, "Job");
         assert_eq!(owners[0].uid, "job-uid-123");
     }
 
     #[test]
-    fn build_secret_omits_absent_nyxid_keys() {
+    fn build_secret_always_writes_the_llm_api_key() {
         let secrets = SessionSecrets {
             github_token: SecretString::from("ghs_xyz"),
-            nyxid_token: None,
-            nyxid_url: None,
+            llm_api_key: SecretString::from("sk-always"),
         };
         let secret = build_secret(&spec(), "ns", &secrets, None).expect("secret");
         let data = secret.string_data.unwrap();
         assert!(data.contains_key("github-token"));
         assert!(data.contains_key("session-spec.json"));
-        assert!(!data.contains_key("nyxid-token"));
-        assert!(!data.contains_key("nyxid-url"));
+        assert_eq!(data["llm-api-key"], "sk-always");
         assert!(secret.metadata.owner_references.is_none());
     }
 

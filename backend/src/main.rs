@@ -159,21 +159,17 @@ async fn main() -> ExitCode {
         }
     };
 
-    // Capture what the Job watcher needs BEFORE `config`/`github_app`/`auth_mode`
-    // move into `AppState`. The binding store is shared (one instance) between
-    // the connect routes (via AppState) and the watcher's refresh driver.
+    // Capture what the Job watcher needs BEFORE `config`/`github_app` move into
+    // `AppState`. The binding store lives in AppState for the connect routes; the
+    // watcher no longer drives any per-session credential refresh (the LLM key is
+    // static config), so it is not passed to the watcher.
     let binding_store = fkst_control_plane::nyxid_connect::BrokerBindingStore::new();
     let pod_dispatch = config.pod.dispatch;
     let pod_namespace = config.pod.namespace.clone();
-    let broker_client = config.broker_client();
-    let watcher_base_url = match &auth_mode {
-        fkst_control_plane::auth::AuthMode::Enabled(settings) => Some(settings.base_url.clone()),
-        fkst_control_plane::auth::AuthMode::Disabled => None,
-    };
     let watcher_github_app = github_app.clone();
 
     let app = match build_router(AppState {
-        binding_store: binding_store.clone(),
+        binding_store,
         config,
         auth_mode,
         authz,
@@ -189,8 +185,8 @@ async fn main() -> ExitCode {
     tracing::info!("router built");
 
     // Pod-per-session: spawn the Job watcher (maps Job terminal status -> goal
-    // issue labels + summary comment, drives the NyxID refresh). Requires the
-    // GitHub App (issue mutations go through the App token) + a reachable cluster.
+    // issue labels + summary comment). Requires the GitHub App (issue mutations
+    // go through the App token) + a reachable cluster.
     if pod_dispatch {
         match (
             watcher_github_app,
@@ -201,9 +197,6 @@ async fn main() -> ExitCode {
                     kube.client().clone(),
                     pod_namespace,
                     github_app,
-                    binding_store,
-                    broker_client,
-                    watcher_base_url,
                 );
                 tokio::spawn(async move { watcher.run().await });
                 tracing::info!("job watcher spawned");

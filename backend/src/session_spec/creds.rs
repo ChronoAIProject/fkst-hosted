@@ -12,15 +12,11 @@ use std::path::{Path, PathBuf};
 /// verbatim (`crate::engine::goal_token::TOKEN_FILE_NAME`).
 pub const GITHUB_TOKEN_FILE: &str = "github-token";
 
-/// The current NyxID session token (`NYXID_ACCESS_TOKEN`, used for the
-/// substrate's LLM and Ornn calls). The control plane rotates this file in place
-/// as the short token is refreshed; the durable NyxID binding never enters the
-/// pod.
-pub const NYXID_TOKEN_FILE: &str = "nyxid-token";
-
-/// The NyxID issuer base URL (`NYXID_URL`). Not a secret, but co-located with
-/// the token so the pod reads one mount.
-pub const NYXID_URL_FILE: &str = "nyxid-url";
+/// The static LLM API key the engine's codex provider authenticates with. The
+/// pod reads it and exports it under the `LLM_API_KEY` env var (the codex
+/// `env_key`); the value comes from the control plane's `FKST_LLM_API_KEY`
+/// config, not a per-session token, so it is written once and never rotated.
+pub const LLM_API_KEY_FILE: &str = "llm-api-key";
 
 /// Default mount path of the per-session credential Secret volume inside the pod.
 pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
@@ -52,14 +48,9 @@ impl CredsLayout {
         self.base.join(GITHUB_TOKEN_FILE)
     }
 
-    /// Path to the (rotated-in-place) NyxID session token file.
-    pub fn nyxid_token(&self) -> PathBuf {
-        self.base.join(NYXID_TOKEN_FILE)
-    }
-
-    /// Path to the NyxID base-URL file.
-    pub fn nyxid_url(&self) -> PathBuf {
-        self.base.join(NYXID_URL_FILE)
+    /// Path to the static LLM API key file.
+    pub fn llm_api_key(&self) -> PathBuf {
+        self.base.join(LLM_API_KEY_FILE)
     }
 }
 
@@ -76,12 +67,8 @@ mod tests {
             Path::new("/var/run/fkst/creds/github-token")
         );
         assert_eq!(
-            layout.nyxid_token(),
-            Path::new("/var/run/fkst/creds/nyxid-token")
-        );
-        assert_eq!(
-            layout.nyxid_url(),
-            Path::new("/var/run/fkst/creds/nyxid-url")
+            layout.llm_api_key(),
+            Path::new("/var/run/fkst/creds/llm-api-key")
         );
     }
 
