@@ -62,7 +62,12 @@ pub struct SessionSpec {
     pub installation_id: i64,
     /// The target repository the session clones and works in.
     pub repo: RepoRef,
-    /// The repo owner's GitHub login.
+    /// The GitHub login of the **issue author** — the authorization subject for
+    /// the issue-comment control path (`/stop`, `/status`): only this login may
+    /// drive the session. This is deliberately DISTINCT from [`Self::repo`]'s
+    /// `owner` (the repo owner): the App token is scoped to the repo, and the
+    /// deterministic session id is derived from the repo owner, but who is
+    /// *allowed to control* the session is its issue author.
     pub owner_login: String,
     /// The triggering issue number (progress is reported back to it).
     pub issue_number: i64,
