@@ -503,6 +503,49 @@ return {
     t.eq(count_calls("gh issue edit"), 0)
   end,
 
+  test_existing_peer_bot_fork_parent_ledger_skips_duplicate_fork = function()
+    mock_bot("loning", "1")
+    mock_managed_bot_logins("loning,ElonSG")
+    local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
+    t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
+      stdout = issue_state_json({
+        author_login = "human",
+        created_at = created_after_grace(),
+        comments = {
+          {
+            body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_key .. '" issue="99" -->',
+            author_login = "ElonSG",
+          },
+        },
+      }),
+      stderr = "",
+      exit_code = 0,
+    })
+
+    local ok, raised = capture_raises(function()
+      return core.claim_issue_for_management(
+        "claim_contract",
+        "owner/repo",
+        42,
+        self_current({
+          author_login = "human",
+          created_at = created_after_grace(),
+          comments = {
+            {
+              body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_key .. '" issue="99" -->',
+              author_login = "ElonSG",
+            },
+          },
+        }),
+        "github-devloop/issue/owner/repo/42"
+      )
+    end)
+
+    t.eq(ok, false)
+    t.eq(#raised, 0)
+    t.eq(count_calls("gh issue edit"), 0)
+  end,
+
   test_existing_fork_parent_intent_skips_duplicate_fork = function()
     mock_bot("fkst-test-bot", "1")
     local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
