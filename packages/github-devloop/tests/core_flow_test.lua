@@ -5,6 +5,8 @@ local parsers_pr = require("devloop.parsers.pr")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local core = h.core
 local t = h.t
 local decompose_lib = require("devloop.decompose")
@@ -113,22 +115,22 @@ return {
   test_converge_round_and_reconcile_requests = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local base_version = core.converge_base_version(dedup_key .. "/loop/2")
+    local base_version = conv_rounds.converge_base_version(core, dedup_key .. "/loop/2")
     local sr_digest = convergence_shared.source_ref_digest(source_ref())
-    local marker = core.converge_round_marker(proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
+    local marker = conv_rounds.converge_round_marker(core, proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
       { angle = "minimal", verdict = "abstain", digest = "a" },
       { angle = "structural", verdict = "approve", digest = "b" },
     })
 
     t.eq(base_version, dedup_key)
-    t.eq(core.has_converge_round_marker({ marker }, proposal_id, base_version, sr_digest, 2), true)
-    local facts = core.converge_round_facts({ marker }, proposal_id, base_version, sr_digest)
+    t.eq(conv_rounds.has_converge_round_marker(core, { marker }, proposal_id, base_version, sr_digest, 2), true)
+    local facts = conv_rounds.converge_round_facts(core, { marker }, proposal_id, base_version, sr_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].round, 2)
-    t.eq(core.max_converge_round(facts), 2)
+    t.eq(conv_rounds.max_converge_round(core, facts), 2)
 
     local forged = core.state_marker(proposal_id, "blocked", base_version .. "/loop/99")
-    local forged_converge_marker = core.converge_round_marker(
+    local forged_converge_marker = conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       sr_digest,
@@ -160,7 +162,7 @@ return {
     t.is_true(round_comment.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(round_comment.body:find(forged, 1, true) == nil, true)
     t.is_true(round_comment.body:find("fkst:github-devloop:converge-round:v1", 1, true) ~= nil)
-    local comment_facts = core.converge_round_facts({ round_comment.body }, proposal_id, base_version, sr_digest)
+    local comment_facts = conv_rounds.converge_round_facts(core, { round_comment.body }, proposal_id, base_version, sr_digest)
     t.eq(#comment_facts, 1)
     t.eq(comment_facts[1].round, 2)
     t.eq(comment_facts[1].dedup, dedup_key .. "/loop/2")
@@ -168,19 +170,19 @@ return {
     t.eq(comment_facts[1].verdicts, facts[1].verdicts)
     t.is_true(round_comment.dedup_key:find("converge-round", 1, true) ~= nil)
 
-    local reconcile = core.build_devloop_reconcile_payload(event, 3, base_version)
+    local reconcile = conv_reconcile.build_devloop_reconcile_payload(core, event, 3, base_version)
     t.eq(reconcile.schema, "github-devloop.reconcile.v1")
     t.eq(reconcile.dedup_key, "reconcile:" .. base_version .. "/loop/3")
-    t.eq(core.is_supported_reconcile(reconcile), true)
-    local reconcile_marker = core.reconcile_marker(proposal_id, base_version, 3, "drop")
-    t.eq(core.has_reconcile_marker({ reconcile_marker }, proposal_id, base_version, 3), true)
-    t.eq(core.reconcile_state_version(base_version, 3), base_version .. "/loop/3")
+    t.eq(conv_reconcile.is_supported_reconcile(core, reconcile), true)
+    local reconcile_marker = conv_reconcile.reconcile_marker(core, proposal_id, base_version, 3, "drop")
+    t.eq(conv_reconcile.has_reconcile_marker(core, { reconcile_marker }, proposal_id, base_version, 3), true)
+    t.eq(conv_reconcile.reconcile_state_version(core, base_version, 3), base_version .. "/loop/3")
     local live_thinking_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
-    local terminal_version = core.reconcile_terminal_state_version(live_thinking_version, 3)
+    local terminal_version = conv_reconcile.reconcile_terminal_state_version(core, live_thinking_version, 3)
     t.eq(terminal_version, live_thinking_version .. "/loop/3")
     t.eq(core.versioned_transition_status({ state = "thinking", version = live_thinking_version }, { "thinking" }, "blocked", terminal_version), "apply")
     local live_higher_loop = live_thinking_version .. "/loop/8"
-    local higher_terminal = core.reconcile_terminal_state_version(live_higher_loop, 3)
+    local higher_terminal = conv_reconcile.reconcile_terminal_state_version(core, live_higher_loop, 3)
     t.eq(higher_terminal, live_higher_loop .. "/loop/9")
     t.eq(core.versioned_transition_status({ state = "thinking", version = live_higher_loop }, { "thinking" }, "blocked", higher_terminal), "apply")
 
@@ -207,7 +209,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = review_unresolved()
-    local reconcile = core.build_devloop_review_reconcile_payload(event, 3, issue_proposal_id, issue_version, "def456")
+    local reconcile = conv_reconcile.build_devloop_review_reconcile_payload(core, event, 3, issue_proposal_id, issue_version, "def456")
 
     t.eq(reconcile.schema, "github-devloop.review-reconcile.v1")
     t.eq(reconcile.proposal_id, issue_proposal_id)
@@ -216,22 +218,22 @@ return {
     t.eq(reconcile.head_sha, "def456")
     t.eq(reconcile.round, 3)
     t.eq(reconcile.dedup_key, "review-reconcile:" .. issue_version .. "/review-loop/3")
-    t.eq(core.is_supported_review_reconcile(reconcile), true)
+    t.eq(conv_reconcile.is_supported_review_reconcile(core, reconcile), true)
     local missing_round = copy_table(reconcile)
     missing_round.round = nil
-    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { dedup_key = "review-reconcile:" .. issue_version .. "/review-loop/4" })), false)
-    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { head_sha = "not-a-sha" })), false)
-    t.eq(core.is_supported_review_reconcile(missing_round), false)
-    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { round = "1.5" })), false)
-    t.eq(core.is_supported_review_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
-    t.eq(core.review_reconcile_state_version(issue_version, 3), issue_version .. "/review-loop/3")
+    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { dedup_key = "review-reconcile:" .. issue_version .. "/review-loop/4" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { head_sha = "not-a-sha" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(core, missing_round), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { round = "1.5" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
+    t.eq(conv_reconcile.review_reconcile_state_version(core, issue_version, 3), issue_version .. "/review-loop/3")
     local live_reviewing_version = issue_version .. "/review-loop/9"
-    local terminal_version = core.review_reconcile_terminal_state_version(live_reviewing_version, 3)
+    local terminal_version = conv_reconcile.review_reconcile_terminal_state_version(core, live_reviewing_version, 3)
     t.eq(terminal_version, live_reviewing_version .. "/review-loop/10")
     t.eq(core.versioned_transition_status({ state = "reviewing", version = live_reviewing_version }, { "reviewing" }, "blocked", terminal_version), "apply")
 
-    local marker = core.review_reconcile_marker(issue_proposal_id, issue_version, 3, "drop")
-    t.eq(core.has_review_reconcile_marker({ marker }, issue_proposal_id, issue_version, 3), true)
+    local marker = conv_reconcile.review_reconcile_marker(core, issue_proposal_id, issue_version, 3, "drop")
+    t.eq(conv_reconcile.has_review_reconcile_marker(core, { marker }, issue_proposal_id, issue_version, 3), true)
     t.is_true(marker:find('action="drop"', 1, true) ~= nil)
     t.is_true(marker:find('dedup="review-reconcile:' .. issue_version .. '/review-loop/3"', 1, true) ~= nil)
 
@@ -252,7 +254,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/4"
     local review_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
-    local reconcile = core.build_devloop_fix_reconcile_payload({
+    local reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
       proposal_id = issue_proposal_id,
       review_proposal_id = review_id,
       review_dedup_key = "consensus:" .. review_id .. "/review",
@@ -270,15 +272,15 @@ return {
     t.eq(reconcile.round, 4)
     t.eq(reconcile.pr_number, 7)
     t.eq(reconcile.dedup_key, "fix-reconcile:" .. issue_version)
-    t.eq(core.fix_reconcile_state_version(issue_version), issue_version)
-    t.eq(core.is_supported_fix_reconcile(reconcile), true)
-    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { dedup_key = "fix-reconcile:" .. issue_version .. "/other" })), false)
-    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { round = 3 })), false)
-    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { head_sha = "not-a-sha" })), false)
-    t.eq(core.is_supported_fix_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
+    t.eq(conv_reconcile.fix_reconcile_state_version(core, issue_version), issue_version)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(core, reconcile), true)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { dedup_key = "fix-reconcile:" .. issue_version .. "/other" })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { round = 3 })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { head_sha = "not-a-sha" })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
 
-    local marker = core.fix_reconcile_marker(issue_proposal_id, issue_version, "drop")
-    t.eq(core.has_fix_reconcile_marker({ marker }, issue_proposal_id, issue_version), true)
+    local marker = conv_reconcile.fix_reconcile_marker(core, issue_proposal_id, issue_version, "drop")
+    t.eq(conv_reconcile.has_fix_reconcile_marker(core, { marker }, issue_proposal_id, issue_version), true)
     t.is_true(marker:find('action="drop"', 1, true) ~= nil)
     t.is_true(marker:find('round="4"', 1, true) ~= nil)
     t.is_true(marker:find('dedup="fix-reconcile:' .. issue_version .. '"', 1, true) ~= nil)
@@ -317,7 +319,7 @@ return {
       angle_digests = bare_angle_digests,
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
-    local marker = core.review_converge_round_marker(
+    local marker = conv_rounds.review_converge_round_marker(core,
       event.proposal_id,
       issue_proposal_id,
       issue_version,
@@ -328,9 +330,9 @@ return {
       event.narrowed_question,
       event.angle_digests
     )
-    local bare_facts = core.review_converge_round_facts({ marker }, event.proposal_id, issue_proposal_id, issue_version, head_sha, sr_digest)
+    local bare_facts = conv_rounds.review_converge_round_facts(core, { marker }, event.proposal_id, issue_proposal_id, issue_version, head_sha, sr_digest)
     t.eq(#bare_facts, 1)
-    local forged_review_marker = core.review_converge_round_marker(
+    local forged_review_marker = conv_rounds.review_converge_round_marker(core,
       event.proposal_id,
       issue_proposal_id,
       issue_version,
@@ -361,7 +363,7 @@ return {
     t.is_true(comment.body:find("delete: abstain", 1, true) ~= nil)
     t.is_true(comment.body:find(ai_sentinel, 1, true) ~= nil)
     t.is_true(comment.body:find("fkst:github-devloop:review-converge-round:v1", 1, true) ~= nil)
-    local facts = core.review_converge_round_facts({ comment.body }, event.proposal_id, issue_proposal_id, issue_version, head_sha, sr_digest)
+    local facts = conv_rounds.review_converge_round_facts(core, { comment.body }, event.proposal_id, issue_proposal_id, issue_version, head_sha, sr_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].round, 2)
     t.eq(facts[1].dedup, event.dedup_key .. "/loop/2")

@@ -1,6 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
 local t = h.t
 local core = h.core
 local decompose_lib = require("devloop.decompose")
@@ -173,7 +174,7 @@ return {
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(original.proposal_id, base_version),
-      core.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests),
+      conv_rounds.converge_round_marker(core, original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests),
     })
 
     local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
@@ -195,7 +196,7 @@ return {
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(current.proposal_id, current.dedup_key),
-      core.converge_round_marker(original.proposal_id, original.dedup_key, sr_digest, 0, original.dedup_key, "Old question", {
+      conv_rounds.converge_round_marker(core, original.proposal_id, original.dedup_key, sr_digest, 0, original.dedup_key, "Old question", {
         { angle = "minimal", verdict = "abstain", digest = "old-lineage" },
       }),
     })

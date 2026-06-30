@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = fkst.test
 local core = require("core")
 local gh_argv = require("testkit.gh_argv_mock")
@@ -112,7 +113,7 @@ local function unresolved(extra)
   return value
 end
 local function reconcile(extra)
-  local value = core.build_devloop_reconcile_payload(unresolved({
+  local value = conv_reconcile.build_devloop_reconcile_payload(core, unresolved({
     dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
   }), 3, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
   for key, field in pairs(extra or {}) do
@@ -225,7 +226,7 @@ local function review_reconcile(extra)
     dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
     round = 3,
   })
-  local value = core.build_devloop_review_reconcile_payload(event, 3, "github-devloop/issue/owner/repo/42", reviewing().version, "def456")
+  local value = conv_reconcile.build_devloop_review_reconcile_payload(core, event, 3, "github-devloop/issue/owner/repo/42", reviewing().version, "def456")
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
@@ -234,7 +235,7 @@ end
 
 local function fix_reconcile(extra)
   local issue_version = core.next_fix_version(core.next_fix_version(core.next_fix_version(reviewing().version)))
-  local value = core.build_devloop_fix_reconcile_payload({
+  local value = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
     proposal_id = "github-devloop/issue/owner/repo/42",
     review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456"),
     review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456") .. "/review",

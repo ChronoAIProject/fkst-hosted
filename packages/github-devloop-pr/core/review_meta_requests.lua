@@ -1,5 +1,6 @@
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local S = {}
 local comment_strings = require("devloop.strings")
 
@@ -176,8 +177,8 @@ function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
 end
 
 function M.build_fix_reconcile_comment_request(repo, _issue_number, fix_reconcile, action, reason)
-  local version = M.fix_reconcile_state_version(fix_reconcile.issue_version)
-  local marker = M.fix_reconcile_marker(fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
+  local version = conv_reconcile.fix_reconcile_state_version(M, fix_reconcile.issue_version)
+  local marker = conv_reconcile.fix_reconcile_marker(M, fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
   local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = M.parse_pr_source_ref(fix_reconcile.source_ref)
@@ -197,8 +198,8 @@ function M.build_fix_reconcile_comment_request(repo, _issue_number, fix_reconcil
 end
 
 function M.build_review_reconcile_comment_request(repo, _issue_number, review_reconcile, action, reason, state_version)
-  local version = state_version or M.review_reconcile_state_version(review_reconcile.issue_version, review_reconcile.round)
-  local marker = M.review_reconcile_marker(review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
+  local version = state_version or conv_reconcile.review_reconcile_state_version(M, review_reconcile.issue_version, review_reconcile.round)
+  local marker = conv_reconcile.review_reconcile_marker(M, review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = M.parse_pr_source_ref(review_reconcile.source_ref)

@@ -6,6 +6,7 @@ local handoff_helpers = require("devloop.comment_handoff")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
@@ -72,7 +73,7 @@ local function act_handoff(event)
   end
 
   if handoff.kind == "github-devloop.reconcile" then
-    local reconcile = core.build_devloop_reconcile_payload({
+    local reconcile = conv_reconcile.build_devloop_reconcile_payload(core, {
       proposal_id = handoff.proposal_id,
       source_ref = handoff.source_ref,
     }, handoff.round, handoff.base_version)

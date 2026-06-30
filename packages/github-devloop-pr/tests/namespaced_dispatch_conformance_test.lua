@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local conformance = require("testkit.namespaced_dispatch_conformance")
@@ -49,7 +50,7 @@ local function merge_ready()
 end
 
 local function timeout_reconcile()
-  return core.build_devloop_timeout_reconcile_payload({
+  return conv_reconcile.build_devloop_timeout_reconcile_payload(core, {
     from_state = "merge-ready",
   }, {
     version = h.merge_ready().version .. "/timeout/merge-ready/1",

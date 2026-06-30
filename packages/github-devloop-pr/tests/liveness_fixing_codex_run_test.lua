@@ -3,6 +3,8 @@ local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -146,7 +148,7 @@ local function review_meta_comments(event, version)
     trusted_comment(core.state_marker(event.proposal_id, "review-meta", version or event.version)),
     trusted_comment(core.review_meta_marker(event.proposal_id, event.dedup_key)),
     trusted_comment(core.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
-    trusted_comment(core.review_converge_round_marker(
+    trusted_comment(conv_rounds.review_converge_round_marker(core,
       event.review_proposal_id,
       event.proposal_id,
       event.version,
@@ -168,7 +170,7 @@ local function timeout_attempt_v2_comment(row, state, comments, round)
     source_ref = core.pr_source_ref(repo, 7),
   }
   local eval = core.actionable_epoch_resolve(row, state, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
-  return trusted_comment(core.timeout_attempt_v2_marker(
+  return trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
     proposal_id,
     row.from_state,
     row.liveness_class_id,

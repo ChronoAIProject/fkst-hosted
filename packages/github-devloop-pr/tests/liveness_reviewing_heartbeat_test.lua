@@ -1,5 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -135,13 +137,13 @@ local function state_comment(state_name, state_version, created_at)
 end
 
 local function timeout_attempt_comment(state_version, round)
-  return trusted_comment(core.timeout_attempt_marker(proposal_id, state_version, "reviewing", round, core.pr_source_ref(repo, 7)))
+  return trusted_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, "reviewing", round, core.pr_source_ref(repo, 7)))
 end
 
 local function review_round_comment(created_at)
   local source_ref = core.pr_source_ref(repo, 7)
   local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
-  return trusted_comment(core.review_converge_round_marker(
+  return trusted_comment(conv_rounds.review_converge_round_marker(core,
     review_proposal_id,
     proposal_id,
     version,

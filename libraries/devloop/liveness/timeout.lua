@@ -1,3 +1,5 @@
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_attempts = require("devloop.convergence.attempts")
 local S = {}
 local contract_time = require("contract.time")
 local source_refs = require("contract.source_ref")
@@ -37,7 +39,7 @@ function M.liveness_timeout_attempt(row, state, facts)
   local comments = facts and facts.current and facts.current.comments or nil
   local from_state = row and row.from_state
   local version = state and state.version
-  local durable_round = M.timeout_attempt_round(comments, proposal_id, version, from_state)
+  local durable_round = conv_attempts.timeout_attempt_round(M, comments, proposal_id, version, from_state)
   local version_round = M.version_timeout_round(version, from_state)
   return math.max(durable_round or 0, version_round or 0)
 end
@@ -130,7 +132,7 @@ local function build_timeout_reconcile(row, entity, state, facts, decision)
   if source_refs.has_bounded_source_ref(source_ref, M._max_key_len)
     and M._is_path_safe_key(proposal_id, M._max_key_len)
     and M._is_bounded_string(state and state.version, M._max_dedup_len) then
-    return "devloop_timeout_reconcile", M.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, decision.attempt)
+    return "devloop_timeout_reconcile", conv_reconcile.build_devloop_timeout_reconcile_payload(M, row, state, proposal_id, source_ref, decision.attempt)
   end
   return nil, nil
 end
@@ -201,9 +203,9 @@ local function emit_timeout_attempt_marker(dept, entity, state, row, facts, prop
       and type(eval) == "table"
       and eval.status == "actionable"
       and eval.generation_key ~= nil then
-      M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", M.build_timeout_attempt_v2_comment_request(target, proposal_id, state, row, source_ref, attempt, eval.generation_key))
+      M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, eval.generation_key))
     else
-      M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", M.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt))
+      M.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_comment_request(M, target, proposal_id, state, row, source_ref, attempt))
     end
   end
 end
@@ -212,7 +214,7 @@ local function emit_decompose_exhausted_marker(dept, entity, state, facts, propo
   local target = timeout_attempt_target(entity, facts)
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
   if target ~= nil then
-    local request = M.build_decompose_exhausted_comment_request(target, proposal_id, state, source_ref, attempt)
+    local request = conv_attempts.build_decompose_exhausted_comment_request(M, target, proposal_id, state, source_ref, attempt)
     M.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
       target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request",
     })
@@ -234,7 +236,7 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
     M.log_cas_decision(dept, proposal_id, facts and facts.fresh_current_state or state, row.from_state, row.driving_queue, "stale_timeout_noop(" .. tostring(mismatch) .. ")", "timeout watchdog lineage no longer matches freshly derived current state")
     return true
   end
-  if row.from_state == "blocked" and M.has_decompose_exhausted_marker(comments, proposal_id, state and state.version) then
+  if row.from_state == "blocked" and conv_attempts.has_decompose_exhausted_marker(M, comments, proposal_id, state and state.version) then
     M.log_cas_decision(dept, proposal_id, state, "blocked", row.driving_queue, "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
     return true
   end

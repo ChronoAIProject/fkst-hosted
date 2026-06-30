@@ -2,6 +2,8 @@ local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -806,8 +808,8 @@ return {
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 1, "base", event.narrowed_question, event.angle_digests),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 2, "loop1", event.narrowed_question, event.angle_digests),
+      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 1, "base", event.narrowed_question, event.angle_digests),
+      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, 2, "loop1", event.narrowed_question, event.angle_digests),
     })
 
     local loop_result = run_review_loop(event, opts("review-loop-true-stall"))
@@ -839,11 +841,11 @@ return {
     t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
-    local version = core.review_reconcile_terminal_state_version(event.issue_version, event.round)
+    local version = conv_reconcile.review_reconcile_terminal_state_version(core, event.issue_version, event.round)
     t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("no-actionable-framing-after-3-review-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(core.review_reconcile_marker(event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
+    t.is_true(comment.body:find(conv_reconcile.review_reconcile_marker(core, event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(count_calls("codex exec"), 0)
@@ -854,7 +856,7 @@ return {
     local state_version = event.issue_version .. "/review-loop/9"
     mock_bot_env()
     mock_issue_review({ "fkst-dev:blocked" }, {
-      core.build_review_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", core.review_reconcile_terminal_state_version(state_version, event.round)).body,
+      core.build_review_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", conv_reconcile.review_reconcile_terminal_state_version(core, state_version, event.round)).body,
     })
 
     local result = run_review_reconcile(event, opts("review-reconcile-idempotent"))

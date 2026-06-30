@@ -12,6 +12,7 @@ local check_runs = require("forge.github.check_runs")
 local merge_batch = require("devloop.merge_batch")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local M = {}
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
@@ -75,7 +76,7 @@ local function should_wait_for_stale_mergeability(pr, branches, mergeable_reason
 end
 
 local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
-  local fix_reconcile = core.build_devloop_fix_reconcile_payload({
+  local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
     proposal_id = merge_ready.proposal_id,
     review_proposal_id = merge_ready.review_proposal_id,
     review_dedup_key = merge_ready.review_dedup_key,

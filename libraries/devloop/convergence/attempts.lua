@@ -1,14 +1,14 @@
 local parsers_misc = require("devloop.parsers.misc")
-local S = {}
+local shared = require("devloop.convergence.shared")
+local C = {}
 local transition_version = require("contract.transition_version")
 
-function S.install(M, shared)
-  local valid_round = shared.valid_round
-  local max_attr_len = shared.max_attr_len
-  local safe_attr = shared.safe_attr
-  local attr = shared.attr
+local valid_round = shared.valid_round
+local max_attr_len = shared.max_attr_len
+local safe_attr = shared.safe_attr
+local attr = shared.attr
 
-function M.timeout_attempt_marker(proposal_id, issue_version, state_name, round, source_ref)
+function C.timeout_attempt_marker(M, proposal_id, issue_version, state_name, round, source_ref)
   local n = valid_round(round)
   if n == nil or n <= 0 then
     error("github-devloop: invalid timeout attempt round")
@@ -25,7 +25,7 @@ function M.timeout_attempt_marker(proposal_id, issue_version, state_name, round,
     .. '" -->'
 end
 
-function M.timeout_attempt_v2_marker(proposal_id, state_name, liveness_class_id, generation_key, round, source_ref)
+function C.timeout_attempt_v2_marker(M, proposal_id, state_name, liveness_class_id, generation_key, round, source_ref)
   local n = valid_round(round)
   if n == nil or n <= 0 then
     error("github-devloop: invalid timeout attempt round")
@@ -42,7 +42,7 @@ function M.timeout_attempt_v2_marker(proposal_id, state_name, liveness_class_id,
     .. '" -->'
 end
 
-function M.timeout_attempt_latest_marker(proposal_id, state_name, liveness_class_id, generation_key)
+function C.timeout_attempt_latest_marker(M, proposal_id, state_name, liveness_class_id, generation_key)
   return '<!-- fkst:github-devloop:timeout-attempt:latest:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
     .. '" state="' .. safe_attr(state_name, max_attr_len)
     .. '" liveness_class_id="' .. safe_attr(liveness_class_id or "", max_attr_len)
@@ -50,10 +50,10 @@ function M.timeout_attempt_latest_marker(proposal_id, state_name, liveness_class
     .. '" -->'
 end
 
-function M.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt)
+function C.build_timeout_attempt_comment_request(M, target, proposal_id, state, row, source_ref, attempt)
   local normalized = M.normalize_source_ref(source_ref)
-  local marker = M.timeout_attempt_marker(proposal_id, state.version, row.from_state, attempt, normalized)
-  local latest_marker = M.timeout_attempt_latest_marker(proposal_id, row.from_state, "", transition_version.strip_suffixes(state.version))
+  local marker = C.timeout_attempt_marker(M, proposal_id, state.version, row.from_state, attempt, normalized)
+  local latest_marker = C.timeout_attempt_latest_marker(M, proposal_id, row.from_state, "", transition_version.strip_suffixes(state.version))
   return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
     .. " "
@@ -74,10 +74,10 @@ function M.build_timeout_attempt_comment_request(target, proposal_id, state, row
   })
 end
 
-function M.build_timeout_attempt_v2_comment_request(target, proposal_id, state, row, source_ref, attempt, generation_key)
+function C.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, generation_key)
   local normalized = M.normalize_source_ref(source_ref)
-  local marker = M.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
-  local latest_marker = M.timeout_attempt_latest_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key)
+  local marker = C.timeout_attempt_v2_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
+  local latest_marker = C.timeout_attempt_latest_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key)
   return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
     .. " "
@@ -99,7 +99,7 @@ function M.build_timeout_attempt_v2_comment_request(target, proposal_id, state, 
   })
 end
 
-function M.decompose_exhausted_marker(proposal_id, issue_version, round, source_ref)
+function C.decompose_exhausted_marker(M, proposal_id, issue_version, round, source_ref)
   local n = valid_round(round)
   if n == nil or n <= 0 then
     error("github-devloop: invalid decompose exhausted round")
@@ -115,9 +115,9 @@ function M.decompose_exhausted_marker(proposal_id, issue_version, round, source_
     .. '" -->'
 end
 
-function M.build_decompose_exhausted_comment_request(target, proposal_id, state, source_ref, attempt)
+function C.build_decompose_exhausted_comment_request(M, target, proposal_id, state, source_ref, attempt)
   local normalized = M.normalize_source_ref(source_ref)
-  local marker = M.decompose_exhausted_marker(proposal_id, state.version, attempt, normalized)
+  local marker = C.decompose_exhausted_marker(M, proposal_id, state.version, attempt, normalized)
   return M.build_entity_comment_request(target, "github-devloop decompose output obligation exhausted\n\n"
     .. "Structured WHY:\n"
     .. "reason_class=decompose-output-obligation-timeout\n"
@@ -133,7 +133,7 @@ function M.build_decompose_exhausted_comment_request(target, proposal_id, state,
     tostring(attempt),
   }), normalized)
 end
-function M.timeout_attempt_round(comments, proposal_id, issue_version, state_name)
+function C.timeout_attempt_round(M, comments, proposal_id, issue_version, state_name)
   if type(comments) ~= "table" then
     return 0
   end
@@ -155,7 +155,7 @@ function M.timeout_attempt_round(comments, proposal_id, issue_version, state_nam
   return max_seen
 end
 
-function M.timeout_attempt_v2_round(comments, proposal_id, row, generation_key)
+function C.timeout_attempt_v2_round(M, comments, proposal_id, row, generation_key)
   if type(comments) ~= "table" then
     return 0
   end
@@ -177,7 +177,7 @@ function M.timeout_attempt_v2_round(comments, proposal_id, row, generation_key)
   return max_seen
 end
 
-function M.has_decompose_exhausted_marker(comments, proposal_id, issue_version)
+function C.has_decompose_exhausted_marker(M, comments, proposal_id, issue_version)
   if type(comments) ~= "table" then
     return false
   end
@@ -193,6 +193,5 @@ function M.has_decompose_exhausted_marker(comments, proposal_id, issue_version)
   end
   return false
 end
-end
 
-return S
+return C

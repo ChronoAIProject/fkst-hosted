@@ -6,6 +6,8 @@ local strings = require("contract.strings")
 local context_bundle = require("devloop.context_bundle")
 local decompose_lib = require("devloop.decompose")
 local config = require("devloop.config")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_attempts = require("devloop.convergence.attempts")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -313,14 +315,14 @@ local function decomposed_done(event)
       context.decompose.proposal_id,
       current_pr.comments)
     local state = core.current_entity_state(current_pr.comments, context.decompose.proposal_id)
-    if not core.has_fix_reconcile_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version)
+    if not conv_reconcile.has_fix_reconcile_marker(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(context.decompose.version) then
       return
     end
     local decomposed = decompose_lib.decomposed_fact(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
     if decomposed == nil then
-      if core.has_decompose_exhausted_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version) then
+      if conv_attempts.has_decompose_exhausted_marker(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version) then
         core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed",
           "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
         done = true
@@ -358,7 +360,7 @@ local function act_decompose(event)
     core.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)
 
     local state = core.current_entity_state(current_pr.comments, decompose.proposal_id)
-    if not core.has_fix_reconcile_marker(current_pr.comments, decompose.proposal_id, decompose.version)
+    if not conv_reconcile.has_fix_reconcile_marker(core, current_pr.comments, decompose.proposal_id, decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(decompose.version) then
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
@@ -382,7 +384,7 @@ local function act_decompose(event)
       core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
       })
-      core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", core.build_decompose_exhausted_comment_request(
+      core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", conv_attempts.build_decompose_exhausted_comment_request(core,
         { kind = "pr", repo = repo, number = decompose.pr_number },
         decompose.proposal_id,
         state,

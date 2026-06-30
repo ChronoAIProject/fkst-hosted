@@ -1,6 +1,9 @@
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local h = require("tests.devloop_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -35,7 +38,7 @@ end
 
 local function converge_round_comment(created_at)
   local source_ref = core.issue_source_ref(repo, 42)
-  return trusted_comment(core.converge_round_marker(
+  return trusted_comment(conv_rounds.converge_round_marker(core,
     proposal_id,
     version,
     convergence_shared.source_ref_digest(source_ref),
@@ -51,11 +54,11 @@ local function merge_gate_wait_comment(state_version, created_at)
 end
 
 local function timeout_attempt_comment(state_name, state_version, round, source_ref)
-  return trusted_comment(core.timeout_attempt_marker(proposal_id, state_version, state_name, round, source_ref), "2026-06-03T00:00:00Z")
+  return trusted_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, state_name, round, source_ref), "2026-06-03T00:00:00Z")
 end
 
 local function timeout_attempt_v2_comment(row, generation_key, round, source_ref)
-  return trusted_comment(core.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, round, source_ref), "2026-06-03T00:00:00Z")
+  return trusted_comment(conv_attempts.timeout_attempt_v2_marker(core, proposal_id, row.from_state, row.liveness_class_id, generation_key, round, source_ref), "2026-06-03T00:00:00Z")
 end
 
 local function implementing_attempt_comment(state_version, started_at, created_at, attempt, exec_ref)
@@ -360,7 +363,7 @@ return {
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
-    local payload = core.build_devloop_timeout_reconcile_payload(row, {
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
       state = "merge-ready",
       version = timeout_version,
     }, proposal_id, source_ref, 3)
@@ -384,7 +387,7 @@ return {
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
-    local payload = core.build_devloop_timeout_reconcile_payload(row, {
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
       state = "merge-ready",
       version = timeout_version,
     }, proposal_id, source_ref, 3)
@@ -407,7 +410,7 @@ return {
     local source_ref = core.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
-    local payload = core.build_devloop_timeout_reconcile_payload(row, {
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
       state = "merge-ready",
       version = timeout_version,
     }, proposal_id, source_ref, 3)

@@ -3,6 +3,7 @@ local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local decompose_lib = require("devloop.decompose")
@@ -68,7 +69,7 @@ local function mock_claim_and_reads(payload)
     labels = { "fkst-dev:blocked" },
     comments = {
       core.state_marker(payload.proposal_id, "blocked", payload.version),
-      core.fix_reconcile_marker(payload.proposal_id, payload.version, "drop"),
+      conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
     },
     state = "OPEN",
     updated_at = "2026-06-03T01:02:03Z",
@@ -79,7 +80,7 @@ local function mock_claim_and_reads(payload)
     comments = {
       core.pr_origin_marker(payload.proposal_id, 7, "devloop-owner-repo-42-01HY", payload.version, "dev"),
       core.state_marker(payload.proposal_id, "blocked", payload.version),
-      core.fix_reconcile_marker(payload.proposal_id, payload.version, "drop"),
+      conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
     },
     head = "devloop-owner-repo-42-01HY",
     head_sha = "def456",

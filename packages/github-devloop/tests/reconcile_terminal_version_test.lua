@@ -1,5 +1,7 @@
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -59,7 +61,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
-    local version = core.reconcile_terminal_state_version(state_version, event.round)
+    local version = conv_reconcile.reconcile_terminal_state_version(core, state_version, event.round)
     t.eq(core.versioned_transition_status({ state = "thinking", version = state_version }, { "thinking" }, "blocked", version), "apply")
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
 
@@ -71,7 +73,7 @@ return {
 
   test_thinking_reconcile_does_not_override_advanced_state = function()
     local event = reconcile()
-    local state_version = core.reconcile_terminal_state_version("github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418", event.round)
+    local state_version = conv_reconcile.reconcile_terminal_state_version(core, "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418", event.round)
     mock_issue_reconcile({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", state_version),
     })
@@ -117,7 +119,7 @@ return {
     end
     t.eq(eval.status, "actionable")
     t.eq(eval.signal.reason, "codex-run-not-running")
-    local payload = core.build_devloop_timeout_reconcile_payload(
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core,
       row,
       state,
       proposal_id,
@@ -131,7 +133,7 @@ return {
         created_at = "2026-06-03T00:00:00Z",
       },
       {
-        body = core.timeout_attempt_v2_marker(
+        body = conv_attempts.timeout_attempt_v2_marker(core,
           proposal_id,
           "implementing",
           "implementing.active",
@@ -143,7 +145,7 @@ return {
         created_at = "2026-06-03T00:01:00Z",
       },
       {
-        body = core.timeout_attempt_v2_marker(
+        body = conv_attempts.timeout_attempt_v2_marker(core,
           proposal_id,
           "implementing",
           "implementing.active",

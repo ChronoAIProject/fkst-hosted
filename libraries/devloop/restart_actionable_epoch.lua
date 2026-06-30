@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local conv_attempts = require("devloop.convergence.attempts")
 local S = {}
 local contract_time = require("contract.time")
 
@@ -405,30 +406,30 @@ function M.actionable_epoch_timeout_attempt(row, state, facts)
   end
   local comments = facts and facts.current and facts.current.comments or nil
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
-  local current = M.timeout_attempt_v2_round(comments, proposal_id, row, eval.generation_key)
+  local current = conv_attempts.timeout_attempt_v2_round(M, comments, proposal_id, row, eval.generation_key)
   if row and row.actionable_epoch and row.actionable_epoch.source == "live_defer_heartbeat:v1" then
     return math.max(
       current,
-      M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0,
+      conv_attempts.timeout_attempt_round(M, comments, proposal_id, state and state.version, row and row.from_state) or 0,
       M.version_timeout_round(state and state.version, row and row.from_state) or 0
     )
   end
   if row and row.actionable_epoch and row.actionable_epoch.source == "codex_run:v1" then
     return math.max(
       current,
-      M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0,
+      conv_attempts.timeout_attempt_round(M, comments, proposal_id, state and state.version, row and row.from_state) or 0,
       M.version_timeout_round(state and state.version, row and row.from_state) or 0
     )
   end
   if row and row.actionable_epoch and row.actionable_epoch.source == "child_workflow_wait:v1" then
     return math.max(
       current,
-      M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0,
+      conv_attempts.timeout_attempt_round(M, comments, proposal_id, state and state.version, row and row.from_state) or 0,
       M.version_timeout_round(state and state.version, row and row.from_state) or 0
     )
   end
   if tostring(eval.generation_opened_by or ""):find("^state%-entry:v1:") then
-    return math.max(current, M.timeout_attempt_round(comments, proposal_id, state and state.version, row and row.from_state) or 0, M.version_timeout_round(state and state.version, row and row.from_state) or 0)
+    return math.max(current, conv_attempts.timeout_attempt_round(M, comments, proposal_id, state and state.version, row and row.from_state) or 0, M.version_timeout_round(state and state.version, row and row.from_state) or 0)
   end
   return current
 end

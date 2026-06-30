@@ -2,6 +2,7 @@ local convergence_shared, poll_fakes = require("devloop.convergence.shared"), re
 local contract_time = require("contract.time")
 local decompose_lib = require("devloop.decompose")
 local replayer = require("devloop.replayer")
+local conv_rounds = require("devloop.convergence.rounds")
 
 local C = {}
 
@@ -633,10 +634,10 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
     local digest = convergence_shared.source_ref_digest(PR_SOURCE_REF)
     if value.action == "block" then
       for round = 1, value.n do
-        table.insert(entity.comments, comment(core, core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, round, state.version .. "/review-loop/" .. tostring(round), "behavioral fixture same review question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, conv_rounds.review_converge_round_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, round, state.version .. "/review-loop/" .. tostring(round), "behavioral fixture same review question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
     else
-      table.insert(entity.comments, comment(core, core.review_converge_round_marker(value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, value.n, value.review_dedup_key, "behavioral fixture review question", {
+      table.insert(entity.comments, comment(core, conv_rounds.review_converge_round_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, state.version, HEAD_SHA, digest, value.n, value.review_dedup_key, "behavioral fixture review question", {
         { perspective = "one", verdict = "comment", digest = "a" },
         { perspective = "two", verdict = "abstain", digest = "b" },
         { perspective = "three", verdict = "abstain", digest = "c" },
@@ -654,15 +655,15 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "converge-round" then
     if value.true_stall_fixture == true then
       for round = 1, value.round do
-        table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), value.narrowed_question, value.angle_digests), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(core, ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), value.narrowed_question, value.angle_digests), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
     elseif value.visible_round_sequence == true then
       for round = 1, value.round - 1 do
-        table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), "behavioral fixture narrowed question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(core, ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, state.version .. "/loop/" .. tostring(round), "behavioral fixture narrowed question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
-      table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+      table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(core, ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     else
-      table.insert(entity.comments, comment(core, core.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
+      table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(core, ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     end
   elseif is_synthetic == true then
     table.insert(entity.comments, comment(core, '<!-- fkst:github-devloop:synthetic-visible-fact:v1 proposal="' .. ISSUE_PROPOSAL

@@ -11,6 +11,7 @@ local context_bundle = require("devloop.context_bundle")
 local replayer = require("devloop.replayer")
 
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local M = {}
 
 local spec = {
@@ -284,7 +285,7 @@ local function timeout_reconcile_reready_reentry_state(current, proposal_id, sta
   if state.state ~= "blocked" or link ~= nil then
     return nil, "reready requires ready or dependency_wait state"
   end
-  local fact = core.timeout_reconcile_fact_for_terminal_version(current.comments, proposal_id, state.version)
+  local fact = conv_reconcile.timeout_reconcile_fact_for_terminal_version(core, current.comments, proposal_id, state.version)
   if fact == nil then
     return nil, "reready requires ready or dependency_wait state"
   end

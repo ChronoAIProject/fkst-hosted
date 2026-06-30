@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local conv_rounds = require("devloop.convergence.rounds")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
@@ -413,7 +414,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
   if resolver == "converge-round" then
     local source_ref = facts and facts.source_ref
     local sr_digest = convergence_shared.source_ref_digest(source_ref)
-    local base_version = M.version_loop_round(signal_version) > 0 and M.converge_base_version(signal_version) or signal_version
+    local base_version = M.version_loop_round(signal_version) > 0 and conv_rounds.converge_base_version(M, signal_version) or signal_version
     return newest_matching_marker_age(M, comments, "converge-round", function(marker)
       return marker_attr(marker, "proposal") == tostring(proposal_id)
         and marker_attr(marker, "version") == tostring(base_version)

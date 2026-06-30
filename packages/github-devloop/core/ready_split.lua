@@ -1,6 +1,7 @@
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_attempts = require("devloop.convergence.attempts")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
 local replay_fields_resolver = require("devloop.replay_fields")
@@ -265,7 +266,7 @@ local function next_ready_redrive_version(marker_version, round)
 end
 
 local function ready_redrive_round(M, comments, proposal_id, marker_version, row)
-  local timeout_round = M.timeout_attempt_round(
+  local timeout_round = conv_attempts.timeout_attempt_round(M,
     comments,
     proposal_id,
     marker_version,

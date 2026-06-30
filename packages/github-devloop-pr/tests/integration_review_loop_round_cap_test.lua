@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -37,7 +38,7 @@ return {
     local result = run_review_loop(event, opts("review-loop-dedup-lineage"))
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, core.converge_proposal_base_dedup(event.dedup_key) .. "/loop/2")
+    t.eq(proposal.dedup_key, conv_rounds.converge_proposal_base_dedup(core, event.dedup_key) .. "/loop/2")
     t.eq(proposal.round, 2)
     t.eq(proposal.convergence_question, event.narrowed_question)
     t.eq(proposal.source_ref.ref, "owner/repo#pr/7")
@@ -70,8 +71,8 @@ return {
     mock_pr_origin({
       origin_marker,
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 2, "base", "Review question " .. tostring(cap - 2), varying_digest(cap - 2)),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 1, "loop", "Review question " .. tostring(cap - 1), varying_digest(cap - 1)),
+      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 2, "base", "Review question " .. tostring(cap - 2), varying_digest(cap - 2)),
+      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", review_version, "def456", sr_digest, cap - 1, "loop", "Review question " .. tostring(cap - 1), varying_digest(cap - 1)),
     }, "devloop-owner-repo-42-01HY", "def456")
 
     local result = run_review_loop(event, opts("review-loop-round-cap"))
@@ -111,7 +112,7 @@ return {
     mock_pr_origin({
       origin_marker,
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      core.review_converge_round_marker(event.proposal_id, "github-devloop/issue/owner/repo/42", drift_version, "feedface", drift_digest, cap, "review/loop/" .. tostring(cap), "Review question " .. tostring(cap) .. " drifted", {
+      conv_rounds.review_converge_round_marker(core, event.proposal_id, "github-devloop/issue/owner/repo/42", drift_version, "feedface", drift_digest, cap, "review/loop/" .. tostring(cap), "Review question " .. tostring(cap) .. " drifted", {
         { angle = "minimal", verdict = "abstain", digest = "review-digest-" .. tostring(cap) },
       }),
     }, "devloop-owner-repo-42-01HY", "def456")

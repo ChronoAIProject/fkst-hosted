@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -180,8 +181,8 @@ return {
       core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
       decompose_lib.decomposed_marker(core, proposal_id, version, 7, 1),
       core.review_result_marker(review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
-      issue_comment(core.timeout_attempt_marker(proposal_id, version .. "/timeout-reconcile/blocked/1", "blocked", 1, core.issue_source_ref(repo, 42))),
-      issue_comment(core.timeout_attempt_marker(proposal_id, version .. "/timeout-reconcile/blocked/2", "blocked", 2, core.issue_source_ref(repo, 42))),
+      issue_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, version .. "/timeout-reconcile/blocked/1", "blocked", 1, core.issue_source_ref(repo, 42))),
+      issue_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, version .. "/timeout-reconcile/blocked/2", "blocked", 2, core.issue_source_ref(repo, 42))),
     }
     mock_repo()
     mock_issue_list()
@@ -195,9 +196,9 @@ return {
     t.eq(find_raise(exhausted, "devloop_timeout_reconcile"), nil)
     t.eq(count_raises(exhausted, "github-proxy.github_issue_comment_request"), 1)
     local stop = find_raise(exhausted, "github-proxy.github_issue_comment_request")
-    t.is_true(stop.payload.body:find(core.decompose_exhausted_marker(proposal_id, version, 3, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(stop.payload.body:find(conv_attempts.decompose_exhausted_marker(core, proposal_id, version, 3, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
 
-    table.insert(comments, issue_comment(core.decompose_exhausted_marker(proposal_id, version .. "/timeout-reconcile/blocked/3", 3, core.issue_source_ref(repo, 42))))
+    table.insert(comments, issue_comment(conv_attempts.decompose_exhausted_marker(core, proposal_id, version .. "/timeout-reconcile/blocked/3", 3, core.issue_source_ref(repo, 42))))
     mock_repo()
     mock_issue_list("2026-06-04T01:02:03Z")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, comments, "2026-06-04T01:02:03Z")
@@ -228,8 +229,8 @@ return {
         t.eq(find_raise(result, "devloop_timeout_reconcile"), nil)
         local attempt = find_raise(result, "github-proxy.github_issue_comment_request")
         t.is_true(attempt ~= nil)
-        t.is_true(attempt.payload.body:find(core.timeout_attempt_marker(event.proposal_id, event.dedup_key, "impl-failed", sweep, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
-        table.insert(comments, issue_comment(core.timeout_attempt_marker(event.proposal_id, event.dedup_key, "impl-failed", sweep, core.issue_source_ref(repo, 42))))
+        t.is_true(attempt.payload.body:find(conv_attempts.timeout_attempt_marker(core, event.proposal_id, event.dedup_key, "impl-failed", sweep, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+        table.insert(comments, issue_comment(conv_attempts.timeout_attempt_marker(core, event.proposal_id, event.dedup_key, "impl-failed", sweep, core.issue_source_ref(repo, 42))))
       else
         t.eq(find_raise(result, "github-proxy.github_issue_comment_request"), nil)
         local reconcile = find_raise(result, "devloop_timeout_reconcile")
@@ -261,10 +262,10 @@ return {
       local comment = find_raise(result, "github-proxy.github_issue_comment_request")
       t.is_true(comment ~= nil)
       if sweep < 3 then
-        t.is_true(comment.payload.body:find(core.timeout_attempt_marker(proposal_id, version, "blocked", sweep, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
-        table.insert(comments, issue_comment(core.timeout_attempt_marker(proposal_id, version, "blocked", sweep, core.issue_source_ref(repo, 42))))
+        t.is_true(comment.payload.body:find(conv_attempts.timeout_attempt_marker(core, proposal_id, version, "blocked", sweep, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+        table.insert(comments, issue_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, version, "blocked", sweep, core.issue_source_ref(repo, 42))))
       else
-        t.is_true(comment.payload.body:find(core.decompose_exhausted_marker(proposal_id, version, 3, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+        t.is_true(comment.payload.body:find(conv_attempts.decompose_exhausted_marker(core, proposal_id, version, 3, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
       end
     end
   end,

@@ -3,6 +3,7 @@ local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
 
 local t = h.t
 local core = h.core
@@ -124,7 +125,7 @@ local function reached_payload()
 end
 
 local function review_converge_round_marker()
-  return core.review_converge_round_marker(
+  return conv_rounds.review_converge_round_marker(core,
     review_proposal_id,
     issue_proposal_id,
     reviewed_version,

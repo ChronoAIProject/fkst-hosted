@@ -8,6 +8,7 @@ local config = require("devloop.config")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
+local conv_reconcile = require("devloop.convergence.reconcile")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -181,7 +182,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       local fix_round = core.version_fix_round(state.version)
       local max_rounds_hit = fix_round >= config.max_fix_rounds(core)
       if max_rounds_hit then
-        local fix_reconcile = core.build_devloop_fix_reconcile_payload({
+        local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
           proposal_id = origin.proposal_id,
           review_proposal_id = reached.proposal_id,
           review_dedup_key = reached.dedup_key,

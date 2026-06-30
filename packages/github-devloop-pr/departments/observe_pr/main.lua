@@ -12,6 +12,7 @@ local operator_commands = require("devloop.operator_commands")
 local decompose_lib = require("devloop.decompose")
 local replayer = require("devloop.replayer")
 local config = require("devloop.config")
+local conv_rounds = require("devloop.convergence.rounds")
 
 local M = {}
 
@@ -161,7 +162,7 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
   local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
   local review_version = transition_version.safe_version_segment(state.version)
   local sr_digest = convergence_shared.source_ref_digest(core.pr_source_ref(origin.repo, pr_number))
-  local facts = core.review_converge_round_facts(
+  local facts = conv_rounds.review_converge_round_facts(core,
     current_pr.comments,
     review_proposal_id,
     origin.proposal_id,
@@ -169,8 +170,8 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
     current_pr.head_sha,
     sr_digest
   )
-  local round = core.max_converge_round(facts)
-  return core.is_true_stall(facts, round)
+  local round = conv_rounds.max_converge_round(core, facts)
+  return conv_rounds.is_true_stall(core, facts, round)
 end
 
 local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)

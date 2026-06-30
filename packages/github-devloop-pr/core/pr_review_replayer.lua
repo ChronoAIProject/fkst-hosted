@@ -2,6 +2,8 @@ local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
@@ -225,7 +227,7 @@ end
 local function review_converge_fact(facts, state, link, current_pr)
   local review_proposal = M.pr_review_proposal_id(facts.issue.repo, link.pr_number, state.version, current_pr.head_sha)
   local source_ref = M.pr_source_ref(facts.issue.repo, link.pr_number)
-  local records = M.review_converge_round_facts(
+  local records = conv_rounds.review_converge_round_facts(M,
     comments_for_pr_facts(facts, current_pr),
     review_proposal,
     facts.proposal_id,
@@ -233,7 +235,7 @@ local function review_converge_fact(facts, state, link, current_pr)
     current_pr.head_sha,
     convergence_shared.source_ref_digest(source_ref)
   )
-  local round = M.max_converge_round(records)
+  local round = conv_rounds.max_converge_round(M, records)
   local latest = nil
   for _, fact in ipairs(records) do
     if fact.round == round then
@@ -253,10 +255,10 @@ local function replay_review_converge(dept, issue, state, facts, tools, link, cu
   if latest == nil then
     return nil
   end
-  if M.is_true_stall(records, round) or round >= config.max_converge_rounds(M) then
-    local payload = M.build_devloop_review_reconcile_payload(latest, round, facts.proposal_id, state.version, current_pr.head_sha)
+  if conv_rounds.is_true_stall(M, records, round) or round >= config.max_converge_rounds(M) then
+    local payload = conv_reconcile.build_devloop_review_reconcile_payload(M, latest, round, facts.proposal_id, state.version, current_pr.head_sha)
     M.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "blocked", "applied(replay)", "trusted review-converge-round fact reached terminal reconcile")
-    return tools.raise_effects(dept, facts.proposal_id, "blocked", M.review_reconcile_terminal_state_version(state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {
+    return tools.raise_effects(dept, facts.proposal_id, "blocked", conv_reconcile.review_reconcile_terminal_state_version(M, state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {
       { queue = "devloop_review_reconcile", payload = payload },
     })
   end

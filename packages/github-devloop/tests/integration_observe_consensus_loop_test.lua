@@ -2,6 +2,8 @@ local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
 local config = require("devloop.config")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -578,8 +580,8 @@ return {
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, base_version .. "/loop/1", event.narrowed_question, event.angle_digests),
-      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 2, base_version .. "/loop/2", event.narrowed_question, event.angle_digests),
+      conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, 1, base_version .. "/loop/1", event.narrowed_question, event.angle_digests),
+      conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, 2, base_version .. "/loop/2", event.narrowed_question, event.angle_digests),
     })
 
     local result = run_loop(event, opts("loop-true-stall"))
@@ -611,8 +613,8 @@ return {
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 2, base_version .. "/loop/" .. tostring(cap - 2), "Question " .. tostring(cap - 2), varying_digest(cap - 2)),
-      core.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 1, base_version .. "/loop/" .. tostring(cap - 1), "Question " .. tostring(cap - 1), varying_digest(cap - 1)),
+      conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, cap - 2, base_version .. "/loop/" .. tostring(cap - 2), "Question " .. tostring(cap - 2), varying_digest(cap - 2)),
+      conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, cap - 1, base_version .. "/loop/" .. tostring(cap - 1), "Question " .. tostring(cap - 1), varying_digest(cap - 1)),
     })
 
     local result = run_loop(event, opts("loop-round-cap"))
@@ -628,10 +630,10 @@ return {
 
   test_loop_duplicate_converge_round_marker_skips = function()
     local event = unresolved({ round = 1 })
-    local base_version = core.converge_base_version(event.dedup_key)
+    local base_version = conv_rounds.converge_base_version(core, event.dedup_key)
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, event.dedup_key, nil, nil),
+      conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, 1, event.dedup_key, nil, nil),
     })
 
     local result = run_loop(event, opts("loop-duplicate-converge-round"))
@@ -651,7 +653,7 @@ return {
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.converge_round_marker(event.proposal_id, base_version, sr_digest, 4, base_version .. "/loop/4", event.narrowed_question, event.angle_digests),
+      conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, 4, base_version .. "/loop/4", event.narrowed_question, event.angle_digests),
     })
 
     local result = run_loop(event, opts("loop-stale-lower-round"))
@@ -726,11 +728,11 @@ return {
     t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
-    local version = core.reconcile_terminal_state_version(default_marker_version, event.round)
+    local version = conv_reconcile.reconcile_terminal_state_version(core, default_marker_version, event.round)
     t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("no-actionable-framing-after-3-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(core.reconcile_marker(event.proposal_id, event.base_version, event.round, "drop"), 1, true) ~= nil)
+    t.is_true(comment.body:find(conv_reconcile.reconcile_marker(core, event.proposal_id, event.base_version, event.round, "drop"), 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(count_calls("codex exec"), 0)
@@ -740,7 +742,7 @@ return {
     local event = reconcile()
     local state_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
     mock_issue_reconcile({ "fkst-dev:blocked" }, {
-      core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", core.reconcile_terminal_state_version(state_version, event.round)).body,
+      core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", conv_reconcile.reconcile_terminal_state_version(core, state_version, event.round)).body,
     })
 
     local result = run_reconcile(event, opts("reconcile-idempotent"))

@@ -3,6 +3,8 @@ local convergence_shared = require("devloop.convergence.shared")
 local comment_strings = require("devloop.strings")
 local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local core = h.core
 local t = h.t
 
@@ -51,7 +53,7 @@ local function comment_cases()
       { angle = "delete", verdict = "approve" },
     },
   })
-  local converge_marker = core.converge_round_marker(
+  local converge_marker = conv_rounds.converge_round_marker(core,
     issue_proposal_id,
     reached_with_angles.dedup_key,
     convergence_shared.source_ref_digest(source_ref()),
@@ -60,7 +62,7 @@ local function comment_cases()
     "Narrow question?",
     { { angle = "minimal", verdict = "abstain", digest = "digest" } }
   )
-  local reconcile = core.build_devloop_reconcile_payload(unresolved(), 3, reached_with_angles.dedup_key)
+  local reconcile = conv_reconcile.build_devloop_reconcile_payload(core, unresolved(), 3, reached_with_angles.dedup_key)
   local gate = { kind = "waiting", reason = "waiting-on-dependency" }
   local dependency_marker = core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }, gate.kind, gate.reason)
   local dependency_void_gate = {

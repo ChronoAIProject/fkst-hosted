@@ -1,10 +1,6 @@
-local S = {}
-
-function S.install(M)
-  local shared = require("devloop.convergence.shared")
-  require("devloop.convergence.rounds").install(M, shared)
-  require("devloop.convergence.reconcile").install(M, shared)
-  require("devloop.convergence.attempts").install(M, shared)
-end
-
-return S
+return {
+  shared = require("devloop.convergence.shared"),
+  rounds = require("devloop.convergence.rounds"),
+  reconcile = require("devloop.convergence.reconcile"),
+  attempts = require("devloop.convergence.attempts"),
+}

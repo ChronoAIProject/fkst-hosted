@@ -1,21 +1,21 @@
 local parsers_misc = require("devloop.parsers.misc")
-local S = {}
+local shared = require("devloop.convergence.shared")
+local C = {}
 
-function S.install(M, shared)
-  local valid_round = shared.valid_round
-  local max_digest_len = shared.max_digest_len
-  local max_attr_len = shared.max_attr_len
-  local max_question_len = shared.max_question_len
-  local safe_attr = shared.safe_attr
-  local decode_attr = shared.decode_attr
-  local decode_angle_replay = shared.decode_angle_replay
-  local encode_angle_replay = shared.encode_angle_replay
-  local converge_question_digest = shared.converge_question_digest
-  local converge_verdicts_digest = shared.converge_verdicts_digest
-  local converge_angles_digest = shared.converge_angles_digest
-  local attr = shared.attr
-  local is_digest = shared.is_digest
-  local is_bounded_attr = shared.is_bounded_attr
+local valid_round = shared.valid_round
+local max_digest_len = shared.max_digest_len
+local max_attr_len = shared.max_attr_len
+local max_question_len = shared.max_question_len
+local safe_attr = shared.safe_attr
+local decode_attr = shared.decode_attr
+local decode_angle_replay = shared.decode_angle_replay
+local encode_angle_replay = shared.encode_angle_replay
+local converge_question_digest = shared.converge_question_digest
+local converge_verdicts_digest = shared.converge_verdicts_digest
+local converge_angles_digest = shared.converge_angles_digest
+local attr = shared.attr
+local is_digest = shared.is_digest
+local is_bounded_attr = shared.is_bounded_attr
 
 local function converge_record_map(M, comments, kind, matches)
   local records_by_round = {}
@@ -60,7 +60,7 @@ local function converge_record_map(M, comments, kind, matches)
   end)
   return facts
 end
-function M.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key)
+function C.append_converge_round_fact(M, facts, round, narrowed_question, angle_digests, dedup_key)
   local copied = {}
   for _, fact in ipairs(facts or {}) do
     table.insert(copied, fact)
@@ -74,15 +74,15 @@ function M.append_converge_round_fact(facts, round, narrowed_question, angle_dig
   return copied
 end
 
-function M.converge_base_version(consensus_dedup)
+function C.converge_base_version(M, consensus_dedup)
   return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
 end
 
-function M.converge_proposal_base_dedup(consensus_dedup)
-  local base_version = M.converge_base_version(consensus_dedup)
+function C.converge_proposal_base_dedup(M, consensus_dedup)
+  local base_version = C.converge_base_version(M, consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end
-function M.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
+function C.converge_round_marker(M, proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid converge round")
@@ -99,7 +99,7 @@ function M.converge_round_marker(proposal_id, base_version, source_ref_digest, r
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" -->'
 end
-function M.review_converge_round_marker(review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
+function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review converge round")
@@ -120,7 +120,7 @@ function M.review_converge_round_marker(review_proposal_id, issue_proposal_id, i
     .. '" -->'
 end
 
-function M.converge_round_facts(comments, proposal_id, base_version, source_ref_digest)
+function C.converge_round_facts(M, comments, proposal_id, base_version, source_ref_digest)
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(proposal_id)
       and attr(marker, "version") == tostring(base_version)
@@ -129,7 +129,7 @@ function M.converge_round_facts(comments, proposal_id, base_version, source_ref_
   return converge_record_map(M, comments, "converge%-round", matches)
 end
 
-function M.converge_round_facts_for_source(comments, proposal_id, source_ref_digest)
+function C.converge_round_facts_for_source(M, comments, proposal_id, source_ref_digest)
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(proposal_id)
       and attr(marker, "source_ref") == tostring(source_ref_digest)
@@ -137,14 +137,14 @@ function M.converge_round_facts_for_source(comments, proposal_id, source_ref_dig
   return converge_record_map(M, comments, "converge%-round", matches)
 end
 
-function M.converge_round_facts_for_proposal(comments, proposal_id)
+function C.converge_round_facts_for_proposal(M, comments, proposal_id)
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(proposal_id)
   end
   return converge_record_map(M, comments, "converge%-round", matches)
 end
 
-function M.converge_round_facts_for_proposal_boundary(comments, proposal_id, narrowed_question, angle_digests)
+function C.converge_round_facts_for_proposal_boundary(M, comments, proposal_id, narrowed_question, angle_digests)
   local question = converge_question_digest(narrowed_question)
   local verdicts = converge_verdicts_digest(angle_digests)
   local matches = function(marker)
@@ -155,7 +155,7 @@ function M.converge_round_facts_for_proposal_boundary(comments, proposal_id, nar
   return converge_record_map(M, comments, "converge%-round", matches)
 end
 
-function M.review_converge_round_facts(comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)
+function C.review_converge_round_facts(M, comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)
   local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(review_proposal_id)
@@ -167,23 +167,23 @@ function M.review_converge_round_facts(comments, review_proposal_id, issue_propo
   return converge_record_map(M, comments, "review%-converge%-round", matches)
 end
 
-function M.converge_budget_round(comments, proposal_id)
-  return M.max_converge_round(M.converge_round_facts_for_proposal(comments, proposal_id))
+function C.converge_budget_round(M, comments, proposal_id)
+  return C.max_converge_round(M, C.converge_round_facts_for_proposal(M, comments, proposal_id))
 end
 
-function M.converge_boundary_budget_round(comments, proposal_id, narrowed_question, angle_digests)
-  return M.max_converge_round(M.converge_round_facts_for_proposal_boundary(comments, proposal_id, narrowed_question, angle_digests))
+function C.converge_boundary_budget_round(M, comments, proposal_id, narrowed_question, angle_digests)
+  return C.max_converge_round(M, C.converge_round_facts_for_proposal_boundary(M, comments, proposal_id, narrowed_question, angle_digests))
 end
 
-function M.review_converge_budget_round(comments, review_proposal_id, issue_proposal_id)
+function C.review_converge_budget_round(M, comments, review_proposal_id, issue_proposal_id)
   local matches = function(marker)
     return attr(marker, "proposal") == tostring(review_proposal_id)
       and attr(marker, "issue_proposal") == tostring(issue_proposal_id)
   end
-  return M.max_converge_round(converge_record_map(M, comments, "review%-converge%-round", matches))
+  return C.max_converge_round(M, converge_record_map(M, comments, "review%-converge%-round", matches))
 end
 
-function M.max_converge_round(facts)
+function C.max_converge_round(M, facts)
   local max_seen = 0
   if type(facts) ~= "table" then
     return max_seen
@@ -197,24 +197,24 @@ function M.max_converge_round(facts)
   return max_seen
 end
 
-function M.has_converge_round_marker(comments, proposal_id, base_version, source_ref_digest, round)
+function C.has_converge_round_marker(M, comments, proposal_id, base_version, source_ref_digest, round)
   local n = valid_round(round)
   if n == nil then
     return false
   end
-  for _, fact in ipairs(M.converge_round_facts(comments, proposal_id, base_version, source_ref_digest)) do
+  for _, fact in ipairs(C.converge_round_facts(M, comments, proposal_id, base_version, source_ref_digest)) do
     if fact.round == n then
       return true
     end
   end
   return false
 end
-function M.has_review_converge_round_marker(comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round)
+function C.has_review_converge_round_marker(M, comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round)
   local n = valid_round(round)
   if n == nil then
     return false
   end
-  for _, fact in ipairs(M.review_converge_round_facts(comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)) do
+  for _, fact in ipairs(C.review_converge_round_facts(M, comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)) do
     if fact.round == n then
       return true
     end
@@ -222,7 +222,7 @@ function M.has_review_converge_round_marker(comments, review_proposal_id, issue_
   return false
 end
 
-function M.is_true_stall(facts, current_round)
+function C.is_true_stall(M, facts, current_round)
   local round = valid_round(current_round)
   if round == nil or round < 3 or type(facts) ~= "table" then
     return false
@@ -250,6 +250,5 @@ return current.question == previous.question
     and current.verdicts == previous.verdicts
     and previous.verdicts == before_previous.verdicts
 end
-end
 
-return S
+return C

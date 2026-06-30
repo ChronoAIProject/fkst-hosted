@@ -1,6 +1,8 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -62,7 +64,7 @@ local function thinking_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, core.converge_round_marker(
+    table.insert(comments, conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       sr_digest,
@@ -86,7 +88,7 @@ local function thinking_changing_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, core.converge_round_marker(
+    table.insert(comments, conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       sr_digest,
@@ -250,12 +252,12 @@ return {
     local event = issue()
     local proposal_id = core.proposal_id(event.repo, event.number)
     local ready_version = "consensus:github-devloop/issue/owner/repo/42/intake/1116/loop/1"
-    local blocked_version = core.timeout_reconcile_state_version(ready_version, "ready", 3)
+    local blocked_version = conv_reconcile.timeout_reconcile_state_version(core, ready_version, "ready", 3)
     local command = trusted_issue_command("reready", "IC_issue_reready_timeout_ready")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
       core.state_marker(proposal_id, "ready", ready_version, "result-marker,ready-label,devloop-ready"),
       core.state_marker(proposal_id, "blocked", blocked_version),
-      core.timeout_reconcile_marker(proposal_id, ready_version, "ready", 3, "drop", {
+      conv_reconcile.timeout_reconcile_marker(core, proposal_id, ready_version, "ready", 3, "drop", {
         terminal_version = blocked_version,
         from_state = "ready",
         from_version = ready_version,
@@ -295,13 +297,13 @@ return {
     local event = issue()
     local proposal_id = core.proposal_id(event.repo, event.number)
     local ready_version = "consensus:github-devloop/issue/owner/repo/42/intake/1116/loop/1"
-    local blocked_version = core.timeout_reconcile_state_version(ready_version, "ready", 3)
+    local blocked_version = conv_reconcile.timeout_reconcile_state_version(core, ready_version, "ready", 3)
     local command = trusted_issue_command("reready", "IC_issue_reready_timeout_pr_link")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
       core.state_marker(proposal_id, "ready", ready_version, "result-marker,ready-label,devloop-ready"),
       core.state_marker(proposal_id, "blocked", blocked_version),
       core.pr_link_marker(proposal_id, "7", "devloop-owner-repo-42-01HY", ready_version, "dev"),
-      core.timeout_reconcile_marker(proposal_id, ready_version, "ready", 3, "drop", {
+      conv_reconcile.timeout_reconcile_marker(core, proposal_id, ready_version, "ready", 3, "drop", {
         terminal_version = blocked_version,
         from_state = "ready",
         from_version = ready_version,

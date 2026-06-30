@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = fkst.test
 local core = require("core")
 local execution_start = require("devloop.execution_start")
@@ -162,7 +163,7 @@ local function payload_for_queue(queue)
       },
       service_class = "standard",
     }),
-    devloop_fix_reconcile = core.build_devloop_fix_reconcile_payload({
+    devloop_fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
       review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",
@@ -211,7 +212,7 @@ local function payload_for_queue(queue)
       source_ref = { kind = "external", ref = "owner/repo#issue/42" },
       include_ready_hand_off = true,
     }),
-    devloop_reconcile = core.build_devloop_reconcile_payload({
+    devloop_reconcile = conv_reconcile.build_devloop_reconcile_payload(core, {
       schema = "consensus.consensus_converge.v1",
       proposal_id = "github-devloop/issue/owner/repo/42",
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
@@ -223,7 +224,7 @@ local function payload_for_queue(queue)
       dedup_key = "consensus:" .. review_proposal_id() .. "/review/loop/2",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }, "github-devloop/issue/owner/repo/42", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", 7, 3),
-    devloop_review_reconcile = core.build_devloop_review_reconcile_payload({
+    devloop_review_reconcile = conv_reconcile.build_devloop_review_reconcile_payload(core, {
       schema = "consensus.consensus_converge.v1",
       proposal_id = review_proposal_id(),
       dedup_key = "consensus:" .. review_proposal_id() .. "/review/loop/3",
@@ -251,7 +252,7 @@ local function payload_for_queue(queue)
       mode = "round_trip",
       root = "/tmp/fkst-packages-test/github-devloop-unsupported-context-bundle",
     },
-    devloop_timeout_reconcile = core.build_devloop_timeout_reconcile_payload({
+    devloop_timeout_reconcile = conv_reconcile.build_devloop_timeout_reconcile_payload(core, {
       from_state = "ready",
     }, {
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout/ready/1",

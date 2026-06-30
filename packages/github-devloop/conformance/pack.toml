@@ -25,7 +25,7 @@ id = "convergence.requires-boundary-budget-round"
 severity = "error"
 kind = "text_require_regex"
 include = ["departments/loop/main.lua"]
-pattern = "core\\.converge_boundary_budget_round\\s*\\("
+pattern = "conv_rounds\\.converge_boundary_budget_round\\s*\\("
 message = "convergence cap must use the boundary-preserving converge budget helper"
 
 [[rules]]
@@ -33,7 +33,7 @@ id = "convergence.requires-stable-round-facts"
 severity = "error"
 kind = "text_require_regex"
 include = ["departments/loop/main.lua"]
-pattern = "core\\.converge_round_facts_for_proposal_boundary\\s*\\("
+pattern = "conv_rounds\\.converge_round_facts_for_proposal_boundary\\s*\\("
 message = "convergence round counting must derive from stable boundary-preserving facts"
 
 [[rules]]

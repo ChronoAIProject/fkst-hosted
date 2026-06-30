@@ -4,6 +4,7 @@ local operator_commands = require("devloop.operator_commands")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -65,7 +66,7 @@ local function thinking_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, core.converge_round_marker(
+    table.insert(comments, conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       sr_digest,
@@ -89,7 +90,7 @@ local function thinking_changing_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, core.converge_round_marker(
+    table.insert(comments, conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       sr_digest,
@@ -229,9 +230,9 @@ return {
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
-      core.review_converge_round_marker(review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 1, "base", "Same review question", angle_digests),
-      core.review_converge_round_marker(review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 2, "loop1", "Same review question", angle_digests),
-      core.review_converge_round_marker(review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 3, "loop2", "Same review question", angle_digests),
+      conv_rounds.review_converge_round_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 1, "base", "Same review question", angle_digests),
+      conv_rounds.review_converge_round_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 2, "loop1", "Same review question", angle_digests),
+      conv_rounds.review_converge_round_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", review_version, "feedface", sr_digest, 3, "loop2", "Same review question", angle_digests),
       command,
     }, "devloop-owner-repo-42-01HY", "feedface")
 

@@ -1,17 +1,16 @@
 local h = require("tests.devloop_helpers")
 local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local opts = h.opts
 local decompose_lib = require("devloop.decompose")
 local issue = h.issue
-local reviewing = h.reviewing
 local mock_issue_state = h.mock_issue_state
 local run_observe = h.run_observe
-local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
-local find_causal_raise = h.find_causal_raise
 local render_comment = h.render_comment
 local json_string = h.json_string
 local ready = h.ready
@@ -273,7 +272,7 @@ local function ready_state_comment(comment_id, state_version, created_at)
 end
 local function timeout_attempt_comment(state_name, state_version, round, created_at)
   return {
-    body = core.timeout_attempt_marker(proposal_id, state_version, state_name, round, core.issue_source_ref(repo, 42)),
+    body = conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, state_name, round, core.issue_source_ref(repo, 42)),
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
@@ -281,7 +280,7 @@ end
 
 local function timeout_attempt_v2_comment(row, generation_key, round, created_at)
   return {
-    body = core.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, round, core.issue_source_ref(repo, 42)),
+    body = conv_attempts.timeout_attempt_v2_marker(core, proposal_id, row.from_state, row.liveness_class_id, generation_key, round, core.issue_source_ref(repo, 42)),
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
@@ -544,7 +543,7 @@ return {
     t.eq(decompose.payload.version, version)
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(core.timeout_attempt_marker(proposal_id, version, "blocked", 1, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find(conv_attempts.timeout_attempt_marker(core, proposal_id, version, "blocked", 1, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
   end,
 
   test_liveness_scan_over_budget_ready_escalates_to_timeout_reconcile = function()
@@ -633,7 +632,7 @@ return {
     t.eq(reconciled.exit_code, 0)
     local comment = find_raise(reconciled.raises, "github-proxy.github_issue_comment_request")
     local label = find_raise(reconciled.raises, "github-proxy.github_issue_label_request")
-    local blocked_version = core.timeout_reconcile_state_version(live_version, "ready", 3)
+    local blocked_version = conv_reconcile.timeout_reconcile_state_version(core, live_version, "ready", 3)
     t.is_true(comment ~= nil)
     t.is_true(label ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(proposal_id, "blocked", blocked_version), 1, true) ~= nil)
@@ -655,7 +654,7 @@ return {
   test_liveness_scan_timeout_reconcile_blocks_ready_when_payload_version_is_stale_but_live_state_is_stuck = function()
     local stale_version = version .. "/timeout/ready/1"
     local live_version = version .. "/timeout/ready/2"
-    local payload = core.build_devloop_timeout_reconcile_payload(
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core,
       restart_transition_row("ready"),
       {
         state = "ready",
@@ -675,7 +674,7 @@ return {
     t.eq(reconciled.exit_code, 0)
     local comment = find_raise(reconciled.raises, "github-proxy.github_issue_comment_request")
     local label = find_raise(reconciled.raises, "github-proxy.github_issue_label_request")
-    local blocked_version = core.timeout_reconcile_state_version(live_version, "ready", 3)
+    local blocked_version = conv_reconcile.timeout_reconcile_state_version(core, live_version, "ready", 3)
     t.is_true(comment ~= nil)
     t.is_true(label ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(proposal_id, "blocked", blocked_version), 1, true) ~= nil)
@@ -687,7 +686,7 @@ return {
   test_liveness_scan_timeout_reconcile_skips_when_ready_state_advanced = function()
     local stale_version = version .. "/timeout/ready/2"
     local advanced_version = version .. "/timeout/ready/2"
-    local payload = core.build_devloop_timeout_reconcile_payload(
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core,
       restart_transition_row("ready"),
       {
         state = "ready",

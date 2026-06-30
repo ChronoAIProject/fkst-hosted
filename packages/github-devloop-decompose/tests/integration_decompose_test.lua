@@ -1,4 +1,6 @@
 local h = require("tests.devloop_helpers")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -116,7 +118,7 @@ blocked_comments = function(event, extra)
   local comments = {
     core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     core.state_marker(event.proposal_id, "blocked", event.version),
-    core.fix_reconcile_marker(event.proposal_id, event.version, "drop"),
+    conv_reconcile.fix_reconcile_marker(core, event.proposal_id, event.version, "drop"),
   }
   for _, comment in ipairs(extra or {}) do
     table.insert(comments, comment)
@@ -392,7 +394,7 @@ return {
 
   test_decompose_depth_cap_exhausted_marker_is_idempotent = function()
     local event = decompose_event()
-    local exhausted_marker = core.decompose_exhausted_marker(event.proposal_id, event.version, 1, event.source_ref)
+    local exhausted_marker = conv_attempts.decompose_exhausted_marker(core, event.proposal_id, event.version, 1, event.source_ref)
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, { trusted_comment(exhausted_marker) }))

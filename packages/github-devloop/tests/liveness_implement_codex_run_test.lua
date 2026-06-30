@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
+local conv_attempts = require("devloop.convergence.attempts")
 local t = h.t
 local core = h.core
 local ready = h.ready
@@ -176,7 +177,7 @@ return {
       local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.signal.reason, "codex-run-deadline-expired")
-      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
         event.proposal_id,
         row.from_state,
         row.liveness_class_id,
@@ -184,7 +185,7 @@ return {
         1,
         event.source_ref
       )))
-      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
         event.proposal_id,
         row.from_state,
         row.liveness_class_id,
@@ -306,7 +307,7 @@ return {
       t.eq(eval.reason, "codex run liveness indeterminate over row budget")
       t.eq(eval.signal.reason, "codex-runs-unavailable")
       t.eq(eval.codex_runs_fallback, true)
-      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
         event.proposal_id,
         row.from_state,
         row.liveness_class_id,
@@ -314,7 +315,7 @@ return {
         1,
         event.source_ref
       )))
-      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
         event.proposal_id,
         row.from_state,
         row.liveness_class_id,
@@ -405,7 +406,7 @@ return {
       t.eq(eval.reason, "codex run liveness indeterminate over row budget")
       t.eq(eval.signal.reason, "codex-run-deadline-unavailable")
       t.eq(eval.signal.indeterminate, true)
-      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
         event.proposal_id,
         row.from_state,
         row.liveness_class_id,
@@ -413,7 +414,7 @@ return {
         1,
         event.source_ref
       )))
-      table.insert(facts.current.comments, trusted_comment(core.timeout_attempt_v2_marker(
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
         event.proposal_id,
         row.from_state,
         row.liveness_class_id,

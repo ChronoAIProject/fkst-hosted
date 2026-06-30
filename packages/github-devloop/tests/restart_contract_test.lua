@@ -5,6 +5,7 @@ local replayer = require("devloop.replayer")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
 local core = h.core
 local t = h.t
 local replay_fields = require("devloop.replay_fields")
@@ -525,7 +526,7 @@ return {
         current = {
           comments = {
             {
-              body = core.converge_round_marker("github-devloop/issue/owner/repo/42", version, convergence_shared.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
+              body = conv_rounds.converge_round_marker(core, "github-devloop/issue/owner/repo/42", version, convergence_shared.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
                 { angle = "minimal", verdict = "continue", digest = "stale" },
               }),
               author_login = "fkst-test-bot",

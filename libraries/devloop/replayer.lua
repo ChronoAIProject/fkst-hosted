@@ -2,6 +2,7 @@ local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local payloads_builders = require("devloop.payloads.builders")
+local conv_rounds = require("devloop.convergence.rounds")
 local C = {}
 local convergence_shared = require("devloop.convergence.shared")
 local replay_thinking_convergence = require("devloop.replay_thinking_convergence")
@@ -165,7 +166,7 @@ local function require_marker_fact(M, facts, family)
     return fetch_child_state_fact(M, facts)
   end
   if family == "converge-round" then
-    local base_version = M.version_loop_round(facts.state.version) > 0 and M.converge_base_version(facts.state.version) or nil
+    local base_version = M.version_loop_round(facts.state.version) > 0 and conv_rounds.converge_base_version(M, facts.state.version) or nil
     return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, base_version, facts.issue.source_ref)
   end
   if family == "dependency-release" then
@@ -378,7 +379,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   local stable_version = transition_version.strip_suffixes(state.version)
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, stable_version, issue.source_ref)
   if latest ~= nil then
-    local base_version = M.converge_proposal_base_dedup(latest.dedup)
+    local base_version = conv_rounds.converge_proposal_base_dedup(M, latest.dedup)
     local next_n = latest.round + 1
     local next_dedup = base_version .. "/loop/" .. tostring(next_n)
     local content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
@@ -429,10 +430,10 @@ function C.has_thinking_converge_replay(M, current, proposal_id, state, source_r
   end
   local base_version = transition_version.strip_suffixes(state.version)
   local sr_digest = convergence_shared.source_ref_digest(source_ref)
-  local facts = M.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
-  local round = M.max_converge_round(facts)
+  local facts = conv_rounds.converge_round_facts(M, current.comments, proposal_id, base_version, sr_digest)
+  local round = conv_rounds.max_converge_round(M, facts)
   return M.latest_complete_converge_round(current.comments, proposal_id, base_version, source_ref) ~= nil
-    or M.is_true_stall(facts, round)
+    or conv_rounds.is_true_stall(M, facts, round)
 end
 
 local function replay_thinking(M, dept, issue, state, row, facts)

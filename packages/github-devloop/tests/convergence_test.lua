@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
+local conv_rounds = require("devloop.convergence.rounds")
 local core = h.core
 local t = h.t
 
@@ -47,7 +48,7 @@ end
 return {
   test_converge_round_facts_ignore_non_bot_marker = function()
     local source_digest = convergence_shared.source_ref_digest(source_ref)
-    local marker = core.converge_round_marker(
+    local marker = conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       source_digest,
@@ -57,14 +58,14 @@ return {
       angles()
     )
 
-    local facts = core.converge_round_facts({ untrusted(marker) }, proposal_id, base_version, source_digest)
+    local facts = conv_rounds.converge_round_facts(core, { untrusted(marker) }, proposal_id, base_version, source_digest)
     t.eq(#facts, 0)
   end,
 
   test_is_true_stall_requires_three_identical_rounds = function()
-    t.eq(core.is_true_stall({ fact(1) }, 1), false)
-    t.eq(core.is_true_stall({ fact(1), fact(2) }, 2), false)
-    t.eq(core.is_true_stall({ fact(1), fact(2), fact(3) }, 3), true)
+    t.eq(conv_rounds.is_true_stall(core, { fact(1) }, 1), false)
+    t.eq(conv_rounds.is_true_stall(core, { fact(1), fact(2) }, 2), false)
+    t.eq(conv_rounds.is_true_stall(core, { fact(1), fact(2), fact(3) }, 3), true)
   end,
 
   test_is_true_stall_requires_last_three_consecutive_rounds = function()
@@ -73,7 +74,7 @@ return {
       fact(2),
       fact(4),
     }
-    t.eq(core.is_true_stall(facts, 4), false)
+    t.eq(conv_rounds.is_true_stall(core, facts, 4), false)
   end,
 
   test_is_true_stall_false_when_round_three_question_changes = function()
@@ -82,7 +83,7 @@ return {
       fact(2),
       fact(3, "q-different", "v-same"),
     }
-    t.eq(core.is_true_stall(facts, 3), false)
+    t.eq(conv_rounds.is_true_stall(core, facts, 3), false)
   end,
 
   test_is_true_stall_false_when_round_three_verdicts_change = function()
@@ -91,7 +92,7 @@ return {
       fact(2),
       fact(3, "q-same", "v-different"),
     }
-    t.eq(core.is_true_stall(facts, 3), false)
+    t.eq(conv_rounds.is_true_stall(core, facts, 3), false)
   end,
 
   test_converge_marker_round_trips_and_digests_are_stable = function()
@@ -99,18 +100,18 @@ return {
     local consensus_dedup = base_version .. "/loop/3"
     local question = "  Which boundary\n\nshould   narrow?  "
     local angle_digests = angles()
-    local first = core.converge_round_marker(
+    local first = conv_rounds.converge_round_marker(core,
       proposal_id,
-      core.converge_base_version(consensus_dedup),
+      conv_rounds.converge_base_version(core, consensus_dedup),
       source_digest,
       3,
       consensus_dedup,
       question,
       angle_digests
     )
-    local second = core.converge_round_marker(
+    local second = conv_rounds.converge_round_marker(core,
       proposal_id,
-      core.converge_base_version(consensus_dedup),
+      conv_rounds.converge_base_version(core, consensus_dedup),
       source_digest,
       3,
       consensus_dedup,
@@ -119,7 +120,7 @@ return {
     )
     t.eq(first, second)
 
-    local facts = core.converge_round_facts({ trusted(first) }, proposal_id, base_version, source_digest)
+    local facts = conv_rounds.converge_round_facts(core, { trusted(first) }, proposal_id, base_version, source_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].round, 3)
     t.eq(facts[1].dedup, consensus_dedup)
@@ -127,13 +128,13 @@ return {
     t.eq(facts[1].verdicts, convergence_shared.converge_verdicts_digest(angle_digests))
     t.eq(facts[1].narrowed_question, "Which boundary should narrow?")
     t.eq(facts[1].angle_digests[1].digest, "Small enough.")
-    t.eq(core.has_converge_round_marker({ trusted(first) }, proposal_id, base_version, source_digest, 3), true)
-    t.eq(core.max_converge_round(facts), 3)
+    t.eq(conv_rounds.has_converge_round_marker(core, { trusted(first) }, proposal_id, base_version, source_digest, 3), true)
+    t.eq(conv_rounds.max_converge_round(core, facts), 3)
   end,
 
   test_converge_marker_replay_fields_escape_delimiters = function()
     local source_digest = convergence_shared.source_ref_digest(source_ref)
-    local marker = core.converge_round_marker(
+    local marker = conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       source_digest,
@@ -145,7 +146,7 @@ return {
       }
     )
 
-    local facts = core.converge_round_facts({ trusted(marker) }, proposal_id, base_version, source_digest)
+    local facts = conv_rounds.converge_round_facts(core, { trusted(marker) }, proposal_id, base_version, source_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].angle_digests[1].digest, "contains | pipe; semicolon % percent")
   end,
@@ -154,7 +155,7 @@ return {
     local source_digest = convergence_shared.source_ref_digest(source_ref)
     local first_question = "Which boundary should narrow first?"
     local last_question = "Which boundary should narrow last?"
-    local first = core.converge_round_marker(
+    local first = conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       source_digest,
@@ -163,7 +164,7 @@ return {
       first_question,
       angles()
     )
-    local last = core.converge_round_marker(
+    local last = conv_rounds.converge_round_marker(core,
       proposal_id,
       base_version,
       source_digest,
@@ -173,7 +174,7 @@ return {
       angles()
     )
 
-    local facts = core.converge_round_facts({ trusted(first .. "\n" .. last) }, proposal_id, base_version, source_digest)
+    local facts = conv_rounds.converge_round_facts(core, { trusted(first .. "\n" .. last) }, proposal_id, base_version, source_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].round, 2)
     t.eq(facts[1].question, convergence_shared.converge_question_digest(last_question))
@@ -185,7 +186,7 @@ return {
     }
     local question = "  Which boundary\nshould narrow next?  "
     local angle_digests = angles()
-    local appended = core.append_converge_round_fact(
+    local appended = conv_rounds.append_converge_round_fact(core,
       existing,
       2,
       question,
@@ -208,14 +209,14 @@ return {
     local boundary_question = "Same boundary"
     local boundary_angles = angles()
     local comments = {
-      trusted(core.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
-      trusted(core.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", boundary_question, boundary_angles)),
-      trusted(core.converge_round_marker("github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
+      trusted(conv_rounds.converge_round_marker(core, proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
+      trusted(conv_rounds.converge_round_marker(core, proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", boundary_question, boundary_angles)),
+      trusted(conv_rounds.converge_round_marker(core, "github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
     }
-    local filtered = core.converge_round_facts(comments, proposal_id, base_version, source_a)
-    t.eq(core.max_converge_round(filtered), 6)
-    t.eq(core.converge_budget_round(comments, proposal_id), 8)
-    t.eq(core.converge_boundary_budget_round(comments, proposal_id, boundary_question, boundary_angles), 8)
+    local filtered = conv_rounds.converge_round_facts(core, comments, proposal_id, base_version, source_a)
+    t.eq(conv_rounds.max_converge_round(core, filtered), 6)
+    t.eq(conv_rounds.converge_budget_round(core, comments, proposal_id), 8)
+    t.eq(conv_rounds.converge_boundary_budget_round(core, comments, proposal_id, boundary_question, boundary_angles), 8)
   end,
 
   test_converge_boundary_budget_round_ignores_changed_question_verdict_boundary = function()
@@ -225,13 +226,13 @@ return {
     local boundary_question = "Current boundary"
     local boundary_angles = angles()
     local comments = {
-      trusted(core.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
-      trusted(core.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Different boundary", {
+      trusted(conv_rounds.converge_round_marker(core, proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
+      trusted(conv_rounds.converge_round_marker(core, proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Different boundary", {
         { angle = "minimal", verdict = "approve", digest = "different" },
       })),
     }
-    t.eq(core.converge_budget_round(comments, proposal_id), 8)
-    t.eq(core.converge_boundary_budget_round(comments, proposal_id, boundary_question, boundary_angles), 6)
+    t.eq(conv_rounds.converge_budget_round(core, comments, proposal_id), 8)
+    t.eq(conv_rounds.converge_boundary_budget_round(core, comments, proposal_id, boundary_question, boundary_angles), 6)
   end,
 
   test_review_converge_facts_are_bound_to_issue_version_and_head = function()
@@ -239,7 +240,7 @@ return {
     local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/v1"
     local head_sha = "abcdef1234567890"
-    local marker = core.review_converge_round_marker(
+    local marker = conv_rounds.review_converge_round_marker(core,
       review_proposal_id,
       proposal_id,
       issue_version,
@@ -251,7 +252,7 @@ return {
       angles()
     )
 
-    local mismatched_head = core.review_converge_round_facts(
+    local mismatched_head = conv_rounds.review_converge_round_facts(core,
       { trusted(marker) },
       review_proposal_id,
       proposal_id,
@@ -259,7 +260,7 @@ return {
       "fedcba0987654321",
       source_digest
     )
-    local mismatched_version = core.review_converge_round_facts(
+    local mismatched_version = conv_rounds.review_converge_round_facts(core,
       { trusted(marker) },
       review_proposal_id,
       proposal_id,
@@ -267,7 +268,7 @@ return {
       head_sha,
       source_digest
     )
-    local matched = core.review_converge_round_facts(
+    local matched = conv_rounds.review_converge_round_facts(core,
       { trusted(marker) },
       review_proposal_id,
       proposal_id,
@@ -280,7 +281,7 @@ return {
     t.eq(#mismatched_version, 0)
     t.eq(#matched, 1)
     t.eq(matched[1].round, 2)
-    t.eq(core.has_review_converge_round_marker({ trusted(marker) }, review_proposal_id, proposal_id, issue_version, head_sha, source_digest, 2), true)
+    t.eq(conv_rounds.has_review_converge_round_marker(core, { trusted(marker) }, review_proposal_id, proposal_id, issue_version, head_sha, source_digest, 2), true)
   end,
 
   test_review_converge_budget_round_counts_review_saga_across_drift = function()
@@ -292,12 +293,12 @@ return {
     local head_sha = "abcdef1234567890"
     local drift_head = "fedcba0987654321"
     local comments = {
-      trusted(core.review_converge_round_marker(review_proposal_id, proposal_id, issue_version, head_sha, source_a, 6, "review/loop/6", "Review 6", angles())),
-      trusted(core.review_converge_round_marker(review_proposal_id, proposal_id, drift_version, drift_head, source_b, 8, "review/loop/8", "Review 8", angles())),
-      trusted(core.review_converge_round_marker(review_proposal_id, "github-devloop/issue/owner/repo/99", drift_version, drift_head, source_b, 13, "review/loop/13", "Other", angles())),
+      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, issue_version, head_sha, source_a, 6, "review/loop/6", "Review 6", angles())),
+      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, drift_version, drift_head, source_b, 8, "review/loop/8", "Review 8", angles())),
+      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, "github-devloop/issue/owner/repo/99", drift_version, drift_head, source_b, 13, "review/loop/13", "Other", angles())),
     }
-    local filtered = core.review_converge_round_facts(comments, review_proposal_id, proposal_id, issue_version, head_sha, source_a)
-    t.eq(core.max_converge_round(filtered), 6)
-    t.eq(core.review_converge_budget_round(comments, review_proposal_id, proposal_id), 8)
+    local filtered = conv_rounds.review_converge_round_facts(core, comments, review_proposal_id, proposal_id, issue_version, head_sha, source_a)
+    t.eq(conv_rounds.max_converge_round(core, filtered), 6)
+    t.eq(conv_rounds.review_converge_budget_round(core, comments, review_proposal_id, proposal_id), 8)
   end,
 }

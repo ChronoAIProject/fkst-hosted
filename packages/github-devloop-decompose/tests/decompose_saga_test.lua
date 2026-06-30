@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local saga_conformance = require("testkit.saga_conformance")
 local forge_saga_conformance = require("forge.saga_conformance")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -14,7 +15,7 @@ local function blocked_comments(event, extra)
   local comments = {
     core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     core.state_marker(event.proposal_id, "blocked", event.version),
-    core.fix_reconcile_marker(event.proposal_id, event.version, "drop"),
+    conv_reconcile.fix_reconcile_marker(core, event.proposal_id, event.version, "drop"),
   }
   for _, comment in ipairs(extra or {}) do
     table.insert(comments, comment)
