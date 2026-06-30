@@ -9,7 +9,7 @@
 #
 # Local build, from the repo root (the engine ref is defaulted, #227):
 #
-#   docker build -f backend/fkst-control-plane/Dockerfile -t fkst-control-plane:dev .
+#   docker build -f backend/Dockerfile -t fkst-control-plane:dev .
 #
 # The fkst-substrate engine is built from a pinned upstream ref
 # (backend/engine.ref); keep the ARG defaults below in lockstep with it.
@@ -155,27 +155,28 @@ RUN test -x /cli-dist/nyxid \
 # ---- server build stage: dep-cache warm-up, then build only the control-plane ----
 FROM rust:${RUST_VERSION}-bookworm AS server-builder
 WORKDIR /app
-# 1) cache the dependency graph first (all crate manifests + lockfile +
-#    stub sources). The stubs compile, so this warm build must succeed.
+# 1) cache the dependency graph first (the single crate manifest + lockfile +
+#    stub sources). The stubs compile, so this warm build must succeed. The
+#    backend is one flat crate rooted at `backend/`, so its sources live in
+#    `src/` (no nested member directory).
 COPY backend/Cargo.toml backend/Cargo.lock ./
-COPY backend/fkst-control-plane/Cargo.toml fkst-control-plane/Cargo.toml
-RUN mkdir -p fkst-control-plane/src \
-    && echo 'fn main() {}' > fkst-control-plane/src/main.rs \
-    && echo '' > fkst-control-plane/src/lib.rs \
-    && cargo build --release --locked --workspace
-# 2) copy the real sources and build only the control-plane binary.
+RUN mkdir -p src \
+    && echo 'fn main() {}' > src/main.rs \
+    && echo '' > src/lib.rs \
+    && cargo build --release --locked
+# 2) copy the real sources and build the control-plane binary.
 # touch: the copied sources keep their (older) context mtimes, so without it
 # cargo's mtime-based freshness check would keep the stub-built binaries.
 COPY backend/ ./
-RUN touch fkst-control-plane/src/main.rs fkst-control-plane/src/lib.rs \
-    && cargo build --release --locked -p fkst-control-plane
+RUN touch src/main.rs src/lib.rs \
+    && cargo build --release --locked
 RUN test -x /app/target/release/fkst-control-plane \
     || (echo "ERROR: fkst-control-plane binary not produced by the server build" && exit 1)
 
 # ---- worker runtime image (engine-laden) ----
 # The WORKER deployable. It carries the engine binaries + codex + nyxid CLI and
 # the runtime volume. (The transitional control-plane binary copy is dropped:
-# the controller now has its own image — backend/fkst-control-plane/Dockerfile.
+# the controller now has its own image — backend/Dockerfile.
 # Until #151, the control-plane Deployment runs from this image via a `command:`
 # override; that arrangement is documented in the README, not encoded by
 # carrying the controller binary here — see header.)

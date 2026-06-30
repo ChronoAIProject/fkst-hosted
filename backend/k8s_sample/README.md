@@ -2,7 +2,7 @@
 
 Per-deployable **sample** Kubernetes objects for the **control-plane** (the
 public REST API). Every value here is an EXAMPLE — the config loaders
-(`backend/fkst-control-plane/src/config.rs` and its `reconcile/` + `github_app/`
+(`backend/src/config.rs` and its `reconcile/` + `github_app/`
 siblings, plus the linked `backend/fkst-engine/src/config.rs`) are the canonical
 source of truth for the env contract. The worker's objects live in
 [`backend/fkst-worker/k8s_sample/`](../../fkst-worker/k8s_sample/README.md).
@@ -62,7 +62,7 @@ prefix and failing the fail-closed loader at startup.
 it first (the namespace must exist for the Secret to live in):
 
 ```sh
-kubectl --context docker-desktop apply -f backend/fkst-control-plane/k8s_sample/namespace.yaml
+kubectl --context docker-desktop apply -f backend/k8s_sample/namespace.yaml
 
 TOK="$(openssl rand -hex 32)"   # share TOK with the worker Secret (#134)
 kubectl --context docker-desktop -n fkst-hosted create secret generic fkst-control-plane-secret \
@@ -81,7 +81,7 @@ the controller is datastore-free (#143).
 ## 2. Deploy and verify
 
 ```sh
-kubectl --context docker-desktop apply -k backend/fkst-control-plane/k8s_sample
+kubectl --context docker-desktop apply -k backend/k8s_sample
 
 kubectl --context docker-desktop -n fkst-hosted rollout status deployment/fkst-control-plane
 

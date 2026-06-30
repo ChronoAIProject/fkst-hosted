@@ -1,7 +1,7 @@
 # fkst-control-plane: the controller deployable (public REST API). SINGLE
 # authoritative replica (datastore-free, #143/#144). SAMPLE manifest — every
 # value here is an example; the config loaders
-# (backend/fkst-control-plane/src/config.rs et al.) are the canonical source of
+# (backend/src/config.rs et al.) are the canonical source of
 # truth for the env contract.
 #
 # TRANSITIONAL (until #151): engine execution still lives in the control-plane
@@ -9,7 +9,7 @@
 # (a) must run from the ENGINE-LADEN image — the `fkst-control-plane` image tag
 # below is a kustomize seam (kustomization.yaml `images:`); transitionally point
 # it at the engine-laden `fkst-worker` image (with a `command:` override to the
-# fkst-control-plane binary) since the slim `backend/fkst-control-plane/Dockerfile`
+# fkst-control-plane binary) since the slim `backend/Dockerfile`
 # carries no engine — and (b) keeps the `runtime`+`tmp` emptyDir volumes below.
 # When #151 moves engine execution onto the worker: switch this image to the
 # slim `fkst-control-plane` image and drop the `runtime` volume + its mount, and
