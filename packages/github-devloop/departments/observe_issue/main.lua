@@ -8,6 +8,7 @@ local transition_version = require("contract.transition_version")
 local context_bundle = require("devloop.context_bundle")
 local replayer = require("devloop.replayer")
 
+local payloads_builders = require("devloop.payloads.builders")
 local M = {}
 
 local spec = {
@@ -479,7 +480,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
       impl_version = link.impl_version,
     }
   end
-  local payload = core.build_devloop_ready_payload(payload_source)
+  local payload = payloads_builders.build_devloop_ready_payload(core, payload_source)
   local comment_request = operator_commands.build_operator_issue_reimplement_comment_request(
     core,
     issue.repo,
@@ -683,7 +684,7 @@ local function process_issue_event(event)
       version = issue.dedup_key,
       tick = event.ts,
     })
-    local proposal = core.build_board_proposal(issue, event.ts)
+    local proposal = payloads_builders.build_board_proposal(core, issue, event.ts)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")
       return

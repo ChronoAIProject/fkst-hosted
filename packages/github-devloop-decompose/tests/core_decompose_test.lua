@@ -1,4 +1,5 @@
 local h = require("tests.devloop_core_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local core = h.core
 local t = h.t
 local decompose_lib = require("devloop.decompose")
@@ -58,7 +59,7 @@ return {
   test_decompose_child_fact_indexes_keep_proxy_marker_legacy_but_completion_uses_live_open_children = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "2026-06-03T01-02-03Z"
-    local decompose = core.build_devloop_decompose_payload({
+    local decompose = payloads_builders.build_devloop_decompose_payload(core, {
       proposal_id = proposal_id,
       pr_number = 7,
       issue_version = version,

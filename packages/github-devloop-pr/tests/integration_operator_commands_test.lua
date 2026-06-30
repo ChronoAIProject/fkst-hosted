@@ -2,6 +2,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local operator_commands = require("devloop.operator_commands")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -54,7 +55,7 @@ end
 
 local function thinking_converge_comments(event, rounds, command)
   local proposal_id = core.proposal_id(event.repo, event.number)
-  local base_version = core.build_proposal(event).dedup_key
+  local base_version = payloads_builders.build_proposal(core, event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local angle_digests = {
     { angle = "minimal", verdict = "abstain", digest = "same-digest" },
@@ -81,7 +82,7 @@ end
 
 local function thinking_changing_converge_comments(event, rounds, command)
   local proposal_id = core.proposal_id(event.repo, event.number)
-  local base_version = core.build_proposal(event).dedup_key
+  local base_version = payloads_builders.build_proposal(core, event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local comments = {
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),

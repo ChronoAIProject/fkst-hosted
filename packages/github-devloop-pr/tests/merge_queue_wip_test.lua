@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -111,7 +112,7 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/" .. tostring(version_time)
   local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
   local review_proposal_id = core.pr_review_proposal_id("owner/repo", pr_number, version, head_sha)
-  return core.build_devloop_merge_ready_payload(proposal_id, pr_number, version, {
+  return payloads_builders.build_devloop_merge_ready_payload(core, proposal_id, pr_number, version, {
     review_proposal_id = review_proposal_id,
     review_dedup_key = "consensus:" .. review_proposal_id .. "/review",
     reviewed_head_sha = head_sha,

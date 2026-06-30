@@ -1,6 +1,7 @@
 local base_ids = require("devloop.base_ids")
 local context_bundle = require("devloop.context_bundle")
 
+local payloads_builders = require("devloop.payloads.builders")
 local E = {}
 
 local service_classes = {
@@ -69,7 +70,7 @@ function E.build_execution_start_proposal(core, repo, issue_number, request, cur
       tick = event_ts,
     }),
   }
-  local proposal = core.build_board_proposal(issue, event_ts)
+  local proposal = payloads_builders.build_board_proposal(core, issue, event_ts)
   proposal.dedup_key = request.dedup_key
   proposal.effect_version = request.dedup_key
   proposal.intake_hand_off = E.execution_intake_hand_off(request)

@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -44,7 +45,7 @@ local function implementing_comments(event, extra)
 end
 
 local function liveness_redrive_ready(event)
-  return core.build_devloop_ready_payload({
+  return payloads_builders.build_devloop_ready_payload(core, {
     proposal_id = event.proposal_id,
     dedup_key = core.ready_payload_inner_version(event.dedup_key),
     source_ref = event.source_ref,
@@ -472,7 +473,7 @@ return {
 
   test_double_wrapped_liveness_redrive_is_not_recovered = function()
     local event = ready()
-    local double_wrapped = core.build_devloop_ready_payload({
+    local double_wrapped = payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = event.proposal_id,
       dedup_key = event.dedup_key,
       source_ref = event.source_ref,

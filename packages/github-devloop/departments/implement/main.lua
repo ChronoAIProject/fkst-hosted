@@ -14,6 +14,8 @@ local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local fork_gate = require("departments.implement.fork_gate")
 
+local payloads_builders = require("devloop.payloads.builders")
+local payloads_predicates = require("devloop.payloads.predicates")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -361,7 +363,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     error("github-devloop: git add failed: " .. tostring(add_result.stderr))
   end
 
-  local commit_result = core.git_commit(worktree, core.implement_commit_subject(
+  local commit_result = core.git_commit(worktree, payloads_builders.implement_commit_subject(core,
       issue_number,
       core.commit_issue_subject_snapshot(repo, issue_number)
     ), 60)
@@ -485,7 +487,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   end
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
-    if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
+    if transition == "pending" and payloads_predicates.is_ready_hand_off(core, accepted_ready_hand_off, marker_ready) then
       core.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
@@ -531,7 +533,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   end
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
-    if transition == "pending" and core.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
+    if transition == "pending" and payloads_predicates.is_ready_hand_off(core, accepted_ready_hand_off, marker_ready) then
       core.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
@@ -746,7 +748,7 @@ local function process_ready_event(event)
       local verified_state = nil
       local hand_off_reason = "missing"
       if ready.ready_hand_off ~= nil then
-        verified_state, hand_off_reason = core.verified_hand_off_state(repo, ready.ready_hand_off, {
+        verified_state, hand_off_reason = payloads_predicates.verified_hand_off_state(core, repo, ready.ready_hand_off, {
           proposal_id = ready.proposal_id,
           state = "ready",
           marker_version = ready.ready_hand_off.marker_version,

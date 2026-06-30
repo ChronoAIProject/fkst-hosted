@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -115,7 +116,7 @@ return {
     local handoff = run_comment_handoff_from_request(comment_request, "IC_carry_over_1", "merge-carry-over-comment-handoff")
     t.eq(handoff.exit_code, 0)
     local merge_ready_raise = find_raise(handoff.raises, "devloop_merge_ready").payload
-    local expected = core.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
+    local expected = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head),
       review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,

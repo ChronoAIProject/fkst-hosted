@@ -6,6 +6,7 @@ local config = require("devloop.config")
 
 
 
+local payloads_builders = require("devloop.payloads.builders")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -109,7 +110,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       version = next_dedup,
       tick = event.ts,
     })
-    local proposal = core.build_board_loop_proposal(repo, issue_number, current, unresolved.source_ref, next_n, {
+    local proposal = payloads_builders.build_board_loop_proposal(core, repo, issue_number, current, unresolved.source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
     }, event.ts, content_fetch, next_dedup)

@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
 local replay_fields_resolver = require("devloop.replay_fields")
@@ -311,7 +312,7 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     state.version,
     row
   )
-  local ready_payload = M.build_devloop_ready_payload({
+  local ready_payload = payloads_builders.build_devloop_ready_payload(M, {
     proposal_id = fields.proposal_id,
     dedup_key = next_ready_redrive_version(state.version, redrive_round),
     source_ref = fields.source_ref,

@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -128,7 +129,7 @@ return {
     local merge_raise = find_raise(handoff.raises, "devloop_merge_ready", function(payload)
       return payload.reviewed_head_sha == new_head
     end)
-    local expected = core.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
+    local expected = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, event.version, new_head),
       review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,
@@ -173,7 +174,7 @@ return {
     local replayed_merge = find_raise(advanced.raises, "devloop_merge_ready")
     t.is_true(replayed_merge ~= nil)
     t.eq(find_raise(advanced.raises, "devloop_reviewing"), nil)
-    local replay_payload = core.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
+    local replay_payload = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,
       reviewed_head_sha = old_head,

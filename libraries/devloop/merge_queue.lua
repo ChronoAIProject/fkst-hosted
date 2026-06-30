@@ -1,6 +1,7 @@
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
+local payloads_builders = require("devloop.payloads.builders")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
@@ -431,7 +432,7 @@ function M.merge_ready_payload_from_queue_entry(entry, source_ref)
   if type(entry) ~= "table" then
     return nil
   end
-  return M.build_devloop_merge_ready_payload(
+  return payloads_builders.build_devloop_merge_ready_payload(M,
     entry.proposal_id,
     entry.pr_number,
     entry.version,

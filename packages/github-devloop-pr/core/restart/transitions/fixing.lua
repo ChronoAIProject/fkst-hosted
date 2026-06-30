@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -71,7 +72,7 @@ return function(M, h)
         },
       },
     }),
-    payload_builder = M.build_devloop_fixing_payload,
+    payload_builder = payloads_builders.build_devloop_fixing_payload,
     dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",
     required_facts = {
       fact("state", "marker-read"),

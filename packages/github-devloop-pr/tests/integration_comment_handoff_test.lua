@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -136,7 +137,7 @@ return {
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/v1/fix/1"
     local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/v1", "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
-    local expected_replay = core.build_replayed_fixing_payload({
+    local expected_replay = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = proposal_id,
       impl_version = version,
     }, 7, {
@@ -179,7 +180,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local fixing = find_raise(result.raises, "devloop_fixing").payload
-    local expected = core.build_devloop_fixing_payload({
+    local expected = payloads_builders.build_devloop_fixing_payload(core, {
       proposal_id = proposal_id,
       impl_version = version,
     }, 7, {
@@ -244,7 +245,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local merge_ready = find_raise(result.raises, "devloop_merge_ready").payload
-    local expected = core.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42", 7, version, {
+    local expected = payloads_builders.build_devloop_merge_ready_payload(core, "github-devloop/issue/owner/repo/42", 7, version, {
       review_proposal_id = review_proposal_id,
       review_dedup_key = review_dedup_key,
       reviewed_head_sha = "def456",

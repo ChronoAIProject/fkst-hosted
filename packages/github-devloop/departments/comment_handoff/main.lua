@@ -4,6 +4,8 @@ local source_refs = require("contract.source_ref")
 local valid_round = require("devloop.rounds").valid_round
 local handoff_helpers = require("devloop.comment_handoff")
 
+local payloads_builders = require("devloop.payloads.builders")
+local payloads_predicates = require("devloop.payloads.predicates")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
@@ -17,7 +19,7 @@ local spec = {
 local function supported_handoff(payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-proxy.comment-written.v1"
-    or not core.is_safe_comment_id(payload.comment_id)
+    or not payloads_predicates.is_safe_comment_id(core, payload.comment_id)
     or type(payload.handoff) ~= "table" then
     return nil
   end
@@ -57,7 +59,7 @@ local function act_handoff(event)
 
   core.log_entry("comment_handoff", event, handoff.proposal_id, payload.dedup_key)
   if handoff.kind == "github-devloop.ready" then
-    local ready = core.build_devloop_ready_payload({
+    local ready = payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = handoff.proposal_id,
       dedup_key = handoff.marker_version,
       source_ref = handoff.source_ref,

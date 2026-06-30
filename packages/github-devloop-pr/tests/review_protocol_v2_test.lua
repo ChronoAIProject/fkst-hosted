@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local core = h.core
 local t = h.t
 
@@ -251,7 +252,7 @@ return {
 
   test_review_prompts_state_gate_owned_facts_are_out_of_scope = function()
     local version = h.reviewing().version
-    local proposal = core.build_pr_review_proposal(
+    local proposal = payloads_builders.build_pr_review_proposal(core,
       "owner/repo",
       "42",
       7,
@@ -296,7 +297,7 @@ return {
       "feedface",
       core.next_fix_version(version)
     ).body
-    local rereview = core.build_pr_review_proposal(
+    local rereview = payloads_builders.build_pr_review_proposal(core,
       "owner/repo",
       "42",
       7,
@@ -482,7 +483,7 @@ return {
       { body = reject_comment, author_login = "fkst-test-bot" },
       { body = fix_comment, author_login = "fkst-test-bot" },
     }
-    local proposal = core.build_pr_review_proposal(
+    local proposal = payloads_builders.build_pr_review_proposal(core,
       "owner/repo",
       "42",
       7,
@@ -627,7 +628,7 @@ return {
       },
       fix.source_ref
     ).body
-    local proposal = core.build_pr_review_proposal(
+    local proposal = payloads_builders.build_pr_review_proposal(core,
       "owner/repo",
       "42",
       7,

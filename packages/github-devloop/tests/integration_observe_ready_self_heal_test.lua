@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local decompose_lib = require("devloop.decompose")
@@ -124,7 +125,7 @@ end
 return {
   test_observe_issue_reraises_thinking_proposal_for_poll_self_heal = function()
     local event = issue()
-    local original = core.build_proposal(event)
+    local original = payloads_builders.build_proposal(core, event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(original.proposal_id, original.dedup_key),
     })
@@ -156,7 +157,7 @@ return {
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 1)
     local second_proposal = find_raise(second.raises, "consensus.proposal").payload
-    t.eq(second_proposal.dedup_key, core.build_proposal(updated_event).dedup_key .. "/replay")
+    t.eq(second_proposal.dedup_key, payloads_builders.build_proposal(core, updated_event).dedup_key .. "/replay")
     t.is_true(second_proposal.dedup_key ~= first_proposal.dedup_key)
     t.is_true(second_proposal.content_fetch ~= first_proposal.content_fetch)
     t.eq(count_calls("--json body"), 0)
@@ -164,7 +165,7 @@ return {
 
   test_observe_issue_replays_mid_loop_thinking_proposal_from_converge_marker = function()
     local event = issue()
-    local original = core.build_proposal(event)
+    local original = payloads_builders.build_proposal(core, event)
     local base_version = original.dedup_key
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local angle_digests = {
@@ -179,7 +180,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, core.build_proposal(event).dedup_key .. "/loop/1")
+    t.eq(proposal.dedup_key, payloads_builders.build_proposal(core, event).dedup_key .. "/loop/1")
     t.eq(proposal.round, 1)
     t.eq(proposal.convergence_question, "Narrow the question")
     t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
@@ -189,8 +190,8 @@ return {
   test_observe_issue_skips_stale_lineage_thinking_replay = function()
     local old_event = issue()
     local event = issue({ updated_at = "2026-06-03T01:02:04Z" })
-    local original = core.build_proposal(old_event)
-    local current = core.build_proposal(event)
+    local original = payloads_builders.build_proposal(core, old_event)
+    local current = payloads_builders.build_proposal(core, event)
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(current.proposal_id, current.dedup_key),
@@ -211,7 +212,7 @@ return {
 
   test_observe_issue_replays_thinking_base_proposal_when_converge_marker_is_missing = function()
     local event = issue()
-    local original = core.build_proposal(event)
+    local original = payloads_builders.build_proposal(core, event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key .. "/loop/1"),
@@ -231,7 +232,7 @@ return {
 
   test_observe_issue_timeout_redrives_plain_thinking_before_replay = function()
     local event = issue()
-    local original = core.build_proposal(event)
+    local original = payloads_builders.build_proposal(core, event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
@@ -277,7 +278,7 @@ return {
 
   test_observe_issue_ready_self_heal_does_not_duplicate_after_implementing = function()
     local event = reached()
-    local ready_payload = core.build_devloop_ready_payload(event)
+    local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     local branch = core.implement_branch("owner/repo", 42, ready_payload.dedup_key)
     local run_opts = opts("observe-issue-ready-self-heal-advanced")
     local exec_ref = core.implement_exec_ref(event.proposal_id, ready_payload.dedup_key)
@@ -307,7 +308,7 @@ return {
 
   test_observe_issue_legacy_pr_open_canonicalizes_instead_of_issue_side_reviewing_redrive = function()
     local event = reached()
-    local ready_payload = core.build_devloop_ready_payload(event)
+    local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     local comments = {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
       core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
@@ -340,7 +341,7 @@ return {
 
   test_observe_issue_pr_open_timeout_redrive_canonicalizes_legacy_issue_state = function()
     local event = reached()
-    local ready_payload = core.build_devloop_ready_payload(event)
+    local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     local comments = {
       {
         body = core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
@@ -428,7 +429,7 @@ return {
 
   test_observe_issue_missing_reviewing_label_does_not_change_pr_local_state = function()
     local event = reached()
-    local ready_payload = core.build_devloop_ready_payload(event)
+    local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
       core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
@@ -446,7 +447,7 @@ return {
 
   test_observe_issue_linked_pr_fetch_failure_fails_closed = function()
     local event = reached()
-    local ready_payload = core.build_devloop_ready_payload(event)
+    local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
       core.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),

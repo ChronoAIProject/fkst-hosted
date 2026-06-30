@@ -19,7 +19,6 @@ require("devloop.logging").install(M)
 require("devloop.state").install(M)
 require("devloop.markers").install(M)
 require("core.intake_service_class").install(M)
-require("devloop.payloads").install(M)
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), {
   intake = true,

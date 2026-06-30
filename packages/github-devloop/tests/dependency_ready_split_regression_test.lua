@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local operator_commands = require("devloop.operator_commands")
@@ -157,7 +158,7 @@ local function reached()
 end
 
 local function ready_at(inner_version)
-  return core.build_devloop_ready_payload({
+  return payloads_builders.build_devloop_ready_payload(core, {
     proposal_id = proposal_id,
     dedup_key = inner_version,
     source_ref = source_ref(),
@@ -304,7 +305,7 @@ return {
     t.eq(ready.payload.ready_hand_off.comment_id, "IC_ready_visible")
     t.eq(ready.payload.ready_hand_off.marker_version, version)
     t.eq(ready.payload.ready_hand_off.event_version, ready.payload.dedup_key)
-    t.is_true(ready.payload.dedup_key ~= core.build_devloop_ready_payload({
+    t.is_true(ready.payload.dedup_key ~= payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = proposal_id,
       dedup_key = version,
       source_ref = source_ref(),
@@ -323,7 +324,7 @@ return {
 
     local first_ready = find_raise(first_raises, "devloop_ready")
     t.eq(first_ready ~= nil, true)
-    t.eq(first_ready.payload.dedup_key, core.build_devloop_ready_payload({
+    t.eq(first_ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = proposal_id,
       dedup_key = marker_version .. "/redrive/ready/2",
       source_ref = source_ref(),
@@ -340,7 +341,7 @@ return {
 
     local second_ready = find_raise(second_raises, "devloop_ready")
     t.eq(second_ready ~= nil, true)
-    t.eq(second_ready.payload.dedup_key, core.build_devloop_ready_payload({
+    t.eq(second_ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = proposal_id,
       dedup_key = marker_version .. "/redrive/ready/3",
       source_ref = source_ref(),
@@ -367,7 +368,7 @@ return {
     t.eq(ready ~= nil, true)
     t.eq(ready.payload.ready_hand_off.comment_id, "IC_ready_visible")
     t.eq(ready.payload.ready_hand_off.marker_version, version)
-    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload({
+    t.eq(ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = proposal_id,
       dedup_key = version .. "/redrive/ready/2",
       source_ref = source_ref(),
@@ -399,7 +400,7 @@ return {
           ok = true,
           reason = "test",
         },
-        ready_payload = core.build_devloop_ready_payload({
+        ready_payload = payloads_builders.build_devloop_ready_payload(core, {
           proposal_id = proposal_id,
           dedup_key = marker_version .. "/stale-bypass",
           source_ref = source_ref(),
@@ -412,7 +413,7 @@ return {
     t.eq(ready.payload.ready_hand_off.comment_id, "IC_ready_visible")
     t.eq(ready.payload.ready_hand_off.marker_version, marker_version)
     t.eq(ready.payload.ready_hand_off.event_version, ready.payload.dedup_key)
-    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload({
+    t.eq(ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = proposal_id,
       dedup_key = marker_version .. "/redrive/ready/2",
       source_ref = source_ref(),

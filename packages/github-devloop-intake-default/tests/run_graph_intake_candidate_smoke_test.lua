@@ -1,4 +1,5 @@
 local graph = require("testkit.graph")
+local payloads_builders = require("devloop.payloads.builders")
 local t = fkst.test
 local core = require("core")
 local h = require("tests.devloop_base_helpers")
@@ -29,7 +30,7 @@ local function source_ref()
 end
 
 local function candidate()
-  return core.build_devloop_intake_candidate_payload("owner/repo", 42, "2026-06-03T01:02:03Z")
+  return payloads_builders.build_devloop_intake_candidate_payload(core, "owner/repo", 42, "2026-06-03T01:02:03Z")
 end
 
 local function initial_event()

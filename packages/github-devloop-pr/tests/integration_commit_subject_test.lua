@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local fixing = h.fixing
@@ -202,16 +203,16 @@ return {
 
   test_commit_subject_helpers_keep_message_bounded = function()
     local title = ("long title "):rep(30)
-    t.is_true(#core.implement_commit_subject("42", { title = title }) <= 200)
-    t.is_true(#core.fix_commit_subject("42", { title = title }) <= 200)
-    t.eq(core.implement_commit_subject("42", {}), "auto-implement refs #42")
-    t.eq(core.fix_commit_subject("42", nil), "auto-fix refs #42")
+    t.is_true(#payloads_builders.implement_commit_subject(core, "42", { title = title }) <= 200)
+    t.is_true(#payloads_builders.fix_commit_subject(core, "42", { title = title }) <= 200)
+    t.eq(payloads_builders.implement_commit_subject(core, "42", {}), "auto-implement refs #42")
+    t.eq(payloads_builders.fix_commit_subject(core, "42", nil), "auto-fix refs #42")
   end,
 
   test_commit_subject_helpers_truncate_utf8_safely = function()
     local title = ("界"):rep(80)
-    local implement_subject = core.implement_commit_subject("42", { title = title })
-    local fix_subject = core.fix_commit_subject("42", { title = title })
+    local implement_subject = payloads_builders.implement_commit_subject(core, "42", { title = title })
+    local fix_subject = payloads_builders.fix_commit_subject(core, "42", { title = title })
     t.is_true(#implement_subject <= 200)
     t.is_true(#fix_subject <= 200)
     t.is_true(implement_subject:find("界$", 1, false) ~= nil)

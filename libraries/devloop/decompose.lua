@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local payloads_builders = require("devloop.payloads.builders")
 local C = {}
 local source_refs = require("contract.source_ref")
 local forge_validators = require("devloop.forge_validators")
@@ -215,7 +216,7 @@ function C.build_decompose_replay_payload(M, fact, comments_or_feedback, source_
   if type(feedback) == "table" and feedback[1] ~= nil then
     feedback = M.fixing_replay_feedback_fact(comments_or_feedback, fact.proposal_id, fact.version)
   end
-  local payload = M.build_devloop_decompose_payload({
+  local payload = payloads_builders.build_devloop_decompose_payload(M, {
     proposal_id = fact.proposal_id,
     pr_number = fact.pr_number,
     issue_version = fact.version,

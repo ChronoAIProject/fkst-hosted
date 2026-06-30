@@ -4,6 +4,8 @@ local core, saga = require("core"), require("workflow.saga")
 local transition_version = require("contract.transition_version")
 local config = require("devloop.config")
 
+local payloads_builders = require("devloop.payloads.builders")
+local payloads_predicates = require("devloop.payloads.predicates")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -98,8 +100,8 @@ return saga.department(spec, { done = function() return false end, act = functio
     local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision
     local comment_reached = reached
-    local gate_owned_reject = reached.decision == "reject" and core.is_gate_owned_review_gap(reached.blocking_gap)
-    local out_of_contract_reject = reached.decision == "reject" and core.is_out_of_contract_review_gap(reached.blocking_gap)
+    local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(core, reached.blocking_gap)
+    local out_of_contract_reject = reached.decision == "reject" and payloads_predicates.is_out_of_contract_review_gap(core, reached.blocking_gap)
     if gate_owned_reject or out_of_contract_reject then
       effective_decision = "approve"
     end
@@ -185,7 +187,7 @@ return saga.department(spec, { done = function() return false end, act = functio
           pr_number = pr_number,
           source_ref = pr_source_ref,
         }, state.version)
-        local decompose = core.build_devloop_decompose_payload(fix_reconcile)
+        local decompose = payloads_builders.build_devloop_decompose_payload(core, fix_reconcile)
         local reason = "fix-loop-max-rounds"
         core.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(" .. reason .. ")", "review decision=reject")
         core.log_raise("review_result", origin.proposal_id, "devloop_fix_reconcile", fix_reconcile)
@@ -246,7 +248,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local reflection_payload = nil
     if reflection_checkpoint then
-      reflection_payload = core.build_devloop_fix_reflection_payload({
+      reflection_payload = payloads_builders.build_devloop_fix_reflection_payload(core, {
         proposal_id = reached.proposal_id,
         dedup_key = reached.dedup_key,
         source_ref = pr_source_ref,

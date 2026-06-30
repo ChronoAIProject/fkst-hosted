@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -73,7 +74,7 @@ return function(M, h)
         },
       },
     }),
-    payload_builder = M.build_proposal,
+    payload_builder = payloads_builders.build_proposal,
     dedup_shape = "proposal:<proposal_id>/<updated_at> or consensus:<base_version>/loop/<n>",
     required_facts = { fact("state", "marker-read") },
     advancing_facts = {
