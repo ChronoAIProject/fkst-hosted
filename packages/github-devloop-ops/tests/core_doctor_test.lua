@@ -59,7 +59,7 @@ return {
     local seen = 0
     for _, expected in ipairs(rows) do
       seen = seen + 1
-      local actual = core.lifecycle_transition_row(expected.from_state)
+      local actual = provider.lifecycle_transition_row(core, expected.from_state)
       t.is_true(actual ~= nil)
       t.eq(actual.from_state, expected.from_state)
       t.eq(actual.terminal, expected.terminal)
@@ -72,7 +72,8 @@ return {
   test_core_doctor_uses_provider_not_local_lifecycle_rows = function()
     local body = file.read("packages/github-devloop-ops/core.lua")
     t.is_nil(body:find("local lifecycle_rows", 1, true))
-    t.is_true(body:find('require("devloop.restart.issue_lifecycle").install(M)', 1, true) ~= nil)
+    t.is_nil(body:find("devloop.restart.issue_lifecycle", 1, true))
+    t.is_true(file.read("packages/github-devloop-ops/core/doctor.lua"):find('require("devloop.restart.issue_lifecycle")', 1, true) ~= nil)
   end,
 
   test_core_doctor_classifies_stuck_past_budget = function()

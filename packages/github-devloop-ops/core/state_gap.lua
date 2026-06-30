@@ -1,5 +1,6 @@
 local S = {}
 local contract_time = require("contract.time")
+local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 
 function S.install(M)
 
@@ -174,7 +175,7 @@ function M.state_gap_marker_stream(entity)
 end
 
 local function budget_status(from_state, gap_seconds)
-  local budget_minutes = M.liveness_budget_minutes(from_state)
+  local budget_minutes = issue_lifecycle.liveness_budget_minutes(M, from_state)
   if budget_minutes == nil then
     return "no-budget", nil
   end

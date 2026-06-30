@@ -1,4 +1,5 @@
 local S = {}
+local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 
 function S.install(M)
 local verdict_rank = {
@@ -120,7 +121,7 @@ function M.saga_doctor_classify_entity(entity, opts)
   local options = opts or {}
   local now_seconds = tonumber(options.now_seconds) or now()
   local state = entity.current_state
-  local row = M.lifecycle_transition_row(state and state.state)
+  local row = issue_lifecycle.lifecycle_transition_row(M, state and state.state)
 
   -- NOTE: a label-vs-marker mismatch check (MIS-LABELED) is intentionally NOT done
   -- here. An issue's fkst-dev label legitimately mirrors its linked PR's downstream

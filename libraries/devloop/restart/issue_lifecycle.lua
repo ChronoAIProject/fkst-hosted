@@ -1,4 +1,4 @@
-local L = {}
+local C = {}
 
 local restart = require("devloop.restart")
 
@@ -23,7 +23,7 @@ local function load_entries(base, index)
   return entries
 end
 
-function L.transition_sources()
+function C.transition_sources()
   local transitions_index = require(index_module(transitions_base))
   return {
     transitions_index = transitions_index,
@@ -32,8 +32,8 @@ function L.transition_sources()
   }
 end
 
-function L.transition_table(M)
-  return restart.transition_table(M, L.transition_sources())
+function C.transition_table(M)
+  return restart.transition_table(M, C.transition_sources())
 end
 
 local function lifecycle_row(row)
@@ -45,28 +45,39 @@ local function lifecycle_row(row)
   }
 end
 
-function L.lifecycle_rows(M)
+function C.lifecycle_rows(M)
   local rows = {}
-  for _, row in ipairs(L.transition_table(M)) do
+  for _, row in ipairs(C.transition_table(M)) do
     table.insert(rows, lifecycle_row(row))
   end
   return rows
 end
 
-function L.install(M)
-  local lifecycle_by_state = {}
-  for _, row in ipairs(L.lifecycle_rows(M)) do
-    lifecycle_by_state[row.from_state] = row
-  end
+-- Memoize the by-state index per composed M, weak-keyed so it is built once
+-- per M -- matching the old install-time build-once-and-close-over behavior
+-- (stable returned-row identity + O(1) lookups, not an O(n) rebuild per call).
+local lifecycle_by_state_cache = setmetatable({}, { __mode = "k" })
 
-  function M.lifecycle_transition_row(state_name)
-    return lifecycle_by_state[state_name]
+local function lifecycle_by_state(M)
+  local cached = lifecycle_by_state_cache[M]
+  if cached then
+    return cached
   end
-
-  function M.liveness_budget_minutes(state_name)
-    local row = M.lifecycle_transition_row(state_name)
-    return row and row.budget and tonumber(row.budget.minutes) or nil
+  local by_state = {}
+  for _, row in ipairs(C.lifecycle_rows(M)) do
+    by_state[row.from_state] = row
   end
+  lifecycle_by_state_cache[M] = by_state
+  return by_state
 end
 
-return L
+function C.lifecycle_transition_row(M, state_name)
+  return lifecycle_by_state(M)[state_name]
+end
+
+function C.liveness_budget_minutes(M, state_name)
+  local row = C.lifecycle_transition_row(M, state_name)
+  return row and row.budget and tonumber(row.budget.minutes) or nil
+end
+
+return C
