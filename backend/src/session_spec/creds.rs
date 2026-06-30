@@ -18,6 +18,15 @@ pub const GITHUB_TOKEN_FILE: &str = "github-token";
 /// config, not a per-session token, so it is written once and never rotated.
 pub const LLM_API_KEY_FILE: &str = "llm-api-key";
 
+/// Filename prefix for an injected per-user env entry (PR4b). The control plane
+/// writes one Secret data key `userenv.<KEY>` per resolved user env var; mounted,
+/// each surfaces as a file `userenv.<KEY>` under [`CredsLayout::base`]. The runner
+/// globs these, strips this prefix to recover `KEY`, and folds the file's
+/// contents into the engine `env_profile`. `KEY` is env-var-shaped
+/// (`^[A-Za-z_][A-Za-z0-9_]*$`), so the composite `userenv.<KEY>` is a valid
+/// Kubernetes Secret data key (`[-._a-zA-Z0-9]+`).
+pub const USER_ENV_PREFIX: &str = "userenv.";
+
 /// Default mount path of the per-session credential Secret volume inside the pod.
 pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
 
@@ -52,6 +61,28 @@ impl CredsLayout {
     pub fn llm_api_key(&self) -> PathBuf {
         self.base.join(LLM_API_KEY_FILE)
     }
+
+    /// List the mounted per-user env files (PR4b): every entry directly under
+    /// [`base`](Self::base) whose filename starts with [`USER_ENV_PREFIX`],
+    /// returned as `(KEY, path)` with the prefix stripped from `KEY`. The
+    /// non-user files (the spec, the GitHub token, the LLM key) are skipped, as is
+    /// a bare `userenv.` with no key. Order follows the filesystem and the caller
+    /// must not depend on it. The recovered `KEY` is whatever followed the prefix;
+    /// reserved-name filtering is the reader's job, not this lister's.
+    pub fn user_env_files(&self) -> std::io::Result<Vec<(String, PathBuf)>> {
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(&self.base)? {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            if let Some(key) = name.strip_prefix(USER_ENV_PREFIX) {
+                if !key.is_empty() {
+                    files.push((key.to_string(), entry.path()));
+                }
+            }
+        }
+        Ok(files)
+    }
 }
 
 #[cfg(test)]
@@ -76,6 +107,38 @@ mod tests {
     fn honors_a_custom_base() {
         let layout = CredsLayout::new("/mnt/creds");
         assert_eq!(layout.github_token(), Path::new("/mnt/creds/github-token"));
+    }
+
+    #[test]
+    fn user_env_files_lists_only_prefixed_entries_with_the_key_stripped() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join("userenv.FOO"), "foo").expect("write FOO");
+        std::fs::write(dir.path().join("userenv.BAR_2"), "bar").expect("write BAR_2");
+        // Non-user files must be ignored entirely.
+        std::fs::write(dir.path().join(GITHUB_TOKEN_FILE), "ghs").expect("write token");
+        std::fs::write(dir.path().join(LLM_API_KEY_FILE), "sk").expect("write llm");
+        std::fs::write(dir.path().join("session-spec.json"), "{}").expect("write spec");
+        // A bare prefix with no key must be skipped (no empty-named entry).
+        std::fs::write(dir.path().join("userenv."), "x").expect("write bare");
+
+        let layout = CredsLayout::new(dir.path());
+        let mut found = layout.user_env_files().expect("list");
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("BAR_2".to_string(), dir.path().join("userenv.BAR_2")),
+                ("FOO".to_string(), dir.path().join("userenv.FOO")),
+            ]
+        );
+    }
+
+    #[test]
+    fn user_env_files_is_empty_when_no_entries_present() {
+        let dir = tempfile::tempdir().expect("dir");
+        std::fs::write(dir.path().join(GITHUB_TOKEN_FILE), "ghs").expect("write token");
+        let layout = CredsLayout::new(dir.path());
+        assert!(layout.user_env_files().expect("list").is_empty());
     }
 
     #[test]

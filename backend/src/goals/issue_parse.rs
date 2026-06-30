@@ -17,12 +17,29 @@
 //! Secret hygiene: the `Goal` section becomes the engine prompt (secret
 //! downstream). Never log the parsed `description`; this module logs nothing.
 
+use std::sync::OnceLock;
+
+use regex::Regex;
+
 use crate::error::AppError;
 
 /// The canonical section headings, in template order. A section's content is
 /// every line after its heading up to the next `### ` heading (or EOF).
 const HEADING_GOAL: &str = "### Goal";
 const HEADING_PACKAGES: &str = "### Package Name List";
+/// OPTIONAL section (PR4b): each non-blank line names ONE env var KEY to inject
+/// into the session from the issue author's `fkst-user-<id>` store. Absent →
+/// no injection.
+const HEADING_ENVIRONMENT: &str = "### Environment";
+
+/// Anchored env-var-name pattern, identical to the user-store key grammar in
+/// [`crate::routes::user_env`]. A name that passes here is also a valid
+/// Kubernetes ConfigMap/Secret data key, so the requested key can be looked up in
+/// the author's store and mounted unescaped.
+fn env_key_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new("^[A-Za-z_][A-Za-z0-9_]*$").expect("static env key regex"))
+}
 
 /// The structured result of parsing an `fkst-goal` issue body. Carries only the
 /// body-derived fields — the title comes from the GitHub issue title, not the
@@ -35,6 +52,11 @@ pub struct ParsedGoal {
     /// One package name per non-empty `### Package Name List` line (grammar
     /// validation deferred to `validate_goal_fields`).
     pub package_names: Vec<String>,
+    /// The env var KEY NAMES from the OPTIONAL `### Environment` section, one per
+    /// non-blank line (PR4b). Each is a validated env-var name; the trigger
+    /// resolves these against the issue author's store and injects the matching
+    /// values into the session. Empty when the section is absent.
+    pub env_keys: Vec<String>,
 }
 
 /// Parse the `fkst-goal` issue body into [`ParsedGoal`].
@@ -74,10 +96,38 @@ pub fn parse_goal_issue_body(body: &str) -> Result<ParsedGoal, AppError> {
         ));
     }
 
+    // `### Environment` — OPTIONAL. Each non-blank line names one env var KEY to
+    // inject (PR4b). A malformed name is a 422 naming the section (consistent
+    // with the other structural failures); an absent section means no injection.
+    let env_keys = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_ENVIRONMENT)
+    {
+        Some((_, content)) => parse_env_keys(content)?,
+        None => Vec::new(),
+    };
+
     Ok(ParsedGoal {
         description,
         package_names,
+        env_keys,
     })
+}
+
+/// Parse the `### Environment` block into validated env var KEY names. Each
+/// non-blank trimmed line must match the env-var-name grammar; the first
+/// violation is a 422 that names the offending key and the section.
+fn parse_env_keys(block: &str) -> Result<Vec<String>, AppError> {
+    let keys = non_empty_lines(block);
+    for key in &keys {
+        if !env_key_regex().is_match(key) {
+            return Err(AppError::Unprocessable(format!(
+                "the `### Environment` section has an invalid env var name {key:?}: \
+                 must match ^[A-Za-z_][A-Za-z0-9_]*$"
+            )));
+        }
+    }
+    Ok(keys)
 }
 
 /// Split a body into `(heading, content)` sections at each `### ` heading line.
@@ -157,6 +207,39 @@ digest-writer
             "Build a CLI that summarizes a git repo's commit history into a weekly digest."
         );
         assert_eq!(parsed.package_names, vec!["repo-reader", "digest-writer"]);
+    }
+
+    #[test]
+    fn environment_section_absent_yields_no_env_keys() {
+        let body = "### Goal\nG\n### Package Name List\npkg-a\n";
+        let parsed = parse_goal_issue_body(body).expect("parses without Environment");
+        assert!(parsed.env_keys.is_empty());
+    }
+
+    #[test]
+    fn environment_section_parses_one_key_per_non_blank_line() {
+        let body =
+            "### Goal\nG\n### Package Name List\npkg-a\n### Environment\n  FOO \n\nBAR_2\n_BAZ\n";
+        let parsed = parse_goal_issue_body(body).expect("parses Environment");
+        assert_eq!(parsed.env_keys, vec!["FOO", "BAR_2", "_BAZ"]);
+    }
+
+    #[test]
+    fn environment_section_may_be_empty_and_yields_no_keys() {
+        let body = "### Goal\nG\n### Package Name List\npkg-a\n### Environment\n   \n";
+        let parsed = parse_goal_issue_body(body).expect("empty Environment is allowed");
+        assert!(parsed.env_keys.is_empty());
+    }
+
+    #[test]
+    fn malformed_env_key_name_is_422_naming_environment() {
+        let body = "### Goal\nG\n### Package Name List\npkg-a\n### Environment\nMY-VAR\n";
+        let msg = err_message(body);
+        assert!(
+            msg.contains("Environment"),
+            "must name the Environment section: {msg}"
+        );
+        assert!(msg.contains("MY-VAR"), "must name the offending key: {msg}");
     }
 
     #[test]

@@ -124,6 +124,36 @@ fn secret_key_names(secret: &Secret) -> Vec<String> {
     keys
 }
 
+/// Decode a Secret's `data` (and any freshly-created `string_data` echo) into a
+/// `{ name: value }` map. UNLIKE [`secret_key_names`], this exposes the VALUES, so
+/// it is private and reachable ONLY through [`get_secret_values`] — never a route.
+/// A value that is not valid UTF-8 is dropped with a warning (user-store values
+/// always originate as UTF-8 strings, so this is purely defensive). The value is
+/// NEVER logged.
+fn decode_secret_values(secret: &Secret) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    if let Some(data) = secret.data.as_ref() {
+        for (k, v) in data {
+            match String::from_utf8(v.0.clone()) {
+                Ok(value) => {
+                    out.insert(k.clone(), value);
+                }
+                Err(_) => {
+                    tracing::warn!(key = %k, "user store: secret value is not valid utf-8; skipped")
+                }
+            }
+        }
+    }
+    // A just-created Secret may echo `string_data` instead of `data`; fill only
+    // the gaps so the persisted `data` always wins.
+    if let Some(sd) = secret.string_data.as_ref() {
+        for (k, v) in sd {
+            out.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+    out
+}
+
 fn configmap_api(kube: &KubeClient) -> Api<ConfigMap> {
     Api::namespaced(kube.client().clone(), kube.namespace())
 }
@@ -162,6 +192,28 @@ pub async fn get_secret_keys(
     {
         Some(secret) => Ok(secret_key_names(&secret)),
         None => Ok(Vec::new()),
+    }
+}
+
+/// The user's secret VALUES (empty when the Secret is absent).
+///
+/// UNLIKE [`get_secret_keys`], this returns the decoded values. It exists ONLY
+/// for the in-cluster env-injection path (PR4b): the webhook trigger reads the
+/// issue author's store, selects the requested subset, and mounts those into the
+/// session Secret. It is NOT wired to any user-facing route, so a secret value
+/// never crosses the API boundary through here.
+pub async fn get_secret_values(
+    kube: &KubeClient,
+    github_user_id: i64,
+) -> Result<BTreeMap<String, String>, AppError> {
+    let name = user_object_name(github_user_id);
+    match secret_api(kube)
+        .get_opt(&name)
+        .await
+        .map_err(map_kube_err)?
+    {
+        Some(secret) => Ok(decode_secret_values(&secret)),
+        None => Ok(BTreeMap::new()),
     }
 }
 
@@ -381,6 +433,52 @@ mod tests {
             secret_key_names(&secret),
             vec!["A".to_string(), "B".to_string()]
         );
+    }
+
+    #[test]
+    fn decode_secret_values_returns_decoded_values_from_data() {
+        let mut data = BTreeMap::new();
+        data.insert("API_KEY".to_string(), ByteString(b"s3cr3t".to_vec()));
+        data.insert("TOKEN".to_string(), ByteString(b"tok".to_vec()));
+        let secret = Secret {
+            data: Some(data),
+            ..Default::default()
+        };
+        let values = decode_secret_values(&secret);
+        assert_eq!(values["API_KEY"], "s3cr3t");
+        assert_eq!(values["TOKEN"], "tok");
+    }
+
+    #[test]
+    fn decode_secret_values_data_wins_over_string_data_echo() {
+        let mut data = BTreeMap::new();
+        data.insert("A".to_string(), ByteString(b"from-data".to_vec()));
+        let mut string_data = BTreeMap::new();
+        // `A` is also echoed in string_data; the persisted `data` must win.
+        string_data.insert("A".to_string(), "echo".to_string());
+        string_data.insert("B".to_string(), "from-string-data".to_string());
+        let secret = Secret {
+            data: Some(data),
+            string_data: Some(string_data),
+            ..Default::default()
+        };
+        let values = decode_secret_values(&secret);
+        assert_eq!(values["A"], "from-data");
+        assert_eq!(values["B"], "from-string-data");
+    }
+
+    #[test]
+    fn decode_secret_values_drops_non_utf8_values() {
+        let mut data = BTreeMap::new();
+        data.insert("GOOD".to_string(), ByteString(b"ok".to_vec()));
+        data.insert("BAD".to_string(), ByteString(vec![0xff, 0xfe]));
+        let secret = Secret {
+            data: Some(data),
+            ..Default::default()
+        };
+        let values = decode_secret_values(&secret);
+        assert_eq!(values["GOOD"], "ok");
+        assert!(!values.contains_key("BAD"), "invalid utf-8 is dropped");
     }
 
     #[test]

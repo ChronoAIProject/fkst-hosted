@@ -289,6 +289,41 @@ async fn missing_llm_api_key_exits_nonzero_without_starting() {
     );
 }
 
+#[test]
+fn user_env_files_are_injected_into_env_profile_with_reserved_keys_skipped() {
+    use secrecy::ExposeSecret;
+
+    let dir = tempfile::tempdir().expect("creds dir");
+    fs::write(dir.path().join("userenv.FOO"), "foo-val\n").expect("write FOO");
+    fs::write(dir.path().join("userenv.BAR"), "bar-val\n").expect("write BAR");
+    // An `FKST_`-prefixed key the engine would strip: it must be skipped here.
+    fs::write(dir.path().join("userenv.FKST_X"), "nope\n").expect("write FKST_X");
+    // A collision with the LLM credential key must be skipped too (never shadow).
+    fs::write(
+        dir.path().join(format!("userenv.{LLM_ENV_KEY}")),
+        "stolen\n",
+    )
+    .expect("write llm collision");
+    // A non-user credential file must be ignored entirely (not injected).
+    fs::write(dir.path().join("github-token"), "ghs_x\n").expect("write token");
+    let creds = CredsLayout::new(dir.path());
+
+    let mut env_profile: BTreeMap<String, SecretString> = BTreeMap::new();
+    env_profile.insert(LLM_ENV_KEY.to_string(), SecretString::from("real-llm-key"));
+    inject_user_env(&creds, "sess-1", &mut env_profile);
+
+    assert_eq!(env_profile.get("FOO").unwrap().expose_secret(), "foo-val");
+    assert_eq!(env_profile.get("BAR").unwrap().expose_secret(), "bar-val");
+    // The reserved `FKST_X` is dropped, and the real LLM key is never overwritten.
+    assert!(!env_profile.contains_key("FKST_X"));
+    assert_eq!(
+        env_profile.get(LLM_ENV_KEY).unwrap().expose_secret(),
+        "real-llm-key"
+    );
+    // Exactly the LLM key + the two accepted user vars.
+    assert_eq!(env_profile.len(), 3);
+}
+
 #[tokio::test]
 async fn invalid_spec_exits_nonzero() {
     let stub_dir = tempfile::tempdir().expect("stub dir");

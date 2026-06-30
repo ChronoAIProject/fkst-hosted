@@ -65,3 +65,38 @@ the **Issues** and the **Issue comment** events. A session triggers when an
 installed repo gets an issue opened with the `fkst` label; once it exists, the
 issue author drives it by commenting `/stop` or `/status` on the issue (the
 **Issue comment** subscription is REQUIRED for those control commands to work).
+
+## Injecting per-user env into a session
+
+The triggering issue body may carry an OPTIONAL `### Environment` section listing
+env var **names** (one per line) to inject into the session — for example:
+
+```md
+### Goal
+…
+
+### Package Name List
+…
+
+### Environment
+OPENAI_API_KEY
+MY_FEATURE_FLAG
+```
+
+Each name is resolved against the **issue author's** own store, the
+`fkst-user-<github_user_id>` ConfigMap (non-secret variables) + Secret (secret
+values) in the control-plane namespace. Only the **named** keys are selected; a
+name present in BOTH the variables and the secrets resolves to the secret value.
+A requested name that the author has not stored is skipped (logged, not an
+error), and if the store cannot be read the session still launches with no
+injected env. Names must be valid env var names (`^[A-Za-z_][A-Za-z0-9_]*$`); a
+malformed name fails issue parsing. Reserved/platform keys (anything `FKST_*`,
+git-credential keys, or the engine's `LLM_API_KEY`) are dropped before reaching
+the agent so a user value can never shadow a platform var.
+
+The resolved values ride the per-session 0400 Secret as `userenv.<KEY>` files
+and are folded into the agent's environment by the runner — they are NOT plain
+pod env. A GitHub user populates their store via the
+`/api/v1/users/me/env` and `/api/v1/users/me/secrets` API (authenticated by the
+user's GitHub token; see PR4a). Secret values are write-only over that API — only
+key names are ever returned.

@@ -322,7 +322,7 @@ mod tests {
     fn comment_body(action: &str, sender_login: &str, sender_type: &str, body: &str) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({
             "action": action,
-            "issue": { "number": 7, "user": { "login": "octocat" } },
+            "issue": { "number": 7, "user": { "login": "octocat", "id": 583231 } },
             "comment": { "body": body, "user": { "login": sender_login, "type": sender_type } },
             "repository": { "owner": { "login": "acme" }, "name": "site" },
             "installation": { "id": 42 },
