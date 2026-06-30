@@ -1,4 +1,5 @@
 local S = {}
+local conflict_telemetry = require("devloop.conflict_telemetry")
 
 function S.install(M)
 local conflict_hotspot_threshold = 3
@@ -56,7 +57,7 @@ local function hotspot_parent_comment_target(repo, hotspot)
 end
 
 function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
-  local key = M.conflict_path_key(hotspot.file)
+  local key = conflict_telemetry.conflict_path_key(M, hotspot.file)
   return {
     schema = "github-proxy.issue-create.v1",
     repo = repo,
@@ -87,8 +88,8 @@ function M.observe_conflict_hotspots(repo, timeout)
     log.warn("github-devloop dept=observability tag=CONFLICT_HOTSPOT_PATROL action=no-op reason=log-source-failed")
     return { facts = 0, hotspots = 0, raised = 0 }
   end
-  local facts = M.parse_conflict_file_facts(result.stdout)
-  local hotspots = M.conflict_hotspots(facts, conflict_hotspot_threshold, now())
+  local facts = conflict_telemetry.parse_conflict_file_facts(result.stdout)
+  local hotspots = conflict_telemetry.conflict_hotspots(facts, conflict_hotspot_threshold, now())
   local raised = 0
   for _, hotspot in ipairs(hotspots) do
     local request = M.build_conflict_hotspot_issue_create_request(repo, hotspot)

@@ -2,6 +2,7 @@ local h = require("tests.devloop_ops_helpers")
 local t = h.t
 local core = h.core
 local gh_argv = require("testkit.gh_argv_mock")
+local conflict_telemetry = require("devloop.conflict_telemetry")
 
 local function opts(name, extra)
   local env = {
@@ -123,7 +124,7 @@ end
 
 return {
   test_unmerged_paths_are_deduped_into_safe_conflict_files = function()
-    local paths = core.conflict_file_paths_from_unmerged(table.concat({
+    local paths = conflict_telemetry.conflict_file_paths_from_unmerged(core, table.concat({
       "100644 abc123 1\tpackages/github-devloop/core.lua",
       "100644 def456 2\tpackages/github-devloop/core.lua",
       "100644 bad 1\tunsafe path.lua",

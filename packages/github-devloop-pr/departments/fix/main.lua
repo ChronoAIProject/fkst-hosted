@@ -2,6 +2,7 @@ local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local dispatch_live_run = require("devloop.dispatch_live_run")
+local conflict_telemetry = require("devloop.conflict_telemetry")
 
 local spec = {
   consumes = { "devloop_fixing" },
@@ -407,7 +408,7 @@ local function run_fix_attempt(plan)
     )
   end
   if merge_context.conflicted then
-    core.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
+    conflict_telemetry.log_conflict_files(core, "fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
   local codex_started_at = now()
   core.log_codex_start("fix", plan.fix.proposal_id, "fix")

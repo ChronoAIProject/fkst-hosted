@@ -1,14 +1,13 @@
-local S = {}
 local contract_time = require("contract.time")
-
-function S.install(M)
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
+
 local conflict_hotspot_threshold = 3
 local conflict_hotspot_window_days = 7
 local conflict_hotspot_window_seconds = conflict_hotspot_window_days * 24 * 60 * 60
 local max_conflict_log_bytes = 200000
 local max_conflict_evidence = 8
+local C = {}
 
 local function is_safe_conflict_path(path)
   local text = tostring(path or "")
@@ -20,7 +19,7 @@ local function is_safe_conflict_path(path)
     and text:find("^[%w%._%-%/]+$") ~= nil
 end
 
-function M.conflict_path_key(path)
+function C.conflict_path_key(M, path)
   local key = strings.sanitize_key(tostring(path or ""), false):gsub("/", "-"):gsub("%-+", "-")
   if #key > 140 then
     local suffix = "-" .. decimal_checksum(key)
@@ -33,7 +32,7 @@ local function current_conflict_timestamp()
   return os.date("!%Y-%m-%dT%H:%M:%SZ", now())
 end
 
-function M.conflict_file_paths_from_unmerged(stdout)
+function C.conflict_file_paths_from_unmerged(M, stdout)
   local paths = {}
   local seen = {}
   for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
@@ -46,7 +45,7 @@ function M.conflict_file_paths_from_unmerged(stdout)
     elseif path ~= nil then
       M.log_line("warn", "fix", "unknown", "CONFLICT_FILE_SKIPPED", {
         "reason=unsafe-path",
-        "path_key=" .. M.conflict_path_key(path),
+        "path_key=" .. C.conflict_path_key(M, path),
       })
     end
   end
@@ -54,8 +53,8 @@ function M.conflict_file_paths_from_unmerged(stdout)
   return paths
 end
 
-function M.log_conflict_files(dept, proposal_id, pr_number, unmerged_stdout)
-  local paths = M.conflict_file_paths_from_unmerged(unmerged_stdout)
+function C.log_conflict_files(M, dept, proposal_id, pr_number, unmerged_stdout)
+  local paths = C.conflict_file_paths_from_unmerged(M, unmerged_stdout)
   if #paths == 0 then
     M.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
       "action=no-op",
@@ -111,7 +110,7 @@ local function parse_conflict_log_line(line)
   }
 end
 
-function M.parse_conflict_file_facts(log_text)
+function C.parse_conflict_file_facts(log_text)
   local facts = {}
   local text = tostring(log_text or "")
   if #text > max_conflict_log_bytes then
@@ -126,7 +125,7 @@ function M.parse_conflict_file_facts(log_text)
   return facts
 end
 
-function M.conflict_hotspots(facts, threshold, now_seconds)
+function C.conflict_hotspots(facts, threshold, now_seconds)
   local cutoff_seconds = (tonumber(now_seconds) or now()) - conflict_hotspot_window_seconds
   local by_file = {}
   for _, fact in ipairs(facts or {}) do
@@ -165,6 +164,5 @@ function M.conflict_hotspots(facts, threshold, now_seconds)
   end)
   return result
 end
-end
 
-return S
+return C

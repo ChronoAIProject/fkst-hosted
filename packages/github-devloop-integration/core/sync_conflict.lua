@@ -1,6 +1,7 @@
 local S = {}
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
+local conflict_telemetry = require("devloop.conflict_telemetry")
 
 function S.install(M)
 local max_sync_conflict_attempts = 3
@@ -10,7 +11,7 @@ local function safe_branch_segment(branch)
 end
 
 local function conflict_fingerprint(conflict, unmerged_stdout)
-  local paths = M.conflict_file_paths_from_unmerged(unmerged_stdout)
+  local paths = conflict_telemetry.conflict_file_paths_from_unmerged(M, unmerged_stdout)
   local material = {
     "repo=" .. tostring(conflict.repo or ""),
     "upstream=" .. tostring(conflict.upstream_branch or ""),
@@ -86,7 +87,7 @@ function M.build_sync_conflict_escalation_request(conflict, fingerprint, attempt
     title = M.truncate_utf8(title, M._max_title_len)
   end
 
-  local paths = M.conflict_file_paths_from_unmerged(unmerged_stdout)
+  local paths = conflict_telemetry.conflict_file_paths_from_unmerged(M, unmerged_stdout)
   local path_lines = {}
   for _, path in ipairs(paths) do
     table.insert(path_lines, "- " .. path)
