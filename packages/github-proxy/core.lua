@@ -290,6 +290,18 @@ function M.is_safe_head_sha(head_sha) return is_git_sha(head_sha) end
 function M.parse_entity_list(gh_json_stdout, entity_type)
   local decoded = json.decode(gh_json_stdout or "[]")
   local entities = {}
+  local function parse_assignees(value)
+    local assignees = {}
+    for _, assignee in ipairs(value.assignees or {}) do
+      if type(assignee) == "table" and assignee.login ~= nil then
+        table.insert(assignees, tostring(assignee.login))
+      elseif type(assignee) == "string" then
+        table.insert(assignees, assignee)
+      end
+    end
+    return assignees
+  end
+
   local function visit_items(value)
     if type(value) ~= "table" then
       return
@@ -308,8 +320,11 @@ function M.parse_entity_list(gh_json_stdout, entity_type)
         if type(item_state) == "string" then
           item_state = item_state:upper()
         end
+        local author = value.user or value.author
+        local author_login = type(author) == "table" and author.login or author
         table.insert(entities, { number = number, title = value.title, url = value.url or value.html_url,
-          updated_at = value.updatedAt or value.updated_at, state = item_state, labels = labels })
+          updated_at = value.updatedAt or value.updated_at, state = item_state, labels = labels,
+          assignees = parse_assignees(value), author_login = author_login })
       end
       return
     end
