@@ -585,11 +585,15 @@ board_one() { # $1 name, $2 stale_hours
     printf "  PR#%-4s →%-12s %-12s %s\n" "$num" "$base" "$flow" "$title"
   done
   echo "── issues (by fkst-dev state) ──"
-  gh api "repos/$REPO/issues?state=open&per_page=100" --jq '.[]|select(.pull_request==null)|"\(.number)\t\(.updated_at)\t\([.labels[].name]|map(select(startswith("fkst-dev:")and .!="fkst-dev:enabled"))|join(","))\t\(.title[0:38])"' 2>/dev/null | \
+  gh api "repos/$REPO/issues?state=open&per_page=100" --jq '.[]|select(.pull_request==null)|([.labels[].name]|map(select(startswith("fkst-dev:")and .!="fkst-dev:enabled"))) as $labels|"\(.number)\t\(.updated_at)\t\(if ($labels|length)==0 then "__fkst_stateless__" else ($labels|join(",")) end)\t\(.title[0:38])"' 2>/dev/null | \
   while IFS=$'\t' read -r num upd label title; do
-    [ -z "$label" ] && continue
     local a st cls; a=$(( (now - $(epoch_utc "$upd")) / 3600 )); st="$(issue_primary_state "$label")"
-    cls="$(issue_recency_class "$num" "$label" "$st" "$a" "$stale" "$openpr")" || continue
+    if [ -z "$label" ] || [ "$label" = "__fkst_stateless__" ]; then
+      st="stateless"
+      if [ "$a" -ge "$stale" ]; then cls="⚠ STRANDED stateless ${a}h"; else cls="✓ waiting intake ${a}h"; fi
+    else
+      cls="$(issue_recency_class "$num" "$label" "$st" "$a" "$stale" "$openpr")" || continue
+    fi
     printf "  #%-4s [%-12s] %s\n" "$num" "$st" "$cls"
   done
   echo ""

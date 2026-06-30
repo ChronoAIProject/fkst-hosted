@@ -315,6 +315,50 @@ function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
+function M.intake_recheck_dedup_key(repo, issue_number, updated_at)
+  return M._dedup_key({
+    "intake-recheck",
+    M.safe_repo(repo),
+    "issue",
+    M.safe_issue(issue_number),
+    M.safe_updated_at(updated_at or "unknown"),
+  })
+end
+
+function M.build_intake_recheck_payload(repo, issue_number, updated_at, reason)
+  local source_ref = M.issue_source_ref(repo, issue_number)
+  local proposal_id = M.proposal_id(repo, tostring(issue_number))
+  return {
+    schema = "github-devloop.intake-recheck.v1",
+    repo = repo,
+    issue_number = tostring(issue_number),
+    updated_at = updated_at,
+    reason = reason or "fork-grace-elapsed",
+    proposal_id = proposal_id,
+    dedup_key = M.intake_recheck_dedup_key(repo, issue_number, updated_at),
+    source_ref = source_ref,
+  }
+end
+
+function M.is_supported_intake_recheck(payload)
+  if type(payload) ~= "table" or payload.schema ~= "github-devloop.intake-recheck.v1" then
+    return false
+  end
+  if payload.reason ~= nil and tostring(payload.reason) ~= "fork-grace-elapsed" then
+    return false
+  end
+  local repo, issue_number = M.parse_issue_source_ref(payload.source_ref)
+  if repo == nil or issue_number == nil then
+    return false
+  end
+  if tostring(payload.repo or "") ~= repo or tostring(payload.issue_number or "") ~= tostring(issue_number) then
+    return false
+  end
+  local proposal_id = M.proposal_id(repo, issue_number)
+  return tostring(payload.proposal_id or "") == proposal_id
+    and tostring(payload.dedup_key or "") == M.intake_recheck_dedup_key(repo, issue_number, payload.updated_at)
+end
+
 function M.build_proposal(issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")

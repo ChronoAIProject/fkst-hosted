@@ -57,6 +57,7 @@ class DogfoodBoardHarness:
                     printf '%s\\t%s\\t%s\\t%s\\n' 34 2026-06-27T00:00:00Z 'fkst-dev:ready' 'Actionable ready'
                     printf '%s\\t%s\\t%s\\t%s\\n' 35 2026-06-27T00:00:00Z 'fkst-dev:blocked' 'Terminal blocked'
                     printf '%s\\t%s\\t%s\\t%s\\n' 36 2026-06-27T00:00:00Z 'fkst-dev:implementing,fkst-dev:blocked-on-dependency' 'Implementing stale'
+                    printf '%s\\t%s\\t%s\\t%s\\n' 37 2026-06-27T00:00:00Z '__fkst_stateless__' 'Stateless old issue'
                     ;;
                   *)
                     printf 'unexpected gh call: %s\\n' "$*" >&2
@@ -120,6 +121,7 @@ class DogfoodBoardTest(unittest.TestCase):
             self.assertIn("#34   [ready       ] ⚠ STUCK ready 12h", result.stdout)
             self.assertIn("#35   [blocked     ] parked(blocked)", result.stdout)
             self.assertIn("#36   [implementing] ⚠ STUCK implementing 12h", result.stdout)
+            self.assertIn("#37   [stateless   ] ⚠ STRANDED stateless 12h", result.stdout)
         finally:
             h.close()
 

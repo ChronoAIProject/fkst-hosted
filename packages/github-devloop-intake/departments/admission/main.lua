@@ -1,9 +1,11 @@
 local core = require("core")
 local operator_commands = require("devloop.operator_commands")
+local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed" },
+  consumes = { "github-proxy.github_entity_changed", "devloop_intake_recheck" },
+  published_seam = { "devloop_intake_recheck" },
   produces = {
     "devloop_intake_candidate",
     "github-proxy.github_issue_comment_request",
@@ -62,16 +64,9 @@ local function done(_event)
   return false
 end
 
-local function act(event)
-  local entity = event.payload or {}
+local function admit_issue_event(event, entity)
+  entity = entity or event.payload or {}
   core.log_entry("admission", event, "github-devloop/intake", core.payload_field(entity, "dedup_key"))
-  if entity.type ~= "issue" then
-    return
-  end
-  if tostring(entity.state or ""):upper() ~= "OPEN" then
-    return
-  end
-
   local repo, issue_number = core.parse_issue_source_ref(entity.source_ref)
   if repo == nil or issue_number == nil then
     core.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "entity", "candidate", "skip-foreign(source_ref)", "invalid issue source_ref")
@@ -120,6 +115,43 @@ local function act(event)
     "devloop_intake_candidate",
   })
   core.log_raise("admission", proposal_id, "devloop_intake_candidate", payload)
+end
+
+local function act_entity_changed(event)
+  local entity = event.payload or {}
+  if entity.type ~= "issue" then
+    return
+  end
+  if tostring(entity.state or ""):upper() ~= "OPEN" then
+    return
+  end
+  admit_issue_event(event, entity)
+end
+
+local function act_recheck(event)
+  local payload = event.payload or {}
+  if not core.is_supported_intake_recheck(payload) then
+    core.log_entry("admission", event, "github-devloop/intake", core.payload_field(payload, "dedup_key"))
+    core.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "recheck", "candidate", "skip-foreign(payload)", "unsupported intake recheck payload")
+    return
+  end
+  admit_issue_event(event, {
+    source_ref = payload.source_ref,
+    updated_at = payload.updated_at,
+    dedup_key = payload.dedup_key,
+  })
+end
+
+local handlers = {
+  ["github-proxy.github_entity_changed"] = act_entity_changed,
+  devloop_intake_recheck = act_recheck,
+}
+
+local function act(event)
+  local handled = queue.dispatch_consumed_queue("admission", spec, event, handlers, "github-devloop-intake")
+  if not handled then
+    error("github-devloop-intake: consumed-queue-unrouted: " .. tostring(event and event.queue or ""))
+  end
 end
 
 return saga.department(spec, {

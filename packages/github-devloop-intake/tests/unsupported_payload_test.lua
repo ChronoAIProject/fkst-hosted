@@ -1,5 +1,6 @@
 local t = fkst.test
 local core = require("core")
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local package_root = "packages/github-devloop-intake"
 
@@ -50,12 +51,54 @@ local function payload_for_queue(queue)
       dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
       source_ref = core.issue_source_ref("owner/repo", 42),
     },
+    devloop_intake_tick = {
+      schema = "github-devloop.intake-tick.v1",
+    },
+    devloop_intake_recheck = core.build_intake_recheck_payload(
+      "owner/repo",
+      42,
+      "2026-06-03T01:02:03Z",
+      "fork-grace-elapsed"
+    ),
   }
   local payload = payloads[queue]
   if payload == nil then
     error("github-devloop-intake: no production-shaped queue fixture for " .. tostring(queue))
   end
   return payload
+end
+
+local function mock_queue_dependencies(queue)
+  if queue == "devloop_intake_tick" then
+    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+      stdout = "owner/repo",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+      stdout = "fkst-test-bot",
+      stderr = "",
+      exit_code = 0,
+    })
+    entity_read_mocks.mock_issue_list_command(t, core.gh_issue_list_intake_cmd("owner/repo", 100), {})
+  elseif queue == "devloop_intake_recheck" then
+    t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+      stdout = "fkst-test-bot",
+      stderr = "",
+      exit_code = 0,
+    })
+    entity_read_mocks.mock_issue_view_selector(t, {
+      number = 42,
+      title = "Namespaced dispatch probe",
+      body = "",
+      updated_at = "2026-06-03T01:02:03Z",
+      state = "CLOSED",
+      labels = {},
+      comments = {},
+      assignees = {},
+      author_login = "human",
+    }, "title,body,updatedAt,labels,comments,state,assignees,author")
+  end
 end
 
 local function run_department_with_logs(path, event)
@@ -87,6 +130,7 @@ return {
           queue = production_queue_name(queue),
           payload = payload_for_queue(queue),
         }
+        mock_queue_dependencies(queue)
         local ok, err, logs = run_department_with_logs(path, event)
         assert_no_unsupported_queue_fallthrough(path, queue, ok, err, logs)
       end

@@ -9,7 +9,7 @@ root = "."
 libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
-packages = ["github-proxy", "consensus", "github-devloop-decompose"]
+packages = ["github-proxy", "consensus", "github-devloop-decompose", "github-devloop-intake"]
 
 [conformance]
 pack = "conformance/pack.toml"
