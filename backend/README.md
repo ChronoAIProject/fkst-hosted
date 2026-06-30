@@ -8,7 +8,7 @@ only.
 
 > **Kubernetes-only deployment.** The fkst deployables are deployed exclusively
 > on Kubernetes via the per-deployable `k8s_sample/` directories
-> ([`fkst-control-plane/k8s_sample/`](fkst-control-plane/k8s_sample/README.md)
+> ([`k8s_sample/`](k8s_sample/README.md)
 > and [`fkst-worker/k8s_sample/`](fkst-worker/k8s_sample/README.md));
 > `docker-compose` is not used in this repo. Local development runs the crates
 > directly with `cargo run -p fkst-control-plane` / `cargo run -p fkst-worker`
@@ -23,7 +23,7 @@ only.
 
 1. Start MongoDB 7 from a developer-managed container (or the transitional
    mongodb manifests in
-   [`fkst-control-plane/k8s_sample/`](fkst-control-plane/k8s_sample/README.md)
+   [`k8s_sample/`](k8s_sample/README.md)
    on a local cluster). Until #143 removes Mongo, a local container is the
    simplest source (data persists in the named volume `fkst_mongo_data`):
 
@@ -303,7 +303,7 @@ backend/
 > **Shared vs. control-plane:** the role-neutral types (models, NyxID client,
 > LLM client, Ornn types, vault model) live under `backend/fkst-shared/src/`.
 > The Axum handlers, MongoDB wiring, and all business logic remain in
-> `backend/fkst-control-plane/src/`.
+> `backend/src/`.
 
 ## Docker images
 
@@ -314,7 +314,7 @@ workspace crate manifest + `Cargo.lock`, which live under `backend/`):
 | Dockerfile | Image | Contents | ENTRYPOINT |
 |------------|-------|----------|------------|
 | `backend/fkst-worker/Dockerfile` | `fkst-worker` | engine-laden (built from `backend/engine.ref`); carries the engine, codex, nyxid CLI, and the runtime volume. Engine pinned via `FKST_SUBSTRATE_REF`, **temporarily defaulted** to the `backend/engine.ref` SHA so a no-arg build works (workaround, see #227). | `fkst-worker` |
-| `backend/fkst-control-plane/Dockerfile` | `fkst-control-plane` | slim (only `ca-certificates`, no engine, runs as uid 10001). No `FKST_SUBSTRATE_REF` needed. | `fkst-control-plane` |
+| `backend/Dockerfile` | `fkst-control-plane` | slim (only `ca-certificates`, no engine, runs as uid 10001). No `FKST_SUBSTRATE_REF` needed. | `fkst-control-plane` |
 
 **Local builds:**
 
@@ -327,7 +327,7 @@ docker build -f backend/fkst-worker/Dockerfile \
   -t fkst-worker:dev .
 
 # Control-plane image (slim)
-docker build -f backend/fkst-control-plane/Dockerfile \
+docker build -f backend/Dockerfile \
   -t fkst-control-plane:dev .
 ```
 
@@ -347,7 +347,7 @@ Each deployable ships its own **sample** Kubernetes manifests under its crate
 directory; these `k8s_sample/` dirs are the single source of k8s objects (every
 value is a SAMPLE — the config loaders are the source of truth):
 
-- [`fkst-control-plane/k8s_sample/`](fkst-control-plane/k8s_sample/README.md) —
+- [`k8s_sample/`](k8s_sample/README.md) —
   Namespace, control-plane Deployment, the public ClusterIP Service (no
   Ingress), ConfigMap + Secret template, PDB, and the transitional MongoDB pair.
 - [`fkst-worker/k8s_sample/`](fkst-worker/k8s_sample/README.md) — worker
