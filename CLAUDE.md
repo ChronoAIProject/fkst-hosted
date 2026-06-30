@@ -49,7 +49,7 @@ fkst-hosted integrates with the following ChronoAI platform services. When doing
 
 ## API Contract (OpenAPI)
 
-The control plane (`backend/fkst-control-plane`) serves a **dynamically generated OpenAPI 3.1 document at `GET /openapi.json`**. It is assembled at runtime from the live Axum routes and Rust types via `utoipa` + `utoipa-axum` — there is **no static / checked-in spec file**, and the route registration *is* the documented path (`utoipa-axum`'s `OpenApiRouter` + `routes!`), so the spec never drifts from the code. The assembly + serving lives in `src/openapi.rs`; `src/router.rs::build_router` composes the routers and `split_for_parts()` yields `(Router, OpenApi)`.
+The control plane (`backend/`, a single Rust crate) serves a **dynamically generated OpenAPI 3.1 document at `GET /openapi.json`**. It is assembled at runtime from the live Axum routes and Rust types via `utoipa` + `utoipa-axum` — there is **no static / checked-in spec file**, and the route registration *is* the documented path (`utoipa-axum`'s `OpenApiRouter` + `routes!`), so the spec never drifts from the code. The assembly + serving lives in `src/openapi.rs`; `src/router.rs::build_router` composes the routers and `split_for_parts()` yields `(Router, OpenApi)`.
 
 When you add or change a **public** HTTP endpoint, the spec does **not** auto-reflect the handler signature — you must keep it in sync:
 
@@ -58,13 +58,13 @@ When you add or change a **public** HTTP endpoint, the spec does **not** auto-re
 - **Derive schemas**: `#[derive(ToSchema)]` on every request/response DTO; `#[derive(IntoParams)]` + `#[into_params(parameter_in = Query)]` on typed query structs. Error responses reference the public `error::ErrorEnvelope`.
 - **Security**: protected `/api/v1/*` operations carry `security(("NyxIdIdentity" = []))`; the public surface (`/health`, `/metrics`, `/openapi.json`, the signature-verified GitHub App webhook) carries none.
 
-Cross-crate and scope constraints:
+Scope and constraints:
 
-- **Shared wire types** live in `fkst-shared` and derive `ToSchema` behind an **off-by-default `schema` feature** (`#[cfg_attr(feature = "schema", derive(utoipa::ToSchema))]`). The control plane enables `fkst-shared/schema`; the **worker must NOT** (so `utoipa` stays out of the worker binary). A new shared type used in a control-plane DTO needs that `cfg_attr`, or the build breaks.
-- **Scope is the public surface only**: `/api/v1/*`, `/health`, `/metrics`, and the GitHub App webhook (only when a webhook secret is configured — the spec tracks live config). The fleet-only `/internal/v1/*` worker protocol is mounted **after** `build_router`, so it is intentionally excluded.
-- **Component names** are derived from the Rust type identifier, so duplicate idents collide in the spec — give colliding types distinct names (e.g. `AdminSessionView`, `SetupRepoRef`) or consolidate them into one shared type.
+- **Wire types** are plain modules in the crate and derive `ToSchema` directly (the backend is one crate — there is no separate shared/worker crate, so no off-by-default `schema` feature to gate). A new request/response DTO needs `#[derive(ToSchema)]`, or it won't appear in the spec.
+- **Scope is the public surface only**: `/api/v1/*`, `/health`, `/metrics`, and the GitHub App webhook (only when a webhook secret is configured — the spec tracks live config).
+- **Component names** are derived from the Rust type identifier, so duplicate idents collide in the spec — give colliding types distinct names or consolidate them into one type.
 - **Version pins**: `utoipa = "5"`, `utoipa-axum = "0.1"` (the axum-0.7 line; `utoipa-axum` 0.2+ targets axum 0.8 — do not bump it until axum itself is upgraded).
-- **Keep `tests/openapi.rs` green**: it drives the real `build_router` and asserts the spec's paths/schemas/security and that no `/internal/*` path ever leaks.
+- **Keep `tests/openapi.rs` green**: it drives the real `build_router` and asserts the spec's paths/schemas/security.
 
 ## Git Workflow
 
@@ -104,7 +104,7 @@ Cross-crate and scope constraints:
 
 - **Unless the user explicitly says otherwise, auto-merge every PR you open into `develop` as soon as CI passes** (all required checks green). Use GitHub auto-merge: `gh pr merge --auto --merge`.
 - **If any CI check fails, work on the resolution and auto-merge once CI passes.** Never leave a red PR open or hand it back unresolved.
-- Applies to PRs targeting `develop` (the unattended `develop-auto` loop follows the same auto-merge-on-green behavior). PRs into `main` are **releases** and still follow the review-gated release flow (1 approval).
+- Applies to PRs targeting `develop` (the unattended `develop-auto` loop follows the same auto-merge-on-green behavior). PRs into `main` still require review (1 approval); a release is cut manually as a git tag on `main`.
 
 ### Flow
 
@@ -130,47 +130,31 @@ Every issue and pull request uses a standard template, stored under `.github/`:
 - GitHub auto-applies these templates when opening issues/PRs in the web UI.
 - When creating issues/PRs via `gh` or the API (including unattended AI agent loops), fill the same template fields so structure and the required issue link are preserved.
 
-## Versioning & Release
+## Versioning
 
-fkst-hosted uses **Changesets + SemVer**. Changesets drive **only the version number**; the human-readable release notes are authored separately and accumulated into `CHANGELOG.md`.
+The product version lives in the root `package.json` (`version`) and is read by
+the Docker build. There is **no automated release pipeline** (the Changesets +
+release-note + tag workflows were removed): PRs into `develop` do **not** need a
+changeset, and a release — if ever cut — is a plain git tag on `main`.
 
-### Conventions
+## CI (pull requests into `develop`)
 
-- **Unified version:** one product version (front + back) in the root `package.json` — the single source of truth. (It will be mirrored into `Cargo.toml` and the frontend `package.json` once those exist.)
-- **Every PR into `develop` must include a changeset:** run `npx changeset` (or `npm run changeset`) and pick `patch` / `minor` / `major`. The `require-changeset` gate enforces this.
-- **Release notes:** copy the persistent template `.github/release-note-template.md` (sections `## Fixed`, `## New Feature`, `## Changed`) to `release-notes/release-note-YYYYMMDD-HHMM.md` and fill it in. The template is **never deleted**; the dated copies are **ephemeral** (removed after release).
-- **`CHANGELOG.md` (root)** is the persistent ledger — latest version on top, one `## vX.Y.Z` section per release (= that release's notes). It is updated as part of the `develop → main` release PR.
-- The **`release-automation`** label makes automated/release PRs skip the `require-changeset` and `require-release-note` gates.
+PRs into `develop` run exactly five checks, all under `.github/workflows/`:
 
-### Release flow
+| Check | Workflow | What it does |
+|-------|----------|--------------|
+| `rust lint` | `rust-ci.yml` | `cargo fmt --check` + `cargo clippy --all-targets -D warnings` |
+| `rust build` | `rust-ci.yml` | `cargo build --workspace --locked` |
+| `rust test` | `rust-ci.yml` | `cargo test --workspace --locked` |
+| `docker build` | `docker-build.yml` | builds `backend/Dockerfile` `--target server-builder` |
+| `gitleaks` | `gitleaks.yml` | scans the working tree for committed secrets |
 
-A release is **two PRs** (because `main` is protected and only `develop` may merge into it):
-
-1. **Prepare** — open a PR into `develop` with the **`release-automation`** label and the filled `release-notes/release-note-*.md`. The `sync-release-pr` workflow computes the next SemVer version from the pending changesets, bumps `package.json`, and writes the pending `CHANGELOG.md` section. Review and merge into `develop`.
-2. **Release** — open the `develop → main` PR (the `require-release-note` gate verifies the note). On merge, the `release` workflow tags `vX.Y.Z` and creates a GitHub Release whose body is the release note, then opens + merges a **lazy cleanup** PR back into `develop` (consume the changesets, delete the dated note, freeze the CHANGELOG entry). `main` is cleaned of those files on the next release.
-
-```mermaid
-graph LR
-    PR[feature PR + changeset] -->|merge| D[develop]
-    D -->|prepare PR: release-automation + release note| D
-    D -->|release PR| M[main]
-    M -->|on merge| T[tag vX.Y.Z + GitHub Release]
-    M -->|lazy cleanup PR| D
-```
-
-### Workflows
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `require-changeset.yml` | PRs into `develop` | Fail unless a changeset is added (skips on `release-automation`). |
-| `require-release-note.yml` | PRs `develop → main` | Fail unless a complete `release-note-*.md` is present (skips on `release-automation`). |
-| `sync-release-pr.yml` | labeled release PRs into `develop` | Compute version, bump `package.json`, write the pending `CHANGELOG` section. |
-| `release.yml` | push to `main` | Tag `vX.Y.Z`, create the GitHub Release, open the lazy cleanup PR into `develop`. |
+Keep this set minimal — do not add new PR gates without good reason.
 
 ## Quick Rules Summary
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
-- The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; `fkst-shared` wire types derive `ToSchema` behind its off-by-default `schema` feature (the worker stays utoipa-free); pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
+- The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes (per-deployable `k8s_sample/` dirs); `docker-compose` is not used in this repo.
 - Treat the upstream engine and packages repos as read-only references.
 - Keep commits small and self-contained.
@@ -182,6 +166,5 @@ graph LR
 - Use pull requests into `develop` or `develop-auto`; only `develop` merges into `main`.
 - Never force push `main`, `develop`, or `develop-auto`.
 - For NyxID / IAM work, reference NyxID's latest `main`; for Ornn / agent-skill work, reference Ornn's latest `main`.
-- Every PR into `develop` must include a changeset (`npx changeset`).
-- Releases use release notes from `.github/release-note-template.md` → `release-notes/`; `CHANGELOG.md` is the ledger and the version lives in root `package.json`.
-- A release = a `release-automation`-labelled prepare PR into `develop`, then a `develop → main` PR that tags `vX.Y.Z`.
+- PRs into `develop` run exactly five checks (rust lint/build/test, docker build, gitleaks); there is no changeset or release-note requirement.
+- The product version lives in root `package.json`; there is no automated release pipeline — releases are manual git tags on `main`.
