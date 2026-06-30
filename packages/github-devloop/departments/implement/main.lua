@@ -10,6 +10,7 @@ local transitions = require("departments.implement.transitions")
 local worktree_lifecycle = require("departments.implement.worktree")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local context_bundle = require("devloop.context_bundle")
+local config = require("devloop.config")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
@@ -69,7 +70,7 @@ local function raise_implement_attempt(repo, issue_number, ready, attempt, start
 end
 
 local function publish_implementation_branch(repo, issue_number, ready, worktree, branch)
-  if core.write_mode() ~= "real" then
+  if config.write_mode(core) ~= "real" then
     core.log_line("info", "implement", ready.proposal_id, "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
@@ -647,7 +648,7 @@ local function process_ready_event(event)
       return
     end
 
-    local branches = core.branch_config()
+    local branches = config.branch_config(core)
     local implementation_version = core.implementation_attempt_version(ready.dedup_key, ready.impl_retry_attempt)
     local branch_version = core.implementation_base_version(ready.dedup_key)
     local marker_ready = ready_for_implementation_version(ready, implementation_version)

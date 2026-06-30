@@ -1,6 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
+local config = require("devloop.config")
 require("tests.cache_seed_helpers")
 local t = h.t
 local core = h.core
@@ -608,7 +609,7 @@ return {
   end,
 
   test_loop_round_cap_records_round_and_handoff_reconcile_even_when_question_varies = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local function varying_digest(round)
       return {

@@ -3,6 +3,7 @@ local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local strings = require("contract.strings")
+local config = require("devloop.config")
 
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
@@ -239,7 +240,7 @@ local function merge_ready_queue_head(M, entities, now_seconds)
 end
 
 local function merge_queue_head_entity(M, repo, now_seconds)
-  local branches = M.branch_config()
+  local branches = config.branch_config(M)
   local _, entries = M.merge_queue_head(repo, branches.integration)
   local head, age = M.merge_queue_starvation_candidate(entries, M._merge_ready_starvation_threshold_minutes, now_seconds)
   if head == nil then

@@ -1,6 +1,7 @@
 local S = {}
 local error_facts = require("contract.error_facts")
 local logging = require("workflow.logging")
+local config = require("devloop.config")
 
 function S.install(M)
 
@@ -85,7 +86,7 @@ end
 
 function M.log_outbound(dept, proposal_id, queue, request)
   M.log_line("info", dept, proposal_id, "OUTBOUND", {
-    "mode=" .. M.write_mode(),
+    "mode=" .. config.write_mode(M),
     "queue=" .. tostring(queue or ""),
     "repo=" .. tostring(request and request.repo or ""),
     "issue=" .. tostring(request and request.issue_number or ""),

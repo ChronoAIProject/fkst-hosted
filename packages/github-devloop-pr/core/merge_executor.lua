@@ -7,6 +7,7 @@ local merge_batch = require("devloop.merge_batch")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local M = {}
 local github = require("forge.github").production_handle
+local config = require("devloop.config")
 
 local function log_gate(merge_ready, outcome, reason)
   local pass = merge_ready and merge_ready._merge_pass
@@ -83,7 +84,7 @@ end
 
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
   local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
-  if core.version_fix_round(current_state.version) >= core.max_fix_rounds() then
+  if core.version_fix_round(current_state.version) >= config.max_fix_rounds(core) then
     raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
     return
   end
@@ -93,7 +94,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
   if queue_position ~= nil then
     predecessor_set = queue_position.predecessor_set
   else
-    local branches = core.branch_config()
+    local branches = config.branch_config(core)
     local position, predecessor_reason = core.merge_queue_position(repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
@@ -236,7 +237,7 @@ local function revalidate_speculative_predecessors(repo, issue_number, merge_rea
   end
   local current_position = queue_position
   if current_position == nil then
-    local branches = core.branch_config()
+    local branches = config.branch_config(core)
     local position, reason = core.merge_queue_position(repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
@@ -248,7 +249,7 @@ local function revalidate_speculative_predecessors(repo, issue_number, merge_rea
     end
     current_position = position
   end
-  local branches = core.branch_config()
+  local branches = config.branch_config(core)
   local matches, match_reason = core.merge_queue_predecessor_set_matches_current_base(
     speculative_fact.predecessor_set,
     current_position.predecessor_set,
@@ -412,7 +413,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-foreign(pr-origin)", "PR origin/link does not match immutable PR branch")
     return
   end
-  local write_enabled = (write_mode or core.write_mode()) == "real"
+  local write_enabled = (write_mode or config.write_mode(core)) == "real"
   local pr_ok, pr_reason = assert_open_same_repo_pr(merge_ready, current_pr, repo, origin.branch, merge_ready.reviewed_head_sha)
   if not pr_ok then
     if core.is_merged_pr(current_pr)
@@ -792,7 +793,7 @@ local function process_merge_queue_tick(event)
   end
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
-    local branches = core.branch_config()
+    local branches = config.branch_config(core)
     local head, entries = merge_queue_head_all(repo, branches.integration)
     if head == nil then
       core.log_line("info", "merge", "unknown", "GATE", {
@@ -860,7 +861,7 @@ local function process_merge_queue_tick(event)
     merge_ready._merge_pass = "poll"
     core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local selected_is_fifo_head = queue_starvation_cause_matches_entry(cause, head)
-    local write_mode = core.write_mode()
+    local write_mode = config.write_mode(core)
     local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, {
       enforce_queue = false,
       write_mode = write_mode,
@@ -899,7 +900,7 @@ local function process_merge_ready_event(event)
 
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
-    local branches = core.branch_config()
+    local branches = config.branch_config(core)
     process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   end)
 end

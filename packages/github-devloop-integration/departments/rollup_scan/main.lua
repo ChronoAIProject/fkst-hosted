@@ -1,6 +1,7 @@
 local core = require("core")
 local saga = require("workflow.saga")
 local github = require("forge.github").production_handle
+local config = require("devloop.config")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -90,8 +91,8 @@ end
 
 local function act(event)
   core.log_entry("rollup_scan", event, "rollup", event and event.queue or "")
-  local branches = core.branch_config()
-  local cfg = core.devloop_config()
+  local branches = config.branch_config(core)
+  local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)
 
   if branches.integration == branches.upstream then

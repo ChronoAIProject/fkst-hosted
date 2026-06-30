@@ -1,6 +1,7 @@
 local convergence_shared, github_risk = require("devloop.convergence.shared"), require("devloop.github_risk")
 local core, saga = require("core"), require("workflow.saga")
 local transition_version = require("contract.transition_version")
+local config = require("devloop.config")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -39,7 +40,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.assert_trusted_bot_configured()
-  local branches = core.branch_config()
+  local branches = config.branch_config(core)
   local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
@@ -144,7 +145,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local issue_version = state.version
     local reflection_checkpoint = false
-    if effective_decision == "reject" and core.version_fix_round(state.version) < core.max_fix_rounds() then
+    if effective_decision == "reject" and core.version_fix_round(state.version) < config.max_fix_rounds(core) then
       issue_version = core.fix_version_from_review_version(state.version)
       reflection_checkpoint = core.version_fix_round(issue_version) == core.fix_reflection_checkpoint_round()
     end
@@ -173,7 +174,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     if effective_decision == "reject" then
       local fix_round = core.version_fix_round(state.version)
-      local max_rounds_hit = fix_round >= core.max_fix_rounds()
+      local max_rounds_hit = fix_round >= config.max_fix_rounds(core)
       if max_rounds_hit then
         local fix_reconcile = core.build_devloop_fix_reconcile_payload({
           proposal_id = origin.proposal_id,

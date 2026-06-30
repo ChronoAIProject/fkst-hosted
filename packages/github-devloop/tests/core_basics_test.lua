@@ -5,6 +5,7 @@ local github_risk = require("devloop.github_risk")
 local t = h.t
 local source_ref = h.source_ref
 local issue = h.issue
+local config = require("devloop.config")
 
 return {
   test_devloop_config_defaults_and_validation = function()
@@ -22,23 +23,23 @@ return {
       local rendered = type(cmd) == "table" and (cmd.cmd or table.concat(cmd.argv or {}, " ")) or cmd
       return responses[rendered] or { stdout = "", stderr = "unexpected " .. tostring(rendered), exit_code = 1 }
     end
-    local config = core.devloop_config(exec)
-    t.eq(config.repo, "owner/repo")
-    t.eq(config.bot_login, "fkst-test-bot")
-    t.eq(config.write_mode, "dry-run")
-    t.eq(config.upstream_branch, "dev")
-    t.eq(config.integration_branch, "dev")
-    t.eq(config.rollup_merge, "auto")
-    t.eq(core.test_command(exec), "scripts/run.sh test")
-    local local_command = core.local_iteration_test_command()
+    local cfg = config.devloop_config(core, exec)
+    t.eq(cfg.repo, "owner/repo")
+    t.eq(cfg.bot_login, "fkst-test-bot")
+    t.eq(cfg.write_mode, "dry-run")
+    t.eq(cfg.upstream_branch, "dev")
+    t.eq(cfg.integration_branch, "dev")
+    t.eq(cfg.rollup_merge, "auto")
+    t.eq(config.test_command(core, exec), "scripts/run.sh test")
+    local local_command = config.local_iteration_test_command(core)
     t.eq(local_command, "scripts/run.sh test-affected")
     t.is_nil(local_command:find("FKST_DEVLOOP_TEST_COMMAND", 1, true))
 
-    t.eq(core.env_present_command("GH_TOKEN"), 'if [ -n "${GH_TOKEN:-}" ]; then printf present; fi')
-    responses[core.env_present_command("GH_TOKEN")] = { stdout = "present", exit_code = 0 }
-    responses[core.env_present_command("GITHUB_TOKEN")] = { stdout = "", exit_code = 0 }
-    t.eq(core.env_present("GH_TOKEN", exec), true)
-    t.eq(core.env_present("GITHUB_TOKEN", exec), false)
+    t.eq(config.env_present_command(core, "GH_TOKEN"), 'if [ -n "${GH_TOKEN:-}" ]; then printf present; fi')
+    responses[config.env_present_command(core, "GH_TOKEN")] = { stdout = "present", exit_code = 0 }
+    responses[config.env_present_command(core, "GITHUB_TOKEN")] = { stdout = "", exit_code = 0 }
+    t.eq(config.env_present(core, "GH_TOKEN", exec), true)
+    t.eq(config.env_present(core, "GITHUB_TOKEN", exec), false)
     t.raises(function()
       core.read_env_command("GH_TOKEN")
     end)
@@ -48,22 +49,22 @@ return {
     responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "manual", exit_code = 0 }
     responses['printf %s "$FKST_DEVLOOP_TEST_COMMAND"'] = { stdout = "cargo build && cargo test", exit_code = 0 }
     responses['printf %s "$FKST_GITHUB_WRITE"'] = { stdout = "1", exit_code = 0 }
-    config = core.devloop_config(exec)
-    t.eq(config.write_mode, "real")
-    t.eq(config.upstream_branch, "main")
-    t.eq(config.integration_branch, "integration/dev")
-    t.eq(config.rollup_merge, "manual")
-    t.eq(core.test_command(exec), "cargo build && cargo test")
-    t.eq(core.local_iteration_test_command(exec), local_command)
+    cfg = config.devloop_config(core, exec)
+    t.eq(cfg.write_mode, "real")
+    t.eq(cfg.upstream_branch, "main")
+    t.eq(cfg.integration_branch, "integration/dev")
+    t.eq(cfg.rollup_merge, "manual")
+    t.eq(config.test_command(core, exec), "cargo build && cargo test")
+    t.eq(config.local_iteration_test_command(core, exec), local_command)
 
     responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "../bad", exit_code = 0 }
     t.raises(function()
-      core.branch_config(exec)
+      config.branch_config(core, exec)
     end)
     responses['printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"'] = { stdout = "integration/dev", exit_code = 0 }
     responses['printf %s "$FKST_DEVLOOP_ROLLUP_MERGE"'] = { stdout = "sometimes", exit_code = 0 }
     t.raises(function()
-      core.devloop_config(exec)
+      config.devloop_config(core, exec)
     end)
   end,
   test_gh_exec_opts_preserves_argv_without_shell_controls = function()

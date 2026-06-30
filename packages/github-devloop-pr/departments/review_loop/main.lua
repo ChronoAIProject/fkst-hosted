@@ -2,6 +2,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local core = require("core")
 local context_bundle = require("devloop.context_bundle")
+local config = require("devloop.config")
 
 local saga = require("workflow.saga")
 
@@ -83,7 +84,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.assert_trusted_bot_configured()
-  local branches = core.branch_config()
+  local branches = config.branch_config(core)
   local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review loop: " .. tostring(pr_view.stderr))
@@ -155,7 +156,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     )
     local facts_with_current = core.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local budget_round = math.max(round, core.review_converge_budget_round(current_pr.comments, unresolved.proposal_id, origin.proposal_id))
-    local hit_round_cap = budget_round >= core.max_converge_rounds()
+    local hit_round_cap = budget_round >= config.max_converge_rounds(core)
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
       local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
       local review_reconcile = core.build_devloop_review_reconcile_payload(unresolved, round, origin.proposal_id, review_version, reviewed_head_sha)

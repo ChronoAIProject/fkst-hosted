@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local config = require("devloop.config")
 
 -- Mock the env reads a claim flow consults. Each mock_command registration is
 -- consumed by one matching read (queued FIFO), mirroring claim_contract_test.lua's
@@ -283,7 +284,7 @@ return {
 
   test_unknown_mode_falls_back_to_assignee = function()
     mock_env("fkst-test-bot", "bogus-mode", "")
-    t.eq(core.claim_mode(), "assignee")
+    t.eq(config.claim_mode(core), "assignee")
     t.eq(core.issue_claim_state({ { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
     t.mock_command("gh issue view 42 --repo owner/repo --json assignees,author", {
       stdout = ownership_json({ "fkst-test-bot" }, "fkst-test-bot"),

@@ -3,6 +3,7 @@ local saga = require("workflow.saga")
 local strings = require("contract.strings")
 local context_bundle = require("devloop.context_bundle")
 local decompose_lib = require("devloop.decompose")
+local config = require("devloop.config")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -394,7 +395,7 @@ local function act_decompose(event)
       count = 1
     end
 
-    if core.write_mode() ~= "real" then
+    if config.write_mode(core) ~= "real" then
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "dry-run(marker-write-required)", "FKST_GITHUB_WRITE=1 is required before issue create requests")
       return
     end

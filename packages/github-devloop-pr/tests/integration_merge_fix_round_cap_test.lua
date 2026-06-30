@@ -11,6 +11,7 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local config = require("devloop.config")
 
 local function mock_base_head_for_stale_mergeability()
   t.mock_command("git fetch origin dev", { stdout = "", stderr = "", exit_code = 0 })
@@ -28,7 +29,7 @@ end
 
 local function max_fix_round_merge_ready()
   local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-  for n = 1, core.max_fix_rounds() do
+  for n = 1, config.max_fix_rounds(core) do
     version = version .. "/fix/" .. tostring(n)
   end
   local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
@@ -59,10 +60,10 @@ return {
     local reconcile = find_raise(result.raises, "devloop_fix_reconcile")
     local decompose = find_raise(result.raises, "github-devloop-decompose.devloop_decompose")
     t.eq(reconcile.payload.issue_version, event.version)
-    t.eq(reconcile.payload.round, core.max_fix_rounds())
+    t.eq(reconcile.payload.round, config.max_fix_rounds(core))
     t.eq(reconcile.payload.pr_number, event.pr_number)
     t.eq(decompose.payload.version, event.version)
-    t.eq(decompose.payload.round, core.max_fix_rounds())
+    t.eq(decompose.payload.round, config.max_fix_rounds(core))
     t.eq(decompose.payload.pr_number, event.pr_number)
     t.eq(decompose.payload.review_proposal_id, event.review_proposal_id)
     t.eq(decompose.payload.review_dedup_key, event.review_dedup_key)

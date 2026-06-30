@@ -1,6 +1,7 @@
 local S = {}
 local check_runs = require("forge.github.check_runs")
 local contract_time = require("contract.time")
+local config = require("devloop.config")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -216,7 +217,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     age_minutes = age,
     threshold_minutes = threshold,
     failing_check = failing_check,
-    rollup_autofix = M.rollup_autofix_enabled(),
+    rollup_autofix = config.rollup_autofix_enabled(M),
   }
   local snapshot = write_snapshot(repo, evidence)
   local request = M.build_rollup_health_issue_create_request(repo, evidence, snapshot)

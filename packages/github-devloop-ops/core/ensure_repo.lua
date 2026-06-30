@@ -1,4 +1,5 @@
 local S = {}
+local config = require("devloop.config")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -351,7 +352,7 @@ function M.ensure_repo_label_specs()
 end
 
 function M.ensure_repo()
-  local cfg = M.devloop_config()
+  local cfg = config.devloop_config(M)
   local repo = require_repo(cfg.repo)
   if cfg.write_mode == "real" then
     M.assert_trusted_bot_configured()
@@ -381,7 +382,7 @@ function M.ensure_repo()
   -- The fkst-dev:claimed label backs label-mode ownership; only register it when
   -- the deployment opts into label-mode so assignee-mode repos stay unchanged.
   local claim_label_result = nil
-  if M.claim_mode() == "label" then
+  if config.claim_mode(M) == "label" then
     claim_label_result = ensure_label(repo, apply_mode, repo_labels, {
       name = M.claimed_label(),
       color = "0E8A16",
@@ -392,7 +393,7 @@ function M.ensure_repo()
   return {
     repo = repo,
     mode = cfg.write_mode,
-    claim_mode = M.claim_mode(),
+    claim_mode = config.claim_mode(M),
     labels = label_result,
     dashboard_label = dashboard_label_result,
     claim_label = claim_label_result,

@@ -1,6 +1,7 @@
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
+local config = require("devloop.config")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -86,7 +87,7 @@ local function raise_conflict(repo, upstream, integration, upstream_sha, integra
 end
 
 local function push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
-  if core.write_mode() ~= "real" then
+  if config.write_mode(core) ~= "real" then
     core.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
@@ -124,7 +125,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
 end
 
 local function converge_integration_to_upstream(repo, upstream, integration, upstream_sha, integration_sha)
-  if core.write_mode() ~= "real" then
+  if config.write_mode(core) ~= "real" then
     core.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
@@ -175,8 +176,8 @@ end
 
 local function act(event)
   core.log_entry("sync_scan", event, "branch-sync", event and event.queue or "")
-  local branches = core.branch_config()
-  local cfg = core.devloop_config()
+  local branches = config.branch_config(core)
+  local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)
 
   if branches.integration == branches.upstream then

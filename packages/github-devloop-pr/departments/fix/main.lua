@@ -4,6 +4,7 @@ local saga = require("workflow.saga")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
+local config = require("devloop.config")
 
 local spec = {
   consumes = { "devloop_fixing" },
@@ -342,7 +343,7 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
-  local write_enabled = core.write_mode() == "real"
+  local write_enabled = config.write_mode(core) == "real"
   if write_enabled then
     return true
   end
@@ -641,7 +642,7 @@ local function act_fix(event)
   local attempt_plan = nil
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
-    local branches = core.branch_config()
+    local branches = config.branch_config(core)
 
     local pr_view = core.gh_pr_view_fix(repo, fix.pr_number, 30)
     if pr_view.exit_code ~= 0 then

@@ -10,6 +10,7 @@ local mock_bot_env = h.mock_bot_env
 local mock_pr_origin = h.mock_pr_origin
 local mock_issue_review = h.mock_issue_review
 local find_raise = h.find_raise
+local config = require("devloop.config")
 
 return {
   test_review_loop_reraised_proposal_dedup_follows_incoming_review_lineage = function()
@@ -47,7 +48,7 @@ return {
   end,
 
   test_review_loop_round_cap_records_round_and_raises_review_reconcile_even_when_question_varies = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local event = review_unresolved({
       dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/" .. tostring(cap),
       round = cap,
@@ -91,7 +92,7 @@ return {
   end,
 
   test_review_loop_round_cap_uses_review_budget_when_version_head_and_source_ref_drift = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local event = review_unresolved({
       dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/6",
       round = 6,

@@ -3,6 +3,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
+local config = require("devloop.config")
 
 function S.install(M)
 local function linked_pr_state(pr)
@@ -247,7 +248,7 @@ local function replay_review_converge(dept, issue, state, facts, tools, link, cu
   if latest == nil then
     return nil
   end
-  if M.is_true_stall(records, round) or round >= M.max_converge_rounds() then
+  if M.is_true_stall(records, round) or round >= config.max_converge_rounds(M) then
     local payload = M.build_devloop_review_reconcile_payload(latest, round, facts.proposal_id, state.version, current_pr.head_sha)
     M.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "blocked", "applied(replay)", "trusted review-converge-round fact reached terminal reconcile")
     return tools.raise_effects(dept, facts.proposal_id, "blocked", M.review_reconcile_terminal_state_version(state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {

@@ -1,6 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
 local context_bundle = require("devloop.context_bundle")
+local config = require("devloop.config")
 
 
 
@@ -77,7 +78,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     )
     local facts_with_current = core.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
-    local hit_round_cap = budget_round >= core.max_converge_rounds()
+    local hit_round_cap = budget_round >= config.max_converge_rounds(core)
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
       local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body, {
         kind = "github-devloop.reconcile",

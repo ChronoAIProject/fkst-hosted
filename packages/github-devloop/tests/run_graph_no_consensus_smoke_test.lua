@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local config = require("devloop.config")
 
 local t = h.t
 local core = h.core
@@ -114,7 +115,7 @@ local function mock_issue_reads()
 end
 
 local function unresolved_at_cap()
-  local cap = core.max_converge_rounds()
+  local cap = config.max_converge_rounds(core)
   return {
     schema = "consensus.consensus_converge.v1",
     proposal_id = "github-devloop/issue/owner/repo/42",

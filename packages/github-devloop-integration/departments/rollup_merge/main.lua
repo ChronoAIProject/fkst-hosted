@@ -1,6 +1,7 @@
 local core = require("core")
 local saga = require("workflow.saga")
 local github = require("forge.github").production_handle
+local config = require("devloop.config")
 
 local spec = {
   consumes = { "devloop_rollup_ready" },
@@ -57,7 +58,7 @@ local function act(event)
 
   core.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
   with_lock(core.rollup_lock_key(payload.repo, payload.upstream_branch, payload.integration_branch), function()
-    if core.write_mode() ~= "real" then
+    if config.write_mode(core) ~= "real" then
       log_skip(payload, "dry-run")
       return
     end

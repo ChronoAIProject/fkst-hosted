@@ -1,4 +1,5 @@
 local strings = require("contract.strings")
+local config = require("devloop.config")
 
 local M = {}
 
@@ -33,7 +34,7 @@ function M.stderr_http_status(stderr)
 end
 
 function M.gh_auth_mode(core)
-  if core.env_present("GH_TOKEN") or core.env_present("GITHUB_TOKEN") then
+  if config.env_present(core, "GH_TOKEN") or config.env_present(core, "GITHUB_TOKEN") then
     return "env-token"
   end
   return "gh-auth"

@@ -3,6 +3,7 @@ local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local support = require("devloop.commands.support")
+local config = require("devloop.config")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -466,12 +467,12 @@ function M.merge_queue_files_disjoint(left, right)
 end
 
 function M.wip_capacity_allows_start(repo, current_issue_number)
-  local max_inflight = M.max_inflight()
+  local max_inflight = config.max_inflight(M)
   if max_inflight == nil then
     return true, "wip-cap-disabled", 0, nil
   end
 
-  local integration_branch = M.branch_config().integration
+  local integration_branch = config.branch_config(M).integration
 
   local list = M.gh_issue_list_wip(repo, 30)
   if list.exit_code ~= 0 then

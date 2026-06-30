@@ -1,5 +1,6 @@
 local core = require("core")
 local git_adapter = require("forge.git")
+local config = require("devloop.config")
 
 local saga = require("workflow.saga")
 
@@ -156,7 +157,7 @@ local function write_refresh_commit(worktree, runtime, repo, branch, integration
 end
 
 local function push_if_real(repo, branch, branch_sha, worktree)
-  if core.write_mode() ~= "real" then
+  if config.write_mode(core) ~= "real" then
     core.log_line("info", "pr_freshness_scan", "pr-freshness", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
@@ -258,8 +259,8 @@ end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   core.log_entry("pr_freshness_scan", event, "pr-freshness", event and event.queue or "")
-  local branches = core.branch_config()
-  local cfg = core.devloop_config()
+  local branches = config.branch_config(core)
+  local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)
   if branches.integration == branches.upstream then
     core.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = "same-branch", version = branches.integration }, "tick", "freshness", "skip-idempotent(same-branch)", "integration branch equals upstream branch")

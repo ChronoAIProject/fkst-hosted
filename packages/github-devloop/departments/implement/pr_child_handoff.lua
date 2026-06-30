@@ -1,4 +1,5 @@
 local core = require("core")
+local config = require("devloop.config")
 
 local H = {}
 
@@ -46,7 +47,7 @@ local function emit_effects(dept, proposal_id, effects)
 end
 
 function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current, fact, reason)
-  if core.write_mode() ~= "real" then
+  if config.write_mode(core) ~= "real" then
     core.log_line("info", dept, ready.proposal_id, "OUTBOUND", {
       "mode=dry-run",
       "queue=github-proxy.github_pr_comment_request",

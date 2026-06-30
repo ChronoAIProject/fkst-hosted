@@ -7,6 +7,7 @@ local forge_validators = require("devloop.forge_validators")
 local operator_commands = require("devloop.operator_commands")
 local decompose_lib = require("devloop.decompose")
 local replayer = require("devloop.replayer")
+local config = require("devloop.config")
 
 local M = {}
 
@@ -306,7 +307,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
   if mergeable or not check_runs.is_not_mergeable_reason(reason) then
     return false
   end
-  if core.version_fix_round(state.version) >= core.max_fix_rounds() then
+  if core.version_fix_round(state.version) >= config.max_fix_rounds(core) then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "skip-idempotent(fix-loop-max-rounds)", reason)
     return false
   end
@@ -430,7 +431,7 @@ local function process_pr_event(event)
 
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   core.assert_trusted_bot_configured()
-  local branches = core.branch_config()
+  local branches = config.branch_config(core)
   local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))

@@ -1,4 +1,5 @@
 local S = {}
+local config = require("devloop.config")
 
 function S.install(M)
 local gate = require("devloop.gate")
@@ -288,7 +289,7 @@ end
 
 function M.adopt_existing_pr_child(issue, impl_version, generation)
   local repo, issue_number, issue_proposal_id = issue_fields(issue, impl_version)
-  local base_branch = issue.base_branch or (issue.implementation and issue.implementation.base_branch) or M.branch_config().integration
+  local base_branch = issue.base_branch or (issue.implementation and issue.implementation.base_branch) or config.branch_config(M).integration
   local branch = issue.branch or (issue.implementation and issue.implementation.branch) or branch_for(repo, issue_number, impl_version)
   local delegation = delegation_key(issue_proposal_id, impl_version, generation or 1)
   local pr = find_pr(repo, branch, base_branch)
@@ -297,7 +298,7 @@ end
 
 function M.ensure_pr_child(issue, impl_version, generation)
   local repo, issue_number, issue_proposal_id = issue_fields(issue, impl_version)
-  local base_branch = issue.base_branch or (issue.implementation and issue.implementation.base_branch) or M.branch_config().integration
+  local base_branch = issue.base_branch or (issue.implementation and issue.implementation.base_branch) or config.branch_config(M).integration
   local branch = issue.branch or (issue.implementation and issue.implementation.branch) or branch_for(repo, issue_number, impl_version)
   local delegation = delegation_key(issue_proposal_id, impl_version, generation or 1)
   local pr = existing_delegation(issue, issue_proposal_id, delegation)

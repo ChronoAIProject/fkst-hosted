@@ -1,4 +1,5 @@
 local core = require("core")
+local config = require("devloop.config")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 
@@ -101,7 +102,7 @@ local function commit_resolution(worktree, runtime, conflict)
 end
 
 local function push_if_real(conflict, worktree)
-  if core.write_mode() ~= "real" then
+  if config.write_mode(core) ~= "real" then
     core.log_line("info", "sync_conflict", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(conflict.repo),

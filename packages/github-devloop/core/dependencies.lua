@@ -2,6 +2,7 @@ local M = {}
 local root_ref = nil
 local strings = require("forge.strings")
 local transition_version = require("contract.transition_version")
+local config = require("devloop.config")
 
 local max_dependency_depth = 32
 
@@ -438,7 +439,7 @@ function M.dependency_gate(repo, issue_number, context)
   if type(gate_context) ~= "table" then
     gate_context = {}
   end
-  gate_context.managed_sibling_repos = core.managed_sibling_repos()
+  gate_context.managed_sibling_repos = config.managed_sibling_repos(core)
   local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0, gate_context, {})
   if not ok or type(result) ~= "table" then
     return gate("unresolvable", "dependency-gate-exception", {})

@@ -1,4 +1,5 @@
 local S = {}
+local config = require("devloop.config")
 
 local function prompt_loader(resolved)
   resolved = resolved or {}
@@ -149,7 +150,7 @@ function M.build_implement_prompt(proposal_id, current, framing, content_manifes
     proposal_id = M.neutralize_untrusted_prompt_text(proposal_id),
     framing = bounded_framing(M, framing),
     title = M.neutralize_untrusted_prompt_text(current.title),
-    local_test_command = M.local_iteration_test_command(),
+    local_test_command = config.local_iteration_test_command(M),
     content_fetch_block = local_context_block(M, content_manifest),
   }, nil, { role = "actor", entity_history = true })
 end
@@ -166,7 +167,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     framing = bounded_framing(M, framing),
     blocking_gap = bounded_gap(M, fix.blocking_gap),
     title = M.neutralize_untrusted_prompt_text(current_issue.title),
-    local_test_command = M.local_iteration_test_command(),
+    local_test_command = config.local_iteration_test_command(M),
     target_merge_context = target_merge_context(M, merge_context),
     content_fetch_block = local_context_block(M, content_manifest),
     review_feedback = M.neutralize_untrusted_prompt_text(review_reason),

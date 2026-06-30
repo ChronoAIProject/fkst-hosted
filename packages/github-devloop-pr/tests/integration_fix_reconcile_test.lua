@@ -15,6 +15,7 @@ local mock_issue_review = h.mock_issue_review
 local find_raise = h.find_raise
 local find_causal_raise = h.find_causal_raise
 local count_calls = h.count_calls
+local config = require("devloop.config")
 
 local function origin_marker(version)
   return core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", version, "dev")
@@ -57,11 +58,11 @@ end
 
 return {
   test_review_result_reject_same_framing_below_max_keeps_fixing = function()
-    local review_version = fix_round_version(core.max_fix_rounds() - 1)
+    local review_version = fix_round_version(config.max_fix_rounds(core) - 1)
     local event = reject_review_event(review_version)
     event.framing = "Raising bounds breaks the reliable payload proof."
     local fix_version = core.fix_version_from_review_version(review_version)
-    t.eq(core.version_fix_round(review_version), core.max_fix_rounds() - 1)
+    t.eq(core.version_fix_round(review_version), config.max_fix_rounds(core) - 1)
     mock_bot_env()
     mock_pr_origin({ origin_marker(reviewing().version) }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result({ "fkst-dev:reviewing" }, {
@@ -86,11 +87,11 @@ return {
   end,
 
   test_review_result_reject_max_fix_rounds_blocks_even_when_framing_changes = function()
-    local over_version = fix_round_version(core.max_fix_rounds())
+    local over_version = fix_round_version(config.max_fix_rounds(core))
     local over_event = reject_review_event(over_version)
-    over_event.framing = "Round " .. tostring(core.max_fix_rounds()) .. " has new feedback."
-    local previous_a = fix_round_version(core.max_fix_rounds() - 1)
-    local previous_b = fix_round_version(core.max_fix_rounds() - 2)
+    over_event.framing = "Round " .. tostring(config.max_fix_rounds(core)) .. " has new feedback."
+    local previous_a = fix_round_version(config.max_fix_rounds(core) - 1)
+    local previous_b = fix_round_version(config.max_fix_rounds(core) - 2)
     mock_bot_env()
     mock_pr_origin({ origin_marker(reviewing().version) }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result({ "fkst-dev:reviewing" }, {
@@ -105,7 +106,7 @@ return {
     local reconcile = find_raise(over.raises, "devloop_fix_reconcile").payload
     local decompose = find_raise(over.raises, "github-devloop-decompose.devloop_decompose").payload
     t.eq(reconcile.issue_version, over_version)
-    t.eq(reconcile.round, core.max_fix_rounds())
+    t.eq(reconcile.round, config.max_fix_rounds(core))
     t.eq(decompose.schema, "github-devloop.decompose.v1")
     t.eq(decompose.proposal_id, reconcile.proposal_id)
     t.eq(decompose.version, reconcile.issue_version)

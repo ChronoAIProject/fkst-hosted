@@ -1,4 +1,5 @@
 local S = {}
+local config = require("devloop.config")
 
 function S.install(M)
 local codex = require("workflow.codex")
@@ -7,6 +8,13 @@ local forge_validators = require("devloop.forge_validators")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local transition_version = require("contract.transition_version")
+
+M.read_env_command = function(name)
+  return config.read_env_command(M, name)
+end
+M.read_env = function(name, exec)
+  return config.read_env(M, name, exec)
+end
 
 local max_key_len = 200
 local max_dedup_len = 512

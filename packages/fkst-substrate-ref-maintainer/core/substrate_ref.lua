@@ -1,6 +1,7 @@
 local S = {}
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
+local config = require("devloop.config")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -635,7 +636,7 @@ function M.substrate_ref_constants()
 end
 
 function M.substrate_ref_scan()
-  local cfg = M.devloop_config()
+  local cfg = config.devloop_config(M)
   local repo = require_repo(cfg.repo)
   if cfg.write_mode == "real" then
     M.assert_trusted_bot_configured()

@@ -9,7 +9,6 @@ function M.decompose_package_queue()
 end
 
 require("devloop.base").install(M)
-require("devloop.config").install(M)
 require("forge.github_debug_stamp").install(M)
 require("devloop.strings").install(M)
 require("core.github_graphql").install(M)

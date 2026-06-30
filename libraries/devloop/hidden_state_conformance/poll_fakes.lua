@@ -1,11 +1,12 @@
 local S = {}
 local context_bundle = require("devloop.context_bundle")
+local config = require("devloop.config")
 
 function S.with(core, opts, fn)
   local head_sha = opts.head_sha
   local base_branch = opts.base_branch
   local previous_children = core.gh_issue_list_decompose_children
-  local previous_branch_config = core.branch_config
+  local previous_branch_config = config.branch_config
   local previous_fetch_branch = core.fetch_branch
   local previous_remote_head = core.remote_head
   local previous_is_ancestor = core.is_ancestor
@@ -19,7 +20,7 @@ function S.with(core, opts, fn)
       return { exit_code = 0, stdout = "[]", stderr = "" }
     end
   end
-  core.branch_config = function()
+  config.branch_config = function(_core)
     return { integration = base_branch, upstream = "dev" }
   end
   core.fetch_branch = function()
@@ -49,7 +50,7 @@ function S.with(core, opts, fn)
   if type(previous_children) == "function" then
     core.gh_issue_list_decompose_children = previous_children
   end
-  core.branch_config = previous_branch_config
+  config.branch_config = previous_branch_config
   core.fetch_branch = previous_fetch_branch
   core.remote_head = previous_remote_head
   core.is_ancestor = previous_is_ancestor

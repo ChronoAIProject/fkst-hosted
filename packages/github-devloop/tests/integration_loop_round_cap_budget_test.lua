@@ -7,6 +7,7 @@ local unresolved = h.unresolved
 local run_loop = h.run_loop
 local mock_issue_loop = h.mock_issue_loop
 local find_raise = h.find_raise
+local config = require("devloop.config")
 
 local function run_comment_handoff_from_request(request, comment_id, name)
   return t.run_department("departments/comment_handoff/main.lua", {
@@ -27,7 +28,7 @@ end
 
 return {
   test_loop_round_cap_uses_proposal_budget_when_version_and_source_ref_drift = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local drift_version = base_version .. "/drifted"
     local event = unresolved({
@@ -57,7 +58,7 @@ return {
   end,
 
   test_loop_round_cap_uses_stable_proposal_facts_for_current_round_when_key_drifts = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local old_base = "consensus:github-devloop/issue/owner/repo/42/intake/old"
     local current_base = "consensus:github-devloop/issue/owner/repo/42/intake/current"
     local event = unresolved({
@@ -87,7 +88,7 @@ return {
   end,
 
   test_loop_true_stall_reconcile_runs_after_comment_handoff_ack = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = unresolved({
       dedup_key = base_version .. "/loop/" .. tostring(cap),
@@ -133,7 +134,7 @@ return {
   end,
 
   test_loop_round_cap_preserves_question_verdict_boundary_when_key_drifts = function()
-    local cap = core.max_converge_rounds()
+    local cap = config.max_converge_rounds(core)
     local old_base = "consensus:github-devloop/issue/owner/repo/42/intake/old"
     local current_base = "consensus:github-devloop/issue/owner/repo/42/intake/current"
     local event = unresolved({
