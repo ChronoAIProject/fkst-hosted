@@ -46,7 +46,7 @@ local function duplicate_label(repo, issue_number, ready, origin, canonical_numb
   )
 end
 
-function M.check(repo, issue_number, ready, origin, original)
+function M.check(repo, issue_number, ready, origin, original, managed)
   if type(origin) ~= "table" or type(original) ~= "table" then
     return false
   end
@@ -54,7 +54,8 @@ function M.check(repo, issue_number, ready, origin, original)
     core,
     original.comments,
     forks.fork_issue_dedup_key(origin.repo, origin.issue_number),
-    core.claim_owner()
+    core.claim_owner(),
+    managed
   )
   if canonical == nil or tonumber(canonical) == tonumber(issue_number) then
     return false

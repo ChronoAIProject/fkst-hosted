@@ -6,6 +6,28 @@ local F = {}
 
 local max_login_len = 80
 
+function F.managed_fork_trust_set(core, bot_login, managed)
+  local trust_set = {}
+  if type(managed) == "table" then
+    for login, trusted in pairs(managed) do
+      if trusted then trust_set[login] = true end
+    end
+  elseif type(core.managed_bot_logins) == "function" then
+    for login, trusted in pairs(core.managed_bot_logins() or {}) do
+      if trusted then trust_set[login] = true end
+    end
+  end
+  local normalized = core.strip_bot_login_suffix(bot_login)
+  if normalized ~= nil and normalized ~= "" then
+    trust_set[normalized] = true
+  end
+  return trust_set
+end
+
+local function is_trusted_fork_marker_author(core, comment, trust_set)
+  return parsers_misc._is_trusted_comment(core, comment, trust_set)
+end
+
 local function safe_marker_attr(value)
   local text = tostring(value or ""):gsub("<!%-%- fkst:[^\n]*%-%->", " ")
   text = text:gsub("&lt;!%-%- fkst:[^\n]*%-%-&gt;", " ")
@@ -31,14 +53,15 @@ function F.fork_issue_dedup_key(repo, issue_number)
   })
 end
 
-function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot_login)
+function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot_login, managed)
   if type(comments) ~= "table" then
     return false
   end
+  local trust_set = F.managed_fork_trust_set(core, bot_login, managed)
   local create_pattern = "<!%-%- fkst:github%-proxy:issue%-create%-intent:v1.-%-%->"
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(comments) do
-    if parsers_misc.comment_author_login(core, comment) == tostring(bot_login) then
+    if is_trusted_fork_marker_author(core, comment, trust_set) then
       local body = parsers_misc.comment_body(core, comment)
       for marker in body:gmatch(create_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
@@ -55,13 +78,14 @@ function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot
   return false
 end
 
-function F.trusted_issue_created_number(core, comments, dedup_key, bot_login)
+function F.trusted_issue_created_number(core, comments, dedup_key, bot_login, managed)
   if type(comments) ~= "table" then
     return nil
   end
+  local trust_set = F.managed_fork_trust_set(core, bot_login, managed)
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(comments) do
-    if parsers_misc.comment_author_login(core, comment) == tostring(bot_login) then
+    if is_trusted_fork_marker_author(core, comment, trust_set) then
       local body = parsers_misc.comment_body(core, comment)
       for marker in body:gmatch(created_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
@@ -121,17 +145,18 @@ local function fork_origin_fact_from_text(core, text)
   return nil
 end
 
-function F.fork_origin_fact(core, entity)
+function F.fork_origin_fact(core, entity, managed)
   if type(entity) ~= "table" then
     return nil
   end
-  if core.issue_author_login(entity) == core.claim_owner() then
+  local trust_set = F.managed_fork_trust_set(core, core.claim_owner(), managed)
+  if core.is_managed_bot_login(core.issue_author_login(entity), trust_set) then
     local body_fact = fork_origin_fact_from_text(core, entity.body)
     if body_fact ~= nil then
       return body_fact
     end
   end
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, entity.comments)) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, entity.comments, trust_set)) do
     local comment_fact = fork_origin_fact_from_text(core, parsers_misc.comment_body(core, comment))
     if comment_fact ~= nil then
       return comment_fact
