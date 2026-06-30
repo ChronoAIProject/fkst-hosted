@@ -1,5 +1,7 @@
 local core = require("core")
 
+local payloads_builders = require("devloop.payloads.builders")
+local payloads_board = require("devloop.payloads.board")
 local M = {}
 
 M.spec = {
@@ -10,19 +12,19 @@ M.spec = {
 function M.run(payload)
   if payload.mode == "block" then
     return {
-      body = core.board_digest_block(payload.repo, payload.tick),
+      body = payloads_board.board_digest_block(core, payload.repo, payload.tick),
     }
   end
 
   if payload.mode == "append" then
     return {
-      proposal = core.append_board_digest_to_proposal(payload.proposal, payload.repo, payload.tick),
+      proposal = payloads_board.append_board_digest_to_proposal(core, payload.proposal, payload.repo, payload.tick),
     }
   end
 
   if payload.mode == "board_loop" then
     return {
-      proposal = core.build_board_loop_proposal(
+      proposal = payloads_builders.build_board_loop_proposal(core,
         payload.repo,
         payload.issue_number,
         payload.current,
@@ -36,7 +38,7 @@ function M.run(payload)
 
   if payload.mode == "board_review" then
     return {
-      proposal = core.build_board_pr_review_proposal(
+      proposal = payloads_builders.build_board_pr_review_proposal(core,
         payload.repo,
         payload.issue_number,
         payload.pr_number,
@@ -51,7 +53,7 @@ function M.run(payload)
 
   if payload.mode == "board_review_loop" then
     return {
-      proposal = core.build_board_pr_review_loop_proposal(
+      proposal = payloads_builders.build_board_pr_review_loop_proposal(core,
         payload.repo,
         payload.issue_number,
         payload.pr_number,

@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -60,7 +61,7 @@ return {
     t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    local expected_merge_ready = core.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42", "7", impl_version, {
+    local expected_merge_ready = payloads_builders.build_devloop_merge_ready_payload(core, "github-devloop/issue/owner/repo/42", "7", impl_version, {
       review_proposal_id = event.proposal_id,
       review_dedup_key = event.dedup_key,
       reviewed_head_sha = "def456",

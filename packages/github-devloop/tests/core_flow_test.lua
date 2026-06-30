@@ -1,6 +1,7 @@
 local parsers_pr = require("devloop.parsers.pr")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local core = h.core
 local t = h.t
 local decompose_lib = require("devloop.decompose")
@@ -394,17 +395,17 @@ return {
     local source = reached({
       framing = "Only include bounded issue comments; defer raising bounds.",
     })
-    local ready = core.build_devloop_ready_payload(source)
+    local ready = payloads_builders.build_devloop_ready_payload(core, source)
     t.eq(ready.schema, "github-devloop.ready.v1")
     t.eq(ready.proposal_id, source.proposal_id)
     t.eq(ready.framing, source.framing)
     t.eq(ready.source_ref.ref, "owner/repo#issue/42")
     t.eq(core.is_supported_ready(ready), true)
-    local ready_without_framing = core.build_devloop_ready_payload(reached())
+    local ready_without_framing = payloads_builders.build_devloop_ready_payload(core, reached())
     t.is_nil(ready_without_framing.framing)
     t.is_nil(ready_without_framing.ready_hand_off)
     t.eq(core.is_supported_ready(ready_without_framing), true)
-    local ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
+    local ready_with_hand_off = payloads_builders.build_devloop_ready_payload(core, copy_table(reached(), {
       include_ready_hand_off = true,
       ready_comment_id = "IC_123",
     }))
@@ -419,7 +420,7 @@ return {
     ready_with_hand_off.ready_hand_off.state = "ready"
     ready_with_hand_off.ready_hand_off.event_version = "ready/other"
     t.eq(core.is_supported_ready(ready_with_hand_off), false)
-    ready_with_hand_off = core.build_devloop_ready_payload(copy_table(reached(), {
+    ready_with_hand_off = payloads_builders.build_devloop_ready_payload(core, copy_table(reached(), {
       include_ready_hand_off = true,
       impl_retry_attempt = 2,
     }))
@@ -709,7 +710,7 @@ return {
   end,
 
   test_fixing_payload_carries_agreed_framing = function()
-    local fix = core.build_devloop_fixing_payload({
+    local fix = payloads_builders.build_devloop_fixing_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     }, 7, {
@@ -739,11 +740,11 @@ return {
       reviewed_head_sha = "def456",
       blocking_gap = "rollup red",
     }
-    local defective = core.build_replayed_fixing_payload(origin, 7, feedback, source_ref())
-    local corrected = core.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+    local defective = payloads_builders.build_replayed_fixing_payload(core, origin, 7, feedback, source_ref())
+    local corrected = payloads_builders.build_replayed_fixing_payload(core, origin, 7, copy_table(feedback, {
       gate_baseline_sha = "828df8d3",
     }), source_ref())
-    local new_predecessors = core.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+    local new_predecessors = payloads_builders.build_replayed_fixing_payload(core, origin, 7, copy_table(feedback, {
       predecessor_set = "pr5-github-devloop/issue/owner/repo/41-ready-aaa111",
     }), source_ref())
 
@@ -763,7 +764,7 @@ return {
     -- Real gh form (observed via dogfood): a merged / branch-deleted PR returns
     -- headRepository.nameWithOwner as an empty string; fall back to owner/name so
     -- the same-repo check is not fooled into treating it as cross-repo.
-    local origin = parsers_pr.parse_pr_view_origin(core, 
+    local origin = parsers_pr.parse_pr_view_origin(core,
       '{"headRefName":"b","headRefOid":"ABC123","state":"MERGED","headRepository":{"name":"fkst-packages","nameWithOwner":""},"headRepositoryOwner":{"login":"ChronoAIProject"},"isCrossRepository":false,"comments":[]}'
     )
     t.eq(origin.head_repository, "ChronoAIProject/fkst-packages")
@@ -784,7 +785,7 @@ return {
       },
     }
 
-    local thinking = core.build_loop_proposal("owner/repo", "42", {
+    local thinking = payloads_builders.build_loop_proposal(core, "owner/repo", "42", {
       title = "Converge narrowing",
       body = "Body",
       updated_at = "2026-06-08T00:00:00Z",
@@ -798,7 +799,7 @@ return {
     t.is_true(core.validate_proposal(thinking))
 
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local review = core.build_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
+    local review = payloads_builders.build_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",
       body = "Body",
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge)
@@ -812,7 +813,7 @@ return {
     local function context_fetch_returns_high_risk()
       return "runtime-cache:github-devloop/context-bundle-manifest/pr-review-owner-repo-7", true
     end
-    local high_risk_review = core.build_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
+    local high_risk_review = payloads_builders.build_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",
       body = "Body",
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, {}, context_fetch_returns_high_risk())
@@ -820,7 +821,7 @@ return {
     t.is_true(high_risk_review.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(core.validate_proposal(high_risk_review))
 
-    local high_risk_board_review = core.build_board_pr_review_loop_proposal("owner/repo", "42", 7, version, "abcdef1234567890", {
+    local high_risk_board_review = payloads_builders.build_board_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",
       body = "Body",
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, "2026-06-08T00:00:00Z", {}, context_fetch_returns_high_risk())
@@ -830,7 +831,7 @@ return {
 
     -- Without a converge carry the proposal stays valid and blind-compatible: the round is
     -- still tracked, but no convergence_question / prior_round_digests are injected.
-    local blind = core.build_loop_proposal("owner/repo", "42", {
+    local blind = payloads_builders.build_loop_proposal(core, "owner/repo", "42", {
       title = "Blind",
       body = "Body",
       updated_at = "2026-06-08T00:00:00Z",

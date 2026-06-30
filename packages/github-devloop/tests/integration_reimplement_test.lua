@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -49,7 +50,7 @@ local function forged_command()
 end
 
 local function impl_failed_comments(event, reason, attempt, command)
-  local version = core.build_devloop_ready_payload(event).dedup_key
+  local version = payloads_builders.build_devloop_ready_payload(core, event).dedup_key
   local comments = {
     core.state_marker(event.proposal_id, "impl-failed", version),
     core.impl_failure_marker(event.proposal_id, version, reason or "codex-failed", attempt),
@@ -75,7 +76,7 @@ return {
     t.eq(result.exit_code, 0)
     local ready = find_raise(result.raises, "devloop_ready")
     t.is_true(ready ~= nil)
-    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload(event).dedup_key)
+    t.eq(ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, event).dedup_key)
     t.eq(ready.payload.impl_retry_attempt, 2)
   end,
 
@@ -87,7 +88,7 @@ return {
     t.eq(result.exit_code, 0)
     local ready = find_raise(result.raises, "devloop_ready")
     t.is_true(ready ~= nil)
-    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload(event).dedup_key)
+    t.eq(ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, event).dedup_key)
     t.eq(ready.payload.impl_retry_attempt, 2)
     t.eq(find_raise(result.raises, "github-proxy.github_issue_comment_request"), nil)
   end,
@@ -119,7 +120,7 @@ return {
     t.eq(result.exit_code, 0)
     local ready = find_raise(result.raises, "devloop_ready")
     t.is_true(ready ~= nil)
-    t.eq(ready.payload.dedup_key, core.build_devloop_ready_payload(event).dedup_key)
+    t.eq(ready.payload.dedup_key, payloads_builders.build_devloop_ready_payload(core, event).dedup_key)
     t.eq(ready.payload.impl_retry_attempt, 3)
     local response = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(response.payload.body:find("operator command accepted: reimplement", 1, true) ~= nil)
@@ -137,7 +138,7 @@ return {
 
   test_reimplement_command_reenters_blocked_open_pr_from_issue = function()
     local event = reached()
-    local ready_version = core.build_devloop_ready_payload(event).dedup_key
+    local ready_version = payloads_builders.build_devloop_ready_payload(core, event).dedup_key
     local blocked_version = ready_version .. "/review-loop/3"
     local command = trusted_command("IC_reimplement_blocked")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
@@ -165,7 +166,7 @@ return {
 
   test_reimplement_command_refuses_blocked_without_open_linked_pr = function()
     local event = reached()
-    local ready_version = core.build_devloop_ready_payload(event).dedup_key
+    local ready_version = payloads_builders.build_devloop_ready_payload(core, event).dedup_key
     local command = trusted_command("IC_reimplement_blocked_unlinked")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
       core.state_marker(event.proposal_id, "blocked", ready_version .. "/review-loop/3"),
@@ -182,7 +183,7 @@ return {
 
   test_retry_implementation_writes_attempt_version = function()
     local event = reached()
-    local ready = core.build_devloop_ready_payload(event)
+    local ready = payloads_builders.build_devloop_ready_payload(core, event)
     ready.impl_retry_attempt = 2
     mock_issue_implement_raw({ "fkst-dev:impl-failed" }, {
       core.state_marker(event.proposal_id, "impl-failed", ready.dedup_key),
@@ -213,7 +214,7 @@ return {
 
   test_blocked_reimplement_receiver_writes_fresh_attempt_version = function()
     local event = reached()
-    local ready = core.build_devloop_ready_payload(event)
+    local ready = payloads_builders.build_devloop_ready_payload(core, event)
     local blocked_version = ready.dedup_key .. "/review-loop/3"
     ready.impl_retry_attempt = 2
     ready.operator_reentry = {

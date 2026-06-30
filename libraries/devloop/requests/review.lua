@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 local operator_commands = require("devloop.operator_commands")
@@ -33,7 +34,7 @@ function M.attach_blocked_handoff(request, proposal_id, pr_number, version, sour
 end
 
 function M.attach_fixing_handoff(request, proposal_id, pr_number, version, review_fact, source_ref)
-  local normalized = M.build_devloop_fixing_payload({
+  local normalized = payloads_builders.build_devloop_fixing_payload(M, {
     proposal_id = proposal_id,
     impl_version = version,
   }, pr_number, review_fact, source_ref)

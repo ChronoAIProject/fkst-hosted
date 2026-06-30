@@ -2,6 +2,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local autonomy_ledger = require("devloop.autonomy_ledger")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -99,7 +100,7 @@ end
 
 local function pr_native_merge_ready(extra)
   local event = pr_native_review_reached()
-  local value = core.build_devloop_merge_ready_payload(
+  local value = payloads_builders.build_devloop_merge_ready_payload(core,
     core.pr_proposal_id("owner/repo", 7),
     7,
     "pr-native-version",

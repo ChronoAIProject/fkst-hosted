@@ -1,4 +1,5 @@
 local h = require("tests.devloop_core_helpers")
+local payloads_predicates = require("devloop.payloads.predicates")
 local core = h.core
 local t = h.t
 
@@ -18,7 +19,7 @@ local function mock_comment_get(comment_id, marker)
 end
 
 local function verify(hand_off, expected)
-  return core.verified_hand_off_state("owner/repo", hand_off, expected)
+  return payloads_predicates.verified_hand_off_state(core, "owner/repo", hand_off, expected)
 end
 
 return {

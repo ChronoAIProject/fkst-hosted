@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 local t = fkst.test
 local core = require("core")
 local h = require("tests.devloop_helpers")
@@ -5,7 +6,7 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local decompose_lib = require("devloop.decompose")
 
 local function production_decompose_payload()
-  return core.build_devloop_decompose_payload(core.build_devloop_fix_reconcile_payload({
+  return payloads_builders.build_devloop_decompose_payload(core, core.build_devloop_fix_reconcile_payload({
     proposal_id = "github-devloop/issue/owner/repo/42",
     review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
     review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",

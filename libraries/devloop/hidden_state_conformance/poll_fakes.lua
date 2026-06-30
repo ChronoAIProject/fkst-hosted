@@ -1,3 +1,4 @@
+local payloads_board = require("devloop.payloads.board")
 local S = {}
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
@@ -13,7 +14,7 @@ function S.with(core, opts, fn)
   local previous_current_branch_head_sha = core.current_branch_head_sha
   local previous_context_fetch_ref_from_bundle = context_bundle.context_fetch_ref_from_bundle
   local previous_context_fetch_from_bundle = context_bundle.context_fetch_from_bundle
-  local previous_board_digest_block = core.board_digest_block
+  local previous_board_digest_block = payloads_board.board_digest_block
 
   if type(previous_children) == "function" then
     core.gh_issue_list_decompose_children = function()
@@ -42,7 +43,7 @@ function S.with(core, opts, fn)
   context_bundle.context_fetch_from_bundle = function(_core, args)
     return "Hidden-state conformance fixture context for " .. tostring(args and args.version or "fixture")
   end
-  core.board_digest_block = function()
+  payloads_board.board_digest_block = function()
     return "Hidden-state conformance board fixture."
   end
 
@@ -57,7 +58,7 @@ function S.with(core, opts, fn)
   core.current_branch_head_sha = previous_current_branch_head_sha
   context_bundle.context_fetch_ref_from_bundle = previous_context_fetch_ref_from_bundle
   context_bundle.context_fetch_from_bundle = previous_context_fetch_from_bundle
-  core.board_digest_block = previous_board_digest_block
+  payloads_board.board_digest_block = previous_board_digest_block
   if not ok then
     error(first)
   end

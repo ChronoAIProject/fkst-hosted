@@ -1,3 +1,4 @@
+local payloads_board = require("devloop.payloads.board")
 local C = {}
 local strings = require("contract.strings")
 local github_risk = require("devloop.github_risk")
@@ -490,7 +491,7 @@ function C.build_context_bundle(M, args)
     tmp_bundle.risk_bytes = #risk_text
   end
 
-  local board = M.board_digest_block(repo, args.tick)
+  local board = payloads_board.board_digest_block(M, repo, args.tick)
   board = truncate_if_needed(M, board, args.dept, proposal_id, "board.txt")
   write_file(M, tmp_bundle.board_path, board, args.exec)
   tmp_bundle.board_bytes = #board

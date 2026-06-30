@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -544,7 +545,7 @@ return {
   end,
 
   test_observe_pr_blocked_decomposed_marker_reraises_missing_children = function()
-    local event = core.build_devloop_decompose_payload(h.fix_reconcile())
+    local event = payloads_builders.build_devloop_decompose_payload(core, h.fix_reconcile())
     local comments = {
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
@@ -581,7 +582,7 @@ return {
   end,
 
   test_observe_pr_reconciles_stale_state_label_when_expected_label_is_present = function()
-    local event = core.build_devloop_decompose_payload(h.fix_reconcile())
+    local event = payloads_builders.build_devloop_decompose_payload(core, h.fix_reconcile())
     local comments = {
       core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
@@ -616,7 +617,7 @@ return {
   end,
 
   test_observe_pr_live_308_decompose_reconcile_marker_substream_replay_does_not_require_fix_feedback = function()
-    local event = core.build_devloop_decompose_payload(h.fix_reconcile())
+    local event = payloads_builders.build_devloop_decompose_payload(core, h.fix_reconcile())
     event.review_proposal_id = nil
     event.review_dedup_key = nil
     event.head_sha = nil
@@ -716,7 +717,7 @@ return {
     t.is_true(fixing_raise.payload.gate_failure_excerpt:find("rollup-red", 1, true) ~= nil)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
     assert_declared_merge_gate_fixing_replay_field_set(fixing_raise.payload)
-    local defective_replay = core.build_replayed_fixing_payload({
+    local defective_replay = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = event.proposal_id,
       impl_version = fixture.fixing_version,
     }, fixture.pr_number, {

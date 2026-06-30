@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 local t = fkst.test
 local core = require("core")
 local gh_argv = require("testkit.gh_argv_mock")
@@ -212,7 +213,7 @@ local function review_meta_event(extra)
   local unresolved_event = review_unresolved({
     dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
   })
-  local value = core.build_devloop_review_meta_payload(unresolved_event, "github-devloop/issue/owner/repo/42", reviewing().version, 7, 3)
+  local value = payloads_builders.build_devloop_review_meta_payload(core, unresolved_event, "github-devloop/issue/owner/repo/42", reviewing().version, 7, 3)
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
@@ -248,7 +249,7 @@ local function fix_reconcile(extra)
 end
 
 local function decompose_event(extra)
-  local value = core.build_devloop_decompose_payload(fix_reconcile())
+  local value = payloads_builders.build_devloop_decompose_payload(core, fix_reconcile())
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
@@ -257,7 +258,7 @@ end
 
 local function merge_ready(extra)
   local event = review_reached()
-  local value = core.build_devloop_merge_ready_payload(
+  local value = payloads_builders.build_devloop_merge_ready_payload(core,
     "github-devloop/issue/owner/repo/42",
     7,
     reviewing().version,

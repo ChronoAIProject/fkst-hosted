@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
 local source_ref = require("contract.source_ref")
 local transition_version = require("contract.transition_version")
@@ -632,7 +633,7 @@ function M.state_marker_comment_id(comments, proposal_id, state, version, effect
         and candidate.state == state
         and candidate.version == version
         and tostring(attrs.effects or "") == tostring(effects or "")
-        and M.is_safe_comment_id(comment.id) then
+        and payloads_predicates.is_safe_comment_id(M, comment.id) then
         return tostring(comment.id)
       end
     end

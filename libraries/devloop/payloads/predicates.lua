@@ -1,8 +1,6 @@
 local parsers_misc = require("devloop.parsers.misc")
-local S = {}
-
-function S.install(M, shared)
-local github = shared.github
+local C = {}
+local shared = require("devloop.payloads.shared")
 
 local gate_owned_gap_patterns = {
   "ci%s+green",
@@ -76,7 +74,7 @@ local out_of_contract_gap_patterns = {
   "missing%s+pull%s+request%s+description%s+evidence",
 }
 
-function M.is_gate_owned_review_gap(gap)
+function C.is_gate_owned_review_gap(_M, gap)
   local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
   if text == "" then
     return false
@@ -99,7 +97,7 @@ function M.is_gate_owned_review_gap(gap)
   return true
 end
 
-function M.is_out_of_contract_review_gap(gap)
+function C.is_out_of_contract_review_gap(_M, gap)
   local text = tostring(gap or ""):lower():gsub("[_%-%/]+", " "):gsub("%s+", " ")
   if text == "" then
     return false
@@ -112,7 +110,7 @@ function M.is_out_of_contract_review_gap(gap)
   return false
 end
 
-function M.is_ready_hand_off(hand_off, ready)
+function C.is_ready_hand_off(M, hand_off, ready)
   if type(hand_off) ~= "table" or type(ready) ~= "table" then
     return false
   end
@@ -122,15 +120,15 @@ function M.is_ready_hand_off(hand_off, ready)
     and hand_off.event_version == ready.dedup_key
     and M._is_bounded_string(hand_off.marker_version, M._max_dedup_len)
     and hand_off.stage_rank == M.stage_rank("ready")
-    and M.is_safe_comment_id(hand_off.comment_id)
+    and C.is_safe_comment_id(M, hand_off.comment_id)
 end
 
-function M.is_safe_comment_id(value)
+function C.is_safe_comment_id(_M, value)
   local text = tostring(value or "")
   return text ~= "" and #text <= 80 and text:find("^[%w_%-]+$") ~= nil
 end
 
-function M.is_own_state_marker_hand_off(hand_off, expected)
+function C.is_own_state_marker_hand_off(M, hand_off, expected)
   if type(hand_off) ~= "table" or type(expected) ~= "table" then
     return false
   end
@@ -142,14 +140,14 @@ function M.is_own_state_marker_hand_off(hand_off, expected)
     and hand_off.marker_version == expected.marker_version
     and hand_off.stage_rank == M.stage_rank(state)
     and (expected.effects == nil or hand_off.effects == expected.effects)
-    and M.is_safe_comment_id(hand_off.comment_id)
+    and C.is_safe_comment_id(M, hand_off.comment_id)
 end
 
 local function state_marker_comment_verified(M, repo, hand_off)
-  if type(hand_off) ~= "table" or not M.is_safe_comment_id(hand_off.comment_id) then
+  if type(hand_off) ~= "table" or not C.is_safe_comment_id(M, hand_off.comment_id) then
     return false, "missing-comment-id"
   end
-  local ok_result, result = pcall(github().comment_get, repo, hand_off.comment_id, 30)
+  local ok_result, result = pcall(shared.github(M).comment_get, repo, hand_off.comment_id, 30)
   if not ok_result or type(result) ~= "table" then
     return false, "comment-get-failed"
   end
@@ -192,15 +190,15 @@ local function state_marker_comment_verified(M, repo, hand_off)
   return false, "state-marker-missing"
 end
 
-function M.verify_own_state_marker_hand_off(repo, hand_off, expected)
-  if not M.is_own_state_marker_hand_off(hand_off, expected) then
+function C.verify_own_state_marker_hand_off(M, repo, hand_off, expected)
+  if not C.is_own_state_marker_hand_off(M, hand_off, expected) then
     return false, "payload-mismatch"
   end
   return state_marker_comment_verified(M, repo, hand_off)
 end
 
-function M.verified_hand_off_state(repo, hand_off, expected)
-  local ok, reason = M.verify_own_state_marker_hand_off(repo, hand_off, expected)
+function C.verified_hand_off_state(M, repo, hand_off, expected)
+  local ok, reason = C.verify_own_state_marker_hand_off(M, repo, hand_off, expected)
   if not ok then
     return nil, reason
   end
@@ -210,6 +208,4 @@ function M.verified_hand_off_state(repo, hand_off, expected)
     stage_rank = M.stage_rank(expected.state),
   }, reason
 end
-end
-
-return S
+return C

@@ -1,8 +1,5 @@
-local S = {}
-
-function S.install(M, shared)
-local github = shared.github
-local label_names = shared.label_names
+local C = {}
+local shared = require("devloop.payloads.shared")
 
 local function board_feed_cmd(M)
   local cmd = M.read_env("FKST_DEVLOOP_BOARD_CMD")
@@ -12,7 +9,7 @@ local function board_feed_cmd(M)
   return cmd
 end
 
-local function parse_board_list(stdout)
+local function parse_board_list(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
   if type(decoded) ~= "table" then
@@ -23,7 +20,7 @@ local function parse_board_list(stdout)
       table.insert(items, {
         number = tonumber(item.number),
         title = tostring(item.title or ""),
-        labels = label_names(item.labels),
+        labels = shared.label_names(M, item.labels),
       })
     end
   end
@@ -129,7 +126,7 @@ local function fetch_board_feed(M)
     .. "\n" .. M._untrusted_issue_data_end
 end
 
-function M.board_digest_block(repo, tick)
+function C.board_digest_block(M, repo, tick)
   if tick == nil or tostring(tick) == "" then
     return ""
   end
@@ -145,7 +142,7 @@ function M.board_digest_block(repo, tick)
     return feed
   end
 
-  local github_port = github()
+  local github_port = shared.github(M)
   local ok_issue, issue_result = pcall(github_port.issue_list_board_digest, repo, 30)
   local ok_pr, pr_result = pcall(github_port.pr_list_board_digest, repo, 30)
   local ok_closed, closed_result = pcall(github_port.issue_list_recent_closed, repo, 30, 30)
@@ -157,7 +154,7 @@ function M.board_digest_block(repo, tick)
 
   local closed_issues = nil
   if ok_closed and type(closed_result) == "table" and closed_result.exit_code == 0 then
-    local ok_parse, parsed = pcall(parse_board_list, closed_result.stdout)
+    local ok_parse, parsed = pcall(parse_board_list, M, closed_result.stdout)
     if ok_parse then
       closed_issues = parsed
     end
@@ -165,16 +162,16 @@ function M.board_digest_block(repo, tick)
 
   local block = render_board_digest(
     M,
-    parse_board_list(issue_result.stdout),
-    parse_board_list(pr_result.stdout),
+    parse_board_list(M, issue_result.stdout),
+    parse_board_list(M, pr_result.stdout),
     closed_issues
   )
   cache_set(key, block)
   return block
 end
 
-function M.append_board_digest_to_proposal(proposal, repo, tick)
-  local block = M.board_digest_block(repo, tick)
+function C.append_board_digest_to_proposal(M, proposal, repo, tick)
+  local block = C.board_digest_block(M, repo, tick)
   if block == "" then
     return proposal
   end
@@ -208,6 +205,5 @@ function M.append_board_digest_to_proposal(proposal, repo, tick)
   end
   return proposal
 end
-end
 
-return S
+return C

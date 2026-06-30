@@ -4,6 +4,8 @@ local saga = require("workflow.saga")
 local source_refs = require("contract.source_ref")
 local handoff_helpers = require("devloop.comment_handoff")
 
+local payloads_builders = require("devloop.payloads.builders")
+local payloads_predicates = require("devloop.payloads.predicates")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
@@ -76,7 +78,7 @@ local function verified_pr_state(repo, handoff, comment_id, state)
     stage_rank = core.stage_rank(state),
     comment_id = comment_id,
   }
-  return core.verified_hand_off_state(repo, marker_hand_off, expected)
+  return payloads_predicates.verified_hand_off_state(core, repo, marker_hand_off, expected)
 end
 
 local function retryable_visibility_reason(reason)
@@ -86,7 +88,7 @@ end
 local maybe_raise_pr_label
 
 local function emit_merge_ready(payload, handoff)
-  local merge_ready = core.build_devloop_merge_ready_payload(handoff.proposal_id, handoff.pr_number, handoff.version, {
+  local merge_ready = payloads_builders.build_devloop_merge_ready_payload(core, handoff.proposal_id, handoff.pr_number, handoff.version, {
     review_proposal_id = handoff.review_proposal_id,
     review_dedup_key = handoff.review_dedup_key,
     reviewed_head_sha = handoff.reviewed_head_sha,
@@ -98,7 +100,7 @@ local function emit_merge_ready(payload, handoff)
 end
 
 local function emit_fixing(payload, handoff)
-  local fixing = core.build_devloop_fixing_payload({
+  local fixing = payloads_builders.build_devloop_fixing_payload(core, {
     proposal_id = handoff.proposal_id,
     impl_version = handoff.version,
   }, handoff.pr_number, {
@@ -130,7 +132,7 @@ local function emit_reviewing(payload, handoff)
   if not issue_claim_ok(payload, handoff) then
     return
   end
-  local reviewing = core.build_devloop_reviewing_payload({
+  local reviewing = payloads_builders.build_devloop_reviewing_payload(core, {
     proposal_id = handoff.proposal_id,
     impl_version = handoff.version,
     reviewing_comment_id = payload.comment_id,
@@ -171,7 +173,7 @@ local handoff_strategies = {
 local function supported_handoff(payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-proxy.comment-written.v1"
-    or not core.is_safe_comment_id(payload.comment_id)
+    or not payloads_predicates.is_safe_comment_id(core, payload.comment_id)
     or type(payload.handoff) ~= "table" then
     return nil
   end

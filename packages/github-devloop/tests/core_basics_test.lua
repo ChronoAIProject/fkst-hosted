@@ -1,4 +1,5 @@
 local h = require("tests.devloop_core_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local core = h.core
 local error_facts = require("contract.error_facts")
 local github_risk = require("devloop.github_risk")
@@ -252,7 +253,7 @@ return {
     )
   end,
   test_build_proposal = function()
-    local proposal = core.build_proposal(issue())
+    local proposal = payloads_builders.build_proposal(core, issue())
     t.eq(proposal.schema, "consensus.proposal.v1")
     t.eq(proposal.proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(proposal.title, "Implement decision recorder")

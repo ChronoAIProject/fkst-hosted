@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local transition_version = require("contract.transition_version")
+local payloads_builders = require("devloop.payloads.builders")
 local core = h.core
 local t = h.t
 
@@ -21,7 +22,7 @@ return {
     t.eq(core.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/7/v1"), nil)
 
     local issue_proposal_id = "github-devloop/issue/" .. repo .. "/42"
-    local proposal = core.build_pr_review_proposal(
+    local proposal = payloads_builders.build_pr_review_proposal(core,
       repo,
       "42",
       7,
@@ -105,7 +106,7 @@ return {
     t.eq(parsed_version, transition_version.safe_version_segment(version))
     t.eq(parsed_head_sha, head_sha)
 
-    local proposal = core.build_pr_review_proposal(
+    local proposal = payloads_builders.build_pr_review_proposal(core,
       repo,
       "42",
       7,
@@ -123,7 +124,7 @@ return {
   test_pr_review_proposal_uses_fetch_instruction_when_issue_body_is_long = function()
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local head_sha = "abcdef1234567890"
-    local proposal = core.build_pr_review_proposal(
+    local proposal = payloads_builders.build_pr_review_proposal(core,
       "owner/repo",
       "42",
       7,

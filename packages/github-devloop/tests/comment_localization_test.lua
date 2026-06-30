@@ -1,6 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local comment_strings = require("devloop.strings")
 local h = require("tests.devloop_core_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local core = h.core
 local t = h.t
 
@@ -17,7 +18,7 @@ local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_ver
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
 
 local function ready_payload()
-  return core.build_devloop_ready_payload(reached())
+  return payloads_builders.build_devloop_ready_payload(core, reached())
 end
 
 local function collect_markers(body)

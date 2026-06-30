@@ -1,4 +1,5 @@
 local parsers_pr = require("devloop.parsers.pr")
+local payloads_builders = require("devloop.payloads.builders")
 local C = {}
 local convergence_shared = require("devloop.convergence.shared")
 local replay_thinking_convergence = require("devloop.replay_thinking_convergence")
@@ -386,7 +387,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
       version = next_dedup,
       tick = event_ts,
     })
-    local proposal = M.build_board_loop_proposal(issue.repo, issue.number, {
+    local proposal = payloads_builders.build_board_loop_proposal(M, issue.repo, issue.number, {
       title = issue.title,
       updated_at = issue.updated_at,
     }, issue.source_ref, next_n, {
@@ -411,7 +412,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
     version = replay_dedup,
     tick = event_ts,
   })
-  local proposal = M.build_board_proposal(replay_issue, event_ts)
+  local proposal = payloads_builders.build_board_proposal(M, replay_issue, event_ts)
   proposal.dedup_key = replay_dedup
   return M.validate_proposal(proposal) and proposal or nil
 end
@@ -477,7 +478,7 @@ local function replay_implementing(M, dept, issue, state, row, facts)
   -- double-wrap it ("ready/ready/..."). Preserve the retry suffix as structured
   -- attempt metadata so re-drives reproduce frozen "ready/.../reimplement/N"
   -- markers exactly.
-  local payload = M.build_devloop_ready_payload({
+  local payload = payloads_builders.build_devloop_ready_payload(M, {
     proposal_id = proposal_id,
     dedup_key = M.ready_payload_inner_version(state.version),
     source_ref = issue.source_ref,
@@ -501,7 +502,7 @@ local function replay_impl_failed(M, dept, issue, state, row, facts)
     proposal_id = proposal_id,
     ["impl-failure"] = failure,
   })
-  local payload = M.build_devloop_ready_payload({
+  local payload = payloads_builders.build_devloop_ready_payload(M, {
     proposal_id = fields.proposal_id,
     dedup_key = M.ready_payload_inner_version(fields.dedup_key),
     source_ref = fields.source_ref,
@@ -592,7 +593,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       feedback = feedback,
       proposal_id = proposal_id,
     })
-    local fix_payload = M.build_replayed_fixing_payload({
+    local fix_payload = payloads_builders.build_replayed_fixing_payload(M, {
       proposal_id = fields.proposal_id,
       impl_version = fields.version,
     }, fields.pr_number, feedback, fields.source_ref)
@@ -680,10 +681,10 @@ local function replay_review_meta(M, tools, dept, issue, state, row, facts)
   })
   local payload = nil
   if fact.mode == "fix-reflection" then
-    payload = M.build_devloop_fix_reflection_payload(fact, proposal_id, fields.version, fields.pr_number, fact.fix_round or fact.n, fields.source_ref)
+    payload = payloads_builders.build_devloop_fix_reflection_payload(M, fact, proposal_id, fields.version, fields.pr_number, fact.fix_round or fact.n, fields.source_ref)
     payload.blocking_gap = fact.blocking_gap
   else
-    payload = M.build_devloop_review_meta_payload(fact, proposal_id, fields.version, fields.pr_number, fact.n, fields.source_ref)
+    payload = payloads_builders.build_devloop_review_meta_payload(M, fact, proposal_id, fields.version, fields.pr_number, fact.n, fields.source_ref)
   end
   M.log_cas_decision(dept, proposal_id, state, "review-meta", "review-meta", "applied(replay)", "trusted review-meta fact is visible")
   return raise_effects(M, dept, proposal_id, "review-meta", state.version, { add = {}, remove = {} }, {
@@ -698,7 +699,7 @@ local function raise_reviewing_for_current_head(M, dept, issue, state, proposal_
   if not forge_validators.is_git_sha(current_pr.head_sha) then
     return log_skip(M, dept, proposal_id, state, "merge-ready", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
-  local reviewing_payload = M.build_current_head_reviewing_payload({ repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, M.pr_source_ref(issue.repo, link.pr_number))
+  local reviewing_payload = payloads_builders.build_current_head_reviewing_payload(M, { repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, M.pr_source_ref(issue.repo, link.pr_number))
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "reviewing", outcome, reason)
   if reviewing_payload == nil then
     return false
@@ -793,7 +794,7 @@ local function replay_merge_ready_like(M, tools, dept, issue, state, row, facts)
     ["merge-ready"] = fact,
     proposal_id = proposal_id,
   })
-  local payload = M.build_devloop_merge_ready_payload(fields.proposal_id, fields.pr_number, fields.version, {
+  local payload = payloads_builders.build_devloop_merge_ready_payload(M, fields.proposal_id, fields.pr_number, fields.version, {
     review_proposal_id = fields.review_proposal_id,
     review_dedup_key = fields.review_dedup_key,
     reviewed_head_sha = fields.reviewed_head_sha,

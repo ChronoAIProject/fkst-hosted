@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -262,7 +263,7 @@ return {
     local fix_version = core.next_fix_version(impl_version)
     local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     local review_dedup_key = "consensus:" .. review_id .. "/review"
-    local expected = core.build_replayed_fixing_payload({
+    local expected = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = fix_version,
     }, 7, {

@@ -92,15 +92,18 @@ def make_fake_tools(bin_dir: Path) -> None:
     make_fake_date(bin_dir)
 
 
-def run_argv(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        args,
+def run_git(args: list[str], cwd: Path, env: dict[str, str]) -> None:
+    result = subprocess.run(
+        ["git", *args],
         cwd=cwd,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
     )
+    if result.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
 
 class DogfoodLayout:
@@ -121,6 +124,7 @@ class DogfoodLayout:
         make_fake_tools(self.bin_dir)
         make_fake_bin(self.fake_bin)
         write_executable(self.script, dogfood_script)
+        self.platform_revs: dict[Path, str] = {}
         self._populate_repos()
 
     def _populate_repos(self) -> None:
@@ -133,7 +137,6 @@ class DogfoodLayout:
         ):
             (host / ".git").mkdir(parents=True)
 
-        platform_revs: dict[Path, str] = {}
         platform_roots = (
             self.dogfood_root / "pkgs-dogfood",
             self.dogfood_root / "substrate-dogfood" / "pkgs",
@@ -154,64 +157,89 @@ class DogfoodLayout:
             shutil.copy2(REPO_ROOT / "scripts" / "composed_manifest.sh", platform / "scripts" / "composed_manifest.sh")
             shutil.copy2(REPO_ROOT / "scripts" / "bin_bootstrap.sh", platform / "scripts" / "bin_bootstrap.sh")
             shutil.copy2(REPO_ROOT / "scripts" / "bin_cache.py", platform / "scripts" / "bin_cache.py")
-            platform_revs[platform] = self._commit_platform(platform)
+            self.platform_revs[platform] = self._make_platform_git_repo(platform)
 
         (self.dogfood_root / "website-dogfood" / "site" / ".fkst" / "local-packages" / "site-board").mkdir(
             parents=True,
             exist_ok=True,
         )
-        self._write_host_platform_pin(
-            self.dogfood_root / "substrate-dogfood" / "sub",
-            self.dogfood_root / "substrate-dogfood" / "pkgs",
-            platform_revs[self.dogfood_root / "substrate-dogfood" / "pkgs"],
-        )
-        self._write_host_platform_pin(
-            self.dogfood_root / "website-dogfood" / "site",
-            self.dogfood_root / "website-dogfood" / "pkgs",
-            platform_revs[self.dogfood_root / "website-dogfood" / "pkgs"],
-        )
 
-    def _commit_platform(self, platform: Path) -> str:
-        if run_argv(["git", "init", "-q"], cwd=platform).returncode != 0:
-            raise AssertionError(f"git init failed for {platform}")
-        for key, value in {
-            "user.email": "host-run-equivalence@example.invalid",
-            "user.name": "Host Run Equivalence",
-        }.items():
-            result = run_argv(["git", "config", key, value], cwd=platform)
-            if result.returncode != 0:
-                raise AssertionError(result.stderr)
-        result = run_argv(["git", "add", "."], cwd=platform)
-        if result.returncode != 0:
-            raise AssertionError(result.stderr)
-        result = run_argv(["git", "commit", "-q", "-m", "seed"], cwd=platform)
-        if result.returncode != 0:
-            raise AssertionError(result.stderr)
-        result = run_argv(["git", "rev-parse", "HEAD"], cwd=platform)
-        if result.returncode != 0:
-            raise AssertionError(result.stderr)
-        return result.stdout.strip()
+        for host, platform in (
+            (self.dogfood_root / "pkgs-dogfood", self.dogfood_root / "pkgs-dogfood"),
+            (self.dogfood_root / "substrate-dogfood" / "sub", self.dogfood_root / "substrate-dogfood" / "pkgs"),
+            (self.dogfood_root / "website-dogfood" / "site", self.dogfood_root / "website-dogfood" / "pkgs"),
+        ):
+            self._write_host_workspace(host, platform)
 
-    def _write_host_platform_pin(self, host: Path, platform: Path, rev: str) -> None:
-        host.mkdir(parents=True, exist_ok=True)
+    def _write_host_workspace(self, host: Path, platform: Path) -> None:
+        if host == platform:
+            manifest = "[workspace]\nunits = [\"packages/*\"]\n"
+            for package in PLATFORM_PACKAGES.split():
+                manifest += (
+                    "\n[[package]]\n"
+                    f"name = {json.dumps(package)}\n"
+                    'source = "workspace"\n'
+                    'version = "workspace"\n'
+                )
+            (host / "fkst.workspace.toml").write_text(manifest, encoding="utf-8")
+            return
+
         (host / "fkst.workspace.toml").write_text(
-            "[workspace]\nunits = []\n\n"
-            "[[external_sources]]\n"
-            'id = "fkst-packages-platform"\n'
-            f"git = {json.dumps(str(platform))}\n"
-            f"rev = {json.dumps(rev)}\n"
-            f"packages = {json.dumps(PLATFORM_PACKAGES.split())}\n",
+            textwrap.dedent(
+                f"""\
+                [workspace]
+                units = [".fkst/local-packages/*"]
+
+                [[external_sources]]
+                id = "fkst-packages-platform"
+                git = {json.dumps(str(platform))}
+                packages = {json.dumps(PLATFORM_PACKAGES.split())}
+                """
+            ),
             encoding="utf-8",
         )
         (host / "fkst.lock").write_text(
-            "[[external_source]]\n"
-            'id = "fkst-packages-platform"\n'
-            f"git = {json.dumps(str(platform))}\n\n"
-            "[external_source.resolved]\n"
-            f"rev = {json.dumps(rev)}\n"
-            'tree_sha256 = "sha256-test"\n',
+            textwrap.dedent(
+                f"""\
+                [[external_source]]
+                id = "fkst-packages-platform"
+                git = {json.dumps(str(platform))}
+
+                [external_source.resolved]
+                rev = {json.dumps(self.platform_revs[platform])}
+                tree_sha256 = "sha256-test"
+                """
+            ),
             encoding="utf-8",
         )
+
+    def _make_platform_git_repo(self, platform: Path) -> str:
+        git_env = os.environ.copy()
+        git_env.update(
+            {
+                "GIT_AUTHOR_NAME": "Host Run Equivalence",
+                "GIT_AUTHOR_EMAIL": "host-run-equivalence@example.invalid",
+                "GIT_COMMITTER_NAME": "Host Run Equivalence",
+                "GIT_COMMITTER_EMAIL": "host-run-equivalence@example.invalid",
+                "GIT_AUTHOR_DATE": "2001-09-09T01:46:40Z",
+                "GIT_COMMITTER_DATE": "2001-09-09T01:46:40Z",
+            }
+        )
+        run_git(["init", "-q"], cwd=platform, env=git_env)
+        run_git(["add", "."], cwd=platform, env=git_env)
+        run_git(["commit", "-q", "-m", "seed"], cwd=platform, env=git_env)
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=platform,
+            env=git_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+        return result.stdout.strip()
 
     def env(self, target: str) -> dict[str, str]:
         base_path = os.environ.get("PATH", "")

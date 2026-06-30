@@ -3,6 +3,8 @@ local parsers_issue = require("devloop.parsers.issue")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local transition_version = require("contract.transition_version")
 
+local payloads_builders = require("devloop.payloads.builders")
+local payloads_predicates = require("devloop.payloads.predicates")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -76,7 +78,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       local verified_state = nil
       local hand_off_reason = "missing"
       if reviewing.reviewing_hand_off ~= nil then
-        verified_state, hand_off_reason = core.verified_hand_off_state(repo, reviewing.reviewing_hand_off, {
+        verified_state, hand_off_reason = payloads_predicates.verified_hand_off_state(core, repo, reviewing.reviewing_hand_off, {
           proposal_id = reviewing.proposal_id,
           state = "reviewing",
           marker_version = reviewing.version,
@@ -150,7 +152,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     }) }
     local content_fetch = context_fetch[1]
     local high_risk = context_fetch[2]
-    local proposal = core.build_board_pr_review_proposal(repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
+    local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
     if not core.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return

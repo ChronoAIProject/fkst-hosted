@@ -1,5 +1,6 @@
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local gh_argv = require("testkit.gh_argv_mock")
@@ -860,7 +861,7 @@ return {
 
   test_implement_redrive_hand_off_uses_original_ready_marker_version = function()
     local original_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local redrive = core.build_devloop_ready_payload({
+    local redrive = payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = ready().proposal_id,
       dedup_key = original_version .. "/redrive/ready/2",
       source_ref = source_ref(),

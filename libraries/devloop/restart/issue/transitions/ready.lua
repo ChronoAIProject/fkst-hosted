@@ -1,3 +1,4 @@
+local payloads_builders = require("devloop.payloads.builders")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -57,7 +58,7 @@ return function(M, h)
         },
       },
     }),
-    payload_builder = M.build_devloop_ready_payload,
+    payload_builder = payloads_builders.build_devloop_ready_payload,
     dedup_shape = "ready/<state.version>",
     required_facts = { fact("state", "marker-read") },
     advancing_facts = {

@@ -8,6 +8,7 @@ local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 
+local payloads_builders = require("devloop.payloads.builders")
 local spec = {
   consumes = { "devloop_fixing" },
   produces = {
@@ -487,7 +488,7 @@ local function run_fix_attempt(plan)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git add failed: " .. tostring(add_result.stderr))
   end
-  local commit_result = core.git_commit(worktree, core.fix_commit_subject(
+  local commit_result = core.git_commit(worktree, payloads_builders.fix_commit_subject(core,
       plan.issue_number,
       core.commit_issue_subject_snapshot(plan.repo, plan.issue_number)
     ), 60)

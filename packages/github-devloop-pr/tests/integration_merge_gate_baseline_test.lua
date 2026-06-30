@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -222,7 +223,7 @@ return {
       gate_baseline_sha = "828df8d3",
       gate_failure_excerpt = "mergeable-conflicting",
     })
-    local defective = core.build_replayed_fixing_payload({
+    local defective = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = event.proposal_id,
       impl_version = event.version,
     }, event.pr_number, {
@@ -231,7 +232,7 @@ return {
       reviewed_head_sha = event.reviewed_head_sha,
       blocking_gap = "mergeable-conflicting",
     }, event.source_ref)
-    local corrected = core.build_replayed_fixing_payload({
+    local corrected = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = event.proposal_id,
       impl_version = event.version,
     }, event.pr_number, {

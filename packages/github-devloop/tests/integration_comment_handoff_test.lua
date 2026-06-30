@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -68,12 +69,12 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local ready = find_raise(result.raises, "devloop_ready").payload
-    t.eq(ready.dedup_key, core.build_devloop_ready_payload({
+    t.eq(ready.dedup_key, payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       dedup_key = marker_version,
       source_ref = source_ref,
     }).dedup_key)
-    t.is_true(ready.dedup_key ~= core.build_devloop_ready_payload({
+    t.is_true(ready.dedup_key ~= payloads_builders.build_devloop_ready_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       dedup_key = event_version,
       source_ref = source_ref,

@@ -1,10 +1,8 @@
 local parsers_misc = require("devloop.parsers.misc")
-local S = {}
+local C = {}
 local forge_validators = require("devloop.forge_validators")
-
-function S.install(M, shared)
-local bounded_framing = shared.bounded_framing
-local bounded_control_text = shared.bounded_control_text
+local shared = require("devloop.payloads.shared")
+local board = require("devloop.payloads.board")
 
 local function commit_subject_title(M, current)
   if type(current) ~= "table" then
@@ -40,7 +38,7 @@ local function bounded_commit_subject(M, prefix, issue_number, current)
   return subject
 end
 
-function M.build_devloop_ready_payload(source)
+function C.build_devloop_ready_payload(M, source)
   local ready_version = M._dedup_key({
     "ready",
     tostring(source.dedup_key),
@@ -64,7 +62,7 @@ function M.build_devloop_ready_payload(source)
       comment_id = source.ready_comment_id,
     }
   end
-  local framing = bounded_framing(M, source.framing)
+  local framing = shared.bounded_framing(M, source.framing)
   if framing ~= nil then
     payload.framing = framing
   end
@@ -81,7 +79,7 @@ function M.build_devloop_ready_payload(source)
   return payload
 end
 
-function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
+function C.build_devloop_reviewing_payload(M, origin, pr_number, source_ref, version)
   local review_version = version or origin.impl_version
   local payload = {
     schema = "github-devloop.reviewing.v1",
@@ -110,18 +108,18 @@ function M.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
   return payload
 end
 
-function M.build_current_head_reviewing_payload(origin, pr_number, current_pr, state, source_ref)
+function C.build_current_head_reviewing_payload(M, origin, pr_number, current_pr, state, source_ref)
   local review_proposal_id = M.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
   if M.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
     return nil
   end
-  return M.build_devloop_reviewing_payload({
+  return C.build_devloop_reviewing_payload(M, {
     proposal_id = origin.proposal_id,
     impl_version = state.version,
   }, pr_number, source_ref, state.version)
 end
 
-function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
+function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, source_ref)
   local version = origin.impl_version
   if review_fact.fix_version ~= nil then
     version = review_fact.fix_version
@@ -143,11 +141,11 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     }),
     source_ref = M.normalize_source_ref(source_ref),
   }
-  local framing = bounded_framing(M, review_fact.framing or origin.framing)
+  local framing = shared.bounded_framing(M, review_fact.framing or origin.framing)
   if framing ~= nil then
     payload.framing = framing
   end
-  local blocking_gap = bounded_control_text(M, review_fact.blocking_gap, M._max_blocking_gap_len)
+  local blocking_gap = shared.bounded_control_text(M, review_fact.blocking_gap, M._max_blocking_gap_len)
   if blocking_gap ~= nil then
     payload.blocking_gap = blocking_gap
   end
@@ -163,7 +161,7 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     end
     payload.predecessor_set = tostring(review_fact.predecessor_set)
   end
-  local gate_failure_excerpt = bounded_control_text(M, review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
+  local gate_failure_excerpt = shared.bounded_control_text(M, review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
   if gate_failure_excerpt ~= nil then
     payload.gate_failure_excerpt = gate_failure_excerpt
   end
@@ -180,8 +178,8 @@ local function replay_fact_sha(value, fallback)
   return fallback
 end
 
-function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref)
-  local payload = M.build_devloop_fixing_payload(origin, pr_number, {
+function C.build_replayed_fixing_payload(M, origin, pr_number, feedback, source_ref)
+  local payload = C.build_devloop_fixing_payload(M, origin, pr_number, {
     review_proposal_id = feedback.review_proposal_id,
     review_dedup_key = feedback.review_dedup_key,
     reviewed_head_sha = feedback.reviewed_head_sha,
@@ -204,7 +202,7 @@ function M.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
   return payload
 end
 
-function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
+function C.build_devloop_review_meta_payload(M, unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
   return {
     schema = "github-devloop.review-meta.v1",
     proposal_id = issue_proposal_id,
@@ -225,7 +223,7 @@ function M.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issu
   }
 end
 
-function M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+function C.fix_reflection_dedup_key(M, issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
   return M._dedup_key({
     "fix-reflection",
     tostring(issue_proposal_id),
@@ -236,20 +234,20 @@ function M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number,
   })
 end
 
-function M.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+function C.build_devloop_fix_reflection_payload(M, unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
   local review_dedup_key = unresolved.review_dedup_key or unresolved.dedup_key
-  local payload = M.build_devloop_review_meta_payload({
+  local payload = C.build_devloop_review_meta_payload(M, {
     proposal_id = unresolved.proposal_id,
     dedup_key = review_dedup_key,
     source_ref = unresolved.source_ref,
   }, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
   payload.mode = "fix-reflection"
   payload.fix_round = fix_round
-  payload.dedup_key = M.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+  payload.dedup_key = C.fix_reflection_dedup_key(M, issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
   return payload
 end
 
-function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
+function C.build_devloop_merge_ready_payload(M, issue_proposal_id, pr_number, version, review_fact, source_ref)
   local current_head_sha = review_fact and review_fact.current_head_sha
   if current_head_sha == nil then
     current_head_sha = review_fact and review_fact.reviewed_head_sha
@@ -274,7 +272,7 @@ function M.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, versi
   }
 end
 
-function M.build_devloop_decompose_payload(fix_reconcile)
+function C.build_devloop_decompose_payload(M, fix_reconcile)
   return {
     schema = "github-devloop.decompose.v1",
     proposal_id = fix_reconcile.proposal_id,
@@ -293,7 +291,7 @@ function M.build_devloop_decompose_payload(fix_reconcile)
   }
 end
 
-function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at, options)
+function C.build_devloop_intake_candidate_payload(M, repo, issue_number, updated_at, options)
   local opts = options or {}
   local proposal_id = M.proposal_id(repo, issue_number)
   local source_ref = {
@@ -316,7 +314,7 @@ function M.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
-function M.build_proposal(issue)
+function C.build_proposal(M, issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
   if #title > M._max_title_len then
@@ -338,8 +336,8 @@ function M.build_proposal(issue)
   }
 end
 
-function M.build_board_proposal(issue, tick)
-  return M.append_board_digest_to_proposal(M.build_proposal(issue), issue.repo, tick)
+function C.build_board_proposal(M, issue, tick)
+  return board.append_board_digest_to_proposal(M, C.build_proposal(M, issue), issue.repo, tick)
 end
 
 -- Thread the meta-judge's narrowing onto a re-raised next-round proposal so the next
@@ -361,7 +359,7 @@ local function apply_converge_fields(proposal, n, converge)
   return proposal
 end
 
-function M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key)
+function C.build_loop_proposal(M, repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key)
   local issue = {
     repo = repo,
     number = issue_number,
@@ -370,13 +368,13 @@ function M.build_loop_proposal(repo, issue_number, current, source_ref, n, conve
     source_ref = source_ref,
     content_fetch = content_fetch,
   }
-  local proposal = M.build_proposal(issue)
+  local proposal = C.build_proposal(M, issue)
   proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_loop_proposal(repo, issue_number, current, source_ref, n, converge, tick, content_fetch, dedup_key)
-  return M.append_board_digest_to_proposal(M.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key), repo, tick)
+function C.build_board_loop_proposal(M, repo, issue_number, current, source_ref, n, converge, tick, content_fetch, dedup_key)
+  return board.append_board_digest_to_proposal(M, C.build_loop_proposal(M, repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key), repo, tick)
 end
 
 local function apply_high_risk_angles(proposal, high_risk)
@@ -386,7 +384,7 @@ local function apply_high_risk_angles(proposal, high_risk)
   return proposal
 end
 
-function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
+function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
   local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
@@ -438,27 +436,25 @@ function M.build_pr_review_proposal(repo, issue_number, pr_number, version, head
   }, high_risk)
 end
 
-function M.build_board_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch, high_risk)
-  return M.append_board_digest_to_proposal(M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk), repo, tick)
+function C.build_board_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, tick, pr_comments, content_fetch, high_risk)
+  return board.append_board_digest_to_proposal(M, C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk), repo, tick)
 end
 
-function M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key)
-  local proposal = M.build_pr_review_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
+function C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key)
+  local proposal = C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
   proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
   return apply_converge_fields(proposal, n, converge)
 end
 
-function M.build_board_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, high_risk, dedup_key)
-  return M.append_board_digest_to_proposal(M.build_pr_review_loop_proposal(repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key), repo, tick)
+function C.build_board_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, tick, pr_comments, content_fetch, high_risk, dedup_key)
+  return board.append_board_digest_to_proposal(M, C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key), repo, tick)
 end
 
-function M.implement_commit_subject(issue_number, current)
+function C.implement_commit_subject(M, issue_number, current)
   return bounded_commit_subject(M, "auto-implement", issue_number, current)
 end
 
-function M.fix_commit_subject(issue_number, current)
+function C.fix_commit_subject(M, issue_number, current)
   return bounded_commit_subject(M, "auto-fix", issue_number, current)
 end
-end
-
-return S
+return C

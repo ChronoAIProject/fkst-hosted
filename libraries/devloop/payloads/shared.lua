@@ -1,10 +1,8 @@
-local S = {}
+local C = {}
+local github_view = require("forge.github_view")
 local github_handle = nil
 
-function S.install(M)
-local github_view = require("forge.github_view")
-local label_names = github_view.label_names
-local function github()
+function C.github(_M)
   if github_handle ~= nil then
     return github_handle
   end
@@ -15,7 +13,11 @@ local function github()
   return github_handle
 end
 
-local function bounded_framing(M, framing)
+function C.label_names(_M, labels)
+  return github_view.label_names(labels)
+end
+
+function C.bounded_framing(M, framing)
   if framing == nil then
     return nil
   end
@@ -26,7 +28,7 @@ local function bounded_framing(M, framing)
   return value
 end
 
-local function bounded_control_text(M, value, limit)
+function C.bounded_control_text(M, value, limit)
   if value == nil then
     return nil
   end
@@ -42,12 +44,4 @@ local function bounded_control_text(M, value, limit)
   return text
 end
 
-return {
-  github = github,
-  label_names = label_names,
-  bounded_framing = bounded_framing,
-  bounded_control_text = bounded_control_text,
-}
-end
-
-return S
+return C

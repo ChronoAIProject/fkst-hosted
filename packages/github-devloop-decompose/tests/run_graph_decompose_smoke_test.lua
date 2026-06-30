@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
+local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
 local core = h.core
 local decompose_lib = require("devloop.decompose")
@@ -14,7 +15,7 @@ local function source_ref()
 end
 
 local function decompose_payload()
-  return core.build_devloop_decompose_payload({
+  return payloads_builders.build_devloop_decompose_payload(core, {
     proposal_id = "github-devloop/issue/owner/repo/42",
     pr_number = 7,
     issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3",
