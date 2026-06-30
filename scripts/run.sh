@@ -841,7 +841,6 @@ cmd_board() {
   local cache="$FKST_DIR/run/board-cache.json"
   python3 -B "$ROOT/scripts/board.py" \
     --bin "$BIN" \
-    --project-root "$ROOT" \
     --durable-root "$durable" \
     --cache "$cache" \
     "$@"
