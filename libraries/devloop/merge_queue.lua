@@ -5,7 +5,6 @@ local transition_version = require("contract.transition_version")
 local support = require("devloop.commands.support")
 
 function S.install(M)
-require("devloop.queue").install(M)
 local strings = require("contract.strings")
 
 local active_wip_states = {

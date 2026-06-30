@@ -1,5 +1,6 @@
 local core = require("core")
 local git_adapter = require("forge.git")
+local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 local pr_child_handoff = require("departments.implement.pr_child_handoff")
 local forks = require("devloop.forks")
@@ -853,7 +854,7 @@ local function process_ready_event(event)
 end
 
 local function act_implement(event)
-  core.dispatch_consumed_queue("implement", spec, event, {
+  queue.dispatch_consumed_queue("implement", spec, event, {
     devloop_ready = process_ready_event,
   })
 end

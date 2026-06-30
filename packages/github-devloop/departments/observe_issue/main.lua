@@ -1,5 +1,6 @@
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local contract_time = require("contract.time")
+local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
 
 local M = {}
@@ -738,7 +739,7 @@ local function process_pr_event(event)
 end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
-  core.dispatch_consumed_queue("observe_issue", spec, event, {
+  queue.dispatch_consumed_queue("observe_issue", spec, event, {
     ["github-proxy.github_entity_changed"] = function(e)
       if core.payload_field(e and e.payload, "type") == "pr" then
         return process_pr_event(e)

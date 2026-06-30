@@ -1,6 +1,7 @@
 local t = fkst.test
 local core = require("core")
 local execution_start = require("devloop.execution_start")
+local queue = require("devloop.queue")
 
 local package_root = "packages/github-devloop"
 
@@ -339,7 +340,7 @@ return {
     local spec = {
       consumes = { "devloop_ready", "devloop_ready_session" },
     }
-    local handled = core.dispatch_consumed_queue("test", spec, {
+    local handled = queue.dispatch_consumed_queue("test", spec, {
       queue = "github-devloop.devloop_ready_session",
       payload = {},
     }, {
@@ -357,7 +358,7 @@ return {
 
   test_consumed_queue_dispatch_fail_closed_when_declared_queue_is_unrouted = function()
     t.raises(function()
-      core.dispatch_consumed_queue("test", {
+      queue.dispatch_consumed_queue("test", {
         consumes = { "devloop_ready", "devloop_ready_session" },
       }, {
         queue = "github-devloop.devloop_ready_session",
@@ -369,7 +370,7 @@ return {
   end,
 
   test_consumed_queue_dispatch_skips_foreign_queue_without_error = function()
-    local handled = core.dispatch_consumed_queue("test", {
+    local handled = queue.dispatch_consumed_queue("test", {
       consumes = { "devloop_ready" },
     }, {
       queue = "github-proxy.github_entity_changed",
@@ -384,9 +385,9 @@ return {
   end,
 
   test_event_queue_matches_namespaced_session_queue = function()
-    t.eq(core.event_queue_matches({ queue = "github-devloop.devloop_ready_session" }, "devloop_ready_session"), true)
-    t.eq(core.event_queue_matches({ queue = "devloop_ready_session" }, "devloop_ready_session"), true)
-    t.eq(core.event_queue_matches({ queue = "github-devloop.devloop_ready" }, "devloop_ready_session"), false)
+    t.eq(queue.event_queue_matches({ queue = "github-devloop.devloop_ready_session" }, "devloop_ready_session"), true)
+    t.eq(queue.event_queue_matches({ queue = "devloop_ready_session" }, "devloop_ready_session"), true)
+    t.eq(queue.event_queue_matches({ queue = "github-devloop.devloop_ready" }, "devloop_ready_session"), false)
   end,
 
   test_all_departments_accept_production_namespaced_consumed_queues = function()

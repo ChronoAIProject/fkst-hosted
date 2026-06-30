@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
+local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
@@ -535,7 +536,7 @@ local function process_pr_event(event)
 end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
-  core.dispatch_consumed_queue("observe_pr", spec, event, {
+  queue.dispatch_consumed_queue("observe_pr", spec, event, {
     ["github-proxy.github_entity_changed"] = process_pr_event,
     devloop_observe_pr = process_pr_event,
   }, "github-devloop-pr")
