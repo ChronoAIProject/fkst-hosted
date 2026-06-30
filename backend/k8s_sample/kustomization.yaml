@@ -1,4 +1,4 @@
-# `kubectl apply -k backend/fkst-control-plane/k8s_sample` brings up the
+# `kubectl apply -k backend/k8s_sample` brings up the
 # datastore-free control-plane stack (plus the shared Namespace). This is a
 # convenience entry — the directory is primarily the authoritative SAMPLE set;
 # the config loaders are the source of truth for keys.

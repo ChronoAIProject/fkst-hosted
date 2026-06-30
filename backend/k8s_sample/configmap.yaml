@@ -3,11 +3,11 @@
 # Every key below is enumerated from the controller's config loaders, which are
 # the canonical source of truth (NOT this file). The controller is datastore-free
 # (#143): there are no MongoDB / lease / takeover keys.
-#   backend/fkst-control-plane/src/config.rs           HTTP / journal / auth / LLM /
+#   backend/src/config.rs           HTTP / journal / auth / LLM /
 #                                                       vault / codex / NyxID /
 #                                                       worker-liveness / placement
-#   backend/fkst-control-plane/src/reconcile/config.rs     orphan-dir sweep
-#   backend/fkst-control-plane/src/github_app/config.rs    FKST_GITHUB_APP_*
+#   backend/src/reconcile/config.rs     orphan-dir sweep
+#   backend/src/github_app/config.rs    FKST_GITHUB_APP_*
 #   backend/fkst-engine/src/config.rs                   FKST_HOSTED_ENGINE_*
 #                                                       (worker-owned after #151)
 # Secret keys live in secret.example.yaml (fkst-control-plane-secret), never here.

@@ -101,7 +101,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: backend/fkst-control-plane/Dockerfile
+          file: backend/Dockerfile
           push: false
           load: true
           tags: ${{ env.IMAGE_CONTROL_PLANE }}
