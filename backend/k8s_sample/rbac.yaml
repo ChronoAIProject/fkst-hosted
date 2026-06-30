@@ -1,17 +1,22 @@
-# RBAC for pod-per-session execution (milestone #9).
-#
-# Grants the control plane the minimum it needs to spawn + watch + GC one Job
-# per substrate session, and declares the ServiceAccount the session Job pods
-# run as. Apply into the FKST_POD_NAMESPACE namespace (default: fkst-sessions).
-#
-# Bind the RoleBinding subject to whatever ServiceAccount the control-plane
-# Deployment runs as (placeholder: fkst-control-plane in namespace fkst-hosted).
+# RBAC for pod-per-session execution. The control plane spawns + watches + GCs
+# one Job (+ its 0400 per-session Secret) per substrate session, in its OWN
+# namespace (FKST_POD_NAMESPACE = downward-API metadata.namespace). All objects
+# are namespace-agnostic so kustomize sets the namespace for everything.
 ---
+# The control plane runs as this ServiceAccount (Deployment serviceAccountName).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fkst-control-plane
+  labels:
+    app.kubernetes.io/name: fkst-control-plane
+    app.kubernetes.io/part-of: fkst-hosted
+---
+# Session Job pods run as this ServiceAccount (FKST_POD_SERVICE_ACCOUNT).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: fkst-session-runner
-  namespace: fkst-sessions
   labels:
     app.kubernetes.io/part-of: fkst-hosted
     app.kubernetes.io/component: session-runner
@@ -20,22 +25,20 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: fkst-pod-launcher
-  namespace: fkst-sessions
   labels:
     app.kubernetes.io/part-of: fkst-hosted
 rules:
-  # Per-session credentials: created before the Job, mounted 0400, and
-  # patched in place to rotate the short-lived NyxID token (update/patch).
-  # They carry an ownerReference to the Job, so K8s cascade-deletes them.
+  # Per-session credentials: created before the Job, mounted 0400, patched to
+  # rotate the short-lived NyxID token; ownerReferenced to the Job for cascade GC.
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
   # One Job per session: created, watched to completion, GC'd via
-  # ttlSecondsAfterFinished (delete kept for explicit teardown).
+  # ttlSecondsAfterFinished (delete kept for explicit teardown / the stop route).
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch", "delete"]
-  # Read pod status for richer failure diagnostics on a failed Job.
+  # Read pod status for richer failure diagnostics + the rich session GET view.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
@@ -44,7 +47,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: fkst-pod-launcher
-  namespace: fkst-sessions
   labels:
     app.kubernetes.io/part-of: fkst-hosted
 roleRef:
@@ -52,8 +54,5 @@ roleRef:
   kind: Role
   name: fkst-pod-launcher
 subjects:
-  # The control-plane's own ServiceAccount (adjust name/namespace to match the
-  # control-plane Deployment's serviceAccountName).
   - kind: ServiceAccount
     name: fkst-control-plane
-    namespace: fkst-hosted
