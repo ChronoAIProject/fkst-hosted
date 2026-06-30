@@ -1,3 +1,4 @@
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
@@ -82,7 +83,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local budget_round = math.max(round, core.converge_boundary_budget_round(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
     local hit_round_cap = budget_round >= config.max_converge_rounds(core)
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
-      local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body, {
+      local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body, {
         kind = "github-devloop.reconcile",
         proposal_id = unresolved.proposal_id,
         round = round,
@@ -118,7 +119,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return
     end
-    local comment_request = core.build_converge_round_comment_request(repo, issue_number, unresolved, round, marker_body)
+    local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body)
 
     core.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), "raising loop proposal round " .. tostring(next_n))
     core.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {

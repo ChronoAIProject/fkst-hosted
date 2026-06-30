@@ -25,7 +25,6 @@ prompts.install(M, wiring.prompts(), {
   intake_parser = true,
 })
 require("core.intake_class").install(M)
-require("devloop.requests").install(M)
 require("devloop.entity").install(M)
 require("devloop.validators").install(M)
 require("devloop.claims").install(M)

@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local payloads_builders = require("devloop.payloads.builders")
 local C = {}
@@ -54,7 +56,7 @@ end
 
 local function fixing_replay_comment_request(M, issue, pr_number, fix_payload, feedback, source_ref)
   local reason = fix_payload.gate_failure_excerpt or feedback.review_reason or feedback.reason or "fixing-replay"
-  local request = M.build_merge_gate_fix_comment_request(
+  local request = requests_review.build_merge_gate_fix_comment_request(M,
     issue.repo,
     issue.number,
     {
@@ -538,7 +540,7 @@ local function replay_fixing_to_reviewing(M, dept, issue, state, proposal_id, li
     reviewed_head_sha = feedback.reviewed_head_sha,
     source_ref = source_ref,
   }
-  M.raise_fix_reviewing({
+  requests_review.raise_fix_reviewing(M, {
     dept = dept,
     repo = issue.repo,
     issue_number = issue.number,
@@ -612,7 +614,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
   if dept ~= "observe_pr" then
     local new_version = M.next_fix_version(state.version)
     local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
-    local comment_request = M.build_merge_head_reviewing_comment_request(
+    local comment_request = requests_review.build_merge_head_reviewing_comment_request(M,
       issue.repo,
       issue.number,
       {
@@ -624,7 +626,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       new_version,
       source_ref
     )
-    local label_request = M.build_state_label_request(issue.repo, issue.number, "reviewing", M._dedup_key({
+    local label_request = requests_labels.build_state_label_request(M, issue.repo, issue.number, "reviewing", M._dedup_key({
       "observe",
       "fixing",
       "renormalize",
@@ -706,7 +708,7 @@ local function raise_reviewing_for_current_head(M, dept, issue, state, proposal_
   end
   if not dept_can_direct_reviewing(dept) then
     local merge_ready = M.merge_ready_fact(current_pr.comments, proposal_id, state.version, link.pr_number)
-    local comment_request = M.build_merge_head_reviewing_comment_request(
+    local comment_request = requests_review.build_merge_head_reviewing_comment_request(M,
       issue.repo,
       issue.number,
       {
@@ -758,7 +760,7 @@ local function maybe_replay_review_carry_over(M, dept, issue, state, row, facts,
     return false
   end
   local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
-  local comment_request = M.build_review_carry_over_comment_request(issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
+  local comment_request = requests_review.build_review_carry_over_comment_request(M, issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
   return raise_effects(M, dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
     { queue = "github-proxy.github_pr_comment_request", payload = comment_request },

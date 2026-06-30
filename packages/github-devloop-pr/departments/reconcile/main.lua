@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -420,7 +421,7 @@ local function pipeline_timeout(event)
     local comment_request = target_pr_number ~= nil
       and build_timeout_reconcile_pr_comment_request(repo, target_pr_number, reconcile, action, reason, version, why_fields)
       or core.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
-    local label_request = core.build_state_label_request(repo, issue_number, "blocked", core._dedup_key({
+    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", core._dedup_key({
       "timeout-reconcile",
       "label",
       tostring(reconcile.dedup_key),

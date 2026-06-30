@@ -77,7 +77,6 @@ prompts.install(M, wiring.prompts(), {
   review_meta = true,
   review_meta_parser = true,
 })
-require("devloop.requests").install(M)
 require("core.pr_label_requests").install(M)
 require("core.review_meta_requests").install(M)
 require("devloop.entity").install(M)

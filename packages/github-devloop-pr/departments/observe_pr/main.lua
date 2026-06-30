@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
@@ -234,7 +236,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
 
   local new_version = operator_commands.operator_rereview_version(core, state.version, current_pr.head_sha)
-  local comment_request = core.build_operator_rereview_comment_request(
+  local comment_request = requests_review.build_operator_rereview_comment_request(core,
     origin.repo,
     pr_number,
     origin.proposal_id,
@@ -334,7 +336,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
     reviewed_head_sha = review_fact.reviewed_head_sha,
     dedup_key = tostring(state.version) .. "/observe-pr-conflict",
   }
-  local comment_request = core.build_merge_gate_fix_comment_request(
+  local comment_request = requests_review.build_merge_gate_fix_comment_request(core,
     origin.repo,
     origin.issue_number,
     comment_origin,
@@ -347,7 +349,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
       gate_failure_excerpt = reason,
     }
   )
-  local label_request = origin.issue_number ~= nil and core.build_state_label_request(
+  local label_request = origin.issue_number ~= nil and requests_labels.build_state_label_request(core,
     origin.repo,
     origin.issue_number,
     "fixing",
@@ -405,13 +407,13 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
       return
     end
 
-    local blocked_version = core.pr_base_unmanaged_blocked_version(origin.impl_version)
+    local blocked_version = requests_review.pr_base_unmanaged_blocked_version(core, origin.impl_version)
     local blocked_state = {
       state = "blocked",
       version = blocked_version,
       proposal_id = origin.proposal_id,
     }
-    local comment_request = core.build_pr_base_unmanaged_comment_request(origin.repo, pr.number, origin, branches.integration, source_ref)
+    local comment_request = requests_review.build_pr_base_unmanaged_comment_request(core, origin.repo, pr.number, origin, branches.integration, source_ref)
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "applied(pr-base-unmanaged)", "self-claimed PR base is not managed by this instance")
     core.log_apply("observe_pr", origin.proposal_id, "blocked", blocked_version, { add = { "fkst-dev:blocked" }, remove = {} }, {
       "github-proxy.github_pr_comment_request",
@@ -536,7 +538,7 @@ local function process_pr_event(event)
       return
     end
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "applied", "writing PR-local reviewing marker")
-    local comment_request = core.build_reviewing_comment_request(origin.repo, origin.issue_number, origin, pr.number, source_ref)
+    local comment_request = requests_review.build_reviewing_comment_request(core, origin.repo, origin.issue_number, origin, pr.number, source_ref)
     local raised = {
       "github-proxy.github_pr_comment_request",
     }

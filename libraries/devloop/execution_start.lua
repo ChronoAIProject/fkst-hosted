@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local base_ids = require("devloop.base_ids")
 local context_bundle = require("devloop.context_bundle")
 
@@ -89,8 +91,8 @@ function E.build_execution_start_effects(core, repo, issue_number, request, curr
   }
   return {
     proposal = proposal,
-    thinking_comment_request = core.build_observe_comment_request(issue_ref, proposal),
-    thinking_label_request = core.build_thinking_label_request(issue_ref, proposal),
+    thinking_comment_request = requests_lifecycle.build_observe_comment_request(core, issue_ref, proposal),
+    thinking_label_request = requests_labels.build_thinking_label_request(core, issue_ref, proposal),
   }
 end
 

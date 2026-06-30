@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local operator_commands = require("devloop.operator_commands")
 local transition_version = require("contract.transition_version")
@@ -246,7 +247,7 @@ return {
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_duplicate")
     local command_fact = operator_commands.operator_command_fact(core, { command }, "rereview")
-    local response = core.build_operator_rereview_comment_request(
+    local response = requests_review.build_operator_rereview_comment_request(core,
       "owner/repo",
       7,
       "github-devloop/issue/owner/repo/42",

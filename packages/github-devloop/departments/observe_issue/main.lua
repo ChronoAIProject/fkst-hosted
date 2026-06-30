@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
@@ -267,7 +269,7 @@ local function raise_stale_dependency_label_clear(issue, proposal_id, state, lab
   core.log_apply("observe_issue", proposal_id, state.state, state.version, { add = {}, remove = { core._blocked_on_dependency_label } }, {
     "github-proxy.github_issue_label_request",
   })
-  core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
+  core.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(core,
     issue.repo,
     issue.number,
     {},
@@ -598,7 +600,7 @@ local function process_issue_event(event)
         tostring(issue_state.version),
         tostring(link.pr_number),
       }), issue.source_ref)
-      local label_request = core.build_state_label_request(issue.repo, issue.number, "awaiting-pr", core._dedup_key({
+      local label_request = requests_labels.build_state_label_request(core, issue.repo, issue.number, "awaiting-pr", core._dedup_key({
         "canonicalize",
         "pr-open",
         "label",
@@ -635,7 +637,7 @@ local function process_issue_event(event)
       local label_state = issue_label_projection_state(issue_state, link, snapshot)
       local add_labels, remove_labels = core.state_label_reconcile_changes(current.labels, label_state.state)
       if #add_labels > 0 or #remove_labels > 0 then
-        local label_request = core.build_label_request(
+        local label_request = requests_labels.build_label_request(core,
           issue.repo,
           issue.number,
           add_labels,
@@ -690,8 +692,8 @@ local function process_issue_event(event)
       return
     end
 
-    local comment_request = core.build_observe_comment_request(issue, proposal)
-    local label_request = core.build_thinking_label_request(issue, proposal)
+    local comment_request = requests_lifecycle.build_observe_comment_request(core, issue, proposal)
+    local label_request = requests_labels.build_thinking_label_request(core, issue, proposal)
     local add_labels, remove_labels = core.state_label_changes("thinking")
     core.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, { add = add_labels, remove = remove_labels }, {
       "consensus.proposal",

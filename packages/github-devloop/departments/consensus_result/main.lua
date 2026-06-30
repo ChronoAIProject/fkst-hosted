@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local core = require("core")
 local ports_seam = require("forge.ports")
 local saga = require("workflow.saga")
@@ -30,8 +32,8 @@ end
 local function raise_result_effects(repo, issue_number, reached, current, state, gate, reason, version, to_state)
   version = version or result_version(reached)
   to_state = to_state or (gate and gate.ok and "ready" or "dependency_wait")
-  local comment_request = core.build_result_comment_request(repo, issue_number, reached, to_state)
-  local label_request = core.build_result_label_request(repo, issue_number, reached)
+  local comment_request = requests_lifecycle.build_result_comment_request(core, repo, issue_number, reached, to_state)
+  local label_request = requests_labels.build_result_label_request(core, repo, issue_number, reached)
   local dependency_comment_request = nil
   local dependency_label_request = nil
   local dependency_release_comment_request = nil
@@ -41,7 +43,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       or (gate.kind == "unresolvable"
         and core.dependency_unresolvable_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason)
         or core.dependency_wait_marker(reached.proposal_id, version, gate.unmet, gate.kind, gate.reason))
-    dependency_comment_request = core.build_dependency_hold_comment_request(
+    dependency_comment_request = requests_lifecycle.build_dependency_hold_comment_request(core,
       repo,
       issue_number,
       reached.proposal_id,
@@ -50,7 +52,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       marker,
       reached.source_ref
     )
-    dependency_label_request = core.build_label_request(
+    dependency_label_request = requests_labels.build_label_request(core,
       repo,
       issue_number,
       { core._blocked_on_dependency_label },
@@ -59,7 +61,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       reached.source_ref
     )
   elseif core.dependency_gate_has_notes(gate) then
-    dependency_release_comment_request = core.build_dependency_release_comment_request(
+    dependency_release_comment_request = requests_lifecycle.build_dependency_release_comment_request(core,
       repo,
       issue_number,
       reached.proposal_id,
@@ -168,7 +170,7 @@ local function make_department(ports)
       if transition == "idempotent" or transition == "stale" then
         if transition == "idempotent" and tostring(state.version or "") == tostring(version) then
           local complete = gate.ok
-            and core.result_effects_complete(current, reached)
+            and requests_lifecycle.result_effects_complete(core, current, reached)
             or dependency_hold_effects_complete(current, reached, version)
           if complete then
             core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, "skip-idempotent(result effects complete)", "all declared result effects are derivable")

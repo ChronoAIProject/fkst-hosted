@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local parsers_issue = require("devloop.parsers.issue")
 local S = {}
 local comment_strings = require("devloop.strings")
@@ -223,7 +224,7 @@ function M.build_intake_class_followup_comment_request(repo, issue_number, candi
 end
 
 function M.build_intake_class_folded_label_request(repo, issue_number, candidate)
-  return M.build_state_label_request(
+  return requests_labels.build_state_label_request(M,
     repo,
     issue_number,
     "blocked",

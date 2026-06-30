@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -36,7 +37,7 @@ local function mock_fix_writeback(event, branch, origin_marker)
   mock_write_env("1")
   mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
     core.state_marker(event.proposal_id, "fixing", event.version),
-    core.build_review_result_comment_request(
+    requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -61,7 +62,7 @@ return {
   test_fix_rebuilds_missing_recorded_worktree_under_current_runtime_root = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -104,7 +105,7 @@ return {
   test_fix_removes_existing_outside_runtime_worktree_before_rebuild = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,

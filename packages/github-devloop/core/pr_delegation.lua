@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local S = {}
 local config = require("devloop.config")
@@ -154,7 +155,7 @@ local function build_parent_awaiting_comment(repo, issue_number, ready, child)
 end
 
 local function build_parent_awaiting_label(repo, issue_number, ready, child)
-  return M.build_state_label_request(repo, issue_number, "awaiting-pr", M._dedup_key({
+  return requests_labels.build_state_label_request(M, repo, issue_number, "awaiting-pr", M._dedup_key({
     "awaiting-pr",
     "label",
     tostring(ready.proposal_id),

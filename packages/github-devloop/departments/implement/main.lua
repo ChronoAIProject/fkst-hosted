@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local git_adapter = require("forge.git")
@@ -37,8 +39,8 @@ local function implement_done(_event)
 end
 
 local function raise_impl_failed(repo, issue_number, ready, reason, detail, attempt)
-  local comment_request = core.build_impl_failure_comment_request(repo, issue_number, ready, reason, detail, attempt)
-  local label_request = core.build_impl_failed_label_request(repo, issue_number, ready, reason)
+  local comment_request = requests_lifecycle.build_impl_failure_comment_request(core, repo, issue_number, ready, reason, detail, attempt)
+  local label_request = requests_labels.build_impl_failed_label_request(core, repo, issue_number, ready, reason)
   local add_labels, remove_labels = core.state_label_changes("impl-failed")
   core.log_apply("implement", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
@@ -49,8 +51,8 @@ local function raise_impl_failed(repo, issue_number, ready, reason, detail, atte
 end
 
 local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
-  local comment_request = core.build_implementing_state_comment_request(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
-  local label_request = core.build_implementing_label_request(repo, issue_number, ready)
+  local comment_request = requests_lifecycle.build_implementing_state_comment_request(core, repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
+  local label_request = requests_labels.build_implementing_label_request(core, repo, issue_number, ready)
   local add_labels, remove_labels = core.state_label_changes("implementing")
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
@@ -61,7 +63,7 @@ local function raise_implementing_state(repo, issue_number, ready, worktree, bra
 end
 
 local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
-  local comment_request = core.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
+  local comment_request = requests_lifecycle.build_implementing_comment_request(core, repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
   core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = {}, remove = {} }, {
     "github-proxy.github_issue_comment_request",
   })
@@ -69,7 +71,7 @@ local function raise_implementing(repo, issue_number, ready, worktree, branch, h
 end
 
 local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at, exec_ref)
-  local request = core.build_implement_attempt_comment_request(repo, issue_number, ready, attempt, started_at, exec_ref)
+  local request = requests_lifecycle.build_implement_attempt_comment_request(core, repo, issue_number, ready, attempt, started_at, exec_ref)
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
@@ -163,7 +165,7 @@ local function ready_for_implementation_version(ready, version)
 end
 
 local function raise_implement_version_mismatch(repo, issue_number, ready, state, expected_version, attempt)
-  local request = core.build_implement_version_mismatch_comment_request(
+  local request = requests_lifecycle.build_implement_version_mismatch_comment_request(core,
     repo,
     issue_number,
     ready,
@@ -644,7 +646,7 @@ local function process_ready_event(event)
         gate,
         ready.source_ref
       ))
-      core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", core.build_label_request(
+      core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(core,
         repo,
         issue_number,
         { core._blocked_on_dependency_label },

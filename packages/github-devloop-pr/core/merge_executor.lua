@@ -1,3 +1,7 @@
+local requests_bodies = require("devloop.requests.bodies")
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
+local requests_review = require("devloop.requests.review")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
@@ -107,8 +111,8 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     end
     predecessor_set = position.predecessor_set
   end
-  local comment_request = core.build_merge_gate_fix_comment_request(repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
-  local label_request = issue_number ~= nil and core.build_state_label_request(
+  local comment_request = requests_review.build_merge_gate_fix_comment_request(core, repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
+  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(core,
     repo,
     issue_number,
     "fixing",
@@ -138,8 +142,8 @@ local function raise_reviewing_for_current_head(repo, issue_number, merge_ready,
     return
   end
   local current_head_sha = tostring(current_pr.head_sha or "")
-  local comment_request = core.build_merge_head_reviewing_comment_request(repo, issue_number, merge_ready, merge_ready.reviewed_head_sha, current_head_sha, review_version, source_ref)
-  local label_request = issue_number ~= nil and core.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, current_head_sha, review_version, core.issue_source_ref(repo, issue_number)) or nil
+  local comment_request = requests_review.build_merge_head_reviewing_comment_request(core, repo, issue_number, merge_ready, merge_ready.reviewed_head_sha, current_head_sha, review_version, source_ref)
+  local label_request = issue_number ~= nil and requests_labels.build_merge_head_reviewing_label_request(core, repo, issue_number, merge_ready, current_head_sha, review_version, core.issue_source_ref(repo, issue_number)) or nil
   local add_labels, remove_labels = core.state_label_changes("reviewing")
   core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "applied", reason)
   local raised = {
@@ -283,7 +287,7 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
 end
 
 local function build_merging_body(merge_ready)
-  return core.build_merging_comment_body(merge_ready)
+  return requests_bodies.build_merging_comment_body(core, merge_ready)
 end
 local function write_merging_marker(repo, merge_ready, comments)
   if core.merging_fact(comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) ~= nil then
@@ -307,7 +311,7 @@ end
 local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)
   local merged_source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
   local autonomy_record = issue_number ~= nil and autonomy_ledger.autonomy_result_record(core, repo, issue_number, merge_ready, nil, merged_pr) or nil
-  local merged_body = core.build_merged_comment_body(merge_ready, autonomy_record)
+  local merged_body = requests_bodies.build_merged_comment_body(core, merge_ready, autonomy_record)
   local comment_request = core.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -348,7 +352,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
   if options ~= nil and type(options.queue_starvation_cause) == "table" then
-    local comment_request = core.build_queue_starvation_reconcile_comment_request(repo, merge_ready, options.queue_starvation_cause)
+    local comment_request = requests_lifecycle.build_queue_starvation_reconcile_comment_request(core, repo, merge_ready, options.queue_starvation_cause)
     core.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     raise("github-proxy.github_pr_comment_request", comment_request)
   end

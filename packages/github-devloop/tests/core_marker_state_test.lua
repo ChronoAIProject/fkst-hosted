@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
@@ -221,7 +223,7 @@ return {
       '<!-- fkst:github-devloop:result:v1 proposal="github-devloop/issue/owner/repo/42" decision="approve" dedup="consensus:github-devloop/issue/owner/repo/42/v1" -->'
     )
 
-    local label = core.build_result_label_request("owner/repo", "42", reached())
+    local label = requests_labels.build_result_label_request(core, "owner/repo", "42", reached())
     t.eq(label.schema, "github-proxy.label.v1")
     t.eq(label.add_labels[1], "fkst-dev:ready")
     t.eq(label.label_colors["fkst-dev:ready"], "0E8A16")
@@ -235,7 +237,7 @@ return {
     t.eq(#label.remove_labels, 12)
     t.eq(label.issue_number, "42")
 
-    local awaiting = core.build_state_label_request(
+    local awaiting = requests_labels.build_state_label_request(core,
       "owner/repo",
       "42",
       "awaiting-pr",
@@ -268,7 +270,7 @@ return {
         { angle = "delete", verdict = "approve" },
       },
     })
-    local comment = core.build_result_comment_request("owner/repo", "42", completed)
+    local comment = requests_lifecycle.build_result_comment_request(core, "owner/repo", "42", completed)
     t.eq(comment.schema, "github-proxy.v1")
     t.eq(comment.issue_number, "42")
     t.is_true(comment.body:find("github-devloop decision: approve", 1, true) ~= nil)
@@ -293,8 +295,8 @@ return {
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/v2",
     })
 
-    local first_comment = core.build_result_comment_request("owner/repo", "42", first)
-    local second_comment = core.build_result_comment_request("owner/repo", "42", second)
+    local first_comment = requests_lifecycle.build_result_comment_request(core, "owner/repo", "42", first)
+    local second_comment = requests_lifecycle.build_result_comment_request(core, "owner/repo", "42", second)
 
     t.eq(first_comment.dedup_key, "github-devloop/issue/owner/repo/42/comment/approve/consensus-github-devloop/issue/owner/repo/42/v1")
     t.eq(second_comment.dedup_key, "github-devloop/issue/owner/repo/42/comment/approve/consensus-github-devloop/issue/owner/repo/42/v2")
@@ -863,7 +865,7 @@ return {
       body = "Looks fine.\n" .. forged,
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     })
-    local comment = core.build_result_comment_request("owner/repo", "42", event)
+    local comment = requests_lifecycle.build_result_comment_request(core, "owner/repo", "42", event)
 
     t.is_true(comment.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(comment.body:find(forged, 1, true) == nil, true)

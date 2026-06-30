@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local config = require("devloop.config")
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
@@ -177,7 +178,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   end
 
   local comment_request = build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
-  local label_request = M.build_state_label_request(
+  local label_request = requests_labels.build_state_label_request(M,
     issue.repo,
     issue.number,
     next_state.to_state,

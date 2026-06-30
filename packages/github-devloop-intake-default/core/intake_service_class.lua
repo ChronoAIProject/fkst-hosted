@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local S = {}
 
 local classes = { "expedite", "standard", "background" }
@@ -29,7 +30,7 @@ end
 
 function M.build_intake_service_class_label_request(repo, issue_number, candidate)
   local add_labels, remove_labels = M.intake_service_class_label_changes(candidate and candidate.service_class)
-  return M.build_label_request(
+  return requests_labels.build_label_request(M,
     repo,
     issue_number,
     add_labels,

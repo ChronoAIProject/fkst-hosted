@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
@@ -301,7 +302,7 @@ local function mock_pr_state(comments)
 end
 
 local function reject_comment(event)
-  return core.build_review_result_comment_request(
+  return requests_review.build_review_result_comment_request(core,
     repo,
     "42",
     event.proposal_id,

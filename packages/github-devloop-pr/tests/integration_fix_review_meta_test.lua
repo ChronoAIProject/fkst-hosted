@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
@@ -88,7 +89,7 @@ return {
   test_fix_write_pushes_and_marks_reviewing_new_head = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -164,7 +165,7 @@ return {
   test_fix_marker_lag_retries_then_visible_marker_runs = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -217,7 +218,7 @@ return {
       version = core.fix_version_from_review_version(review_version),
     })
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -243,7 +244,7 @@ return {
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reviewing_version = core.next_fix_version(event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -266,7 +267,7 @@ return {
   test_fix_missing_write_dry_run_no_advance = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -292,7 +293,7 @@ return {
   test_fix_runs_after_write_is_enabled = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -356,7 +357,7 @@ return {
     })
     local recomputed_branch = core.implement_branch("owner/repo", "42", second_event.version)
     t.eq(first_branch ~= recomputed_branch, true)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       second_event.proposal_id,
@@ -405,7 +406,7 @@ return {
   test_fix_push_then_crash_replay_self_heals_reviewing_marker = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -442,7 +443,7 @@ return {
   test_fix_missing_head_repository_fails_closed = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -476,7 +477,7 @@ return {
   test_fix_no_changes_moves_forward_to_reviewing_for_review_meta_path = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -517,7 +518,7 @@ return {
   test_fix_clean_worktree_with_existing_ahead_commit_reuses_it = function()
     local event = fixing()
     local branch = core.implement_branch("owner/repo", "42", event.version)
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       event.proposal_id,
@@ -571,7 +572,7 @@ return {
     local event = fixing({ fix_summary = "stale summary from a prior round" })
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local review = { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } }
-    local reject_comment = core.build_review_result_comment_request("owner/repo", "42", event.proposal_id, event.version, review, event.source_ref).body
+    local reject_comment = requests_review.build_review_result_comment_request(core, "owner/repo", "42", event.proposal_id, event.version, review, event.source_ref).body
     local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")

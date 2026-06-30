@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
@@ -161,7 +163,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local budget_round = math.max(round, core.review_converge_budget_round(current_pr.comments, unresolved.proposal_id, origin.proposal_id))
     local hit_round_cap = budget_round >= config.max_converge_rounds(core)
     if hit_round_cap or core.is_true_stall(facts_with_current, round) then
-      local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
+      local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
       local review_reconcile = core.build_devloop_review_reconcile_payload(unresolved, round, origin.proposal_id, review_version, reviewed_head_sha)
       local reason = hit_round_cap
         and ("PR review convergence budget reached at round " .. tostring(budget_round))
@@ -177,11 +179,11 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if review_truth_table_unapproved(unresolved) then
       marker_body = marker_body .. "\n" .. core.state_marker(origin.proposal_id, "review-meta", state.version)
-      local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
+      local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
       local review_meta = payloads_builders.build_devloop_review_meta_payload(core, unresolved, origin.proposal_id, state.version, pr_number, round, pr_source_ref)
       local label_request = nil
       if origin.issue_number ~= nil then
-        label_request = core.build_state_label_request(origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
+        label_request = requests_labels.build_state_label_request(core, origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
       end
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", core.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
       core.log_apply("review_loop", origin.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = {} }, {
@@ -196,7 +198,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       core.log_raise("review_loop", origin.proposal_id, "devloop_review_meta", review_meta)
       return
     end
-    local comment_request = core.build_review_converge_round_comment_request(origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
+    local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
 
     local current_issue = {
       title = "PR #" .. tostring(pr_number),

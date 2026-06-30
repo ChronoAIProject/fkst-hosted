@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local execution_start = require("devloop.execution_start")
@@ -59,7 +61,7 @@ local function raise_enable_successor(dept, repo, issue_number, candidate, curre
     log.warn("github-devloop dept=" .. tostring(dept) .. " proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-execution-request")
     return false
   end
-  local label_request = core.build_intake_enabled_label_request(repo, issue_number, candidate)
+  local label_request = requests_labels.build_intake_enabled_label_request(core, repo, issue_number, candidate)
   if opts.log_apply then
     local class_add, class_remove = core.intake_service_class_label_changes(candidate.service_class)
     core.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "intake-enable", "execution-request", "applied(" .. tostring(opts.reason or "direct") .. ")", "raising execution request successor event")
@@ -286,7 +288,7 @@ local function act_intake_judge(event)
       end
     end
     candidate.service_class = parsed.service_class
-    local comment_request = core.build_intake_decision_comment_request(repo, issue_number, decision_candidate, parsed.action, parsed.reason, parsed.service_class)
+    local comment_request = requests_lifecycle.build_intake_decision_comment_request(core, repo, issue_number, decision_candidate, parsed.action, parsed.reason, parsed.service_class)
     table.insert(raised, "github-proxy.github_issue_label_request")
     local class_add, class_remove = core.intake_service_class_label_changes(parsed.service_class)
     local apply_add = { class_add[1] }
@@ -328,7 +330,7 @@ local function act_intake_judge(event)
     if enables_pipeline(parsed.action) then
       raise_enable_successor("intake_judge", repo, issue_number, candidate, current, event.ts, decision_dedup_key)
     elseif tracks_umbrella(parsed.action) then
-      local label_request = core.build_intake_tracking_label_request(repo, issue_number, candidate)
+      local label_request = requests_labels.build_intake_tracking_label_request(core, repo, issue_number, candidate)
       core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_label_request", label_request)
     else
       local label_request = core.build_intake_service_class_label_request(repo, issue_number, candidate)

@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 
@@ -18,7 +19,7 @@ local function source_ref()
 end
 
 local function review_result_comment_request()
-  return core.build_review_result_comment_request(repo, nil, proposal_id, version, {
+  return requests_review.build_review_result_comment_request(core, repo, nil, proposal_id, version, {
     schema = "consensus.consensus_reached.v1",
     proposal_id = review_proposal_id,
     decision = "approve",

@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
@@ -284,7 +286,7 @@ local function raise_review_meta(repo, issue_number, fix, reason, detail)
 end
 
 local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_sha, reason, summary)
-  core.raise_fix_reviewing({
+  requests_review.raise_fix_reviewing(core, {
     dept = "fix",
     repo = repo,
     issue_number = issue_number,
@@ -308,7 +310,7 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
     reviewed_head_sha = fix.reviewed_head_sha,
     dedup_key = fix.dedup_key,
   }
-  local comment_request = core.build_merge_gate_fix_comment_request(
+  local comment_request = requests_review.build_merge_gate_fix_comment_request(core,
     repo,
     issue_number,
     merge_ready,
@@ -323,7 +325,7 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
       preserve_nil_gate_failure_excerpt = true,
     }
   )
-  local label_request = issue_number ~= nil and core.build_state_label_request(
+  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(core,
     repo,
     issue_number,
     "fixing",

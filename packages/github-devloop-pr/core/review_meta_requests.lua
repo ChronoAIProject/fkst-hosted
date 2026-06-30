@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_review = require("devloop.requests.review")
 local S = {}
 local comment_strings = require("devloop.strings")
 
@@ -54,7 +56,7 @@ local function review_meta_result_marker(review_meta, action, reason, state_vers
 end
 
 function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
-  return M.build_state_label_request(
+  return requests_labels.build_state_label_request(M,
     repo,
     issue_number,
     "review-meta",
@@ -98,7 +100,7 @@ end
 
 function M.build_review_meta_label_request(repo, issue_number, review_meta, action, version)
   local normalized = normalized_reflection_action(review_meta, action)
-  return M.build_state_label_request(
+  return requests_labels.build_state_label_request(M,
     repo,
     issue_number,
     review_meta_to_state(normalized),
@@ -135,7 +137,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   }), review_meta.source_ref)
   if action == "fix" or action == "continue" then
     local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_meta.review_proposal_id)
-    return M.attach_fixing_handoff(request, review_meta.proposal_id, review_meta.pr_number, state_version, {
+    return requests_review.attach_fixing_handoff(M, request, review_meta.proposal_id, review_meta.pr_number, state_version, {
       review_proposal_id = review_meta.review_proposal_id,
       review_dedup_key = review_meta.dedup_key,
       reviewed_head_sha = reviewed_head_sha,
@@ -146,7 +148,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
 end
 
 function M.build_review_reconcile_label_request(repo, issue_number, review_reconcile)
-  return M.build_state_label_request(
+  return requests_labels.build_state_label_request(M,
     repo,
     issue_number,
     "blocked",
@@ -160,7 +162,7 @@ function M.build_review_reconcile_label_request(repo, issue_number, review_recon
 end
 
 function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
-  return M.build_state_label_request(
+  return requests_labels.build_state_label_request(M,
     repo,
     issue_number,
     "blocked",

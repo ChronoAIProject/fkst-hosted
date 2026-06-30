@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -59,7 +60,7 @@ return {
   test_pr_native_fix_write_pushes_and_skips_issue_side_effects = function()
     local event = pr_native_fixing()
     local branch = "pr-native-branch"
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       nil,
       event.proposal_id,
@@ -140,7 +141,7 @@ return {
   test_fix_pre_spawn_write_gate_skips_stale_pr_head_before_codex = function()
     local event = pr_native_fixing()
     local branch = "pr-native-branch"
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       nil,
       event.proposal_id,

@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
@@ -96,7 +97,7 @@ return {
   test_merge_gate_marker_without_baseline_round_trips_nil = function()
     local event = merge_ready()
     local fix_version = core.fix_version_from_review_version(event.version)
-    local request = core.build_merge_gate_fix_comment_request(
+    local request = requests_review.build_merge_gate_fix_comment_request(core,
       "owner/repo",
       "42",
       event,

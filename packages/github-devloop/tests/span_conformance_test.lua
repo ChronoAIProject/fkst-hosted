@@ -1,3 +1,4 @@
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local replayer = require("devloop.replayer")
@@ -386,7 +387,8 @@ return {
 local strings = { en = { implementation_started = "github-devloop implementation started" } }
 ]],
       ["packages/github-devloop/core/requests/lifecycle.lua"] = [[
-function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha)
+local C = {}
+function C.build_implementing_comment_request(M, repo, issue_number, ready, worktree, branch, head_sha)
   return { body = comment_strings.comment_string(M, "implementation_started") .. "\nHead: " .. tostring(head_sha) }
 end
 ]],
@@ -398,7 +400,8 @@ end
   test_completion_comment_literal_start_wording_fails = function()
     local errors = span.errors_from_sources({
       ["packages/github-devloop/core/requests/lifecycle.lua"] = [[
-function M.build_implementing_comment_request(repo, issue_number, ready, worktree, branch, head_sha)
+local C = {}
+function C.build_implementing_comment_request(M, repo, issue_number, ready, worktree, branch, head_sha)
   return { body = "github-devloop implementation started" .. "\nHead: " .. tostring(head_sha) }
 end
 ]],
@@ -439,7 +442,7 @@ raise_implementing_state(repo, issue_number, ready)
 ]]),
       ["packages/github-devloop/departments/implement/main.lua"] = [[
 local function raise_implementing_state(repo, issue_number, ready)
-  local request = core.build_implementing_state_comment_request(repo, issue_number, ready)
+  local request = requests_lifecycle.build_implementing_state_comment_request(core, repo, issue_number, ready)
   raise("github-proxy.github_issue_comment_request", request)
 end
 
@@ -447,7 +450,8 @@ raise_implementing_state(repo, issue_number, ready)
 local result = spawn_codex_sync({ prompt = prompt })
 ]],
       ["libraries/devloop/requests/lifecycle.lua"] = [[
-function M.build_implementing_state_comment_request(repo, issue_number, ready)
+local C = {}
+function C.build_implementing_state_comment_request(M, repo, issue_number, ready)
   local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
   return { body = marker }
 end

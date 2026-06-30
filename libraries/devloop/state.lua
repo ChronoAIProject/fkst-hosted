@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
@@ -838,7 +839,7 @@ function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, 
   else
     add_labels, remove_labels = M.state_label_changes(state)
   end
-  return M.build_label_request(
+  return requests_labels.build_label_request(M,
     repo,
     issue_number,
     add_labels,

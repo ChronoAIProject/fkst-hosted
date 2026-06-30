@@ -1,20 +1,19 @@
-local S = {}
+local C = {}
 
-function S.install(M, shared)
-  local function label_colors_for(add_labels)
-    local colors = {}
-    local has_color = false
-    for _, label in ipairs(add_labels or {}) do
-      local color = M._label_colors and M._label_colors[tostring(label)]
-      if color ~= nil then
-        colors[tostring(label)] = color
-        has_color = true
-      end
+local function label_colors_for(M, add_labels)
+  local colors = {}
+  local has_color = false
+  for _, label in ipairs(add_labels or {}) do
+    local color = M._label_colors and M._label_colors[tostring(label)]
+    if color ~= nil then
+      colors[tostring(label)] = color
+      has_color = true
     end
-    return has_color and colors or nil
   end
+  return has_color and colors or nil
+end
 
-function M.build_label_request(repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
+function C.build_label_request(M, repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
   return M.attach_issue_claim({
     schema = "github-proxy.label.v1",
     repo = repo,
@@ -23,19 +22,19 @@ function M.build_label_request(repo, issue_number, add_labels, remove_labels, de
     issue_number = issue_number,
     add_labels = add_labels or {},
     remove_labels = remove_labels or {},
-    label_colors = label_colors_for(add_labels),
+    label_colors = label_colors_for(M, add_labels),
     dedup_key = dedup_key,
     source_ref = M.normalize_source_ref(source_ref),
   }, source_ref)
 end
 
-function M.build_state_label_request(repo, issue_number, to_state, dedup_key_value, source_ref)
+function C.build_state_label_request(M, repo, issue_number, to_state, dedup_key_value, source_ref)
   local add_labels, remove_labels = M.state_label_changes(to_state)
-  return M.build_label_request(repo, issue_number, add_labels, remove_labels, dedup_key_value, source_ref)
+  return C.build_label_request(M, repo, issue_number, add_labels, remove_labels, dedup_key_value, source_ref)
 end
 
-function M.build_thinking_label_request(issue, proposal)
-  return M.build_state_label_request(
+function C.build_thinking_label_request(M, issue, proposal)
+  return C.build_state_label_request(M,
     issue.repo,
     issue.number,
     "thinking",
@@ -44,8 +43,8 @@ function M.build_thinking_label_request(issue, proposal)
   )
 end
 
-function M.build_result_label_request(repo, issue_number, reached)
-  return M.build_state_label_request(
+function C.build_result_label_request(M, repo, issue_number, reached)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "ready",
@@ -54,10 +53,10 @@ function M.build_result_label_request(repo, issue_number, reached)
   )
 end
 
-function M.build_intake_enabled_label_request(repo, issue_number, candidate)
+function C.build_intake_enabled_label_request(M, repo, issue_number, candidate)
   local add_labels, remove_labels = M.intake_service_class_label_changes(candidate.service_class)
   table.insert(add_labels, 1, M._enabled_label)
-  return M.build_label_request(
+  return C.build_label_request(M,
     repo,
     issue_number,
     add_labels,
@@ -72,10 +71,10 @@ function M.build_intake_enabled_label_request(repo, issue_number, candidate)
   )
 end
 
-function M.build_intake_tracking_label_request(repo, issue_number, candidate)
+function C.build_intake_tracking_label_request(M, repo, issue_number, candidate)
   local add_labels, remove_labels = M.intake_service_class_label_changes(candidate.service_class)
   table.insert(add_labels, 1, M._tracking_label)
-  return M.build_label_request(
+  return C.build_label_request(M,
     repo,
     issue_number,
     add_labels,
@@ -91,8 +90,8 @@ function M.build_intake_tracking_label_request(repo, issue_number, candidate)
   )
 end
 
-function M.build_implementing_label_request(repo, issue_number, ready)
-  return M.build_state_label_request(
+function C.build_implementing_label_request(M, repo, issue_number, ready)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "implementing",
@@ -106,8 +105,8 @@ function M.build_implementing_label_request(repo, issue_number, ready)
   )
 end
 
-function M.build_impl_failed_label_request(repo, issue_number, ready, reason)
-  return M.build_state_label_request(
+function C.build_impl_failed_label_request(M, repo, issue_number, ready, reason)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "impl-failed",
@@ -122,8 +121,8 @@ function M.build_impl_failed_label_request(repo, issue_number, ready, reason)
   )
 end
 
-function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, source_ref)
-  return M.build_state_label_request(
+function C.build_reviewing_label_request(M, repo, issue_number, origin, pr_number, source_ref)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "reviewing",
@@ -138,8 +137,8 @@ function M.build_reviewing_label_request(repo, issue_number, origin, pr_number, 
   )
 end
 
-function M.build_pr_base_unmanaged_label_request(repo, issue_number, origin, pr_number, integration_branch, source_ref)
-  return M.build_state_label_request(
+function C.build_pr_base_unmanaged_label_request(M, repo, issue_number, origin, pr_number, integration_branch, source_ref)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "blocked",
@@ -157,11 +156,11 @@ function M.build_pr_base_unmanaged_label_request(repo, issue_number, origin, pr_
   )
 end
 
-function M.build_review_result_label_request(repo, issue_number, issue_proposal_id, reached, source_ref)
+function C.build_review_result_label_request(M, repo, issue_number, issue_proposal_id, reached, source_ref)
   local to_state = reached.reflection_checkpoint and "review-meta"
     or reached.decision == "approve" and "merge-ready"
     or "fixing"
-  return M.build_state_label_request(
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     to_state,
@@ -176,8 +175,8 @@ function M.build_review_result_label_request(repo, issue_number, issue_proposal_
   )
 end
 
-function M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
-  return M.build_state_label_request(
+function C.build_fix_reviewing_label_request(M, repo, issue_number, fix, new_head_sha, new_version)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "reviewing",
@@ -192,8 +191,8 @@ function M.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_s
   )
 end
 
-function M.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, new_head_sha, new_version, source_ref)
-  return M.build_state_label_request(
+function C.build_merge_head_reviewing_label_request(M, repo, issue_number, merge_ready, new_head_sha, new_version, source_ref)
+  return C.build_state_label_request(M,
     repo,
     issue_number,
     "reviewing",
@@ -208,6 +207,5 @@ function M.build_merge_head_reviewing_label_request(repo, issue_number, merge_re
     source_ref
   )
 end
-end
 
-return S
+return C

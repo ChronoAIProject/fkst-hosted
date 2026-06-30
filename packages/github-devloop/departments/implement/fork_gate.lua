@@ -1,3 +1,4 @@
+local requests_labels = require("devloop.requests.labels")
 local core = require("core")
 local forks = require("devloop.forks")
 
@@ -28,7 +29,7 @@ local function duplicate_comment(repo, issue_number, ready, origin, canonical_nu
 end
 
 local function duplicate_label(repo, issue_number, ready, origin, canonical_number)
-  return core.build_label_request(
+  return requests_labels.build_label_request(core,
     repo,
     issue_number,
     { duplicate_label_name },

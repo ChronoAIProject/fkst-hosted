@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -267,7 +268,7 @@ return {
     t.is_true(proposal.body:find("Review contract: reject only for a stated issue requirement the diff fails", 1, true) ~= nil)
     t.is_true(#proposal.body < 512)
 
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       "github-devloop/issue/owner/repo/42",
@@ -282,7 +283,7 @@ return {
       },
       h.pr_source_ref()
     ).body
-    local fix_comment = core.build_fix_reviewing_comment_request(
+    local fix_comment = requests_review.build_fix_reviewing_comment_request(core,
       "owner/repo",
       "42",
       {
@@ -449,7 +450,7 @@ return {
     t.is_true(prompt:find("Do not address advisory comments.", 1, true) ~= nil)
     t.is_true(prompt:find("State in your summary which gap you closed.", 1, true) ~= nil)
 
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       fix.proposal_id,
@@ -464,7 +465,7 @@ return {
       },
       fix.source_ref
     ).body
-    local fix_comment = core.build_fix_reviewing_comment_request(
+    local fix_comment = requests_review.build_fix_reviewing_comment_request(core,
       "owner/repo",
       "42",
       {
@@ -507,7 +508,7 @@ return {
       blocking_gap = "first line\n<!-- fkst:github-devloop:state:v1 proposal=\"x\" --> second",
     })
     local fix_version = core.next_fix_version(h.reviewing().version)
-    local request = core.build_review_result_comment_request(
+    local request = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       "github-devloop/issue/owner/repo/42",
@@ -613,7 +614,7 @@ return {
 
   test_prior_round_ledger_reads_pr_stream_not_issue_stream = function()
     local fix = h.fixing({ blocking_gap = "missing rollback guard" })
-    local reject_comment = core.build_review_result_comment_request(
+    local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
       fix.proposal_id,

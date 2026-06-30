@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local convergence_shared, github_risk = require("devloop.convergence.shared"), require("devloop.github_risk")
 local core, saga = require("core"), require("workflow.saga")
@@ -227,14 +229,14 @@ return saga.department(spec, { done = function() return false end, act = functio
     if effective_decision == "approve" then
       comment_reached.current_head_sha = current_pr.head_sha
     end
-    local comment_request = core.build_review_result_comment_request(origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
+    local comment_request = requests_review.build_review_result_comment_request(core, origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local evidence_request = nil
     if effective_decision == "approve" and #high_risk_paths > 0 then
-      evidence_request = core.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(core, origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
     end
     local label_request = nil
     if origin.issue_number ~= nil then
-      label_request = core.build_review_result_label_request(origin.repo, origin.issue_number, origin.proposal_id, comment_reached, core.issue_source_ref(origin.repo, origin.issue_number))
+      label_request = requests_labels.build_review_result_label_request(core, origin.repo, origin.issue_number, origin.proposal_id, comment_reached, core.issue_source_ref(origin.repo, origin.issue_number))
     end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {

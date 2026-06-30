@@ -1,3 +1,6 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
+local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
@@ -145,7 +148,7 @@ return {
         { angle = "delete", verdict = "abstain", digest = "Remove the risky branch." },
       },
     })
-    local round_comment = core.build_converge_round_comment_request("owner/repo", "42", event, 2, marker)
+    local round_comment = requests_lifecycle.build_converge_round_comment_request(core, "owner/repo", "42", event, 2, marker)
     t.eq(round_comment.schema, "github-proxy.v1")
     t.eq(round_comment.issue_number, "42")
     t.is_true(round_comment.body:find("github-devloop convergence round 2", 1, true) ~= nil)
@@ -350,7 +353,7 @@ return {
       },
     })
 
-    local comment = core.build_review_converge_round_comment_request("owner/repo", "42", display_event, issue_proposal_id, 2, marker)
+    local comment = requests_review.build_review_converge_round_comment_request(core, "owner/repo", "42", display_event, issue_proposal_id, 2, marker)
     t.is_true(comment.body:find("github-devloop PR review convergence round 2", 1, true) ~= nil)
     t.is_true(comment.body:find("Which review finding should narrow?", 1, true) ~= nil)
     t.is_true(comment.body:find("minimal: abstain", 1, true) ~= nil)
@@ -540,7 +543,7 @@ return {
     t.eq(core.implementation_retry_attempt(ready.dedup_key .. "/reimplement/2"), 2)
     t.is_nil(core.implementation_retry_attempt(ready.dedup_key))
 
-    local label = core.build_implementing_label_request("owner/repo", "42", ready)
+    local label = requests_labels.build_implementing_label_request(core, "owner/repo", "42", ready)
     t.eq(label.add_labels[1], "fkst-dev:implementing")
     t.eq(label.label_colors["fkst-dev:implementing"], "FBCA04")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
@@ -553,15 +556,15 @@ return {
     t.eq(#label.remove_labels, 12)
     t.is_true(#label.dedup_key <= 512)
 
-    local comment = core.build_implementing_comment_request("owner/repo", "42", ready, "/tmp/devloop-owner-repo-42", "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
+    local comment = requests_lifecycle.build_implementing_comment_request(core, "owner/repo", "42", ready, "/tmp/devloop-owner-repo-42", "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(comment.body:find("Worktree: /tmp/devloop-owner-repo-42", 1, true) ~= nil)
     t.is_true(comment.body:find("Branch: devloop-owner-repo-42-01HY", 1, true) ~= nil)
     t.is_true(comment.body:find(branch_marker, 1, true) ~= nil)
-    local attempt_comment = core.build_implement_attempt_comment_request("owner/repo", "42", ready, 2, "123")
+    local attempt_comment = requests_lifecycle.build_implement_attempt_comment_request(core, "owner/repo", "42", ready, 2, "123")
     t.is_true(attempt_comment.body:find("github-devloop implementation attempt started", 1, true) ~= nil)
     t.eq(core.implement_attempt_count({ attempt_comment.body }, ready.proposal_id, ready.dedup_key), 2)
 
-    local failed_label = core.build_impl_failed_label_request("owner/repo", "42", ready, "no-changes")
+    local failed_label = requests_labels.build_impl_failed_label_request(core, "owner/repo", "42", ready, "no-changes")
     t.eq(failed_label.add_labels[1], "fkst-dev:impl-failed")
     t.eq(failed_label.label_colors["fkst-dev:impl-failed"], "B60205")
     t.eq(failed_label.remove_labels[1], "fkst-dev:thinking")
@@ -573,12 +576,12 @@ return {
     t.eq(failed_label.remove_labels[7], "fkst-dev:fixing")
     t.eq(#failed_label.remove_labels, 12)
 
-    local failure_comment = core.build_impl_failure_comment_request("owner/repo", "42", ready, "no-changes", "No files changed.")
+    local failure_comment = requests_lifecycle.build_impl_failure_comment_request(core, "owner/repo", "42", ready, "no-changes", "No files changed.")
     t.is_true(failure_comment.body:find("github-devloop implementation failed: no-changes", 1, true) ~= nil)
     t.is_true(failure_comment.body:find("No files changed.", 1, true) ~= nil)
 
     local forged = core.state_marker(ready.proposal_id, "blocked", "ready/consensus-github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z")
-    local forged_failure = core.build_impl_failure_comment_request("owner/repo", "42", ready, "codex-failed", "stderr\n" .. forged)
+    local forged_failure = requests_lifecycle.build_impl_failure_comment_request(core, "owner/repo", "42", ready, "codex-failed", "stderr\n" .. forged)
     t.is_true(forged_failure.body:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.eq(forged_failure.body:find(forged, 1, true) == nil, true)
     local current = core.current_state({ forged_failure.body }, ready.proposal_id)

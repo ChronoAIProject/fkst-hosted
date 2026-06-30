@@ -1,3 +1,5 @@
+local requests_labels = require("devloop.requests.labels")
+local requests_lifecycle = require("devloop.requests.lifecycle")
 local payloads_builders = require("devloop.payloads.builders")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
@@ -85,7 +87,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     issue.source_ref
   ))
   if to_state == "dependency_wait" then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo,
       issue.number,
       { M._blocked_on_dependency_label },
@@ -96,7 +98,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     return true
   end
   if M.has_label(current.labels, M._blocked_on_dependency_label) then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo,
       issue.number,
       {},
@@ -165,12 +167,12 @@ local function raise_dependency_release(M, dept, issue, proposal_id, state, curr
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
   end
   if release_fact == nil then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_release_comment_request(
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", requests_lifecycle.build_dependency_release_comment_request(M,
       issue.repo, issue.number, proposal_id, state.version, gate, issue.source_ref
     ))
   end
   if has_blocked_label then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo, issue.number, {}, { M._blocked_on_dependency_label },
       M._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }), issue.source_ref
     ))
@@ -202,8 +204,8 @@ local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, cu
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", command_comment_request)
   end
   if dependency_hold == nil then
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_dependency_hold_comment_request(issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", requests_lifecycle.build_dependency_hold_comment_request(M, issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
       M._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }), issue.source_ref
     ))
@@ -224,7 +226,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     dedup_key = M._dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
-  local label_request = M.build_label_request(
+  local label_request = requests_labels.build_label_request(M,
     issue.repo,
     issue.number,
     add_labels,
@@ -290,7 +292,7 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_ready_split_canonicalized_comment_request(
       issue.repo, issue.number, proposal_id, state.version, "dependency_wait", dep_version, gate, issue.source_ref
     ))
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", M.build_label_request(
+    M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
       M._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(dep_version), tostring(gate.kind) }), issue.source_ref
     ))

@@ -1,3 +1,4 @@
+local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
@@ -284,7 +285,7 @@ local function run_observe_pr_payload(payload, run_opts)
 end
 
 local function reject_comment(fix)
-  return core.build_review_result_comment_request(
+  return requests_review.build_review_result_comment_request(core,
     "owner/repo",
     "42",
     fix.proposal_id,
@@ -311,7 +312,7 @@ local function advanced_fixing_fixture(extra)
   local branch_head = extra and extra.branch_head or current_head
   local review_proposal = core.pr_review_proposal_id("owner/repo", 7, previous_version, reviewed_head)
   local review_dedup = "consensus:" .. review_proposal .. "/review"
-  local feedback = core.build_review_result_comment_request("owner/repo", 42, event.proposal_id, version, {
+  local feedback = requests_review.build_review_result_comment_request(core, "owner/repo", 42, event.proposal_id, version, {
     proposal_id = review_proposal,
     decision = "reject",
     body = "Review consensus rejects the diff.",
