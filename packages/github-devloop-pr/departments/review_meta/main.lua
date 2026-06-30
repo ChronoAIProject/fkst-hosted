@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("workflow.saga")
+local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -85,7 +85,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
     local codex_started_at = now()
     core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
-    local content_fetch = core.context_fetch_from_bundle({
+    local content_fetch = context_bundle.context_fetch_from_bundle(core, {
       dept = "review_meta",
       repo = repo,
       issue_number = issue_number,

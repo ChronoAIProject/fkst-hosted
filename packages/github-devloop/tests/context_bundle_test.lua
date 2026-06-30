@@ -2,7 +2,9 @@ local h = require("tests.devloop_core_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 require("tests.context_bundle_probe_helpers")
 local core = h.core
+local context_bundle = require("devloop.context_bundle")
 local t = h.t
+local max_bundle_file_len = 10 * 1024 * 1024
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -51,8 +53,8 @@ return {
   test_context_bundle_cache_keys_bound_realistic_pr_review_proposal_id = function()
     local proposal_id = "github-devloop/pr-review/ChronoAIProject/fkst-packages/2376452037/223/ready-consensus-github-devloop-issue-ChronoAIProject-fkst-packages-221-2026-06-10T20-13-08Z-2548858339"
     local version = proposal_id .. "/review/loop/17/review-meta/2026-06-10T21-14-55Z-9988776655"
-    local bundle_key = core.context_bundle_key(proposal_id, version)
-    local manifest_key = core.context_bundle_manifest_key(proposal_id, version)
+    local bundle_key = context_bundle.context_bundle_key(proposal_id, version)
+    local manifest_key = context_bundle.context_bundle_manifest_key(proposal_id, version)
 
     assert_consensus_safe_context_key(bundle_key)
     assert_consensus_safe_context_key(manifest_key)
@@ -63,16 +65,16 @@ return {
     local proposal_b = "github-devloop/pr-review/ChronoAIProject/fkst-packages/2376452037/223/ready-consensus-github-devloop-issue-ChronoAIProject-fkst-packages-221-2026-06-10T20-13-08Z-0000000000"
     local version = "review-loop-2026-06-10T21-14-55Z"
 
-    t.is_true(core.context_bundle_key(proposal_a, version) ~= core.context_bundle_key(proposal_b, version))
-    t.is_true(core.context_bundle_manifest_key(proposal_a, version) ~= core.context_bundle_manifest_key(proposal_b, version))
+    t.is_true(context_bundle.context_bundle_key(proposal_a, version) ~= context_bundle.context_bundle_key(proposal_b, version))
+    t.is_true(context_bundle.context_bundle_manifest_key(proposal_a, version) ~= context_bundle.context_bundle_manifest_key(proposal_b, version))
   end,
 
   test_context_bundle_cache_keys_keep_short_id_behavior = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "v1"
 
-    t.eq(core.context_bundle_key(proposal_id, version), "github-devloop/context-bundle/github-devloop/issue/owner/repo/42/v1")
-    t.eq(core.context_bundle_manifest_key(proposal_id, version), "github-devloop/context-bundle-manifest/github-devloop/issue/owner/repo/42/v1")
+    t.eq(context_bundle.context_bundle_key(proposal_id, version), "github-devloop/context-bundle/github-devloop/issue/owner/repo/42/v1")
+    t.eq(context_bundle.context_bundle_manifest_key(proposal_id, version), "github-devloop/context-bundle-manifest/github-devloop/issue/owner/repo/42/v1")
   end,
 
   test_context_bundle_files_round_trip_from_different_cwd = function()
@@ -133,7 +135,7 @@ return {
   test_context_bundle_file_cap_truncates_on_utf8_boundary = function()
     local result = run_probe("utf8_truncation", runtime_root("utf8-truncation"))
 
-    t.eq(result.issue_bytes, core._max_bundle_file_len - 1)
+    t.eq(result.issue_bytes, max_bundle_file_len - 1)
     assert_valid_utf8(result.issue_content)
   end,
 
@@ -159,8 +161,8 @@ return {
   end,
 
   test_stale_generation_classifier_accepts_consensus_manifest_errors = function()
-    t.eq(core.is_stale_generation_context_error("consensus: runtime context cache miss"), true)
-    t.eq(core.is_stale_generation_context_error("consensus: runtime context manifest file is unreadable"), true)
+    t.eq(context_bundle.is_stale_generation_context_error("consensus: runtime context cache miss"), true)
+    t.eq(context_bundle.is_stale_generation_context_error("consensus: runtime context manifest file is unreadable"), true)
   end,
 
   test_stale_generation_replayer_rebuilds_manifest_after_runtime_swap = function()
@@ -178,12 +180,12 @@ return {
     local repo = fixtures.long_repo()
     local version = fixtures.full_review_issue_version(repo)
     local proposal_id = core.pr_review_proposal_id(repo, 187, version, fixtures.review_head_sha())
-    local manifest_key = core.context_bundle_manifest_key(proposal_id, version)
-    local bundle_key = core.context_bundle_key(proposal_id, version)
+    local manifest_key = context_bundle.context_bundle_manifest_key(proposal_id, version)
+    local bundle_key = context_bundle.context_bundle_key(proposal_id, version)
 
     t.is_true(#fixtures.unbounded_full_review_proposal_id() > core._max_key_len)
     t.is_true(#proposal_id <= core._max_key_len)
-    t.is_true(core.context_bundle_key("github-devloop/issue/owner/repo/42", "owner/repo#issue#42@2026-06-03T01:02:03Z"):find("#", 1, true) == nil)
+    t.is_true(context_bundle.context_bundle_key("github-devloop/issue/owner/repo/42", "owner/repo#issue#42@2026-06-03T01:02:03Z"):find("#", 1, true) == nil)
     t.is_true(#manifest_key <= core._max_key_len)
     t.is_true(#bundle_key <= core._max_key_len)
     t.eq(core._is_path_safe_key(manifest_key, core._max_key_len), true)

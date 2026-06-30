@@ -1,4 +1,5 @@
 local base_ids = require("devloop.base_ids")
+local context_bundle = require("devloop.context_bundle")
 
 local E = {}
 
@@ -59,7 +60,7 @@ function E.build_execution_start_proposal(core, repo, issue_number, request, cur
     title = current.title,
     updated_at = current.updated_at,
     source_ref = request.source_ref,
-    content_fetch = core.context_fetch_ref_from_bundle({
+    content_fetch = context_bundle.context_fetch_ref_from_bundle(core, {
       dept = dept or "execute_start",
       repo = repo,
       issue_number = issue_number,

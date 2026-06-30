@@ -9,6 +9,7 @@ local substrate_pin = require("departments.implement.substrate_pin")
 local transitions = require("departments.implement.transitions")
 local worktree_lifecycle = require("departments.implement.worktree")
 local dispatch_live_run = require("devloop.dispatch_live_run")
+local context_bundle = require("devloop.context_bundle")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
@@ -264,7 +265,7 @@ end
 
 local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, worktree, codex_started_at, exec_ref, attempt, event_ts, event_queue)
   core.log_codex_start("implement", ready.proposal_id, "implement")
-  local content_fetch = core.context_fetch_from_bundle({
+  local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "implement",
     repo = repo,
     issue_number = issue_number,

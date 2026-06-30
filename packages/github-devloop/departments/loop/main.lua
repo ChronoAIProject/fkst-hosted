@@ -1,5 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
+local context_bundle = require("devloop.context_bundle")
 
 
 
@@ -98,7 +99,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local next_n = round + 1
     local next_dedup = core.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
-    local content_fetch = core.context_fetch_ref_from_bundle({
+    local content_fetch = context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "loop",
       repo = repo,
       issue_number = issue_number,

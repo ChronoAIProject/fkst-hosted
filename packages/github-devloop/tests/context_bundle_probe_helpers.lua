@@ -1,7 +1,10 @@
 local core = require("core")
+local context_bundle = require("devloop.context_bundle")
 local fixtures = require("tests.production_fixture_helpers")
 
 M = {}
+
+local max_bundle_file_len = 10 * 1024 * 1024
 
 M.spec = {
   consumes = { "context_bundle_probe" },
@@ -170,8 +173,8 @@ end
 
 local function run_round_trip(root)
   local fixtures = {}
-  local bundle = core.build_context_bundle(build_args(root, fixtures, { pr_number = 7 }))
-  local paths = manifest_paths(core.context_bundle_manifest(bundle))
+  local bundle = context_bundle.build_context_bundle(core, build_args(root, fixtures, { pr_number = 7 }))
+  local paths = manifest_paths(context_bundle.context_bundle_manifest(bundle))
   local scratch = root .. "/isolated-scratch"
   mkdir_p(scratch)
   local contents = {}
@@ -182,7 +185,7 @@ local function run_round_trip(root)
   return {
     paths = paths,
     contents = contents,
-    manifest = core.context_bundle_manifest(bundle),
+    manifest = context_bundle.context_bundle_manifest(bundle),
     issue_content = read_file(bundle.issue_path),
     notice_content = read_file(bundle.notice_path),
   }
@@ -196,9 +199,9 @@ local function run_deleted_file(root)
     },
   }
   local args = build_args(root, fixtures)
-  local first = core.build_context_bundle(args)
+  local first = context_bundle.build_context_bundle(core, args)
   os.remove(first.issue_path)
-  local second = core.build_context_bundle(args)
+  local second = context_bundle.build_context_bundle(core, args)
   return {
     first_dir = first.dir,
     second_dir = second.dir,
@@ -214,12 +217,12 @@ local function run_preexisting(root)
   write_file(dir .. "/UNTRUSTED-NOTICE.txt", "BEGIN UNTRUSTED BUNDLE DATA\npreexisting notice\nEND UNTRUSTED BUNDLE DATA\n")
   write_file(dir .. "/issue.json", "preexisting issue\n")
   write_file(dir .. "/board.txt", "preexisting board\n")
-  local bundle = core.build_context_bundle(build_args(root, fixtures))
+  local bundle = context_bundle.build_context_bundle(core, build_args(root, fixtures))
   return {
     dir = bundle.dir,
     expected_dir = dir,
     issue_content = read_file(bundle.issue_path),
-    manifest = core.context_bundle_manifest(bundle),
+    manifest = context_bundle.context_bundle_manifest(bundle),
     issue_fetch_count = count_calls(fixtures.calls, "gh issue view"),
   }
 end
@@ -232,12 +235,12 @@ local function run_publish_reuse(root)
     },
   }
   local args = build_args(root, fixtures)
-  local first = core.build_context_bundle(args)
+  local first = context_bundle.build_context_bundle(core, args)
   local before_notice = read_file(first.notice_path)
   local before_issue = read_file(first.issue_path)
   local before_board = read_file(first.board_path)
   local fetches_after_first = count_calls(fixtures.calls, "gh issue view")
-  local second = core.build_context_bundle(args)
+  local second = context_bundle.build_context_bundle(core, args)
   return {
     first_dir = first.dir,
     second_dir = second.dir,
@@ -257,12 +260,12 @@ local function run_publish_unique_on_invalid(root)
     },
   }
   local args = build_args(root, fixtures)
-  local first = core.build_context_bundle(args)
+  local first = context_bundle.build_context_bundle(core, args)
   os.remove(first.notice_path)
   write_file(first.issue_path, "invalid first issue remains\n")
   local before_issue = read_file(first.issue_path)
   local before_board = read_file(first.board_path)
-  local second = core.build_context_bundle(args)
+  local second = context_bundle.build_context_bundle(core, args)
   return {
     dir = second.dir,
     original_dir = first.dir,
@@ -271,18 +274,18 @@ local function run_publish_unique_on_invalid(root)
     original_issue_unchanged = before_issue == read_file(first.issue_path),
     original_board_unchanged = before_board == read_file(first.board_path),
     rebuilt_issue = read_file(second.issue_path),
-    manifest = core.context_bundle_manifest(second),
-    has_notice = has_path_suffix(manifest_paths(core.context_bundle_manifest(second)), "/UNTRUSTED-NOTICE.txt"),
+    manifest = context_bundle.context_bundle_manifest(second),
+    has_notice = has_path_suffix(manifest_paths(context_bundle.context_bundle_manifest(second)), "/UNTRUSTED-NOTICE.txt"),
   }
 end
 
 local function run_utf8_truncation(root)
   local fixture_data = {
     issue_outputs = {
-      string.rep("a", core._max_bundle_file_len - 1) .. fixtures.cjk_char() .. "tail",
+      string.rep("a", max_bundle_file_len - 1) .. fixtures.cjk_char() .. "tail",
     },
   }
-  local bundle = core.build_context_bundle(build_args(root, fixture_data, { tick = nil }))
+  local bundle = context_bundle.build_context_bundle(core, build_args(root, fixture_data, { tick = nil }))
   return {
     issue_content = read_file(bundle.issue_path),
     issue_bytes = bundle.issue_bytes,
@@ -292,15 +295,15 @@ end
 local function run_stale_manifest_files(root)
   local fixtures = {}
   local args = build_args(root, fixtures)
-  local ref = core.context_fetch_ref_from_bundle(args)
-  local old_bundle = core.build_context_bundle(args)
+  local ref = context_bundle.context_fetch_ref_from_bundle(core, args)
+  local old_bundle = context_bundle.build_context_bundle(core, args)
   os.remove(old_bundle.issue_path)
-  local ok, err = pcall(core.context_bundle_manifest_from_ref, ref, args.exec)
+  local ok, err = pcall(context_bundle.context_bundle_manifest_from_ref, core, ref, args.exec)
   return {
     ok = ok,
     error = tostring(err or ""),
-    stale = core.is_stale_generation_context_error(err),
-    class = core.stale_generation_context_error_class(),
+    stale = context_bundle.is_stale_generation_context_error(err),
+    class = context_bundle.stale_generation_context_error_class(),
   }
 end
 
@@ -317,7 +320,7 @@ local function run_unknown_risk_structured(root)
     proposal_id = "github-devloop/pr-review/owner-repo/1234567890/7/unknown-risk",
     version = "unknown-risk-" .. safe_suffix:sub(-48),
   })
-  local ref, high_risk, risk = core.context_fetch_ref_from_bundle(args)
+  local ref, high_risk, risk = context_bundle.context_fetch_ref_from_bundle(core, args)
   return {
     ref = ref,
     high_risk = high_risk,
@@ -345,17 +348,17 @@ local function run_stale_manifest_rebuild(root)
     },
   }
   local old_args = build_args(old_root, old_fixtures, { proposal_id = proposal_id, version = version })
-  local old_ref = core.context_fetch_ref_from_bundle(old_args)
-  local old_bundle = core.build_context_bundle(old_args)
+  local old_ref = context_bundle.context_fetch_ref_from_bundle(core, old_args)
+  local old_bundle = context_bundle.build_context_bundle(core, old_args)
   os.remove(old_bundle.issue_path)
 
-  local stale_ok, stale_err = pcall(core.context_bundle_manifest_from_ref, old_ref, old_args.exec)
+  local stale_ok, stale_err = pcall(context_bundle.context_bundle_manifest_from_ref, core, old_ref, old_args.exec)
   local fresh_args = build_args(fresh_root, fresh_fixtures, { proposal_id = proposal_id, version = version })
-  local fresh_ref = core.context_fetch_ref_from_bundle(fresh_args)
-  local fresh_manifest = core.context_bundle_manifest_from_ref(fresh_ref, fresh_args.exec)
+  local fresh_ref = context_bundle.context_fetch_ref_from_bundle(core, fresh_args)
+  local fresh_manifest = context_bundle.context_bundle_manifest_from_ref(core, fresh_ref, fresh_args.exec)
   return {
     stale_ok = stale_ok,
-    stale = core.is_stale_generation_context_error(stale_err),
+    stale = context_bundle.is_stale_generation_context_error(stale_err),
     same_ref = old_ref == fresh_ref,
     fresh_manifest = fresh_manifest,
     fresh_fetch_count = count_calls(fresh_fixtures.calls, "gh issue view"),

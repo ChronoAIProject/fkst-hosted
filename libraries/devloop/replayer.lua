@@ -4,6 +4,7 @@ local replay_thinking_convergence = require("devloop.replay_thinking_convergence
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
+local context_bundle = require("devloop.context_bundle")
 
 function S.install(opts)
 local M = opts.core
@@ -375,7 +376,7 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
     local base_version = M.converge_proposal_base_dedup(latest.dedup)
     local next_n = latest.round + 1
     local next_dedup = base_version .. "/loop/" .. tostring(next_n)
-    local content_fetch = M.context_fetch_ref_from_bundle({
+    local content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
       dept = "observe_issue",
       repo = issue.repo,
       issue_number = issue.number,
@@ -400,7 +401,7 @@ local function build_thinking_replay_proposal(issue, proposal_id, state, current
   local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at)
     .. "/replay"
     .. tostring(state.version or ""):sub(#stable_version + 1)
-  replay_issue.content_fetch = M.context_fetch_ref_from_bundle({
+  replay_issue.content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
     dept = "observe_issue",
     repo = issue.repo,
     issue_number = issue.number,

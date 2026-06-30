@@ -3,6 +3,7 @@ local contract_time = require("contract.time")
 local operator_commands = require("devloop.operator_commands")
 local queue = require("devloop.queue")
 local transition_version = require("contract.transition_version")
+local context_bundle = require("devloop.context_bundle")
 
 local M = {}
 
@@ -671,7 +672,7 @@ local function process_issue_event(event)
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 
-    issue.content_fetch = core.context_fetch_ref_from_bundle({
+    issue.content_fetch = context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "observe_issue",
       repo = issue.repo,
       issue_number = issue.number,

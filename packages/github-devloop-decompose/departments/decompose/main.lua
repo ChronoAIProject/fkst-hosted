@@ -1,6 +1,7 @@
 local core = require("core")
 local saga = require("workflow.saga")
 local strings = require("contract.strings")
+local context_bundle = require("devloop.context_bundle")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -84,7 +85,7 @@ local function plan_current_decompose(event, repo, issue_number, decompose)
     return current_issue, nil, "depth-cap"
   end
   decompose.current_issue_body = current_issue.body
-  local content_fetch = core.context_fetch_from_bundle({
+  local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "decompose",
     repo = repo,
     issue_number = issue_number,

@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("workflow.saga")
+local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local transition_version = require("contract.transition_version")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
@@ -137,7 +137,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
     local review_dedup_key = core._dedup_key({ review_id, "review" })
-    local context_fetch = { core.context_fetch_ref_from_bundle({
+    local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_pr",
       repo = repo,
       issue_number = issue_number,

@@ -2,6 +2,7 @@ local core = require("core")
 local execution_start = require("devloop.execution_start")
 local operator_commands = require("devloop.operator_commands")
 local saga = require("workflow.saga")
+local context_bundle = require("devloop.context_bundle")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -212,7 +213,7 @@ local function act_intake_judge(event)
   end
 
   core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
-  local content_fetch = core.context_fetch_from_bundle({
+  local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "intake_judge",
     repo = repo,
     issue_number = issue_number,

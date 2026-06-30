@@ -1,6 +1,7 @@
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local core = require("core")
+local context_bundle = require("devloop.context_bundle")
 
 local saga = require("workflow.saga")
 
@@ -207,7 +208,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local next_n = round + 1
     local next_dedup = core.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
-    local context_fetch = { core.context_fetch_ref_from_bundle({
+    local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_loop",
       repo = repo,
       issue_number = origin.issue_number,

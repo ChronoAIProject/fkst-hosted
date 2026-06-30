@@ -69,7 +69,6 @@ require("devloop.requests").install(M)
 require("devloop.entity").install(M)
 require("core.observability_bounds").install(M)
 require("core.ensure_repo").install(M)
-require("devloop.context_bundle").install(M)
 require("core.doctor").install(M)
 
 return M

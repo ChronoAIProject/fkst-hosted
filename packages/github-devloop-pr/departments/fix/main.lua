@@ -3,6 +3,7 @@ local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local conflict_telemetry = require("devloop.conflict_telemetry")
+local context_bundle = require("devloop.context_bundle")
 
 local spec = {
   consumes = { "devloop_fixing" },
@@ -412,7 +413,7 @@ local function run_fix_attempt(plan)
   end
   local codex_started_at = now()
   core.log_codex_start("fix", plan.fix.proposal_id, "fix")
-  local content_fetch = core.context_fetch_from_bundle({
+  local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "fix",
     repo = plan.repo,
     issue_number = plan.issue_number,
