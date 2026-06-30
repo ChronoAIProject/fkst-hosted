@@ -13,6 +13,7 @@ HOST_RUN_RUNTIME_LABEL=""
 HOST_RUN_RUNTIME_IS_EXPLICIT=0
 HOST_RUN_RESTART=0
 HOST_RUN_PACKAGE_ROOTS=()
+HOST_RUN_PLATFORM_SOURCE_ID="fkst-packages-platform"
 
 host_run_usage() {
   cat >&2 <<'EOF'
@@ -159,6 +160,103 @@ for source in lock_sources(lock_path):
     if current != rev:
         fail(f"external source {source_id} checkout is at {current}, expected {rev}")
 PY
+}
+
+host_run_resolve_target_platform_root() {
+  if host_run_same_path "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_ROOT"; then
+    return 0
+  fi
+  local resolved
+  resolved="$(python3 - "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_SOURCE_ID" "$HOST_RUN_PLATFORM_PACKAGES" <<'PY'
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+ID_RE = re.compile(r"[A-Za-z0-9._-]+")
+REV_RE = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def fail(message: str) -> None:
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def table_array(data: dict[str, object], key: str, source: str) -> list[dict[str, object]]:
+    entries = data.get(key, [])
+    if isinstance(entries, dict):
+        entries = [entries]
+    if not isinstance(entries, list):
+        fail(f"{source} {key} must be a table array")
+    result: list[dict[str, object]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            fail(f"{source} {key} entries must be tables")
+        result.append(entry)
+    return result
+
+
+def load_toml(path: Path, source: str) -> dict[str, object]:
+    if not path.is_file():
+        fail(f"{source} is required for external platform package supervise: {path}")
+    try:
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        fail(f"invalid {source}: {path}: {exc}")
+    if not isinstance(data, dict):
+        fail(f"{source} must decode to a table")
+    return data
+
+
+def source_id(entry: dict[str, object]) -> str | None:
+    value = entry.get("id")
+    if isinstance(value, str) and ID_RE.fullmatch(value) and value not in {".", ".."}:
+        return value
+    return None
+
+
+def find_source(entries: list[dict[str, object]], wanted: str, source: str) -> dict[str, object]:
+    matches = [entry for entry in entries if source_id(entry) == wanted]
+    if len(matches) != 1:
+        fail(f"{source} must declare exactly one external source id={wanted}")
+    return matches[0]
+
+
+project_root = Path(sys.argv[1]).resolve()
+platform_source_id = sys.argv[2]
+requested_packages = [item for item in sys.argv[3].split() if item]
+workspace = load_toml(project_root / "fkst.workspace.toml", "fkst.workspace.toml")
+lock = load_toml(project_root / "fkst.lock", "fkst.lock")
+
+workspace_source = find_source(table_array(workspace, "external_sources", "fkst.workspace.toml"), platform_source_id, "fkst.workspace.toml")
+declared_packages = workspace_source.get("packages")
+if not isinstance(declared_packages, list) or not all(isinstance(item, str) and item for item in declared_packages):
+    fail(f"fkst.workspace.toml external_sources(id={platform_source_id}) must declare packages = [...] for host supervise")
+
+missing = sorted(set(requested_packages) - set(declared_packages))
+if missing:
+    fail(
+        "fkst.workspace.toml external_sources(id="
+        + platform_source_id
+        + ") is missing platform packages required by supervise: "
+        + " ".join(missing)
+    )
+
+lock_source = find_source(table_array(lock, "external_source", "fkst.lock"), platform_source_id, "fkst.lock")
+resolved = lock_source.get("resolved")
+rev = resolved.get("rev") if isinstance(resolved, dict) else None
+if not isinstance(rev, str) or not REV_RE.fullmatch(rev):
+    fail(f"fkst.lock external_source(id={platform_source_id}) is missing resolved.rev as a full git SHA")
+
+workspace_git = workspace_source.get("git")
+lock_git = lock_source.get("git")
+if isinstance(workspace_git, str) and isinstance(lock_git, str) and workspace_git != lock_git:
+    fail(f"fkst.workspace.toml and fkst.lock disagree on external source git for id={platform_source_id}")
+
+print(project_root / ".fkst" / "run" / platform_source_id)
+PY
+)" || return $?
+  HOST_RUN_PLATFORM_ROOT="$resolved"
 }
 
 host_run_parse_supervise_args() {
@@ -402,8 +500,11 @@ host_run_print_package_roots() {
 host_run_supervise_contract() {
   host_run_parse_supervise_args "$@" || return $?
   host_run_validate_shape || return $?
-  host_run_build_package_roots || return $?
+  host_run_resolve_target_platform_root || return $?
   host_run_hydrate_external_sources || return $?
+  [ -d "$HOST_RUN_PLATFORM_ROOT" ] || { echo "error: resolved platform root does not exist after hydration: $HOST_RUN_PLATFORM_ROOT" >&2; return 1; }
+  [ -d "$HOST_RUN_PLATFORM_ROOT/packages" ] || { echo "error: resolved platform root has no packages directory: $HOST_RUN_PLATFORM_ROOT/packages" >&2; return 1; }
+  host_run_build_package_roots || return $?
   if [ -n "${FKST_RATE_POOL_ROOT:-}" ]; then
     case "$FKST_RATE_POOL_ROOT" in
       /*) ;;

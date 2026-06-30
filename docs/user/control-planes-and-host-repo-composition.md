@@ -59,11 +59,11 @@ The host supervise loads the platform trio from the pinned PKGSRC and its own pa
 `.fkst/local-packages/`, all on the same engine BIN — see `docs/user/github-devloop-dogfood-topology.md` for
 the dogfood directory layout.
 
-Before launching `fkst-framework supervise`, the host-run contract reads every `[[external_source]]` entry in
-the host's `fkst.lock` and ensures `<HOST>/.fkst/run/<id>/` is a checkout of that entry's
-`resolved.rev`. This hydration is an idempotent pre-launch step only: the explicit `--platform-root` remains
-the platform package source for `--package-root` wiring, so the final `fkst-framework supervise` argv does
-not change when hydration is needed.
+Before launching `fkst-framework supervise`, the host-run contract reads the host's
+`fkst.workspace.toml` and `fkst.lock`, ensures `<HOST>/.fkst/run/<id>/` is a checkout of each locked
+`resolved.rev`, and loads declared `fkst-packages-platform` packages from that target-host checkout. The
+explicit `--platform-root` supplies the shared runner and self-host fallback; for external hosts, the target
+workspace pin is the package-root authority.
 
 ## 3. Host-repo conformance — no per-repo rebuild
 
