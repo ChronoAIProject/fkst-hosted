@@ -59,11 +59,11 @@ The host supervise loads the platform trio from the pinned PKGSRC and its own pa
 `.fkst/local-packages/`, all on the same engine BIN — see `docs/user/github-devloop-dogfood-topology.md` for
 the dogfood directory layout.
 
-Before launching `fkst-framework supervise`, the host-run contract reads every `[[external_source]]` entry in
-the host's `fkst.lock` and ensures `<HOST>/.fkst/run/<id>/` is a checkout of that entry's
-`resolved.rev`. This hydration is an idempotent pre-launch step only: the explicit `--platform-root` remains
-the platform package source for `--package-root` wiring, so the final `fkst-framework supervise` argv does
-not change when hydration is needed.
+Before launching `fkst-framework supervise`, the host-run contract reads the host's
+`fkst.workspace.toml` and `fkst.lock`, ensures `<HOST>/.fkst/run/<id>/` is a checkout of each locked
+`resolved.rev`, and loads declared `fkst-packages-platform` packages from that target-host checkout. The
+explicit `--platform-root` supplies the shared runner and self-host fallback; for external hosts, the target
+workspace pin is the package-root authority.
 
 ## 3. Host-repo conformance — no per-repo rebuild
 
@@ -93,6 +93,24 @@ providing ONLY its config (its package roots + its own waivers). It carries **no
 - **`.fkst/` is the host runtime/interface directory** (tracked + ignored mix): committed host-owned bits
   (`local-packages`, `local-libraries`, `conformance`, `compose`) plus gitignored engine scratch
   (`runtime/`, `durable/`).
+
+### Frontend application workflow profile
+
+Frontend application hosts use the same host-repo composition contract as any other non-Lua host repo. The
+profile is composition, not a separate platform package:
+
+- Load the platform packages that own the lifecycle: `github-proxy`, `consensus`, `github-devloop`,
+  `github-devloop-pr`, and `github-devloop-intake`.
+- Put host-specific UI adapters, boards, browser probes, or app metadata under
+  `.fkst/local-packages/<host-package>/`.
+- List those host-owned package roots in `.fkst/compose/package-roots` so the shared conformance tiers test
+  them with the pinned platform graph.
+- Keep frontend-specific checks as host package behavior or host CI commands. The platform `github-devloop`
+  lifecycle remains the single source of truth for issue intake, implementation, PR review, fixing, and merge.
+
+Do not add a standalone `frontend-devloop` package/profile unless it has a distinct lifecycle contract that
+cannot be represented by host composition. This keeps frontend workflow support on the same DRY, single-owner
+path as the existing `github-devloop` platform instead of creating a second source of truth.
 
 ## 5. The big picture
 

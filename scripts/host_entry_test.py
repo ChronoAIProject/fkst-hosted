@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import subprocess
 import tempfile
@@ -58,6 +59,17 @@ class HostEntryHarness:
         allowlists = self.config_dir / "allowlists"
         allowlists.mkdir()
         (allowlists / "README").write_text("host allowlists fixture\n", encoding="utf-8")
+
+    def write_platform_workspace(self, packages: list[str]) -> None:
+        (self.host / "fkst.workspace.toml").write_text(
+            "[workspace]\nunits = [\".fkst/local-packages/site-board\"]\n\n"
+            "[[external_sources]]\n"
+            'id = "fkst-packages-platform"\n'
+            f"git = {json.dumps(str(self.platform))}\n"
+            'rev = "0123456789abcdef0123456789abcdef01234567"\n'
+            f"packages = {json.dumps(packages)}\n",
+            encoding="utf-8",
+        )
 
     def run_helper(self, body: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -152,6 +164,7 @@ class HostEntryTest(unittest.TestCase):
                 ".fkst/local-packages/site-board\nfkst-packages:packages/github-proxy\n",
                 encoding="utf-8",
             )
+            h.write_platform_workspace(["github-proxy"])
             result = h.run_helper(
                 textwrap.dedent(
                     f"""\
