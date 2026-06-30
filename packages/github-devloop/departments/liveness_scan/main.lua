@@ -8,7 +8,6 @@ local spec = {
   consumes = { "devloop_liveness_tick" }, published_seam = { "devloop_liveness_tick" },
   produces = {
     "devloop_observe_issue",
-    "github-devloop-intake.devloop_intake_recheck",
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_pr_comment_request",
     "consensus.proposal",
@@ -89,72 +88,6 @@ local function should_reinject_issue(repo, issue, limits, deadline)
   return true
 end
 
-local function should_recheck_intake(repo, issue, limits, deadline)
-  if not core.issue_ref_round_trips(repo, issue.number) then
-    return false
-  end
-  if not sweep_bounds.sweep_has_budget(deadline) then
-    return nil, "deadline"
-  end
-
-  local proposal_id = core.proposal_id(repo, issue.number)
-  local view = core.gh_issue_view_intake_judge(repo, issue.number, sweep_bounds.sweep_call_timeout(limits, deadline))
-  if view.exit_code ~= 0 then
-    if liveness_scan.liveness_scan_is_timeout_result(core, view) then
-      return nil, "deadline"
-    end
-    error("github-devloop: liveness-scan-intake-view-failed: " .. tostring(view.stderr))
-  end
-
-  local current = core.parse_issue_view_intake_judge(view.stdout)
-  current.number = issue.number
-  current.updated_at = current.updated_at or issue.updated_at
-  if tostring(current.state or ""):upper() ~= "OPEN" then
-    return false
-  end
-  if core.should_skip_known_intake_issue(current.labels) then
-    return false
-  end
-  if core.has_intake_decision_marker(current.comments, proposal_id) then
-    return false
-  end
-
-  local owner = core.claim_owner()
-  if core.issue_claim_state(current.assignees, owner, current.labels) ~= "unassigned" then
-    return false
-  end
-  local author = core.issue_author_login(current)
-  if author == nil or author == "" then
-    return false
-  end
-  author = core.strip_bot_login_suffix(author)
-  if core.claim_mode() == "label" or author == owner then
-    return false
-  end
-  if core.is_managed_bot_login(author, core.managed_bot_logins()) then
-    return false
-  end
-
-  local elapsed = core.fork_grace_elapsed(repo, issue.number, current, now(), core.fork_grace_seconds())
-  if not elapsed then
-    return false
-  end
-  return true, nil, current
-end
-
-local function raise_intake_recheck(repo, issue, current)
-  local payload = core.build_intake_recheck_payload(
-    repo,
-    issue.number,
-    current.updated_at or issue.updated_at,
-    "fork-grace-elapsed"
-  )
-  core.log_apply("liveness_scan", payload.proposal_id, nil, nil, { add = {}, remove = {} }, {
-    "github-devloop-intake.devloop_intake_recheck",
-  })
-  core.log_raise("liveness_scan", payload.proposal_id, "github-devloop-intake.devloop_intake_recheck", payload)
-end
-
 local function liveness_scan_done(_event)
   return false
 end
@@ -194,8 +127,8 @@ local function act_liveness_scan(event)
     end
 
     attempted = attempted + 1
-    local should_recheck, intake_defer_reason, intake_current = should_recheck_intake(repo, activation.entity, limits, deadline)
-    if intake_defer_reason == "deadline" then
+    local should_reinject, defer_reason = should_reinject_issue(repo, activation.entity, limits, deadline)
+    if defer_reason == "deadline" then
       liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
       liveness_scan.liveness_scan_log_deferred(core, "deadline", {
         listed_issues = #issues,
@@ -205,25 +138,9 @@ local function act_liveness_scan(event)
       })
       return
     end
-    if should_recheck then
-      raise_intake_recheck(repo, activation.entity, intake_current)
-      processed = processed + 1
-    else
-      local should_reinject, defer_reason = should_reinject_issue(repo, activation.entity, limits, deadline)
-      if defer_reason == "deadline" then
-        liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
-        liveness_scan.liveness_scan_log_deferred(core, "deadline", {
-          listed_issues = #issues,
-          processed = processed,
-          deferred = (#activations - processed) + deferred_by_cap,
-          entity_cap = limits.entity_cap,
-        })
-        return
-      end
-      processed = processed + 1
-      if should_reinject then
-        liveness_scan.liveness_scan_reinject(core, repo, activation.entity, "issue", event and event.ts)
-      end
+    processed = processed + 1
+    if should_reinject then
+      liveness_scan.liveness_scan_reinject(core, repo, activation.entity, "issue", event and event.ts)
     end
   end
 

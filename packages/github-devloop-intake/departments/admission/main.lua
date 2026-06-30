@@ -4,8 +4,7 @@ local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 
 local spec = {
-  consumes = { "github-proxy.github_entity_changed", "devloop_intake_recheck" },
-  published_seam = { "devloop_intake_recheck" },
+  consumes = { "github-proxy.github_entity_changed" },
   produces = {
     "devloop_intake_candidate",
     "github-proxy.github_issue_comment_request",
@@ -128,23 +127,8 @@ local function act_entity_changed(event)
   admit_issue_event(event, entity)
 end
 
-local function act_recheck(event)
-  local payload = event.payload or {}
-  if not core.is_supported_intake_recheck(payload) then
-    core.log_entry("admission", event, "github-devloop/intake", core.payload_field(payload, "dedup_key"))
-    core.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "recheck", "candidate", "skip-foreign(payload)", "unsupported intake recheck payload")
-    return
-  end
-  admit_issue_event(event, {
-    source_ref = payload.source_ref,
-    updated_at = payload.updated_at,
-    dedup_key = payload.dedup_key,
-  })
-end
-
 local handlers = {
   ["github-proxy.github_entity_changed"] = act_entity_changed,
-  devloop_intake_recheck = act_recheck,
 }
 
 local function act(event)

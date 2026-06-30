@@ -132,29 +132,6 @@ local function mock_issue_state_number(issue_number, labels, state, comments, up
   })
 end
 
-local function mock_intake_view_number(issue_number, fields)
-  local f = fields or {}
-  entity_read_mocks.mock_issue_view_selector(t, {
-    repo = repo,
-    number = issue_number,
-    title = f.title or ("Issue " .. tostring(issue_number)),
-    body = f.body or "",
-    updated_at = f.updated_at or "2026-06-03T01:02:03Z",
-    state = f.state or "OPEN",
-    labels = f.labels or {},
-    comments = f.comments or {},
-    assignees = f.assignees or {},
-    author_login = f.author_login or "human",
-  }, "title,body,updatedAt,labels,comments,state,assignees,author")
-end
-
-local function seed_cache(key, value, run_opts)
-  return t.run_department("departments/test_cache_seed/main.lua", {
-    queue = "cache_seed",
-    payload = { key = key, value = tostring(value) },
-  }, run_opts)
-end
-
 local function mock_empty_pr_list()
   t.mock_command(core.gh_pr_list_observe_cmd(repo), {
     stdout = "[]\n",
@@ -1017,83 +994,4 @@ return {
     t.eq(find_raise(result.raises, ISSUE_REDRIVE_QUEUE), nil)
   end,
 
-  test_liveness_scan_rechecks_other_authored_intake_after_fork_grace = function()
-    local run_opts = opts("liveness-scan-intake-recheck-after-grace")
-    local updated_at = "2026-06-03T01:02:03Z"
-    local seeded = seed_cache(core.fork_first_observed_key(repo, 42, updated_at), now() - (3 * 60 * 60) - 1, run_opts)
-    t.eq(seeded.exit_code, 0)
-    mock_repo()
-    mock_issue_list({ { number = 42, state = "open", updated_at = updated_at } })
-    mock_empty_pr_list()
-    mock_intake_view_number(42, {
-      updated_at = updated_at,
-      labels = {},
-      comments = {},
-      assignees = {},
-      author_login = "human",
-    })
-
-    local result = run_liveness_scan("liveness-scan-intake-recheck-after-grace", run_opts)
-
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local recheck = find_raise(result.raises, "github-devloop-intake.devloop_intake_recheck").payload
-    t.eq(recheck.schema, "github-devloop.intake-recheck.v1")
-    t.eq(recheck.repo, repo)
-    t.eq(recheck.issue_number, "42")
-    t.eq(recheck.updated_at, updated_at)
-    t.eq(recheck.reason, "fork-grace-elapsed")
-    t.eq(recheck.source_ref.ref, "owner/repo#issue/42")
-    t.eq(recheck.dedup_key, core.intake_recheck_dedup_key(repo, 42, updated_at))
-  end,
-
-  test_liveness_scan_does_not_recheck_intake_inside_fork_grace = function()
-    local run_opts = opts("liveness-scan-intake-recheck-inside-grace")
-    local updated_at = "2026-06-03T01:02:03Z"
-    local seeded = seed_cache(core.fork_first_observed_key(repo, 42, updated_at), now() - 60, run_opts)
-    t.eq(seeded.exit_code, 0)
-    mock_repo()
-    mock_issue_list({ { number = 42, state = "open", updated_at = updated_at } })
-    mock_empty_pr_list()
-    mock_intake_view_number(42, {
-      updated_at = updated_at,
-      labels = {},
-      comments = {},
-      assignees = {},
-      author_login = "human",
-    })
-    mock_issue_state_number(42, {}, "OPEN", {}, updated_at)
-
-    local result = run_liveness_scan("liveness-scan-intake-recheck-inside-grace", run_opts)
-
-    t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "github-devloop-intake.devloop_intake_recheck"), nil)
-  end,
-
-  test_liveness_scan_skips_intake_recheck_when_decision_exists = function()
-    local run_opts = opts("liveness-scan-intake-recheck-decision-exists")
-    local updated_at = "2026-06-03T01:02:03Z"
-    local decision = {
-      body = core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
-      author_login = core.trusted_bot_login(),
-    }
-    local seeded = seed_cache(core.fork_first_observed_key(repo, 42, updated_at), now() - (3 * 60 * 60) - 1, run_opts)
-    t.eq(seeded.exit_code, 0)
-    mock_repo()
-    mock_issue_list({ { number = 42, state = "open", updated_at = updated_at } })
-    mock_empty_pr_list()
-    mock_intake_view_number(42, {
-      updated_at = updated_at,
-      labels = {},
-      comments = { decision },
-      assignees = {},
-      author_login = "human",
-    })
-    mock_issue_state_number(42, {}, "OPEN", { decision }, updated_at)
-
-    local result = run_liveness_scan("liveness-scan-intake-recheck-decision-exists", run_opts)
-
-    t.eq(result.exit_code, 0)
-    t.eq(find_raise(result.raises, "github-devloop-intake.devloop_intake_recheck"), nil)
-  end,
 }

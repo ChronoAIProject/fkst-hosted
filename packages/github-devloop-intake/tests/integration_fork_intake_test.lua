@@ -75,14 +75,6 @@ local function run_admission(run_opts, updated_at)
   return t.run_department("departments/admission/main.lua", event(updated_at), run_opts)
 end
 
-local function run_admission_recheck(payload, run_opts)
-  return t.run_department("departments/admission/main.lua", {
-    queue = "devloop_intake_recheck",
-    payload = payload,
-    source_ref = payload.source_ref,
-  }, run_opts)
-end
-
 local function assert_no_fork_or_candidate(result)
   t.eq(result.exit_code, 0)
   t.eq(#result.raises, 0)
@@ -160,26 +152,5 @@ return {
     local result = run_admission(run_opts, "2026-06-03T02:00:00Z")
 
     assert_no_fork_or_candidate(result)
-  end,
-
-  test_recheck_admission_uses_canonical_fork_path = function()
-    local run_opts = opts("fork-intake-recheck-admission")
-    local updated_at = "2026-06-03T01:02:03Z"
-    local seeded = seed_cache(core.fork_first_observed_key("owner/repo", 42, updated_at), now() - (3 * 60 * 60) - 1, run_opts)
-    t.eq(seeded.exit_code, 0)
-    local payload = core.build_intake_recheck_payload("owner/repo", 42, updated_at, "fork-grace-elapsed")
-    mock_repo_env()
-    mock_admission_view({ updated_at = updated_at })
-    mock_state_view({ updated_at = updated_at })
-
-    local result = run_admission_recheck(payload, run_opts)
-
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local request = find_raise(result.raises, "github-proxy.github_issue_create_request").payload
-    t.eq(request.external_effect_saga, "fork-and-block")
-    t.eq(request.external_effect_step, "create-fork")
-    t.eq(request.parent_comment_target.issue_number, 42)
-    t.eq(find_raise(result.raises, "devloop_intake_candidate"), nil)
   end,
 }
