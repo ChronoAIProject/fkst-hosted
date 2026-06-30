@@ -3,8 +3,7 @@
 This is the complete reference for the **fkst-hosted** HTTP API — every public
 endpoint, with its path, required headers, permissions, request/response
 shapes, and examples. For a high-level overview of the project, see the
-[root README](../README.md); to run or deploy the service, see
-[`backend/README.md`](../backend/README.md).
+[root README](../README.md).
 
 - [Conventions](#conventions)
 - [Authentication & authorization](#authentication--authorization)

@@ -36,10 +36,5 @@ For instructions on setting up authentication, service accounts, and GitHub inte
 
 ---
 
-<sub>Running or contributing to fkst-hosted? See
-[`backend/README.md`](backend/README.md) for local development and the
-per-deployable Kubernetes samples
-[`backend/k8s_sample/README.md`](backend/k8s_sample/README.md)
-and
-[`backend/fkst-worker/k8s_sample/README.md`](backend/fkst-worker/k8s_sample/README.md)
-for deployment.</sub>
+<sub>Deploying fkst-hosted? See the Kubernetes samples
+[`backend/k8s_sample/README.md`](backend/k8s_sample/README.md).</sub>
