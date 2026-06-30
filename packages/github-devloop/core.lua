@@ -80,7 +80,6 @@ require("devloop.replayer").install({
 })
 require("core.liveness_bounds").install(M)
 require("devloop.liveness").install(M, wiring.liveness(M))
-require("devloop.liveness_scan").install(M)
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), { implement = true })
 require("devloop.requests").install(M)

@@ -1,11 +1,10 @@
-local S, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
+local C, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
 
-function S.install(M)
 local LIVENESS_SCAN_MAX_PER_TICK = 100
 local LIVENESS_SCAN_CALL_TIMEOUT = 10
 local LIVENESS_SCAN_WALL_CLOCK_BUDGET = 25
 
-function M.liveness_scan_limits()
+function C.liveness_scan_limits(M)
   return {
     entity_cap = LIVENESS_SCAN_MAX_PER_TICK,
     call_timeout = LIVENESS_SCAN_CALL_TIMEOUT,
@@ -13,7 +12,7 @@ function M.liveness_scan_limits()
   }
 end
 
-function M.liveness_scan_read_repo()
+function C.liveness_scan_read_repo(M)
   local repo = M.read_env("FKST_GITHUB_REPO")
   if repo == nil or not M.issue_ref_round_trips(repo, 1) then
     return nil
@@ -21,11 +20,11 @@ function M.liveness_scan_read_repo()
   return repo
 end
 
-function M.liveness_scan_cursor_key(repo, prefix)
+function C.liveness_scan_cursor_key(M, repo, prefix)
   return tostring(prefix or "github-devloop/liveness-scan/cursor/") .. M.safe_repo(repo)
 end
 
-function M.liveness_scan_log_deferred(reason, fields)
+function C.liveness_scan_log_deferred(M, reason, fields)
   M.log_line("info", "liveness_scan", "github-devloop/liveness-scan", "LIVENESS_DEFERRED", {
     "reason=" .. tostring(reason or "budget"),
     "listed_issues=" .. tostring(fields and fields.listed_issues or 0),
@@ -36,19 +35,19 @@ function M.liveness_scan_log_deferred(reason, fields)
   })
 end
 
-function M.liveness_scan_is_timeout_result(result)
+function C.liveness_scan_is_timeout_result(M, result)
   return type(result) == "table" and result.exit_code ~= 0
     and (tonumber(result.exit_code) == 124 or M.error_fact_class({ message = result.stderr }) == "timeout")
 end
 
-function M.liveness_scan_update_cursor(cursor_key, cursor, total, processed)
+function C.liveness_scan_update_cursor(M, cursor_key, cursor, total, processed)
   if cursor_key == nil then
     return
   end
   cache_set(cursor_key, tostring(sweep_bounds.sweep_cursor_advance(cursor, total, processed)))
 end
 
-function M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
+function C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
   local number = tostring(entity.number or "")
   local updated_at = tostring(entity.updated_at or "")
   local source_ref = kind == "pr" and M.pr_source_ref(repo, number) or M.issue_source_ref(repo, number)
@@ -72,24 +71,24 @@ function M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
   }
 end
 
-function M.liveness_scan_state_is_non_terminal(state)
+function C.liveness_scan_state_is_non_terminal(M, state)
   local row = replay_fields.restart_transition_row(M.restart_transition_table(), state and state.state)
   return row ~= nil and row.terminal ~= true
 end
 
-function M.liveness_scan_should_reinject_state(proposal_id, state)
+function C.liveness_scan_should_reinject_state(M, proposal_id, state)
   if state == nil or state.state == nil then
     M.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "no current restart state marker")
     return false
   end
-  if not M.liveness_scan_state_is_non_terminal(state) then
+  if not C.liveness_scan_state_is_non_terminal(M, state) then
     M.log_cas_decision("liveness_scan", proposal_id, state, "tick", "observe", "skip-terminal", "current restart state is terminal or unknown")
     return false
   end
   return true
 end
 
-function M.liveness_scan_issue_entity(repo, issue_number)
+function C.liveness_scan_issue_entity(M, repo, issue_number)
   return {
     repo = repo,
     number = issue_number,
@@ -97,7 +96,7 @@ function M.liveness_scan_issue_entity(repo, issue_number)
   }
 end
 
-function M.liveness_scan_maybe_timeout_action(entity, state, facts)
+function C.liveness_scan_maybe_timeout_action(M, entity, state, facts)
   local row = replay_fields.restart_transition_row(M.restart_transition_table(), state and state.state)
   if row == nil or row.terminal == true then
     return nil
@@ -133,14 +132,14 @@ function M.liveness_scan_maybe_timeout_action(entity, state, facts)
   return nil
 end
 
-function M.liveness_scan_observe_queue(kind)
+function C.liveness_scan_observe_queue(M, kind)
   if kind == "pr" then
     return "devloop_observe_pr"
   end
   return "devloop_observe_issue"
 end
 
-function M.liveness_scan_list_open_issues(repo, timeout, poll_key)
+function C.liveness_scan_list_open_issues(M, repo, timeout, poll_key)
   local list = M.fetch_shared_issue_observe_list(repo, {
     timeout = timeout or 60,
     poll_key = poll_key,
@@ -151,7 +150,7 @@ function M.liveness_scan_list_open_issues(repo, timeout, poll_key)
   return M.parse_issue_list_observe(list.stdout)
 end
 
-function M.liveness_scan_list_open_prs(repo, timeout, poll_key)
+function C.liveness_scan_list_open_prs(M, repo, timeout, poll_key)
   local list = M.fetch_shared_pr_observe_list(repo, {
     timeout = timeout or 60,
     poll_key = poll_key,
@@ -169,14 +168,14 @@ local function sort_by_number(items)
   return items
 end
 
-function M.liveness_scan_activation_slice(repo, kind, items, cursor_prefix)
+function C.liveness_scan_activation_slice(M, repo, kind, items, cursor_prefix)
   local activations = {}
   for _, entity in ipairs(sort_by_number(items or {})) do
     table.insert(activations, { kind = kind, entity = entity })
   end
   local total = #activations
   if total > LIVENESS_SCAN_MAX_PER_TICK then
-    local cursor_key = M.liveness_scan_cursor_key(repo, cursor_prefix)
+    local cursor_key = C.liveness_scan_cursor_key(M, repo, cursor_prefix)
     local cursor = cache_get(cursor_key)
     local bounded, deferred = sweep_bounds.sweep_cursor_batch(
       activations,
@@ -187,20 +186,18 @@ function M.liveness_scan_activation_slice(repo, kind, items, cursor_prefix)
     M.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "deferred-cap", tostring(total - LIVENESS_SCAN_MAX_PER_TICK) .. " open entities deferred by LIVENESS_SCAN_MAX_PER_TICK")
     return bounded, deferred, cursor_key, cursor, total
   end
-  cache_set(M.liveness_scan_cursor_key(repo, cursor_prefix), "0")
+  cache_set(C.liveness_scan_cursor_key(M, repo, cursor_prefix), "0")
   return activations, 0, nil, nil, total
 end
 
-function M.liveness_scan_reinject(repo, entity, kind, tick)
+function C.liveness_scan_reinject(M, repo, entity, kind, tick)
   local proposal_id = kind == "pr" and M.pr_proposal_id(repo, entity.number) or M.proposal_id(repo, entity.number)
-  local payload = M.liveness_scan_build_observe_payload(repo, entity, kind, tick)
-  local queue = M.liveness_scan_observe_queue(kind)
+  local payload = C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
+  local queue = C.liveness_scan_observe_queue(M, kind)
   M.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
     queue,
   })
   M.log_raise("liveness_scan", proposal_id, queue, payload)
 end
 
-end
-
-return S
+return C

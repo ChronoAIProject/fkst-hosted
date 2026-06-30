@@ -1,4 +1,5 @@
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
+local liveness_scan = require("devloop.liveness_scan")
 local saga = require("workflow.saga")
 local forge_validators = require("devloop.forge_validators")
 
@@ -35,7 +36,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     timeout = sweep_bounds.sweep_call_timeout(limits, deadline),
   })
   if state_view.exit_code ~= 0 then
-    if core.liveness_scan_is_timeout_result(state_view) then
+    if liveness_scan.liveness_scan_is_timeout_result(core, state_view) then
       return nil, "deadline"
     end
     error("github-devloop: liveness-scan-pr-view-failed: " .. tostring(state_view.stderr))
@@ -54,11 +55,11 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   end
 
   local state = core.current_entity_state(current.comments, origin.proposal_id)
-  if not core.liveness_scan_should_reinject_state(proposal_id, state) then
+  if not liveness_scan.liveness_scan_should_reinject_state(core, proposal_id, state) then
     return false
   end
   local source_ref = core.pr_source_ref(repo, pr.number)
-  local timeout_action = core.liveness_scan_maybe_timeout_action(core.liveness_scan_issue_entity(origin.repo, origin.issue_number), state, {
+  local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(core, origin.repo, origin.issue_number), state, {
     proposal_id = origin.proposal_id,
     current = { comments = current.comments or {}, labels = current.labels or {} },
     current_pr = current,
@@ -96,28 +97,28 @@ local function act_liveness_scan(event)
   core.log_entry("liveness_scan", event, "github-devloop/liveness-scan", "tick")
   core.assert_trusted_bot_configured()
 
-  local repo = core.liveness_scan_read_repo()
+  local repo = liveness_scan.liveness_scan_read_repo(core)
   if repo == nil then
     core.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
     return
   end
 
-  local limits = core.liveness_scan_limits()
+  local limits = liveness_scan.liveness_scan_limits(core)
   local deadline = sweep_bounds.sweep_deadline(now(), limits)
   local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
-    core.liveness_scan_log_deferred("deadline", { entity_cap = limits.entity_cap })
+    liveness_scan.liveness_scan_log_deferred(core, "deadline", { entity_cap = limits.entity_cap })
     return
   end
-  local prs = core.liveness_scan_list_open_prs(repo, timeout, core.entity_list_poll_key(event))
-  local activations, deferred_by_cap, cursor_key, cursor, total = core.liveness_scan_activation_slice(repo, "pr", prs, LIVENESS_SCAN_CURSOR_PREFIX)
+  local prs = liveness_scan.liveness_scan_list_open_prs(core, repo, timeout, core.entity_list_poll_key(event))
+  local activations, deferred_by_cap, cursor_key, cursor, total = liveness_scan.liveness_scan_activation_slice(core, repo, "pr", prs, LIVENESS_SCAN_CURSOR_PREFIX)
   local processed = 0
   local attempted = 0
 
   for _, activation in ipairs(activations) do
     if not sweep_bounds.sweep_has_budget(deadline) then
-      core.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
-      core.liveness_scan_log_deferred("deadline", {
+      liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
+      liveness_scan.liveness_scan_log_deferred(core, "deadline", {
         listed_prs = #prs,
         processed = processed,
         deferred = (#activations - processed) + deferred_by_cap,
@@ -129,8 +130,8 @@ local function act_liveness_scan(event)
     attempted = attempted + 1
     local should_reinject, defer_reason = should_reinject_pr(repo, activation.entity, limits, deadline)
     if defer_reason == "deadline" then
-      core.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
-      core.liveness_scan_log_deferred("deadline", {
+      liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
+      liveness_scan.liveness_scan_log_deferred(core, "deadline", {
         listed_prs = #prs,
         processed = processed,
         deferred = (#activations - processed) + deferred_by_cap,
@@ -140,14 +141,14 @@ local function act_liveness_scan(event)
     end
     processed = processed + 1
     if should_reinject then
-      core.liveness_scan_reinject(repo, activation.entity, "pr", event and event.ts)
+      liveness_scan.liveness_scan_reinject(core, repo, activation.entity, "pr", event and event.ts)
     end
   end
 
-  core.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
+  liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
 
   if deferred_by_cap > 0 then
-    core.liveness_scan_log_deferred("cap", {
+    liveness_scan.liveness_scan_log_deferred(core, "cap", {
       listed_prs = #prs,
       processed = processed,
       deferred = deferred_by_cap,

@@ -248,7 +248,7 @@ return {
     end
     local liveness_scan = file.read("packages/github-devloop/departments/liveness_scan/main.lua")
     local observe_issue = file.read("packages/github-devloop/departments/observe_issue/main.lua")
-    t.is_true(liveness_scan:find("core.liveness_scan_maybe_timeout_action", 1, true) ~= nil)
+    t.is_true(liveness_scan:find("liveness_scan.liveness_scan_maybe_timeout_action(core", 1, true) ~= nil)
     t.is_true(liveness_scan:find("should_reinject_state", 1, true) ~= nil)
     t.is_true(observe_issue:find("core.restart_row_observable_on", 1, true) ~= nil)
     t.is_true(observe_issue:find("maybe_reconcile_issue_local_orphaned_pr", 1, true) ~= nil)
