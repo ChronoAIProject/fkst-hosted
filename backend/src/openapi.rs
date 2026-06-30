@@ -40,6 +40,7 @@ use crate::state::AppState;
     ),
     tags(
         (name = "sessions", description = "Engine session status and lifecycle."),
+        (name = "users", description = "Per-user environment + secret store (GitHub-token authenticated)."),
         (name = "system", description = "Liveness and Prometheus metrics (public)."),
         (name = "webhooks", description = "Inbound GitHub App webhook (signature-verified, public).")
     )

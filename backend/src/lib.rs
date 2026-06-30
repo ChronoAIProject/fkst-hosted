@@ -12,6 +12,10 @@ pub mod config;
 pub mod engine;
 pub mod error;
 pub mod github_app;
+// GitHub-token identity verification + the `GithubUser` axum extractor (PR4a):
+// trades `Authorization: Bearer <github token>` for the verified `{login, id}`
+// that keys the per-user environment/secret store.
+pub mod github_identity;
 pub mod goals;
 pub mod models;
 pub mod protocol;

@@ -30,8 +30,14 @@ metadata:
 rules:
   # Per-session credentials: created before the Job, mounted 0400, patched to
   # rotate the short-lived NyxID token; ownerReferenced to the Job for cascade GC.
+  # ALSO backs the per-user secret store (`fkst-user-<id>` Secret, PR4a).
   - apiGroups: [""]
     resources: ["secrets"]
+    verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
+  # Per-user environment store: one `fkst-user-<id>` ConfigMap per user (PR4a),
+  # merge-upserted / read / key-deleted via the GitHub-token user-store API.
+  - apiGroups: [""]
+    resources: ["configmaps"]
     verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
   # One Job per session: created, watched to completion, GC'd via
   # ttlSecondsAfterFinished (delete kept for explicit teardown / the stop route).

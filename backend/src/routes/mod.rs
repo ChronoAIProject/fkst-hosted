@@ -5,3 +5,4 @@ pub mod health;
 pub mod metrics;
 pub mod session_ops;
 pub mod sessions;
+pub mod user_env;

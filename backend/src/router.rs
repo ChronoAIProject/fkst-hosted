@@ -49,7 +49,10 @@ fn cors_layer() -> CorsLayer {
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
     let timeout = Duration::from_secs(state.config.request_timeout_secs);
 
-    let api_routes = routes::sessions::router();
+    // The per-user environment/secret store (PR4a) mounts alongside sessions
+    // under `/api/v1`. It is open at the app layer: identity is the per-request
+    // GitHub token verified by the `GithubUser` extractor, not middleware.
+    let api_routes = routes::sessions::router().merge(routes::user_env::router());
 
     // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
     // but signature-verified inside the handler over the raw body. It lives at
