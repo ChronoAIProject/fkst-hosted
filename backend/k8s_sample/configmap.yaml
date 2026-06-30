@@ -28,9 +28,15 @@ data:
   # Slug of the NyxID GitHub proxy service. Non-blank (fail-closed).
   FKST_NYXID_GITHUB_PROXY_SLUG: "api-github"
 
-  # --- Codex / chrono-llm (reached via the NyxID proxy) ---
-  FKST_HOSTED_CODEX_MODEL: "gpt-5-codex" # non-blank (fail-closed)
-  FKST_HOSTED_CHRONO_LLM_BASE_URL: "http://nyxid-backend.ornn-cluster:3001/api/v1/proxy/s/chrono-llm"
+  # --- LLM provider (config-driven; injected into each session pod) ---
+  # The model/base URL/wire_api are injected as plain pod env (session pods do
+  # NOT inherit this ConfigMap). FKST_LLM_API_KEY is a Secret (see
+  # secret.example.yaml) and is REQUIRED when FKST_POD_DISPATCH=true.
+  FKST_LLM_MODEL: "gpt-5-codex" # non-blank (fail-closed)
+  FKST_LLM_BASE_URL: "http://nyxid-backend.ornn-cluster:3001/api/v1/proxy/s/chrono-llm"
+  # wire_api MUST be "chat": chrono-llm serves only /chat/completions (502 on
+  # /responses). Non-blank (fail-closed).
+  FKST_LLM_WIRE_API: "chat"
 
   # --- Session trigger ---
   # Only a GitHub issues.opened carrying this label auto-triggers a session.
