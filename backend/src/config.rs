@@ -83,6 +83,12 @@ mod defaults {
         "fkst".to_string()
     }
 
+    pub(super) fn github_api_base_url() -> String {
+        // Base URL the per-user-store identity check calls (`GET {base}/user`).
+        // Overridable so tests can point at a wiremock server.
+        "https://api.github.com".to_string()
+    }
+
     pub(super) fn pod_namespace() -> String {
         // The namespace per-session Jobs + Secrets live in (milestone #9).
         "fkst-sessions".to_string()
@@ -133,6 +139,11 @@ struct HttpVars {
 struct WebhookVars {
     #[serde(default = "defaults::webhook_trigger_label")]
     webhook_trigger_label: String,
+    /// Base URL the per-user-store GitHub-token identity check calls
+    /// (`GET {base}/user`). Env: `FKST_GITHUB_API_BASE_URL`. Default
+    /// `https://api.github.com`; non-blank (tests point it at a mock server).
+    #[serde(default = "defaults::github_api_base_url")]
+    github_api_base_url: String,
 }
 
 /// `FKST_POD_*`-prefixed variables (pod-per-session dispatch, milestone #9).
@@ -236,6 +247,11 @@ pub struct Config {
     /// Only `issues.opened` carrying this label auto-triggers a session.
     /// Env: `FKST_WEBHOOK_TRIGGER_LABEL`. Default `fkst`.
     pub webhook_trigger_label: String,
+    /// Base URL the per-user-store identity check calls (`GET {base}/user`) to
+    /// trade a caller's GitHub token for the verified `{login, id}`. The numeric
+    /// `id` (never a client-supplied value) keys the user's `fkst-user-<id>`
+    /// objects. Env: `FKST_GITHUB_API_BASE_URL`. Default `https://api.github.com`.
+    pub github_api_base_url: String,
     /// Max bytes for a single inline vault value (#138). Env:
     /// `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. Default 65536, zero rejected.
     pub vault_value_byte_cap: usize,
@@ -260,6 +276,7 @@ impl Default for Config {
             log_level: defaults::log_level(),
             request_timeout_secs: defaults::request_timeout_secs(),
             webhook_trigger_label: defaults::webhook_trigger_label(),
+            github_api_base_url: defaults::github_api_base_url(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             llm_api_key: SecretString::from(String::new()),
@@ -288,10 +305,18 @@ impl Config {
             ));
         }
 
-        // Webhook trigger label pass (the bare `FKST_WEBHOOK_TRIGGER_LABEL`).
+        // Webhook trigger label pass (the bare `FKST_WEBHOOK_TRIGGER_LABEL`) plus
+        // the GitHub API base used by the per-user-store identity check.
         let webhook: WebhookVars = envy::prefixed(WEBHOOK_ENV_PREFIX)
             .from_iter(vars.iter().cloned())
             .map_err(|e| AppError::Config(e.to_string()))?;
+        // A blank base would make every user-store identity check call a malformed
+        // URL (and 503 the whole user surface). Reject it loudly, naming the var.
+        if webhook.github_api_base_url.trim().is_empty() {
+            return Err(AppError::Config(
+                "FKST_GITHUB_API_BASE_URL must not be blank".to_string(),
+            ));
+        }
 
         // Vault cap validation (fail-closed): the vault is always-on, so a zero
         // cap is a startup error.
@@ -396,6 +421,7 @@ impl Config {
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             llm_api_key: SecretString::from(llm_api_key.unwrap_or_default()),
             webhook_trigger_label: webhook.webhook_trigger_label,
+            github_api_base_url: webhook.github_api_base_url.trim().to_string(),
             pod,
         })
     }
@@ -575,6 +601,28 @@ mod tests {
         let overridden = Config::from_vars(vars(&[("FKST_WEBHOOK_TRIGGER_LABEL", "fkst-cloud")]))
             .expect("override");
         assert_eq!(overridden.webhook_trigger_label, "fkst-cloud");
+    }
+
+    // ---- github api base (per-user store identity) tests ----------------------
+
+    #[test]
+    fn github_api_base_defaults_and_overrides() {
+        let default = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(default.github_api_base_url, "https://api.github.com");
+        let overridden = Config::from_vars(vars(&[(
+            "FKST_GITHUB_API_BASE_URL",
+            "http://127.0.0.1:8080",
+        )]))
+        .expect("override");
+        assert_eq!(overridden.github_api_base_url, "http://127.0.0.1:8080");
+    }
+
+    #[test]
+    fn blank_github_api_base_is_a_config_error_naming_the_var() {
+        let err = Config::from_vars(vars(&[("FKST_GITHUB_API_BASE_URL", "   ")]))
+            .expect_err("blank base must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_GITHUB_API_BASE_URL"));
     }
 
     // ---- vault configuration tests --------------------------------------------

@@ -7,6 +7,7 @@
 
 pub mod client;
 pub mod launcher;
+pub mod user_store;
 pub mod watch;
 
 pub use client::{KubeClient, KubeError};

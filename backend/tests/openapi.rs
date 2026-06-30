@@ -80,6 +80,11 @@ async fn paths_are_the_trimmed_v1_surface() {
     for expected in [
         "/api/v1/sessions/{owner}/{repo}/{issue}",
         "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
+        // The per-user environment + secret store (PR4a).
+        "/api/v1/users/me/env",
+        "/api/v1/users/me/secrets",
+        "/api/v1/users/me/env/{key}",
+        "/api/v1/users/me/secrets/{key}",
         "/health",
         "/api/v1/health",
         "/metrics",
@@ -112,7 +117,17 @@ async fn paths_are_the_trimmed_v1_surface() {
 async fn components_include_the_session_schemas_and_not_the_removed_ones() {
     let spec = fetch_spec(app(false)).await;
     let schemas = &spec["components"]["schemas"];
-    for expected in ["SessionView", "StopResponse", "ErrorEnvelope"] {
+    for expected in [
+        "SessionView",
+        "StopResponse",
+        "ErrorEnvelope",
+        // PR4a user-store DTOs.
+        "PutEnvRequest",
+        "EnvVariablesResponse",
+        "PutSecretsRequest",
+        "SecretKeysResponse",
+        "UserEnvView",
+    ] {
         assert!(
             schemas.get(expected).is_some(),
             "spec must include {expected}; have {:?}",
@@ -149,6 +164,21 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
             .is_none(),
         "stop session must NOT require security (open read-only surface)"
     );
+    // The user-store endpoints authenticate via the per-request GitHub token (the
+    // `GithubUser` extractor), NOT a documented security scheme — so they carry
+    // no `security` and no `NyxIdIdentity`.
+    for (route, verb) in [
+        ("/api/v1/users/me/env", "get"),
+        ("/api/v1/users/me/env", "put"),
+        ("/api/v1/users/me/secrets", "put"),
+        ("/api/v1/users/me/env/{key}", "delete"),
+        ("/api/v1/users/me/secrets/{key}", "delete"),
+    ] {
+        assert!(
+            paths[route][verb].get("security").is_none(),
+            "user-store {verb} {route} must NOT carry a security scheme"
+        );
+    }
     assert!(
         paths["/health"]["get"].get("security").is_none(),
         "/health must not require security"
