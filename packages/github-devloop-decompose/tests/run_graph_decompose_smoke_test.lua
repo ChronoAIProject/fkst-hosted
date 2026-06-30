@@ -4,6 +4,7 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 
 local t = h.t
 local core = h.core
+local decompose_lib = require("devloop.decompose")
 
 local function source_ref()
   return {
@@ -62,7 +63,7 @@ local function mock_claim_and_reads(payload)
     repo = "owner/repo",
     number = 42,
     title = "Original large issue",
-    body = "Child body.\n\n" .. core.decompose_lineage_marker(payload.proposal_id, 1),
+    body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(core, payload.proposal_id, 1),
     labels = { "fkst-dev:blocked" },
     comments = {
       core.state_marker(payload.proposal_id, "blocked", payload.version),

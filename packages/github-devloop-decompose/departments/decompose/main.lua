@@ -2,6 +2,7 @@ local core = require("core")
 local saga = require("workflow.saga")
 local strings = require("contract.strings")
 local context_bundle = require("devloop.context_bundle")
+local decompose_lib = require("devloop.decompose")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -75,13 +76,13 @@ local function read_decompose_child_issues(repo, proposal_id)
   if child_list.exit_code ~= 0 then
     error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
   end
-  return core.parse_decompose_child_issue_list(child_list.stdout)
+  return decompose_lib.parse_decompose_child_issue_list(core, child_list.stdout)
 end
 
 local function plan_current_decompose(event, repo, issue_number, decompose)
   local current_issue = read_decompose_issue(repo, issue_number)
-  local depth = core.decompose_lineage_depth(current_issue.body)
-  if depth >= core.max_decompose_depth() then
+  local depth = decompose_lib.decompose_lineage_depth(core, current_issue.body)
+  if depth >= decompose_lib.max_decompose_depth(core) then
     return current_issue, nil, "depth-cap"
   end
   decompose.current_issue_body = current_issue.body
@@ -108,7 +109,7 @@ end
 
 local function child_completion_check(child_issues, decompose, index)
   return function()
-    local completed = core.decompose_child_issue_fact_indexes(
+    local completed = decompose_lib.decompose_child_issue_fact_indexes(core,
       child_issues,
       decompose.proposal_id,
       decompose.version,
@@ -119,7 +120,7 @@ local function child_completion_check(child_issues, decompose, index)
 end
 
 local function all_children_complete(child_issues, decompose, count)
-  local completed = core.decompose_child_issue_fact_indexes(
+  local completed = decompose_lib.decompose_child_issue_fact_indexes(core,
     child_issues,
     decompose.proposal_id,
     decompose.version,
@@ -145,7 +146,7 @@ end
 
 local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed)
   local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
-  local completed = core.decompose_child_issue_fact_indexes(
+  local completed = decompose_lib.decompose_child_issue_fact_indexes(core,
     child_issues,
     decompose.proposal_id,
     decompose.version,
@@ -175,7 +176,7 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
     end
   end
 
-  completed = core.decompose_child_issue_fact_indexes(child_issues, decompose.proposal_id, decompose.version, decompose.pr_number)
+  completed = decompose_lib.decompose_child_issue_fact_indexes(core, child_issues, decompose.proposal_id, decompose.version, decompose.pr_number)
   local missing = {}
   for index = 1, decomposed.count do
     if not completed[index] then
@@ -215,7 +216,7 @@ local function write_decomposed_marker(repo, decompose, count)
   core.invalidate_entity_after_write(repo, "pr", decompose.pr_number)
 
   local confirmed_pr = read_current_pr(repo, decompose.pr_number)
-  if not core.has_decomposed_marker(confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
+  if not decompose_lib.has_decomposed_marker(core, confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
     error("github-devloop: decomposed marker not yet visible after write; retrying")
   end
   return confirmed_pr
@@ -229,7 +230,7 @@ local function decompose_context(event)
     return context_cache[event]
   end
   local decompose = event.payload or {}
-  if not core.is_supported_decompose(decompose) then
+  if not decompose_lib.is_supported_decompose(core, decompose) then
     core.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
     core.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     if type(event) == "table" then
@@ -314,7 +315,7 @@ local function decomposed_done(event)
       or tostring(state.version or "") ~= tostring(context.decompose.version) then
       return
     end
-    local decomposed = core.decomposed_fact(current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
+    local decomposed = decompose_lib.decomposed_fact(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
     if decomposed == nil then
       if core.has_decompose_exhausted_marker(current_pr.comments, context.decompose.proposal_id, context.decompose.version) then
         core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed",
@@ -360,7 +361,7 @@ local function act_decompose(event)
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
       error("github-devloop: blocked fix reconcile marker not yet visible for decompose; retrying")
     end
-    local decomposed = core.decomposed_fact(
+    local decomposed = decompose_lib.decomposed_fact(core,
       current_pr.comments,
       decompose.proposal_id,
       decompose.version,
@@ -372,8 +373,8 @@ local function act_decompose(event)
     end
 
     local current_issue, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
-    local depth = core.decompose_lineage_depth(current_issue.body)
-    if reason == "depth-cap" or depth >= core.max_decompose_depth() then
+    local depth = decompose_lib.decompose_lineage_depth(core, current_issue.body)
+    if reason == "depth-cap" or depth >= decompose_lib.max_decompose_depth(core) then
       core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "applied(decompose-exhausted:depth-cap)", "decompose lineage depth cap reached")
       core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
@@ -387,7 +388,7 @@ local function act_decompose(event)
       ))
       return
     end
-    local count = math.min(#issues, core.max_decompose_issues())
+    local count = math.min(#issues, decompose_lib.max_decompose_issues(core))
     if count < 1 then
       issues = core.fallback_decompose_plan(decompose)
       count = 1

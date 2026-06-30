@@ -2,6 +2,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
+local decompose_lib = require("devloop.decompose")
 local issue = h.issue
 local reached = h.reached
 local decompose_event = h.decompose_event
@@ -58,7 +59,7 @@ local function mock_decompose_child_issue_list(event, indexes)
       '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
       100 + index,
       index,
-      json_string(core.decompose_child_marker(event.proposal_id, event.version, event.pr_number, index)),
+      json_string(decompose_lib.decompose_child_marker(core, event.proposal_id, event.version, event.pr_number, index)),
       100 + index
     ))
   end
@@ -463,7 +464,7 @@ return {
       core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
-      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
     })
     mock_linked_pr_state({})
     mock_decompose_child_issue_list(event, {})
@@ -488,7 +489,7 @@ return {
       core.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
-      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
     })
     mock_linked_pr_state({})
     mock_decompose_child_issue_list(event, { 1, 2, 3 })
@@ -506,7 +507,7 @@ return {
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
       {
-        body = core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+        body = decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
         author_login = "mallory",
       },
     })

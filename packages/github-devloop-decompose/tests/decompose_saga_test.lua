@@ -5,6 +5,7 @@ local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
+local decompose_lib = require("devloop.decompose")
 
 local two_issue_json = [[{"issues":[{"title":"Extract retry helper","body":"Smaller scope: implement retry helper.\nNon-goals: no workflow rewrite.\nAcceptance: helper tests pass."},{"title":"Wire retry helper","body":"Smaller scope: wire one caller.\nNon-goals: no unrelated states.\nAcceptance: integration test passes."}]}]]
 local first_delivery_facts = nil
@@ -38,7 +39,7 @@ local function mock_child_issue_list(event, indexes)
       '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
       100 + index,
       index,
-      h.json_string(core.decompose_child_marker(event.proposal_id, event.version, event.pr_number, index)),
+      h.json_string(decompose_lib.decompose_child_marker(core, event.proposal_id, event.version, event.pr_number, index)),
       100 + index
     ))
   end

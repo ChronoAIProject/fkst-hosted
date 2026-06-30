@@ -5,6 +5,7 @@ local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
 local context_bundle = require("devloop.context_bundle")
+local decompose_lib = require("devloop.decompose")
 
 function S.install(opts)
 local M = opts.core
@@ -206,7 +207,7 @@ local function require_marker_fact(facts, family)
     if link == nil then
       return nil
     end
-    return M.decomposed_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
+    return decompose_lib.decomposed_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
   end
   if family == "implementing" then
     return M.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
@@ -267,7 +268,7 @@ local function gather_fetch_before_compare_fact(facts, entity, family)
     if child_list.exit_code ~= 0 then
       error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
     end
-    facts.decompose_children = M.parse_decompose_child_issue_list(child_list.stdout)
+    facts.decompose_children = decompose_lib.parse_decompose_child_issue_list(M, child_list.stdout)
     return facts.decompose_children
   end
   if family == "branch-head" then
@@ -810,7 +811,7 @@ local function replay_blocked(dept, issue, state, row, facts)
   if decomposed == nil then
     return log_skip(dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
   end
-  local complete, completed_count = M.decompose_children_complete(
+  local complete, completed_count = decompose_lib.decompose_children_complete(M,
     nil,
     facts.decompose_children or {},
     proposal_id,
@@ -828,7 +829,7 @@ local function replay_blocked(dept, issue, state, row, facts)
     decomposed = decomposed,
     proposal_id = proposal_id,
   })
-  local payload = M.build_decompose_replay_payload(decomposed, facts.fix_feedback, fields.source_ref, completed_count)
+  local payload = decompose_lib.build_decompose_replay_payload(M, decomposed, facts.fix_feedback, fields.source_ref, completed_count)
   if payload == nil then
     return log_skip(dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
   end

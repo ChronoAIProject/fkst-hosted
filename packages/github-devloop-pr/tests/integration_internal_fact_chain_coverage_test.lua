@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local decompose_lib = require("devloop.decompose")
 local opts = h.opts
 local reviewing = h.reviewing
 local review_reached = h.review_reached
@@ -91,7 +92,7 @@ local function mock_decompose_child_issue_list(event, indexes)
       '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
       100 + index,
       index,
-      h.json_string(core.decompose_child_marker(event.proposal_id, event.version, event.pr_number, index)),
+      h.json_string(decompose_lib.decompose_child_marker(core, event.proposal_id, event.version, event.pr_number, index)),
       100 + index
     ))
   end
@@ -557,7 +558,7 @@ return {
         nil,
         "rollup-red"
       ),
-      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
     }
     mock_bot_env()
     mock_pr_origin(comments)
@@ -594,7 +595,7 @@ return {
         nil,
         "rollup-red"
       ),
-      core.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
     }
     mock_bot_env()
     mock_pr_origin(comments, nil, nil, nil, nil, nil, { "fkst-dev:blocked", "fkst-dev:reviewing" })

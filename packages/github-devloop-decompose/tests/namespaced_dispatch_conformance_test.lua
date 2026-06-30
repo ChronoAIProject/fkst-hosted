@@ -3,6 +3,7 @@ local conformance = require("testkit.namespaced_dispatch_conformance")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local h = require("tests.devloop_helpers")
 local t = fkst.test
+local decompose_lib = require("devloop.decompose")
 
 local function load_department(path, module_name)
   local old_pipeline = pipeline
@@ -41,7 +42,7 @@ local function mock_decompose_reads(payload)
       core.state_marker(payload.proposal_id, "blocked", payload.version),
     },
     title = "Original large issue",
-    body = "Child body.\n\n" .. core.decompose_lineage_marker(payload.proposal_id, 1),
+    body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(core, payload.proposal_id, 1),
   }, "title,body,labels,comments")
   entity_read_mocks.mock_pr_view_selector(t, {
     comments = {

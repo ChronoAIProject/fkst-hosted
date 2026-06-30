@@ -1,12 +1,11 @@
-local S = {}
+local C = {}
 local source_refs = require("contract.source_ref")
 local forge_validators = require("devloop.forge_validators")
 
-function S.install(M)
 local max_decompose_issues = 3
 local max_decompose_depth = 1
 
-function M.is_supported_decompose(payload)
+function C.is_supported_decompose(M, payload)
   if type(payload) ~= "table" then
     return false
   end
@@ -58,7 +57,7 @@ function M.is_supported_decompose(payload)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
-function M.decomposed_marker(proposal_id, version, pr_number, count)
+function C.decomposed_marker(M, proposal_id, version, pr_number, count)
   local issue_count = tonumber(count)
   if issue_count == nil or issue_count < 1 or issue_count > max_decompose_issues or issue_count % 1 ~= 0 then
     error("github-devloop: invalid decomposed count")
@@ -73,7 +72,7 @@ function M.decomposed_marker(proposal_id, version, pr_number, count)
     .. '" -->'
 end
 
-function M.has_decomposed_marker(comments, proposal_id, version, pr_number)
+function C.has_decomposed_marker(M, comments, proposal_id, version, pr_number)
   if type(comments) ~= "table" then
     return false
   end
@@ -90,7 +89,7 @@ function M.has_decomposed_marker(comments, proposal_id, version, pr_number)
   return false
 end
 
-function M.decomposed_fact(comments, proposal_id, version, pr_number)
+function C.decomposed_fact(M, comments, proposal_id, version, pr_number)
   if type(comments) ~= "table" then
     return nil
   end
@@ -122,7 +121,7 @@ function M.decomposed_fact(comments, proposal_id, version, pr_number)
   return nil
 end
 
-function M.parse_decompose_child_issue_list(stdout)
+function C.parse_decompose_child_issue_list(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
   if type(decoded) ~= "table" then
@@ -147,7 +146,7 @@ function M.parse_decompose_child_issue_list(stdout)
   return issues
 end
 
-function M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+function C.decompose_child_issue_fact_indexes(M, issues, proposal_id, version, pr_number)
   local completed = {}
   local child_pattern = "<!%-%- fkst:github%-devloop:decompose%-child:v1.-%-%->"
   for _, issue in ipairs(issues or {}) do
@@ -171,8 +170,8 @@ function M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_n
   return completed
 end
 
-function M.decompose_child_fact_indexes(comments, issues, proposal_id, version, pr_number, dedup_by_index)
-  local completed = M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+function C.decompose_child_fact_indexes(M, comments, issues, proposal_id, version, pr_number, dedup_by_index)
+  local completed = C.decompose_child_issue_fact_indexes(M, issues, proposal_id, version, pr_number)
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
     for marker in M._comment_body(comment):gmatch(created_pattern) do
@@ -200,17 +199,17 @@ local function decompose_child_count(completed)
   return count
 end
 
-function M.decompose_children_complete(comments, issues, proposal_id, version, pr_number, expected_count)
+function C.decompose_children_complete(M, comments, issues, proposal_id, version, pr_number, expected_count)
   local count = tonumber(expected_count)
   if count == nil or count < 1 or count > max_decompose_issues or count % 1 ~= 0 then
     return true, 0
   end
-  local completed = M.decompose_child_issue_fact_indexes(issues, proposal_id, version, pr_number)
+  local completed = C.decompose_child_issue_fact_indexes(M, issues, proposal_id, version, pr_number)
   local completed_count = decompose_child_count(completed)
   return completed_count >= count, completed_count
 end
 
-function M.build_decompose_replay_payload(fact, comments_or_feedback, source_ref, completed_count)
+function C.build_decompose_replay_payload(M, fact, comments_or_feedback, source_ref, completed_count)
   local feedback = comments_or_feedback
   if type(feedback) == "table" and feedback[1] ~= nil then
     feedback = M.fixing_replay_feedback_fact(comments_or_feedback, fact.proposal_id, fact.version)
@@ -239,7 +238,7 @@ function M.build_decompose_replay_payload(fact, comments_or_feedback, source_ref
   return payload
 end
 
-function M.decompose_child_marker(proposal_id, version, pr_number, index)
+function C.decompose_child_marker(M, proposal_id, version, pr_number, index)
   return '<!-- fkst:github-devloop:decompose-child:v1 parent="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
     .. '" pr="' .. tostring(pr_number)
@@ -247,7 +246,7 @@ function M.decompose_child_marker(proposal_id, version, pr_number, index)
     .. '" -->'
 end
 
-function M.decompose_lineage_marker(root_proposal_id, depth)
+function C.decompose_lineage_marker(M, root_proposal_id, depth)
   local n = tonumber(depth)
   if n == nil or n < 0 or n % 1 ~= 0 then
     error("github-devloop: invalid decompose lineage depth")
@@ -257,7 +256,7 @@ function M.decompose_lineage_marker(root_proposal_id, depth)
     .. '" -->'
 end
 
-function M.decompose_lineage_depth(body)
+function C.decompose_lineage_depth(M, body)
   local text = tostring(body or "")
   local marker_pattern = "<!%-%- fkst:github%-devloop:decompose%-lineage:v1.-%-%->"
   local max_depth = 0
@@ -270,13 +269,12 @@ function M.decompose_lineage_depth(body)
   return max_depth
 end
 
-function M.max_decompose_issues()
+function C.max_decompose_issues(M)
   return max_decompose_issues
 end
 
-function M.max_decompose_depth()
+function C.max_decompose_depth(M)
   return max_decompose_depth
 end
-end
 
-return S
+return C

@@ -2,6 +2,7 @@ local h = require("tests.devloop_ops_core_helpers")
 local core = h.core
 local contract_time = require("contract.time")
 local t = h.t
+local decompose_lib = require("devloop.decompose")
 
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local version = "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -116,7 +117,7 @@ return {
     local current = entity({ "fkst-dev:enabled", "fkst-dev:blocked" }, {
       state_comment("blocked"),
       bot_comment(core.pr_link_marker(proposal_id, 7, "devloop/issue/owner/repo/42/v", version, "dev")),
-      bot_comment(core.decomposed_marker(proposal_id, version, 7, 2)),
+      bot_comment(decompose_lib.decomposed_marker(core, proposal_id, version, 7, 2)),
     })
 
     local result = classify(current, {

@@ -2,6 +2,7 @@ local t = fkst.test
 local core = require("core")
 local h = require("tests.devloop_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local decompose_lib = require("devloop.decompose")
 
 local function production_decompose_payload()
   return core.build_devloop_decompose_payload(core.build_devloop_fix_reconcile_payload({
@@ -24,7 +25,7 @@ return {
         core.state_marker(payload.proposal_id, "blocked", payload.version),
       },
       title = "Original large issue",
-      body = "Child body.\n\n" .. core.decompose_lineage_marker(payload.proposal_id, 1),
+      body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(core, payload.proposal_id, 1),
     }, "title,body,labels,comments")
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = {
