@@ -8,6 +8,7 @@ from typing import Any
 
 TASK_LEVELS = ("L0", "L1", "L2", "L3", "L4", "unclassified")
 NO_REVERT_REOPEN_WINDOW_SECONDS = 7 * 24 * 60 * 60
+NO_REVERT_REOPEN_SCAN_SCHEMA = "github-devloop.no-revert-reopen-scan.v1"
 REQUIRED_GATE_NAMES = (
     "human_touch",
     "pre_merge_ci",
@@ -334,6 +335,34 @@ def no_revert_sources_complete(fact: dict[str, Any], data: Any) -> bool:
     return pr_number in scanned_pr_numbers(data) and issue_number in scanned_issue_numbers(data)
 
 
+def truthy(value: Any) -> bool:
+    return value is True or str(value or "").strip().lower() == "true"
+
+
+def scan_timestamp(scan: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        parsed = timestamp_order(scan.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def no_revert_full_window_scan_covers(fact: dict[str, Any], data: Any) -> bool:
+    scan = fact.get("no_revert_reopen_scan")
+    if not isinstance(scan, dict) and isinstance(data, dict):
+        scan = data.get("no_revert_reopen_scan")
+    if not isinstance(scan, dict) or scan.get("schema") != NO_REVERT_REOPEN_SCAN_SCHEMA:
+        return False
+    if not truthy(scan.get("pr_reverts_complete")) or not truthy(scan.get("issue_reopens_complete")):
+        return False
+    merged = no_revert_merge_seconds(fact)
+    since = scan_timestamp(scan, "since", "since_at", "since_seconds")
+    until = scan_timestamp(scan, "until", "until_at", "until_seconds")
+    if merged is None or since is None or until is None:
+        return False
+    return since <= merged and until >= merged + NO_REVERT_REOPEN_WINDOW_SECONDS
+
+
 def no_revert_reopen_gate(fact: dict[str, Any], data: Any, now: Any = None) -> str:
     if detect_false_consensus(fact, data):
         return "fail"
@@ -345,7 +374,9 @@ def no_revert_reopen_gate(fact: dict[str, Any], data: Any, now: Any = None) -> s
         now_seconds = timestamp_order(data.get("now") or data.get("generated_at") or data.get("cached_at"))
     if merged is None or now_seconds is None:
         return "pending"
-    return "pass" if now_seconds >= merged + NO_REVERT_REOPEN_WINDOW_SECONDS else "pending"
+    if now_seconds < merged + NO_REVERT_REOPEN_WINDOW_SECONDS:
+        return "pending"
+    return "pass" if no_revert_full_window_scan_covers(fact, data) else "pending"
 
 
 def apply_no_revert_reopen_gate(fact: dict[str, Any], data: Any, now: Any = None) -> dict[str, Any]:

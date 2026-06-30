@@ -13,6 +13,16 @@ local function mock_check_runs(json)
   })
 end
 
+local function no_revert_scan()
+  return {
+    schema = "github-devloop.no-revert-reopen-scan.v1",
+    since_at = "2026-06-03T01:30:00Z",
+    until_at = "2026-06-10T01:30:00Z",
+    pr_reverts_complete = true,
+    issue_reopens_complete = true,
+  }
+end
+
 local function trusted_comment(body, created_at, id)
   return {
     id = id,
@@ -217,10 +227,19 @@ return {
     })
     t.eq(reopened, "fail")
 
+    local after_window_without_scan = no_revert_reopen.gate(fact, {
+      issue = clean_scan.issue,
+      recent_merged_prs = clean_scan.recent_merged_prs,
+      recent_merged_issues = clean_scan.recent_merged_issues,
+      now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
+    })
+    t.eq(after_window_without_scan, "pending")
+
     local after_window = no_revert_reopen.gate(fact, {
       issue = clean_scan.issue,
       recent_merged_prs = clean_scan.recent_merged_prs,
       recent_merged_issues = clean_scan.recent_merged_issues,
+      no_revert_reopen_scan = no_revert_scan(),
       now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
     })
     t.eq(after_window, "pass")
@@ -380,6 +399,7 @@ return {
         recent_merged_issues = {
           { number = 42, state = "CLOSED", state_reason = "COMPLETED" },
         },
+        no_revert_reopen_scan = no_revert_scan(),
         now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
         status_check_rollup = {
           { status = "COMPLETED", conclusion = "SUCCESS" },
@@ -510,6 +530,7 @@ return {
         recent_merged_issues = {
           { number = 42, state = "CLOSED", state_reason = "COMPLETED" },
         },
+        no_revert_reopen_scan = no_revert_scan(),
         now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-12T01:30:00Z"),
         status_check_rollup = {
           { status = "COMPLETED", conclusion = "SUCCESS" },

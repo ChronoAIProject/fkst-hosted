@@ -17,6 +17,16 @@ local function mock_dashboard_env()
   end
 end
 
+local function no_revert_scan()
+  return {
+    schema = "github-devloop.no-revert-reopen-scan.v1",
+    since_at = "2026-06-03T01:30:00Z",
+    until_at = "2026-06-10T01:30:00Z",
+    pr_reverts_complete = true,
+    issue_reopens_complete = true,
+  }
+end
+
 local function mock_managed_bot_logins(value)
   for _ = 1, 8 do
     t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
@@ -364,6 +374,10 @@ return {
       },
     }
     local facts = core.collect_avm_scoreboard_facts({}, 1781227800, recent_prs, recent_issues)
+    t.eq(facts[1].gates.no_revert_reopen, "pending")
+
+    recent_prs[1].no_revert_reopen_scan = no_revert_scan()
+    facts = core.collect_avm_scoreboard_facts({}, 1781227800, recent_prs, recent_issues)
     local rows = core.aggregate_avm_scoreboard(facts)
     local by_level = {}
     for _, row in ipairs(rows) do

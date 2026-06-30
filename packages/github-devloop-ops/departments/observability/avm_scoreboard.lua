@@ -182,6 +182,30 @@ local function fact_issue_for_gate(fact, entities, recent_merged_issues)
   return nil
 end
 
+local function fact_scan_for_gate(fact, recent_merged_prs, recent_merged_issues)
+  if type(fact) ~= "table" then
+    return nil
+  end
+  if type(fact.no_revert_reopen_scan) == "table" then
+    return fact.no_revert_reopen_scan
+  end
+  local pr_number = tonumber(fact.pr_number)
+  for _, pr in ipairs(recent_merged_prs or {}) do
+    if pr_number ~= nil and tonumber(pr and (pr.number or pr.pr_number)) == pr_number
+      and type(pr.no_revert_reopen_scan) == "table" then
+      return pr.no_revert_reopen_scan
+    end
+  end
+  local issue_number = tonumber(fact.issue_number)
+  for _, issue in ipairs(recent_merged_issues or {}) do
+    if issue_number ~= nil and tonumber(issue and (issue.number or issue.issue_number)) == issue_number
+      and type(issue.no_revert_reopen_scan) == "table" then
+      return issue.no_revert_reopen_scan
+    end
+  end
+  return nil
+end
+
 local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recent_merged_prs, recent_merged_issues)
   if type(fact) ~= "table" then
     return fact
@@ -192,6 +216,7 @@ local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recen
     entities = entities,
     recent_merged_prs = recent_merged_prs,
     recent_merged_issues = recent_merged_issues,
+    no_revert_reopen_scan = fact_scan_for_gate(fact, recent_merged_prs, recent_merged_issues),
   })
   if type(fact.gates) ~= "table" then
     fact.gates = {}

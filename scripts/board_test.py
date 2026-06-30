@@ -111,6 +111,15 @@ fi
 
 
 class BoardScriptTest(unittest.TestCase):
+    def no_revert_scan(self) -> dict[str, object]:
+        return {
+            "schema": "github-devloop.no-revert-reopen-scan.v1",
+            "since_at": "2026-06-03T08:00:00Z",
+            "until_at": "2026-06-10T08:00:00Z",
+            "pr_reverts_complete": True,
+            "issue_reopens_complete": True,
+        }
+
     def test_avm_aggregation_deduplicates_identity_and_keeps_unclassified(self) -> None:
         observe = {
             "avm_facts": [
@@ -230,6 +239,10 @@ class BoardScriptTest(unittest.TestCase):
         }
 
         buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
+        self.assertEqual(buckets["L1"]["avm_numerator"], 0)
+
+        observe["no_revert_reopen_scan"] = self.no_revert_scan()
+        buckets = {row["level"]: row for row in aggregate_avm_scoreboard(observe)}
         self.assertEqual(buckets["L1"]["avm_numerator"], 1)
         self.assertEqual(buckets["L1"]["avm_denominator"], 1)
         self.assertEqual(buckets["L1"]["revert_numerator"], 0)
@@ -250,6 +263,13 @@ class BoardScriptTest(unittest.TestCase):
                     "valid_autonomous_merge": "true",
                     "gates": {"no_revert_reopen": "pass"},
                     "merged_at": "2026-06-14T08:00:00Z",
+                    "no_revert_reopen_scan": {
+                        "schema": "github-devloop.no-revert-reopen-scan.v1",
+                        "since_at": "2026-06-14T08:00:00Z",
+                        "until_at": "2026-06-21T08:00:00Z",
+                        "pr_reverts_complete": True,
+                        "issue_reopens_complete": True,
+                    },
                 }
             ],
             "recent_merged_prs": [
@@ -376,6 +396,7 @@ class BoardScriptTest(unittest.TestCase):
                         "codex_calls": 4,
                         "rounds": 1,
                         "merged_at": "2026-06-03T08:00:00Z",
+                        "no_revert_reopen_scan": self.no_revert_scan(),
                         "gates": {
                             "human_touch": "pass",
                             "pre_merge_ci": "pass",

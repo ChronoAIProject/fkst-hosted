@@ -4,6 +4,7 @@ local no_revert_reopen = {}
 
 local no_revert_reopen_window_days = 7
 local no_revert_reopen_window_seconds = no_revert_reopen_window_days * 24 * 60 * 60
+local scan_schema = "github-devloop.no-revert-reopen-scan.v1"
 
 local function positive_number(value)
   local parsed = tonumber(value)
@@ -37,7 +38,22 @@ end
 local function first_timestamp_seconds(...)
   for index = 1, select("#", ...) do
     local value = select(index, ...)
-    local parsed = contract_time.iso_timestamp_epoch_seconds(value)
+    local parsed = type(value) == "number" and value or contract_time.iso_timestamp_epoch_seconds(value)
+    if parsed ~= nil then
+      return parsed
+    end
+  end
+  return nil
+end
+
+local function is_true(value)
+  return value == true or tostring(value or ""):lower() == "true"
+end
+
+local function scan_timestamp(scan, ...)
+  for index = 1, select("#", ...) do
+    local key = select(index, ...)
+    local parsed = first_timestamp_seconds(scan and scan[key])
     if parsed ~= nil then
       return parsed
     end
@@ -170,6 +186,29 @@ local function sources_complete(fact, opts)
   return pr_source_contains_target(fact, options) and issue_source_contains_target(fact, options)
 end
 
+local function full_window_scan_covers(fact, opts)
+  local options = opts or {}
+  local scan = options.no_revert_reopen_scan
+    or options.scan
+    or (type(fact) == "table" and fact.no_revert_reopen_scan or nil)
+  if type(scan) ~= "table" or tostring(scan.schema or "") ~= scan_schema then
+    return false
+  end
+  if not is_true(scan.pr_reverts_complete) or not is_true(scan.issue_reopens_complete) then
+    return false
+  end
+  local merged = merge_seconds(fact, options)
+  if merged == nil then
+    return false
+  end
+  local since = scan_timestamp(scan, "since_seconds", "since_at", "since")
+  local until_value = scan_timestamp(scan, "until_seconds", "until_at", "until")
+  if since == nil or until_value == nil then
+    return false
+  end
+  return since <= merged and until_value >= merged + no_revert_reopen_window_seconds
+end
+
 local function evidence_pairs(fact, opts)
   local options = opts or {}
   local pairs = {}
@@ -248,6 +287,9 @@ function no_revert_reopen.gate(fact, opts)
   end
   if current < merged + no_revert_reopen_window_seconds then
     return "pending", "window-open", pairs
+  end
+  if not full_window_scan_covers(fact, options) then
+    return "pending", "missing-full-window-scan", pairs
   end
   return "pass", "window-elapsed", pairs
 end
