@@ -5,6 +5,7 @@ local transition_version = require("contract.transition_version")
 local core, saga, replay_fields = require("core"), require("workflow.saga"), require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local operator_commands = require("devloop.operator_commands")
+local decompose_lib = require("devloop.decompose")
 
 local M = {}
 
@@ -118,7 +119,7 @@ local function issue_claim_for_origin(origin)
 end
 
 local function replay_pr_local_state(origin, pr_number, current_pr, state, source_ref)
-  if state.state == "blocked" and core.decomposed_fact(current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
+  if state.state == "blocked" and decompose_lib.decomposed_fact(core, current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
     return false
   end

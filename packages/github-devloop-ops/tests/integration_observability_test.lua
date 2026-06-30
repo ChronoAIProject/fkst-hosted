@@ -4,6 +4,7 @@ local core = h.core
 require("departments.observability.main")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
+local decompose_lib = require("devloop.decompose")
 local function opts(name, extra)
   local env = {
     FKST_RUNTIME_ROOT = "/tmp/fkst-packages-test/github-devloop/" .. tostring(now()) .. "/" .. tostring(name),
@@ -592,7 +593,7 @@ return {
     mock_all_issue_lists({})
     mock_pr_list({ 7 })
     mock_reaper_pr(proposal_id, 42, 7, {
-      render_comment(core.decomposed_marker(proposal_id, version, 7, 2), "fkst-test-bot"),
+      render_comment(decompose_lib.decomposed_marker(core, proposal_id, version, 7, 2), "fkst-test-bot"),
       render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/1/aaa" issue="132" -->', "fkst-test-bot"),
       render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/2/bbb" issue="146" -->', "fkst-test-bot"),
     })
@@ -621,7 +622,7 @@ return {
     mock_all_issue_lists({})
     mock_pr_list({ 7 })
     mock_reaper_pr(proposal_id, 42, 7, {
-      render_comment(core.decomposed_marker(proposal_id, version, 7, 2), "fkst-test-bot"),
+      render_comment(decompose_lib.decomposed_marker(core, proposal_id, version, 7, 2), "fkst-test-bot"),
       render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/1/aaa" issue="132" -->', "fkst-test-bot"),
     })
     mock_issue_view({

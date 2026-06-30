@@ -4,6 +4,7 @@ local core = h.core
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local codex_status = require("tests.codex_status_helpers")
+local decompose_lib = require("devloop.decompose")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -177,7 +178,7 @@ return {
     local comments = {
       state_comment("blocked", version, "2026-06-01T00:00:00Z"),
       core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
-      core.decomposed_marker(proposal_id, version, 7, 1),
+      decompose_lib.decomposed_marker(core, proposal_id, version, 7, 1),
       core.review_result_marker(review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
       issue_comment(core.timeout_attempt_marker(proposal_id, version .. "/timeout-reconcile/blocked/1", "blocked", 1, core.issue_source_ref(repo, 42))),
       issue_comment(core.timeout_attempt_marker(proposal_id, version .. "/timeout-reconcile/blocked/2", "blocked", 2, core.issue_source_ref(repo, 42))),

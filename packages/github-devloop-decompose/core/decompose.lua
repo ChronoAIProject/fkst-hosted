@@ -1,9 +1,10 @@
 local S = {}
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
+local decompose_lib = require("devloop.decompose")
 
 function S.install(M)
-local max_decompose_issues = M.max_decompose_issues()
+local max_decompose_issues = decompose_lib.max_decompose_issues(M)
 local fallback_title = "Rework blocked PR with a smaller or alternative approach"
 
 local function bounded_text(value, limit, fallback)
@@ -65,7 +66,7 @@ end
 
 function M.decomposed_comment_body(decompose, count)
   return M.comment_string("decomposed_prefix") .. tostring(count) .. M.comment_string("decomposed_suffix")
-    .. "\n\n" .. M.decomposed_marker(decompose.proposal_id, decompose.version, decompose.pr_number, count)
+    .. "\n\n" .. decompose_lib.decomposed_marker(M, decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 
 function M.build_issue_create_request(repo, decompose, issue, index)
@@ -78,8 +79,8 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\n\nNon-goals:\n- Do not repeat the same high-round fix path without reducing scope or changing approach."
     .. "\n\nAcceptance:\n- The work is independently reviewable."
     .. "\n- The implementation can pass the normal intake, consensus, implementation, and review pipeline."
-    .. "\n\n" .. M.decompose_lineage_marker(decompose.proposal_id, M.decompose_lineage_depth(decompose.current_issue_body) + 1)
-    .. "\n\n" .. M.decompose_child_marker(decompose.proposal_id, decompose.version, decompose.pr_number, index)
+    .. "\n\n" .. decompose_lib.decompose_lineage_marker(M, decompose.proposal_id, decompose_lib.decompose_lineage_depth(M, decompose.current_issue_body) + 1)
+    .. "\n\n" .. decompose_lib.decompose_child_marker(M, decompose.proposal_id, decompose.version, decompose.pr_number, index)
   if #body > M._max_body_len then
     body = M.truncate_utf8(body, M._max_body_len)
   end

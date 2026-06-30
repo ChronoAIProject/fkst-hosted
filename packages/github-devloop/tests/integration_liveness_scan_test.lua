@@ -3,6 +3,7 @@ local contract_time = require("contract.time")
 local t = h.t
 local core = h.core
 local opts = h.opts
+local decompose_lib = require("devloop.decompose")
 local issue = h.issue
 local reviewing = h.reviewing
 local mock_issue_state = h.mock_issue_state
@@ -522,7 +523,7 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
       timeout_state_comment("blocked", version, "2026-06-01T00:00:00Z"),
       core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
-      core.decomposed_marker(proposal_id, version, 7, 1),
+      decompose_lib.decomposed_marker(core, proposal_id, version, 7, 1),
       core.review_result_marker(review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
     })
     t.mock_command(core.gh_issue_list_decompose_children_cmd(repo, proposal_id), {

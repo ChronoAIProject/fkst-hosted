@@ -1,5 +1,6 @@
 local convergence_shared, poll_fakes = require("devloop.convergence.shared"), require("devloop.hidden_state_conformance.poll_fakes")
 local contract_time = require("contract.time")
+local decompose_lib = require("devloop.decompose")
 
 local C = {}
 
@@ -615,7 +616,7 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "impl-failure" then
     table.insert(entity.comments, comment(core, core.impl_failure_marker(ISSUE_PROPOSAL, state.version, value.reason or "codex-failed", value.attempt or 1), "2026-06-03T01:03:07Z"))
   elseif family == "decomposed" then
-    table.insert(entity.comments, comment(core, core.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
+    table.insert(entity.comments, comment(core, decompose_lib.decomposed_marker(core, ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
     table.insert(entity.comments, comment(core, core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then

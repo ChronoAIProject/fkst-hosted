@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local t = h.t
 local core = h.core
+local decompose_lib = require("devloop.decompose")
 local action_label = h.action_label
 local reason_label = h.reason_label
 local has_value = h.has_value
@@ -103,7 +104,7 @@ local function mock_decompose_child_issue_list(proposal_id, version, pr_number, 
       '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
       100 + index,
       index,
-      json_string(core.decompose_child_marker(proposal_id, version, pr_number, index)),
+      json_string(decompose_lib.decompose_child_marker(core, proposal_id, version, pr_number, index)),
       100 + index
     ))
   end
@@ -228,7 +229,7 @@ return {
     mock_pr_origin({
       core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "blocked", impl_version .. "/blocked"),
-      core.decomposed_marker("github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, 1),
+      decompose_lib.decomposed_marker(core, "github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, 1),
     }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev", nil, { "fkst-dev:reviewing" })
     mock_decompose_child_issue_list("github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, {})
 

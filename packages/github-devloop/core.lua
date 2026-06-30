@@ -32,7 +32,6 @@ require("core.pr_delegation").install(M)
 require("core.impl_failure").install(M)
 require("devloop.payloads").install(M)
 require("devloop.convergence").install(M)
-require("devloop.decompose").install(M)
 M.restart_package_name = "github-devloop"
 M.restart_lifecycle_states = {
   "thinking",

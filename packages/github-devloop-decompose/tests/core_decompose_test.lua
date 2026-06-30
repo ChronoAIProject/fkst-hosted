@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local decompose_lib = require("devloop.decompose")
 
 local function assert_language_preamble(prompt)
   t.is_true(prompt:find("Write all output in English; quote code identifiers and cited originals verbatim.", 1, true) ~= nil)
@@ -72,7 +73,7 @@ return {
       core.build_issue_create_request("owner/repo", decompose, { title = "One", body = "Body one" }, 1).dedup_key,
       core.build_issue_create_request("owner/repo", decompose, { title = "Two", body = "Body two" }, 2).dedup_key,
     }
-    local completed = core.decompose_child_fact_indexes({
+    local completed = decompose_lib.decompose_child_fact_indexes(core, {
       {
         body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_by_index[1] .. '" issue="101" -->',
         author_login = "fkst-test-bot",
@@ -83,24 +84,24 @@ return {
       },
     }, {
       {
-        body = core.decompose_child_marker(proposal_id, version, 7, 3),
+        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 3),
         author_login = "fkst-test-bot",
         state = "OPEN",
       },
       {
-        body = core.decompose_child_marker(proposal_id, version, 7, 2),
+        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 2),
         author_login = "someone-else",
         state = "OPEN",
       },
     }, proposal_id, version, 7, dedup_by_index)
-    local live_completed = core.decompose_child_issue_fact_indexes({
+    local live_completed = decompose_lib.decompose_child_issue_fact_indexes(core, {
       {
-        body = core.decompose_child_marker(proposal_id, version, 7, 1),
+        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 1),
         author_login = "fkst-test-bot",
         state = "CLOSED",
       },
       {
-        body = core.decompose_child_marker(proposal_id, version, 7, 2),
+        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 2),
         author_login = "fkst-test-bot",
         state = "OPEN",
       },

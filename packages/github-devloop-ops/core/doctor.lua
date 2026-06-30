@@ -1,5 +1,6 @@
 local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
+local decompose_lib = require("devloop.decompose")
 
 function S.install(M)
 local verdict_rank = {
@@ -89,13 +90,13 @@ end
 
 local function blocked_orphan(M, entity, state, facts)
   local link = M.pr_link_fact(entity.comments, entity.proposal_id)
-  local decomposed = M.decomposed_fact(entity.comments, entity.proposal_id, state and state.version, link and link.pr_number)
-    or M.decomposed_fact(entity.comments, entity.proposal_id)
+  local decomposed = decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id, state and state.version, link and link.pr_number)
+    or decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id)
   if decomposed == nil then
     return false, nil, nil
   end
   local child_issues = type(facts) == "table" and facts.decompose_children or {}
-  local complete, completed_count = M.decompose_children_complete(
+  local complete, completed_count = decompose_lib.decompose_children_complete(M,
     entity.comments,
     child_issues,
     entity.proposal_id,
@@ -251,14 +252,14 @@ local function maybe_decompose_children(repo, entity)
   if state == nil or state.state ~= "blocked" then
     return nil
   end
-  if M.decomposed_fact(entity.comments, entity.proposal_id) == nil then
+  if decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id) == nil then
     return nil
   end
   local result = M.gh_issue_list_decompose_children(repo, entity.proposal_id, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-decompose-child-list-failed: " .. tostring(result.stderr))
   end
-  return M.parse_decompose_child_issue_list(result.stdout)
+  return decompose_lib.parse_decompose_child_issue_list(M, result.stdout)
 end
 
 function M.saga_doctor_collect(opts)

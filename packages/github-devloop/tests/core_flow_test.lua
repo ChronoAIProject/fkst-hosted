@@ -2,6 +2,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
+local decompose_lib = require("devloop.decompose")
 local prompt_installers = require("devloop.prompts")
 local has_value = h.has_value
 local source_ref = h.source_ref
@@ -378,14 +379,14 @@ return {
       count = 3,
     }
 
-    local zero = core.build_decompose_replay_payload(fact, comments, source_ref(), 0)
-    local partial = core.build_decompose_replay_payload(fact, comments, source_ref(), 2)
+    local zero = decompose_lib.build_decompose_replay_payload(core, fact, comments, source_ref(), 0)
+    local partial = decompose_lib.build_decompose_replay_payload(core, fact, comments, source_ref(), 2)
 
     t.is_true(zero.dedup_key ~= partial.dedup_key)
     t.is_true(zero.dedup_key:find("/3/0", 1, true) ~= nil)
     t.is_true(partial.dedup_key:find("/3/2", 1, true) ~= nil)
-    t.eq(core.is_supported_decompose(zero), true)
-    t.eq(core.is_supported_decompose(partial), true)
+    t.eq(decompose_lib.is_supported_decompose(core, zero), true)
+    t.eq(decompose_lib.is_supported_decompose(core, partial), true)
   end,
 
   test_ready_and_implementation_helpers = function()
