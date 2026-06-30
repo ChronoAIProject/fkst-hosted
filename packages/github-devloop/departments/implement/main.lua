@@ -545,8 +545,8 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   return true
 end
 
-local function backing_original(current)
-  local origin = forks.fork_origin_fact(core, current)
+local function backing_original(current, managed)
+  local origin = forks.fork_origin_fact(core, current, managed)
   if origin == nil then
     return nil, nil
   end
@@ -601,6 +601,7 @@ local function process_ready_event(event)
     local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
     current.repo = repo
     current.number = issue_number
+    local managed = core.managed_bot_logins()
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     if tostring(current.state or ""):upper() ~= "OPEN" then
       core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")
@@ -609,12 +610,12 @@ local function process_ready_event(event)
     if slice_gate.check(repo, issue_number, ready, current) then
       return
     end
-    local origin, original = backing_original(current)
+    local origin, original = backing_original(current, managed)
     if original ~= nil and tostring(original.state or ""):upper() ~= "OPEN" then
       core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "fork backing issue is closed: " .. tostring(origin.repo) .. "#" .. tostring(origin.issue_number))
       return
     end
-    if fork_gate.check(repo, issue_number, ready, origin, original) then
+    if fork_gate.check(repo, issue_number, ready, origin, original, managed) then
       return
     end
     local state = core.current_state(current.comments, ready.proposal_id)

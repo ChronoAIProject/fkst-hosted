@@ -288,12 +288,13 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
   -- opts issues in via the fkst-dev:enabled label, so it claims directly
   -- (matching the label-claim fork). Assignee-mode keeps the original behavior.
   if config.claim_mode(M) ~= "label" and author ~= owner then
-    if M.is_managed_bot_login(author, M.managed_bot_logins()) then
+    local managed = M.managed_bot_logins()
+    if M.is_managed_bot_login(author, managed) then
       log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
       return false
     end
     local dedup_key = forks.fork_issue_dedup_key(repo, issue_number)
-    if forks.has_trusted_issue_create_parent_marker(M, current and current.comments, dedup_key, owner) then
+    if forks.has_trusted_issue_create_parent_marker(M, current and current.comments, dedup_key, owner, managed) then
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
@@ -313,7 +314,7 @@ function M.claim_issue_for_management(dept, repo, issue_number, current, proposa
       log_claim(dept, proposal_id, "skip-fork-" .. tostring(request_reason or "invalid"), "fork request could not be built from current issue")
       return false
     end
-    if forks.has_trusted_issue_create_parent_marker(M, current and current.comments, request.dedup_key, owner) then
+    if forks.has_trusted_issue_create_parent_marker(M, current and current.comments, request.dedup_key, owner, managed) then
       log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
