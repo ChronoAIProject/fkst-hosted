@@ -10,7 +10,7 @@ without rebuilding any infrastructure.
 | Plane | Lives in | Owns | Must NOT own |
 |---|---|---|---|
 | **PRODUCT** | `packages/`, `libraries/` | the platform itself: agent packages (the `github-devloop` trio + the rest) and workspace libraries (`contract` / `workflow` / `testkit` / `forge` / `devloop`), targeting the engine ABI | how a host launches; multi-host orchestration |
-| **HOST-RUN contract** | `scripts/host_run.sh` (invoked via `scripts/run.sh supervise`) | ALL launch invariants for **one** host: BIN resolve + freshness rebuild, host external workspace hydration from `fkst.lock`, runtime-scratch, `--durable-root` (mandatory, fail-closed — never defaulted), the 3-host-shape `--package-root` wiring, `FKST_GITHUB_WRITE` posture, pidfile-based `--restart` (kill -9 + verify-dead, refuses a 2nd supervise on the same durable root) | which hosts run; product logic |
+| **HOST-RUN contract** | `scripts/host_run.sh` (invoked via `scripts/run.sh supervise`) | ALL launch invariants for **one** host: BIN resolve + freshness rebuild, target `fkst.workspace.toml` + `fkst.lock` platform resolution, runtime-scratch, `--durable-root` (mandatory, fail-closed — never defaulted), the 3-host-shape `--package-root` wiring, `FKST_GITHUB_WRITE` posture, pidfile-based `--restart` (kill -9 + verify-dead, refuses a 2nd supervise on the same durable root) | which hosts run; product logic |
 | **DOGFOOD-OPERATOR** | `.claude/skills/dogfood-github-devloop/dogfood.sh` | coordinating **N** hosts: per-machine config, run-checkout sync, `board` / `doctor` / `sync` / `stop`, the integration topology | how **one** host supervises itself — it **delegates** that to the host-run contract |
 
 **Keystone rule**: a single host MUST be runnable without `.claude/skills`. The dogfood operator coordinates
@@ -47,7 +47,7 @@ It does NOT vendor or copy the platform; it **composes** it and **pins** version
   └── .fkst/conformance/allowlists/           # host conformance allowlists, see ADR 0002
         │ composes (pkg.queue limited names; no cross-require, no vendoring)
         ▼
-  PLATFORM (from a pinned fkst-packages, supplied at dogfood time by a sibling PKGSRC clone)
+  PLATFORM (from the target repo's locked fkst-packages-platform external source)
     packages/{github-devloop, github-devloop-pr, github-devloop-intake, …, consensus, github-proxy, archaudit, idle-detector}
     libraries/{contract, workflow, testkit, forge, devloop}
         │ runs on
@@ -55,15 +55,16 @@ It does NOT vendor or copy the platform; it **composes** it and **pins** version
   ENGINE (a pinned fkst-substrate build)
 ```
 
-The host supervise loads the platform trio from the pinned PKGSRC and its own package from
+The host supervise resolves the requested platform package names against the target
+`fkst.workspace.toml`, hydrates only the external source IDs that own those packages from `fkst.lock`, and
+loads those package roots from `<HOST>/.fkst/run/<id>/packages/<pkg>`. Host-owned packages still come from
 `.fkst/local-packages/`, all on the same engine BIN — see `docs/user/github-devloop-dogfood-topology.md` for
 the dogfood directory layout.
 
-Before launching `fkst-framework supervise`, the host-run contract reads every `[[external_source]]` entry in
-the host's `fkst.lock` and ensures `<HOST>/.fkst/run/<id>/` is a checkout of that entry's
-`resolved.rev`. This hydration is an idempotent pre-launch step only: the explicit `--platform-root` remains
-the platform package source for `--package-root` wiring, so the final `fkst-framework supervise` argv does
-not change when hydration is needed.
+If the target manifest is absent, does not declare a requested platform package, or declares that package in
+more than one source, host supervise fails before launch with a narrow diagnostic. `--platform-root` remains a
+compatibility argument for the delegated call shape, but it is not the authority for platform package-root
+wiring when the target workspace declares external platform packages.
 
 ## 3. Host-repo conformance — no per-repo rebuild
 

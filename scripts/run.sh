@@ -51,6 +51,8 @@
 #       Start the real fkst-framework supervise event loop for one host. Runtime
 #       root is scratch and defaults to a fresh temp dir; explicit --runtime-root
 #       is used as the fresh scratch root for this launch.
+#       Platform package roots are resolved from the target fkst.workspace.toml
+#       and fkst.lock, not from ad hoc package-root construction.
 #       Durable root is mandatory and reused. --restart SIGKILLs the prior host-run supervise
 #       recorded for that durable root. FKST_GITHUB_WRITE passes through
 #       (unset = dry-run).
