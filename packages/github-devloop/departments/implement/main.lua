@@ -12,6 +12,7 @@ local worktree_lifecycle = require("departments.implement.worktree")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
+local fork_gate = require("departments.implement.fork_gate")
 
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
@@ -544,13 +545,12 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   return true
 end
 
-local function backing_original_closed(current)
+local function backing_original(current)
   local origin = forks.fork_origin_fact(core, current)
   if origin == nil then
-    return false
+    return nil, nil
   end
-  local open = forks.rederive_issue_is_open(core, origin.repo, origin.issue_number)
-  return not open, origin
+  return origin, forks.rederive_issue_state(core, origin.repo, origin.issue_number)
 end
 
 local function operator_blocked_reimplement_allowed(ready, current, state)
@@ -609,9 +609,12 @@ local function process_ready_event(event)
     if slice_gate.check(repo, issue_number, ready, current) then
       return
     end
-    local original_closed, origin = backing_original_closed(current)
-    if original_closed then
+    local origin, original = backing_original(current)
+    if original ~= nil and tostring(original.state or ""):upper() ~= "OPEN" then
       core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "fork backing issue is closed: " .. tostring(origin.repo) .. "#" .. tostring(origin.issue_number))
+      return
+    end
+    if fork_gate.check(repo, issue_number, ready, origin, original) then
       return
     end
     local state = core.current_state(current.comments, ready.proposal_id)
