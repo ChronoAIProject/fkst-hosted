@@ -34,11 +34,21 @@ pub(super) struct IssuePayload {
     pub body: Option<String>,
     #[serde(default)]
     pub labels: Vec<LabelPayload>,
+    /// The issue author. Its `login` is the session's authorization subject (the
+    /// only identity allowed to drive `/stop` + `/status` later, see PR3).
+    pub user: ActorPayload,
 }
 
 #[derive(Debug, Deserialize)]
 pub(super) struct LabelPayload {
     pub name: String,
+}
+
+/// A GitHub actor (issue author / comment author / sender). Reused across the
+/// `issues` and `issue_comment` webhook shapes.
+#[derive(Debug, Deserialize)]
+pub(super) struct ActorPayload {
+    pub login: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,11 +76,17 @@ pub(super) fn should_trigger(event: &IssuesEvent, trigger_label: &str) -> bool {
 /// Build the non-secret SessionSpec for an issue-triggered session. The
 /// `session_id` is deterministic, so a webhook redelivery maps to the same
 /// session (at-most-one-Job).
+///
+/// `owner` is the **repo** owner (it scopes the App token and seeds the session
+/// id); `author_login` is the **issue author** and becomes `SessionSpec.owner_login`
+/// — the authorization subject for the issue-comment control path. The two are
+/// usually different identities, so they are passed separately on purpose.
 pub(super) fn build_session_spec(
     installation_id: i64,
     owner: &str,
     name: &str,
     issue_number: i64,
+    author_login: &str,
     title: &str,
     parsed: &ParsedGoal,
 ) -> SessionSpec {
@@ -84,7 +100,7 @@ pub(super) fn build_session_spec(
             owner: owner.to_string(),
             name: name.to_string(),
         },
-        owner_login: owner.to_string(),
+        owner_login: author_login.to_string(),
         issue_number,
         goal: SessionGoal {
             title: title.to_string(),
@@ -135,6 +151,7 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
         owner,
         name,
         event.issue.number,
+        &event.issue.user.login,
         &event.issue.title,
         &parsed,
     );
@@ -193,6 +210,9 @@ mod tests {
                         name: n.to_string(),
                     })
                     .collect(),
+                user: ActorPayload {
+                    login: "octocat".to_string(),
+                },
             },
             repository: RepoPayload {
                 owner: OwnerPayload {
@@ -216,12 +236,19 @@ mod tests {
     fn issues_event_parses_a_representative_payload() {
         let payload = serde_json::json!({
             "action": "opened",
-            "issue": { "number": 9, "title": "T", "body": "B", "labels": [{"name": "fkst"}] },
+            "issue": {
+                "number": 9,
+                "title": "T",
+                "body": "B",
+                "labels": [{"name": "fkst"}],
+                "user": { "login": "octocat" }
+            },
             "repository": { "owner": { "login": "acme" }, "name": "site" },
             "installation": { "id": 42 }
         });
         let event: IssuesEvent = serde_json::from_value(payload).expect("parses");
         assert_eq!(event.issue.number, 9);
+        assert_eq!(event.issue.user.login, "octocat");
         assert_eq!(event.repository.owner.login, "acme");
         assert_eq!(event.installation.id, 42);
         assert!(should_trigger(&event, "fkst"));
@@ -233,13 +260,17 @@ mod tests {
             description: "do it".to_string(),
             package_names: vec!["web".to_string()],
         };
-        let a = build_session_spec(42, "acme", "site", 7, "T", &parsed);
-        let b = build_session_spec(42, "acme", "site", 7, "T", &parsed);
+        let a = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
+        let b = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
         assert_eq!(
             a.session_id, b.session_id,
             "deterministic id (redelivery dedup)"
         );
-        assert_eq!(a.repo.owner, "acme");
+        assert_eq!(a.repo.owner, "acme", "repo owner scopes the token + id");
+        assert_eq!(
+            a.owner_login, "octocat",
+            "owner_login is the issue author (authz subject), not the repo owner"
+        );
         assert_eq!(a.issue_number, 7);
         assert_eq!(a.goal.prompt, "do it");
         assert_eq!(a.package_names, vec!["web".to_string()]);

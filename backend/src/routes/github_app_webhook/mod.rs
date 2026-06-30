@@ -26,6 +26,7 @@
 //! Secret discipline: the webhook secret is never logged; the payload is parsed
 //! only for the non-secret installation/repository fields used below.
 
+mod comment_control;
 mod issue_trigger;
 mod verify;
 
@@ -107,6 +108,9 @@ enum Handled {
     Ignored,
     /// A qualifying `issues.opened` drove the pod-per-session pipeline (#303).
     Triggered,
+    /// An `issue_comment` control command (`/stop`, `/status`) was processed
+    /// (executed, denied, or best-effort-failed) — always a 2xx (PR3).
+    CommentControl,
 }
 
 // ---- Handler ---------------------------------------------------------------
@@ -122,7 +126,9 @@ enum Handled {
     request_body(
         content = serde_json::Value,
         content_type = "application/json",
-        description = "Raw GitHub App webhook event (installation / installation_repositories). \
+        description = "Raw GitHub App webhook event. Recognized events: `installation` / \
+            `installation_repositories` (cache-bust), `issues` (opened -> session trigger), and \
+            `issue_comment` (created -> the issue author's `/stop` + `/status` control commands). \
             Authenticated by the `X-Hub-Signature-256` HMAC over the exact body."
     ),
     responses(
@@ -158,6 +164,7 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
         "installation" => handle_installation(&state, &body).await,
         "installation_repositories" => handle_installation_repositories(&state, &body).await,
         "issues" => issue_trigger::handle_issues(&state, &body).await,
+        "issue_comment" => comment_control::handle_issue_comment(&state, &body).await,
         other => {
             // ping / membership / etc. — acknowledged but not acted on.
             tracing::debug!(event = %other, "github webhook event ignored");
@@ -186,6 +193,7 @@ impl Handled {
             Handled::CacheBusted => "cache_busted",
             Handled::Ignored => "ignored",
             Handled::Triggered => "triggered",
+            Handled::CommentControl => "comment_control",
         }
     }
 }

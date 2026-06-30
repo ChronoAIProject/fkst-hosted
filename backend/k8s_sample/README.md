@@ -60,6 +60,8 @@ npx smee-client -u https://smee.io/<channel> -t http://localhost:8080/api/v1/git
 ```
 
 The App needs these repository permissions as **Read & write**: Administration,
-Contents, Issues, Pull requests (Metadata read is implicit). Subscribe to the
-**Issues** event. A session triggers when an installed repo gets an issue opened
-with the `fkst` label.
+Contents, Issues, Pull requests (Metadata read is implicit). Subscribe to BOTH
+the **Issues** and the **Issue comment** events. A session triggers when an
+installed repo gets an issue opened with the `fkst` label; once it exists, the
+issue author drives it by commenting `/stop` or `/status` on the issue (the
+**Issue comment** subscription is REQUIRED for those control commands to work).
