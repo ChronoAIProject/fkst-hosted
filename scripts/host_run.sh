@@ -202,12 +202,12 @@ workspace = read_workspace(workspace_path)
 workspace_packages: dict[str, str] = {}
 workspace_table = workspace.get("workspace", {})
 if isinstance(workspace_table, dict):
-    package_globs = workspace_table.get("packages", [])
-    if package_globs is None:
-        package_globs = []
-    for pattern in string_list(package_globs, "workspace.packages"):
+    unit_globs = workspace_table.get("units", [])
+    if unit_globs is None:
+        unit_globs = []
+    for pattern in string_list(unit_globs, "workspace.units"):
         if pattern.startswith("/") or ".." in Path(pattern).parts:
-            fail("fkst.workspace.toml workspace.packages entries must be safe relative globs")
+            fail("fkst.workspace.toml workspace.units entries must be safe relative globs")
         for match in glob(str(project_root / pattern)):
             package_root = Path(match)
             if package_root.is_dir() and (package_root / "fkst.toml").is_file():

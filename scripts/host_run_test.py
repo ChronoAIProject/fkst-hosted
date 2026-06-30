@@ -100,15 +100,13 @@ class HostRunHarness:
         self,
         *,
         root: Path | None = None,
-        workspace_package_globs: list[str] | None = None,
+        workspace_units: list[str] | None = None,
         workspace_packages: list[str] | None = None,
         external_sources: list[tuple[str, Path, list[str]]] | None = None,
     ) -> None:
         target_root = root or self.website_host
-        workspace_packages_line = ""
-        if workspace_package_globs is not None:
-            workspace_packages_line = f"packages = {json.dumps(workspace_package_globs)}\n"
-        chunks = [f"[workspace]\nunits = [\".fkst/local-packages/*\"]\n{workspace_packages_line}"]
+        units = workspace_units or [".fkst/local-packages/*"]
+        chunks = [f"[workspace]\nunits = {json.dumps(units)}\n"]
         for package in workspace_packages or []:
             chunks.append(
                 textwrap.dedent(
@@ -223,7 +221,7 @@ class HostRunTest(unittest.TestCase):
     def test_packages_host_uses_project_packages_for_host_packages(self) -> None:
         h = HostRunHarness()
         try:
-            h.write_workspace_manifest(root=h.packages_host, workspace_package_globs=["packages/*"])
+            h.write_workspace_manifest(root=h.packages_host, workspace_units=["packages/*"])
             result = h.package_roots(
                 [
                     "--project-root",
@@ -247,6 +245,35 @@ class HostRunTest(unittest.TestCase):
                     str((h.packages_host / "packages" / "github-proxy").resolve()),
                     str((h.packages_host / "packages" / "consensus").resolve()),
                     str(h.packages_host / "packages" / "autochrono"),
+                ],
+            )
+        finally:
+            h.close()
+
+    def test_workspace_platform_packages_resolve_from_workspace_units(self) -> None:
+        h = HostRunHarness()
+        try:
+            h.write_workspace_manifest(root=h.packages_host, workspace_units=["packages/*"])
+            result = h.package_roots(
+                [
+                    "--project-root",
+                    str(h.packages_host),
+                    "--platform-root",
+                    str(h.packages_host),
+                    "--platform-packages",
+                    "github-proxy consensus",
+                    "--durable-root",
+                    str(h.durable),
+                    "--runtime-root",
+                    str(h.runtime),
+                ]
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    str((h.packages_host / "packages" / "github-proxy").resolve()),
+                    str((h.packages_host / "packages" / "consensus").resolve()),
                 ],
             )
         finally:
