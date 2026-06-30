@@ -1,0 +1,22 @@
+kind = "package.composed"
+name = "frontend-devloop"
+persistence_class = "stateless_adapter"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = []
+
+[event_deps]
+packages = [
+  "github-proxy",
+  "consensus",
+  "github-devloop-intake",
+  "github-devloop-intake-default",
+  "github-devloop-decompose",
+  "github-devloop",
+  "github-devloop-pr",
+  "github-devloop-ops",
+  "github-devloop-integration",
+]
