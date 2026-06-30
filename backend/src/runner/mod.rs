@@ -30,6 +30,7 @@ use std::time::{Duration, SystemTime};
 use secrecy::SecretString;
 use tempfile::TempDir;
 
+use crate::engine::config::is_reserved_env_key;
 use crate::engine::{
     clone_repo_packages, EngineConfig, GoalContext, LiveStatus, RunnerError, SessionRunner,
     StartSpec,
@@ -261,6 +262,10 @@ async fn run_session_with(
     };
     let mut env_profile: BTreeMap<String, SecretString> = BTreeMap::new();
     env_profile.insert(LLM_ENV_KEY.to_string(), llm_api_key);
+    // Fold the issue author's injected env (PR4b) into the same profile. Reserved
+    // / forbidden keys are skipped (warn) so a user can never shadow a platform
+    // var; a bad/empty value is skipped too — optional env never aborts the run.
+    inject_user_env(creds, &session_id, &mut env_profile);
 
     // 6. Render the per-session CODEX_HOME (0700 dir + the operator-pinned LLM
     //    provider config.toml). The pod has no vault, so the runner renders the
@@ -379,6 +384,57 @@ fn load_spec(path: &Path) -> Result<SessionSpec, String> {
         .map_err(|error| format!("read session spec {}: {error}", path.display()))?;
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("parse session spec {}: {error}", path.display()))
+}
+
+/// Glob the mounted `userenv.*` files and fold each into `env_profile` (PR4b).
+///
+/// Each file's name (minus the `userenv.` prefix) is the env var KEY recovered by
+/// [`CredsLayout::user_env_files`]; its contents are the value. A KEY that is
+/// platform-reserved ([`is_reserved_env_key`] — which covers the whole `FKST_*`
+/// family the engine strips, plus the git-credential keys and host allow-list) or
+/// that collides with the LLM credential key ([`LLM_ENV_KEY`]) is skipped with a
+/// warning, so a user entry can never shadow a platform var. A missing/empty or
+/// unreadable value is also skipped: optional user env must never abort the
+/// session. Values are NEVER logged — only the KEY (non-secret) appears.
+fn inject_user_env(
+    creds: &CredsLayout,
+    session_id: &str,
+    env_profile: &mut BTreeMap<String, SecretString>,
+) {
+    let files = match creds.user_env_files() {
+        Ok(files) => files,
+        Err(error) => {
+            tracing::warn!(
+                session_id = %session_id,
+                error = %error,
+                "run-session: could not list user env files; none injected"
+            );
+            return;
+        }
+    };
+    for (key, path) in files {
+        if is_reserved_env_key(&key) || key == LLM_ENV_KEY {
+            tracing::warn!(
+                session_id = %session_id,
+                key = %key,
+                "run-session: skipping reserved/forbidden user env key"
+            );
+            continue;
+        }
+        match creds::read_required_secret(&path) {
+            Ok(value) => {
+                env_profile.insert(key, value);
+            }
+            Err(error) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    key = %key,
+                    error = %error,
+                    "run-session: skipping unreadable/empty user env value"
+                );
+            }
+        }
+    }
 }
 
 /// Create a fresh 0700 CODEX_HOME under `temp_root` and write the operator-pinned

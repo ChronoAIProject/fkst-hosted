@@ -18,7 +18,9 @@ use kube::ResourceExt;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
-use crate::session_spec::creds::{DEFAULT_CREDS_DIR, GITHUB_TOKEN_FILE, LLM_API_KEY_FILE};
+use crate::session_spec::creds::{
+    DEFAULT_CREDS_DIR, GITHUB_TOKEN_FILE, LLM_API_KEY_FILE, USER_ENV_PREFIX,
+};
 use crate::session_spec::SessionSpec;
 
 /// Where the per-session credential Secret is mounted in the pod (must match the
@@ -54,6 +56,12 @@ pub struct SessionSecrets {
     /// (sourced from the control plane's `FKST_LLM_API_KEY` config). Always
     /// written — an engine with no LLM credential 401s.
     pub llm_api_key: SecretString,
+    /// Per-user env to inject into the session (PR4b), resolved from the issue
+    /// author's `fkst-user-<id>` store by the trigger. Each `(KEY, value)` is
+    /// written as a `userenv.<KEY>` Secret data key; the runner globs those back
+    /// into the engine `env_profile`. Empty when the issue declared no
+    /// `### Environment` keys (the common case).
+    pub user_env: BTreeMap<String, SecretString>,
 }
 
 /// Errors launching a session Job.
@@ -234,6 +242,15 @@ pub fn build_secret(
         LLM_API_KEY_FILE.to_string(),
         secrets.llm_api_key.expose_secret().to_string(),
     );
+    // Per-user env (PR4b): each entry rides a `userenv.<KEY>` data key. KEY is
+    // env-var-shaped, so the composite is a valid Secret data key; the runner
+    // strips the prefix to recover KEY and folds it into the engine env_profile.
+    for (key, value) in &secrets.user_env {
+        data.insert(
+            format!("{USER_ENV_PREFIX}{key}"),
+            value.expose_secret().to_string(),
+        );
+    }
 
     Ok(Secret {
         metadata: ObjectMeta {
@@ -457,6 +474,7 @@ mod tests {
         let secrets = SessionSecrets {
             github_token: SecretString::from("ghs_xyz"),
             llm_api_key: SecretString::from("sk-test"),
+            user_env: BTreeMap::new(),
         };
         let secret = build_secret(&spec, "fkst-sessions", &secrets, Some(owner)).expect("secret");
         let data = secret.string_data.unwrap();
@@ -465,8 +483,8 @@ mod tests {
         assert_eq!(back, spec);
         assert_eq!(data["github-token"], "ghs_xyz");
         assert_eq!(data["llm-api-key"], "sk-test");
-        // The session Secret carries ONLY the github token + LLM key — no other
-        // credential files are written.
+        // With no user env, the Secret carries ONLY the spec + github token + LLM
+        // key — no other files are written.
         assert_eq!(data.len(), 3);
         let owners = secret.metadata.owner_references.unwrap();
         assert_eq!(owners[0].kind, "Job");
@@ -478,6 +496,7 @@ mod tests {
         let secrets = SessionSecrets {
             github_token: SecretString::from("ghs_xyz"),
             llm_api_key: SecretString::from("sk-always"),
+            user_env: BTreeMap::new(),
         };
         let secret = build_secret(&spec(), "ns", &secrets, None).expect("secret");
         let data = secret.string_data.unwrap();
@@ -485,6 +504,28 @@ mod tests {
         assert!(data.contains_key("session-spec.json"));
         assert_eq!(data["llm-api-key"], "sk-always");
         assert!(secret.metadata.owner_references.is_none());
+    }
+
+    #[test]
+    fn build_secret_writes_user_env_under_the_userenv_prefix() {
+        let mut user_env = BTreeMap::new();
+        user_env.insert("FOO".to_string(), SecretString::from("foo-val"));
+        user_env.insert("API_TOKEN".to_string(), SecretString::from("tok-val"));
+        let secrets = SessionSecrets {
+            github_token: SecretString::from("ghs_xyz"),
+            llm_api_key: SecretString::from("sk-test"),
+            user_env,
+        };
+        let secret = build_secret(&spec(), "ns", &secrets, None).expect("secret");
+        let data = secret.string_data.unwrap();
+        // Each user env var rides a `userenv.<KEY>` data key carrying its value.
+        assert_eq!(data["userenv.FOO"], "foo-val");
+        assert_eq!(data["userenv.API_TOKEN"], "tok-val");
+        // The base credential keys remain; the two user env keys are additive.
+        assert!(data.contains_key("github-token"));
+        assert!(data.contains_key("llm-api-key"));
+        assert!(data.contains_key("session-spec.json"));
+        assert_eq!(data.len(), 5);
     }
 
     #[test]

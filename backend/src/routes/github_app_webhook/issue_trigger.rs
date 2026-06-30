@@ -6,12 +6,15 @@
 //! per-session Secret, and launch the Job. Everything flows from
 //! `installation.id`; no user token is present.
 
+use std::collections::BTreeMap;
+
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use super::Handled;
 use crate::goals::issue_parse::{parse_goal_issue_body, ParsedGoal};
 use crate::goals::labels::GOAL_LABEL;
-use crate::k8s::{KubeClient, PodSessionLauncher, SessionSecrets};
+use crate::k8s::{user_store, KubeClient, PodSessionLauncher, SessionSecrets};
 use crate::models::RepoRef;
 use crate::session_spec::{derive_session_id, SessionGoal, SessionSpec};
 use crate::state::AppState;
@@ -49,6 +52,11 @@ pub(super) struct LabelPayload {
 #[derive(Debug, Deserialize)]
 pub(super) struct ActorPayload {
     pub login: String,
+    /// The actor's immutable numeric GitHub id. For an issue author it keys their
+    /// per-user env store (`fkst-user-<id>`), the ONLY identity used to resolve
+    /// injected env (PR4b). Required: GitHub always includes `user.id`, and a
+    /// silent `0` fallback would resolve the WRONG store.
+    pub id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,17 +168,26 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
         .token_for_repo(&owner_repo, None)
         .await
         .map_err(|e| format!("mint app token: {e}"))?;
+
+    let kube = KubeClient::from_inferred(&state.config.pod.namespace)
+        .await
+        .map_err(|e| format!("kubernetes client: {e}"))?;
+
+    // Resolve the issue author's requested env (PR4b) from their per-user store,
+    // reusing the SAME client the launcher uses. Best-effort: a store read error
+    // yields no user env (logged), never a launch failure — optional env must not
+    // sink the whole session.
+    let user_env = resolve_user_env(&kube, event.issue.user.id, &parsed.env_keys).await;
+
     // The LLM credential is a static config value (FKST_LLM_API_KEY). It is
     // written into the session Secret and read by the engine's codex provider
     // under LLM_API_KEY.
     let secrets = SessionSecrets {
         github_token,
         llm_api_key: state.config.llm_api_key.clone(),
+        user_env,
     };
 
-    let kube = KubeClient::from_inferred(&state.config.pod.namespace)
-        .await
-        .map_err(|e| format!("kubernetes client: {e}"))?;
     let launcher = PodSessionLauncher::new(
         kube.client().clone(),
         state.config.pod.namespace.clone(),
@@ -193,6 +210,69 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
     Ok(())
 }
 
+/// Resolve the issue author's requested env into a secret map by reading their
+/// `fkst-user-<id>` store (PR4b).
+///
+/// Best-effort by design: an empty `requested` short-circuits to no work, and a
+/// store read failure logs + yields an EMPTY map rather than failing the launch —
+/// optional env must never sink the whole session. The selection itself is the
+/// pure [`select_user_env`]; this wrapper adds only the I/O + the per-key
+/// "requested but absent from the store" log line.
+async fn resolve_user_env(
+    kube: &KubeClient,
+    author_id: i64,
+    requested: &[String],
+) -> BTreeMap<String, SecretString> {
+    if requested.is_empty() {
+        return BTreeMap::new();
+    }
+    let variables = match user_store::get_env(kube, author_id).await {
+        Ok(variables) => variables,
+        Err(error) => {
+            tracing::warn!(github_user_id = author_id, error = %error, "webhook trigger: could not read user env store; proceeding with no user env");
+            return BTreeMap::new();
+        }
+    };
+    let secrets = match user_store::get_secret_values(kube, author_id).await {
+        Ok(secrets) => secrets,
+        Err(error) => {
+            tracing::warn!(github_user_id = author_id, error = %error, "webhook trigger: could not read user secret store; proceeding with no user env");
+            return BTreeMap::new();
+        }
+    };
+    let resolved = select_user_env(requested, &variables, &secrets);
+    for key in requested {
+        if !resolved.contains_key(key) {
+            tracing::info!(github_user_id = author_id, key = %key, "webhook trigger: requested env key not in user store; skipped");
+        }
+    }
+    tracing::info!(
+        github_user_id = author_id,
+        requested = requested.len(),
+        injected = resolved.len(),
+        "webhook trigger: resolved user env for injection"
+    );
+    resolved
+}
+
+/// Pure selector: take ONLY the `requested` keys, looking each up FIRST in the
+/// user's `secrets`, then in their non-secret `variables` (a secret of the same
+/// name wins, so a plaintext can never override a secret). A requested key in
+/// NEITHER map is dropped. I/O-free + cluster-free so it is unit-testable.
+fn select_user_env(
+    requested: &[String],
+    variables: &BTreeMap<String, String>,
+    secrets: &BTreeMap<String, String>,
+) -> BTreeMap<String, SecretString> {
+    let mut resolved = BTreeMap::new();
+    for key in requested {
+        if let Some(value) = secrets.get(key).or_else(|| variables.get(key)) {
+            resolved.insert(key.clone(), SecretString::from(value.clone()));
+        }
+    }
+    resolved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +292,7 @@ mod tests {
                     .collect(),
                 user: ActorPayload {
                     login: "octocat".to_string(),
+                    id: 583231,
                 },
             },
             repository: RepoPayload {
@@ -241,7 +322,7 @@ mod tests {
                 "title": "T",
                 "body": "B",
                 "labels": [{"name": "fkst"}],
-                "user": { "login": "octocat" }
+                "user": { "login": "octocat", "id": 583231 }
             },
             "repository": { "owner": { "login": "acme" }, "name": "site" },
             "installation": { "id": 42 }
@@ -249,6 +330,7 @@ mod tests {
         let event: IssuesEvent = serde_json::from_value(payload).expect("parses");
         assert_eq!(event.issue.number, 9);
         assert_eq!(event.issue.user.login, "octocat");
+        assert_eq!(event.issue.user.id, 583231);
         assert_eq!(event.repository.owner.login, "acme");
         assert_eq!(event.installation.id, 42);
         assert!(should_trigger(&event, "fkst"));
@@ -259,6 +341,7 @@ mod tests {
         let parsed = ParsedGoal {
             description: "do it".to_string(),
             package_names: vec!["web".to_string()],
+            env_keys: vec![],
         };
         let a = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
         let b = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
@@ -275,5 +358,47 @@ mod tests {
         assert_eq!(a.goal.prompt, "do it");
         assert_eq!(a.package_names, vec!["web".to_string()]);
         assert_eq!(a.log_branch, format!("fkst/session-{}", a.session_id));
+    }
+
+    // ---- select_user_env (pure; no cluster) ----------------------------------
+
+    use secrecy::ExposeSecret;
+
+    #[test]
+    fn select_user_env_picks_only_requested_present_keys_from_either_store() {
+        let variables = BTreeMap::from([
+            ("PLAIN".to_string(), "p-val".to_string()),
+            ("UNREQUESTED".to_string(), "ignored".to_string()),
+        ]);
+        let secrets = BTreeMap::from([("SECRET".to_string(), "s-val".to_string())]);
+        let requested = vec![
+            "PLAIN".to_string(),
+            "SECRET".to_string(),
+            "MISSING".to_string(),
+        ];
+
+        let resolved = select_user_env(&requested, &variables, &secrets);
+
+        assert_eq!(resolved.len(), 2, "only the present requested keys");
+        assert_eq!(resolved["PLAIN"].expose_secret(), "p-val");
+        assert_eq!(resolved["SECRET"].expose_secret(), "s-val");
+        // A requested key absent from BOTH stores is dropped (the caller logs it).
+        assert!(!resolved.contains_key("MISSING"));
+        // A stored key that was NOT requested is never injected.
+        assert!(!resolved.contains_key("UNREQUESTED"));
+    }
+
+    #[test]
+    fn select_user_env_prefers_a_secret_over_a_plaintext_of_the_same_name() {
+        let variables = BTreeMap::from([("DUP".to_string(), "plain".to_string())]);
+        let secrets = BTreeMap::from([("DUP".to_string(), "secret".to_string())]);
+        let resolved = select_user_env(&["DUP".to_string()], &variables, &secrets);
+        assert_eq!(resolved["DUP"].expose_secret(), "secret");
+    }
+
+    #[test]
+    fn select_user_env_empty_request_resolves_to_empty() {
+        let resolved = select_user_env(&[], &BTreeMap::new(), &BTreeMap::new());
+        assert!(resolved.is_empty());
     }
 }
