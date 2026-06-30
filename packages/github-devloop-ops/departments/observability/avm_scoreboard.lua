@@ -1,5 +1,6 @@
 local M = {}
 local contract_time = require("contract.time")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 
 function M.install_avm_scoreboard(core)
 local task_levels = { "L0", "L1", "L2", "L3", "L4", "unclassified" }
@@ -198,7 +199,7 @@ local function decorate_with_attempt_projection(fact, comments, now_seconds)
   if fact.repo == nil or fact.issue_number == nil then
     return fact
   end
-  local projection = core.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
+  local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, fact.repo, fact.issue_number, {
     proposal_id = fact.proposal_id,
     now_seconds = now_seconds,
   })
@@ -235,7 +236,7 @@ local function fact_from_marker(marker, comment)
   if proposal_id == nil or pr_number == nil or version == nil or head_sha == nil then
     return nil, "missing_identity"
   end
-  return core.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
+  return autonomy_ledger.autonomy_result_record_from_marker(core, marker, comment, proposal_id, pr_number, version, head_sha)
 end
 
 local function log_marker_rejection(tag, reason, comment, marker)

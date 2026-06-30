@@ -3,6 +3,7 @@ local S, replay_fields = {}, require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
+local autonomy_ledger = require("devloop.autonomy_ledger")
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -96,9 +97,9 @@ local function resume_terminal_markers(issue, next_state, delegation, current_pr
     version = next_state.version,
     reviewed_head_sha = head_sha,
   }
-  local autonomy_record = M.autonomy_result_record(issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr))
+  local autonomy_record = autonomy_ledger.autonomy_result_record(M, issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr))
   return "\n" .. M.merged_marker(delegation.proposal_id, delegation.pr_number, next_state.version, head_sha, autonomy_record)
-    .. "\n" .. M.autonomy_result_marker(autonomy_record)
+    .. "\n" .. autonomy_ledger.autonomy_result_marker(M, autonomy_record)
 end
 
 local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
