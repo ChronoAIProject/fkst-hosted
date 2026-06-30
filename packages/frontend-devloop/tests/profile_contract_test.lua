@@ -10,6 +10,15 @@ local function list_contains(list, expected)
   return false
 end
 
+local function find_by_surface(rows, expected)
+  for _, row in ipairs(rows) do
+    if row.surface == expected then
+      return row
+    end
+  end
+  return nil
+end
+
 return {
   test_default_profile_declares_existing_devloop_packages = function()
     local profile = core.default_profile()
@@ -38,6 +47,25 @@ return {
     t.is_true(list_contains(profile.host_capabilities.required_commands, "build"))
   end,
 
+  test_default_profile_proves_why_frontend_devloop_owns_the_profile = function()
+    local proof = core.default_profile().necessity_proof
+
+    t.eq(proof.schema, "frontend-devloop.necessity-proof.v1")
+    t.eq(proof.conclusion, "frontend-devloop owns the UI workflow profile contract")
+
+    local scripts = find_by_surface(proof.alternatives, "project-local scripts")
+    t.eq(scripts.owner, "host")
+    t.eq(scripts.insufficiency, "commands do not declare fkst package roots or trust boundaries")
+
+    local browser_qa = find_by_surface(proof.alternatives, "browser-qa")
+    t.eq(browser_qa.owner, "browser-qa")
+    t.eq(browser_qa.insufficiency, "browser execution does not own devloop package composition")
+
+    local global_host = find_by_surface(proof.alternatives, "global-host profiles")
+    t.eq(global_host.owner, "host profile layer")
+    t.eq(global_host.insufficiency, "generic host hydration does not own UI workflow artifact handoff")
+  end,
+
   test_default_profile_uses_source_refs_for_ui_artifacts = function()
     local profile = core.default_profile()
     local handoff = profile.handoff
@@ -62,6 +90,15 @@ return {
     snapshot_payload.handoff.payload_policy = "embed-ui-artifacts"
     t.raises(function()
       core.validate_profile(snapshot_payload)
+    end)
+  end,
+
+  test_validate_profile_rejects_missing_necessity_proof = function()
+    local missing_proof = core.default_profile()
+    missing_proof.necessity_proof = nil
+
+    t.raises(function()
+      core.validate_profile(missing_proof)
     end)
   end,
 

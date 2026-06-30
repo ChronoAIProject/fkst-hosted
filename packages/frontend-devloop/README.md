@@ -1,8 +1,16 @@
 # frontend-devloop
 
-`frontend-devloop` is a composed profile package for host repositories whose primary product is a UI application. It owns the declarative profile contract for running the existing GitHub devloop package family against a frontend host; it does not own browser automation, GitHub issue lifecycle state, or host package-manager commands.
+`frontend-devloop` is a composed profile package for host repositories whose primary product is a UI application. It owns the declarative profile contract for running the existing GitHub devloop package family against a frontend host; it does not own browser automation, GitHub issue lifecycle state, global host hydration, or host package-manager commands.
 
 The profile exists because project-local scripts alone can run `install`, `lint`, `test`, and `build`, but they do not tell the fkst host-run contract which platform packages and trust boundaries make a UI workflow safe to supervise. `browser-qa` remains the owner of browser execution and visual validation. `github-devloop` remains the issue-to-PR lifecycle owner.
+
+The necessity proof is part of `frontend-devloop.profile.v1`, not an implied convention:
+
+- Project-local scripts are host-owned commands; they do not declare fkst package roots or trust boundaries.
+- `browser-qa` owns browser execution; it does not own devloop package composition.
+- Global-host profiles own generic host hydration; they do not own UI workflow artifact handoff.
+
+Therefore `frontend-devloop` owns only the UI workflow profile contract that composes those existing surfaces.
 
 Host package composition is explicit. A frontend host includes these platform package roots in `.fkst/compose/package-roots`:
 

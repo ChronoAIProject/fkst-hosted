@@ -26,10 +26,39 @@ local trust_boundaries = {
   "host-scripts-owned-by-host",
 }
 
+local necessity_alternatives = {
+  {
+    surface = "project-local scripts",
+    owner = "host",
+    insufficiency = "commands do not declare fkst package roots or trust boundaries",
+  },
+  {
+    surface = "browser-qa",
+    owner = "browser-qa",
+    insufficiency = "browser execution does not own devloop package composition",
+  },
+  {
+    surface = "global-host profiles",
+    owner = "host profile layer",
+    insufficiency = "generic host hydration does not own UI workflow artifact handoff",
+  },
+}
+
 local function copy_list(list)
   local copied = {}
   for index, value in ipairs(list) do
     copied[index] = value
+  end
+  return copied
+end
+
+local function copy_rows(rows)
+  local copied = {}
+  for index, row in ipairs(rows) do
+    copied[index] = {}
+    for key, value in pairs(row) do
+      copied[index][key] = value
+    end
   end
   return copied
 end
@@ -44,6 +73,18 @@ local function has_item(list, expected)
     end
   end
   return false
+end
+
+local function find_by_field(rows, field, expected)
+  if type(rows) ~= "table" then
+    return nil
+  end
+  for _, row in ipairs(rows) do
+    if type(row) == "table" and row[field] == expected then
+      return row
+    end
+  end
+  return nil
 end
 
 local function require_string(row, field, ctx)
@@ -68,6 +109,19 @@ local function require_list_contains(list, value, ctx)
   end
 end
 
+local function require_necessity_alternative(alternatives, expected, ctx)
+  local row = find_by_field(alternatives, "surface", expected.surface)
+  if not row then
+    error(ctx .. ": missing necessity proof for " .. expected.surface)
+  end
+  if row.owner ~= expected.owner then
+    error(ctx .. ": invalid owner for " .. expected.surface)
+  end
+  if row.insufficiency ~= expected.insufficiency then
+    error(ctx .. ": invalid insufficiency for " .. expected.surface)
+  end
+end
+
 function M.platform_packages()
   return copy_list(required_platform_packages)
 end
@@ -80,6 +134,11 @@ function M.default_profile()
     issue_lifecycle_owner = "github-devloop",
     browser_qa_owner = "browser-qa",
     platform_packages = M.platform_packages(),
+    necessity_proof = {
+      schema = "frontend-devloop.necessity-proof.v1",
+      alternatives = copy_rows(necessity_alternatives),
+      conclusion = "frontend-devloop owns the UI workflow profile contract",
+    },
     host_capabilities = {
       required_commands = copy_list(required_commands),
       command_contract = "project-local package-manager scripts or host-owned command adapters",
@@ -125,6 +184,17 @@ function M.validate_profile(profile)
   local packages = require_table(profile, "platform_packages", ctx)
   for _, package_name in ipairs(required_platform_packages) do
     require_list_contains(packages, package_name, ctx)
+  end
+  local proof = require_table(profile, "necessity_proof", ctx)
+  if proof.schema ~= "frontend-devloop.necessity-proof.v1" then
+    error(ctx .. ": unsupported necessity proof schema")
+  end
+  local alternatives = require_table(proof, "alternatives", ctx)
+  for _, expected in ipairs(necessity_alternatives) do
+    require_necessity_alternative(alternatives, expected, ctx)
+  end
+  if proof.conclusion ~= "frontend-devloop owns the UI workflow profile contract" then
+    error(ctx .. ": invalid necessity proof conclusion")
   end
   local capabilities = require_table(profile, "host_capabilities", ctx)
   local commands = require_table(capabilities, "required_commands", ctx)
