@@ -26,21 +26,66 @@ local trust_boundaries = {
   "host-scripts-owned-by-host",
 }
 
+local required_profile_duties = {
+  "reusable platform package composition",
+  "UI workflow trust-boundary declaration",
+  "source-ref-only UI artifact handoff",
+  "package-local conformance for the UI profile contract",
+}
+
 local necessity_alternatives = {
   {
     surface = "project-local scripts",
     owner = "host",
+    existing_surfaces = {
+      "package-manager scripts",
+      ".fkst/compose/package-roots",
+    },
+    can_express = {
+      "host-owned command execution",
+      "host-local package root selection",
+    },
+    missing_profile_duties = {
+      "reusable platform package composition",
+      "UI workflow trust-boundary declaration",
+      "package-local conformance for the UI profile contract",
+    },
     insufficiency = "commands do not declare fkst package roots or trust boundaries",
+    boundary_violation = "Host-local files would make each frontend host duplicate platform semantics that fkst-packages should validate once.",
   },
   {
     surface = "browser-qa",
     owner = "browser-qa",
+    existing_surfaces = {
+      "browser-qa",
+    },
+    can_express = {
+      "browser execution",
+      "visual validation",
+    },
+    missing_profile_duties = {
+      "reusable platform package composition",
+      "GitHub devloop lifecycle ownership",
+    },
     insufficiency = "browser execution does not own devloop package composition",
+    boundary_violation = "Putting package composition in browser-qa would couple browser execution to GitHub issue-to-PR lifecycle orchestration.",
   },
   {
     surface = "global-host profiles",
     owner = "host profile layer",
+    existing_surfaces = {
+      "global-host profiles",
+    },
+    can_express = {
+      "generic host hydration",
+      "workspace-root wiring",
+    },
+    missing_profile_duties = {
+      "UI workflow trust-boundary declaration",
+      "source-ref-only UI artifact handoff",
+    },
     insufficiency = "generic host hydration does not own UI workflow artifact handoff",
+    boundary_violation = "Putting UI artifact trust policy in the global host layer would couple generic host hydration to frontend workflow semantics.",
   },
 }
 
@@ -52,13 +97,21 @@ local function copy_list(list)
   return copied
 end
 
+local function copy_value(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  local copied = {}
+  for key, child in pairs(value) do
+    copied[key] = copy_value(child)
+  end
+  return copied
+end
+
 local function copy_rows(rows)
   local copied = {}
   for index, row in ipairs(rows) do
-    copied[index] = {}
-    for key, value in pairs(row) do
-      copied[index][key] = value
-    end
+    copied[index] = copy_value(row)
   end
   return copied
 end
@@ -120,6 +173,15 @@ local function require_necessity_alternative(alternatives, expected, ctx)
   if row.insufficiency ~= expected.insufficiency then
     error(ctx .. ": invalid insufficiency for " .. expected.surface)
   end
+  for _, field in ipairs({ "existing_surfaces", "can_express", "missing_profile_duties" }) do
+    local values = require_table(row, field, ctx .. ": " .. expected.surface)
+    for _, value in ipairs(expected[field]) do
+      require_list_contains(values, value, ctx .. ": " .. expected.surface .. " " .. field)
+    end
+  end
+  if row.boundary_violation ~= expected.boundary_violation then
+    error(ctx .. ": invalid boundary violation for " .. expected.surface)
+  end
 end
 
 function M.platform_packages()
@@ -136,6 +198,7 @@ function M.default_profile()
     platform_packages = M.platform_packages(),
     necessity_proof = {
       schema = "frontend-devloop.necessity-proof.v1",
+      required_profile_duties = copy_list(required_profile_duties),
       alternatives = copy_rows(necessity_alternatives),
       conclusion = "frontend-devloop owns the UI workflow profile contract",
     },
@@ -188,6 +251,10 @@ function M.validate_profile(profile)
   local proof = require_table(profile, "necessity_proof", ctx)
   if proof.schema ~= "frontend-devloop.necessity-proof.v1" then
     error(ctx .. ": unsupported necessity proof schema")
+  end
+  local duties = require_table(proof, "required_profile_duties", ctx)
+  for _, duty in ipairs(required_profile_duties) do
+    require_list_contains(duties, duty, ctx .. ": necessity proof duties")
   end
   local alternatives = require_table(proof, "alternatives", ctx)
   for _, expected in ipairs(necessity_alternatives) do

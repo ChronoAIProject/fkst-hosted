@@ -2,6 +2,9 @@ local core = require("core")
 local t = fkst.test
 
 local function list_contains(list, expected)
+  if type(list) ~= "table" then
+    return false
+  end
   for _, value in ipairs(list) do
     if value == expected then
       return true
@@ -17,6 +20,12 @@ local function find_by_surface(rows, expected)
     end
   end
   return nil
+end
+
+local function assert_contains_all(list, expected)
+  for _, value in ipairs(expected) do
+    t.is_true(list_contains(list, value))
+  end
 end
 
 return {
@@ -64,6 +73,55 @@ return {
     local global_host = find_by_surface(proof.alternatives, "global-host profiles")
     t.eq(global_host.owner, "host profile layer")
     t.eq(global_host.insufficiency, "generic host hydration does not own UI workflow artifact handoff")
+  end,
+
+  test_necessity_proof_compares_existing_surfaces_to_profile_duties = function()
+    local proof = core.default_profile().necessity_proof
+
+    assert_contains_all(proof.required_profile_duties, {
+      "reusable platform package composition",
+      "UI workflow trust-boundary declaration",
+      "source-ref-only UI artifact handoff",
+      "package-local conformance for the UI profile contract",
+    })
+
+    local scripts = find_by_surface(proof.alternatives, "project-local scripts")
+    assert_contains_all(scripts.existing_surfaces, {
+      "package-manager scripts",
+      ".fkst/compose/package-roots",
+    })
+    assert_contains_all(scripts.can_express, {
+      "host-owned command execution",
+      "host-local package root selection",
+    })
+    assert_contains_all(scripts.missing_profile_duties, {
+      "reusable platform package composition",
+      "UI workflow trust-boundary declaration",
+      "package-local conformance for the UI profile contract",
+    })
+    t.eq(scripts.boundary_violation, "Host-local files would make each frontend host duplicate platform semantics that fkst-packages should validate once.")
+
+    local browser_qa = find_by_surface(proof.alternatives, "browser-qa")
+    assert_contains_all(browser_qa.can_express, {
+      "browser execution",
+      "visual validation",
+    })
+    assert_contains_all(browser_qa.missing_profile_duties, {
+      "reusable platform package composition",
+      "GitHub devloop lifecycle ownership",
+    })
+    t.eq(browser_qa.boundary_violation, "Putting package composition in browser-qa would couple browser execution to GitHub issue-to-PR lifecycle orchestration.")
+
+    local global_host = find_by_surface(proof.alternatives, "global-host profiles")
+    assert_contains_all(global_host.can_express, {
+      "generic host hydration",
+      "workspace-root wiring",
+    })
+    assert_contains_all(global_host.missing_profile_duties, {
+      "UI workflow trust-boundary declaration",
+      "source-ref-only UI artifact handoff",
+    })
+    t.eq(global_host.boundary_violation, "Putting UI artifact trust policy in the global host layer would couple generic host hydration to frontend workflow semantics.")
   end,
 
   test_default_profile_uses_source_refs_for_ui_artifacts = function()

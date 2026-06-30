@@ -6,9 +6,16 @@ The profile exists because project-local scripts alone can run `install`, `lint`
 
 The necessity proof is part of `frontend-devloop.profile.v1`, not an implied convention:
 
-- Project-local scripts are host-owned commands; they do not declare fkst package roots or trust boundaries.
-- `browser-qa` owns browser execution; it does not own devloop package composition.
-- Global-host profiles own generic host hydration; they do not own UI workflow artifact handoff.
+- Project-local scripts and `.fkst/compose/package-roots` can express host-owned command execution
+  and host-local package root selection, but they cannot own a reusable platform package
+  composition, UI workflow trust-boundary declaration, or package-local conformance contract without
+  making every frontend host duplicate fkst-packages platform semantics.
+- `browser-qa` can express browser execution and visual validation, but it cannot own reusable
+  platform package composition or the GitHub devloop lifecycle without coupling browser execution to
+  issue-to-PR orchestration.
+- Global-host profiles can express generic host hydration and workspace-root wiring, but they cannot
+  own UI workflow trust-boundary policy or source-ref-only UI artifact handoff without coupling the
+  generic host layer to frontend workflow semantics.
 
 Therefore `frontend-devloop` owns only the UI workflow profile contract that composes those existing surfaces.
 
