@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 
 function S.install(M, shared)
@@ -23,8 +24,8 @@ local function converge_record_map(M, comments, kind, matches)
   end
 
   local marker_pattern = "<!%-%- fkst:github%-devloop:" .. kind .. ":v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local round = valid_round(attr(marker, "round"))
       local question = attr(marker, "question")
       local verdicts = attr(marker, "verdicts")

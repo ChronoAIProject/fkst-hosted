@@ -1,3 +1,6 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local M = {}
 local root_ref = nil
 local strings = require("forge.strings")
@@ -192,7 +195,9 @@ local function blocker_merged(repo, blocker_number)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"
   end
-  local ok, current = pcall(core.parse_issue_view_observe, result.stdout)
+  local ok, current = pcall(function()
+    return parsers_issue.parse_issue_view_observe(core, result.stdout)
+  end)
   if not ok or type(current) ~= "table" then
     return nil, "malformed-json"
   end
@@ -210,7 +215,9 @@ local function blocker_merged(repo, blocker_number)
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end
-  local pr_ok, pr_current = pcall(core.parse_pr_view_origin, pr_result.stdout)
+  local pr_ok, pr_current = pcall(function()
+    return parsers_pr.parse_pr_view_origin(core, pr_result.stdout)
+  end)
   if not pr_ok or type(pr_current) ~= "table" then
     return nil, "malformed-pr-json"
   end
@@ -298,8 +305,8 @@ function M.dependency_waiver_fact(comments, proposal_id, version, blocker_number
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-waiver:v1.-%-%->"
-  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
-    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
+    for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
       if marker_attr(marker, "proposal") == tostring(proposal_id)
         and marker_attr(marker, "version") == tostring(version)
         and tonumber(marker_attr(marker, "blocker") or "") == tonumber(blocker_number) then
@@ -308,7 +315,7 @@ function M.dependency_waiver_fact(comments, proposal_id, version, blocker_number
           version = tostring(version),
           blocker_number = tonumber(blocker_number),
           reason = decode_dependency_attr(marker_attr(marker, "reason")) or "dependency-waiver",
-          comment_created_at = core._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(core, comment),
         }
       end
     end
@@ -538,8 +545,8 @@ function M.dependency_hold_fact(comments, proposal_id)
   local wait_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
   local cycle_pattern = "<!%-%- fkst:github%-devloop:dependency%-cycle:v1.-%-%->"
   local unresolvable_pattern = "<!%-%- fkst:github%-devloop:dependency%-unresolvable:v1.-%-%->"
-  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
-    local body = core._comment_body(comment)
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
+    local body = parsers_misc._comment_body(core, comment)
     local hold_kind = body:match("github%-devloop dependency hold:%s*([^\n]+)")
     local reason = body:match("Reason:%s*([^\n]+)")
     for marker in body:gmatch(wait_pattern) do
@@ -551,7 +558,7 @@ function M.dependency_hold_fact(comments, proposal_id)
           marker_kind = "dependency-wait",
           hold_kind = decode_dependency_attr(marker_attr(marker, "hold_kind")) or hold_kind or "waiting",
           reason = decode_dependency_attr(marker_attr(marker, "reason")) or reason or "waiting-on-dependency",
-          comment_created_at = core._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(core, comment),
         }
       end
     end
@@ -564,7 +571,7 @@ function M.dependency_hold_fact(comments, proposal_id)
           marker_kind = "dependency-cycle",
           hold_kind = hold_kind or "cycle",
           reason = reason or "dependency-cycle",
-          comment_created_at = core._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(core, comment),
         }
       end
     end
@@ -577,7 +584,7 @@ function M.dependency_hold_fact(comments, proposal_id)
           marker_kind = "dependency-unresolvable",
           hold_kind = decode_dependency_attr(marker_attr(marker, "hold_kind")) or hold_kind or "unresolvable",
           reason = decode_dependency_attr(marker_attr(marker, "reason")) or reason or "gh-failed",
-          comment_created_at = core._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(core, comment),
         }
       end
     end
@@ -591,8 +598,8 @@ function M.dependency_release_fact(comments, proposal_id, version)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-release:v1.-%-%->"
-  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
-    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
+    for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       if marker_proposal == tostring(proposal_id)
@@ -600,7 +607,7 @@ function M.dependency_release_fact(comments, proposal_id, version)
         return {
           proposal_id = marker_proposal,
           version = marker_version,
-          comment_created_at = core._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(core, comment),
         }
       end
     end
@@ -614,8 +621,8 @@ function M.ready_split_canonicalized_fact(comments, proposal_id, from_version)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:ready%-split%-canonicalized:v1.-%-%->"
-  for _, comment in ipairs(core._trusted_marker_comments(comments)) do
-    for marker in core._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
+    for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_from = marker:match('from_version="([^"]*)"')
       if marker_proposal == tostring(proposal_id)
@@ -626,7 +633,7 @@ function M.ready_split_canonicalized_fact(comments, proposal_id, from_version)
           to_version = decode_dependency_attr(marker_attr(marker, "to_version")),
           derived_state = decode_dependency_attr(marker_attr(marker, "derived_state")),
           reason = decode_dependency_attr(marker_attr(marker, "reason")),
-          comment_created_at = core._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(core, comment),
         }
       end
     end
@@ -665,7 +672,9 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end
-  local pr_ok, pr_current = pcall(core.parse_pr_view_origin, pr_result.stdout)
+  local pr_ok, pr_current = pcall(function()
+    return parsers_pr.parse_pr_view_origin(core, pr_result.stdout)
+  end)
   if not pr_ok or type(pr_current) ~= "table" then
     return nil, "malformed-pr-json"
   end

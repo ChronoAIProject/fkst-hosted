@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
 local queue = require("devloop.queue")
@@ -110,7 +112,7 @@ local function issue_reviewing_for_origin(origin)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue reviewing view failed: " .. tostring(issue_view.stderr))
   end
-  return core.parse_issue_view_reviewing(issue_view.stdout)
+  return parsers_issue.parse_issue_view_reviewing(core, issue_view.stdout)
 end
 
 local function issue_claim_for_origin(origin)
@@ -437,7 +439,7 @@ local function process_pr_event(event)
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end
 
-  local current_pr = core.parse_pr_view_origin(pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
   local origin, has_issue_origin = origin_from_pr(pr.repo, pr.number, current_pr)
   if origin.branch == nil or origin.base_branch == nil then
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "PR branch facts missing")

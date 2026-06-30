@@ -1,4 +1,6 @@
 local saga_conformance = require("devloop.saga_conformance")
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
 local M
 local wiring = require("core.devloop_wiring")
 
@@ -11,12 +13,19 @@ M = {
   saga_conformance_errors = saga_conformance_errors,
 }
 
+function M.parse_pr_view_merge(stdout)
+  return parsers_pr.parse_pr_view_merge(M, stdout)
+end
+
+function M.rollup_failure_gate_sha(pr)
+  return parsers_misc.rollup_failure_gate_sha(M, pr)
+end
+
 require("devloop.base").install(M)
 require("forge.github_debug_stamp").install(M)
 require("devloop.commands").install(M)
 require("forge.merge_commands").install(M)
 require("devloop.git_mechanics").install(M)
-require("devloop.parsers").install(M)
 require("devloop.pr_safety").install(M)
 require("forge.merge").install(M)
 require("devloop.logging").install(M)

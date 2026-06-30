@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 local decompose_lib = require("devloop.decompose")
@@ -182,7 +184,7 @@ local function fetch_issue_entity(repo, issue)
   if view.exit_code ~= 0 then
     error("github-devloop: saga-doctor-issue-view-failed: " .. tostring(view.stderr))
   end
-  local current = M.parse_issue_view_state(view.stdout)
+  local current = parsers_issue.parse_issue_view_state(M, view.stdout)
   local proposal_id = M.proposal_id(repo, issue.number)
   return {
     kind = "issue",
@@ -203,7 +205,7 @@ local function fetch_pr_entity(repo, pr)
   if view.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-view-failed: " .. tostring(view.stderr))
   end
-  local current = M.parse_pr_view_origin(view.stdout)
+  local current = parsers_pr.parse_pr_view_origin(M, view.stdout)
   local origin = M.pr_origin_fact(current.comments)
   local proposal_id = origin and origin.proposal_id or M.pr_proposal_id(repo, pr.number)
   return {
@@ -226,7 +228,7 @@ local function list_open_issues(repo, poll_key)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-issue-list-failed: " .. tostring(result.stderr))
   end
-  return M.parse_issue_list_observe(result.stdout)
+  return parsers_issue.parse_issue_list_observe(M, result.stdout)
 end
 
 local function list_open_prs(repo, poll_key)
@@ -237,7 +239,7 @@ local function list_open_prs(repo, poll_key)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-list-failed: " .. tostring(result.stderr))
   end
-  return M.parse_pr_list_observe(result.stdout)
+  return parsers_pr.parse_pr_list_observe(M, result.stdout)
 end
 
 local function open_pr_number_set(prs)

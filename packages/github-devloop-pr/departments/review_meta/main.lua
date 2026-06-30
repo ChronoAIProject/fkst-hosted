@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
@@ -45,7 +47,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
-    local current_pr = core.parse_pr_view_origin(view.stdout)
+    local current_pr = parsers_pr.parse_pr_view_origin(core, view.stdout)
     local current_issue = {
       title = "PR #" .. tostring(review_meta.pr_number),
       body = "(PR-only review-meta context; issue backing is absent)",
@@ -56,7 +58,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
       end
-      local parsed_issue = core.parse_issue_view_fix(issue_view.stdout)
+      local parsed_issue = parsers_issue.parse_issue_view_fix(core, issue_view.stdout)
       if parsed_issue.title ~= nil and parsed_issue.title ~= "" then
         current_issue.title = parsed_issue.title
       end

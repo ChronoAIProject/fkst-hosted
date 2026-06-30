@@ -1,3 +1,4 @@
+local parsers_issue = require("devloop.parsers.issue")
 local S = {}
 local comment_strings = require("devloop.strings")
 
@@ -135,7 +136,7 @@ function M.fetch_recent_closed_intake_class_issues(repo)
   if listed.exit_code ~= 0 then
     error("github-devloop: gh issue intake class sibling lookup failed: " .. tostring(listed.stderr))
   end
-  return M.parse_issue_list_intake(listed.stdout)
+  return parsers_issue.parse_issue_list_intake(M, listed.stdout)
 end
 
 function M.intake_class_carrier_marker(class_key)
@@ -162,7 +163,7 @@ function M.find_open_intake_class_carrier(repo, issue_number, current, class_key
   if listed.exit_code ~= 0 then
     error("github-devloop: gh issue intake class lookup failed: " .. tostring(listed.stderr))
   end
-  for _, issue in ipairs(M.parse_issue_list_intake(listed.stdout)) do
+  for _, issue in ipairs(parsers_issue.parse_issue_list_intake(M, listed.stdout)) do
     if tostring(issue.number) ~= tostring(issue_number)
       and (tostring(issue.body or ""):find(wanted_marker, 1, true) ~= nil
         or tostring(issue.title or "") == wanted_title

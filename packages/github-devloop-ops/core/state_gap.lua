@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local contract_time = require("contract.time")
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
@@ -18,7 +19,7 @@ local function state_marker_stage_rank(marker, state)
 end
 
 local function parse_marker_time(comment)
-  local created_at = M._comment_created_at(comment)
+  local created_at = parsers_misc._comment_created_at(M, comment)
   local seconds = contract_time.iso_timestamp_epoch_seconds(created_at)
   if seconds == nil then
     return nil, nil
@@ -28,10 +29,10 @@ end
 
 local function append_state_markers(markers, comments, proposal_id)
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments or {})) do
     local created_at, created_seconds = parse_marker_time(comment)
     if created_seconds ~= nil then
-      for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
         local marker_proposal = marker:match('proposal="([^"]+)"')
         local state = marker:match('state="([^"]+)"')
         local version = marker:match('version="([^"]*)"')
@@ -51,7 +52,7 @@ local function append_state_markers(markers, comments, proposal_id)
 end
 
 local function append_entity_comments(list, comments)
-  for _, comment in ipairs(M._trusted_marker_comments(comments or {})) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments or {})) do
     table.insert(list, comment)
   end
 end
@@ -85,14 +86,14 @@ local function find_marker_between(entity, proposal_id, marker_kind, version, fr
   for _, comment in ipairs(trusted_entity_comments(entity)) do
     local seconds = comment_seconds(comment)
     if timestamp_between(seconds, from_seconds, to_seconds) then
-      for marker in M._comment_body(comment):gmatch(marker_pattern) do
+      for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
         if marker_attr(marker, "proposal") == tostring(proposal_id)
           and (version == nil or marker_attr(marker, "version") == tostring(version)) then
           if found == nil or seconds < found.created_seconds then
             found = {
               marker = marker,
               comment = comment,
-              created_at = M._comment_created_at(comment),
+              created_at = parsers_misc._comment_created_at(M, comment),
               created_seconds = seconds,
             }
           end

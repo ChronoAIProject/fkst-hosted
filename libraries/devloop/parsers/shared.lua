@@ -1,11 +1,12 @@
-local S = {}
-
-function S.install(M)
 local strings = require("contract.strings")
 local github_view = require("forge.github_view")
-local label_names = github_view.label_names
+local C = {}
 
-local function each_paginated_item(decoded, callback)
+function C.label_names(_M, labels)
+  return github_view.label_names(labels)
+end
+
+function C.each_paginated_item(_M, decoded, callback)
   if type(decoded) ~= "table" then
     return
   end
@@ -22,10 +23,10 @@ local function each_paginated_item(decoded, callback)
   end
 end
 
-local function parse_numbered_list(stdout)
+function C.parse_numbered_list(M, stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
-  each_paginated_item(decoded, function(item)
+  C.each_paginated_item(M, decoded, function(item)
     if type(item) == "table" and tonumber(item.number) ~= nil then
       table.insert(items, {
         number = tonumber(item.number),
@@ -37,13 +38,7 @@ local function parse_numbered_list(stdout)
   return items
 end
 
-return {
-  strings = strings,
-  github_view = github_view,
-  label_names = label_names,
-  each_paginated_item = each_paginated_item,
-  parse_numbered_list = parse_numbered_list,
-}
-end
+C.strings = strings
+C.github_view = github_view
 
-return S
+return C

@@ -1,3 +1,4 @@
+local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local saga = require("workflow.saga")
 local github = require("forge.github").production_handle
@@ -49,7 +50,7 @@ end
 
 local function list_open_pr(repo, integration, upstream)
   local listed = core.run_required(core.gh_pr_list_head_base(repo, integration, upstream, 30), "rollup PR list")
-  local prs = core.parse_pr_list_head_base(listed.stdout)
+  local prs = parsers_pr.parse_pr_list_head_base(core, listed.stdout)
   if #prs == 0 then
     return nil
   end
@@ -58,7 +59,7 @@ end
 
 local function fetch_rollup_pr(repo, pr_number)
   local viewed = core.run_required(github("github-devloop-integration.rollup_scan").gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
-  local pr = core.parse_pr_view_merge(viewed.stdout)
+  local pr = parsers_pr.parse_pr_view_merge(core, viewed.stdout)
   pr.number = tonumber(pr_number)
   return pr
 end

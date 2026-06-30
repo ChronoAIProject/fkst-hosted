@@ -1,3 +1,5 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_issue = require("devloop.parsers.issue")
 local base_ids = require("devloop.base_ids")
 
 local F = {}
@@ -36,8 +38,8 @@ function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot
   local create_pattern = "<!%-%- fkst:github%-proxy:issue%-create%-intent:v1.-%-%->"
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(comments) do
-    if core.comment_author_login(comment) == tostring(bot_login) then
-      local body = core.comment_body(comment)
+    if parsers_misc.comment_author_login(core, comment) == tostring(bot_login) then
+      local body = parsers_misc.comment_body(core, comment)
       for marker in body:gmatch(create_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
           return true
@@ -108,8 +110,8 @@ function F.fork_origin_fact(core, entity)
       return body_fact
     end
   end
-  for _, comment in ipairs(core._trusted_marker_comments(entity.comments)) do
-    local comment_fact = fork_origin_fact_from_text(core, core.comment_body(comment))
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, entity.comments)) do
+    local comment_fact = fork_origin_fact_from_text(core, parsers_misc.comment_body(core, comment))
     if comment_fact ~= nil then
       return comment_fact
     end
@@ -134,7 +136,7 @@ function F.rederive_issue_state(core, repo, issue_number)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue source_ref state recheck failed: " .. tostring(view.stderr))
   end
-  return core.parse_issue_view_state(view.stdout)
+  return parsers_issue.parse_issue_view_state(core, view.stdout)
 end
 
 function F.rederive_issue_is_open(core, repo, issue_number)

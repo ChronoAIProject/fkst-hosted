@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local core = require("core")
@@ -89,7 +91,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review loop: " .. tostring(pr_view.stderr))
   end
-  local current_pr = core.parse_pr_view_origin(pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
   local origin = core.pr_origin_fact(current_pr.comments)
   if origin == nil then
     origin = core.pr_native_origin(repo, pr_number, current_pr)
@@ -205,7 +207,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
       end
-      current_issue = core.parse_issue_view_review_loop(issue_view.stdout)
+      current_issue = parsers_issue.parse_issue_view_review_loop(core, issue_view.stdout)
     end
     local next_n = round + 1
     local next_dedup = core.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)

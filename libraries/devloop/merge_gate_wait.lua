@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
@@ -70,8 +71,8 @@ function M.merge_gate_wait_fact(comments, issue_proposal_id, issue_version, pr_n
   end
   local wait_version = M.merge_gate_wait_version_lineage(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate%-wait:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
@@ -92,7 +93,7 @@ function M.merge_gate_wait_fact(comments, issue_proposal_id, issue_version, pr_n
           head_sha = marker_head_sha,
           kind = marker_kind,
           reason = marker_reason,
-          comment_created_at = M._comment_created_at(comment),
+          comment_created_at = parsers_misc._comment_created_at(M, comment),
         }
       end
     end

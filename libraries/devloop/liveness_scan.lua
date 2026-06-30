@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local C, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
 local entity_list_cache = require("devloop.entity_list_cache")
 
@@ -148,7 +150,7 @@ function C.liveness_scan_list_open_issues(M, repo, timeout, poll_key)
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-issue-list-failed: " .. tostring(list.stderr))
   end
-  return M.parse_issue_list_observe(list.stdout)
+  return parsers_issue.parse_issue_list_observe(M, list.stdout)
 end
 
 function C.liveness_scan_list_open_prs(M, repo, timeout, poll_key)
@@ -159,7 +161,7 @@ function C.liveness_scan_list_open_prs(M, repo, timeout, poll_key)
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-pr-list-failed: " .. tostring(list.stderr))
   end
-  return M.parse_pr_list_observe(list.stdout)
+  return parsers_pr.parse_pr_list_observe(M, list.stdout)
 end
 
 local function sort_by_number(items)

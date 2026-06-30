@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local liveness_scan = require("devloop.liveness_scan")
 local entity_list_cache = require("devloop.entity_list_cache")
@@ -41,7 +43,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     error("github-devloop: liveness-scan-issue-view-failed: " .. tostring(state_view.stderr))
   end
 
-  local current = core.parse_issue_view_state(state_view.stdout)
+  local current = parsers_issue.parse_issue_view_state(core, state_view.stdout)
   if tostring(current.state or ""):upper() ~= "OPEN" then
     core.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-closed", "issue is not open")
     return false
@@ -65,7 +67,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
       end
       error("github-devloop: liveness-scan-awaiting-pr-view-failed: " .. tostring(pr_view.stderr))
     end
-    current_pr = core.parse_pr_view_origin(pr_view.stdout)
+    current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
     current_pr.number = delegation.pr_number
     current_pr.force_fresh = true
     snapshot.comments = current.comments or {}

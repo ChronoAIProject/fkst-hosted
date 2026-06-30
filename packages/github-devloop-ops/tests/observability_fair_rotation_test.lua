@@ -1,4 +1,5 @@
 local h = require("tests.devloop_ops_helpers")
+local parsers_issue = require("devloop.parsers.issue")
 local sweep_bounds = require("devloop.sweep_bounds")
 local t = h.t
 local core = h.core
@@ -83,11 +84,11 @@ return {
       table.insert(pages[3], { number = i + 200, state = "open" })
     end
     local calls = {}
-    local function parse(stdout)
+    local function parse(_core, stdout)
       return pages[tonumber(tostring(stdout):match("page:(%d+)"))] or {}
     end
-    local original_parse = core.parse_issue_list_observe
-    core.parse_issue_list_observe = parse
+    local original_parse = parsers_issue.parse_issue_list_observe
+    parsers_issue.parse_issue_list_observe = parse
     local listed = nil
     local ok, err = pcall(function()
       listed = core.observability_list_issue_candidates(
@@ -113,7 +114,7 @@ return {
         end
       )
     end)
-    core.parse_issue_list_observe = original_parse
+    parsers_issue.parse_issue_list_observe = original_parse
 
     t.eq(ok, true, tostring(err))
     local called_page_3 = false

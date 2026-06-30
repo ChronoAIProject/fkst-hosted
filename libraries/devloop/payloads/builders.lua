@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 
@@ -162,7 +163,7 @@ function M.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     end
     payload.predecessor_set = tostring(review_fact.predecessor_set)
   end
-  local gate_failure_excerpt = bounded_control_text(M, review_fact.gate_failure_excerpt, M._max_rollup_failure_summary_len)
+  local gate_failure_excerpt = bounded_control_text(M, review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
   if gate_failure_excerpt ~= nil then
     payload.gate_failure_excerpt = gate_failure_excerpt
   end

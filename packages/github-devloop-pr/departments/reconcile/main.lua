@@ -1,3 +1,6 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core, replay_fields = require("core"), require("devloop.replay_fields")
 local check_runs = require("forge.github.check_runs")
 local transition_version = require("contract.transition_version")
@@ -62,11 +65,11 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   end
   local reason_class = core.merge_gate_reason_class(wait.reason)
   local wait_kind = tostring(wait.kind or "")
-  if core.is_ci_red_reason(reason_class) or check_runs.is_not_mergeable_reason(reason_class) then
+  if parsers_misc.is_ci_red_reason(core, reason_class) or check_runs.is_not_mergeable_reason(reason_class) then
     return "state-output-obligation-timeout"
   end
   if reason_class == "ci-wait"
-    or core.is_ci_wait_reason(reason_class)
+    or parsers_misc.is_ci_wait_reason(core, reason_class)
     or wait_kind == "CI_WAIT"
     or wait_kind == "CHECKS_PENDING"
     or wait_kind == "CI_UNKNOWN"
@@ -97,7 +100,7 @@ local function load_timeout_issue_surface(repo, issue_number, proposal_id, state
   if view.exit_code ~= 0 then
     error("github-devloop: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
   end
-  local current_issue = core.parse_issue_view_loop(view.stdout)
+  local current_issue = parsers_issue.parse_issue_view_loop(core, view.stdout)
   local issue_state = core.current_entity_state(current_issue.comments, proposal_id)
   if timeout_reconcile_needs_pr_surface(state_name) then
     local snapshot = core.linked_pr_surface_snapshot(repo, proposal_id, current_issue.comments)
@@ -155,7 +158,7 @@ local function pipeline_review(event)
       error("github-devloop: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_pr_view_origin(view.stdout)
+    local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = core.current_entity_state(current.comments, reconcile.proposal_id)
     if core.has_review_reconcile_marker(current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.round) then
@@ -231,7 +234,7 @@ local function pipeline_fix(event)
       error("github-devloop: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = core.parse_pr_view_origin(view.stdout)
+    local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = core.current_entity_state(current.comments, reconcile.proposal_id)
     local version = core.fix_reconcile_state_version(reconcile.issue_version)
@@ -305,7 +308,7 @@ local function pipeline_timeout(event)
         target_pr_number = nil
         current_issue, current_pr, comments, snapshot = load_timeout_issue_surface(repo, issue_number, reconcile.proposal_id, reconcile.state)
       else
-        current_pr = core.parse_pr_view_origin(view.stdout)
+        current_pr = parsers_pr.parse_pr_view_origin(core, view.stdout)
         comments = current_pr.comments
       end
     else

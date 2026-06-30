@@ -1,3 +1,5 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local runtime_files = require("core.merge_runtime_files")
 local ci_wait = require("core.merge_ci_wait")
@@ -276,7 +278,7 @@ local function ensure_pr_ready_for_merge(repo, merge_ready, current_pr)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: PR ready recheck failed: " .. tostring(pr_view.stderr))
   end
-  return core.parse_pr_view_merge(pr_view.stdout)
+  return parsers_pr.parse_pr_view_merge(core, pr_view.stdout)
 end
 
 local function build_merging_body(merge_ready)
@@ -355,7 +357,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     if pr_view.exit_code ~= 0 then
       error("github-devloop: PR merge view failed: " .. tostring(pr_view.stderr))
     end
-    current_pr = core.parse_pr_view_merge(pr_view.stdout)
+    current_pr = parsers_pr.parse_pr_view_merge(core, pr_view.stdout)
   end
   core.log_forged_markers("merge", merge_ready.proposal_id, current_pr.comments)
   local state = core.current_entity_state(current_pr.comments, merge_ready.proposal_id)
@@ -575,7 +577,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       raise_fixing(repo, issue_number, merge_ready, state, current_pr, classification.reason, queue_position)
       return
     end
-    if not core.is_ci_red_reason(rollup_reason) then
+    if not parsers_misc.is_ci_red_reason(core, rollup_reason) then
       if rollup_reason == "missing-status-rollup" then
         local healed, heal_reason = core.ci_selfheal_once(
           repo,
@@ -604,7 +606,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   if pr_recheck.exit_code ~= 0 then
     error("github-devloop: PR merge recheck failed: " .. tostring(pr_recheck.stderr))
   end
-  local rechecked_pr_for_gate = core.parse_pr_view_merge(pr_recheck.stdout)
+  local rechecked_pr_for_gate = parsers_pr.parse_pr_view_merge(core, pr_recheck.stdout)
   local recheck_ok, recheck_reason, rechecked_state = assert_merge_pr_authority(merge_ready, rechecked_pr_for_gate, repo, issue_number, origin, branches)
   if not recheck_ok then
     if recheck_reason == "head-sha-mismatch" then
@@ -673,12 +675,12 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     raise_reviewing_for_current_head(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr or rechecked_pr_for_gate, "head-sha-mismatch")
     return
   end
-  if not merge_ok and core.is_ci_red_reason(merge_reason) then
+  if not merge_ok and parsers_misc.is_ci_red_reason(core, merge_reason) then
     log_gate(merge_ready, "fixing", merge_reason)
     raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason, queue_position)
     return
   end
-  if not merge_ok and core.is_ci_wait_reason(merge_reason) then
+  if not merge_ok and parsers_misc.is_ci_wait_reason(core, merge_reason) then
     log_gate(merge_ready, "hold", merge_reason)
     ci_wait.hold(core, merge_ready, repo, merge_rechecked_pr or rechecked_pr_for_gate, {
       kind = "CI_WAIT",

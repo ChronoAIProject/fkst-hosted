@@ -1,4 +1,6 @@
 local S = {}
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local sweep_bounds = require("devloop.sweep_bounds")
 
 function S.install(M)
@@ -227,7 +229,9 @@ function M.observability_list_issue_candidates(repo, labels, limits, deadline, s
       function(page)
         return M.gh_issue_list_observe_opts(repo, label, page)
       end,
-      M.parse_issue_list_observe,
+      function(stdout)
+        return parsers_issue.parse_issue_list_observe(M, stdout)
+      end,
       limits,
       deadline,
       tostring(seed or "") .. "/issue/" .. tostring(label or ""),
@@ -248,7 +252,9 @@ function M.observability_list_pr_candidates(repo, limits, deadline, seed, exec)
     function(page)
       return M.gh_pr_list_observe_opts(repo, page)
     end,
-    M.parse_pr_list_observe,
+    function(stdout)
+      return parsers_pr.parse_pr_list_observe(M, stdout)
+    end,
     limits,
     deadline,
     tostring(seed or "") .. "/pr",

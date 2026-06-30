@@ -1,3 +1,5 @@
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
@@ -554,7 +556,7 @@ local function recheck_fix_write_gate(repo, fix, branch)
   if pr_recheck.exit_code ~= 0 then
     error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
   end
-  local rechecked_pr = core.parse_pr_view_fix(pr_recheck.stdout)
+  local rechecked_pr = parsers_pr.parse_pr_view_fix(core, pr_recheck.stdout)
   return validate_fix_write_gate_snapshot(repo, fix, branch, rechecked_pr, "write-time", true)
 end
 
@@ -563,7 +565,7 @@ local function precheck_fix_write_gate(repo, fix, branch)
   if pr_precheck.exit_code ~= 0 then
     error("github-devloop: gh pr fix precheck failed: " .. tostring(pr_precheck.stderr))
   end
-  local prechecked_pr = core.parse_pr_view_fix(pr_precheck.stdout)
+  local prechecked_pr = parsers_pr.parse_pr_view_fix(core, pr_precheck.stdout)
   if validate_fix_write_gate_snapshot(repo, fix, branch, prechecked_pr, "pre-spawn", false) == nil then
     return false
   end
@@ -602,7 +604,7 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if pushed_view.exit_code ~= 0 then
     error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
   end
-  local pushed_pr = core.parse_pr_view_fix(pushed_view.stdout)
+  local pushed_pr = parsers_pr.parse_pr_view_fix(core, pushed_view.stdout)
   if tostring(pushed_pr.state or ""):lower() ~= "open"
     or tostring(pushed_pr.head_ref_name or "") ~= branch
     or tostring(pushed_pr.head_sha or "") ~= outcome.new_head_sha
@@ -648,7 +650,7 @@ local function act_fix(event)
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
-    local current_pr = core.parse_pr_view_fix(pr_view.stdout)
+    local current_pr = parsers_pr.parse_pr_view_fix(core, pr_view.stdout)
     core.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
     local reviewing_version = core.next_fix_version(fix.version)
     if core.has_state_marker(current_pr.comments, fix.proposal_id, "reviewing", reviewing_version) then
@@ -778,7 +780,7 @@ local function act_fix(event)
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
-      current_issue = core.parse_issue_view_fix(issue_view.stdout)
+      current_issue = parsers_issue.parse_issue_view_fix(core, issue_view.stdout)
     end
 
     if merge_gate_fact ~= nil and tostring(merge_gate_fact.predecessor_set or "") ~= tostring(fix.predecessor_set or "") then

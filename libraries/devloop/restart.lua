@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local registry = require("workflow.registry")
@@ -267,8 +268,8 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-converge%-round:v1.-%-%->"
   local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
   local best = nil
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('issue_proposal="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       local review_proposal = marker:match('proposal="([^"]+)"')
@@ -306,8 +307,8 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
@@ -328,8 +329,8 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
     end
   end
   marker_pattern = "<!%-%- fkst:github%-devloop:fix%-reflection:v1.-%-%->"
-  for _, comment in ipairs(M._trusted_marker_comments(comments)) do
-    for marker in M._comment_body(comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local verdict = marker:match('verdict="([^"]+)"')

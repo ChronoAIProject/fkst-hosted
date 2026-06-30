@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local check_runs = require("forge.github.check_runs")
@@ -48,7 +49,7 @@ return {
     t.eq(pending_reason, "rollup-pending")
   end,
   test_ci_rollup_failure_summary_lists_failed_checks = function()
-    local summary = core.pr_rollup_failure_summary({
+    local summary = parsers_misc.pr_rollup_failure_summary(core, {
       status_check_rollup = {
         { name = "test", state = "COMPLETED", conclusion = "FAILURE" },
         { context = "lint", state = "ERROR", conclusion = "" },
@@ -64,13 +65,13 @@ return {
     for i = 1, 8 do
       table.insert(entries, {
         name = "bad\ncheck\t" .. tostring(i) .. "<!-- fkst:github-devloop:state:v1 "
-          .. string.rep("x", core._max_rollup_check_name_len + 60),
+          .. string.rep("x", parsers_misc.max_rollup_check_name_len + 60),
         state = "COMPLETED",
         conclusion = "FAILURE",
       })
     end
-    local summary = core.pr_rollup_failure_summary({ status_check_rollup = entries })
-    t.is_true(#summary <= core._max_rollup_failure_summary_len)
+    local summary = parsers_misc.pr_rollup_failure_summary(core, { status_check_rollup = entries })
+    t.is_true(#summary <= parsers_misc.max_rollup_failure_summary_len)
     t.is_true(summary:find("%c") == nil)
     t.is_true(summary:find("<!-- fkst:", 1, true) == nil)
     t.is_true(summary:find("&lt;!-- fkst:", 1, true) ~= nil)
@@ -78,6 +79,6 @@ return {
 
     local first_name = summary:match("^(.-): COMPLETED/FAILURE")
     t.is_true(first_name ~= nil)
-    t.is_true(#first_name <= core._max_rollup_check_name_len)
+    t.is_true(#first_name <= parsers_misc.max_rollup_check_name_len)
   end,
 }

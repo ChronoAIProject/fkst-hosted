@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local core = require("core")
 local saga = require("workflow.saga")
 local source_refs = require("contract.source_ref")
@@ -39,7 +40,7 @@ local function valid_fixing_handoff(handoff)
     and (handoff.blocking_gap == nil or core._is_bounded_string(handoff.blocking_gap, core._max_blocking_gap_len))
     and (handoff.framing == nil or core._is_bounded_string(handoff.framing, core._max_framing_len))
     and (handoff.gate_baseline_sha == nil or core.is_safe_head_sha(handoff.gate_baseline_sha))
-    and (handoff.gate_failure_excerpt == nil or core._is_bounded_string(handoff.gate_failure_excerpt, core._max_rollup_failure_summary_len))
+    and (handoff.gate_failure_excerpt == nil or core._is_bounded_string(handoff.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len))
     and (handoff.predecessor_set == nil or core._is_path_safe_key(handoff.predecessor_set, core._max_dedup_len))
     and (handoff.dedup_key == nil or core._is_path_safe_key(handoff.dedup_key, core._max_dedup_len))
 end

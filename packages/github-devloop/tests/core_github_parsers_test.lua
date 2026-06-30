@@ -1,3 +1,6 @@
+local parsers_misc = require("devloop.parsers.misc")
+local parsers_pr = require("devloop.parsers.pr")
+local parsers_issue = require("devloop.parsers.issue")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -107,20 +110,20 @@ return {
       core.gh_pr_list_head_base_cmd("owner/repo", "integration/dev", "dev"),
       "gh api --paginate --slurp 'repos/owner/repo/pulls?state=open&head=owner%3Aintegration%2Fdev&per_page=100&base=dev'"
     )
-    local intake = core.parse_issue_list_intake('[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
+    local intake = parsers_issue.parse_issue_list_intake(core, '[[{"number":42,"title":"Fix","updated_at":"2026-06-03T01:02:03Z","labels":[{"name":"bug"}]}]]')
     t.eq(intake[1].number, 42)
     t.eq(intake[1].body, "")
     t.eq(intake[1].created_at, nil)
     t.eq(intake[1].updated_at, "2026-06-03T01:02:03Z")
     t.eq(intake[1].labels[1], "bug")
-    local mixed = core.parse_issue_list_intake('[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)
+    local mixed = parsers_issue.parse_issue_list_intake(core, '[[{"number":1,"pull_request":{"url":"https://api.example.test/pulls/1"}}],[{"number":2,"title":"Issue","updated_at":"2026-06-03T01:02:04Z","labels":[]}]]', 1)
     t.eq(#mixed, 1)
     t.eq(mixed[1].number, 2)
-    t.eq(#core.parse_issue_list_intake("[[]]"), 0)
-    t.eq(#core.parse_issue_list_observe("[[]]"), 0)
-    t.eq(#core.parse_pr_list_observe("[[]]"), 0)
-    t.eq(#core.parse_pr_list_head_base("[[]]"), 0)
-    local rollup_prs = core.parse_pr_list_head_base('[[{"number":9,"head":{"sha":"abc123","ref":"integration/dev"},"base":{"ref":"dev"},"state":"open"}]]')
+    t.eq(#parsers_issue.parse_issue_list_intake(core, "[[]]"), 0)
+    t.eq(#parsers_issue.parse_issue_list_observe(core, "[[]]"), 0)
+    t.eq(#parsers_pr.parse_pr_list_observe(core, "[[]]"), 0)
+    t.eq(#parsers_pr.parse_pr_list_head_base(core, "[[]]"), 0)
+    local rollup_prs = parsers_pr.parse_pr_list_head_base(core, '[[{"number":9,"head":{"sha":"abc123","ref":"integration/dev"},"base":{"ref":"dev"},"state":"open"}]]')
     t.eq(rollup_prs[1].number, 9)
     t.eq(rollup_prs[1].head_sha, "abc123")
     t.eq(rollup_prs[1].head_ref_name, "integration/dev")
@@ -135,17 +138,17 @@ return {
       "gh issue view '42' --repo 'owner/repo' --json labels,comments"
     )
 
-    local state = core.parse_issue_view_state('{"updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"body":"hello","author":{"login":"fkst-test-bot"}}]}')
+    local state = parsers_issue.parse_issue_view_state(core, '{"updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[{"body":"hello","author":{"login":"fkst-test-bot"}}]}')
     t.eq(state.state, "OPEN")
     t.eq(state.updated_at, "2026-06-03T01:02:03Z")
     t.eq(state.labels[1], "fkst-dev:enabled")
-    t.eq(core.comment_body(state.comments[1]), "hello")
-    t.eq(core.comment_author_login(state.comments[1]), "fkst-test-bot")
+    t.eq(parsers_misc.comment_body(core, state.comments[1]), "hello")
+    t.eq(parsers_misc.comment_author_login(core, state.comments[1]), "fkst-test-bot")
 
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local decision = "approve"
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/v1"
-    local result = core.parse_issue_view_result(
+    local result = parsers_issue.parse_issue_view_result(core, 
       '{"labels":["fkst-dev:ready"],"comments":[{"body":"'
         .. core.result_marker(proposal_id, decision, dedup_key):gsub('"', '\\"')
         .. '","author":{"login":"fkst-test-bot"}}]}'
@@ -238,7 +241,7 @@ return {
   end,
   test_intake_judge_parse_keeps_full_issue_body = function()
     local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
-    local parsed = core.parse_issue_view_intake_judge(
+    local parsed = parsers_issue.parse_issue_view_intake_judge(core, 
       '{"title":"Long intake","body":"' .. long_body .. '","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"bug"}],"comments":[]}'
     )
 
@@ -252,7 +255,7 @@ return {
   end,
   test_meta_parse_omits_issue_body_snapshot = function()
     local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
-    local parsed = core.parse_issue_view_meta(
+    local parsed = parsers_issue.parse_issue_view_meta(core, 
       '{"title":"Long meta","body":"' .. long_body .. '","labels":[{"name":"bug"}],"comments":[]}'
     )
 
@@ -262,7 +265,7 @@ return {
   end,
   test_decompose_parse_keeps_full_issue_body_for_lineage_only = function()
     local long_body = string.rep("body-line-", core.max_body_len() + 1) .. "FULL_BODY_TAIL"
-    local parsed = core.parse_issue_view_decompose(
+    local parsed = parsers_issue.parse_issue_view_decompose(core, 
       '{"title":"Long decompose","body":"' .. long_body .. '","labels":[{"name":"bug"}],"comments":[]}'
     )
 

@@ -1,3 +1,4 @@
+local parsers_pr = require("devloop.parsers.pr")
 local S = {}
 local config = require("devloop.config")
 
@@ -43,7 +44,7 @@ end
 
 local function parse_open_prs_for_branch(stdout, branch, base_branch)
   local found = {}
-  for _, pr in ipairs(M.parse_pr_list_head_base(stdout)) do
+  for _, pr in ipairs(parsers_pr.parse_pr_list_head_base(M, stdout)) do
     if tostring(pr.head_ref_name or "") == tostring(branch)
       and (base_branch == nil or tostring(pr.base_ref_name or "") == tostring(base_branch))
       and tostring(pr.state or ""):lower() ~= "closed" then

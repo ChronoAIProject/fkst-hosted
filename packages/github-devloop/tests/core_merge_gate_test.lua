@@ -1,3 +1,4 @@
+local parsers_misc = require("devloop.parsers.misc")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -142,20 +143,20 @@ return {
 
   test_rollup_failure_gate_sha_comes_from_failed_checks = function()
     local sha = "abc123"
-    t.eq(core.rollup_failure_gate_sha(pr({
+    t.eq(parsers_misc.rollup_failure_gate_sha(core, pr({
       base_ref_oid = "base999",
       status_check_rollup = {
         { name = "test", state = "COMPLETED", conclusion = "FAILURE", headSha = sha },
         { name = "docs", state = "COMPLETED", conclusion = "SUCCESS", headSha = "docs999" },
       },
     })), sha)
-    t.eq(core.rollup_failure_gate_sha(pr({
+    t.eq(parsers_misc.rollup_failure_gate_sha(core, pr({
       base_ref_oid = "base999",
       status_check_rollup = {
         { name = "test", state = "COMPLETED", conclusion = "FAILURE" },
       },
     })), nil)
-    t.eq(core.rollup_failure_gate_sha(pr({
+    t.eq(parsers_misc.rollup_failure_gate_sha(core, pr({
       status_check_rollup = {
         { name = "test", state = "COMPLETED", conclusion = "FAILURE", headSha = "abc123" },
         { name = "lint", state = "COMPLETED", conclusion = "FAILURE", headSha = "def456" },
