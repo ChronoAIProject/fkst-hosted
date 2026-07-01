@@ -20,6 +20,11 @@ pub mod github_app;
 // that keys the per-user environment/secret store.
 pub mod github_identity;
 pub mod goals;
+// Shared in-pod install-command runner + the `validate-env` subcommand (issue
+// #338 §3.2/§3.4): runs an environment's ordered install commands and emits a
+// machine-readable verdict frame. Reused by the env-validation pod (wired here)
+// and, later, the session's pre-agent install step.
+pub mod install;
 pub mod models;
 pub mod protocol;
 // Runtime OpenAPI 3 document (no static spec): assembled from the live
