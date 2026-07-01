@@ -65,12 +65,12 @@ mod defaults {
         // The model the per-session codex provider serves. The operator pins it
         // to whatever the LLM backend currently serves; this is a sensible
         // non-empty default, never a literal placeholder.
-        "gpt-5-codex".to_string()
+        "gpt-5.5".to_string()
     }
 
     pub(super) fn llm_base_url() -> String {
         // Base URL of the LLM provider the session codex talks to.
-        "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm".to_string()
+        "https://llm.aelf.dev/v1".to_string()
     }
 
     pub(super) fn llm_wire_api() -> String {
@@ -875,11 +875,8 @@ mod tests {
     #[test]
     fn llm_defaults_apply_when_unset() {
         let config = Config::from_vars(vars(&[])).expect("defaults");
-        assert_eq!(config.pod.llm_model, "gpt-5-codex");
-        assert_eq!(
-            config.pod.llm_base_url,
-            "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm"
-        );
+        assert_eq!(config.pod.llm_model, "gpt-5.5");
+        assert_eq!(config.pod.llm_base_url, "https://llm.aelf.dev/v1");
         // The wire_api MUST default to `chat` (chrono-llm 502s on `responses`).
         assert_eq!(config.pod.llm_wire_api, "chat");
         // No key configured (dispatch off) => empty, never a placeholder.
