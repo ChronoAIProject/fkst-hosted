@@ -108,7 +108,7 @@ local function is_trusted_comment(M, comment, trust_set)
   if type(trust_set) == "table" then
     return trust_set[author] == true
   end
-  return author == M.trusted_bot_login()
+  return author == devloop_base.trusted_bot_login()
 end
 
 local function trusted_marker_comments(M, comments, trust_set)

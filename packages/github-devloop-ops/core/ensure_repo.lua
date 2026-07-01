@@ -360,7 +360,7 @@ function M.ensure_repo()
   local cfg = config.devloop_config(M)
   local repo = require_repo(cfg.repo)
   if cfg.write_mode == "real" then
-    M.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
   end
   local repo_labels = parsers_misc.parse_repo_labels(M, run_gh(function(timeout)
     return labels.gh_repo_labels_list(repo, timeout)

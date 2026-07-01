@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
@@ -170,7 +171,7 @@ local function install_generic_restart_liveness_model(row)
       restart_transition_table = function(...)
         return model.restart_transition_table(...)
       end,
-      trusted_bot_login = core.trusted_bot_login,
+      trusted_bot_login = devloop_base.trusted_bot_login,
     },
   })
   return model

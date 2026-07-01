@@ -70,7 +70,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local pr_view = core.gh_pr_view_origin(repo, reviewing.pr_number, 30)
     if pr_view.exit_code ~= 0 then

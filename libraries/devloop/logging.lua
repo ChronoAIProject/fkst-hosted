@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local error_facts = require("contract.error_facts")
@@ -153,7 +154,7 @@ function M.log_forged_markers(dept, proposal_id, comments)
           M.log_line("warn", dept, proposal_id, "FORGE", {
             "marker_kind=" .. tostring(marker_kind),
             "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),
-            "trusted_bot=" .. tostring(M.trusted_bot_login()),
+            "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
           })
         end
       end

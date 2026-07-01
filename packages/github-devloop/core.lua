@@ -22,8 +22,6 @@ local base = require("devloop.base")
 local function dept_exec_sync(...) return exec_sync(...) end
 M.judgment_worktree = function(...) return base.judgment_worktree_with_exec(M, dept_exec_sync, ...) end
 M.parse_name_only_paths = function(...) return base.parse_name_only_paths(M, ...) end
-M.configure_trusted_bot_login = function(...) return base.configure_trusted_bot_login(M, ...) end
-M.assert_trusted_bot_configured = function(...) return base.assert_trusted_bot_configured(M, ...) end
 M.safe_updated_at = function(...) return base.safe_updated_at(M, ...) end
 M.is_safe_proposal_ref = function(...) return base.is_safe_proposal_ref(M, ...) end
 M.is_safe_pr_review_result_ref = function(...) return base.is_safe_pr_review_result_ref(M, ...) end
@@ -45,7 +43,6 @@ M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, .
 M.max_body_len = function(...) return base.max_body_len(M, ...) end
 M.quote_untrusted_prompt_text = function(...) return base.quote_untrusted_prompt_text(M, ...) end
 M.gh_exec_opts = function(...) return base.gh_exec_opts(M, ...) end
-M.trusted_bot_login = function(...) return base.trusted_bot_login(M, ...) end
 M.judgment_codex_opts = base.judgment_codex_opts
 M._max_key_len = base._max_key_len
 M._max_dedup_len = base._max_dedup_len

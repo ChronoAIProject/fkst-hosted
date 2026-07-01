@@ -158,7 +158,7 @@ local function trusted_reintake_command(id)
   return {
     id = id or "IC_reintake_1",
     body = "fkst: reintake",
-    author_login = core.trusted_bot_login(),
+    author_login = devloop_base.trusted_bot_login(),
     created_at = "2026-06-04T03:00:00Z",
   }
 end

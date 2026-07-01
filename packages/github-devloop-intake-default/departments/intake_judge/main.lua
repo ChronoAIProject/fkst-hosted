@@ -214,7 +214,7 @@ local function act_intake_judge(event)
   local lock_key = core.observe_lock_key(repo, issue_number)
   local gate = nil
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
     gate = read_current_for_candidate(repo, issue_number, candidate, event.ts)
   end)
   if gate == nil then

@@ -826,7 +826,7 @@ return {
       },
       {
         body = core.state_marker(proposal_id, "thinking", "v1"),
-        author_login = core.trusted_bot_login(),
+        author_login = devloop_base.trusted_bot_login(),
       },
     }
     local current = core.current_state(comments, proposal_id)
@@ -835,13 +835,13 @@ return {
   end,
   test_current_state_ignores_authorless_state_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
     local parsed = parsers_issue.parse_issue_view_state(core, '{"comments":[{"body":"'
       .. core.state_marker(proposal_id, "ready", "v2"):gsub('"', '\\"')
       .. '","author":null},{"body":"'
       .. core.state_marker(proposal_id, "thinking", "v1"):gsub('"', '\\"')
       .. '","author":{"login":"'
-      .. core.trusted_bot_login()
+      .. devloop_base.trusted_bot_login()
       .. '"}}]}')
 
     local current = core.current_state(parsed.comments, proposal_id)

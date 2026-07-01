@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -151,7 +152,7 @@ local function make_department(ports)
     end
 
     with_lock(lock_key, function()
-      core.assert_trusted_bot_configured()
+      devloop_base.assert_trusted_bot_configured()
 
       local current = ports.github.read_issue({
         kind = "external",

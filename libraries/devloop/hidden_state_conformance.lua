@@ -41,8 +41,8 @@ local function production_replay_dept(core)
 end
 
 local function marker_author(core)
-  if type(core.assert_trusted_bot_configured) == "function" then core.assert_trusted_bot_configured() end
-  if type(core.trusted_bot_login) == "function" then return core.trusted_bot_login() end
+  if type(core.assert_trusted_bot_configured) == "function" then devloop_base.assert_trusted_bot_configured() end
+  if type(core.trusted_bot_login) == "function" then return devloop_base.trusted_bot_login() end
   return tostring(core._test_bot_login or "fkst-test-bot")
 end
 local function comment(core, body, when)

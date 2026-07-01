@@ -523,7 +523,7 @@ local function process_issue_event(event)
   core.log_entry("observe_issue", event, proposal_id, issue.dedup_key)
   local lock_key = core.observe_lock_key(issue.repo, issue.number)
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local state_view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, issue.repo, issue.number, issue.updated_at, {
       force_fresh = true,

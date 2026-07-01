@@ -272,7 +272,7 @@ end
 function M.saga_doctor_collect(opts)
   local options = opts or {}
   local repo = options.repo or read_repo()
-  M.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   local poll_key = options.poll_key
 
   local issues = options.issues or list_open_issues(repo, poll_key)

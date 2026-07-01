@@ -440,7 +440,7 @@ local function process_pr_event(event)
   end
 
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config(core)
   local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then

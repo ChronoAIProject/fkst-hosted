@@ -169,7 +169,7 @@ return {
           .. core.state_marker(issue_proposal_id, "ready", issue_version)
           .. "\n" .. m_builders.result_marker(core, issue_proposal_id, "approve", "consensus:v1")
           .. "\n" .. core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }),
-        author_login = core.trusted_bot_login(),
+        author_login = devloop_base.trusted_bot_login(),
       },
     }
     local review_comments = {
@@ -181,7 +181,7 @@ return {
           .. "\n" .. m_builders.merge_ready_marker(core, issue_proposal_id, 7, issue_version, review_proposal_id, review_dedup_key, "def456")
           .. "\n" .. m_builders.review_meta_marker(core, issue_proposal_id, review_dedup_key, "fix", issue_version .. "/fix/1", "missing guard")
           .. "\n" .. m_builders.merge_gate_marker(core, issue_proposal_id, 7, issue_version .. "/fix/1", review_proposal_id, review_dedup_key, "def456", "abc123", "rollup-red"),
-        author_login = core.trusted_bot_login(),
+        author_login = devloop_base.trusted_bot_login(),
       },
     }
     local implementation_comments = {
@@ -190,7 +190,7 @@ return {
           .. m_builders.implementing_marker(core, issue_proposal_id, "impl:v1", "devloop-owner-repo-42", "abc123", "dev", "abc123")
           .. "\n" .. m_builders.pr_link_marker(core, issue_proposal_id, 7, "devloop-owner-repo-42", "impl:v1", "dev")
           .. "\n" .. core.impl_failure_marker(issue_proposal_id, "impl:v1", "codex-failed"),
-        author_login = core.trusted_bot_login(),
+        author_login = devloop_base.trusted_bot_login(),
       },
     }
 
@@ -201,7 +201,7 @@ return {
       {
         body = "noise " .. cjk_probe .. "\n"
           .. core.dependency_waiver_marker(issue_proposal_id, issue_version, 7, "operator-waiver"),
-        author_login = core.trusted_bot_login(),
+        author_login = devloop_base.trusted_bot_login(),
       },
     }, issue_proposal_id, issue_version, 7).reason, "operator-waiver")
     t.eq(m_facts.review_reject_fact(core, review_comments, issue_proposal_id, issue_version .. "/fix/1").blocking_gap, "missing guard")

@@ -177,7 +177,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     return
   end
 
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   core.fetch_branches(repo, { branch }, "PR freshness fetch")
   local rechecked_branch_sha = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if rechecked_branch_sha ~= branch_sha then

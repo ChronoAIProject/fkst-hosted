@@ -79,7 +79,7 @@ end
 -- downstream comparisons get the bare slug regardless of whether the deployment
 -- configured "<slug>" or "<slug>[bot]". No-op for ordinary user logins.
 function C.claim_owner(M)
-  return devloop_base.strip_bot_login_suffix(M.assert_trusted_bot_configured() or M.trusted_bot_login())
+  return devloop_base.strip_bot_login_suffix(devloop_base.assert_trusted_bot_configured() or devloop_base.trusted_bot_login())
 end
 
 function C.managed_bot_logins(M, exec)

@@ -160,7 +160,7 @@ local function pipeline_review(event)
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local view = core.gh_pr_view_origin(repo, pr_number, 30)
     if view.exit_code ~= 0 then
@@ -236,7 +236,7 @@ local function pipeline_fix(event)
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local view = core.gh_pr_view_origin(repo, pr_number, 30)
     if view.exit_code ~= 0 then
@@ -297,7 +297,7 @@ local function pipeline_timeout(event)
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local comments
     local current_pr

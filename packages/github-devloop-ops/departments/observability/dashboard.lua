@@ -512,7 +512,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
   end
 
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
-  local bot_login = core.assert_trusted_bot_configured()
+  local bot_login = devloop_base.assert_trusted_bot_configured()
   deferred = ensure_dashboard_label(repo, limits, deadline); if deferred == "deferred" then return deferred end
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local current = trusted_dashboard_issue(repo, bot_login, limits, deadline)

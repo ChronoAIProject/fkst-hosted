@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local core = require("core")
@@ -102,7 +103,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     return
   end
 
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   core.fetch_branches(repo, { integration }, "branch fetch")
   local rechecked_integration_sha = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
@@ -140,7 +141,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
     return
   end
 
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   core.fetch_branches(repo, { integration }, "branch fetch")
   local rechecked_integration_sha = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then

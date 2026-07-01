@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
@@ -45,7 +46,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local view = core.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then

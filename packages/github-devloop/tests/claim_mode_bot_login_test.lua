@@ -100,11 +100,11 @@ return {
   end,
 
   test_configure_trusted_bot_login_normalizes_bracket_bot_suffix = function()
-    t.eq(core.configure_trusted_bot_login("chronoai-bot[bot]"), "chronoai-bot")
-    t.eq(core.trusted_bot_login(), "chronoai-bot")
-    t.eq(core.configure_trusted_bot_login("plain-bot"), "plain-bot")
-    t.eq(core.trusted_bot_login(), "plain-bot")
-    core.configure_trusted_bot_login(nil)
+    t.eq(devloop_base.configure_trusted_bot_login("chronoai-bot[bot]"), "chronoai-bot")
+    t.eq(devloop_base.trusted_bot_login(), "chronoai-bot")
+    t.eq(devloop_base.configure_trusted_bot_login("plain-bot"), "plain-bot")
+    t.eq(devloop_base.trusted_bot_login(), "plain-bot")
+    devloop_base.configure_trusted_bot_login(nil)
   end,
 
   test_comment_author_login_normalizes_bracket_bot_suffix = function()
@@ -115,8 +115,8 @@ return {
   end,
 
   test_authorless_comment_is_not_trusted_by_default_test_bot_login = function()
-    core.configure_trusted_bot_login(nil)
-    t.eq(core.trusted_bot_login(), core._test_bot_login)
+    devloop_base.configure_trusted_bot_login(nil)
+    t.eq(devloop_base.trusted_bot_login(), core._test_bot_login)
     t.is_nil(parsers_misc.comment_author_login(core, { body = "authorless" }))
     t.eq(parsers_misc._is_trusted_comment(core, { body = "authorless" }), false)
     t.eq(parsers_misc._is_trusted_comment(core, { author = nil, user = nil, body = "authorless" }), false)
@@ -124,31 +124,31 @@ return {
 
   -- Bare-config vs [bot]-author: trusted.
   test_bare_config_trusts_bracket_bot_author = function()
-    core.configure_trusted_bot_login("chronoai-bot")
+    devloop_base.configure_trusted_bot_login("chronoai-bot")
     t.eq(parsers_misc._is_trusted_comment(core, { author_login = "chronoai-bot[bot]", body = "x" }), true)
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
   end,
 
   -- [bot]-config vs [bot]-author: trusted.
   test_bracket_bot_config_trusts_bracket_bot_author = function()
-    core.configure_trusted_bot_login("chronoai-bot[bot]")
+    devloop_base.configure_trusted_bot_login("chronoai-bot[bot]")
     t.eq(parsers_misc._is_trusted_comment(core, { author_login = "chronoai-bot[bot]", body = "x" }), true)
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
   end,
 
   -- bare-config vs bare-author: trusted (and unrelated logins untrusted).
   test_bare_config_trusts_bare_author_and_rejects_others = function()
-    core.configure_trusted_bot_login("chronoai-bot")
+    devloop_base.configure_trusted_bot_login("chronoai-bot")
     t.eq(parsers_misc._is_trusted_comment(core, { author_login = "chronoai-bot", body = "x" }), true)
     t.eq(parsers_misc._is_trusted_comment(core, { author_login = "someone-else", body = "x" }), false)
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
   end,
 
   -- [bot]-config vs bare-author: also trusted (both sides normalized).
   test_bracket_bot_config_trusts_bare_author = function()
-    core.configure_trusted_bot_login("chronoai-bot[bot]")
+    devloop_base.configure_trusted_bot_login("chronoai-bot[bot]")
     t.eq(parsers_misc._is_trusted_comment(core, { author_login = "chronoai-bot", body = "x" }), true)
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
   end,
 
   -- (b) label-mode claim state + ownership derived from the claimed label.
@@ -329,6 +329,6 @@ return {
   test_claim_owner_returns_bare_slug_for_bracket_bot_config = function()
     mock_env("chronoai-bot[bot]", "", "")
     t.eq(m_claims.claim_owner(core), "chronoai-bot")
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
   end,
 }

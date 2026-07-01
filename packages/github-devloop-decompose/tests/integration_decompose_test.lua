@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
@@ -111,7 +112,7 @@ end
 local function trusted_comment(body)
   return {
     body = body,
-    author_login = core.trusted_bot_login(),
+    author_login = devloop_base.trusted_bot_login(),
   }
 end
 

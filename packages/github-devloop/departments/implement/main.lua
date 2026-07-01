@@ -601,7 +601,7 @@ local function process_ready_event(event)
 
   local attempt_plan = nil
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local view = core.gh_issue_view_implement(repo, issue_number, 30)
     if view.exit_code ~= 0 then

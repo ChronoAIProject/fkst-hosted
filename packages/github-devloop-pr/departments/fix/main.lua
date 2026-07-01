@@ -652,7 +652,7 @@ local function act_fix(event)
 
   local attempt_plan = nil
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
     local branches = config.branch_config(core)
 
     local pr_view = core.gh_pr_view_fix(repo, fix.pr_number, 30)

@@ -12,7 +12,7 @@ function M.from_devloop(devloop)
   if type(devloop) ~= "table" then
     error("devloop.adapters.workflow_ports: missing devloop table")
   end
-  local trusted_bot_login = require_devloop_function(devloop, "trusted_bot_login")
+  local trusted_bot_login = require("devloop.base").trusted_bot_login
   return {
     dependency_release_marker = function(...)
       return require_devloop_function(devloop, "dependency_release_marker")(...)

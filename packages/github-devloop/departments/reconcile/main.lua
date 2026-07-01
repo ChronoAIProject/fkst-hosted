@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_issue = require("devloop.parsers.issue")
@@ -110,7 +111,7 @@ local function pipeline_thinking(event)
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local view = core.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
@@ -174,7 +175,7 @@ local function pipeline_timeout(event)
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local view = core.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then

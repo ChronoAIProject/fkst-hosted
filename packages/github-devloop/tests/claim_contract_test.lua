@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local m_claims = require("devloop.claims")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
@@ -663,7 +664,7 @@ return {
       assignees = { "fkst-test-bot" },
       author_login = "human",
     }, "github-devloop/issue/owner/repo/42")
-    core.configure_trusted_bot_login(nil)
+    devloop_base.configure_trusted_bot_login(nil)
 
     t.eq(self_owned, true)
     t.eq(other_owned, false)

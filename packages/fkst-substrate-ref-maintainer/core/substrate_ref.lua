@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
@@ -642,7 +643,7 @@ function M.substrate_ref_scan()
   local cfg = config.devloop_config(M)
   local repo = require_repo(cfg.repo)
   if cfg.write_mode == "real" then
-    M.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
   end
 
   local current_pin = read_pin()

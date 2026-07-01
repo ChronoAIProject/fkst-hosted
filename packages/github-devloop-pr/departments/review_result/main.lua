@@ -51,7 +51,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     return
   end
 
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config(core)
   local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then

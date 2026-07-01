@@ -92,7 +92,7 @@ function C.parse_name_only_paths(M, stdout)
   return paths
 end
 
-local trusted_bot_login_by_M = setmetatable({}, { __mode = "k" })
+local trusted_bot_login_current = nil
 local comment_body
 local comment_author_login
 local is_trusted_comment
@@ -155,25 +155,25 @@ function C.strip_bot_login_suffix(login)
   return (tostring(login):gsub("%[bot%]$", ""))
 end
 
-function C.configure_trusted_bot_login(M, login)
+function C.configure_trusted_bot_login(login)
   if login == nil or tostring(login) == "" then
-    trusted_bot_login_by_M[M] = nil
+    trusted_bot_login_current = nil
     return nil
   end
-  trusted_bot_login_by_M[M] = C.strip_bot_login_suffix(login)
-  return trusted_bot_login_by_M[M]
+  trusted_bot_login_current = C.strip_bot_login_suffix(login)
+  return trusted_bot_login_current
 end
 
-function C.assert_trusted_bot_configured(M)
+function C.assert_trusted_bot_configured()
   local login = C.read_env("FKST_GITHUB_BOT_LOGIN")
   if login ~= nil then
-    C.configure_trusted_bot_login(M, login)
+    C.configure_trusted_bot_login(login)
   end
 
-  if C.read_env("FKST_GITHUB_WRITE") == "1" and trusted_bot_login_by_M[M] == nil then
+  if C.read_env("FKST_GITHUB_WRITE") == "1" and trusted_bot_login_current == nil then
     error("github-devloop: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
   end
-  return trusted_bot_login_by_M[M]
+  return trusted_bot_login_current
 end
 
 local dedup_key = base_ids.dedup_key
@@ -682,8 +682,8 @@ function C.gh_exec_opts(M, cmd_or_opts, timeout)
   return opts
 end
 
-function C.trusted_bot_login(M)
-  return trusted_bot_login_by_M[M] or test_bot_login
+function C.trusted_bot_login()
+  return trusted_bot_login_current or test_bot_login
 end
 
 C._max_key_len = max_key_len

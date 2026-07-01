@@ -806,7 +806,7 @@ local function process_merge_queue_tick(event)
     return
   end
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
     local branches = config.branch_config(core)
     local head, entries = merge_queue_head_all(repo, branches.integration)
     if head == nil then
@@ -913,7 +913,7 @@ local function process_merge_ready_event(event)
   end
 
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
     local branches = config.branch_config(core)
     process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   end)

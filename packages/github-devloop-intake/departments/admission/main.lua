@@ -77,7 +77,7 @@ local function admit_issue_event(event, entity)
     return
   end
   local proposal_id = base_ids.proposal_id(repo, issue_number)
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
 
   local view = core.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)
   if view.exit_code ~= 0 then

@@ -313,7 +313,7 @@ local function decomposed_done(event)
   end
   local done = false
   with_lock(context.lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
     local current_pr = read_current_pr(context.repo, context.decompose.pr_number)
     core.log_forged_markers("decompose",
       context.decompose.proposal_id,
@@ -358,7 +358,7 @@ local function act_decompose(event)
   local repo = context.repo
   local issue_number = context.issue_number
   with_lock(context.lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
 
     local current_pr = read_current_pr(repo, decompose.pr_number)
     core.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)

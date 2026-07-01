@@ -82,7 +82,7 @@ local function act_execute_start(event)
 
   local lock_key = core.observe_lock_key(repo, issue_number)
   with_lock(lock_key, function()
-    core.assert_trusted_bot_configured()
+    devloop_base.assert_trusted_bot_configured()
     local current = read_current(repo, issue_number, request)
     if current == nil then
       return

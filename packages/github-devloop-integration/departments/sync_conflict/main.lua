@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local core = require("core")
 local config = require("devloop.config")
@@ -116,7 +117,7 @@ local function push_if_real(conflict, worktree)
     return
   end
 
-  core.assert_trusted_bot_configured()
+  devloop_base.assert_trusted_bot_configured()
   core.fetch_branches(conflict.repo, { conflict.integration_branch }, "branch fetch")
   local rechecked_integration_sha = core.remote_head(conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= conflict.integration_sha then

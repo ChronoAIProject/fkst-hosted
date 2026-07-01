@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
@@ -156,7 +157,7 @@ function C.decompose_child_issue_fact_indexes(M, issues, proposal_id, version, p
   for _, issue in ipairs(issues or {}) do
     local body = tostring(type(issue) == "table" and issue.body or "")
     local trusted_child = type(issue) == "table"
-      and parsers_misc.comment_author_login(M, issue) == M.trusted_bot_login()
+      and parsers_misc.comment_author_login(M, issue) == devloop_base.trusted_bot_login()
       and tostring(issue.state or ""):upper() == "OPEN"
     if trusted_child then
       for marker in body:gmatch(child_pattern) do

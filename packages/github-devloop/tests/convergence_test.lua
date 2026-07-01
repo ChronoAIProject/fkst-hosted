@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_core_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
@@ -34,7 +35,7 @@ end
 local function trusted(body)
   return {
     body = body,
-    author_login = core.trusted_bot_login(),
+    author_login = devloop_base.trusted_bot_login(),
   }
 end
 
