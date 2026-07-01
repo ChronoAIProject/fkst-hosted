@@ -27,9 +27,21 @@ use kube::api::{Api, PostParams};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
-use crate::k8s::launcher::LaunchError;
 use crate::models::RepoRef;
 use crate::session_spec::creds::{credential_secret_data, DEFAULT_CREDS_DIR};
+
+/// Errors launching a substrate-session Pod (relocated from the deleted Model-A
+/// Job launcher, trimmed to the variants the Pod path actually raises).
+#[derive(Debug, thiserror::Error)]
+pub enum LaunchError {
+    /// Pod dispatch is enabled but no image is configured (should be caught at
+    /// config load; guarded here too).
+    #[error("FKST_POD_IMAGE is not configured")]
+    NoImage,
+    /// A Kubernetes API call failed (non-conflict).
+    #[error("kubernetes api: {0}")]
+    Kube(#[from] kube::Error),
+}
 
 /// Where the per-session credential Secret is mounted in the pod (must match the
 /// runner's `FKST_SESSION_CREDS_DIR`, [`DEFAULT_CREDS_DIR`]).

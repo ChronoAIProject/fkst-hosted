@@ -1,7 +1,8 @@
-# RBAC for pod-per-session execution. The control plane spawns + watches + GCs
-# one Job (+ its 0400 per-session Secret) per substrate session, in its OWN
-# namespace (FKST_POD_NAMESPACE = downward-API metadata.namespace). All objects
-# are namespace-agnostic so kustomize sets the namespace for everything.
+# RBAC for pod-per-session execution. The control-plane reconciler creates +
+# reconciles + GCs one long-lived Pod (+ its 0400 per-session Secret) per
+# substrate session, in its OWN namespace (FKST_POD_NAMESPACE = downward-API
+# metadata.namespace). All objects are namespace-agnostic so kustomize sets the
+# namespace for everything.
 ---
 # The control plane runs as this ServiceAccount (Deployment serviceAccountName).
 apiVersion: v1
@@ -12,7 +13,7 @@ metadata:
     app.kubernetes.io/name: fkst-control-plane
     app.kubernetes.io/part-of: fkst-hosted
 ---
-# Session Job pods AND env-validation pods run as this ServiceAccount
+# Session pods AND env-validation pods run as this ServiceAccount
 # (FKST_POD_SERVICE_ACCOUNT). It is DELIBERATELY zero-RBAC: it has NO Role and NO
 # RoleBinding, and one must NEVER be added (#338 R3 hard rule). Combined with the
 # pods' automountServiceAccountToken:false, even a leaked identity grants nothing.
@@ -31,9 +32,10 @@ metadata:
   labels:
     app.kubernetes.io/part-of: fkst-hosted
 rules:
-  # Per-session credentials: created before the Job, mounted 0400, ownerReferenced
-  # to the Job for cascade GC. ALSO backs the named-environment secret store
-  # (`fkst-env-<id>-<name>` Secret, #338).
+  # Per-session credentials: created before the Pod, mounted 0400, ownerReferenced
+  # to the Pod for cascade GC; the token key is patched in place by the rotation
+  # loop. ALSO backs the named-environment secret store (`fkst-env-<id>-<name>`
+  # Secret, #338).
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
@@ -42,18 +44,15 @@ rules:
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
-  # One Job per session: created, watched to completion, GC'd via
-  # ttlSecondsAfterFinished (delete kept for explicit teardown / the stop route).
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "delete"]
-  # Pods: read for failure diagnostics + the session GET view, AND create/delete
-  # the ephemeral env-VALIDATION pod that runs an environment's install commands
-  # before it is persisted (#338 R2). These verbs belong to the CONTROL PLANE SA
-  # only — never to `fkst-session-runner`, which stays zero-RBAC (see below).
+  # One long-lived Pod per session: the reconciler creates/lists/watches them,
+  # patches the last-pending annotation, and deletes them for idle-kill /
+  # deregister. Also create/delete the ephemeral env-VALIDATION pod that runs an
+  # environment's install commands before it is persisted (#338 R2). These verbs
+  # belong to the CONTROL PLANE SA only — never to `fkst-session-runner`, which
+  # stays zero-RBAC (see above).
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
   # Read the validation pod's logs to capture the per-command install verdict.
   - apiGroups: [""]
     resources: ["pods/log"]

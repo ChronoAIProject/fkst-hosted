@@ -61,17 +61,6 @@ pub enum AppError {
     Upstream(String),
 }
 
-/// Map an engine config-load failure onto the unified type. The engine crate
-/// (`fkst-engine`, issue #151) is role-neutral and carries its own minimal
-/// `EngineConfigError`; here it renders exactly as the former
-/// `AppError::Config` did (a 500 whose detail is logged, never echoed).
-impl From<crate::engine::EngineConfigError> for AppError {
-    fn from(err: crate::engine::EngineConfigError) -> Self {
-        let crate::engine::EngineConfigError::Invalid(message) = err;
-        AppError::Config(message)
-    }
-}
-
 /// Stable JSON error envelope: `{"error": "<code>", "message": "<text>"}`.
 ///
 /// Public + `ToSchema` so the generated OpenAPI spec can reference it as the

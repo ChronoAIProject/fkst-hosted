@@ -2,8 +2,8 @@
 //!
 //! Several envy passes over the same snapshot of variables, one per prefix: the
 //! `FKST_HOSTED_*` HTTP/server settings, the `FKST_POD_*` pod-dispatch settings,
-//! the `FKST_LLM_*` static LLM-provider settings, and the bare
-//! `FKST_WEBHOOK_TRIGGER_LABEL`.
+//! the `FKST_LLM_*` static LLM-provider settings, and the bare `FKST_*`
+//! (`FKST_GITHUB_API_BASE_URL`).
 //!
 //! The control plane is API-only and datastore-free: there is no in-process
 //! session execution, no worker fleet, no journaling, and no MongoDB, so none of
@@ -21,7 +21,7 @@ use crate::reconcile_config::ReconcileConfig;
 const ENV_PREFIX: &str = "FKST_HOSTED_";
 
 /// Prefix for the bare `FKST_*` settings (currently only
-/// `FKST_WEBHOOK_TRIGGER_LABEL`); the envy pass reads them with the `FKST_`
+/// `FKST_GITHUB_API_BASE_URL`); the envy pass reads them with the `FKST_`
 /// prefix and ignores the more specific `FKST_HOSTED_`/`FKST_POD_`/`FKST_LLM_`
 /// variables (envy drops fields it does not recognize).
 const WEBHOOK_ENV_PREFIX: &str = "FKST_";
@@ -80,11 +80,6 @@ mod defaults {
         "chat".to_string()
     }
 
-    pub(super) fn webhook_trigger_label() -> String {
-        // Only issues carrying this label auto-trigger a session.
-        "fkst".to_string()
-    }
-
     pub(super) fn github_api_base_url() -> String {
         // Base URL the per-user-store identity check calls (`GET {base}/user`).
         // Overridable so tests can point at a wiremock server.
@@ -97,20 +92,8 @@ mod defaults {
     }
 
     pub(super) fn pod_service_account() -> String {
-        // The ServiceAccount the session Job pods run as (minimal identity).
+        // The ServiceAccount the session pods run as (minimal identity).
         "fkst-session-runner".to_string()
-    }
-
-    pub(super) fn pod_run_ttl_secs() -> i32 {
-        // `ttlSecondsAfterFinished`: K8s GCs a finished Job (+ its pod and the
-        // owner-referenced Secret) this long after completion. 10 min.
-        600
-    }
-
-    pub(super) fn pod_active_deadline_secs() -> i64 {
-        // `activeDeadlineSeconds`: hard wall after which a still-running Job is
-        // failed. 1 hour — generous for a realistic engine run.
-        3600
     }
 
     pub(super) fn pod_dns_nameservers() -> Vec<String> {
@@ -147,12 +130,10 @@ struct HttpVars {
     vault_entries_per_scope_cap: usize,
 }
 
-/// Bare `FKST_*` settings (currently only `FKST_WEBHOOK_TRIGGER_LABEL`); envy
+/// Bare `FKST_*` settings (currently only `FKST_GITHUB_API_BASE_URL`); envy
 /// pass with the `FKST_` prefix.
 #[derive(Debug, Deserialize)]
 struct WebhookVars {
-    #[serde(default = "defaults::webhook_trigger_label")]
-    webhook_trigger_label: String,
     /// Base URL the per-user-store GitHub-token identity check calls
     /// (`GET {base}/user`). Env: `FKST_GITHUB_API_BASE_URL`. Default
     /// `https://api.github.com`; non-blank (tests point it at a mock server).
@@ -161,7 +142,7 @@ struct WebhookVars {
 }
 
 /// `FKST_POD_*`-prefixed variables (pod-per-session dispatch, milestone #9).
-/// kube-client owns these; `i32`/`i64` match `k8s-openapi`'s `JobSpec` fields.
+/// kube-client owns these.
 #[derive(Debug, Deserialize)]
 struct PodVars {
     #[serde(default)]
@@ -172,10 +153,6 @@ struct PodVars {
     image: Option<String>,
     #[serde(default = "defaults::pod_service_account")]
     service_account: String,
-    #[serde(default = "defaults::pod_run_ttl_secs")]
-    run_ttl_secs: i32,
-    #[serde(default = "defaults::pod_active_deadline_secs")]
-    active_deadline_secs: i64,
     /// Comma-separated external DNS resolvers for the isolated pod. Parsed as a
     /// String (not a Vec) to avoid envy's Vec quirks; split in `from_vars`.
     #[serde(default = "defaults::pod_dns_nameservers_raw")]
@@ -214,18 +191,12 @@ pub struct PodConfig {
     /// Namespace for per-session Jobs + Secrets. Env: `FKST_POD_NAMESPACE`.
     /// Default `fkst-sessions`.
     pub namespace: String,
-    /// The image session Job pods run (the control-plane image, `run-session`
+    /// The image session pods run (the control-plane image, `run-substrate`
     /// mode). Env: `FKST_POD_IMAGE`. Required when `dispatch=true`.
     pub image: Option<String>,
-    /// ServiceAccount the Job pods run as. Env: `FKST_POD_SERVICE_ACCOUNT`.
+    /// ServiceAccount the session pods run as. Env: `FKST_POD_SERVICE_ACCOUNT`.
     /// Default `fkst-session-runner`.
     pub service_account: String,
-    /// `ttlSecondsAfterFinished` for the Job. Env: `FKST_POD_RUN_TTL_SECS`.
-    /// Default 600; must be > 0 when `dispatch=true`.
-    pub run_ttl_secs: i32,
-    /// `activeDeadlineSeconds` for the Job. Env: `FKST_POD_ACTIVE_DEADLINE_SECS`.
-    /// Default 3600; must be > 0 when `dispatch=true`.
-    pub active_deadline_secs: i64,
     /// LLM provider base URL injected into the session pod as `FKST_LLM_BASE_URL`
     /// (session pods do NOT inherit the control-plane ConfigMap, so build_job
     /// injects it explicitly). Env: `FKST_LLM_BASE_URL`.
@@ -257,8 +228,6 @@ impl Default for PodConfig {
             namespace: defaults::pod_namespace(),
             image: None,
             service_account: defaults::pod_service_account(),
-            run_ttl_secs: defaults::pod_run_ttl_secs(),
-            active_deadline_secs: defaults::pod_active_deadline_secs(),
             llm_base_url: defaults::llm_base_url(),
             llm_model: defaults::llm_model(),
             llm_wire_api: defaults::llm_wire_api(),
@@ -281,9 +250,6 @@ pub struct Config {
     /// Per-request timeout in seconds for the tower-http `TimeoutLayer`.
     /// Env: `FKST_HOSTED_REQUEST_TIMEOUT_SECS`. Default 30.
     pub request_timeout_secs: u64,
-    /// Only `issues.opened` carrying this label auto-triggers a session.
-    /// Env: `FKST_WEBHOOK_TRIGGER_LABEL`. Default `fkst`.
-    pub webhook_trigger_label: String,
     /// Base URL the per-user-store identity check calls (`GET {base}/user`) to
     /// trade a caller's GitHub token for the verified `{login, id}`. The numeric
     /// `id` (never a client-supplied value) keys the user's `fkst-user-<id>`
@@ -318,7 +284,6 @@ impl Default for Config {
             bind_addr: defaults::bind_addr(),
             log_level: defaults::log_level(),
             request_timeout_secs: defaults::request_timeout_secs(),
-            webhook_trigger_label: defaults::webhook_trigger_label(),
             github_api_base_url: defaults::github_api_base_url(),
             vault_value_byte_cap: defaults::vault_value_byte_cap(),
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
@@ -429,18 +394,6 @@ impl Config {
                     "FKST_POD_NAMESPACE must not be blank when FKST_POD_DISPATCH=true".to_string(),
                 ));
             }
-            if pod.run_ttl_secs <= 0 {
-                return Err(AppError::Config(
-                    "FKST_POD_RUN_TTL_SECS must be at least 1 when FKST_POD_DISPATCH=true"
-                        .to_string(),
-                ));
-            }
-            if pod.active_deadline_secs <= 0 {
-                return Err(AppError::Config(
-                    "FKST_POD_ACTIVE_DEADLINE_SECS must be at least 1 when FKST_POD_DISPATCH=true"
-                        .to_string(),
-                ));
-            }
             // A session that actually runs needs a real LLM credential, or the
             // engine 401s on every call. Fail closed when dispatch is on but no
             // key is configured. (Checked last so the image/namespace/time-bound
@@ -479,8 +432,6 @@ impl Config {
             namespace: pod.namespace,
             image: pod_image,
             service_account: pod.service_account,
-            run_ttl_secs: pod.run_ttl_secs,
-            active_deadline_secs: pod.active_deadline_secs,
             llm_base_url: llm.base_url,
             llm_model: llm.model,
             llm_wire_api: llm.wire_api,
@@ -505,7 +456,6 @@ impl Config {
             vault_value_byte_cap: http.vault_value_byte_cap,
             vault_entries_per_scope_cap: http.vault_entries_per_scope_cap,
             llm_api_key: SecretString::from(llm_api_key.unwrap_or_default()),
-            webhook_trigger_label: webhook.webhook_trigger_label,
             github_api_base_url: webhook.github_api_base_url.trim().to_string(),
             pod,
             env,
@@ -543,11 +493,8 @@ mod tests {
         assert!(!config.pod.dispatch);
         assert_eq!(config.pod.namespace, "fkst-sessions");
         assert_eq!(config.pod.service_account, "fkst-session-runner");
-        assert_eq!(config.pod.run_ttl_secs, 600);
-        assert_eq!(config.pod.active_deadline_secs, 3600);
         assert!(config.pod.image.is_none());
         assert_eq!(config.request_timeout_secs, 30);
-        assert_eq!(config.webhook_trigger_label, "fkst");
     }
 
     #[test]
@@ -563,8 +510,6 @@ mod tests {
             ("FKST_POD_DISPATCH", "true"),
             ("FKST_POD_IMAGE", "registry/fkst-control-plane:1.0"),
             ("FKST_POD_NAMESPACE", "sessions-prod"),
-            ("FKST_POD_RUN_TTL_SECS", "900"),
-            ("FKST_POD_ACTIVE_DEADLINE_SECS", "7200"),
             ("FKST_LLM_API_KEY", "sk-test"),
             // Required by the PR6 flip whenever dispatch is on.
             ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
@@ -576,8 +521,6 @@ mod tests {
             Some("registry/fkst-control-plane:1.0")
         );
         assert_eq!(config.pod.namespace, "sessions-prod");
-        assert_eq!(config.pod.run_ttl_secs, 900);
-        assert_eq!(config.pod.active_deadline_secs, 7200);
         assert_eq!(config.llm_api_key.expose_secret(), "sk-test");
     }
 
@@ -619,27 +562,6 @@ mod tests {
             config.reconcile.github_bot_login.as_deref(),
             Some("fkst-bot")
         );
-    }
-
-    #[test]
-    fn pod_dispatch_on_rejects_nonpositive_time_bounds() {
-        let ttl = Config::from_vars(vars(&[
-            ("FKST_POD_DISPATCH", "true"),
-            ("FKST_POD_IMAGE", "img"),
-            ("FKST_POD_RUN_TTL_SECS", "0"),
-        ]))
-        .expect_err("zero ttl must fail");
-        assert!(ttl.to_string().contains("FKST_POD_RUN_TTL_SECS"));
-
-        let deadline = Config::from_vars(vars(&[
-            ("FKST_POD_DISPATCH", "true"),
-            ("FKST_POD_IMAGE", "img"),
-            ("FKST_POD_ACTIVE_DEADLINE_SECS", "0"),
-        ]))
-        .expect_err("zero deadline must fail");
-        assert!(deadline
-            .to_string()
-            .contains("FKST_POD_ACTIVE_DEADLINE_SECS"));
     }
 
     #[test]
@@ -758,17 +680,6 @@ mod tests {
         let err = Config::from_vars(vars(&[("FKST_HOSTED_PORT", "abc")]))
             .expect_err("non-numeric port must fail");
         assert!(matches!(err, AppError::Config(_)));
-    }
-
-    // ---- webhook trigger label tests -------------------------------------------
-
-    #[test]
-    fn webhook_trigger_label_defaults_and_overrides() {
-        let default = Config::from_vars(vars(&[])).expect("defaults");
-        assert_eq!(default.webhook_trigger_label, "fkst");
-        let overridden = Config::from_vars(vars(&[("FKST_WEBHOOK_TRIGGER_LABEL", "fkst-cloud")]))
-            .expect("override");
-        assert_eq!(overridden.webhook_trigger_label, "fkst-cloud");
     }
 
     // ---- github api base (per-user store identity) tests ----------------------

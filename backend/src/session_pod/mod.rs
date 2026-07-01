@@ -11,10 +11,12 @@
 //!
 //! The launch DECISIONS live in [`plan`] (pure, unit-tested); [`driver`] is the
 //! thin effectful shell whose full correctness is verified on a live cluster.
-//!
-//! This is ADDITIVE (issue #359 PR4): nothing dispatches `run-substrate` as the
-//! default path yet, and Model A (`crate::runner`'s `run-session`) is untouched.
+//! [`codex`] renders the operator-pinned codex config and [`creds_helper`] owns
+//! the in-pod git credential-helper wiring (both relocated here when the Model-A
+//! `engine`/`sessions` modules were deleted).
 
+mod codex;
+mod creds_helper;
 mod driver;
 mod plan;
 

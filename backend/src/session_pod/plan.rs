@@ -9,9 +9,10 @@
 
 use std::collections::BTreeMap;
 
-use crate::engine::GitConfigEntry;
 use crate::goals::package_ref::{package_name_from_path, parse_package_ref, PackageRef};
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
+
+use super::creds_helper::GitConfigEntry;
 
 // --- injected env keys (mirror `k8s::session_launcher`'s writer-side consts so
 // the pod reader can never disagree with the launcher on a name) ---------------

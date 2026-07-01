@@ -39,22 +39,12 @@ async fn main() -> ExitCode {
         tracing::warn!(directive = %raw_directive, "invalid log directive; falling back to info");
     }
 
-    // 1b. Subcommand dispatch: `run-session` is the in-pod, pod-per-session
-    //     runner (milestone #9). It drives ONE substrate engine session to
-    //     completion and exits with the session disposition — it never binds a
-    //     socket or builds the server router. Dispatched here (after the
-    //     subscriber init so its logs are structured) so the default arg-less
-    //     invocation keeps the existing API-server behaviour unchanged.
-    if std::env::args().nth(1).as_deref() == Some("run-session") {
-        return fkst_control_plane::runner::run_session_from_env().await;
-    }
-
     // 1c. Subcommand dispatch: `validate-env` is the in-pod, isolated
     //     install-validation runner (issue #338 §3.4). It executes a named
     //     environment's ordered install commands, prints a single-line JSON
     //     verdict as the final stdout line, and exits SUCCESS/FAILURE — it never
-    //     binds a socket or builds the server router. Mirrors the `run-session`
-    //     arm so the default arg-less invocation stays the API server unchanged.
+    //     binds a socket or builds the server router, so the default arg-less
+    //     invocation stays the API server unchanged.
     if std::env::args().nth(1).as_deref() == Some("validate-env") {
         return fkst_control_plane::install::run_validate_env().await;
     }
@@ -64,8 +54,8 @@ async fn main() -> ExitCode {
     //     the target repo, wires the rotating GitHub token into git + gh, renders
     //     the codex config, and execs `fkst-framework supervise` (forwarding
     //     SIGTERM) — it never binds a socket or builds the server router. Mirrors
-    //     the `run-session` / `validate-env` arms so the default arg-less
-    //     invocation stays the API server unchanged.
+    //     the `validate-env` arm so the default arg-less invocation stays the API
+    //     server unchanged.
     if std::env::args().nth(1).as_deref() == Some("run-substrate") {
         return fkst_control_plane::session_pod::run_substrate_from_env().await;
     }
@@ -156,14 +146,10 @@ async fn main() -> ExitCode {
         }
     };
 
-    // Capture what the Job watcher needs BEFORE `config`/`github_app` move into
-    // `AppState`. The watcher drives no per-session credential refresh (the LLM
-    // key is static config), so it only needs the namespace + the App tokens.
+    // Capture what the post-router background loops need BEFORE `config` moves
+    // into `AppState`. The env-validation GC sweep (below) needs its own copy of
+    // the namespace + the validation deadline; the reconciler gate reads dispatch.
     let pod_dispatch = config.pod.dispatch;
-    let pod_namespace = config.pod.namespace.clone();
-    let watcher_github_app = github_app.clone();
-    // The env-validation GC sweep (below) needs its own copy of the namespace +
-    // the validation deadline, captured before `config` moves into `AppState`.
     let sweep_namespace = config.pod.namespace.clone();
     let sweep_deadline = config.env.validate_deadline_secs;
 
@@ -193,33 +179,6 @@ async fn main() -> ExitCode {
         }
     };
     tracing::info!("router built");
-
-    // Pod-per-session: spawn the Job watcher (maps Job terminal status -> goal
-    // issue labels + summary comment). Requires the GitHub App (issue mutations
-    // go through the App token) + a reachable cluster.
-    if pod_dispatch {
-        match (
-            watcher_github_app,
-            fkst_control_plane::k8s::KubeClient::from_inferred(&pod_namespace).await,
-        ) {
-            (Some(github_app), Ok(kube)) => {
-                let watcher = fkst_control_plane::k8s::JobWatcher::new(
-                    kube.client().clone(),
-                    pod_namespace,
-                    github_app,
-                );
-                tokio::spawn(async move { watcher.run().await });
-                tracing::info!("job watcher spawned");
-            }
-            (None, _) => tracing::warn!(
-                "pod dispatch on but github app not configured; job watcher not started"
-            ),
-            (_, Err(error)) => tracing::warn!(
-                error = %error,
-                "pod dispatch on but kubernetes client unavailable; job watcher not started"
-            ),
-        }
-    }
 
     // Pod-per-session: spawn the env-validation GC sweep. A validation pod is a
     // bare Pod (no `ttlSecondsAfterFinished`), so a control-plane crash mid-run
