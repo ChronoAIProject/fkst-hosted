@@ -51,7 +51,7 @@ local function with_temp_worktree(conflict, fn)
 end
 
 local function require_clean_resolution(worktree)
-  local unmerged = core.run_required(core.git_unmerged_paths(worktree, 30), "unmerged path check")
+  local unmerged = core.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
   if tostring(unmerged.stdout or "") ~= "" then
     return false, tostring(unmerged.stdout or "")
   end
@@ -78,7 +78,7 @@ end
 
 local function commit_resolution(worktree, runtime, conflict)
   core.run_required(core.git_add_all(worktree, 30), "stage conflict resolution")
-  local unmerged = core.run_required(core.git_unmerged_paths(worktree, 30), "unmerged path check before commit")
+  local unmerged = core.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check before commit")
   if tostring(unmerged.stdout or "") ~= "" then
     error("github-devloop: sync conflict remains unresolved before commit")
   end
@@ -182,7 +182,7 @@ local function act(event)
       if merge_result.exit_code == 0 then
         error("github-devloop: sync conflict event replayed without merge conflict")
       end
-      local unmerged = core.run_required(core.git_unmerged_paths(worktree, 30), "unmerged path check")
+      local unmerged = core.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
       if tostring(unmerged.stdout or "") == "" then
         error("github-devloop: sync conflict merge failed without unmerged paths")
       end

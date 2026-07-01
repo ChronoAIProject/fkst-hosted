@@ -253,7 +253,7 @@ local function process_pr(repo, branches, listed_pr)
         push_if_real(repo, pr.head_ref_name, branch_sha, worktree)
         return
       end
-      local unmerged = core.git_unmerged_paths(worktree, 30)
+      local unmerged = core.git.unmerged_paths(worktree, 30)
       if unmerged.exit_code ~= 0 then
         error("github-devloop: PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
       end

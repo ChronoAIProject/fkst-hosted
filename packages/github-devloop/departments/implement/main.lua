@@ -251,7 +251,7 @@ end
 local function merge_integration_for_implementation(worktree, integration_branch, base_head)
   local merge_result = core.git_worktree_merge_no_edit(worktree, base_head, 120)
   if merge_result.exit_code == 0 then return true end
-  local unmerged_result = core.git_unmerged_paths(worktree, 30)
+  local unmerged_result = core.git.unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
     error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end

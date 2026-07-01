@@ -106,7 +106,7 @@ M.fetch_pr_view_origin = function(...) return github_proxy_entity_view.fetch_pr_
 M.invalidate_entity_after_write = function(...) return github_proxy_entity_view.invalidate_entity_after_write(M, ...) end
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
-M._git = require("forge.git").new(dept_exec_argv)
+M.git = require("forge.git").new(dept_exec_argv)
 M.repo_ref_store_lock_key = function(...) return git_mechanics.repo_ref_store_lock_key(M, ...) end
 M.with_repo_ref_store_lock = function(...) return git_mechanics.with_repo_ref_store_lock(M, ...) end
 M.run_required = function(...) return git_mechanics.run_required(M, ...) end
@@ -125,7 +125,6 @@ M.current_branch_head_sha = function(...) return git_mechanics.current_branch_he
 M.git_push_branch_force_with_lease = function(...) return git_mechanics.git_push_branch_force_with_lease(M, ...) end
 M.git_push_branch_update = function(...) return git_mechanics.git_push_branch_update(M, ...) end
 M.git_push_worktree_branch_update = function(...) return git_mechanics.git_push_worktree_branch_update(M, ...) end
-M.git_unmerged_paths = function(...) return git_mechanics.git_unmerged_paths(M, ...) end
 M.git_diff_check = function(...) return git_mechanics.git_diff_check(M, ...) end
 M.git_diff_cached_check = function(...) return git_mechanics.git_diff_cached_check(M, ...) end
 M.git_conflict_markers = function(...) return git_mechanics.git_conflict_markers(M, ...) end

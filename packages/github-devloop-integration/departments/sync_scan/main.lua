@@ -214,7 +214,7 @@ local function act(event)
         return
       end
 
-      local unmerged = core.git_unmerged_paths(worktree, 30)
+      local unmerged = core.git.unmerged_paths(worktree, 30)
       if unmerged.exit_code ~= 0 then
         error("github-devloop: unmerged path check failed: " .. tostring(unmerged.stderr))
       end

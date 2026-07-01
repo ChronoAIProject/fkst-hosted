@@ -124,7 +124,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.git_is_ancestor(M, maybe_ancestor_sha, descendant_sha, timeout)
-    return M._git.is_ancestor(
+    return M.git.is_ancestor(
       require_safe_sha("ancestor sha", maybe_ancestor_sha),
       require_safe_sha("descendant sha", descendant_sha),
       timeout
@@ -132,15 +132,15 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.git_merge_no_ff(M, worktree, sha, timeout)
-    return M._git.merge_no_ff(worktree, require_safe_sha("merge sha", sha), timeout)
+    return M.git.merge_no_ff(worktree, require_safe_sha("merge sha", sha), timeout)
   end
 
   function C.git_fast_forward(M, worktree, sha, timeout)
-    return M._git.fast_forward(worktree, require_safe_sha("fast-forward sha", sha), timeout)
+    return M.git.fast_forward(worktree, require_safe_sha("fast-forward sha", sha), timeout)
   end
 
   function C.git_remote_trees_equal_quiet(M, upstream, integration, timeout)
-    return M._git.remote_trees_equal_quiet(
+    return M.git.remote_trees_equal_quiet(
       require_safe_branch("upstream branch", upstream),
       require_safe_branch("integration branch", integration),
       timeout
@@ -148,7 +148,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.git_trees_equal_quiet(M, sha_a, sha_b, timeout)
-    return M._git.trees_equal_quiet(
+    return M.git.trees_equal_quiet(
       require_safe_sha("tree compare sha", sha_a),
       require_safe_sha("tree compare sha", sha_b),
       timeout
@@ -158,13 +158,13 @@ local forge_validators = require("devloop.forge_validators")
   function C.current_base_head(M, base_branch)
     local branch = require_safe_branch("base branch", base_branch)
     local fetch_result, fetch_error = run_git_ok(function()
-      return M._git.fetch_branch("origin", branch, 60)
+      return M.git.fetch_branch("origin", branch, 60)
     end, "base fetch")
     if fetch_result == nil then
       return nil, fetch_error
     end
     local head_result, head_error = run_git_ok(function()
-      return M._git.remote_branch_head("origin", branch, 30)
+      return M.git.remote_branch_head("origin", branch, 30)
     end, "base head")
     if head_result == nil then
       return nil, head_error
@@ -180,12 +180,12 @@ local forge_validators = require("devloop.forge_validators")
     local approved = require_safe_sha("approved head sha", approved_head_sha)
     local base = require_safe_sha("base head sha", base_head_sha)
     local new_head = require_safe_sha("new head sha", new_head_sha)
-    local merge_tree = M._git.merge_tree(approved, base, 120)
+    local merge_tree = M.git.merge_tree(approved, base, 120)
     local tree = tostring(merge_tree.stdout or ""):gsub("%s+$", "")
     if tree == "" then
       return false, "merge-tree produced no tree"
     end
-    local result = M._git.trees_equal_quiet(tree, new_head, 30)
+    local result = M.git.trees_equal_quiet(tree, new_head, 30)
     if result.exit_code == 0 then
       return true, "empty"
     end
@@ -194,11 +194,11 @@ local forge_validators = require("devloop.forge_validators")
 
   function C.current_branch_head_sha(M, branch)
     local safe_branch = require_safe_branch("branch", branch)
-    local fetch_result = M._git.fetch_branch("origin", safe_branch, 60)
+    local fetch_result = M.git.fetch_branch("origin", safe_branch, 60)
     if fetch_result.exit_code ~= 0 then
       return nil
     end
-    local head_result = M._git.fetch_head_commit(30)
+    local head_result = M.git.fetch_head_commit(30)
     if head_result.exit_code ~= 0 then
       return nil
     end
@@ -210,7 +210,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.git_push_branch_force_with_lease(M, branch, new_sha, expected_old_sha, timeout)
-    return M._git.push_branch_force_with_lease(
+    return M.git.push_branch_force_with_lease(
       require_safe_branch("push branch", branch),
       require_safe_sha("new branch sha", new_sha),
       require_safe_sha("expected old branch sha", expected_old_sha),
@@ -219,35 +219,32 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.git_push_branch_update(M, branch, timeout)
-    return M._git.push_branch_update(require_safe_branch("push branch", branch), timeout)
+    return M.git.push_branch_update(require_safe_branch("push branch", branch), timeout)
   end
 
   function C.git_push_worktree_branch_update(M, worktree, branch, timeout)
-    return M._git.push_worktree_branch_update(worktree, require_safe_branch("push branch", branch), nil, timeout)
+    return M.git.push_worktree_branch_update(worktree, require_safe_branch("push branch", branch), nil, timeout)
   end
 
-  function C.git_unmerged_paths(M, worktree, timeout)
-    return M._git.unmerged_paths(worktree, timeout)
-  end
 
   function C.git_diff_check(M, worktree, timeout)
-    return M._git.diff_check(worktree, false, timeout)
+    return M.git.diff_check(worktree, false, timeout)
   end
 
   function C.git_diff_cached_check(M, worktree, timeout)
-    return M._git.diff_check(worktree, true, timeout)
+    return M.git.diff_check(worktree, true, timeout)
   end
 
   function C.git_conflict_markers(M, worktree, timeout)
-    return M._git.conflict_markers(worktree, timeout)
+    return M.git.conflict_markers(worktree, timeout)
   end
 
   function C.git_commit_message_file(M, worktree, message_file, timeout)
-    return M._git.commit_message_file(worktree, message_file, timeout)
+    return M.git.commit_message_file(worktree, message_file, timeout)
   end
 
   function C.git_worktree_remove(M, worktree, timeout)
-    return M._git.worktree_remove(worktree, timeout)
+    return M.git.worktree_remove(worktree, timeout)
   end
 
 function C.helpers(M)
