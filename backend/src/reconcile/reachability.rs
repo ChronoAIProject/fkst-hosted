@@ -8,7 +8,7 @@
 //! feedback to the issue author. This pre-flight surfaces the problem UP FRONT so
 //! the planner can flag the trigger issue instead of spawning a doomed pod.
 //!
-//! It probes each ref UNAUTHENTICATED (public repos only): a `GET
+//! It probes each ref with a `GET
 //! /repos/{owner}/{repo}/contents/{path}/fkst.toml?ref={git_ref}`. A `200` proves
 //! the repo, the ref, the path, AND that a package manifest lives there; a `404`
 //! means any of those is wrong (or the repo is private); any other status is
@@ -16,8 +16,15 @@
 //! miss. ALL refs are probed and ALL failures collected, so the author sees every
 //! bad line at once rather than fixing them one redelivery at a time.
 //!
-//! Secret hygiene: package refs are non-secret public metadata; the probe carries
-//! no credential.
+//! The probe is AUTHENTICATED with the repo's installation token when one is
+//! available: an authenticated request reads public content just the same but under
+//! the 5000/hour token budget instead of the 60/hour UNAUTHENTICATED-per-IP budget,
+//! which a session's package closure (many refs) times repeated reconciles would
+//! otherwise exhaust — producing false "unreachable" flags. It falls back to an
+//! unauthenticated probe when no token is supplied (public repos only).
+//!
+//! Secret hygiene: package refs are non-secret public metadata; the token is a
+//! standard bearer credential, sent only as an `Authorization` header, never logged.
 
 use crate::goals::trigger_parse::PackageRef;
 
@@ -36,18 +43,20 @@ pub fn render_ref(r: &PackageRef) -> String {
 /// failures collected, not just the first).
 ///
 /// `github_api_base` is the REST base (e.g. `https://api.github.com`, trailing `/`
-/// trimmed by the caller). The probe is unauthenticated: public repos only.
+/// trimmed by the caller). `token` is the repo's installation token when available
+/// (authenticated probe, 5000/hour); `None` falls back to an unauthenticated probe.
 pub async fn check_reachable(
     refs: &[PackageRef],
     http: &reqwest::Client,
     github_api_base: &str,
+    token: Option<&str>,
 ) -> Result<(), Vec<(String, String)>> {
     let base = github_api_base.trim_end_matches('/');
     let mut failures: Vec<(String, String)> = Vec::new();
 
     for r in refs {
         let display = render_ref(r);
-        match probe_one(r, http, base).await {
+        match probe_one(r, http, base, token).await {
             Ok(()) => {}
             Err(reason) => failures.push((display, reason)),
         }
@@ -63,18 +72,29 @@ pub async fn check_reachable(
 /// Probe a single ref: `Ok(())` on a `200`, else `Err(reason)`. A `404` is the
 /// canonical "missing repo / ref / path (or private)"; any other status (or a
 /// transport error) is reported so a transient failure is not mistaken for a miss.
-async fn probe_one(r: &PackageRef, http: &reqwest::Client, base: &str) -> Result<(), String> {
+async fn probe_one(
+    r: &PackageRef,
+    http: &reqwest::Client,
+    base: &str,
+    token: Option<&str>,
+) -> Result<(), String> {
     let url = format!(
         "{base}/repos/{}/{}/contents/{}/{PACKAGE_MANIFEST}",
         r.owner, r.repo, r.path
     );
-    let response = http
+    let mut request = http
         .get(&url)
         .query(&[("ref", r.git_ref.as_str())])
         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
         // GitHub rejects an API request with no User-Agent (403); set it here so
         // the probe works regardless of how the shared client was built.
-        .header(reqwest::header::USER_AGENT, "fkst-hosted-api")
+        .header(reqwest::header::USER_AGENT, "fkst-hosted-api");
+    // Authenticate when a token is available: reads public content the same but
+    // under the 5000/hour token budget instead of the 60/hour per-IP budget.
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
+    let response = request
         .send()
         .await
         .map_err(|e| format!("request failed: {e}"))?;

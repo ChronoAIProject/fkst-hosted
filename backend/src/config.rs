@@ -74,10 +74,11 @@ mod defaults {
     }
 
     pub(super) fn llm_wire_api() -> String {
-        // The codex `wire_api`. MUST default to `chat`: chrono-llm serves only
-        // `/chat/completions`; `responses` returns 502 (a verified bug). Never
-        // default to `responses`.
-        "chat".to_string()
+        // The codex `wire_api`. Defaults to `responses`: codex 0.139+ dropped
+        // `wire_api = "chat"` (it errors at config load), and the LLM backend
+        // (verified on llm.aelf.dev) serves the `/responses` API. Operators pin a
+        // chat-only backend via `FKST_LLM_WIRE_API`.
+        "responses".to_string()
     }
 
     pub(super) fn github_api_base_url() -> String {
@@ -788,8 +789,8 @@ mod tests {
         let config = Config::from_vars(vars(&[])).expect("defaults");
         assert_eq!(config.pod.llm_model, "gpt-5.5");
         assert_eq!(config.pod.llm_base_url, "https://llm.aelf.dev/v1");
-        // The wire_api MUST default to `chat` (chrono-llm 502s on `responses`).
-        assert_eq!(config.pod.llm_wire_api, "chat");
+        // The wire_api defaults to `responses` (codex 0.139+ rejects `chat`).
+        assert_eq!(config.pod.llm_wire_api, "responses");
         // No key configured (dispatch off) => empty, never a placeholder.
         assert_eq!(config.llm_api_key.expose_secret(), "");
     }
@@ -799,13 +800,13 @@ mod tests {
         let config = Config::from_vars(vars(&[
             ("FKST_LLM_MODEL", "gpt-4.1"),
             ("FKST_LLM_BASE_URL", "https://proxy.example/s/llm"),
-            ("FKST_LLM_WIRE_API", "responses"),
+            ("FKST_LLM_WIRE_API", "chat"),
             ("FKST_LLM_API_KEY", "sk-abc"),
         ]))
         .expect("overrides");
         assert_eq!(config.pod.llm_model, "gpt-4.1");
         assert_eq!(config.pod.llm_base_url, "https://proxy.example/s/llm");
-        assert_eq!(config.pod.llm_wire_api, "responses");
+        assert_eq!(config.pod.llm_wire_api, "chat");
         assert_eq!(config.llm_api_key.expose_secret(), "sk-abc");
     }
 

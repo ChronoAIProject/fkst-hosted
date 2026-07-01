@@ -82,7 +82,7 @@ RUN set -eux; \
 FROM rust:${RUST_VERSION}-bookworm AS engine-builder
 # Defaulted to the pinned SHA as a temporary workaround (#227): the current build
 # platform can't pass build-time args. Keep in lockstep with backend/engine.ref.
-ARG FKST_SUBSTRATE_REF=cb072b224d817a8a4b57f92b613cf5f2174d8759
+ARG FKST_SUBSTRATE_REF=723f5433814975d5c02723e7c5874190c7b8ed73
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 # Fail fast on an explicitly empty pin. This guard runs before any clone; the
 # default above pins a no-arg build, but `--build-arg FKST_SUBSTRATE_REF=""`
@@ -213,16 +213,17 @@ RUN test -x /app/target/release/fkst-control-plane \
 FROM debian:bookworm-slim AS control-plane-runtime
 # Same default as the engine-builder stage (#227); feeds the io.fkst.engine.ref
 # label below. Keep in lockstep with backend/engine.ref.
-ARG FKST_SUBSTRATE_REF=cb072b224d817a8a4b57f92b613cf5f2174d8759
+ARG FKST_SUBSTRATE_REF=723f5433814975d5c02723e7c5874190c7b8ed73
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 ARG PRODUCT_VERSION=0.0.0
 ARG CODEX_VERSION
 ARG GH_VERSION
-# git + bash for spawned engine sessions, ca-certificates for outbound TLS
-# (codex talks HTTPS to its LLM provider), and libdbus-1-3 so the bundled nyxid
-# CLI (which links libdbus via its keyring store) loads in the slim runtime.
+# git + bash for the substrate session, ca-certificates for outbound TLS (codex
+# talks HTTPS to its LLM provider), and python3 — the github-devloop packages
+# shell out to it (e.g. `libraries/devloop/context_bundle.lua` publishes the
+# codex context bundle via python3), so it must be on PATH before any session runs.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git bash ca-certificates libdbus-1-3 \
+        git bash ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 RUN groupadd -g 10001 fkst && useradd -m -u 10001 -g 10001 -s /usr/sbin/nologin fkst
 # Engine binaries: directory copy is the tolerant mechanism — fkst-framework is
@@ -232,11 +233,8 @@ COPY --from=engine-builder /engine-dist/bin/ /usr/local/bin/
 COPY --from=engine-builder /engine-dist/ENGINE_SHA /etc/fkst-engine-sha
 COPY --from=engine-builder /engine-dist/ENGINE_VERSION /etc/fkst-engine-version
 COPY --from=server-builder /app/target/release/fkst-control-plane /usr/local/bin/fkst-control-plane
-# nyxid CLI for in-session NyxID-brokered business calls (#103). Assert it
-# launches in the slim runtime (catches a missing shared lib) and reports the
-# pinned v0.7.0.
-COPY --from=cli-builder /cli-dist/nyxid /usr/local/bin/nyxid
-RUN nyxid --version && nyxid --version | grep -q "0.7.0"
+# (nyxid CLI removed: NyxID is gone in Model B — the session substrate uses only
+# git/gh/codex; the cli-builder stage is now unreferenced and no longer built.)
 # codex CLI (issue #112): the engine requires it on PATH (fkst-substrate does
 # not install it). The static musl binary needs no extra runtime libs; the
 # assertion below fails the build on version drift OR a missing library (a

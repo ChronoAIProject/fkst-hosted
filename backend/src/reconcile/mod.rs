@@ -46,6 +46,21 @@ pub const SUBSTRATE_INVALID_LABEL: &str = "fkst-substrate-invalid";
 /// installation id scopes the GitHub App token; the repo names the work.
 pub type RepoKey = (i64, RepoRef);
 
+/// The set of repos currently carrying ≥1 open trigger-issue registration, shared
+/// (cheap `Arc<Mutex>`) between the per-repo reconcile that MAINTAINS it and the
+/// sweep that re-enqueues every member each tick. It closes the first-spawn gap:
+/// without it, a repo with a registration but no pod yet is re-reconciled ONLY by
+/// the slow full-resync, so a just-labelled work issue would stall for up to
+/// `pod_full_resync_interval_secs` whenever the triggering webhook raced GitHub's
+/// search index (a consistently-lagging index in practice). With the repo in this
+/// set the 30s sweep re-checks its pending work, so the spawn lands within a sweep.
+pub type ActiveRepos = std::sync::Arc<std::sync::Mutex<std::collections::HashSet<RepoKey>>>;
+
+/// A fresh, empty [`ActiveRepos`] for the reconciler to share across its loops.
+pub fn new_active_repos() -> ActiveRepos {
+    std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
 /// A clonable handle for enqueuing repositories onto the reconcile queue. The
 /// webhook (PR6), the sweep, and the full-resync all push `RepoKey`s through this;
 /// the single [`run_reconcile_loop`] consumer drains + dedups them.

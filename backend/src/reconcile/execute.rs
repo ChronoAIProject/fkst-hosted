@@ -15,6 +15,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use secrecy::ExposeSecret;
+
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::chrono::{DateTime, Utc};
 use kube::api::{Api, DeleteParams, Patch, PatchParams};
@@ -56,6 +58,10 @@ pub struct ReconcileCtx {
     pub http: reqwest::Client,
     /// The loaded control-plane config (pod knobs, reconciler knobs, LLM key).
     pub config: Config,
+    /// Repos with ≥1 open trigger registration. [`reconcile_repo`] maintains it and
+    /// the sweep re-enqueues each member, so a first-spawn repo (registration but no
+    /// pod) is reconciled every sweep instead of only by the slow full-resync.
+    pub active_repos: crate::reconcile::ActiveRepos,
 }
 
 /// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows
@@ -101,11 +107,16 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
     let owner_repo = format!("{}/{}", reg.repo.owner, reg.repo.name);
 
     // 1. Reachability: every package ref must resolve on public GitHub. A failure
-    //    flags the trigger issue (comment + latch label) and skips the spawn.
+    //    flags the trigger issue (comment + latch label) and skips the spawn. The
+    //    probe is authenticated with the repo's installation token (best-effort mint;
+    //    falls back to unauthenticated) so a large package closure across repeated
+    //    reconciles rides the 5000/hour token budget, not the 60/hour per-IP one.
+    let reach_token = ctx.github.token_for_repo(&owner_repo, None).await.ok();
     if let Err(bad) = reachability::check_reachable(
         &reg.def.packages,
         &ctx.http,
         &ctx.config.github_api_base_url,
+        reach_token.as_ref().map(|t| t.expose_secret()),
     )
     .await
     {

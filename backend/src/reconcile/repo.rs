@@ -68,6 +68,11 @@ pub async fn reconcile_repo(
         }
     }
 
+    // Track this repo in the shared active-repos set so the sweep keeps reconciling
+    // it while it has ≥1 registration (closes the first-spawn/search-lag gap); drop
+    // it when the last trigger issue is gone so idle repos don't churn the sweep.
+    set_active(ctx, installation_id, repo, !regs.is_empty());
+
     // 3. Observe the live pods for this repo.
     let live = list_live_pods(ctx, repo).await?;
 
@@ -103,6 +108,19 @@ pub async fn reconcile_repo(
         execute(action, repo, ctx).await;
     }
     Ok(())
+}
+
+/// Insert or remove `(installation, repo)` in the shared active-repos set (present
+/// while the repo has ≥1 open trigger registration). Poison-safe: a panic elsewhere
+/// while the lock is held never wedges the reconciler.
+fn set_active(ctx: &ReconcileCtx, installation_id: i64, repo: &RepoRef, active: bool) {
+    let key = (installation_id, repo.clone());
+    let mut set = ctx.active_repos.lock().unwrap_or_else(|e| e.into_inner());
+    if active {
+        set.insert(key);
+    } else {
+        set.remove(&key);
+    }
 }
 
 /// LIST the substrate-session pods and project the ones belonging to `repo` into

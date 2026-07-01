@@ -66,7 +66,7 @@ fn read_substrate_env_defaults_the_llm_trio_when_absent() {
     let env = read_substrate_env_from(lookup(&map)).expect("defaults apply");
     assert_eq!(env.llm_model, DEFAULT_LLM_MODEL);
     assert_eq!(env.llm_base_url, DEFAULT_LLM_BASE_URL);
-    assert_eq!(env.llm_wire_api, "chat");
+    assert_eq!(env.llm_wire_api, "responses");
 }
 
 #[test]
@@ -104,7 +104,7 @@ fn refs(specs: &[&str]) -> Vec<PackageRef> {
 }
 
 #[test]
-fn plan_clones_groups_one_workspace_and_derives_names() {
+fn plan_clones_groups_one_workspace_and_keeps_paths() {
     let refs = refs(&[
         "org/pkgs@dev:packages/github-devloop",
         "org/pkgs@dev:packages/github-proxy",
@@ -119,8 +119,11 @@ fn plan_clones_groups_one_workspace_and_derives_names() {
         }
     );
     assert_eq!(
-        plan.platform_packages,
-        vec!["github-devloop".to_string(), "github-proxy".to_string()]
+        plan.package_paths,
+        vec![
+            "packages/github-devloop".to_string(),
+            "packages/github-proxy".to_string()
+        ]
     );
 }
 
@@ -142,9 +145,10 @@ fn build_supervise_args_is_the_exact_vector() {
     let args = build_supervise_args(
         "/rt/project",
         "/rt/platform",
-        &["github-devloop".to_string(), "github-proxy".to_string()],
-        "/var/run/fkst/durable",
-        "/var/run/fkst/runtime",
+        &[
+            "packages/github-devloop".to_string(),
+            "packages/github-proxy".to_string(),
+        ],
         "/usr/local/bin/fkst-framework",
     );
     assert_eq!(
@@ -153,14 +157,10 @@ fn build_supervise_args_is_the_exact_vector() {
             "supervise",
             "--project-root",
             "/rt/project",
-            "--platform-root",
-            "/rt/platform",
-            "--platform-packages",
-            "github-devloop github-proxy",
-            "--durable-root",
-            "/var/run/fkst/durable",
-            "--runtime-root",
-            "/var/run/fkst/runtime",
+            "--package-root",
+            "/rt/platform/packages/github-devloop",
+            "--package-root",
+            "/rt/platform/packages/github-proxy",
             "--framework-bin",
             "/usr/local/bin/fkst-framework",
         ]

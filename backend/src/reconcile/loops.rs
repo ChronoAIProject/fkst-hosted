@@ -75,7 +75,7 @@ pub async fn run_sweep_loop(ctx: ReconcileCtx, handle: ReconcileHandle) {
             Ok(n) if n > 0 => {
                 tracing::debug!(
                     enqueued = n,
-                    "reconcile sweep: enqueued repos with live pods"
+                    "reconcile sweep: enqueued repos with live pods or open registrations"
                 )
             }
             Ok(_) => {}
@@ -102,6 +102,14 @@ async fn sweep_once(ctx: &ReconcileCtx, handle: &ReconcileHandle) -> Result<usiz
         if let Some(key) = repo_key_from_pod(pod) {
             keys.insert(key);
         }
+    }
+    // Also re-enqueue every repo with an open trigger registration, even those with
+    // NO pod yet — so a first-spawn repo is reconciled every sweep (not only by the
+    // slow full-resync), catching a search-lagged work issue within one sweep. See
+    // `ActiveRepos`.
+    {
+        let active = ctx.active_repos.lock().unwrap_or_else(|e| e.into_inner());
+        keys.extend(active.iter().cloned());
     }
     let enqueued = keys.len();
     for key in keys {

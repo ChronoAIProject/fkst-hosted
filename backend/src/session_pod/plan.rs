@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::goals::package_ref::{package_name_from_path, parse_package_ref, PackageRef};
+use crate::goals::package_ref::{parse_package_ref, PackageRef};
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 
 use super::creds_helper::GitConfigEntry;
@@ -35,9 +35,10 @@ const GIT_CONFIG_COUNT_ENV: &str = "GIT_CONFIG_COUNT";
 // the HTTP config never diverge on the operator-pinned provider) ---------------
 const DEFAULT_LLM_MODEL: &str = "gpt-5.5";
 const DEFAULT_LLM_BASE_URL: &str = "https://llm.aelf.dev/v1";
-/// MUST default to `chat`: chrono-llm serves only `/chat/completions`; `responses`
-/// 502s (a verified bug). Never default to `responses`.
-const DEFAULT_LLM_WIRE_API: &str = "chat";
+/// Defaults to `responses`: codex 0.139+ rejects `wire_api = "chat"` at config
+/// load, and the LLM backend (verified on llm.aelf.dev) serves the `/responses`
+/// API. Overridden per-deploy via `FKST_LLM_WIRE_API`.
+const DEFAULT_LLM_WIRE_API: &str = "responses";
 
 /// The `supervise` subcommand token.
 const SUPERVISE_SUBCOMMAND: &str = "supervise";
@@ -142,7 +143,10 @@ pub struct WorkspaceRepo {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClonePlan {
     pub platform_repo: WorkspaceRepo,
-    pub platform_packages: Vec<String>,
+    /// Package roots to activate, as repo-relative paths under the workspace clone
+    /// (e.g. `packages/github-devloop`). Each becomes one
+    /// `--package-root <platform_root>/<path>` supervise arg.
+    pub package_paths: Vec<String>,
 }
 
 /// Group the package refs into a single-workspace [`ClonePlan`].
@@ -163,7 +167,7 @@ pub fn plan_clones(refs: &[PackageRef]) -> Result<ClonePlan, String> {
         git_ref: first.git_ref.clone(),
     };
 
-    let mut platform_packages = Vec::with_capacity(refs.len());
+    let mut package_paths = Vec::with_capacity(refs.len());
     for candidate in refs {
         if candidate.owner != platform_repo.owner
             || candidate.repo != platform_repo.repo
@@ -180,46 +184,43 @@ pub fn plan_clones(refs: &[PackageRef]) -> Result<ClonePlan, String> {
                 candidate.git_ref,
             ));
         }
-        platform_packages.push(package_name_from_path(&candidate.path).to_string());
+        package_paths.push(candidate.path.clone());
     }
     Ok(ClonePlan {
         platform_repo,
-        platform_packages,
+        package_paths,
     })
 }
 
-/// Build the exact `fkst-framework supervise` argv (issue #359 §5.3):
-/// `["supervise", "--project-root", <p>, "--platform-root", <p>,
-///   "--platform-packages", <names>, "--durable-root", <d>, "--runtime-root", <r>,
-///   "--framework-bin", <bin>]`.
+/// Build the exact `fkst-framework supervise` argv. The real CLI (verified
+/// against `crates/fkst-framework/src/main.rs`) accepts ONLY `--project-root`,
+/// repeatable `--package-root`, and `--framework-bin` — there is no
+/// `--platform-root`/`--platform-packages`/`--durable-root`/`--runtime-root`. The
+/// durable + runtime roots are read from the `FKST_DURABLE_ROOT`/
+/// `FKST_RUNTIME_ROOT` env instead (set on the child by [`substrate_child_env`]).
 ///
-/// `--platform-packages` is ONE argument: the names joined by a single space
-/// (matches the fkst-packages host-run contract). // verify live: confirm the
-/// space-joined single-arg form against the running `fkst-framework supervise`
-/// before the first cluster run.
+/// Each `package_path` is a repo-relative dir under the cloned workspace and
+/// becomes a `--package-root <platform_root>/<path>` arg; the sibling
+/// `libraries/*` + `fkst.lock` resolve from that same clone.
 pub fn build_supervise_args(
     project_root: &str,
     platform_root: &str,
-    platform_packages: &[String],
-    durable_root: &str,
-    runtime_root: &str,
+    package_paths: &[String],
     framework_bin: &str,
 ) -> Vec<String> {
-    vec![
+    let mut args = vec![
         SUPERVISE_SUBCOMMAND.to_string(),
         "--project-root".to_string(),
         project_root.to_string(),
-        "--platform-root".to_string(),
-        platform_root.to_string(),
-        "--platform-packages".to_string(),
-        platform_packages.join(" "),
-        "--durable-root".to_string(),
-        durable_root.to_string(),
-        "--runtime-root".to_string(),
-        runtime_root.to_string(),
-        "--framework-bin".to_string(),
-        framework_bin.to_string(),
-    ]
+    ];
+    let root = platform_root.trim_end_matches('/');
+    for path in package_paths {
+        args.push("--package-root".to_string());
+        args.push(format!("{root}/{}", path.trim_start_matches('/')));
+    }
+    args.push("--framework-bin".to_string());
+    args.push(framework_bin.to_string());
+    args
 }
 
 /// Assemble the env for the supervise child: the process env, PLUS the git-cred

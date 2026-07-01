@@ -30,7 +30,7 @@ data:
   FKST_LLM_BASE_URL: "https://llm.aelf.dev/v1"  # PUBLIC: the isolated session pod reaches the LLM over the internet, never in-cluster (#338 R3)
   # wire_api MUST be "chat": chrono-llm serves only /chat/completions (502 on
   # /responses). Non-blank (fail-closed).
-  FKST_LLM_WIRE_API: "chat"
+  FKST_LLM_WIRE_API: "responses"
 
   # --- Session trigger ---
   # Only a GitHub issues.opened carrying this label auto-triggers a session.
