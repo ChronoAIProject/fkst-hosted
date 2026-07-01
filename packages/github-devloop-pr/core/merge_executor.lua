@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_bodies = require("devloop.requests.bodies")
@@ -784,7 +785,7 @@ end
 local function process_merge_queue_tick(event)
   local cause = type(event and event.payload) == "table" and event.payload.cause or nil
   local cause_kind = type(cause) == "table" and tostring(cause.kind or "") or ""
-  local repo = core.read_env("FKST_GITHUB_REPO")
+  local repo = devloop_base.read_env("FKST_GITHUB_REPO")
   if repo == nil or repo == "" then
     core.log_entry("merge", event, "unknown", "")
     core.log_line("info", "merge", "unknown", "GATE", {

@@ -45,17 +45,17 @@ end
 
 local function mock_env(times)
   for _ = 1, times or 8 do
-    t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
       stdout = "fkst-test-bot",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
       stdout = "dev",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
       stdout = "",
       stderr = "",
       exit_code = 0,

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local t = fkst.test
 local core = require("core")
 local graph = require("testkit.graph")
@@ -8,12 +9,12 @@ gh_argv.install(t, core)
 local repo = "owner/repo"
 
 local function mock_env()
-  t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
     stdout = repo,
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
     stdout = "fkst-test-bot",
     stderr = "",
     exit_code = 0,

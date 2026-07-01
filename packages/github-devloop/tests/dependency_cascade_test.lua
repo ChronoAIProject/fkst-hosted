@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local t = h.t
@@ -229,7 +230,7 @@ local function mock_implement_issue(labels, comments)
 end
 
 local function mock_repo()
-  t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
     stdout = repo,
     stderr = "",
     exit_code = 0,
@@ -561,7 +562,7 @@ return {
   end,
 
   test_dependency_gate_cross_repo_and_failures_unresolvable = function()
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_MANAGED_SIBLING_REPOS"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_MANAGED_SIBLING_REPOS"), {
       stdout = "",
       stderr = "",
       exit_code = 0,

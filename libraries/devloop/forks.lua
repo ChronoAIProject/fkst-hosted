@@ -14,7 +14,7 @@ function F.managed_fork_trust_set(core, bot_login, managed)
     for login, trusted in pairs(managed) do
       if trusted then trust_set[login] = true end
     end
-  elseif type(core) == "table" and type(core.read_env) == "function" then
+  elseif type(core) == "table" then
     for login, trusted in pairs(m_claims.managed_bot_logins(core) or {}) do
       if trusted then trust_set[login] = true end
     end

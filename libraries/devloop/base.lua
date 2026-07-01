@@ -8,11 +8,11 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local transition_version = require("contract.transition_version")
 
-function C.read_env_command(M, name)
-  return config.read_env_command(M, name)
+function C.read_env_command(name)
+  return config.read_env_command(name)
 end
-function C.read_env(M, name, exec)
-  return config.read_env(M, name, exec)
+function C.read_env(name, exec)
+  return config.read_env(name, exec)
 end
 
 local max_key_len = 200
@@ -165,12 +165,12 @@ function C.configure_trusted_bot_login(M, login)
 end
 
 function C.assert_trusted_bot_configured(M)
-  local login = C.read_env(M, "FKST_GITHUB_BOT_LOGIN")
+  local login = C.read_env("FKST_GITHUB_BOT_LOGIN")
   if login ~= nil then
     C.configure_trusted_bot_login(M, login)
   end
 
-  if C.read_env(M, "FKST_GITHUB_WRITE") == "1" and trusted_bot_login_by_M[M] == nil then
+  if C.read_env("FKST_GITHUB_WRITE") == "1" and trusted_bot_login_by_M[M] == nil then
     error("github-devloop: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
   end
   return trusted_bot_login_by_M[M]

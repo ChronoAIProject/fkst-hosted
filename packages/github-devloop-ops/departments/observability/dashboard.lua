@@ -300,7 +300,7 @@ function core.render_observability_dashboard(args)
   local recent_merged_issues = args and args.recent_merged_issues or nil
   local now_seconds = args and args.now_seconds or now()
   local generated_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now_seconds)
-  local instance = core.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
+  local instance = devloop_base.read_env("FKST_GITHUB_BOT_LOGIN") or "unknown"
   local by_state = { unmanaged = {} }
   for _, state in ipairs(core.issue_state_order()) do
     by_state[state] = {}
@@ -504,7 +504,7 @@ local function write_dashboard_input(repo, title, body)
 end
 
 local function publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
-  if core.read_env("FKST_GITHUB_WRITE") ~= "1" then
+  if devloop_base.read_env("FKST_GITHUB_WRITE") ~= "1" then
     local deferred = dashboard_deferred_if_deadline(deadline)
     log.info("github-devloop dept=observability tag=DASHBOARD_DRY_RUN hash=" .. tostring(dashboard.hash))
     log.info(dashboard.body)
@@ -598,7 +598,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
 end
 
 function core.publish_observability_dashboard(repo, dashboard, limits, deadline)
-  if core.read_env("FKST_GITHUB_WRITE") ~= "1" then
+  if devloop_base.read_env("FKST_GITHUB_WRITE") ~= "1" then
     return publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
   end
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end

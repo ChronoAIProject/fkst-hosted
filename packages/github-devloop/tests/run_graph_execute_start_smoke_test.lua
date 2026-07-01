@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local execution_start = require("devloop.execution_start")
 local graph = require("testkit.graph")
@@ -47,17 +48,17 @@ end
 
 local function mock_env()
   for _ = 1, 16 do
-    t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
       stdout = "fkst-test-bot",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_GITHUB_WRITE"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_GITHUB_CLAIM_MODE"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_CLAIM_MODE"), {
       stdout = "",
       stderr = "",
       exit_code = 0,

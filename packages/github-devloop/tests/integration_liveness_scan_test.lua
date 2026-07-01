@@ -66,7 +66,7 @@ local function run_liveness_scan_at(name, ts, run_opts)
 end
 
 local function mock_repo()
-  t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
     stdout = repo,
     stderr = "",
     exit_code = 0,
@@ -144,12 +144,12 @@ local function mock_empty_pr_list()
 end
 
 local function mock_branch_config()
-  t.mock_command(core.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
     stdout = "dev",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
     stdout = "dev",
     stderr = "",
     exit_code = 0,

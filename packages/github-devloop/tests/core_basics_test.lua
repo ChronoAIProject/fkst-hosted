@@ -45,7 +45,7 @@ return {
     t.eq(config.env_present(core, "GH_TOKEN", exec), true)
     t.eq(config.env_present(core, "GITHUB_TOKEN", exec), false)
     t.raises(function()
-      core.read_env_command("GH_TOKEN")
+      devloop_base.read_env_command("GH_TOKEN")
     end)
 
     responses['printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"'] = { stdout = "main", exit_code = 0 }

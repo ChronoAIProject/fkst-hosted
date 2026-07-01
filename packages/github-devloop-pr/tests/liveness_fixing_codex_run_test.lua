@@ -247,7 +247,7 @@ local function with_codex_runs(running, fn)
 end
 
 local function mock_repo_and_empty_issue_list()
-  t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
     stdout = repo,
     stderr = "",
     exit_code = 0,

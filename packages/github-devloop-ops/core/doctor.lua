@@ -174,7 +174,7 @@ function M.saga_doctor_classify_entity(entity, opts)
 end
 
 local function read_repo()
-  local repo = M.read_env("FKST_GITHUB_REPO")
+  local repo = devloop_base.read_env("FKST_GITHUB_REPO")
   if repo == nil or not base_ids.issue_ref_round_trips(repo, 1) then
     error("github-devloop: saga-doctor-invalid-repo: FKST_GITHUB_REPO is missing or invalid")
   end

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -72,7 +73,7 @@ function M.check(repo, issue_number, ready, origin, original, managed)
     duplicate_comment(repo, issue_number, ready, origin, canonical))
   core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request",
     duplicate_label(repo, issue_number, ready, origin, canonical))
-  if core.read_env("FKST_GITHUB_WRITE") == "1" then
+  if devloop_base.read_env("FKST_GITHUB_WRITE") == "1" then
     local closed = core.gh_issue_close(repo, issue_number, 30)
     if type(closed) ~= "table" or closed.exit_code ~= 0 then
       error("github-devloop: duplicate-fork-close-failed: duplicate fork close failed: " .. tostring(closed and closed.stderr or "missing result"))

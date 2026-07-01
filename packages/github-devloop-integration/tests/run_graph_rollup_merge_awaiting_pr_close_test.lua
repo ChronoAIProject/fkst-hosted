@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
@@ -85,32 +86,32 @@ end
 
 local function mock_common_env()
   for _ = 1, 12 do
-    t.mock_command(core.read_env_command("FKST_GITHUB_WRITE"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "1",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
       stdout = core._test_bot_login,
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
       stdout = repo,
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_GITHUB_CLAIM_MODE"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_CLAIM_MODE"), {
       stdout = "",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
       stdout = upstream_branch,
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
       stdout = integration_branch,
       stderr = "",
       exit_code = 0,

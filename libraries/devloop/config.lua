@@ -50,11 +50,11 @@ end
 
 local read_env = env.read_env(read_env_command)
 
-function C.read_env_command(M, name)
+function C.read_env_command(name)
   return read_env_command(name)
 end
 
-function C.read_env(M, name, exec)
+function C.read_env(name, exec)
   return read_env(name, exec)
 end
 
@@ -72,7 +72,7 @@ function C.env_present(M, name, exec)
 end
 
 function C.write_mode(M, exec)
-  return M.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
+  return C.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
 end
 
 -- Claim mode is opt-in and additive: the default (unset/empty/unknown) is
@@ -80,7 +80,7 @@ end
 -- holding ownership via the fkst-dev:claimed label, which a GitHub App can set
 -- even though an App cannot be an issue assignee.
 function C.claim_mode(M, exec)
-  local raw = M.read_env("FKST_GITHUB_CLAIM_MODE", exec)
+  local raw = C.read_env("FKST_GITHUB_CLAIM_MODE", exec)
   raw = strings.trim(raw or "")
   if raw == "label" then
     return "label"
@@ -94,11 +94,11 @@ end
 -- fkst-dev:enabled + fkst-class:expedite so the loop claims and fixes the red
 -- rollup ahead of new issues (expedite class + inflight cap = priority).
 function C.rollup_autofix_enabled(M, exec)
-  return strings.trim(M.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
+  return strings.trim(C.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
 end
 
 function C.max_inflight(M, exec)
-  local value = M.read_env("FKST_DEVLOOP_MAX_INFLIGHT", exec)
+  local value = C.read_env("FKST_DEVLOOP_MAX_INFLIGHT", exec)
   if value == nil then
     return nil
   end
@@ -114,7 +114,7 @@ function C.max_inflight(M, exec)
 end
 
 function C.managed_sibling_repos(M, exec)
-  local raw = M.read_env("FKST_DEVLOOP_MANAGED_SIBLING_REPOS", exec)
+  local raw = C.read_env("FKST_DEVLOOP_MANAGED_SIBLING_REPOS", exec)
   local repos = {}
   if raw == nil then
     return repos
@@ -141,7 +141,7 @@ function C.default_test_command(M)
 end
 
 function C.test_command(M, exec)
-  local command = M.read_env("FKST_DEVLOOP_TEST_COMMAND", exec)
+  local command = C.read_env("FKST_DEVLOOP_TEST_COMMAND", exec)
   if command == nil then
     return C.default_test_command(M)
   end
@@ -180,13 +180,13 @@ local function validated_branch(M, name, branch)
 end
 
 function C.branch_config(M, exec)
-  local upstream_env = M.read_env("FKST_DEVLOOP_UPSTREAM_BRANCH", exec)
+  local upstream_env = C.read_env("FKST_DEVLOOP_UPSTREAM_BRANCH", exec)
   local upstream = upstream_env
   if upstream == nil then
     upstream = current_checkout_branch(M, exec)
   end
   upstream = validated_branch(M, "FKST_DEVLOOP_UPSTREAM_BRANCH", upstream)
-  local integration = M.read_env("FKST_DEVLOOP_INTEGRATION_BRANCH", exec)
+  local integration = C.read_env("FKST_DEVLOOP_INTEGRATION_BRANCH", exec)
   if integration == nil then
     integration = upstream
   end
@@ -199,19 +199,19 @@ end
 
 function C.devloop_config(M, exec)
   local branches = C.branch_config(M, exec)
-  local rollup_merge = M.read_env("FKST_DEVLOOP_ROLLUP_MERGE", exec) or "auto"
+  local rollup_merge = C.read_env("FKST_DEVLOOP_ROLLUP_MERGE", exec) or "auto"
   rollup_merge = strings.trim(rollup_merge)
   if rollup_merge ~= "auto" and rollup_merge ~= "manual" then
     error("github-devloop: invalid FKST_DEVLOOP_ROLLUP_MERGE")
   end
   return {
-    repo = M.read_env("FKST_GITHUB_REPO", exec),
-    bot_login = M.read_env("FKST_GITHUB_BOT_LOGIN", exec),
+    repo = C.read_env("FKST_GITHUB_REPO", exec),
+    bot_login = C.read_env("FKST_GITHUB_BOT_LOGIN", exec),
     write_mode = C.write_mode(M, exec),
     upstream_branch = branches.upstream,
     integration_branch = branches.integration,
     rollup_merge = rollup_merge,
-    allow_release_notes_fallback = M.read_env("FKST_DEVLOOP_RELEASE_NOTES_FALLBACK", exec) == "1",
+    allow_release_notes_fallback = C.read_env("FKST_DEVLOOP_RELEASE_NOTES_FALLBACK", exec) == "1",
   }
 end
 

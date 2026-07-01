@@ -83,7 +83,7 @@ function C.claim_owner(M)
 end
 
 function C.managed_bot_logins(M, exec)
-  local raw = M.read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec)
+  local raw = devloop_base.read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec)
   local logins = {}
   for entry in tostring(raw or ""):gmatch("[^,%s]+") do
     local login = devloop_base.strip_bot_login_suffix(strings.trim(entry))
@@ -239,7 +239,7 @@ function C.verify_pr_review_issue_claim(M, dept, repo, issue_number, current_iss
 end
 
 function C.fork_grace_seconds(M, exec)
-  local raw = M.read_env("FKST_DEVLOOP_FORK_GRACE_HOURS", exec)
+  local raw = devloop_base.read_env("FKST_DEVLOOP_FORK_GRACE_HOURS", exec)
   raw = strings.trim(raw or "")
   if raw == "" then
     return 3 * 60 * 60
@@ -332,7 +332,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
     return false
   end
 
-  if M.read_env("FKST_GITHUB_WRITE") ~= "1" then
+  if devloop_base.read_env("FKST_GITHUB_WRITE") ~= "1" then
     log_claim(M, dept, proposal_id, "dry-run-claim", "FKST_GITHUB_WRITE!=1")
     return true
   end

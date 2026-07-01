@@ -33,12 +33,12 @@ local function pr_list_json(branch, base_branch)
 end
 
 local function mock_branch_config()
-  t.mock_command(core.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
     stdout = "dev",
     stderr = "",
     exit_code = 0,
   })
-  t.mock_command(core.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
     stdout = "dev",
     stderr = "",
     exit_code = 0,

@@ -63,7 +63,7 @@ local function run_observe_pr(name)
 end
 
 local function mock_repo()
-  t.mock_command(core.read_env_command("FKST_GITHUB_REPO"), {
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_REPO"), {
     stdout = repo,
     stderr = "",
     exit_code = 0,

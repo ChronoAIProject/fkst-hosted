@@ -50,22 +50,22 @@ end
 
 local function mock_runtime_and_context()
   for _ = 1, 8 do
-    t.mock_command(core.read_env_command("FKST_GITHUB_WRITE"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "1",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
       stdout = "fkst-test-bot",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_UPSTREAM_BRANCH"), {
       stdout = "dev",
       stderr = "",
       exit_code = 0,
     })
-    t.mock_command(core.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_INTEGRATION_BRANCH"), {
       stdout = "dev",
       stderr = "",
       exit_code = 0,

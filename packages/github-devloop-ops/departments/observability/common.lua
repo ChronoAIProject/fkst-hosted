@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -64,7 +65,7 @@ function M.dashboard_deferred_if_deadline(core, deadline)
 end
 
 function M.require_observe_repo(core)
-  local repo = core.read_env("FKST_GITHUB_REPO")
+  local repo = devloop_base.read_env("FKST_GITHUB_REPO")
   if repo == nil or base_ids.safe_repo(repo) ~= tostring(repo) then
     error("github-devloop: FKST_GITHUB_REPO is required for observability")
   end

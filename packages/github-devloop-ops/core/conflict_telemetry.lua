@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local S = {}
@@ -80,7 +81,7 @@ function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
 end
 
 function M.observe_conflict_hotspots(repo, timeout)
-  local cmd = M.read_env("FKST_DEVLOOP_CONFLICT_LOG_CMD")
+  local cmd = devloop_base.read_env("FKST_DEVLOOP_CONFLICT_LOG_CMD")
   if cmd == nil or tostring(cmd) == "" then
     log.info("github-devloop dept=observability tag=CONFLICT_HOTSPOT_PATROL action=no-op reason=log-source-unconfigured")
     return { facts = 0, hotspots = 0, raised = 0 }

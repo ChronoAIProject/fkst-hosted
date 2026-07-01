@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
@@ -18,7 +19,7 @@ function C.liveness_scan_limits(M)
 end
 
 function C.liveness_scan_read_repo(M)
-  local repo = M.read_env("FKST_GITHUB_REPO")
+  local repo = devloop_base.read_env("FKST_GITHUB_REPO")
   if repo == nil or not base_ids.issue_ref_round_trips(repo, 1) then
     return nil
   end

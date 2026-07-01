@@ -19,7 +19,7 @@ end
 
 local function install_shared(M)
 function M.output_language(exec)
-  local lang = strings.trim(M.read_env("FKST_OUTPUT_LANG", exec))
+  local lang = strings.trim(devloop_base.read_env("FKST_OUTPUT_LANG", exec))
   if lang == "zh" then
     return "zh"
   end

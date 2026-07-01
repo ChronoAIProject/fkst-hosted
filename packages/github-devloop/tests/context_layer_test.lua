@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
@@ -163,7 +164,7 @@ end
 
 return {
   test_devloop_prompt_preamble_language_env = function()
-    t.eq(core.read_env_command("FKST_OUTPUT_LANG"), 'printf %s "$FKST_OUTPUT_LANG"')
+    t.eq(devloop_base.read_env_command("FKST_OUTPUT_LANG"), 'printf %s "$FKST_OUTPUT_LANG"')
     t.eq(core.output_language(function(_cmd)
       return { stdout = "zh", stderr = "", exit_code = 0 }
     end), "zh")

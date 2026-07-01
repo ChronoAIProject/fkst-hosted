@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
@@ -49,7 +50,7 @@ local function blocked_by_json(nodes)
 end
 
 local function mock_managed_repos(value)
-  t.mock_command(core.read_env_command("FKST_DEVLOOP_MANAGED_SIBLING_REPOS"), {
+  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_MANAGED_SIBLING_REPOS"), {
     stdout = value or "",
     stderr = "",
     exit_code = 0,

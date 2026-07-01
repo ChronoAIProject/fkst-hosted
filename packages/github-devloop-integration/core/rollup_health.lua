@@ -106,7 +106,7 @@ local function failure_identity(failing_check)
 end
 
 function M.rollup_red_window_minutes(exec)
-  local raw = M.read_env("FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES", exec)
+  local raw = devloop_base.read_env("FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES", exec)
   if raw == nil or strings.trim(raw) == "" then
     return default_red_window_minutes
   end

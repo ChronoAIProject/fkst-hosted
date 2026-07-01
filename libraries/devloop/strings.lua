@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local C = {}
 
 local strings = {
@@ -182,7 +183,7 @@ function C.output_lang(M, exec)
     return configured_output_lang[M]
   end
   local ok, value = pcall(function()
-    return M.read_env("FKST_OUTPUT_LANG", exec)
+    return devloop_base.read_env("FKST_OUTPUT_LANG", exec)
   end)
   if not ok then
     return "en"

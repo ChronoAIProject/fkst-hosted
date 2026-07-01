@@ -14,8 +14,6 @@ M = {
 local base = require("devloop.base")
 local function dept_exec_sync(...) return exec_sync(...) end
 M.judgment_worktree = function(...) return base.judgment_worktree_with_exec(M, dept_exec_sync, ...) end
-M.read_env_command = function(...) return base.read_env_command(M, ...) end
-M.read_env = function(...) return base.read_env(M, ...) end
 M.parse_name_only_paths = function(...) return base.parse_name_only_paths(M, ...) end
 M.configure_trusted_bot_login = function(...) return base.configure_trusted_bot_login(M, ...) end
 M.assert_trusted_bot_configured = function(...) return base.assert_trusted_bot_configured(M, ...) end
@@ -86,7 +84,7 @@ M._neutralize_fkst_markers = base._neutralize_fkst_markers
 M._has_value = base._has_value
 M._is_review_meta_action = base._is_review_meta_action
 M.fix_reflection_checkpoint_round = base.fix_reflection_checkpoint_round
-require("forge.github_debug_stamp").install(M)
+require("forge.github_debug_stamp").install(M, require("devloop.base").read_env)
 require("devloop.commands").install(M)
 local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
 M.cached_entity_view = function(...) return github_proxy_entity_view.cached_entity_view(M, ...) end
