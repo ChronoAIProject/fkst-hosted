@@ -145,6 +145,10 @@ async fn main() -> ExitCode {
     let pod_dispatch = config.pod.dispatch;
     let pod_namespace = config.pod.namespace.clone();
     let watcher_github_app = github_app.clone();
+    // The env-validation GC sweep (below) needs its own copy of the namespace +
+    // the validation deadline, captured before `config` moves into `AppState`.
+    let sweep_namespace = config.pod.namespace.clone();
+    let sweep_deadline = config.env.validate_deadline_secs;
 
     let app = match build_router(AppState {
         config,
@@ -182,6 +186,34 @@ async fn main() -> ExitCode {
             (_, Err(error)) => tracing::warn!(
                 error = %error,
                 "pod dispatch on but kubernetes client unavailable; job watcher not started"
+            ),
+        }
+    }
+
+    // Pod-per-session: spawn the env-validation GC sweep. A validation pod is a
+    // bare Pod (no `ttlSecondsAfterFinished`), so a control-plane crash mid-run
+    // can orphan one; this periodic sweep reaps any older than the deadline. Only
+    // when dispatch is on and a cluster is reachable (mirrors the watcher above).
+    if pod_dispatch {
+        match fkst_control_plane::k8s::KubeClient::from_inferred(&sweep_namespace).await {
+            Ok(kube) => {
+                // Sweep at least once per deadline window, never faster than 30s.
+                let interval = std::time::Duration::from_secs(
+                    u64::try_from(sweep_deadline).unwrap_or(300).max(30),
+                );
+                tokio::spawn(async move {
+                    fkst_control_plane::k8s::env_validator::run_sweep_loop(
+                        kube,
+                        sweep_deadline,
+                        interval,
+                    )
+                    .await;
+                });
+                tracing::info!("env-validation gc sweep spawned");
+            }
+            Err(error) => tracing::warn!(
+                error = %error,
+                "pod dispatch on but kubernetes client unavailable; env-validation gc sweep not started"
             ),
         }
     }
