@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -217,7 +218,7 @@ local function process_pr(repo, branches, listed_pr)
   end
 
   local issue = issue_state(repo, origin.issue_number)
-  if not core.verify_pr_review_issue_claim("pr_freshness_scan", origin.repo, origin.issue_number, issue, origin.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "pr_freshness_scan", origin.repo, origin.issue_number, issue, origin.proposal_id) then
     return
   end
   local state = core.current_entity_state(pr.comments, origin.proposal_id)

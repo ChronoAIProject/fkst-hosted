@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
@@ -263,7 +264,7 @@ local function decompose_context(event)
     end
     return nil
   end
-  if not core.verify_pr_review_issue_claim("decompose", repo, issue_number, nil, decompose.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "decompose", repo, issue_number, nil, decompose.proposal_id) then
     if type(event) == "table" then
       context_cache[event] = false
     end

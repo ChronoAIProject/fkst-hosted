@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
@@ -121,7 +122,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(head-advanced)", "PR head advanced since unresolved review")
     return
   end
-  if not core.verify_pr_review_issue_claim("review_loop", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "review_loop", origin.repo, origin.issue_number, nil, origin.proposal_id) then
     return
   end
 

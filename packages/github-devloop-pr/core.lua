@@ -76,7 +76,6 @@ prompts.install(M, wiring.prompts(), {
 require("core.pr_label_requests").install(M)
 require("core.review_meta_requests").install(M)
 require("devloop.entity").install(M)
-require("devloop.claims").install(M)
 require("core.span_conformance").install(M)
 
 return M

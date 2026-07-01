@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local execution_start = require("devloop.execution_start")
@@ -35,7 +36,7 @@ local function read_current(repo, issue_number, request)
     core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-held", "fkst-dev:hold label is present")
     return nil
   end
-  if not core.claim_issue_for_management("execute_start", repo, issue_number, current, request.proposal_id) then
+  if not m_claims.claim_issue_for_management(core, "execute_start", repo, issue_number, current, request.proposal_id) then
     return nil
   end
   return current

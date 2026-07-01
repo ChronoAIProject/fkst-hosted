@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
@@ -145,7 +146,7 @@ local function pipeline_review(event)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
-  if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "reconcile", repo, issue_number, nil, reconcile.proposal_id) then
     return
   end
 
@@ -221,7 +222,7 @@ local function pipeline_fix(event)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
-  if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "reconcile", repo, issue_number, nil, reconcile.proposal_id) then
     return
   end
 
@@ -301,7 +302,7 @@ local function pipeline_timeout(event)
     local snapshot
     local target_pr_number = pr_number
     if pr_number ~= nil then
-      if not core.verify_pr_review_issue_claim("reconcile", repo, issue_number, nil, reconcile.proposal_id) then
+      if not m_claims.verify_pr_review_issue_claim(core, "reconcile", repo, issue_number, nil, reconcile.proposal_id) then
         return
       end
       local view = core.gh_pr_view_origin(repo, pr_number, 30)

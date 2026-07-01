@@ -25,6 +25,5 @@ prompts.install(M, wiring.prompts(), {
 })
 require("core.intake_class").install(M)
 require("devloop.entity").install(M)
-require("devloop.claims").install(M)
 
 return M

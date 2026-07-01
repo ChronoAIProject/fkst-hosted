@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local config = require("devloop.config")
@@ -361,7 +362,7 @@ function M.ensure_repo()
   local repo_labels = parsers_misc.parse_repo_labels(M, run_gh(function(timeout)
     return labels.gh_repo_labels_list(repo, timeout)
   end, 30, "gh label list").stdout)
-  local dashboard_issues = parsers_misc.parse_dashboard_issue_list(M, 
+  local dashboard_issues = parsers_misc.parse_dashboard_issue_list(M,
     run_gh(function(timeout)
       return dashboard.gh_dashboard_issue_all_open(repo, timeout)
     end, 30, "gh dashboard issue list").stdout
@@ -385,7 +386,7 @@ function M.ensure_repo()
   local claim_label_result = nil
   if config.claim_mode(M) == "label" then
     claim_label_result = ensure_label(repo, apply_mode, repo_labels, {
-      name = M.claimed_label(),
+      name = m_claims.claimed_label(M),
       color = "0E8A16",
       description = "fkst-dev-label-mode-ownership-claim",
     })

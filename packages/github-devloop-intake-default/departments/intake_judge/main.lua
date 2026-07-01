@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
@@ -115,7 +116,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-held", "fkst-dev:hold label is present")
     return nil
   end
-  if not core.claim_issue_for_management("intake_judge", repo, issue_number, current, candidate.proposal_id) then
+  if not m_claims.claim_issue_for_management(core, "intake_judge", repo, issue_number, current, candidate.proposal_id) then
     return nil
   end
 

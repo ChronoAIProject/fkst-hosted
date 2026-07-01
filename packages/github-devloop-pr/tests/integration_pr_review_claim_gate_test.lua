@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local t = h.t
@@ -28,7 +29,7 @@ local function pr_event()
 end
 
 local function origin_marker(version)
-  return m_builders.pr_origin_marker(core, 
+  return m_builders.pr_origin_marker(core,
     "github-devloop/issue/owner/repo/42",
     "42",
     "devloop-owner-repo-42-01HY",
@@ -46,7 +47,7 @@ local function pr_open_state_marker(version)
 end
 
 local function unmanaged_origin_marker(version, base_branch)
-  return m_builders.pr_origin_marker(core, 
+  return m_builders.pr_origin_marker(core,
     "github-devloop/issue/owner/repo/42",
     "42",
     "devloop-owner-repo-42-01HY",
@@ -64,7 +65,7 @@ end
 return {
   test_verify_pr_review_issue_claim_accepts_unassigned_self_author = function()
     mock_bot_env()
-    local ok = core.verify_pr_review_issue_claim("claim-test", "owner/repo", 42, {
+    local ok = m_claims.verify_pr_review_issue_claim(core, "claim-test", "owner/repo", 42, {
       assignees = {},
       author_login = "fkst-test-bot",
     }, "github-devloop/issue/owner/repo/42")

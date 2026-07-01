@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local S = {}
@@ -53,7 +54,7 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
   local marker = conv_reconcile.reconcile_marker(M, reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
   local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,

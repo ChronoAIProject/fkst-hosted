@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local common = require("departments.observability.common")
 local strings = require("contract.strings")
@@ -158,7 +159,7 @@ local function reap_orphan_pr(repo, entity)
     return
   end
 
-  if not core.verify_pr_review_issue_claim(dept, repo, origin.issue_number, parent, proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, dept, repo, origin.issue_number, parent, proposal_id) then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "backing-issue-not-self-owned"))
     return
   end

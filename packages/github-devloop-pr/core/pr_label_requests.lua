@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local S = {}
 
 function S.install(M)
@@ -41,7 +42,7 @@ function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_
   else
     add_labels, remove_labels = M.state_label_changes(to_state)
   end
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.label.v1",
     repo = repo,
     target_kind = "pr",

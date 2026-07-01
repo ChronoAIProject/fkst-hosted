@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
@@ -32,7 +33,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-  if not core.verify_pr_review_issue_claim("review_meta", repo, issue_number, nil, review_meta.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "review_meta", repo, issue_number, nil, review_meta.proposal_id) then
     return
   end
 

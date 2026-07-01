@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local S = {}
@@ -42,7 +43,7 @@ function M.build_entity_comment_request(target, body, dedup_key, source_ref, opt
   end
   if target.kind == "issue" then
     request.issue_number = target.number
-    M.attach_issue_claim(request, request.source_ref)
+    m_claims.attach_issue_claim(M, request, request.source_ref)
   elseif target.kind == "pr" then
     request.pr_number = target.number
   else

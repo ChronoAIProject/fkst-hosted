@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local payloads_builders = require("devloop.payloads.builders")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
@@ -84,7 +85,7 @@ function C.build_review_converge_round_comment_request(M, repo, issue_number, un
 end
 
 function C.build_issue_review_converge_round_comment_request(M, repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -244,7 +245,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
 end
 
 function C.build_high_risk_review_evidence_comment_request(M, repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
-  local marker = m_builders.high_risk_review_evidence_marker(M, 
+  local marker = m_builders.high_risk_review_evidence_marker(M,
     issue_proposal_id,
     issue_version,
     pr_number,
@@ -283,7 +284,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
   end
   local test_command = M.neutralize_untrusted_comment_text(config.test_command(M))
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
-  local marker = m_builders.merge_gate_marker(M, 
+  local marker = m_builders.merge_gate_marker(M,
     merge_ready.proposal_id,
     merge_ready.pr_number,
     fix_version,
@@ -410,7 +411,7 @@ function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_pro
   local state_marker = M.state_marker(issue_proposal_id, "merge-ready", version)
   local review_marker = m_builders.review_result_marker(M, carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)
   local merge_marker = m_builders.merge_ready_marker(M, issue_proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
-  local carry_marker = m_builders.review_carry_over_marker(M, 
+  local carry_marker = m_builders.review_carry_over_marker(M,
     issue_proposal_id,
     version,
     carry.old_review_proposal_id,

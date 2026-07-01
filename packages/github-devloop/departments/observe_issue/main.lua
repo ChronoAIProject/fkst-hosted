@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_pr = require("devloop.parsers.pr")
@@ -187,7 +188,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
 end
 
 local function ensure_managed_issue_claim(issue, proposal_id, current, state)
-  local claim_state = core.issue_claim_state(current.assignees, core.claim_owner(), current.labels)
+  local claim_state = m_claims.issue_claim_state(core, current.assignees, m_claims.claim_owner(core), current.labels)
   if claim_state == "other" then
     core.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
     return false
@@ -195,7 +196,7 @@ local function ensure_managed_issue_claim(issue, proposal_id, current, state)
   if claim_state == "self" then
     return true
   end
-  return core.claim_issue_for_management("observe_issue", issue.repo, issue.number, current, proposal_id)
+  return m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id)
 end
 
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
@@ -679,7 +680,7 @@ local function process_issue_event(event)
       core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
       error("github-devloop: unmanaged state marker pending for observe; retrying")
     end
-    if not core.claim_issue_for_management("observe_issue", issue.repo, issue.number, current, proposal_id) then
+    if not m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id) then
       return
     end
     core.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")

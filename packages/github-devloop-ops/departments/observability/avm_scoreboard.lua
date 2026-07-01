@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -266,7 +267,7 @@ local function log_marker_rejection(tag, reason, comment, marker)
 end
 
 local function append_comment_facts(facts, comments, now_seconds)
-  local trust_set = core.managed_bot_logins and core.managed_bot_logins() or nil
+  local trust_set = m_claims.managed_bot_logins(core)
   if type(trust_set) == "table" and next(trust_set) == nil then
     trust_set = nil
   end

@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_bodies = require("devloop.requests.bodies")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -223,7 +224,7 @@ local function speculative_fix_fact_for_merge(comments, merge_ready)
   if fact == nil or fact.predecessor_set == nil then
     return nil
   end
-  if not m_facts.has_fix_marker(core, 
+  if not m_facts.has_fix_marker(core,
     comments,
     merge_ready.proposal_id,
     fact.review_proposal_id,
@@ -352,7 +353,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "claim", "claim", "skip-not-owned", "backing issue is absent")
     return
   end
-  if issue_number ~= nil and not core.verify_pr_review_issue_claim("merge", repo, issue_number, nil, merge_ready.proposal_id) then
+  if issue_number ~= nil and not m_claims.verify_pr_review_issue_claim(core, "merge", repo, issue_number, nil, merge_ready.proposal_id) then
     return
   end
   if options ~= nil and type(options.queue_starvation_cause) == "table" then

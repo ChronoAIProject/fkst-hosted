@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
@@ -637,7 +638,7 @@ local function act_fix(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-  if entity.kind == "issue" and not core.verify_pr_review_issue_claim("fix", repo, issue_number, nil, fix.proposal_id) then
+  if entity.kind == "issue" and not m_claims.verify_pr_review_issue_claim(core, "fix", repo, issue_number, nil, fix.proposal_id) then
     return
   end
 

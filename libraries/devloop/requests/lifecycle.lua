@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
 local comment_strings = require("devloop.strings")
@@ -10,7 +11,7 @@ local strings = shared.strings
 local ai_sentinel = shared.ai_sentinel
 
 function C.build_observe_comment_request(M, issue, proposal)
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = issue.repo,
     issue_number = issue.number,
@@ -41,7 +42,7 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
     .. "\n\n" .. state_marker
     .. "\n" .. marker
     .. "\n" .. ai_sentinel
-  local request = M.attach_issue_claim({
+  local request = m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -70,7 +71,7 @@ function C.result_effects_complete(M, current, reached)
 end
 
 function C.build_converge_round_comment_request(M, repo, issue_number, unresolved, round, marker_body, handoff)
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -93,7 +94,7 @@ function C.build_dependency_hold_comment_request(M, repo, issue_number, proposal
   if reason == "" then
     reason = gate and gate.kind or "dependency-hold"
   end
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -115,7 +116,7 @@ function C.build_dependency_release_comment_request(M, repo, issue_number, propo
   if note_markers ~= "" then
     markers = markers .. "\n" .. note_markers
   end
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -144,7 +145,7 @@ function C.build_intake_decision_comment_request(M, repo, issue_number, candidat
   if decision == "track" then
     detail = "\n\n" .. comment_strings.comment_string(M, "intake_tracking_ack")
   end
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -178,7 +179,7 @@ function C.build_implementing_comment_request(M, repo, issue_number, ready, work
   end
   local marker = m_builders.implementing_marker(M, ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
   local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -212,7 +213,7 @@ function C.build_implementing_state_comment_request(M, repo, issue_number, ready
   end
   local state_marker = M.state_marker(ready.proposal_id, "implementing", ready.dedup_key)
   local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -284,7 +285,7 @@ function C.build_impl_failure_comment_request(M, repo, issue_number, ready, reas
 
   local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason, attempt)
   local state_marker = M.state_marker(ready.proposal_id, "impl-failed", ready.dedup_key)
-  return M.attach_issue_claim({
+  return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,

@@ -18,6 +18,5 @@ require("devloop.logging").install(M)
 require("devloop.state").install(M)
 require("core.admission").install(M)
 require("devloop.entity").install(M)
-require("devloop.claims").install(M)
 
 return M

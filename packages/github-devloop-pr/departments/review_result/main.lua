@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
@@ -98,7 +99,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   with_lock(lock_key, function()
     local pr_source_ref = core.pr_source_ref(origin.repo, pr_number)
-    if not core.verify_pr_review_issue_claim("review_result", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+    if not m_claims.verify_pr_review_issue_claim(core, "review_result", origin.repo, origin.issue_number, nil, origin.proposal_id) then
       return
     end
     core.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)

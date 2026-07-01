@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local core = require("core")
 local forks = require("devloop.forks")
@@ -55,7 +56,7 @@ function M.check(repo, issue_number, ready, origin, original, managed)
     core,
     original.comments,
     forks.fork_issue_dedup_key(origin.repo, origin.issue_number),
-    core.claim_owner(),
+    m_claims.claim_owner(core),
     managed
   )
   if canonical == nil or tonumber(canonical) == tonumber(issue_number) then

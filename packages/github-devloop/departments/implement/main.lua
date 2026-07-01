@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
@@ -608,7 +609,7 @@ local function process_ready_event(event)
     local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
     current.repo = repo
     current.number = issue_number
-    local managed = core.managed_bot_logins()
+    local managed = m_claims.managed_bot_logins(core)
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     if tostring(current.state or ""):upper() ~= "OPEN" then
       core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")

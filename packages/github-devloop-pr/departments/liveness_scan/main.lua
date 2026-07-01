@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
@@ -53,7 +54,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     core.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "PR has no origin marker")
     return false
   end
-  if not core.verify_pr_review_issue_claim("liveness_scan", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim(core, "liveness_scan", origin.repo, origin.issue_number, nil, origin.proposal_id) then
     return false
   end
 

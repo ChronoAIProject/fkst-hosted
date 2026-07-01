@@ -1,3 +1,4 @@
+local m_claims = require("devloop.claims")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local operator_commands = require("devloop.operator_commands")
@@ -50,7 +51,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires no active devloop state", source_ref)
     return true
   end
-  if not core.claim_issue_for_management("admission", repo, issue.number, current, proposal_id) then
+  if not m_claims.claim_issue_for_management(core, "admission", repo, issue.number, current, proposal_id) then
     return true
   end
   local payload = core.build_intake_admission_candidate(repo, issue, command, now())
@@ -107,7 +108,7 @@ local function admit_issue_event(event, entity)
     core.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-intake-decision", "trusted intake decision marker is already visible")
     return
   end
-  if not core.claim_issue_for_management("admission", repo, issue_number, current, proposal_id) then
+  if not m_claims.claim_issue_for_management(core, "admission", repo, issue_number, current, proposal_id) then
     return
   end
 

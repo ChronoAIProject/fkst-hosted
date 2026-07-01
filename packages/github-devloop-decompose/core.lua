@@ -24,7 +24,6 @@ require("devloop.state").install(M)
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), { decompose = true })
 require("devloop.entity").install(M)
-require("devloop.claims").install(M)
 require("core.saga").install(M)
 require("core.decompose").install(M)
 
