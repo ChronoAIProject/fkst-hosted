@@ -107,8 +107,8 @@ local forge_validators = require("devloop.forge_validators")
     return head
   end
 
-  function C.is_ancestor(M, ancestor_sha, descendant_sha, error_class)
-    local result = M.git_is_ancestor(ancestor_sha, descendant_sha, 30)
+  function C.is_ancestor(git, ancestor_sha, descendant_sha, error_class)
+    local result = C.git_is_ancestor(git, ancestor_sha, descendant_sha, 30)
     if result.exit_code == 0 then
       return true
     end
@@ -123,8 +123,8 @@ local forge_validators = require("devloop.forge_validators")
     return result.stdout
   end
 
-  function C.git_is_ancestor(M, maybe_ancestor_sha, descendant_sha, timeout)
-    return M.git.is_ancestor(
+  function C.git_is_ancestor(git, maybe_ancestor_sha, descendant_sha, timeout)
+    return git.is_ancestor(
       require_safe_sha("ancestor sha", maybe_ancestor_sha),
       require_safe_sha("descendant sha", descendant_sha),
       timeout

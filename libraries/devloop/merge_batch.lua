@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local C = {}
@@ -69,7 +70,7 @@ local function head_contains_base(M, base_head, entry)
   if fetched_sha ~= head_sha then
     return false, "candidate-head-changed"
   end
-  local result = M.git_is_ancestor(base_head, head_sha, 30)
+  local result = git_mechanics.git_is_ancestor(M.git, base_head, head_sha, 30)
   if result.exit_code == 0 then
     return true, "current-base-contained"
   end

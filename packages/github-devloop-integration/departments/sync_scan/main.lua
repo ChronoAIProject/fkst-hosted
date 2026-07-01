@@ -194,11 +194,11 @@ local function act(event)
     local upstream_sha = core.remote_head(branches.upstream, "remote branch head", "unsafe remote branch head")
     local integration_sha = core.remote_head(branches.integration, "remote branch head", "unsafe remote branch head")
 
-    if core.is_ancestor(upstream_sha, integration_sha, "ancestor check") then
+    if git_mechanics.is_ancestor(core.git, upstream_sha, integration_sha, "ancestor check") then
       core.log_cas_decision("sync_scan", "branch-sync", { state = "synced", version = integration_sha }, "tick", "sync", "skip-idempotent(upstream-ancestor)", "upstream head is already contained in integration")
       return
     end
-    if core.is_ancestor(integration_sha, upstream_sha, "ancestor check") then
+    if git_mechanics.is_ancestor(core.git, integration_sha, upstream_sha, "ancestor check") then
       fast_forward_sync(repo, branches.upstream, branches.integration, upstream_sha, integration_sha)
       return
     end

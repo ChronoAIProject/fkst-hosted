@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
@@ -67,7 +68,7 @@ local function pr_head_contains_current_base(pr, branches)
   if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
     return false, "unsafe-pr-head"
   end
-  local result = core.git_is_ancestor(base_head, head_sha, 30)
+  local result = git_mechanics.git_is_ancestor(core.git, base_head, head_sha, 30)
   if result.exit_code == 0 then
     return true, "current-base-contained"
   end

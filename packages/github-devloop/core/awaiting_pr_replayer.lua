@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -272,7 +273,7 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
   end
   M.fetch_branch(branches.upstream, "awaiting-pr upstream fetch")
   local upstream_head = M.remote_head(branches.upstream, "awaiting-pr upstream head", "unsafe awaiting-pr upstream head")
-  if not M.is_ancestor(merge_commit_sha, upstream_head, "awaiting-pr rollup merge-commit reachability") then
+  if not git_mechanics.is_ancestor(M.git, merge_commit_sha, upstream_head, "awaiting-pr rollup merge-commit reachability") then
     return false, "skip-pending(rollup-not-landed)", "child PR merge commit is not reachable from upstream branch"
   end
   return true

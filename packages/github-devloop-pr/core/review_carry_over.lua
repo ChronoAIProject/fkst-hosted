@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
@@ -56,7 +57,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if not approval_ok then
     return nil, "missing-review-result-approve"
   end
-  local ancestry = M.git_is_ancestor(fact.head_sha, current_head_sha, 30)
+  local ancestry = git_mechanics.git_is_ancestor(M.git, fact.head_sha, current_head_sha, 30)
   if ancestry.exit_code ~= 0 then
     return nil, "approved-head-not-ancestor"
   end

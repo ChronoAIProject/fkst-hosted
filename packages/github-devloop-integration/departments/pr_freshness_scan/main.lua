@@ -241,7 +241,7 @@ local function process_pr(repo, branches, listed_pr)
       core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-stale(head)", "PR head changed after GitHub read")
       return
     end
-    if core.is_ancestor(integration_sha, branch_sha, "PR freshness ancestor check") then
+    if git_mechanics.is_ancestor(core.git, integration_sha, branch_sha, "PR freshness ancestor check") then
       core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(integration-ancestor)", "PR branch already contains integration")
       return
     end

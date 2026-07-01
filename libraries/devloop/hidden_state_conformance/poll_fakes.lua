@@ -10,7 +10,7 @@ function S.with(core, opts, fn)
   local previous_branch_config = config.branch_config
   local previous_fetch_branch = core.fetch_branch
   local previous_remote_head = core.remote_head
-  local previous_is_ancestor = core.is_ancestor
+  local previous_git_is_ancestor = core.git.is_ancestor
   local previous_current_branch_head_sha = core.current_branch_head_sha
   local previous_context_fetch_ref_from_bundle = context_bundle.context_fetch_ref_from_bundle
   local previous_context_fetch_from_bundle = context_bundle.context_fetch_from_bundle
@@ -30,9 +30,10 @@ function S.with(core, opts, fn)
   core.remote_head = function()
     return head_sha
   end
-  core.is_ancestor = function(ancestor_sha, descendant_sha)
-    return tostring(ancestor_sha or "") == tostring(head_sha)
+  core.git.is_ancestor = function(ancestor_sha, descendant_sha)
+    local matched = tostring(ancestor_sha or "") == tostring(head_sha)
       and tostring(descendant_sha or "") == tostring(head_sha)
+    return { exit_code = matched and 0 or 1, stdout = "", stderr = "" }
   end
   core.current_branch_head_sha = function()
     return head_sha
@@ -54,7 +55,7 @@ function S.with(core, opts, fn)
   config.branch_config = previous_branch_config
   core.fetch_branch = previous_fetch_branch
   core.remote_head = previous_remote_head
-  core.is_ancestor = previous_is_ancestor
+  core.git.is_ancestor = previous_git_is_ancestor
   core.current_branch_head_sha = previous_current_branch_head_sha
   context_bundle.context_fetch_ref_from_bundle = previous_context_fetch_ref_from_bundle
   context_bundle.context_fetch_from_bundle = previous_context_fetch_from_bundle

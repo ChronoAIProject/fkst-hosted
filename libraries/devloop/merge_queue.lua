@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
@@ -324,7 +325,7 @@ function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, cur
     if head_sha == nil then
       return false, "predecessor-set-mismatch"
     end
-    local result = M.git_is_ancestor(head_sha, base_head, 30)
+    local result = git_mechanics.git_is_ancestor(M.git, head_sha, base_head, 30)
     if result.exit_code ~= 0 then
       return false, "predecessor-not-landed"
     end

@@ -34,16 +34,18 @@ return {
 
   test_scan_git_is_ancestor_maps_zero_to_true = function()
     local calls = {}
-    core.git_is_ancestor = function(ancestor_sha, descendant_sha, timeout)
-      table.insert(calls, {
-        ancestor_sha = ancestor_sha,
-        descendant_sha = descendant_sha,
-        timeout = timeout,
-      })
-      return result(0, "", "")
-    end
+    local git = {
+      is_ancestor = function(ancestor_sha, descendant_sha, timeout)
+        table.insert(calls, {
+          ancestor_sha = ancestor_sha,
+          descendant_sha = descendant_sha,
+          timeout = timeout,
+        })
+        return result(0, "", "")
+      end,
+    }
 
-    t.eq(core.is_ancestor("aaaa1111", "bbbb2222", "scan ancestor check"), true)
+    t.eq(git_mechanics.is_ancestor(git, "aaaa1111", "bbbb2222", "scan ancestor check"), true)
     t.eq(#calls, 1)
     t.eq(calls[1].ancestor_sha, "aaaa1111")
     t.eq(calls[1].descendant_sha, "bbbb2222")
@@ -51,20 +53,24 @@ return {
   end,
 
   test_scan_git_is_ancestor_maps_one_to_false = function()
-    core.git_is_ancestor = function()
-      return result(1, "", "")
-    end
+    local git = {
+      is_ancestor = function()
+        return result(1, "", "")
+      end,
+    }
 
-    t.eq(core.is_ancestor("aaaa1111", "bbbb2222", "scan ancestor check"), false)
+    t.eq(git_mechanics.is_ancestor(git, "aaaa1111", "bbbb2222", "scan ancestor check"), false)
   end,
 
   test_scan_git_is_ancestor_raises_on_other_exit_code = function()
-    core.git_is_ancestor = function()
-      return result(128, "", "fatal")
-    end
+    local git = {
+      is_ancestor = function()
+        return result(128, "", "fatal")
+      end,
+    }
 
     assert_error_contains(function()
-      core.is_ancestor("aaaa1111", "bbbb2222", "scan ancestor check")
+      git_mechanics.is_ancestor(git, "aaaa1111", "bbbb2222", "scan ancestor check")
     end, "github-devloop: scan ancestor check failed: fatal")
   end,
 }

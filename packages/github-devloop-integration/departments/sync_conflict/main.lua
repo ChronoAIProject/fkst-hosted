@@ -163,7 +163,7 @@ local function act(event)
       core.log_cas_decision("sync_conflict", "branch-sync", { state = "integration", version = integration_sha }, "conflict", "resolved", "skip-stale(integration-head)", "integration head advanced after conflict event")
       return
     end
-    if core.is_ancestor(upstream_sha, integration_sha, "ancestor check") then
+    if git_mechanics.is_ancestor(core.git, upstream_sha, integration_sha, "ancestor check") then
       core.log_cas_decision("sync_conflict", "branch-sync", { state = "synced", version = integration_sha }, "conflict", "resolved", "skip-idempotent(upstream-ancestor)", "conflict resolved elsewhere")
       return
     end

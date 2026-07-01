@@ -170,7 +170,7 @@ local function substrate_pin_is_dev_ancestor(pin, target_sha)
   if fetched_head:lower() ~= tostring(target_sha):lower() then
     return false, "substrate-dev-head-mismatch"
   end
-  local ancestry = M.git_is_ancestor(pin, fetched_head, 30)
+  local ancestry = git_mechanics.git_is_ancestor(M.git, pin, fetched_head, 30)
   if ancestry.exit_code == 0 then
     return true, "substrate-pin-valid"
   end
@@ -376,7 +376,7 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
     error("github-devloop: unable to read base branch head for substrate-ref bump")
   end
   if old_branch_head ~= nil and remote_bump_branch_pin(old_branch_head) == target_sha then
-    local ancestry = M.git_is_ancestor(base_head, old_branch_head, 30)
+    local ancestry = git_mechanics.git_is_ancestor(M.git, base_head, old_branch_head, 30)
     if ancestry.exit_code == 0 then
       return "already-current"
     end

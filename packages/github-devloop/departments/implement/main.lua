@@ -116,7 +116,7 @@ local function remote_branch_fact(branch, base_branch, source_fact)
     error("github-devloop: unsafe implementing remote branch head")
   end
   if source_fact ~= nil and source_fact.head_sha ~= nil and head_sha ~= source_fact.head_sha then
-    local ancestry = core.git_is_ancestor(source_fact.head_sha, head_sha, 30)
+    local ancestry = git_mechanics.git_is_ancestor(core.git, source_fact.head_sha, head_sha, 30)
     if ancestry.exit_code ~= 0 then
       return nil
     end
