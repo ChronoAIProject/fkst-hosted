@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
 
@@ -18,10 +19,10 @@ local function normalize_lines(text)
   for line in (tostring(text or "") .. "\n"):gmatch("(.-)\n") do
     table.insert(lines, (line:gsub("%s+$", "")))
   end
-  while #lines > 0 and M._trim(lines[1]) == "" do
+  while #lines > 0 and strings.trim(lines[1]) == "" do
     table.remove(lines, 1)
   end
-  while #lines > 0 and M._trim(lines[#lines]) == "" do
+  while #lines > 0 and strings.trim(lines[#lines]) == "" do
     table.remove(lines)
   end
   return table.concat(lines, "\n")
@@ -30,7 +31,7 @@ end
 local function strip_sentinel(text)
   local lines = {}
   for line in (tostring(text or "") .. "\n"):gmatch("(.-)\n") do
-    if M._trim(line) ~= ai_sentinel then
+    if strings.trim(line) ~= ai_sentinel then
       table.insert(lines, line)
     end
   end

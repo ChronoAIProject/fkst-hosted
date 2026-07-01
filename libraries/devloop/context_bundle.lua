@@ -19,7 +19,7 @@ local function runtime_root(M, exec)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(result and result.stderr or "nil result"))
   end
-  local root = M._trim(result.stdout)
+  local root = strings.trim(result.stdout)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")
   end
@@ -139,7 +139,7 @@ local function file_size(M, path, exec)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil
   end
-  local stdout = M._trim(result.stdout)
+  local stdout = strings.trim(result.stdout)
   return tonumber(stdout)
 end
 
@@ -438,7 +438,7 @@ function C.build_context_bundle(M, args)
     "temp directory setup",
     args.exec
   )
-  local tmp_dir = M._trim(tmp_result.stdout)
+  local tmp_dir = strings.trim(tmp_result.stdout)
   if tmp_dir == "" or tmp_dir:find("[\r\n]") ~= nil then
     error("github-devloop: context bundle invalid temp directory")
   end

@@ -23,7 +23,7 @@ local function write_enabled()
 end
 
 local function bot_login()
-  local login = core._trim(read_env("FKST_GITHUB_BOT_LOGIN") or "")
+  local login = strings.trim(read_env("FKST_GITHUB_BOT_LOGIN") or "")
   if write_enabled() and login == "" then
     error("github-ratchet-migration-slicer: bot-login-required: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
   end
@@ -38,7 +38,7 @@ local function trusted_bot_logins()
   end
   logins[current] = true
   for entry in tostring(read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS") or ""):gmatch("[^,%s]+") do
-    local login = core.strip_bot_login_suffix(core._trim(entry))
+    local login = core.strip_bot_login_suffix(strings.trim(entry))
     if login ~= nil and login ~= "" then
       logins[login] = true
     end

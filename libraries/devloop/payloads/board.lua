@@ -1,9 +1,10 @@
+local strings = require("contract.strings")
 local C = {}
 local shared = require("devloop.payloads.shared")
 
 local function board_feed_cmd(M)
   local cmd = M.read_env("FKST_DEVLOOP_BOARD_CMD")
-  if cmd == nil or M._trim(cmd) == "" then
+  if cmd == nil or strings.trim(cmd) == "" then
     return nil
   end
   return cmd

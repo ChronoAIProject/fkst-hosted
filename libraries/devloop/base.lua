@@ -751,7 +751,6 @@ C._blocked_label = blocked_label
 C._blocked_on_dependency_label = blocked_on_dependency_label
 C._label_colors = label_colors
 C._shell_single_quote = shell_single_quote
-C._trim = trim
 C._neutralize_fkst_markers = neutralize_fkst_markers
 C._one_line = one_line
 C._is_bounded_string = is_bounded_string

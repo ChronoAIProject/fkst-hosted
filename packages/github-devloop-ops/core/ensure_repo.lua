@@ -321,9 +321,9 @@ local function ensure_topology(branches)
 
   log_ensure("topology", "unchanged", {
     "integration=" .. branches.integration,
-    "head=" .. M._trim(head.stdout),
+    "head=" .. strings.trim(head.stdout),
   })
-  return { ok = true, held = false, head = M._trim(head.stdout) }
+  return { ok = true, held = false, head = strings.trim(head.stdout) }
 end
 
 function M.dashboard_label()

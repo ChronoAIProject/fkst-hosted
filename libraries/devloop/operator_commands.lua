@@ -26,7 +26,7 @@ end
 
 local function first_command_line(M, body)
   for line in tostring(body or ""):gmatch("[^\r\n]+") do
-    local trimmed = M._trim(line):lower()
+    local trimmed = strings.trim(line):lower()
     if trimmed ~= "" then
       return trimmed
     end

@@ -33,7 +33,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   local function runtime_root_path(M, runtime_root)
-    local root = M._trim(runtime_root)
+    local root = strings.trim(runtime_root)
     if root == "" or root:find("[\r\n]") ~= nil then
       error("github-devloop: invalid FKST_RUNTIME_ROOT")
     end

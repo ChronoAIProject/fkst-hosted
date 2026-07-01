@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local C = {}
 local github_handle = nil
 local error_facts = require("contract.error_facts")
@@ -83,7 +84,7 @@ function C.managed_bot_logins(M, exec)
   local raw = M.read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec)
   local logins = {}
   for entry in tostring(raw or ""):gmatch("[^,%s]+") do
-    local login = M.strip_bot_login_suffix(M._trim(entry))
+    local login = M.strip_bot_login_suffix(strings.trim(entry))
     if login ~= nil and login ~= "" then
       logins[login] = true
     end
@@ -237,7 +238,7 @@ end
 
 function C.fork_grace_seconds(M, exec)
   local raw = M.read_env("FKST_DEVLOOP_FORK_GRACE_HOURS", exec)
-  raw = M._trim(raw or "")
+  raw = strings.trim(raw or "")
   if raw == "" then
     return 3 * 60 * 60
   end

@@ -16,7 +16,7 @@ end
 
 local function install_shared(M)
 function M.output_language(exec)
-  local lang = M._trim(M.read_env("FKST_OUTPUT_LANG", exec))
+  local lang = strings.trim(M.read_env("FKST_OUTPUT_LANG", exec))
   if lang == "zh" then
     return "zh"
   end
@@ -258,7 +258,7 @@ function M.parse_intake_action(stdout)
   for line in (text .. "\n"):gmatch("(.-)\n") do
     table.insert(lines, line)
   end
-  while #lines > 0 and M._trim(lines[#lines]) == "" do
+  while #lines > 0 and strings.trim(lines[#lines]) == "" do
     table.remove(lines)
   end
   if #lines ~= 3 then
@@ -283,7 +283,7 @@ function M.parse_intake_action(stdout)
   if action == nil or not is_intake_action(action) then
     return nil
   end
-  if reason == nil or M._trim(reason) == "" then
+  if reason == nil or strings.trim(reason) == "" then
     return nil
   end
   if not strings.is_bounded_string(reason, M._max_meta_reason_len) then
@@ -292,7 +292,7 @@ function M.parse_intake_action(stdout)
   return {
     action = action,
     service_class = service_class,
-    reason = M._trim(reason),
+    reason = strings.trim(reason),
   }
 end
 end
@@ -302,7 +302,7 @@ function M.parse_review_meta_action(stdout)
   local text = tostring(stdout or "")
   local lines = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
-    if M._trim(line) ~= "" then
+    if strings.trim(line) ~= "" then
       table.insert(lines, line)
     end
   end
@@ -320,10 +320,10 @@ function M.parse_review_meta_action(stdout)
   end
 
   local captured_reason = lines[2]:match("^%s*" .. M._reason_label .. "%s+(.+)$")
-  if captured_reason == nil or M._trim(captured_reason) == "" then
+  if captured_reason == nil or strings.trim(captured_reason) == "" then
     return nil
   end
-  local reason = M._trim(captured_reason)
+  local reason = strings.trim(captured_reason)
   if not strings.is_bounded_string(reason, M._max_meta_reason_len) then
     return nil
   end
@@ -334,10 +334,10 @@ function M.parse_review_meta_action(stdout)
       return nil
     end
     local captured_gap = lines[3]:match("^%s*Blocking gap:%s+(.+)$")
-    if captured_gap == nil or M._trim(captured_gap) == "" then
+    if captured_gap == nil or strings.trim(captured_gap) == "" then
       return nil
     end
-    gap = M._trim(captured_gap)
+    gap = strings.trim(captured_gap)
     if not strings.is_bounded_string(gap, M._max_blocking_gap_len)
       or gap:find("%c") ~= nil
       or gap:find("<!%-%- fkst:") ~= nil

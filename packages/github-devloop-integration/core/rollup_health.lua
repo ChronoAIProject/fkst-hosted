@@ -106,10 +106,10 @@ end
 
 function M.rollup_red_window_minutes(exec)
   local raw = M.read_env("FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES", exec)
-  if raw == nil or M._trim(raw) == "" then
+  if raw == nil or strings.trim(raw) == "" then
     return default_red_window_minutes
   end
-  local value = tonumber(M._trim(raw))
+  local value = tonumber(strings.trim(raw))
   if value == nil or value ~= math.floor(value) or value < 1 or value > 1440 then
     error("github-devloop: invalid FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES")
   end

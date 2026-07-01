@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
 local env = require("workflow.env")
@@ -79,7 +80,7 @@ end
 -- even though an App cannot be an issue assignee.
 function C.claim_mode(M, exec)
   local raw = M.read_env("FKST_GITHUB_CLAIM_MODE", exec)
-  raw = M._trim(raw or "")
+  raw = strings.trim(raw or "")
   if raw == "label" then
     return "label"
   end
@@ -92,7 +93,7 @@ end
 -- fkst-dev:enabled + fkst-class:expedite so the loop claims and fixes the red
 -- rollup ahead of new issues (expedite class + inflight cap = priority).
 function C.rollup_autofix_enabled(M, exec)
-  return M._trim(M.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
+  return strings.trim(M.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
 end
 
 function C.max_inflight(M, exec)
@@ -100,7 +101,7 @@ function C.max_inflight(M, exec)
   if value == nil then
     return nil
   end
-  value = M._trim(value)
+  value = strings.trim(value)
   if value == "" then
     return nil
   end
@@ -162,7 +163,7 @@ local function current_checkout_branch(M, exec)
   if not ok or type(out) ~= "table" or out.exit_code ~= 0 then
     error("github-devloop: current checkout branch read failed")
   end
-  local branch = M._trim(out.stdout)
+  local branch = strings.trim(out.stdout)
   if branch == "HEAD" or not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid current checkout branch")
   end
@@ -170,7 +171,7 @@ local function current_checkout_branch(M, exec)
 end
 
 local function validated_branch(M, name, branch)
-  branch = M._trim(branch)
+  branch = strings.trim(branch)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid " .. name)
   end
@@ -198,7 +199,7 @@ end
 function C.devloop_config(M, exec)
   local branches = C.branch_config(M, exec)
   local rollup_merge = M.read_env("FKST_DEVLOOP_ROLLUP_MERGE", exec) or "auto"
-  rollup_merge = M._trim(rollup_merge)
+  rollup_merge = strings.trim(rollup_merge)
   if rollup_merge ~= "auto" and rollup_merge ~= "manual" then
     error("github-devloop: invalid FKST_DEVLOOP_ROLLUP_MERGE")
   end

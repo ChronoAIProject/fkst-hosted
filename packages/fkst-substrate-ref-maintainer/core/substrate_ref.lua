@@ -86,7 +86,7 @@ local function read_runtime_root()
   local result = run_cmd(function()
     return exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
   end, "runtime root read")
-  local root = M._trim(result.stdout)
+  local root = strings.trim(result.stdout)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: FKST_RUNTIME_ROOT is required for substrate-ref bump")
   end
@@ -107,7 +107,7 @@ local function read_pin()
   if result.exit_code ~= 0 then
     error("github-devloop: substrate-ref pin read failed: " .. tostring(result.stderr))
   end
-  local pin = M._trim(result.stdout)
+  local pin = strings.trim(result.stdout)
   if not forge_validators.is_git_sha(pin) then
     error("github-devloop: invalid .fkst/substrate-ref pin")
   end
@@ -160,7 +160,7 @@ local function substrate_pin_is_dev_ancestor(pin, target_sha)
     end,
     "substrate upstream tracking ref read"
   )
-  local fetched_head = M._trim(head.stdout)
+  local fetched_head = strings.trim(head.stdout)
   if not forge_validators.is_git_sha(fetched_head) then
     return false, "invalid-substrate-dev-head"
   end
@@ -309,7 +309,7 @@ local function fetch_bump_branch_head()
   local head = run_cmd(function()
     return git().remote_branch_head("origin", bump_branch, 30)
   end, "substrate-ref bump branch head")
-  local sha = M._trim(head.stdout)
+  local sha = strings.trim(head.stdout)
   if not forge_validators.is_git_sha(sha) then
     error("github-devloop: invalid substrate-ref bump branch head")
   end
@@ -326,7 +326,7 @@ local function remote_bump_branch_pin(branch_head)
   if result.exit_code ~= 0 then
     return nil
   end
-  local pin = M._trim(result.stdout)
+  local pin = strings.trim(result.stdout)
   if not forge_validators.is_git_sha(pin) then
     return nil
   end
@@ -356,7 +356,7 @@ local function pin_delta_state(worktree)
   local diff = run_cmd(function()
     return git().diff_name_only(worktree, "HEAD", 30)
   end, "substrate-ref changed paths")
-  local name = M._trim(diff.stdout)
+  local name = strings.trim(diff.stdout)
   if name == "" then
     return "empty"
   end
