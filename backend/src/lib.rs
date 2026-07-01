@@ -27,6 +27,13 @@ pub mod goals;
 pub mod install;
 pub mod models;
 pub mod protocol;
+// Model B reconciler config knobs (`FKST_*`, issue #359 §4). Config surface only
+// — no behaviour is wired to these yet (PR5b wires the loop; PR6 flips it on).
+pub mod reconcile_config;
+// Model B reconciler CORE (issue #359 §4.3, PR5a): the pure desired-state types,
+// the event→action planner (`plan_repo`), and the trigger-issue → registration
+// parse. No Kubernetes/GitHub calls — the effectful loop is PR5b.
+pub mod reconcile;
 // Reserved-env "keep-module" (Model B PR0, issue #359 §7/§9): holds
 // `is_reserved_env_key` + `LLM_ENV_KEY` so they survive the later deletion of
 // `engine/` and `sessions/codex_provider/`, which originally defined them.
