@@ -108,7 +108,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     .. "\n\n" .. m_builders.pr_origin_marker(M, issue_proposal_id, issue_number, branch, impl_version, base_branch)
     .. "\n" .. m_builders.pr_link_marker(M, issue_proposal_id, pr_number, branch, impl_version, base_branch)
     .. "\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -130,7 +130,7 @@ end
 
 local function build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, source_ref)
   local marker = m_builders.pr_delegation_marker(M, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = repo,
     number = issue_number,
@@ -155,7 +155,7 @@ local function build_parent_awaiting_comment(repo, issue_number, ready, child)
       ready.dedup_key,
       child.delegation_generation
     )
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = repo,
     number = issue_number,

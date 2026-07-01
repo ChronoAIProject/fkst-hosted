@@ -25,7 +25,7 @@ function C.issue_source_ref(repo, issue_number)
   }
 end
 
-function C.build_entity_comment_request(M, target, body, dedup_key, source_ref, opts)
+function C.build_entity_comment_request(target, body, dedup_key, source_ref, opts)
   if type(target) ~= "table" then
     error("github-devloop: invalid entity comment target")
   end
@@ -41,7 +41,7 @@ function C.build_entity_comment_request(M, target, body, dedup_key, source_ref, 
   end
   if target.kind == "issue" then
     request.issue_number = target.number
-    m_claims.attach_issue_claim(M, request, request.source_ref)
+    m_claims.attach_issue_claim(request, request.source_ref)
   elseif target.kind == "pr" then
     request.pr_number = target.number
   else

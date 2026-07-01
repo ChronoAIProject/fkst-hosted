@@ -319,7 +319,7 @@ local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)
   local merged_source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
   local autonomy_record = issue_number ~= nil and autonomy_ledger.autonomy_result_record(core, repo, issue_number, merge_ready, nil, merged_pr) or nil
   local merged_body = requests_bodies.build_merged_comment_body(core, merge_ready, autonomy_record)
-  local comment_request = core.build_entity_comment_request({
+  local comment_request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,

@@ -601,7 +601,7 @@ mark_child_closed_unmerged = function(dept, issue, state, proposal_id, link, too
   local version = transition_version.strip_suffixes(state and state.version)
   local pr_number = link and link.pr_number
   local source_ref = pr_number ~= nil and entity_lib.pr_source_ref(issue.repo, pr_number) or issue.source_ref
-  local comment_request = M.build_entity_comment_request({
+  local comment_request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = issue.repo,
     number = pr_number,
@@ -638,7 +638,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
     .. "\n\n" .. M.state_marker(proposal_id, "merged", state.version)
     .. "\n" .. m_builders.merged_marker(M, proposal_id, link.pr_number, state.version, head_sha)
   local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
-  local comment_request = M.build_entity_comment_request({
+  local comment_request = entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = issue.repo,
     number = issue.number,

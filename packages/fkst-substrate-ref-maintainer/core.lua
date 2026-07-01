@@ -120,7 +120,6 @@ M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, de
 require("forge.merge").install(M)
 require("devloop.logging").install(M)
 local entity = require("devloop.entity")
-M.build_entity_comment_request = function(...) return entity.build_entity_comment_request(M, ...) end
 M.linked_pr_surface_snapshot = function(...) return entity.linked_pr_surface_snapshot(M, ...) end
 M.pr_transition_lock_key = function(...) return entity.pr_transition_lock_key(M, ...) end
 M.is_safe_entity_proposal_ref = function(...) return entity.is_safe_entity_proposal_ref(M, ...) end

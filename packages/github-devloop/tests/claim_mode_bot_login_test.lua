@@ -287,7 +287,7 @@ return {
 
   test_unknown_mode_falls_back_to_assignee = function()
     mock_env("fkst-test-bot", "bogus-mode", "")
-    t.eq(config.claim_mode(core), "assignee")
+    t.eq(config.claim_mode(), "assignee")
     t.eq(m_claims.issue_claim_state(core, { { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
     t.mock_command("gh issue view 42 --repo owner/repo --json assignees,author", {
       stdout = ownership_json({ "fkst-test-bot" }, "fkst-test-bot"),
@@ -328,7 +328,7 @@ return {
   -- claim_owner normalizes the configured bot login at its single source.
   test_claim_owner_returns_bare_slug_for_bracket_bot_config = function()
     mock_env("chronoai-bot[bot]", "", "")
-    t.eq(m_claims.claim_owner(core), "chronoai-bot")
+    t.eq(m_claims.claim_owner(), "chronoai-bot")
     devloop_base.configure_trusted_bot_login(nil)
   end,
 }

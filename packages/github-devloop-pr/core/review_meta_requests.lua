@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -86,7 +87,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
   end
   text = devloop_base.neutralize_untrusted_comment_text(text)
   local state_marker = M.state_marker(fix.proposal_id, "review-meta", fix.version)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = fix.pr_number,
@@ -126,7 +127,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   local state_version = version or review_meta.version
   local marker = review_meta_result_marker(review_meta, action, reason, state_version, blocking_gap)
   local prefix = review_meta.mode == "fix-reflection" and comment_strings.comment_string(M, "fix_reflection_prefix") or comment_strings.comment_string(M, "review_meta_action_prefix")
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = review_meta.pr_number,
@@ -185,7 +186,7 @@ function M.build_fix_reconcile_comment_request(repo, _issue_number, fix_reconcil
   local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(fix_reconcile.source_ref)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -206,7 +207,7 @@ function M.build_review_reconcile_comment_request(repo, _issue_number, review_re
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(review_reconcile.source_ref)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,

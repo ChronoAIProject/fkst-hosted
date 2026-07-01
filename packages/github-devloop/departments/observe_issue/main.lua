@@ -191,7 +191,7 @@ local function replay_or_timeout(issue, proposal_id, current, link, snapshot, st
 end
 
 local function ensure_managed_issue_claim(issue, proposal_id, current, state)
-  local claim_state = m_claims.issue_claim_state(core, current.assignees, m_claims.claim_owner(core), current.labels)
+  local claim_state = m_claims.issue_claim_state(core, current.assignees, m_claims.claim_owner(), current.labels)
   if claim_state == "other" then
     core.log_cas_decision("observe_issue", proposal_id, state, state.state, state.state, "skip-claim-lost", "CLAIM lost before managed issue handling")
     return false
@@ -599,7 +599,7 @@ local function process_issue_event(event)
       local comment_body = "github-devloop canonicalized legacy issue PR state to delegated PR child"
         .. "\n\n" .. core.state_marker(proposal_id, "awaiting-pr", issue_state.version)
         .. "\n" .. m_builders.pr_delegation_marker(core, proposal_id, pr_proposal_id, link.pr_number, issue_state.version, delegation)
-      local comment_request = core.build_entity_comment_request({
+      local comment_request = entity_lib.build_entity_comment_request({
         kind = "issue",
         repo = issue.repo,
         number = issue.number,

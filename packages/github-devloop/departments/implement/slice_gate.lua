@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -61,7 +62,7 @@ local function duplicate_comment(repo, issue_number, ready, entry_key, canonical
     .. "; canonical is #" .. tostring(canonical_number)
     .. "\n\n<!-- fkst:github-devloop:duplicate-slice:v1 entry_key=\"" .. tostring(entry_key)
     .. "\" canonical=\"" .. tostring(canonical_number) .. "\" -->"
-  return core.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = repo,
     number = issue_number,

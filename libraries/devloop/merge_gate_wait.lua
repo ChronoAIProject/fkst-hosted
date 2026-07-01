@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
@@ -49,7 +50,7 @@ function C.build_merge_gate_wait_comment_request(M, repo, merge_ready, reason, k
     safe_reason,
     kind
   )
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,

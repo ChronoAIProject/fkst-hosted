@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -17,7 +18,7 @@ local function duplicate_comment(repo, issue_number, ready, origin, canonical_nu
     .. "\" canonical=\""
     .. tostring(canonical_number)
     .. "\" -->"
-  return core.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = repo,
     number = issue_number,
@@ -58,7 +59,7 @@ function M.check(repo, issue_number, ready, origin, original, managed)
     core,
     original.comments,
     forks.fork_issue_dedup_key(origin.repo, origin.issue_number),
-    m_claims.claim_owner(core),
+    m_claims.claim_owner(),
     managed
   )
   if canonical == nil or tonumber(canonical) == tonumber(issue_number) then

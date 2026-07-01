@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -56,7 +57,7 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
   local marker = conv_reconcile.reconcile_marker(M, reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
   local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
-  return m_claims.attach_issue_claim(M, {
+  return m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -80,7 +81,7 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
   local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(fix_reconcile.source_ref)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -101,7 +102,7 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(review_reconcile.source_ref)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,

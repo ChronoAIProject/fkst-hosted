@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -71,7 +72,7 @@ function C.attach_fixing_handoff(M, request, proposal_id, pr_number, version, re
 end
 
 function C.build_review_converge_round_comment_request(M, repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = unresolved.pr_number or select(2, devloop_base.parse_pr_source_ref(unresolved.source_ref)),
@@ -87,7 +88,7 @@ function C.build_review_converge_round_comment_request(M, repo, issue_number, un
 end
 
 function C.build_issue_review_converge_round_comment_request(M, repo, issue_number, unresolved, issue_proposal_id, round, marker_body, source_ref)
-  return m_claims.attach_issue_claim(M, {
+  return m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -107,7 +108,7 @@ end
 
 function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_number, source_ref)
   local state_marker = M.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -125,7 +126,7 @@ end
 function C.build_operator_rereview_comment_request(M, repo, pr_number, proposal_id, new_version, command, source_ref)
   local state_marker = M.state_marker(proposal_id, "reviewing", new_version)
   local marker = operator_commands.operator_command_marker(M, command, "applied", "rereview")
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -150,7 +151,7 @@ function C.build_pr_base_unmanaged_comment_request(M, repo, pr_number, origin, i
   local blocked_version = C.pr_base_unmanaged_blocked_version(M, origin.impl_version)
   local state_marker = M.state_marker(origin.proposal_id, "blocked", blocked_version)
   local reason_marker = m_builders.pr_base_unmanaged_marker(M, origin.proposal_id, pr_number, origin.base_branch, integration_branch)
-  return C.attach_blocked_handoff(M, M.build_entity_comment_request({
+  return C.attach_blocked_handoff(M, entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -202,7 +203,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     body = body .. "\n" .. comment_strings.comment_string(M, "blocking_gap_label") .. devloop_base.neutralize_untrusted_comment_text(blocking_gap)
   end
   local _, pr_number = devloop_base.parse_pr_source_ref(source_ref)
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -257,7 +258,7 @@ function C.build_high_risk_review_evidence_comment_request(M, repo, issue_propos
     paths_digest,
     angle_digest
   )
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -297,7 +298,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
     safe_reason,
     predecessor_set
   )
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
@@ -338,7 +339,7 @@ function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_h
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
     summary = "\n" .. comment_strings.comment_string(M, "fix_round_summary_label") .. devloop_base.neutralize_untrusted_comment_text(fix.fix_summary)
   end
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = fix.pr_number,
@@ -391,7 +392,7 @@ end
 
 function C.build_merge_head_reviewing_comment_request(M, repo, issue_number, merge_ready, old_head_sha, new_head_sha, new_version, source_ref)
   local state_marker = M.state_marker(merge_ready.proposal_id, "reviewing", new_version)
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = merge_ready.pr_number,
@@ -424,7 +425,7 @@ function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_pro
     carry.new_head_sha,
     carry.base_head_sha
   )
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,

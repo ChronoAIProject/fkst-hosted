@@ -79,7 +79,7 @@ end
 -- "assignee", which is byte-for-byte today's behavior. "label" opts into
 -- holding ownership via the fkst-dev:claimed label, which a GitHub App can set
 -- even though an App cannot be an issue assignee.
-function C.claim_mode(M, exec)
+function C.claim_mode(exec)
   local raw = C.read_env("FKST_GITHUB_CLAIM_MODE", exec)
   raw = strings.trim(raw or "")
   if raw == "label" then

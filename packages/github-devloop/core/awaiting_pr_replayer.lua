@@ -109,7 +109,7 @@ end
 local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
   local source_ref = issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
   local state_marker = M.state_marker(delegation.proposal_id, next_state.to_state, next_state.version)
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = issue.repo,
     number = issue.number,

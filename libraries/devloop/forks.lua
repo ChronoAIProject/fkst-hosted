@@ -151,7 +151,7 @@ function F.fork_origin_fact(core, entity, managed)
   if type(entity) ~= "table" then
     return nil
   end
-  local trust_set = F.managed_fork_trust_set(core, m_claims.claim_owner(core), managed)
+  local trust_set = F.managed_fork_trust_set(core, m_claims.claim_owner(), managed)
   if m_claims.is_managed_bot_login(core, m_claims.issue_author_login(core, entity), trust_set) then
     local body_fact = fork_origin_fact_from_text(core, entity.body)
     if body_fact ~= nil then
@@ -220,7 +220,7 @@ function F.build_fork_issue_create_request(core, repo, issue_number, current, so
     repo = tostring(repo),
     title = F.fork_issue_title(issue_number, current and current.title),
     body = F.fork_issue_body(repo, issue_number, author_login, normalized),
-    assignees = { m_claims.claim_owner(core) },
+    assignees = { m_claims.claim_owner() },
     dedup_key = dedup_key,
     external_effect_saga = "fork-and-block",
     external_effect_step = "create-fork",

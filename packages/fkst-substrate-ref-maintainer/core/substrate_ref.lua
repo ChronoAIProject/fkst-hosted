@@ -557,7 +557,7 @@ local function validate_bump_merge_facts(repo, base_branch, pr, target_sha)
 end
 
 local function raise_merge_audit(repo, pr, target_sha, outcome, reason)
-  local request = M.build_entity_comment_request({
+  local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr.number,

@@ -16,7 +16,7 @@ local function label_colors_for(M, add_labels)
 end
 
 function C.build_label_request(M, repo, issue_number, add_labels, remove_labels, dedup_key, source_ref)
-  return m_claims.attach_issue_claim(M, {
+  return m_claims.attach_issue_claim({
     schema = "github-proxy.label.v1",
     repo = repo,
     target_kind = "issue",

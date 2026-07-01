@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -207,7 +208,7 @@ function M.build_intake_class_followup_comment_request(repo, issue_number, candi
   else
     carrier_line = carrier_line .. "pending intent-before-create"
   end
-  return M.build_entity_comment_request({
+  return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = repo,
     number = issue_number,

@@ -387,7 +387,7 @@ function M.ensure_repo()
   -- The fkst-dev:claimed label backs label-mode ownership; only register it when
   -- the deployment opts into label-mode so assignee-mode repos stay unchanged.
   local claim_label_result = nil
-  if config.claim_mode(M) == "label" then
+  if config.claim_mode() == "label" then
     claim_label_result = ensure_label(repo, apply_mode, repo_labels, {
       name = m_claims.claimed_label(M),
       color = "0E8A16",
@@ -398,7 +398,7 @@ function M.ensure_repo()
   return {
     repo = repo,
     mode = cfg.write_mode,
-    claim_mode = config.claim_mode(M),
+    claim_mode = config.claim_mode(),
     labels = label_result,
     dashboard_label = dashboard_label_result,
     claim_label = claim_label_result,

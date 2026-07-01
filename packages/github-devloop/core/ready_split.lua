@@ -21,7 +21,7 @@ function M.build_ready_split_canonicalized_comment_request(repo, issue_number, p
   if to_state == "dependency_wait" then
     markers = markers .. "\n" .. M.dependency_wait_marker(proposal_id, to_version, gate and gate.unmet or {}, gate and gate.kind or "waiting", gate and gate.reason or "waiting-on-dependency")
   end
-  local request = m_claims.attach_issue_claim(M, {
+  local request = m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = repo,
     issue_number = issue_number,
@@ -220,7 +220,7 @@ end
 local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state, gate)
   local add_labels, remove_labels = M.state_label_changes("blocked")
   table.insert(remove_labels, M._blocked_on_dependency_label)
-  local comment_request = m_claims.attach_issue_claim(M, {
+  local comment_request = m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
     repo = issue.repo,
     issue_number = issue.number,

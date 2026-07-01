@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local shared = require("devloop.convergence.shared")
@@ -55,7 +56,7 @@ function C.build_timeout_attempt_comment_request(M, target, proposal_id, state, 
   local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.timeout_attempt_marker(M, proposal_id, state.version, row.from_state, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(M, proposal_id, row.from_state, "", transition_version.strip_suffixes(state.version))
-  return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
+  return entity_lib.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
     .. " "
     .. tostring(attempt)
@@ -79,7 +80,7 @@ function C.build_timeout_attempt_v2_comment_request(M, target, proposal_id, stat
   local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.timeout_attempt_v2_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key)
-  return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
+  return entity_lib.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
     .. " "
     .. tostring(attempt)
@@ -119,7 +120,7 @@ end
 function C.build_decompose_exhausted_comment_request(M, target, proposal_id, state, source_ref, attempt)
   local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.decompose_exhausted_marker(M, proposal_id, state.version, attempt, normalized)
-  return M.build_entity_comment_request(target, "github-devloop decompose output obligation exhausted\n\n"
+  return entity_lib.build_entity_comment_request(target, "github-devloop decompose output obligation exhausted\n\n"
     .. "Structured WHY:\n"
     .. "reason_class=decompose-output-obligation-timeout\n"
     .. "from_state=blocked\n"

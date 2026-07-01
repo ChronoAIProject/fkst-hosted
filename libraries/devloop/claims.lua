@@ -78,7 +78,7 @@ end
 -- Single source for the claim owner: normalize the configured bot login so all
 -- downstream comparisons get the bare slug regardless of whether the deployment
 -- configured "<slug>" or "<slug>[bot]". No-op for ordinary user logins.
-function C.claim_owner(M)
+function C.claim_owner()
   return devloop_base.strip_bot_login_suffix(devloop_base.assert_trusted_bot_configured() or devloop_base.trusted_bot_login())
 end
 
@@ -107,7 +107,7 @@ end
 
 -- assignee (default) ⇒ exactly today's behavior. label ⇒ opt-in GitHub App mode.
 function C.claim_mode_active(M)
-  return config.claim_mode(M)
+  return config.claim_mode()
 end
 
 -- assignee-mode (default): ownership is the current single self-assignee.
@@ -115,7 +115,7 @@ end
 -- labels is optional/extra and ignored in assignee-mode, so existing 2-arg
 -- callers keep byte-for-byte behavior.
 function C.issue_claim_state(M, assignees, owner, labels)
-  if config.claim_mode(M) == "label" then
+  if config.claim_mode() == "label" then
     if M.has_label(labels, claimed_label) then
       return "self"
     end
@@ -164,7 +164,7 @@ function C.read_current_issue_ownership(M, repo, issue_number)
     return nil
   end
   local fields = "assignees,author"
-  if config.claim_mode(M) == "label" then
+  if config.claim_mode() == "label" then
     fields = "assignees,author,labels"
   end
   local view = github().issue_view(repo, issue_number, fields, 30)
@@ -210,10 +210,10 @@ function C.verify_pr_review_issue_claim(M, dept, repo, issue_number, current_iss
     log_claim(M, dept, proposal_id, "skip-not-owned", "backing issue is absent")
     return false
   end
-  local owner = C.claim_owner(M)
+  local owner = C.claim_owner()
   local ownership = nil
   local current_usable
-  if config.claim_mode(M) == "label" then
+  if config.claim_mode() == "label" then
     -- label-mode ownership is derived from the labels projection.
     current_usable = type(current_issue) == "table" and current_issue.labels ~= nil
   else
@@ -275,7 +275,7 @@ function C.fork_grace_elapsed(M, repo, issue_number, current, now_seconds, grace
 end
 
 function C.claim_issue_for_management(M, dept, repo, issue_number, current, proposal_id)
-  local owner = C.claim_owner(M)
+  local owner = C.claim_owner()
   local status = C.issue_claim_state(M, current and current.assignees, owner, current and current.labels)
   if status == "self" then
     return true
@@ -296,7 +296,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   -- human's issue. In label-mode the loop is single-tenant and explicitly
   -- opts issues in via the fkst-dev:enabled label, so it claims directly
   -- (matching the label-claim fork). Assignee-mode keeps the original behavior.
-  if config.claim_mode(M) ~= "label" and author ~= owner then
+  if config.claim_mode() ~= "label" and author ~= owner then
     local managed = C.managed_bot_logins(M)
     if C.is_managed_bot_login(M, author, managed) then
       log_claim(M, dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
@@ -337,7 +337,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
     return true
   end
 
-  if config.claim_mode(M) == "label" then
+  if config.claim_mode() == "label" then
     github().issue_add_label(repo, issue_number, claimed_label, 30)
     M.invalidate_entity_after_write(repo, "issue", issue_number)
     if C.verify_issue_claim(M, repo, issue_number, owner) then
@@ -375,19 +375,19 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   return false
 end
 
-function C.claim_required_payload(M, source_ref)
+function C.claim_required_payload(source_ref)
   local normalized = base_ids.normalize_source_ref(source_ref)
   local repo, issue_number = devloop_base.parse_issue_source_ref(normalized)
   if repo == nil or issue_number == nil then
     return nil
   end
   return {
-    owner = C.claim_owner(M),
+    owner = C.claim_owner(),
     source_ref = normalized,
   }
 end
 
-function C.attach_issue_claim(M, payload, source_ref)
+function C.attach_issue_claim(payload, source_ref)
   if type(payload) ~= "table" then
     return payload
   end
@@ -398,10 +398,10 @@ function C.attach_issue_claim(M, payload, source_ref)
   -- label-mode is instead verified at claim time (claim_issue_for_management),
   -- so skip attaching the assignee claim and let github-proxy's no-claim path
   -- proceed. Assignee-mode is unchanged.
-  if config.claim_mode(M) == "label" then
+  if config.claim_mode() == "label" then
     return payload
   end
-  payload.claim = C.claim_required_payload(M, source_ref or payload.source_ref)
+  payload.claim = C.claim_required_payload(source_ref or payload.source_ref)
   return payload
 end
 
