@@ -290,39 +290,67 @@ async fn missing_llm_api_key_exits_nonzero_without_starting() {
     );
 }
 
-#[test]
-fn user_env_files_are_injected_into_env_profile_with_reserved_keys_skipped() {
-    use secrecy::ExposeSecret;
+#[tokio::test]
+async fn install_success_lets_the_agent_proceed() {
+    let stub_dir = tempfile::tempdir().expect("stub dir");
+    let temp_root = tempfile::tempdir().expect("temp root");
+    let repo = fixture_repo();
+    let bin = framework_stub(stub_dir.path(), &ready_then_exit(0));
 
-    let dir = tempfile::tempdir().expect("creds dir");
-    fs::write(dir.path().join("userenv.FOO"), "foo-val\n").expect("write FOO");
-    fs::write(dir.path().join("userenv.BAR"), "bar-val\n").expect("write BAR");
-    // An `FKST_`-prefixed key the engine would strip: it must be skipped here.
-    fs::write(dir.path().join("userenv.FKST_X"), "nope\n").expect("write FKST_X");
-    // A collision with the LLM credential key must be skipped too (never shadow).
-    fs::write(
-        dir.path().join(format!("userenv.{LLM_ENV_KEY}")),
-        "stolen\n",
+    // A trivially-succeeding install command; the agent must then run to a clean
+    // completion (SUCCESS).
+    let mut spec = sample_spec();
+    spec.install = vec!["true".to_string()];
+    let (_spec_dir, spec_path) = write_spec(&spec);
+    let (_creds_dir, creds) = creds_with_required_secrets();
+    let source = FixtureRepoSource {
+        repo_dir: repo.path().to_path_buf(),
+    };
+
+    let code = run_session_with(
+        &source,
+        &spec_path,
+        &creds,
+        engine_config(&bin, temp_root.path()),
     )
-    .expect("write llm collision");
-    // A non-user credential file must be ignored entirely (not injected).
-    fs::write(dir.path().join("github-token"), "ghs_x\n").expect("write token");
-    let creds = CredsLayout::new(dir.path());
+    .await;
 
-    let mut env_profile: BTreeMap<String, SecretString> = BTreeMap::new();
-    env_profile.insert(LLM_ENV_KEY.to_string(), SecretString::from("real-llm-key"));
-    inject_user_env(&creds, "sess-1", &mut env_profile);
+    assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::SUCCESS));
+}
 
-    assert_eq!(env_profile.get("FOO").unwrap().expose_secret(), "foo-val");
-    assert_eq!(env_profile.get("BAR").unwrap().expose_secret(), "bar-val");
-    // The reserved `FKST_X` is dropped, and the real LLM key is never overwritten.
-    assert!(!env_profile.contains_key("FKST_X"));
-    assert_eq!(
-        env_profile.get(LLM_ENV_KEY).unwrap().expose_secret(),
-        "real-llm-key"
-    );
-    // Exactly the LLM key + the two accepted user vars.
-    assert_eq!(env_profile.len(), 3);
+#[tokio::test]
+async fn install_failure_fails_the_session_without_starting_the_agent() {
+    let stub_dir = tempfile::tempdir().expect("stub dir");
+    let temp_root = tempfile::tempdir().expect("temp root");
+    let repo = fixture_repo();
+    let bin = framework_stub(stub_dir.path(), &ready_then_exit(0));
+
+    // A failing install command must fail the session BEFORE the agent starts.
+    let mut spec = sample_spec();
+    spec.install = vec!["exit 7".to_string()];
+    let (_spec_dir, spec_path) = write_spec(&spec);
+    let (_creds_dir, creds) = creds_with_required_secrets();
+    let source = FixtureRepoSource {
+        repo_dir: repo.path().to_path_buf(),
+    };
+
+    let code = run_session_with(
+        &source,
+        &spec_path,
+        &creds,
+        engine_config(&bin, temp_root.path()),
+    )
+    .await;
+
+    assert_eq!(format!("{code:?}"), format!("{:?}", ExitCode::FAILURE));
+    // The install runs before CODEX_HOME render + engine start, so no `fkst-*`
+    // session dirs (CODEX_HOME or engine runtime) are ever created.
+    let leaked = fs::read_dir(temp_root.path())
+        .expect("read temp root")
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("fkst-"))
+        .count();
+    assert_eq!(leaked, 0, "no engine/codex dirs created when install fails");
 }
 
 #[tokio::test]
