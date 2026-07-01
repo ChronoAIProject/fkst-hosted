@@ -4,6 +4,7 @@ local h = require("tests.devloop_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
+local m_mgw = require("devloop.merge_gate_wait")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -50,7 +51,7 @@ local function converge_round_comment(created_at)
 end
 
 local function merge_gate_wait_comment(state_version, created_at)
-  return trusted_comment(core.merge_gate_wait_marker(proposal_id, 7, state_version, head_sha, "ci-wait", "CI_WAIT"), created_at)
+  return trusted_comment(m_mgw.merge_gate_wait_marker(core, proposal_id, 7, state_version, head_sha, "ci-wait", "CI_WAIT"), created_at)
 end
 
 local function timeout_attempt_comment(state_name, state_version, round, source_ref)

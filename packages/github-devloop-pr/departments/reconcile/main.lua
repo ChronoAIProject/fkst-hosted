@@ -3,6 +3,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
+local m_mgw = require("devloop.merge_gate_wait")
 local core, replay_fields = require("core"), require("devloop.replay_fields")
 local check_runs = require("forge.github.check_runs")
 local transition_version = require("contract.transition_version")
@@ -63,7 +64,7 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   if pr_number == nil or not forge_validators.is_git_sha(head_sha) then
     return "state-output-obligation-timeout"
   end
-  local wait = core.merge_gate_wait_fact(comments, reconcile.proposal_id, state.version, pr_number, head_sha)
+  local wait = m_mgw.merge_gate_wait_fact(core, comments, reconcile.proposal_id, state.version, pr_number, head_sha)
   if wait == nil then
     return "state-output-obligation-timeout"
   end

@@ -3,6 +3,7 @@ local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
+local m_mgw = require("devloop.merge_gate_wait")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
@@ -547,7 +548,7 @@ function C.wip_admission_classification(M, repo, proposal_id, issue_comments, st
     local current_pr = pr_merge_view_for_wip(M, repo, link.pr_number)
     local wait = nil
     if type(current_pr) == "table" and forge_validators.is_git_sha(current_pr.head_sha) then
-      wait = M.merge_gate_wait_fact(current_pr.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
+      wait = m_mgw.merge_gate_wait_fact(M, current_pr.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
     end
     if wait ~= nil then
       return {

@@ -1,9 +1,8 @@
 local parsers_misc = require("devloop.parsers.misc")
-local S = {}
+local C = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
 
-function S.install(M)
 local wait_bucket_seconds = 1800
 
 local function wait_bucket(now_seconds)
@@ -11,7 +10,7 @@ local function wait_bucket(now_seconds)
   return tostring(math.floor(seconds / wait_bucket_seconds))
 end
 
-function M.merge_gate_wait_version_lineage(version)
+function C.merge_gate_wait_version_lineage(M, version)
   local text = tostring(version or "")
   local previous = nil
   while previous ~= text do
@@ -25,7 +24,7 @@ function M.merge_gate_wait_version_lineage(version)
   return text
 end
 
-function M.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sha, reason, kind)
+function C.merge_gate_wait_marker(M, issue_proposal_id, pr_number, version, head_sha, reason, kind)
   if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-gate-wait marker")
   end
@@ -38,10 +37,10 @@ function M.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sh
     .. '" -->'
 end
 
-function M.build_merge_gate_wait_comment_request(repo, merge_ready, reason, kind, source_ref)
+function C.build_merge_gate_wait_comment_request(M, repo, merge_ready, reason, kind, source_ref)
   local safe_reason = tostring(strings.sanitize_key(reason or "ci-wait", false):gsub("/", "-"))
-  local wait_version = M.merge_gate_wait_version_lineage(merge_ready.version)
-  local marker = M.merge_gate_wait_marker(
+  local wait_version = C.merge_gate_wait_version_lineage(M, merge_ready.version)
+  local marker = C.merge_gate_wait_marker(M,
     merge_ready.proposal_id,
     merge_ready.pr_number,
     wait_version,
@@ -65,11 +64,11 @@ function M.build_merge_gate_wait_comment_request(repo, merge_ready, reason, kind
   }), source_ref)
 end
 
-function M.merge_gate_wait_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
+function C.merge_gate_wait_fact(M, comments, issue_proposal_id, issue_version, pr_number, head_sha)
   if type(comments) ~= "table" then
     return nil
   end
-  local wait_version = M.merge_gate_wait_version_lineage(issue_version)
+  local wait_version = C.merge_gate_wait_version_lineage(M, issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate%-wait:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
@@ -100,6 +99,5 @@ function M.merge_gate_wait_fact(comments, issue_proposal_id, issue_version, pr_n
   end
   return nil
 end
-end
 
-return S
+return C

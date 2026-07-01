@@ -5,6 +5,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_facts = require("devloop.markers.facts")
+local m_mgw = require("devloop.merge_gate_wait")
 local C = {}
 local convergence_shared = require("devloop.convergence.shared")
 local replay_thinking_convergence = require("devloop.replay_thinking_convergence")
@@ -205,7 +206,7 @@ local function require_marker_fact(M, facts, family)
     if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
-    return M.merge_gate_wait_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+    return m_mgw.merge_gate_wait_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
   end
   if family == "decomposed" then
     local link = facts.link
