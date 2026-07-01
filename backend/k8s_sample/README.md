@@ -30,6 +30,7 @@ A session pod (and the ephemeral env-validation pod) runs **untrusted agent code
 2. **Zero-RBAC `fkst-session-runner` SA** — no Role/RoleBinding; never add one.
 3. **`networkpolicy.yaml`** — deny ingress, egress to the public internet only (blocks the apiserver, kube-dns, sibling pods, node/metadata). **Only enforced by a real CNI (Calico/Cilium); a no-op on docker-desktop** — set the real pod/service CIDRs in that file.
 4. **`baseline` PSS** on the namespace + no privileged/host access, dropped caps, seccomp `RuntimeDefault`. The pod runs as **root** solely so install commands work, boxed by all of the above.
+5. **Kata `runtimeClassName`** (strongest tier) — set `FKST_POD_RUNTIME_CLASS` (e.g. `kata`) so both pods run under a sandboxed VM-backed runtime instead of shared-kernel runc. A **prod-only** knob: the nodes must have the Kata runtime installed **and** nested virtualization, and operators must create a cluster-scoped `RuntimeClass` object with that exact name. docker-desktop has neither, so leave it **unset** (empty = runc) locally.
 
 Because the pod cannot reach in-cluster services, `FKST_LLM_BASE_URL` is the **public** LLM host (not the in-cluster `nyxid-backend`).
 

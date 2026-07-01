@@ -201,7 +201,11 @@ pub fn build_job(spec: &SessionSpec, config: &PodConfig) -> Result<Job, LaunchEr
     };
     // Enforce the #338 R3 hard-isolation box (no API token, no service discovery,
     // external DNS only, host namespaces off, root boxed by dropped capabilities).
-    crate::k8s::isolation::apply_isolation(&mut pod_spec, &config.dns_nameservers);
+    crate::k8s::isolation::apply_isolation(
+        &mut pod_spec,
+        &config.dns_nameservers,
+        config.runtime_class.as_deref(),
+    );
 
     let job = Job {
         metadata: ObjectMeta {
