@@ -401,6 +401,12 @@ impl Config {
         }
         let llm_api_key = llm.api_key.filter(|s| !s.trim().is_empty());
 
+        // Model B reconciler knobs (FKST_*). Built BEFORE the pod-dispatch block so
+        // the dispatch-on `FKST_GITHUB_BOT_LOGIN` requirement (issue #359 §8, the
+        // PR6 flip) can read it. Shares the same `vars` snapshot; fails closed on
+        // its own cadence / token-refresh bounds internally.
+        let reconcile = ReconcileConfig::from_vars(&vars)?;
+
         // Pod-per-session dispatch settings (FKST_POD_*). Off by default; when
         // an operator turns it on, the image + namespace must be real and the
         // Job time bounds positive, or the control plane would emit unspawnable
@@ -444,6 +450,15 @@ impl Config {
                     "FKST_LLM_API_KEY must be set when FKST_POD_DISPATCH=true".to_string(),
                 ));
             }
+            // Model B posts feedback + drives sessions as its bot identity; the
+            // reconciler needs the bot's login to attribute its own comments (and
+            // skip them). PR5a deferred this requirement to the flip — enforce it
+            // now that dispatch means Model B is live.
+            if reconcile.github_bot_login.is_none() {
+                return Err(AppError::Config(
+                    "FKST_GITHUB_BOT_LOGIN must be set when FKST_POD_DISPATCH=true".to_string(),
+                ));
+            }
         }
         // Split the comma-separated DNS list, trimming and dropping empties. An
         // empty result means the operator blanked the var: the isolated pod
@@ -481,10 +496,6 @@ impl Config {
         // Named-environment / install-validation knobs (FKST_ENV_*). Shares the
         // same `vars` snapshot; fails closed on its own zero bounds internally.
         let env = EnvConfig::from_vars(&vars)?;
-
-        // Model B reconciler knobs (FKST_*). Shares the same `vars` snapshot; fails
-        // closed on its own cadence / token-refresh bounds internally.
-        let reconcile = ReconcileConfig::from_vars(&vars)?;
 
         Ok(Config {
             port: http.port,
@@ -555,6 +566,8 @@ mod tests {
             ("FKST_POD_RUN_TTL_SECS", "900"),
             ("FKST_POD_ACTIVE_DEADLINE_SECS", "7200"),
             ("FKST_LLM_API_KEY", "sk-test"),
+            // Required by the PR6 flip whenever dispatch is on.
+            ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
         ]))
         .expect("valid dispatch config should load");
         assert!(config.pod.dispatch);
@@ -576,6 +589,36 @@ mod tests {
         ]))
         .expect_err("dispatch with no llm api key must fail closed");
         assert!(err.to_string().contains("FKST_LLM_API_KEY"));
+    }
+
+    #[test]
+    fn pod_dispatch_on_requires_a_github_bot_login() {
+        // The LLM key is set so this passes the earlier LLM check and reaches the
+        // bot-login requirement the PR6 flip added.
+        let err = Config::from_vars(vars(&[
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "img"),
+            ("FKST_LLM_API_KEY", "sk-test"),
+        ]))
+        .expect_err("dispatch with no bot login must fail closed");
+        assert!(err.to_string().contains("FKST_GITHUB_BOT_LOGIN"));
+    }
+
+    #[test]
+    fn pod_dispatch_on_with_bot_login_and_key_loads() {
+        // The full happy path: dispatch on with an image, an LLM key, and a bot
+        // login loads cleanly and surfaces the login on the reconcile config.
+        let config = Config::from_vars(vars(&[
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_IMAGE", "img"),
+            ("FKST_LLM_API_KEY", "sk-test"),
+            ("FKST_GITHUB_BOT_LOGIN", "fkst-bot"),
+        ]))
+        .expect("valid dispatch config with a bot login should load");
+        assert_eq!(
+            config.reconcile.github_bot_login.as_deref(),
+            Some("fkst-bot")
+        );
     }
 
     #[test]

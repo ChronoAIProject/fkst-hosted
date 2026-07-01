@@ -26,7 +26,6 @@
 //! Secret discipline: the webhook secret is never logged; the payload is parsed
 //! only for the non-secret installation/repository fields used below.
 
-mod comment_control;
 mod issue_trigger;
 mod verify;
 
@@ -38,6 +37,7 @@ use serde::Deserialize;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+use crate::models::RepoRef;
 use crate::state::AppState;
 
 use verify::verify_signature;
@@ -99,6 +99,7 @@ struct RepoObject {
 /// Outcome of handling one event, for logging and the response code. Every arm
 /// is a `2xx` to GitHub (even "ignored"): a non-2xx triggers a redelivery
 /// storm, and an unknown/irrelevant event is not an error.
+#[derive(Debug)]
 enum Handled {
     /// Caches were busted (eviction + session-fail) for one or more repos / an
     /// owner. The stateless model has nothing durable to record.
@@ -106,11 +107,11 @@ enum Handled {
     /// Acknowledged but not acted on (unknown action, or a `created`/`unsuspend`
     /// that needs no cache bust — the next on-demand resolve picks it up).
     Ignored,
-    /// A qualifying `issues.opened` drove the pod-per-session pipeline (#303).
-    Triggered,
-    /// An `issue_comment` control command (`/stop`, `/status`) was processed
-    /// (executed, denied, or best-effort-failed) — always a 2xx (PR3).
-    CommentControl,
+    /// The event's `(installation, repo)` was enqueued onto the Model B reconcile
+    /// queue (issue #359, PR6). The webhook is a level-based *nudge*: the
+    /// reconciler re-reads the repo's trigger issues + live pods and decides
+    /// spawn/kill itself.
+    Reconciled,
 }
 
 // ---- Handler ---------------------------------------------------------------
@@ -127,9 +128,11 @@ enum Handled {
         content = serde_json::Value,
         content_type = "application/json",
         description = "Raw GitHub App webhook event. Recognized events: `installation` / \
-            `installation_repositories` (cache-bust), `issues` (opened -> session trigger), and \
-            `issue_comment` (created -> the issue author's `/stop` + `/status` control commands). \
-            Authenticated by the `X-Hub-Signature-256` HMAC over the exact body."
+            `installation_repositories` (cache-bust + Model B reconcile nudge) and `issues` \
+            (reconcile nudge — the reconciler re-reads the repo and decides spawn/kill). \
+            `issue_comment` is inert (a session is controlled purely through its trigger issue's \
+            open/close + work-label changes). Authenticated by the `X-Hub-Signature-256` HMAC \
+            over the exact body."
     ),
     responses(
         (status = 200, description = "Event handled (e.g. installation caches busted)"),
@@ -160,17 +163,7 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
         .unwrap_or("")
         .to_string();
 
-    let result = match event.as_str() {
-        "installation" => handle_installation(&state, &body).await,
-        "installation_repositories" => handle_installation_repositories(&state, &body).await,
-        "issues" => issue_trigger::handle_issues(&state, &body).await,
-        "issue_comment" => comment_control::handle_issue_comment(&state, &body).await,
-        other => {
-            // ping / membership / etc. — acknowledged but not acted on.
-            tracing::debug!(event = %other, "github webhook event ignored");
-            Ok(Handled::Ignored)
-        }
-    };
+    let result = dispatch_event(&state, event.as_str(), &body).await;
 
     match result {
         Ok(handled) => {
@@ -187,15 +180,63 @@ async fn webhook(State(state): State<AppState>, headers: HeaderMap, body: Bytes)
     }
 }
 
+/// Route a verified webhook event to its handler. Split out of [`webhook`] so the
+/// routing (which event → which outcome) is unit-testable without signature
+/// verification. `installation` / `installation_repositories` keep the stateless
+/// cache-bust AND additionally nudge the Model B reconciler; `issues` is a pure
+/// reconcile nudge (PR6 flip); `issue_comment` is inert (the `/stop` + `/status`
+/// control path was removed with Model A — a session is driven purely through its
+/// trigger issue's open/close + work-label changes, which the reconciler reacts to).
+async fn dispatch_event(state: &AppState, event: &str, body: &[u8]) -> Result<Handled, String> {
+    match event {
+        "installation" => handle_installation(state, body).await,
+        "installation_repositories" => handle_installation_repositories(state, body).await,
+        "issues" => issue_trigger::classify_and_enqueue(state, body).await,
+        "issue_comment" => Ok(Handled::Ignored),
+        other => {
+            // ping / membership / etc. — acknowledged but not acted on.
+            tracing::debug!(event = %other, "github webhook event ignored");
+            Ok(Handled::Ignored)
+        }
+    }
+}
+
 impl Handled {
     fn as_str(&self) -> &'static str {
         match self {
             Handled::CacheBusted => "cache_busted",
             Handled::Ignored => "ignored",
-            Handled::Triggered => "triggered",
-            Handled::CommentControl => "comment_control",
+            Handled::Reconciled => "reconciled",
         }
     }
+}
+
+/// Nudge the Model B reconciler for each repo an installation event names, so it
+/// reconverges (spawns for a newly-covered repo, tears down for a removed /
+/// suspended one). A no-op unless the reconciler is live (`state.reconciler` is
+/// `Some`). Additive to the stateless cache-bust: the reconciler is level-based,
+/// so a spurious nudge is harmless. Casing is left as GitHub sends it (its APIs
+/// return a consistent canonical `owner/name`, matching the reconciler's own
+/// sweep / full-resync producers).
+fn enqueue_installation_repos(state: &AppState, installation_id: i64, repos: &[RepoObject]) {
+    let Some(reconciler) = &state.reconciler else {
+        return;
+    };
+    for repo in repos {
+        if let Some(repo_ref) = repo_ref_from_full_name(&repo.full_name) {
+            reconciler.enqueue((installation_id, repo_ref));
+        }
+    }
+}
+
+/// Split a GitHub `owner/name` full name into a [`RepoRef`]. `None` for a malformed
+/// name (no `/`), which is skipped rather than enqueued.
+fn repo_ref_from_full_name(full_name: &str) -> Option<RepoRef> {
+    let (owner, name) = full_name.split_once('/')?;
+    Some(RepoRef {
+        owner: owner.to_string(),
+        name: name.to_string(),
+    })
 }
 
 /// The cache-bust side effects the webhook performs (#141), abstracted behind a
@@ -257,6 +298,11 @@ impl CacheBust for AppState {
 async fn handle_installation(state: &AppState, body: &[u8]) -> Result<Handled, String> {
     let event: InstallationEvent =
         serde_json::from_slice(body).map_err(|e| format!("installation parse: {e}"))?;
+    // Model B nudge (PR6): reconcile every enumerated repo (a `deleted`/`suspend`
+    // that names concrete repos tears them down; a `created` that names repos
+    // spawns for any pending trigger). An account-wide event enumerates no repos,
+    // so the periodic full-resync catches it. Additive to the cache-bust below.
+    enqueue_installation_repos(state, event.installation.id, &event.repositories);
     dispatch_installation(state, &event).await
 }
 
@@ -309,6 +355,11 @@ async fn handle_installation_repositories(
 ) -> Result<Handled, String> {
     let event: InstallationReposEvent = serde_json::from_slice(body)
         .map_err(|e| format!("installation_repositories parse: {e}"))?;
+    // Model B nudge (PR6): reconcile both the added AND the removed repos — an
+    // added repo may have a pending trigger to spawn, a removed one needs its
+    // live session torn down. Additive to the cache-bust below.
+    enqueue_installation_repos(state, event.installation.id, &event.repositories_added);
+    enqueue_installation_repos(state, event.installation.id, &event.repositories_removed);
     dispatch_installation_repositories(state, &event).await
 }
 
@@ -591,5 +642,124 @@ mod tests {
         let bad = br#"{ "action": "deleted", "installation": "not-an-object" }"#;
         let parsed: Result<InstallationEvent, _> = serde_json::from_slice(bad);
         assert!(parsed.is_err(), "malformed body must fail to parse");
+    }
+
+    // ---- Model B reconcile nudge (PR6) ---------------------------------------
+
+    use crate::config::Config;
+    use crate::reconcile::{reconcile_channel, RepoKey};
+    use tokio::sync::mpsc::Receiver;
+
+    /// An `AppState` with a live reconcile queue (`github_app: None`, so the
+    /// `CacheBust` impl's eviction/fail steps are logged no-ops — no cluster
+    /// needed). Returns the queue receiver so a test can assert what was enqueued.
+    fn state_with_reconciler() -> (AppState, Receiver<RepoKey>) {
+        let (handle, rx) = reconcile_channel(16);
+        let state = AppState {
+            config: Config::default(),
+            github_app: None,
+            github_app_webhook_secret: None,
+            reconciler: Some(handle),
+        };
+        (state, rx)
+    }
+
+    fn key(installation: i64, owner: &str, name: &str) -> RepoKey {
+        (
+            installation,
+            RepoRef {
+                owner: owner.to_string(),
+                name: name.to_string(),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn installation_event_cache_busts_and_nudges_each_enumerated_repo() {
+        // A `deleted` event that names concrete repos still busts caches AND now
+        // enqueues each repo so the reconciler tears its session down.
+        let body = br#"{
+            "action": "deleted",
+            "installation": { "id": 42, "account": { "login": "acme" } },
+            "repositories": [{ "full_name": "acme/site" }, { "full_name": "acme/docs" }]
+        }"#;
+        let (state, mut rx) = state_with_reconciler();
+        let handled = handle_installation(&state, body).await.expect("dispatch");
+        assert_eq!(handled.as_str(), "cache_busted", "cache-bust is preserved");
+
+        let mut got = vec![
+            rx.try_recv().expect("first"),
+            rx.try_recv().expect("second"),
+        ];
+        got.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+        assert_eq!(got, vec![key(42, "acme", "docs"), key(42, "acme", "site")]);
+        assert!(
+            rx.try_recv().is_err(),
+            "exactly the two named repos enqueued"
+        );
+    }
+
+    #[tokio::test]
+    async fn installation_repositories_event_nudges_added_and_removed() {
+        let body = br#"{
+            "action": "added",
+            "installation": { "id": 7, "account": { "login": "acme" } },
+            "repositories_added": [{ "full_name": "acme/fresh" }],
+            "repositories_removed": [{ "full_name": "acme/old" }]
+        }"#;
+        let (state, mut rx) = state_with_reconciler();
+        let handled = handle_installation_repositories(&state, body)
+            .await
+            .expect("dispatch");
+        assert_eq!(handled.as_str(), "cache_busted");
+
+        let mut got = vec![
+            rx.try_recv().expect("first"),
+            rx.try_recv().expect("second"),
+        ];
+        got.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+        // Both the added AND the removed repo are nudged (order: added then removed
+        // by the handler, sorted here for a stable assertion).
+        assert_eq!(got, vec![key(7, "acme", "fresh"), key(7, "acme", "old")]);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn installation_event_without_a_reconciler_still_cache_busts() {
+        // The enqueue is additive + guarded on `Some(reconciler)`: with `None` the
+        // handler is a pure cache-bust (the existing behaviour), no panic.
+        let body = br#"{
+            "action": "deleted",
+            "installation": { "id": 1, "account": { "login": "acme" } },
+            "repositories": [{ "full_name": "acme/site" }]
+        }"#;
+        let state = AppState {
+            config: Config::default(),
+            github_app: None,
+            github_app_webhook_secret: None,
+            reconciler: None,
+        };
+        let handled = handle_installation(&state, body).await.expect("dispatch");
+        assert_eq!(handled.as_str(), "cache_busted");
+    }
+
+    #[tokio::test]
+    async fn issue_comment_is_inert_and_never_enqueues() {
+        // `/stop` + `/status` were removed with Model A: any `issue_comment` is a
+        // 2xx no-op that touches neither the cluster nor the reconcile queue.
+        let (state, mut rx) = state_with_reconciler();
+        let handled = dispatch_event(&state, "issue_comment", b"{}")
+            .await
+            .expect("ok");
+        assert_eq!(handled.as_str(), "ignored");
+        assert!(rx.try_recv().is_err(), "issue_comment must not enqueue");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_event_is_ignored() {
+        let (state, mut rx) = state_with_reconciler();
+        let handled = dispatch_event(&state, "ping", b"{}").await.expect("ok");
+        assert_eq!(handled.as_str(), "ignored");
+        assert!(rx.try_recv().is_err());
     }
 }

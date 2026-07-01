@@ -1,30 +1,25 @@
-//! `issues.opened` -> pod session pipeline (issue #303).
+//! `issues` webhook -> Model B reconcile nudge (issue #359 §4.3, PR6).
 //!
-//! The token-less entrypoint: a qualifying GitHub `issues.opened` webhook drives
-//! the whole pipeline — parse the issue, mint the GitHub App installation token,
-//! attach the static LLM API key from config, build the SessionSpec +
-//! per-session Secret, and launch the Job. Everything flows from
-//! `installation.id`; no user token is present.
+//! The webhook is a thin classifier, NOT a launcher. A reconcile-relevant `issues`
+//! action (open / reopen / close / label / unlabel) is a level-based *nudge*: it
+//! enqueues the event's `(installation_id, repo)` onto the reconcile queue and
+//! returns. The reconciler ([`crate::reconcile`]) then re-reads the repo's open
+//! trigger issues + live pods and decides spawn-vs-kill itself, so the webhook does
+//! NOT inspect labels or the issue body — it only needs the repo identity plus the
+//! installation id that scopes the App token. A missing reconciler (`FKST_POD_DISPATCH`
+//! off) or a non-reconcile action is simply ignored; a malformed body is an `Err`
+//! the caller maps to a 202.
 
-use std::collections::BTreeMap;
-
-use secrecy::SecretString;
 use serde::Deserialize;
 
 use super::Handled;
-use crate::goals::issue_parse::{parse_goal_issue_body, ParsedGoal};
-use crate::goals::labels::GOAL_LABEL;
-use crate::k8s::env_store::{get_environment, load_environment_for_session, EnvRecord};
-use crate::k8s::{KubeClient, PodSessionLauncher, SessionSecrets};
 use crate::models::RepoRef;
-use crate::session_spec::{derive_session_id, SessionGoal, SessionSpec};
 use crate::state::AppState;
 
-/// The `validation-status` value a fully-written, validated environment carries;
-/// only a `ready` environment is loaded into a session.
-const ENV_STATUS_READY: &str = "ready";
-
-/// The subset of a GitHub `issues` webhook payload we consume.
+/// The subset of a GitHub `issues` webhook payload the nudge consumes: the
+/// `action` (to gate relevance), the repo (`owner/name`, the reconcile target),
+/// the installation id (scopes the App token), and the issue number (traceability
+/// only). GitHub sends far more; serde ignores the rest.
 #[derive(Debug, Deserialize)]
 pub(super) struct IssuesEvent {
     pub action: String,
@@ -36,33 +31,6 @@ pub(super) struct IssuesEvent {
 #[derive(Debug, Deserialize)]
 pub(super) struct IssuePayload {
     pub number: i64,
-    #[serde(default)]
-    pub title: String,
-    #[serde(default)]
-    pub body: Option<String>,
-    #[serde(default)]
-    pub labels: Vec<LabelPayload>,
-    /// The issue author. Its `login` is the session's authorization subject (the
-    /// only identity allowed to drive `/stop` + `/status` later, see PR3).
-    pub user: ActorPayload,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct LabelPayload {
-    pub name: String,
-}
-
-/// A GitHub actor (issue author / comment author / sender). Reused across the
-/// `issues` and `issue_comment` webhook shapes.
-#[derive(Debug, Deserialize)]
-pub(super) struct ActorPayload {
-    pub login: String,
-    /// The actor's immutable numeric GitHub id. For an issue author it keys the
-    /// named-environment pre-flight + injection ([`resolve_environment`]): the
-    /// author's `fkst-env-<id>-<name>` objects are looked up by this id. Required:
-    /// GitHub always includes `user.id`, and a silent `0` fallback would identify
-    /// the WRONG user (and read the wrong account's environment).
-    pub id: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,396 +49,154 @@ pub(super) struct InstallationPayload {
     pub id: i64,
 }
 
-/// Whether this event should auto-trigger a session: a freshly opened issue
-/// carrying the configured trigger label.
-pub(super) fn should_trigger(event: &IssuesEvent, trigger_label: &str) -> bool {
-    event.action == "opened" && event.issue.labels.iter().any(|l| l.name == trigger_label)
-}
-
-/// Build the non-secret SessionSpec for an issue-triggered session. The
-/// `session_id` is deterministic, so a webhook redelivery maps to the same
-/// session (at-most-one-Job).
-///
-/// `owner` is the **repo** owner (it scopes the App token and seeds the session
-/// id); `author_login` is the **issue author** and becomes `SessionSpec.owner_login`
-/// — the authorization subject for the issue-comment control path. The two are
-/// usually different identities, so they are passed separately on purpose.
-pub(super) fn build_session_spec(
-    installation_id: i64,
-    owner: &str,
-    name: &str,
-    issue_number: i64,
-    author_login: &str,
-    title: &str,
-    parsed: &ParsedGoal,
-) -> SessionSpec {
-    let session_id = derive_session_id(installation_id, owner, name, issue_number);
-    SessionSpec {
-        run_key: session_id.clone(),
-        log_branch: format!("fkst/session-{session_id}"),
-        session_id,
-        installation_id,
-        repo: RepoRef {
-            owner: owner.to_string(),
-            name: name.to_string(),
-        },
-        owner_login: author_login.to_string(),
-        issue_number,
-        goal: SessionGoal {
-            title: title.to_string(),
-            prompt: parsed.description.clone(),
-        },
-        package_names: parsed.package_names.clone(),
-        // `install` is left empty here (this builder stays pure/synchronous) and
-        // set by `trigger_session` once the issue's named environment is
-        // pre-flighted + resolved. A session with no environment keeps it empty.
-        install: Vec::new(),
-    }
-}
-
-/// Whether a resolved environment is usable: present AND validated `ready`.
-fn env_is_ready(record: &EnvRecord) -> bool {
-    record.status == ENV_STATUS_READY
-}
-
-/// Feedback comment when the issue names an environment that is missing or not
-/// yet `ready` for the author. Concrete + actionable; leaks no value.
-fn env_not_ready_comment(name: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't start: environment `{name}` was not found in your account \
-         (or isn't ready). Create it first with `PUT /api/v1/users/me/environments/{name}` \
-         (install commands + variables + secrets), then re-trigger. Omit the `### Environment` \
-         section to run with no environment."
+/// Whether an `issues` action can change a repo's desired session state and so
+/// warrants a reconcile nudge: an issue being opened / reopened / closed, or a
+/// label being added / removed (a trigger label, or a work label the reconciler
+/// gates on). Everything else (`edited`, `assigned`, ...) is inert.
+fn is_reconcile_relevant(action: &str) -> bool {
+    matches!(
+        action,
+        "opened" | "reopened" | "closed" | "labeled" | "unlabeled"
     )
 }
 
-/// Feedback comment when the environment store could not be read (e.g. the
-/// cluster is momentarily unreachable). We fail closed rather than launch a
-/// session that cannot get its declared environment.
-fn env_verify_failed_comment(name: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't verify environment `{name}` right now (a transient error reading \
-         your environments). Please re-trigger in a moment."
-    )
-}
-
-/// The outcome of pre-flighting the issue's named environment before launch.
-enum EnvResolution {
-    /// Launch: the resolved install commands + merged variables/secrets to inject
-    /// (both empty when the issue declared no environment).
-    Proceed {
-        install: Vec<String>,
-        user_env: BTreeMap<String, String>,
-    },
-    /// Do NOT launch; post `comment` on the issue explaining why.
-    Blocked { comment: String },
-}
-
-/// Pre-flight the issue's named environment against the AUTHOR's store.
+/// Classify an `issues` event and, when it is reconcile-relevant AND Model B is
+/// live, enqueue its `(installation_id, repo)` onto the reconcile queue.
 ///
-/// A `None` selection resolves to an empty (no-environment) session. A named
-/// selection must EXIST and be `ready` for `author_id`; otherwise (missing, not
-/// ready, or a store-read error) the launch is blocked with a feedback comment —
-/// we fail closed rather than launch a session that cannot get its declared
-/// environment. On success the install commands + merged variables/secret VALUES
-/// are returned for injection.
-async fn resolve_environment(
-    kube: &KubeClient,
-    author_id: i64,
-    environment: Option<&str>,
-) -> EnvResolution {
-    let name = match environment {
-        None => {
-            return EnvResolution::Proceed {
-                install: Vec::new(),
-                user_env: BTreeMap::new(),
-            }
-        }
-        Some(name) => name,
-    };
-
-    match get_environment(kube, author_id, name).await {
-        Ok(Some(record)) if env_is_ready(&record) => {
-            match load_environment_for_session(kube, author_id, name).await {
-                Ok(Some((install, user_env))) => {
-                    // Counts only — never the variable/secret values.
-                    tracing::info!(
-                        github_user_id = author_id,
-                        environment = %name,
-                        install_commands = install.len(),
-                        env_vars = user_env.len(),
-                        "webhook trigger: named environment resolved for session"
-                    );
-                    EnvResolution::Proceed { install, user_env }
-                }
-                // A race (deleted between the readiness read and the load).
-                Ok(None) => EnvResolution::Blocked {
-                    comment: env_not_ready_comment(name),
-                },
-                Err(error) => {
-                    tracing::error!(environment = %name, error = %error, "webhook trigger: environment load failed");
-                    EnvResolution::Blocked {
-                        comment: env_verify_failed_comment(name),
-                    }
-                }
-            }
-        }
-        // Present but not ready, or absent.
-        Ok(_) => EnvResolution::Blocked {
-            comment: env_not_ready_comment(name),
-        },
-        Err(error) => {
-            tracing::error!(environment = %name, error = %error, "webhook trigger: environment pre-flight read failed");
-            EnvResolution::Blocked {
-                comment: env_verify_failed_comment(name),
-            }
-        }
-    }
-}
-
-/// Handle an `issues` webhook event: ignore non-qualifying ones, else trigger a
-/// session (posting a failure comment if the launch fails).
-pub(super) async fn handle_issues(state: &AppState, body: &[u8]) -> Result<Handled, String> {
+/// Returns [`Handled::Reconciled`] when a nudge was enqueued, [`Handled::Ignored`]
+/// when there is no reconciler (dispatch off) or the action is not relevant, and
+/// `Err` for a malformed body (the caller logs it + returns a 202).
+pub(super) async fn classify_and_enqueue(state: &AppState, body: &[u8]) -> Result<Handled, String> {
     let event: IssuesEvent =
         serde_json::from_slice(body).map_err(|e| format!("parse issues event: {e}"))?;
-    if !should_trigger(&event, &state.config.webhook_trigger_label) {
+
+    // No reconciler => Model B is not live (FKST_POD_DISPATCH off / loop not
+    // spawned): there is nothing to nudge, so acknowledge and ignore.
+    let Some(reconciler) = &state.reconciler else {
+        return Ok(Handled::Ignored);
+    };
+    if !is_reconcile_relevant(&event.action) {
         return Ok(Handled::Ignored);
     }
-    if let Err(error) = trigger_session(state, &event).await {
-        tracing::error!(error = %error, issue = event.issue.number, "webhook trigger: session launch failed");
-        if let Some(gh) = &state.github_app {
-            let owner_repo = format!("{}/{}", event.repository.owner.login, event.repository.name);
-            let _ = gh
-                .post_issue_comment(
-                    &owner_repo,
-                    event.issue.number as u64,
-                    &format!("⚠️ fkst could not start a session for this issue: {error}"),
-                )
-                .await;
-        }
-    }
-    Ok(Handled::Triggered)
-}
 
-/// Drive the full launch for a qualifying issue.
-async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), String> {
-    let owner = &event.repository.owner.login;
-    let name = &event.repository.name;
-    let owner_repo = format!("{owner}/{name}");
-    let github_app = state
-        .github_app
-        .as_ref()
-        .ok_or("github app not configured")?;
-
-    let body = event.issue.body.clone().unwrap_or_default();
-    let parsed = parse_goal_issue_body(&body).map_err(|e| format!("parse issue body: {e}"))?;
-    let mut spec = build_session_spec(
-        event.installation.id,
-        owner,
-        name,
-        event.issue.number,
-        &event.issue.user.login,
-        &event.issue.title,
-        &parsed,
-    );
-
-    let kube = KubeClient::from_inferred(&state.config.pod.namespace)
-        .await
-        .map_err(|e| format!("kubernetes client: {e}"))?;
-
-    // Pre-flight the issue's named environment against the AUTHOR's store (keyed
-    // by the signed numeric GitHub id). A missing / not-ready environment, or a
-    // store-read failure, blocks the launch with a feedback comment — fail closed,
-    // and DO NOT create a Job.
-    let (install, user_env) = match resolve_environment(
-        &kube,
-        event.issue.user.id,
-        parsed.environment.as_deref(),
-    )
-    .await
-    {
-        EnvResolution::Proceed { install, user_env } => (install, user_env),
-        EnvResolution::Blocked { comment } => {
-            let _ = github_app
-                .post_issue_comment(&owner_repo, event.issue.number as u64, &comment)
-                .await;
-            tracing::info!(
-                issue = event.issue.number,
-                "webhook trigger: environment pre-flight blocked the launch (no job created)"
-            );
-            return Ok(());
-        }
+    let repo = RepoRef {
+        owner: event.repository.owner.login.clone(),
+        name: event.repository.name.clone(),
     };
-    spec.install = install;
-    // Wrap the resolved variables + secret VALUES so they ride the per-session
-    // Secret as `userenv.<KEY>` entries (never a plaintext env/ConfigMap).
-    let user_env: BTreeMap<String, SecretString> = user_env
-        .into_iter()
-        .map(|(key, value)| (key, SecretString::from(value)))
-        .collect();
-
-    let github_token = github_app
-        .token_for_repo(&owner_repo, None)
-        .await
-        .map_err(|e| format!("mint app token: {e}"))?;
-
-    // The LLM credential is a static config value (FKST_LLM_API_KEY). It is
-    // written into the session Secret and read by the engine's codex provider
-    // under LLM_API_KEY.
-    let secrets = SessionSecrets {
-        github_token,
-        llm_api_key: state.config.llm_api_key.clone(),
-        user_env,
-    };
-
-    let launcher = PodSessionLauncher::new(
-        kube.client().clone(),
-        state.config.pod.namespace.clone(),
-        state.config.pod.clone(),
+    let installation_id = event.installation.id;
+    tracing::info!(
+        installation = installation_id,
+        owner = %repo.owner,
+        name = %repo.name,
+        action = %event.action,
+        issue = event.issue.number,
+        "webhook: enqueuing repo for reconcile"
     );
-    launcher
-        .launch(&spec, secrets)
-        .await
-        .map_err(|e| format!("launch session job: {e}"))?;
-
-    // Mark the issue as an fkst goal (best-effort).
-    let _ = github_app
-        .add_issue_labels(
-            &owner_repo,
-            event.issue.number as u64,
-            &[GOAL_LABEL.to_string()],
-        )
-        .await;
-    tracing::info!(session_id = %spec.session_id, owner = %owner, "webhook trigger: session job launched");
-    Ok(())
+    reconciler.enqueue((installation_id, repo));
+    Ok(Handled::Reconciled)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use crate::reconcile::{reconcile_channel, ReconcileHandle};
 
-    fn event(action: &str, labels: &[&str]) -> IssuesEvent {
-        IssuesEvent {
-            action: action.to_string(),
-            issue: IssuePayload {
-                number: 7,
-                title: "Add dark mode".to_string(),
-                body: Some("### Goal\ndo it\n\n### Package Name List\nweb\n".to_string()),
-                labels: labels
-                    .iter()
-                    .map(|n| LabelPayload {
-                        name: n.to_string(),
-                    })
-                    .collect(),
-                user: ActorPayload {
-                    login: "octocat".to_string(),
-                    id: 583231,
-                },
-            },
-            repository: RepoPayload {
-                owner: OwnerPayload {
-                    login: "acme".to_string(),
-                },
-                name: "site".to_string(),
-            },
-            installation: InstallationPayload { id: 42 },
+    fn issues_body(action: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "action": action,
+            "issue": { "number": 7 },
+            "repository": { "owner": { "login": "acme" }, "name": "site" },
+            "installation": { "id": 42 }
+        }))
+        .expect("serialize")
+    }
+
+    fn state(reconciler: Option<ReconcileHandle>) -> AppState {
+        AppState {
+            config: Config::default(),
+            github_app: None,
+            github_app_webhook_secret: None,
+            reconciler,
         }
     }
 
     #[test]
-    fn triggers_only_on_opened_with_the_label() {
-        assert!(should_trigger(&event("opened", &["fkst"]), "fkst"));
-        assert!(!should_trigger(&event("opened", &["other"]), "fkst"));
-        assert!(!should_trigger(&event("edited", &["fkst"]), "fkst"));
-        assert!(!should_trigger(&event("opened", &[]), "fkst"));
+    fn relevance_covers_the_state_changing_actions_only() {
+        for yes in ["opened", "reopened", "closed", "labeled", "unlabeled"] {
+            assert!(is_reconcile_relevant(yes), "{yes} must be relevant");
+        }
+        for no in ["edited", "assigned", "milestoned", "deleted", ""] {
+            assert!(!is_reconcile_relevant(no), "{no} must be irrelevant");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_relevant_action_enqueues_and_reports_reconciled() {
+        let (handle, mut rx) = reconcile_channel(8);
+        let st = state(Some(handle));
+        for action in ["opened", "reopened", "closed", "labeled", "unlabeled"] {
+            let handled = classify_and_enqueue(&st, &issues_body(action))
+                .await
+                .expect("ok");
+            assert_eq!(handled.as_str(), "reconciled", "{action} must nudge");
+            let got = rx.try_recv().expect("one key enqueued");
+            assert_eq!(
+                got,
+                (
+                    42,
+                    RepoRef {
+                        owner: "acme".to_string(),
+                        name: "site".to_string()
+                    }
+                )
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_irrelevant_action_is_ignored_and_does_not_enqueue() {
+        let (handle, mut rx) = reconcile_channel(8);
+        let st = state(Some(handle));
+        let handled = classify_and_enqueue(&st, &issues_body("edited"))
+            .await
+            .expect("ok");
+        assert_eq!(handled.as_str(), "ignored");
+        assert!(
+            rx.try_recv().is_err(),
+            "an irrelevant action must not enqueue"
+        );
+    }
+
+    #[tokio::test]
+    async fn without_a_reconciler_a_relevant_action_is_ignored() {
+        // Model B not live: a valid, relevant event is acknowledged (Ignored),
+        // never enqueued (there is no queue).
+        let handled = classify_and_enqueue(&state(None), &issues_body("opened"))
+            .await
+            .expect("ok");
+        assert_eq!(handled.as_str(), "ignored");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_body_is_an_error_not_a_panic() {
+        let (handle, _rx) = reconcile_channel(8);
+        let err = classify_and_enqueue(&state(Some(handle)), b"not json")
+            .await
+            .expect_err("malformed body must Err");
+        assert!(
+            err.contains("parse issues event"),
+            "names the boundary: {err}"
+        );
     }
 
     #[test]
     fn issues_event_parses_a_representative_payload() {
-        let payload = serde_json::json!({
-            "action": "opened",
-            "issue": {
-                "number": 9,
-                "title": "T",
-                "body": "B",
-                "labels": [{"name": "fkst"}],
-                "user": { "login": "octocat", "id": 583231 }
-            },
-            "repository": { "owner": { "login": "acme" }, "name": "site" },
-            "installation": { "id": 42 }
-        });
-        let event: IssuesEvent = serde_json::from_value(payload).expect("parses");
-        assert_eq!(event.issue.number, 9);
-        assert_eq!(event.issue.user.login, "octocat");
-        assert_eq!(event.issue.user.id, 583231);
+        let event: IssuesEvent = serde_json::from_slice(&issues_body("opened")).expect("parses");
+        assert_eq!(event.action, "opened");
+        assert_eq!(event.issue.number, 7);
         assert_eq!(event.repository.owner.login, "acme");
+        assert_eq!(event.repository.name, "site");
         assert_eq!(event.installation.id, 42);
-        assert!(should_trigger(&event, "fkst"));
-    }
-
-    #[test]
-    fn build_spec_maps_fields_and_is_deterministic() {
-        let parsed = ParsedGoal {
-            description: "do it".to_string(),
-            package_names: vec!["web".to_string()],
-            environment: None,
-        };
-        let a = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
-        let b = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
-        assert_eq!(
-            a.session_id, b.session_id,
-            "deterministic id (redelivery dedup)"
-        );
-        assert_eq!(a.repo.owner, "acme", "repo owner scopes the token + id");
-        assert_eq!(
-            a.owner_login, "octocat",
-            "owner_login is the issue author (authz subject), not the repo owner"
-        );
-        assert_eq!(a.issue_number, 7);
-        assert_eq!(a.goal.prompt, "do it");
-        assert_eq!(a.package_names, vec!["web".to_string()]);
-        assert_eq!(a.log_branch, format!("fkst/session-{}", a.session_id));
-        // The builder never resolves the environment; install stays empty until
-        // `trigger_session` pre-flights + loads it.
-        assert!(a.install.is_empty(), "builder leaves install empty");
-    }
-
-    fn env_record(status: &str) -> EnvRecord {
-        EnvRecord {
-            name: "my-env".to_string(),
-            status: status.to_string(),
-            validated_at: String::new(),
-            install: vec![],
-            variables: BTreeMap::new(),
-            secret_keys: vec![],
-        }
-    }
-
-    #[test]
-    fn env_is_ready_only_when_status_is_ready() {
-        assert!(env_is_ready(&env_record("ready")));
-        assert!(!env_is_ready(&env_record("validating")));
-        assert!(!env_is_ready(&env_record("")));
-    }
-
-    #[test]
-    fn not_ready_comment_names_the_env_and_the_put_endpoint() {
-        let msg = env_not_ready_comment("my-env");
-        assert!(msg.contains("my-env"), "names the env: {msg}");
-        assert!(
-            msg.contains("PUT /api/v1/users/me/environments/my-env"),
-            "points at the create endpoint: {msg}"
-        );
-        assert!(
-            msg.contains("Omit the `### Environment`"),
-            "explains the no-environment escape hatch: {msg}"
-        );
-    }
-
-    #[test]
-    fn verify_failed_comment_names_the_env_and_asks_to_retry() {
-        let msg = env_verify_failed_comment("my-env");
-        assert!(msg.contains("my-env"), "names the env: {msg}");
-        assert!(msg.contains("re-trigger"), "asks to retry: {msg}");
     }
 }
