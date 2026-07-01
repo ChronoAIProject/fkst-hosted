@@ -5,3 +5,10 @@ metadata:
   labels:
     app.kubernetes.io/name: fkst-hosted
     app.kubernetes.io/part-of: fkst-hosted
+    # Pod Security Standards backstop for the session-pod hard-isolation rule
+    # (#338 R3): `baseline` blocks privileged, hostPath, and host namespaces even
+    # if a manifest tried to request them. NOT `restricted` — that would reject
+    # the root session/validation pods (root is needed so install commands run,
+    # boxed by no-token + zero-RBAC + NetworkPolicy + dropped caps + seccomp).
+    # Operators deploying into an EXISTING namespace must apply this label there.
+    pod-security.kubernetes.io/enforce: baseline

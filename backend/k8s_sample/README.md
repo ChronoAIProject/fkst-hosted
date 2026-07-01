@@ -13,13 +13,25 @@ env contract; every value here is a SAMPLE.
 
 | File | Purpose |
 |------|---------|
-| `rbac.yaml` | The control-plane SA, the session-runner SA, and the Role/RoleBinding that let the control plane create/watch/delete Jobs + per-session Secrets and read Pods. |
-| `configmap.yaml` | Non-secret config (HTTP, NyxID proxy-trust auth, codex/chrono-llm, the `fkst` trigger label, `FKST_POD_*` dispatch). |
-| `secret.example.yaml` | TEMPLATE for `fkst-control-plane-secret` (GitHub App creds + optional NyxID broker client). Excluded from kustomize. |
+| `rbac.yaml` | The control-plane SA (create/watch/delete Jobs, Secrets, ConfigMaps + the env-validation Pods, read Pods + pod logs) and the DELIBERATELY zero-RBAC `fkst-session-runner` SA the session/validation pods run as. |
+| `configmap.yaml` | Non-secret config (HTTP, codex/chrono-llm — the LLM base URL is the PUBLIC host so isolated pods reach it externally, the trigger label, `FKST_POD_*`/`FKST_ENV_*` dispatch). |
+| `networkpolicy.yaml` | Session/validation-pod hard isolation (#338 R3): deny all ingress, egress to the public internet only. No-op unless the CNI enforces NetworkPolicy — set the real pod/service CIDRs first. |
+| `secret.example.yaml` | TEMPLATE for `fkst-control-plane-secret` (GitHub App creds). Excluded from kustomize. |
 | `deployment.yaml` | The control plane (1 replica, Recreate). `FKST_POD_ID`/`FKST_POD_NAMESPACE` come from the downward API so session Jobs land in this namespace. |
 | `service.yaml` | ClusterIP only (no Ingress). |
 | `pdb.yaml` | `maxUnavailable: 1` (single authoritative replica). |
-| `namespace.yaml` | OPTIONAL — only for a dedicated namespace; not part of the kustomization. |
+| `namespace.yaml` | OPTIONAL — only for a dedicated namespace; carries the `pod-security.kubernetes.io/enforce: baseline` label (apply it to your namespace if you reuse an existing one). |
+
+### Session-pod hard isolation (#338 R3)
+
+A session pod (and the ephemeral env-validation pod) runs **untrusted agent code + arbitrary root install commands**, so it must never reach anything else in the cluster. Enforced by, in order of guarantee:
+
+1. **`automountServiceAccountToken: false`** on the pod — no API credential is mounted, so the pod cannot authenticate to the kube-apiserver **on any CNI**. This is the always-on floor.
+2. **Zero-RBAC `fkst-session-runner` SA** — no Role/RoleBinding; never add one.
+3. **`networkpolicy.yaml`** — deny ingress, egress to the public internet only (blocks the apiserver, kube-dns, sibling pods, node/metadata). **Only enforced by a real CNI (Calico/Cilium); a no-op on docker-desktop** — set the real pod/service CIDRs in that file.
+4. **`baseline` PSS** on the namespace + no privileged/host access, dropped caps, seccomp `RuntimeDefault`. The pod runs as **root** solely so install commands work, boxed by all of the above.
+
+Because the pod cannot reach in-cluster services, `FKST_LLM_BASE_URL` is the **public** LLM host (not the in-cluster `nyxid-backend`).
 
 ## Deploy
 

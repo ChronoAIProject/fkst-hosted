@@ -27,7 +27,7 @@ data:
   # NOT inherit this ConfigMap). FKST_LLM_API_KEY is a Secret (see
   # secret.example.yaml) and is REQUIRED when FKST_POD_DISPATCH=true.
   FKST_LLM_MODEL: "gpt-5-codex" # non-blank (fail-closed)
-  FKST_LLM_BASE_URL: "http://nyxid-backend.ornn-cluster:3001/api/v1/proxy/s/chrono-llm"
+  FKST_LLM_BASE_URL: "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm"  # PUBLIC: the isolated session pod reaches the LLM over the internet, never in-cluster (#338 R3)
   # wire_api MUST be "chat": chrono-llm serves only /chat/completions (502 on
   # /responses). Non-blank (fail-closed).
   FKST_LLM_WIRE_API: "chat"
