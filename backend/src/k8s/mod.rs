@@ -10,8 +10,12 @@ pub mod env_store;
 pub mod env_validator;
 pub(crate) mod isolation;
 pub mod launcher;
+pub mod session_launcher;
 pub mod watch;
 
 pub use client::{KubeClient, KubeError};
 pub use launcher::{LaunchError, LaunchOutcome, PodSessionLauncher, SessionSecrets};
+pub use session_launcher::{
+    build_session_pod, build_session_secret, create_session_pod, SessionPodOutcome, SessionPodSpec,
+};
 pub use watch::{job_disposition, JobDisposition, JobWatcher};

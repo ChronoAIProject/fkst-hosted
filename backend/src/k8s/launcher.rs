@@ -19,9 +19,7 @@ use kube::ResourceExt;
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
-use crate::session_spec::creds::{
-    DEFAULT_CREDS_DIR, GITHUB_TOKEN_FILE, LLM_API_KEY_FILE, USER_ENV_PREFIX,
-};
+use crate::session_spec::creds::{credential_secret_data, DEFAULT_CREDS_DIR};
 use crate::session_spec::SessionSpec;
 
 /// Where the per-session credential Secret is mounted in the pod (must match the
@@ -242,26 +240,20 @@ pub fn build_secret(
     secrets: &SessionSecrets,
     owner: Option<OwnerReference>,
 ) -> Result<Secret, LaunchError> {
-    let mut data: BTreeMap<String, String> = BTreeMap::new();
+    // The credential keys (github-token, llm-api-key, and one `userenv.<KEY>`
+    // per per-user env entry) are assembled by the shared helper so this
+    // Model-A Job Secret and the Model-B session-Pod Secret never diverge on
+    // layout. The Job Secret additionally writes the serialized SessionSpec —
+    // the prompt rides the 0400 Secret, never a ConfigMap.
+    let mut data = credential_secret_data(
+        secrets.github_token.expose_secret(),
+        secrets.llm_api_key.expose_secret(),
+        secrets
+            .user_env
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.expose_secret())),
+    );
     data.insert(SPEC_FILE_KEY.to_string(), serde_json::to_string(spec)?);
-    data.insert(
-        GITHUB_TOKEN_FILE.to_string(),
-        secrets.github_token.expose_secret().to_string(),
-    );
-    // The static LLM API key is always written (no longer an optional token).
-    data.insert(
-        LLM_API_KEY_FILE.to_string(),
-        secrets.llm_api_key.expose_secret().to_string(),
-    );
-    // Per-user env (PR4b): each entry rides a `userenv.<KEY>` data key. KEY is
-    // env-var-shaped, so the composite is a valid Secret data key; the runner
-    // strips the prefix to recover KEY and folds it into the engine env_profile.
-    for (key, value) in &secrets.user_env {
-        data.insert(
-            format!("{USER_ENV_PREFIX}{key}"),
-            value.expose_secret().to_string(),
-        );
-    }
 
     Ok(Secret {
         metadata: ObjectMeta {
