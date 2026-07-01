@@ -184,7 +184,7 @@ function M.build_fix_reconcile_comment_request(repo, _issue_number, fix_reconcil
   local marker = conv_reconcile.fix_reconcile_marker(M, fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
   local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
-  local _, pr_number = M.parse_pr_source_ref(fix_reconcile.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(fix_reconcile.source_ref)
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -205,7 +205,7 @@ function M.build_review_reconcile_comment_request(repo, _issue_number, review_re
   local marker = conv_reconcile.review_reconcile_marker(M, review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
-  local _, pr_number = M.parse_pr_source_ref(review_reconcile.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(review_reconcile.source_ref)
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,

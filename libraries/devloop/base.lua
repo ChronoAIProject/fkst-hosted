@@ -200,7 +200,7 @@ function C.safe_pr_review_repo_segment(M, repo)
   return safe
 end
 
-function C.is_opted_in(M, labels)
+function C.is_opted_in(labels)
   if type(labels) ~= "table" then
     return false
   end
@@ -275,7 +275,7 @@ function C.parse_pr_review_proposal_id(M, id)
   return repo, pr_number, version, head_sha
 end
 
-function C.parse_pr_source_ref(M, source_ref)
+function C.parse_pr_source_ref(source_ref)
   if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
     return nil
   end

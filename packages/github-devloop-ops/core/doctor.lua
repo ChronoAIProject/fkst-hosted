@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -136,7 +137,7 @@ function M.saga_doctor_classify_entity(entity, opts)
   -- false positives. A correct label check needs the full label-sync model; defer it.
 
   if state == nil or state.state == nil then
-    local enabled_or_candidate = M.is_opted_in(entity.labels) or has_state_label(entity.labels)
+    local enabled_or_candidate = devloop_base.is_opted_in(entity.labels) or has_state_label(entity.labels)
     if tostring(entity.open_state or entity.state or ""):upper() == "OPEN" and enabled_or_candidate then
       return diagnosis(entity, nil, nil, "SEEN-WITHOUT-DECISION", "open enabled/candidate entity has no trusted durable intake verdict or state marker", "run intake/observe; if still absent, inspect intake judge delivery")
     end

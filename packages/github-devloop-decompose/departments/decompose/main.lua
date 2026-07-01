@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
@@ -257,7 +258,7 @@ local function decompose_context(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-  local _, pr_number = core.parse_pr_source_ref(decompose.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(decompose.source_ref)
   if tostring(pr_number or "") ~= tostring(decompose.pr_number) then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(source_ref)", "source_ref PR does not match decompose payload")
     if type(event) == "table" then

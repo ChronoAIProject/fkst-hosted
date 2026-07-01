@@ -60,7 +60,7 @@ local function issue_claim_ok(payload, handoff)
   if entity.kind == "pr" then
     local repo = payload.repo
     if repo == nil then
-      repo = select(1, devloop_base.parse_pr_source_ref(core, handoff.source_ref))
+      repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
     end
     return entity.repo == repo and tostring(entity.pr_number) == tostring(handoff.pr_number)
   end
@@ -136,7 +136,7 @@ end
 local function emit_pr_open(payload, handoff)
   local repo = payload.repo
   if repo == nil then
-    repo = select(1, devloop_base.parse_pr_source_ref(core, handoff.source_ref))
+    repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
   end
   if repo == nil then
     error("comment-handoff: pr-open-missing-repo: PR-open handoff missing repo")
@@ -269,7 +269,7 @@ maybe_raise_pr_label = function(payload, handoff)
   end
   local repo = payload.repo
   if repo == nil then
-    repo = select(1, devloop_base.parse_pr_source_ref(core, handoff.source_ref))
+    repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
   end
   if repo == nil then
     error("github-devloop: PR label handoff missing repo")

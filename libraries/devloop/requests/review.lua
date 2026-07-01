@@ -74,7 +74,7 @@ function C.build_review_converge_round_comment_request(M, repo, issue_number, un
   return M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
-    number = unresolved.pr_number or select(2, M.parse_pr_source_ref(unresolved.source_ref)),
+    number = unresolved.pr_number or select(2, devloop_base.parse_pr_source_ref(unresolved.source_ref)),
   }, shared.build_convergence_display(M, comment_strings.comment_string(M, "pr_review_convergence_round_prefix"), unresolved, round)
     .. "\n\n" .. tostring(marker_body)
     .. "\n" .. ai_sentinel, base_ids.dedup_key({
@@ -201,7 +201,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   if reached.decision == "reject" and blocking_gap ~= nil then
     body = body .. "\n" .. comment_strings.comment_string(M, "blocking_gap_label") .. devloop_base.neutralize_untrusted_comment_text(blocking_gap)
   end
-  local _, pr_number = M.parse_pr_source_ref(source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(source_ref)
   local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,

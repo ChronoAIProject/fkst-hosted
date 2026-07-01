@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -43,7 +44,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop pr-review")
     return
   end
-  local repo, pr_number = core.parse_pr_source_ref(reached.source_ref)
+  local repo, pr_number = devloop_base.parse_pr_source_ref(reached.source_ref)
   if repo == nil or tostring(pr_number) ~= tostring(proposal_pr_number) then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(source_ref)", "review source_ref does not match PR review proposal")
     return

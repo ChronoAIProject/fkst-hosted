@@ -56,7 +56,7 @@ local function normalized_fact(payload)
       issue_number = tostring(issue_number),
     }
   else
-    local pr_repo, pr_number = M.parse_pr_source_ref(normalized_source_ref)
+    local pr_repo, pr_number = devloop_base.parse_pr_source_ref(normalized_source_ref)
     if pr_repo == nil then
       return {
         schema = tostring(source.schema or payload.schema or ""),

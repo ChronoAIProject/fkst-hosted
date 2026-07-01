@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -135,7 +136,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     core.log_raise("intake_judge", candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return nil
   end
-  if has_pending_reintake and (core.is_opted_in(current.labels) or has_devloop_state_label(current.labels)) then
+  if has_pending_reintake and (devloop_base.is_opted_in(current.labels) or has_devloop_state_label(current.labels)) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(
       core,
       repo,
@@ -167,7 +168,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     and tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "")
     and authoritative_state.state == nil
     and not has_pending_reintake
-  if core.is_opted_in(current.labels) and not can_replay_enable_successor then
+  if devloop_base.is_opted_in(current.labels) and not can_replay_enable_successor then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
     return nil
   end

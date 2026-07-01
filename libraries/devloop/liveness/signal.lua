@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local parsers_misc = require("devloop.parsers.misc")
 local conv_rounds = require("devloop.convergence.rounds")
@@ -273,7 +274,7 @@ local function codex_run_liveness_signal(M, row, state, facts, now_seconds)
 end
 
 local function merge_gate_wait_identity(M, facts, state)
-  local source_repo, source_pr = M.parse_pr_source_ref(facts and facts.source_ref)
+  local source_repo, source_pr = devloop_base.parse_pr_source_ref(facts and facts.source_ref)
   local pr_number = source_pr
   local head_sha = facts and facts.head_sha or nil
   if facts and facts.current_pr ~= nil then
@@ -425,7 +426,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
   if resolver == "review-converge-round" then
     local head_sha = facts and facts.head_sha
     local review_proposal_id = facts and facts.review_proposal_id
-    local source_repo, source_pr = M.parse_pr_source_ref(facts and facts.source_ref)
+    local source_repo, source_pr = devloop_base.parse_pr_source_ref(facts and facts.source_ref)
     if source_repo ~= nil
       and source_pr ~= nil
       and forge_validators.is_git_sha(head_sha) then

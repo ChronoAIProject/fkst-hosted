@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local h = require("tests.devloop_helpers")
@@ -242,7 +243,7 @@ local function assert_stale_merge_wait_falls_back_to_under_budget_state_age(stat
 end
 
 local function run_timeout_reconcile(payload, comments, name, now_seconds)
-  local source_repo, source_pr = core.parse_pr_source_ref(payload and payload.source_ref)
+  local source_repo, source_pr = devloop_base.parse_pr_source_ref(payload and payload.source_ref)
   local common_issue = {
     repo = repo,
     number = 42,

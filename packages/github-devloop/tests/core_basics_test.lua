@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_core_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -129,12 +130,12 @@ return {
     t.eq(saw_mkdir, true)
   end,
   test_opt_in_detection = function()
-    t.eq(core.is_opted_in({ "fkst-dev:enabled" }), true)
-    t.eq(core.is_opted_in({ "bug" }), false)
-    t.eq(core.is_opted_in({ "fkst-dev:enabled", "fkst-dev:thinking" }), true)
-    t.eq(core.is_opted_in({ "fkst-dev:enabled", "fkst-dev:ready" }), true)
-    t.eq(core.is_opted_in({ "fkst-dev:enabled", "fkst-dev:impl-failed" }), true)
-    t.eq(core.is_opted_in({ "fkst-dev:enabled", "fkst-dev:blocked" }), true)
+    t.eq(devloop_base.is_opted_in({ "fkst-dev:enabled" }), true)
+    t.eq(devloop_base.is_opted_in({ "bug" }), false)
+    t.eq(devloop_base.is_opted_in({ "fkst-dev:enabled", "fkst-dev:thinking" }), true)
+    t.eq(devloop_base.is_opted_in({ "fkst-dev:enabled", "fkst-dev:ready" }), true)
+    t.eq(devloop_base.is_opted_in({ "fkst-dev:enabled", "fkst-dev:impl-failed" }), true)
+    t.eq(devloop_base.is_opted_in({ "fkst-dev:enabled", "fkst-dev:blocked" }), true)
   end,
   test_proposal_id_round_trip = function()
     local id = base_ids.proposal_id("owner/repo", 42)

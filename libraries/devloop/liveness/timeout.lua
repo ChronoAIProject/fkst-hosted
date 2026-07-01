@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local conv_reconcile = require("devloop.convergence.reconcile")
@@ -175,7 +176,7 @@ local function timeout_attempt_target(entity, facts)
   local kind = "issue"
   local repo = entity and entity.repo
   local number = entity and entity.number
-  local _, pr_number = M.parse_pr_source_ref(source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(source_ref)
   if pr_number ~= nil then
     local parsed_repo = select(1, base_ids.parse_proposal_id(facts and facts.proposal_id))
     kind = "pr"

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -61,7 +62,7 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   if reconcile.state ~= "merge-ready" and reconcile.state ~= "merging" then
     return "state-output-obligation-timeout"
   end
-  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   local head_sha = current_pr and current_pr.head_sha or nil
   if pr_number == nil or not forge_validators.is_git_sha(head_sha) then
     return "state-output-obligation-timeout"
@@ -143,7 +144,7 @@ local function pipeline_review(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
@@ -219,7 +220,7 @@ local function pipeline_fix(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   if pr_number == nil then
     pr_number = entity.pr_number
   end
@@ -287,7 +288,7 @@ local function pipeline_timeout(event)
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
-  local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
+  local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   local lock_key = core.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, reconcile.state, "blocked", "skip-foreign(proposal_id)", "no transition lock key")
