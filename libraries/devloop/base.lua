@@ -1,7 +1,6 @@
-local S = {}
+local C = {}
 local config = require("devloop.config")
 
-function S.install(M)
 local codex = require("workflow.codex")
 local error_facts = require("contract.error_facts")
 local forge_validators = require("devloop.forge_validators")
@@ -9,10 +8,10 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local transition_version = require("contract.transition_version")
 
-M.read_env_command = function(name)
+function C.read_env_command(M, name)
   return config.read_env_command(M, name)
 end
-M.read_env = function(name, exec)
+function C.read_env(M, name, exec)
   return config.read_env(M, name, exec)
 end
 
@@ -79,7 +78,7 @@ local label_colors = {
   [blocked_on_dependency_label] = "E99695",
 }
 
-function M.parse_name_only_paths(stdout)
+function C.parse_name_only_paths(M, stdout)
   local paths = {}
   local seen = {}
   for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
@@ -93,7 +92,7 @@ function M.parse_name_only_paths(stdout)
   return paths
 end
 
-local trusted_bot_login = nil
+local trusted_bot_login_by_M = setmetatable({}, { __mode = "k" })
 local comment_body
 local comment_author_login
 local is_trusted_comment
@@ -150,45 +149,45 @@ local is_path_safe_key = strings.is_path_safe_key
 -- Nil-safe (nil in → nil out) and a no-op for ordinary user logins (which never
 -- end in "[bot]"), so claim_owner() and author comparisons keep their existing
 -- nil semantics when the bot login is unconfigured.
-function M.strip_bot_login_suffix(login)
+function C.strip_bot_login_suffix(M, login)
   if login == nil then
     return nil
   end
   return (tostring(login):gsub("%[bot%]$", ""))
 end
 
-function M.configure_trusted_bot_login(login)
+function C.configure_trusted_bot_login(M, login)
   if login == nil or tostring(login) == "" then
-    trusted_bot_login = nil
+    trusted_bot_login_by_M[M] = nil
     return nil
   end
-  trusted_bot_login = M.strip_bot_login_suffix(login)
-  return trusted_bot_login
+  trusted_bot_login_by_M[M] = C.strip_bot_login_suffix(M, login)
+  return trusted_bot_login_by_M[M]
 end
 
-function M.assert_trusted_bot_configured()
-  local login = M.read_env("FKST_GITHUB_BOT_LOGIN")
+function C.assert_trusted_bot_configured(M)
+  local login = C.read_env(M, "FKST_GITHUB_BOT_LOGIN")
   if login ~= nil then
-    M.configure_trusted_bot_login(login)
+    C.configure_trusted_bot_login(M, login)
   end
 
-  if M.read_env("FKST_GITHUB_WRITE") == "1" and trusted_bot_login == nil then
+  if C.read_env(M, "FKST_GITHUB_WRITE") == "1" and trusted_bot_login_by_M[M] == nil then
     error("github-devloop: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
   end
-  return trusted_bot_login
+  return trusted_bot_login_by_M[M]
 end
 
 local dedup_key = base_ids.dedup_key
 
-function M.safe_repo(repo)
+function C.safe_repo(M, repo)
   return base_ids.safe_repo(repo)
 end
 
-function M.safe_issue(issue_number)
+function C.safe_issue(M, issue_number)
   return base_ids.safe_issue(issue_number)
 end
 
-function M.safe_updated_at(updated_at)
+function C.safe_updated_at(M, updated_at)
   local safe = strings.sanitize_key(updated_at, max_key_len):sub(1, max_update_key_len):gsub("/+$", "")
   if safe == "" then
     return "empty"
@@ -196,8 +195,8 @@ function M.safe_updated_at(updated_at)
   return safe
 end
 
-function M.safe_pr_review_repo_segment(repo)
-  local safe = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
+function C.safe_pr_review_repo_segment(M, repo)
+  local safe = C.safe_repo(M, repo):gsub("/", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
   if safe == "" then
     safe = "repo"
@@ -210,7 +209,7 @@ function M.safe_pr_review_repo_segment(repo)
   return safe
 end
 
-function M.is_opted_in(labels)
+function C.is_opted_in(M, labels)
   if type(labels) ~= "table" then
     return false
   end
@@ -223,22 +222,22 @@ function M.is_opted_in(labels)
   return false
 end
 
-function M.is_intake_held(labels)
+function C.is_intake_held(M, labels)
   return has_value(labels, hold_label)
 end
 
-function M.proposal_id(repo, issue_number)
+function C.proposal_id(M, repo, issue_number)
   return base_ids.proposal_id(repo, issue_number)
 end
 
-function M.safe_head_segment(head_sha)
+function C.safe_head_segment(M, head_sha)
   if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid head sha")
   end
   return tostring(head_sha)
 end
 
-function M.pr_review_proposal_id(repo, pr_number, version, head_sha)
+function C.pr_review_proposal_id(M, repo, pr_number, version, head_sha)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
@@ -246,20 +245,20 @@ function M.pr_review_proposal_id(repo, pr_number, version, head_sha)
     error("github-devloop: missing reviewed head sha")
   end
   return "github-devloop/pr-review/"
-    .. M.safe_pr_review_repo_segment(repo)
+    .. C.safe_pr_review_repo_segment(M, repo)
     .. "/"
-    .. M.safe_issue(pr_number)
+    .. C.safe_issue(M, pr_number)
     .. "/"
     .. transition_version.safe_version_segment(version)
     .. "/"
-    .. M.safe_head_segment(head_sha)
+    .. C.safe_head_segment(M, head_sha)
 end
 
-function M.parse_proposal_id(id)
+function C.parse_proposal_id(M, id)
   return base_ids.parse_proposal_id(id)
 end
 
-function M.parse_pr_review_proposal_id(id)
+function C.parse_pr_review_proposal_id(M, id)
   if type(id) ~= "string" then
     return nil
   end
@@ -285,15 +284,15 @@ function M.parse_pr_review_proposal_id(id)
     return nil
   end
   if not is_path_safe_key(repo, 64)
-    or M.safe_issue(pr_number) ~= pr_number
+    or C.safe_issue(M, pr_number) ~= pr_number
     or transition_version.safe_version_segment(version) ~= version
-    or M.safe_head_segment(head_sha) ~= head_sha then
+    or C.safe_head_segment(M, head_sha) ~= head_sha then
     return nil
   end
   return repo, pr_number, version, head_sha
 end
 
-function M.parse_pr_source_ref(source_ref)
+function C.parse_pr_source_ref(M, source_ref)
   if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
     return nil
   end
@@ -303,13 +302,13 @@ function M.parse_pr_source_ref(source_ref)
   if repo == nil or repo == "" or not forge_validators.is_positive_pr_number(pr_number) then
     return nil
   end
-  if M.safe_repo(repo) == "" then
+  if C.safe_repo(M, repo) == "" then
     return nil
   end
   return repo, pr_number
 end
 
-function M.parse_issue_source_ref(source_ref)
+function C.parse_issue_source_ref(M, source_ref)
   if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
     return nil
   end
@@ -319,13 +318,13 @@ function M.parse_issue_source_ref(source_ref)
   if repo == nil or repo == "" or not forge_validators.is_positive_pr_number(issue_number) then
     return nil
   end
-  if not M.issue_ref_round_trips(repo, issue_number) then
+  if not C.issue_ref_round_trips(M, repo, issue_number) then
     return nil
   end
   return repo, issue_number
 end
 
-function M.is_safe_proposal_ref(proposal_id, dedup_key)
+function C.is_safe_proposal_ref(M, proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
@@ -333,14 +332,14 @@ function M.is_safe_proposal_ref(proposal_id, dedup_key)
     return false
   end
 
-  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  local repo, issue_number = C.parse_proposal_id(M, proposal_id)
   if repo == nil or issue_number == nil then
     return false
   end
-  return M.issue_ref_round_trips(repo, issue_number)
+  return C.issue_ref_round_trips(M, repo, issue_number)
 end
 
-function M.is_safe_consensus_result_ref(proposal_id, dedup_key)
+function C.is_safe_consensus_result_ref(M, proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
@@ -353,14 +352,14 @@ function M.is_safe_consensus_result_ref(proposal_id, dedup_key)
     return false
   end
 
-  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  local repo, issue_number = C.parse_proposal_id(M, proposal_id)
   if repo == nil or issue_number == nil then
     return false
   end
-  return M.issue_ref_round_trips(repo, issue_number)
+  return C.issue_ref_round_trips(M, repo, issue_number)
 end
 
-function M.is_safe_pr_review_result_ref(proposal_id, dedup_key)
+function C.is_safe_pr_review_result_ref(M, proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
@@ -373,36 +372,36 @@ function M.is_safe_pr_review_result_ref(proposal_id, dedup_key)
     return false
   end
 
-  local repo, pr_number = M.parse_pr_review_proposal_id(proposal_id)
+  local repo, pr_number = C.parse_pr_review_proposal_id(M, proposal_id)
   return repo ~= nil and pr_number ~= nil
 end
 
-function M.issue_ref_round_trips(repo, issue_number)
+function C.issue_ref_round_trips(M, repo, issue_number)
   return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
-function M.proposal_dedup_key(proposal_id, updated_at)
-  return tostring(proposal_id) .. "/" .. M.safe_updated_at(updated_at)
+function C.proposal_dedup_key(M, proposal_id, updated_at)
+  return tostring(proposal_id) .. "/" .. C.safe_updated_at(M, updated_at)
 end
 
-function M.intake_dedup_key(proposal_id, updated_at)
+function C.intake_dedup_key(M, proposal_id, updated_at)
   return M._dedup_key({
     "intake",
     tostring(proposal_id),
-    M.safe_updated_at(updated_at or "unknown"),
+    C.safe_updated_at(M, updated_at or "unknown"),
   })
 end
 
-function M.intake_candidate_delivery_dedup_key(proposal_id, effect_id, delivery_version)
+function C.intake_candidate_delivery_dedup_key(M, proposal_id, effect_id, delivery_version)
   return M._dedup_key({
     "intake-candidate",
     tostring(proposal_id),
     tostring(effect_id),
-    M.safe_updated_at(delivery_version or "unknown"),
+    C.safe_updated_at(M, delivery_version or "unknown"),
   })
 end
 
-function M.implement_version_mismatch_key(expected_version, current_version)
+function C.implement_version_mismatch_key(M, expected_version, current_version)
   return dedup_key({
     "ivm",
     decimal_checksum(table.concat({
@@ -412,7 +411,7 @@ function M.implement_version_mismatch_key(expected_version, current_version)
   })
 end
 
-function M.intake_decision_dedup_key(proposal_id, current, reintake_command)
+function C.intake_decision_dedup_key(M, proposal_id, current, reintake_command)
   local reintake_created_at = "none"
   if reintake_command ~= nil then
     reintake_created_at = tostring(reintake_command.created_at or "unknown")
@@ -428,61 +427,61 @@ function M.intake_decision_dedup_key(proposal_id, current, reintake_command)
   })
 end
 
-function M.ci_selfheal_once_key(repo, pr_number, head_sha)
+function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
   return M._dedup_key({
     "github-devloop",
     "ci-selfheal",
-    M.safe_repo(repo),
+    C.safe_repo(M, repo),
     "pr",
-    M.safe_issue(pr_number),
-    M.safe_head_segment(head_sha),
+    C.safe_issue(M, pr_number),
+    C.safe_head_segment(M, head_sha),
   })
 end
 
-function M.ci_missing_status_first_observed_key(repo, pr_number, head_sha)
+function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
   return M._dedup_key({
     "github-devloop",
     "ci-missing-status-observed",
-    M.safe_repo(repo),
+    C.safe_repo(M, repo),
     "pr",
-    M.safe_issue(pr_number),
-    M.safe_head_segment(head_sha),
+    C.safe_issue(M, pr_number),
+    C.safe_head_segment(M, head_sha),
   })
 end
 
-function M.observe_lock_key(repo, issue_number)
-  return "github-devloop/transition/" .. M.safe_repo(repo) .. "/issue/" .. M.safe_issue(issue_number)
+function C.observe_lock_key(M, repo, issue_number)
+  return "github-devloop/transition/" .. C.safe_repo(M, repo) .. "/issue/" .. C.safe_issue(M, issue_number)
 end
 
-function M.transition_lock_key(proposal_id)
-  local repo, issue_number = M.parse_proposal_id(proposal_id)
+function C.transition_lock_key(M, proposal_id)
+  local repo, issue_number = C.parse_proposal_id(M, proposal_id)
   if repo == nil then
     return nil
   end
-  return M.observe_lock_key(repo, issue_number)
+  return C.observe_lock_key(M, repo, issue_number)
 end
 
-function M.result_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.result_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.review_result_lock_key(issue_proposal_id)
-  return M.transition_lock_key(issue_proposal_id)
+function C.review_result_lock_key(M, issue_proposal_id)
+  return C.transition_lock_key(M, issue_proposal_id)
 end
 
-function M.review_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.review_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.loop_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.loop_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.implement_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.implement_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.safe_issue_slug(repo, issue_number)
+function C.safe_issue_slug(M, repo, issue_number)
   local slug = strings.sanitize_key(tostring(repo or "") .. "-" .. tostring(issue_number or ""), false):gsub("/", "-")
   slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if slug == "" then
@@ -497,9 +496,9 @@ function M.safe_issue_slug(repo, issue_number)
   return slug
 end
 
-function M.implement_branch(repo, issue_number, impl_version)
-  local safe_repo = M.safe_repo(repo)
-  local safe_issue = M.safe_issue(issue_number)
+function C.implement_branch(M, repo, issue_number, impl_version)
+  local safe_repo = C.safe_repo(M, repo)
+  local safe_issue = C.safe_issue(M, issue_number)
   local safe_version = strings.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe_version = safe_version:gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
   if safe_version == "" then
@@ -526,17 +525,17 @@ function M.implement_branch(repo, issue_number, impl_version)
   return branch
 end
 
-function M.implement_worktree_path(runtime_root, repo, issue_number, impl_version)
+function C.implement_worktree_path(M, runtime_root, repo, issue_number, impl_version)
   local root = trim(runtime_root)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")
   end
-  local slug = M.safe_issue_slug(repo, issue_number)
+  local slug = C.safe_issue_slug(M, repo, issue_number)
   local suffix = decimal_checksum(tostring(repo) .. "#" .. tostring(issue_number) .. "#" .. tostring(impl_version))
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
 end
 
-function M.path_under_runtime_root(runtime_root, path)
+function C.path_under_runtime_root(M, runtime_root, path)
   local root = trim(runtime_root)
   local target = trim(path)
   if root == "" or root:find("[\r\n]") ~= nil then
@@ -550,7 +549,7 @@ function M.path_under_runtime_root(runtime_root, path)
   return target == root or target:sub(1, #root + 1) == root .. "/"
 end
 
-function M.judgment_worktree_path(runtime_root, role, identity)
+function C.judgment_worktree_path(M, runtime_root, role, identity)
   local root = trim(runtime_root)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")
@@ -570,26 +569,26 @@ function M.judgment_worktree_path(runtime_root, role, identity)
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
-function M.judgment_worktree(role, identity)
-  local runtime = exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+function C.judgment_worktree_with_exec(M, exec_sync_fn, role, identity)
+  local runtime = exec_sync_fn({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
   if runtime.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
   end
-  local worktree = M.judgment_worktree_path(runtime.stdout, role, identity)
-  local mkdir = exec_sync({ cmd = M.mkdir_p_cmd(worktree), timeout = 30 })
+  local worktree = C.judgment_worktree_path(M, runtime.stdout, role, identity)
+  local mkdir = exec_sync_fn({ cmd = M.mkdir_p_cmd(worktree), timeout = 30 })
   if mkdir.exit_code ~= 0 then
     error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
   end
   return worktree
 end
 
-M.judgment_codex_opts = codex.judgment_codex_opts
+C.judgment_codex_opts = codex.judgment_codex_opts
 
-function M.max_body_len()
+function C.max_body_len(M)
   return max_body_len
 end
 
-function M.render_template(template, vars)
+function C.render_template(M, template, vars)
   if type(template) ~= "string" then
     error("github-devloop: template must be a string")
   end
@@ -606,7 +605,7 @@ function M.render_template(template, vars)
   end))
 end
 
-function M.neutralize_untrusted_prompt_text(text)
+function C.neutralize_untrusted_prompt_text(M, text)
   local value = tostring(text or "")
 
   local function neutralize_line(line)
@@ -645,7 +644,7 @@ function M.neutralize_untrusted_prompt_text(text)
   return table.concat(output)
 end
 
-function M.quote_untrusted_prompt_text(text)
+function C.quote_untrusted_prompt_text(M, text)
   local value = M._neutralize_fkst_markers(text)
   local output = {}
   local start = 1
@@ -664,7 +663,7 @@ function M.quote_untrusted_prompt_text(text)
   return table.concat(output)
 end
 
-function M.neutralize_untrusted_comment_text(text)
+function C.neutralize_untrusted_comment_text(M, text)
   local value = tostring(text or "")
 
   local function neutralize_line(line)
@@ -691,11 +690,11 @@ function M.neutralize_untrusted_comment_text(text)
   return table.concat(output)
 end
 
-function M.normalize_source_ref(source_ref)
+function C.normalize_source_ref(M, source_ref)
   return base_ids.normalize_source_ref(source_ref)
 end
 
-function M.gh_exec_opts(cmd_or_opts, timeout)
+function C.gh_exec_opts(M, cmd_or_opts, timeout)
   local opts = {}
   if type(cmd_or_opts) == "table" then
     for key, value in pairs(cmd_or_opts) do
@@ -708,61 +707,60 @@ function M.gh_exec_opts(cmd_or_opts, timeout)
   return opts
 end
 
-function M.trusted_bot_login()
-  return trusted_bot_login or test_bot_login
+function C.trusted_bot_login(M)
+  return trusted_bot_login_by_M[M] or test_bot_login
 end
 
-M._max_key_len = max_key_len
-M._max_dedup_len = max_dedup_len
-M._max_title_len = max_title_len
-M._max_body_len = max_body_len
-M._max_comments_len = max_comments_len
-M._max_meta_reason_len = max_meta_reason_len
-M._max_framing_len = max_framing_len
-M._max_impl_output_len = max_impl_output_len
-M._max_blocking_gap_len = max_blocking_gap_len
-M._max_review_ledger_len = max_review_ledger_len
-M._max_pr_issue_context_len = max_pr_issue_context_len
-M._max_pr_title_len = max_pr_title_len
-M._action_label = action_label
-M._intake_label = intake_label
-M._class_label = class_label
-M._reason_label = reason_label
-M._verdict_label = verdict_label
-M._reply_label = reply_label
-M._untrusted_issue_data_begin = untrusted_issue_data_begin
-M._untrusted_issue_data_end = untrusted_issue_data_end
-M._test_bot_login = test_bot_login
-M._enabled_label = enabled_label
-M._tracking_label = tracking_label
-M._hold_label = hold_label
-M._thinking_label = thinking_label
-M._ready_label = ready_label
-M._implementing_label = implementing_label
-M._awaiting_pr_label = awaiting_pr_label
-M._pr_open_label = pr_open_label
-M._reviewing_label = reviewing_label
-M._merge_ready_label = merge_ready_label
-M._merging_label = merging_label
-M._merged_label = merged_label
-M._fixing_label = fixing_label
-M._review_meta_label = review_meta_label
-M._impl_failed_label = impl_failed_label
-M._blocked_label = blocked_label
-M._blocked_on_dependency_label = blocked_on_dependency_label
-M._label_colors = label_colors
-M._shell_single_quote = shell_single_quote
-M._trim = trim
-M._neutralize_fkst_markers = neutralize_fkst_markers
-M._one_line = one_line
-M._is_bounded_string = is_bounded_string
-M.truncate_utf8 = sdk_truncate_utf8
-M._has_value = has_value
-M._is_review_meta_action = is_review_meta_action
-M.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round
-M._is_path_safe_key = is_path_safe_key
-M._is_positive_pr_number = forge_validators.is_positive_pr_number
-M._dedup_key = dedup_key
-end
+C._max_key_len = max_key_len
+C._max_dedup_len = max_dedup_len
+C._max_title_len = max_title_len
+C._max_body_len = max_body_len
+C._max_comments_len = max_comments_len
+C._max_meta_reason_len = max_meta_reason_len
+C._max_framing_len = max_framing_len
+C._max_impl_output_len = max_impl_output_len
+C._max_blocking_gap_len = max_blocking_gap_len
+C._max_review_ledger_len = max_review_ledger_len
+C._max_pr_issue_context_len = max_pr_issue_context_len
+C._max_pr_title_len = max_pr_title_len
+C._action_label = action_label
+C._intake_label = intake_label
+C._class_label = class_label
+C._reason_label = reason_label
+C._verdict_label = verdict_label
+C._reply_label = reply_label
+C._untrusted_issue_data_begin = untrusted_issue_data_begin
+C._untrusted_issue_data_end = untrusted_issue_data_end
+C._test_bot_login = test_bot_login
+C._enabled_label = enabled_label
+C._tracking_label = tracking_label
+C._hold_label = hold_label
+C._thinking_label = thinking_label
+C._ready_label = ready_label
+C._implementing_label = implementing_label
+C._awaiting_pr_label = awaiting_pr_label
+C._pr_open_label = pr_open_label
+C._reviewing_label = reviewing_label
+C._merge_ready_label = merge_ready_label
+C._merging_label = merging_label
+C._merged_label = merged_label
+C._fixing_label = fixing_label
+C._review_meta_label = review_meta_label
+C._impl_failed_label = impl_failed_label
+C._blocked_label = blocked_label
+C._blocked_on_dependency_label = blocked_on_dependency_label
+C._label_colors = label_colors
+C._shell_single_quote = shell_single_quote
+C._trim = trim
+C._neutralize_fkst_markers = neutralize_fkst_markers
+C._one_line = one_line
+C._is_bounded_string = is_bounded_string
+C.truncate_utf8 = sdk_truncate_utf8
+C._has_value = has_value
+C._is_review_meta_action = is_review_meta_action
+C.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round
+C._is_path_safe_key = is_path_safe_key
+C._is_positive_pr_number = forge_validators.is_positive_pr_number
+C._dedup_key = dedup_key
 
-return S
+return C
