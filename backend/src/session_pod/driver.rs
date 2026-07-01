@@ -110,7 +110,23 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     create_dir_idempotent(&gitcred_dir)?;
     let helper_path = materialize_helper_script(&gitcred_dir)
         .map_err(|error| format!("materialize git credential helper: {error}"))?;
-    let git_entries = git_config_entries(&helper_path);
+    let mut git_entries = git_config_entries(&helper_path);
+    // The devloop packages commit with `git`; without an author/committer identity
+    // the commit fails ("Author identity unknown"). Stamp the App bot as the git
+    // identity in CONFIG form (applies to every git invocation regardless of how the
+    // devloop shells out). The email is the App bot's GitHub `noreply`, so the
+    // commit attributes to the App that authored the push. Skipped when no bot login
+    // was injected (git then falls back to its own error, surfaced in the pod log).
+    if !env.bot_login.is_empty() {
+        git_entries.push(GitConfigEntry {
+            key: "user.name".to_string(),
+            value: env.bot_login.clone(),
+        });
+        git_entries.push(GitConfigEntry {
+            key: "user.email".to_string(),
+            value: format!("{}@users.noreply.github.com", env.bot_login),
+        });
+    }
     let shim_dir = runtime_root.join(SHIM_SUBDIR);
     install_gh_shim(&shim_dir)?;
 
@@ -136,6 +152,17 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     let target_url = format!("https://github.com/{}.git", env.repo);
     git_clone(&target_url, None, &project_root, &git_entries, &token_file).await?;
 
+    // 4b. The framework's host-root workspace discovery walks UP from --project-root
+    //     for a `fkst.workspace.toml` and fails CLOSED without one. The target repo
+    //     is a plain repo with no fkst workspace, so write a minimal manifest
+    //     declaring zero units: the host root owns no departments, while each
+    //     platform `--package-root` resolves its `libraries/*` from the platform
+    //     clone's OWN `fkst.workspace.toml` (walk-up from that package root). Verified
+    //     against fkst-substrate `path_resolver.rs` host-root discovery.
+    let workspace_manifest = project_root.join("fkst.workspace.toml");
+    std::fs::write(&workspace_manifest, "[workspace]\nunits = []\n")
+        .map_err(|e| format!("write {}: {e}", workspace_manifest.display()))?;
+
     // 5. Render CODEX_HOME/config.toml (the API key rides LLM_ENV_KEY, never the
     //    toml itself).
     render_codex(env)?;
@@ -144,9 +171,7 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     let args = build_supervise_args(
         &project_root.to_string_lossy(),
         &platform_root.to_string_lossy(),
-        &plan.platform_packages,
-        &env.durable_root,
-        &env.runtime_root,
+        &plan.package_paths,
         FRAMEWORK_BIN,
     );
     let mut child_env = substrate_child_env(
