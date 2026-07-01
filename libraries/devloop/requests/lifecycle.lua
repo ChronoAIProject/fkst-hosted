@@ -4,6 +4,7 @@ local comment_strings = require("devloop.strings")
 local shared = require("devloop.requests.shared")
 local m_shared = require("devloop.markers.shared")
 local m_builders = require("devloop.markers.builders")
+local m_mq = require("devloop.merge_queue")
 
 local strings = shared.strings
 local ai_sentinel = shared.ai_sentinel
@@ -305,7 +306,7 @@ end
 
 function C.build_queue_starvation_reconcile_comment_request(M, repo, merge_ready, cause)
   local attempt_key = cause and cause.attempt_key or "attempt"
-  local marker = M.queue_starvation_reconcile_marker(
+  local marker = m_mq.queue_starvation_reconcile_marker(M,
     merge_ready.proposal_id,
     merge_ready.pr_number,
     merge_ready.version,

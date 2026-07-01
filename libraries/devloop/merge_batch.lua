@@ -1,4 +1,5 @@
 local C = {}
+local m_mq = require("devloop.merge_queue")
 
 local function log_batch_window(M, proposal_id, fields)
   local facts = { "batch_window=true" }
@@ -9,7 +10,7 @@ local function log_batch_window(M, proposal_id, fields)
 end
 
 local function record_merged_files(M, repo, entry, merged_files)
-  local files, reason = M.merge_queue_changed_files(repo, entry)
+  local files, reason = m_mq.merge_queue_changed_files(M, repo, entry)
   if files == nil then
     log_batch_window(M, entry.proposal_id, {
       "action=stop",
@@ -31,7 +32,7 @@ end
 
 local function files_disjoint_from_window(M, files, merged_files)
   for _, merged in ipairs(merged_files or {}) do
-    local disjoint, path = M.merge_queue_files_disjoint(files, merged)
+    local disjoint, path = m_mq.merge_queue_files_disjoint(M, files, merged)
     if not disjoint then
       return false, path, merged.pr_number
     end
@@ -165,7 +166,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       })
       return last_merged_pr_number
     end
-    local files, file_reason = M.merge_queue_changed_files(repo, entry)
+    local files, file_reason = m_mq.merge_queue_changed_files(M, repo, entry)
     if files == nil then
       log_batch_window(M, entry.proposal_id, {
         "action=stop",
@@ -197,7 +198,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       "head=" .. tostring(files.head_sha or ""),
       "files=" .. tostring(#files.paths),
     })
-    local merge_ready = M.merge_ready_payload_from_queue_entry(entry, M.pr_source_ref(repo, entry.pr_number))
+    local merge_ready = m_mq.merge_ready_payload_from_queue_entry(M, entry, M.pr_source_ref(repo, entry.pr_number))
     if merge_ready == nil then
       log_batch_window(M, entry.proposal_id, {
         "action=stop",

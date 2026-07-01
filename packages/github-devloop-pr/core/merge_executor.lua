@@ -15,6 +15,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local v_merge_ready = require("devloop.validators.merge_ready")
 local m_facts = require("devloop.markers.facts")
+local m_mq = require("devloop.merge_queue")
 local M = {}
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
@@ -105,7 +106,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     predecessor_set = queue_position.predecessor_set
   else
     local branches = config.branch_config(core)
-    local position, predecessor_reason = core.merge_queue_position(repo, branches.integration, {
+    local position, predecessor_reason = m_mq.merge_queue_position(core, repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
     })
@@ -248,7 +249,7 @@ local function revalidate_speculative_predecessors(repo, issue_number, merge_rea
   local current_position = queue_position
   if current_position == nil then
     local branches = config.branch_config(core)
-    local position, reason = core.merge_queue_position(repo, branches.integration, {
+    local position, reason = m_mq.merge_queue_position(core, repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
     })
@@ -260,7 +261,7 @@ local function revalidate_speculative_predecessors(repo, issue_number, merge_rea
     current_position = position
   end
   local branches = config.branch_config(core)
-  local matches, match_reason = core.merge_queue_predecessor_set_matches_current_base(
+  local matches, match_reason = m_mq.merge_queue_predecessor_set_matches_current_base(core,
     speculative_fact.predecessor_set,
     current_position.predecessor_set,
     branches.integration
@@ -469,7 +470,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   local speculative_fact = speculative_fix_fact_for_merge(current_pr.comments, merge_ready)
   if enforce_queue and tostring(current_pr.state or ""):upper() == "OPEN" then
     local queue_head
-    queue_head, queue_entries = core.merge_queue_head(repo, branches.integration, {
+    queue_head, queue_entries = m_mq.merge_queue_head(core, repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
     })
@@ -484,7 +485,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       and tostring(queue_head.head_sha or "") == tostring(merge_ready.reviewed_head_sha or "")
     if not queue_ok then
       local queue_reason
-      queue_position, queue_reason = core.merge_queue_position(repo, branches.integration, {
+      queue_position, queue_reason = m_mq.merge_queue_position(core, repo, branches.integration, {
         pr_number = merge_ready.pr_number,
         pr = current_pr,
       })
@@ -507,7 +508,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
           log_gate(merge_ready, "dry-run", "speculative fix requires FKST_GITHUB_WRITE=1")
           return
         end
-        local capacity_ok, capacity_reason = core.wip_capacity_allows_start(repo, issue_number)
+        local capacity_ok, capacity_reason = m_mq.wip_capacity_allows_start(core, repo, issue_number)
         if not capacity_ok then
           core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "fixing", "hold-wip-cap", capacity_reason)
           log_gate(merge_ready, "dry-run", capacity_reason)
@@ -739,14 +740,14 @@ local function synthesize_merge_ready_from_queue_head(repo, head)
   }, core.pr_source_ref(repo, head.pr_number))
 end
 local function merge_queue_head_all(repo, base_branch)
-  local head, entries = core.merge_queue_head(repo, base_branch); return head, entries or {}
+  local head, entries = m_mq.merge_queue_head(core, repo, base_branch); return head, entries or {}
 end
 local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
   local next_head = merge_queue_head_all(repo, branches.integration)
   if next_head == nil then
     core.log_line("info", "merge", "merge", "GATE", { "outcome=quiescent", "reason=merge-queue-empty-after-progress", "pass=poll" })
   else
-    local payload = core.merge_queue_tick_payload(repo, merged_pr_number, next_head)
+    local payload = m_mq.merge_queue_tick_payload(core, repo, merged_pr_number, next_head)
     core.log_raise("merge", tostring(next_head.proposal_id or "merge"), "devloop_merge_queue_tick", payload)
     raise("devloop_merge_queue_tick", payload)
   end
@@ -772,7 +773,7 @@ local function queue_starvation_target_entry(cause, entries)
   if target == nil then
     return nil, nil, "target-not-current"
   end
-  local candidate, age_minutes = core.merge_queue_starvation_candidate(entries, core._merge_ready_starvation_threshold_minutes, now())
+  local candidate, age_minutes = m_mq.merge_queue_starvation_candidate(core, entries, m_mq._merge_ready_starvation_threshold_minutes, now())
   if not queue_starvation_cause_matches_entry(cause, candidate) then
     return nil, age_minutes, "target-not-aged-candidate"
   end

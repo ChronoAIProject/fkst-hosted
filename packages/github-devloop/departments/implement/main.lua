@@ -15,6 +15,7 @@ local dispatch_live_run = require("devloop.dispatch_live_run")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local fork_gate = require("departments.implement.fork_gate")
+local m_mq = require("devloop.merge_queue")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
@@ -778,7 +779,7 @@ local function process_ready_event(event)
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
     end
 
-    local wip_ok, wip_reason, wip_count, wip_max = core.wip_capacity_allows_start(repo, issue_number)
+    local wip_ok, wip_reason, wip_count, wip_max = m_mq.wip_capacity_allows_start(core, repo, issue_number)
     if not wip_ok then
       core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-wip-cap", wip_reason .. ": " .. tostring(wip_count) .. "/" .. tostring(wip_max))
       return

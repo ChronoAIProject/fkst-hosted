@@ -9,6 +9,7 @@ local dispatch_live_run = require("devloop.dispatch_live_run")
 local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
+local m_mq = require("devloop.merge_queue")
 
 local payloads_builders = require("devloop.payloads.builders")
 local v_fixing = require("devloop.validators.fixing")
@@ -192,14 +193,14 @@ local function fetch_verified_pr_head(pr_number, expected_head_sha)
 end
 
 local function current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
-  local predecessors, reason = core.merge_queue_predecessors(repo, integration_branch, {
+  local predecessors, reason = m_mq.merge_queue_predecessors(core, repo, integration_branch, {
     pr_number = fix.pr_number,
     pr = current_pr,
   })
   if predecessors == nil then
     return nil, reason
   end
-  return predecessors, core.merge_queue_predecessor_set(predecessors)
+  return predecessors, m_mq.merge_queue_predecessor_set(core, predecessors)
 end
 
 local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)

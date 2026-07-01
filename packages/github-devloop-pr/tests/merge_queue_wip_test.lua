@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
 local payloads_builders = require("devloop.payloads.builders")
+local m_mq = require("devloop.merge_queue")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -47,7 +48,7 @@ end
 local function run_starvation_merge_queue_tick(event, run_opts)
   return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
-    payload = core.merge_queue_starvation_tick_payload("owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
+    payload = m_mq.merge_queue_starvation_tick_payload(core, "owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
       pr_number = event.pr_number,
       proposal_id = event.proposal_id,
       version = event.version,
@@ -327,7 +328,7 @@ return {
     mock_queue_pr(older, "2026-06-03T01:00:00Z")
     mock_queue_pr(newer, "2026-06-03T02:00:00Z")
 
-    local head = core.merge_queue_head("owner/repo", "dev")
+    local head = m_mq.merge_queue_head(core, "owner/repo", "dev")
     t.eq(head.pr_number, 9)
     t.eq(head.proposal_id, older.proposal_id)
 
@@ -337,14 +338,14 @@ return {
     mock_queue_list({ 3, 2 })
     mock_queue_pr(left, "2026-06-03T01:00:00Z")
     mock_queue_pr(right, "2026-06-03T01:00:00Z")
-    head = core.merge_queue_head("owner/repo", "dev")
+    head = m_mq.merge_queue_head(core, "owner/repo", "dev")
     t.eq(head.pr_number, 2)
 
     mock_bot_env()
     mock_queue_list({ 9, 7 })
     mock_queue_pr(older, "2026-06-03T01:00:00Z", "fixing", older.version .. "/fix/1")
     mock_queue_pr(newer, "2026-06-03T02:00:00Z")
-    head = core.merge_queue_head("owner/repo", "dev")
+    head = m_mq.merge_queue_head(core, "owner/repo", "dev")
     t.eq(head.pr_number, 7)
     t.eq(head.proposal_id, newer.proposal_id)
   end,
@@ -357,7 +358,7 @@ return {
     mock_queue_pr(undated, "")
     mock_queue_pr(dated, "2026-06-03T01:00:00Z")
 
-    local head = core.merge_queue_head("owner/repo", "dev")
+    local head = m_mq.merge_queue_head(core, "owner/repo", "dev")
     t.eq(head.pr_number, 9)
     t.eq(head.proposal_id, dated.proposal_id)
   end,

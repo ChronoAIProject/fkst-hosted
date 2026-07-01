@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local payloads_builders = require("devloop.payloads.builders")
 local m_builders = require("devloop.markers.builders")
+local m_mq = require("devloop.merge_queue")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -30,7 +31,7 @@ end
 local function run_starvation_merge_queue_tick(event, run_opts)
   return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
-    payload = core.merge_queue_starvation_tick_payload("owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
+    payload = m_mq.merge_queue_starvation_tick_payload(core, "owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
       pr_number = event.pr_number,
       proposal_id = event.proposal_id,
       version = event.version,
@@ -179,7 +180,7 @@ return {
       },
     }
 
-    local selected, age = core.merge_queue_starvation_candidate(entries, 60, contract_time.iso_timestamp_epoch_seconds("2026-06-03T02:30:00Z"))
+    local selected, age = m_mq.merge_queue_starvation_candidate(core, entries, 60, contract_time.iso_timestamp_epoch_seconds("2026-06-03T02:30:00Z"))
 
     t.eq(selected.pr_number, 459)
     t.eq(selected.proposal_id, aged.proposal_id)

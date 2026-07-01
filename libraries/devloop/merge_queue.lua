@@ -3,14 +3,13 @@ local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
-local S = {}
+local C = {}
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local support = require("devloop.commands.support")
 local config = require("devloop.config")
 
-function S.install(M)
 local strings = require("contract.strings")
 
 local active_wip_states = {
@@ -28,7 +27,7 @@ local merge_queue_lane_states = {
   merging = true,
 }
 
-M._merge_ready_starvation_threshold_minutes = 60
+C._merge_ready_starvation_threshold_minutes = 60
 
 local function has_merge_ready_created_at(entry)
   local created = tostring(entry and entry.merge_ready_created_at or "")
@@ -49,7 +48,7 @@ local function compare_merge_queue_entries(left, right)
   return tonumber(left.pr_number or 0) < tonumber(right.pr_number or 0)
 end
 
-local function entry_age_minutes(entry, now_seconds)
+local function entry_age_minutes(M, entry, now_seconds)
   local version = tostring(entry and entry.version or "")
   local updated_at = M.version_updated_at(version)
   if updated_at == "" then
@@ -181,7 +180,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
   }
 end
 
-function M.merge_queue_head(repo, base_branch, current)
+function C.merge_queue_head(M, repo, base_branch, current)
   local entries = {}
   local seen = {}
   if type(current) == "table" and current.pr_number ~= nil and type(current.pr) == "table" then
@@ -215,7 +214,7 @@ function M.merge_queue_head(repo, base_branch, current)
   return entries[1], entries
 end
 
-function M.merge_queue_starvation_candidate(entries, threshold_minutes, now_seconds)
+function C.merge_queue_starvation_candidate(M, entries, threshold_minutes, now_seconds)
   local threshold = tonumber(threshold_minutes)
   local current_seconds = tonumber(now_seconds) or now()
   if threshold == nil or threshold < 0 then
@@ -223,7 +222,7 @@ function M.merge_queue_starvation_candidate(entries, threshold_minutes, now_seco
   end
   local selected = nil
   for _, entry in ipairs(entries or {}) do
-    local age = entry_age_minutes(entry, current_seconds)
+    local age = entry_age_minutes(M, entry, current_seconds)
     if entry.state == "merge-ready" and age ~= nil and age > threshold then
       local candidate = {
         entry = entry,
@@ -237,8 +236,8 @@ function M.merge_queue_starvation_candidate(entries, threshold_minutes, now_seco
   return selected and selected.entry or nil, selected and selected.age_minutes or nil
 end
 
-function M.merge_queue_predecessors(repo, base_branch, current)
-  local _, entries = M.merge_queue_head(repo, base_branch, current)
+function C.merge_queue_predecessors(M, repo, base_branch, current)
+  local _, entries = C.merge_queue_head(M, repo, base_branch, current)
   local predecessors = {}
   local found = false
   local current_pr_number = tostring((current or {}).pr_number or "")
@@ -255,19 +254,19 @@ function M.merge_queue_predecessors(repo, base_branch, current)
   return predecessors, "ok"
 end
 
-function M.merge_queue_position(repo, base_branch, current)
-  local predecessors, reason = M.merge_queue_predecessors(repo, base_branch, current)
+function C.merge_queue_position(M, repo, base_branch, current)
+  local predecessors, reason = C.merge_queue_predecessors(M, repo, base_branch, current)
   if predecessors == nil then
     return nil, reason
   end
   return {
     is_head = #predecessors == 0,
     predecessors = predecessors,
-    predecessor_set = M.merge_queue_predecessor_set(predecessors),
+    predecessor_set = C.merge_queue_predecessor_set(M, predecessors),
   }, "ok"
 end
 
-function M.merge_queue_predecessor_set(entries)
+function C.merge_queue_predecessor_set(M, entries)
   local values = {}
   for _, entry in ipairs(entries or {}) do
     table.insert(values, predecessor_identity(entry))
@@ -297,7 +296,7 @@ local function predecessor_head_sha(predecessor)
   return head_sha
 end
 
-function M.merge_queue_predecessor_set_matches_current_base(recorded_set, current_set, base_branch)
+function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, current_set, base_branch)
   local recorded = predecessor_set_entries(recorded_set)
   local current = predecessor_set_entries(current_set)
   if #current > #recorded then
@@ -329,8 +328,8 @@ function M.merge_queue_predecessor_set_matches_current_base(recorded_set, curren
   return true, "predecessor-set-landed-prefix"
 end
 
-function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)
-  local head = M.merge_queue_head(repo, base_branch, {
+function C.merge_queue_allows_event(M, repo, base_branch, merge_ready, current_pr)
+  local head = C.merge_queue_head(M, repo, base_branch, {
     pr_number = merge_ready.pr_number,
     pr = current_pr,
   })
@@ -346,7 +345,7 @@ function M.merge_queue_allows_event(repo, base_branch, merge_ready, current_pr)
   return true, "merge-queue-head"
 end
 
-function M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry)
+function C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry)
   if type(next_entry) ~= "table" then
     error("github-devloop: invalid merge queue next entry")
   end
@@ -362,13 +361,13 @@ function M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry)
   })
 end
 
-function M.merge_queue_tick_payload(repo, merged_pr_number, next_entry)
+function C.merge_queue_tick_payload(M, repo, merged_pr_number, next_entry)
   if type(next_entry) ~= "table" then
     return nil
   end
   return {
     schema = "github-devloop.merge-queue-tick.v1",
-    dedup_key = M.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry),
+    dedup_key = C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry),
     source_ref = M.pr_source_ref(repo, next_entry.pr_number),
     cause = {
       kind = "merge-progress",
@@ -379,7 +378,7 @@ function M.merge_queue_tick_payload(repo, merged_pr_number, next_entry)
   }
 end
 
-function M.merge_queue_starvation_tick_payload(repo, incident_identity, head_entry, attempt_key)
+function C.merge_queue_starvation_tick_payload(M, repo, incident_identity, head_entry, attempt_key)
   if type(head_entry) ~= "table" then
     return nil
   end
@@ -406,7 +405,7 @@ function M.merge_queue_starvation_tick_payload(repo, incident_identity, head_ent
   }
 end
 
-function M.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, version, head_sha, incident_identity, attempt_key, outcome)
+function C.queue_starvation_reconcile_marker(M, issue_proposal_id, pr_number, version, head_sha, incident_identity, attempt_key, outcome)
   if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid queue-starvation reconcile marker")
   end
@@ -429,7 +428,7 @@ function M.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, versi
     .. '" -->'
 end
 
-function M.merge_ready_payload_from_queue_entry(entry, source_ref)
+function C.merge_ready_payload_from_queue_entry(M, entry, source_ref)
   if type(entry) ~= "table" then
     return nil
   end
@@ -446,7 +445,7 @@ function M.merge_ready_payload_from_queue_entry(entry, source_ref)
   )
 end
 
-function M.merge_queue_changed_files(repo, entry)
+function C.merge_queue_changed_files(M, repo, entry)
   local result = M.gh_pr_diff_name_only(repo, entry.pr_number, 30)
   if result.exit_code ~= 0 then
     return nil, "diff-name-only-failed: " .. tostring(result.stderr)
@@ -463,7 +462,7 @@ function M.merge_queue_changed_files(repo, entry)
   }, "changed-files-ok"
 end
 
-function M.merge_queue_files_disjoint(left, right)
+function C.merge_queue_files_disjoint(M, left, right)
   local path = intersecting_path(left and left.set, right and right.set)
   if path ~= nil then
     return false, path
@@ -471,7 +470,7 @@ function M.merge_queue_files_disjoint(left, right)
   return true, "disjoint"
 end
 
-function M.wip_capacity_allows_start(repo, current_issue_number)
+function C.wip_capacity_allows_start(M, repo, current_issue_number)
   local max_inflight = config.max_inflight(M)
   if max_inflight == nil then
     return true, "wip-cap-disabled", 0, nil
@@ -495,11 +494,11 @@ function M.wip_capacity_allows_start(repo, current_issue_number)
       local current = parsers_issue.parse_issue_view_state(M, view.stdout)
       local proposal_id = M.proposal_id(repo, issue_number)
       local state = M.current_state(current.comments, proposal_id)
-      local classification = M.wip_admission_classification(repo, proposal_id, current.comments, state, integration_branch)
+      local classification = C.wip_admission_classification(M, repo, proposal_id, current.comments, state, integration_branch)
       if classification.counts then
         count = count + 1
       elseif classification.reason ~= "state-not-active-wip" then
-        M.log_wip_exclusion(proposal_id, classification)
+        C.log_wip_exclusion(M, proposal_id, classification)
       end
     end
   end
@@ -522,7 +521,7 @@ local merge_gate_wait_wip_states = {
   merging = true,
 }
 
-function M.wip_admission_classification(repo, proposal_id, issue_comments, state, integration_branch)
+function C.wip_admission_classification(M, repo, proposal_id, issue_comments, state, integration_branch)
   local state_name = tostring(state and state.state or "")
   if not active_wip_states[state_name] then
     return {
@@ -572,7 +571,7 @@ function M.wip_admission_classification(repo, proposal_id, issue_comments, state
   }
 end
 
-function M.log_wip_exclusion(proposal_id, classification)
+function C.log_wip_exclusion(M, proposal_id, classification)
   local fields = {
     "reason=" .. tostring(classification.reason),
     "state=" .. tostring(classification.state),
@@ -594,6 +593,4 @@ function M.log_wip_exclusion(proposal_id, classification)
   end
   M.log_line("info", "wip", proposal_id, "WIP_EXCLUDE", fields)
 end
-end
-
-return S
+return C
