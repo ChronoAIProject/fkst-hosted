@@ -195,7 +195,7 @@ local function fetch_issue_entity(repo, issue)
     labels = current.labels,
     comments = current.comments,
     open_state = current.state,
-    current_state = M.current_entity_state(current.comments, proposal_id),
+    current_state = require("devloop.entity").current_entity_state(M, current.comments, proposal_id),
   }
 end
 
@@ -217,7 +217,7 @@ local function fetch_pr_entity(repo, pr)
     labels = current.labels or {},
     comments = current.comments,
     open_state = current.state,
-    current_state = M.current_entity_state(current.comments, proposal_id),
+    current_state = require("devloop.entity").current_entity_state(M, current.comments, proposal_id),
   }
 end
 

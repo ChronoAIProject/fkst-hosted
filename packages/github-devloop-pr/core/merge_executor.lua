@@ -174,7 +174,7 @@ local function assert_open_same_repo_pr(merge_ready, pr, repo, branch, head_sha)
 end
 
 local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, origin, branches)
-  local state = core.current_entity_state(pr.comments, merge_ready.proposal_id)
+  local state = require("devloop.entity").current_entity_state(core, pr.comments, merge_ready.proposal_id)
   if (state.state ~= "merge-ready" and state.state ~= "merging")
     or tostring(state.version or "") ~= tostring(merge_ready.version) then
     return false, "write-time PR state changed", state
@@ -370,7 +370,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     current_pr = parsers_pr.parse_pr_view_merge(core, pr_view.stdout)
   end
   core.log_forged_markers("merge", merge_ready.proposal_id, current_pr.comments)
-  local state = core.current_entity_state(current_pr.comments, merge_ready.proposal_id)
+  local state = require("devloop.entity").current_entity_state(core, current_pr.comments, merge_ready.proposal_id)
   if state.state == "merged" and m_facts.has_merged_marker(core, current_pr.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) then
     core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-idempotent(already at to_state)", "merged marker already visible")
     return

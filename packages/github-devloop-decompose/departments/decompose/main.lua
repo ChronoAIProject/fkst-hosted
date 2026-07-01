@@ -315,7 +315,7 @@ local function decomposed_done(event)
     core.log_forged_markers("decompose",
       context.decompose.proposal_id,
       current_pr.comments)
-    local state = core.current_entity_state(current_pr.comments, context.decompose.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, context.decompose.proposal_id)
     if not conv_reconcile.has_fix_reconcile_marker(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(context.decompose.version) then
@@ -360,7 +360,7 @@ local function act_decompose(event)
     local current_pr = read_current_pr(repo, decompose.pr_number)
     core.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)
 
-    local state = core.current_entity_state(current_pr.comments, decompose.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, decompose.proposal_id)
     if not conv_reconcile.has_fix_reconcile_marker(core, current_pr.comments, decompose.proposal_id, decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(decompose.version) then

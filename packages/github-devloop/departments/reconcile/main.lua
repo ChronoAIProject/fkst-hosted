@@ -183,7 +183,7 @@ local function pipeline_timeout(event)
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     local comments = current.comments or {}
     core.log_forged_markers("reconcile", reconcile.proposal_id, comments)
-    local state = core.current_entity_state(comments, reconcile.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, comments, reconcile.proposal_id)
     if conv_reconcile.has_timeout_reconcile_marker(core, comments, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(timeout reconcile marker already visible)", "timeout reconcile result marker for incoming version is already visible")
       return

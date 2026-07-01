@@ -222,7 +222,7 @@ local function process_pr(repo, branches, listed_pr)
   if not m_claims.verify_pr_review_issue_claim(core, "pr_freshness_scan", origin.repo, origin.issue_number, issue, origin.proposal_id) then
     return
   end
-  local state = core.current_entity_state(pr.comments, origin.proposal_id)
+  local state = require("devloop.entity").current_entity_state(core, pr.comments, origin.proposal_id)
   local reason, skip_reason = candidate_reason(pr, origin, issue, state)
   if reason == nil then
     core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(" .. skip_reason .. ")", "PR is not a freshness candidate")

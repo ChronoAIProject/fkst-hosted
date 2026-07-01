@@ -135,7 +135,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   with_lock(lock_key, function()
     core.log_forged_markers("review_loop", origin.proposal_id, current_pr.comments)
-    local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
     local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then
       core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")

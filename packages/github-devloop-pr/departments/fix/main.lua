@@ -539,7 +539,7 @@ local function run_fix_attempt(plan)
 end
 
 local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_prefix, fail_closed)
-  local rechecked_state = core.current_entity_state(pr.comments, fix.proposal_id)
+  local rechecked_state = require("devloop.entity").current_entity_state(core, pr.comments, fix.proposal_id)
   if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
     core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
     return nil
@@ -664,7 +664,7 @@ local function act_fix(event)
       core.log_cas_decision("fix", fix.proposal_id, { state = "reviewing", version = reviewing_version }, "fixing", "reviewing", "skip-idempotent(already at to_state)", "reviewing state marker for fix already visible")
       return
     end
-    local state = core.current_entity_state(current_pr.comments, fix.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, fix.proposal_id)
     local transition = core.cyclic_transition_status(state, { "fixing" }, "reviewing", fix.version, reviewing_version)
     if transition == "pending" then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")

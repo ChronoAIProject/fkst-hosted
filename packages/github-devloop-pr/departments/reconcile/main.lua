@@ -107,7 +107,7 @@ local function load_timeout_issue_surface(repo, issue_number, proposal_id, state
     error("github-devloop: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
   end
   local current_issue = parsers_issue.parse_issue_view_loop(core, view.stdout)
-  local issue_state = core.current_entity_state(current_issue.comments, proposal_id)
+  local issue_state = require("devloop.entity").current_entity_state(core, current_issue.comments, proposal_id)
   if timeout_reconcile_needs_pr_surface(state_name) then
     local snapshot = core.linked_pr_surface_snapshot(repo, proposal_id, current_issue.comments)
     local current_pr = nil
@@ -166,7 +166,7 @@ local function pipeline_review(event)
 
     local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
-    local state = core.current_entity_state(current.comments, reconcile.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current.comments, reconcile.proposal_id)
     if conv_reconcile.has_review_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(review reconcile marker already visible)", "review reconcile result marker for incoming version is already visible")
       return
@@ -242,7 +242,7 @@ local function pipeline_fix(event)
 
     local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
-    local state = core.current_entity_state(current.comments, reconcile.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current.comments, reconcile.proposal_id)
     local version = conv_reconcile.fix_reconcile_state_version(core, reconcile.issue_version)
     if conv_reconcile.has_fix_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.issue_version) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(fix reconcile marker already visible)", "fix reconcile result marker for incoming version is already visible")
@@ -322,7 +322,7 @@ local function pipeline_timeout(event)
     end
 
     core.log_forged_markers("reconcile", reconcile.proposal_id, comments)
-    local state = core.current_entity_state(comments, reconcile.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, comments, reconcile.proposal_id)
     if conv_reconcile.has_timeout_reconcile_marker(core, comments, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round) then
       core.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(timeout reconcile marker already visible)", "timeout reconcile result marker for incoming version is already visible")
       return

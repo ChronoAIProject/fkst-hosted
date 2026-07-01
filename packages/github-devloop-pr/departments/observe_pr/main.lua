@@ -320,7 +320,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
     return false
   end
   local fix_version = core.next_fix_version(state.version)
-  local visible_state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+  local visible_state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
   if visible_state.state == "fixing" and tostring(visible_state.version or "") == tostring(fix_version) then
     core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "skip-idempotent(already at to_state)", reason)
     return true
@@ -388,7 +388,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
   end
 
   with_lock(lock_key, function()
-    local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
     local issue_current = issue_claim_for_origin(origin)
     if not m_claims.verify_pr_review_issue_claim(core, "observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
@@ -473,7 +473,7 @@ local function process_pr_event(event)
   end
 
   with_lock(lock_key, function()
-    local state = core.current_entity_state(current_pr.comments, origin.proposal_id)
+    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
     local issue_current = issue_claim_for_origin(origin)
     if not m_claims.verify_pr_review_issue_claim(core, "observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
@@ -487,7 +487,7 @@ local function process_pr_event(event)
         issue_current = issue_reviewing_for_origin(origin)
       end
       local issue_comments = issue_current and issue_current.comments or {}
-      local issue_state = core.current_entity_state(issue_comments, origin.proposal_id)
+      local issue_state = require("devloop.entity").current_entity_state(core, issue_comments, origin.proposal_id)
       if issue_state.state == "fixing" then
         core.log_cas_decision("observe_pr", origin.proposal_id, issue_state, "fixing", "fixing", "applied(issue-fixing-replay)", "issue marker is fixing while PR marker is still reviewing")
         maybe_label_hints(origin, pr.number, current_pr, issue_state, source_ref)

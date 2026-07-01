@@ -149,7 +149,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
       for marker in parsers_misc._comment_body(M, comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
         local marker_issue = marker:match('proposal="([^"]+)"')
         if marker_issue ~= nil then
-          local candidate_state = M.current_entity_state(pr.comments, marker_issue)
+          local candidate_state = require("devloop.entity").current_entity_state(M, pr.comments, marker_issue)
           local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
           if merge_queue_lane_states[candidate_state.state]
             and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then

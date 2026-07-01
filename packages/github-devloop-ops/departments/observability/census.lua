@@ -49,7 +49,7 @@ local function put_pr_entity(entities, repo, pr_number, pr)
     return nil
   end
   local proposal_id = origin.proposal_id
-  local pr_state = core.current_entity_state(pr.comments, proposal_id)
+  local pr_state = require("devloop.entity").current_entity_state(core, pr.comments, proposal_id)
   local entity = entities[proposal_id] or {
     proposal_id = proposal_id,
     issue_number = origin.issue_number,

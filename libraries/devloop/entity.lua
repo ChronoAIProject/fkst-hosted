@@ -1,13 +1,10 @@
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
-local S = {}
+local C = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
 
-function S.install(M)
-local previous_transition_lock_key = M.transition_lock_key
-local previous_observe_lock_key = M.observe_lock_key
 
 local function pr_source_ref(repo, pr_number)
   return {
@@ -16,18 +13,18 @@ local function pr_source_ref(repo, pr_number)
   }
 end
 
-function M.pr_source_ref(repo, pr_number)
+function C.pr_source_ref(M, repo, pr_number)
   return pr_source_ref(repo, pr_number)
 end
 
-function M.issue_source_ref(repo, issue_number)
+function C.issue_source_ref(M, repo, issue_number)
   return {
     kind = "external",
     ref = tostring(repo) .. "#issue/" .. tostring(issue_number),
   }
 end
 
-function M.build_entity_comment_request(target, body, dedup_key, source_ref, opts)
+function C.build_entity_comment_request(M, target, body, dedup_key, source_ref, opts)
   if type(target) ~= "table" then
     error("github-devloop: invalid entity comment target")
   end
@@ -52,7 +49,7 @@ function M.build_entity_comment_request(target, body, dedup_key, source_ref, opt
   return request
 end
 
-function M.current_entity_state(entity_comments, proposal_id)
+function C.current_entity_state(M, entity_comments, proposal_id)
   return M.current_state(entity_comments, proposal_id)
 end
 
@@ -62,7 +59,7 @@ local function command_indicates_not_found(result)
     or stderr:find("not found", 1, true) ~= nil
 end
 
-local function linked_pr_numbers(issue_comments, proposal_id)
+local function linked_pr_numbers(M, issue_comments, proposal_id)
   local numbers = {}
   local seen = {}
   local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-link:v1.-%-%->"
@@ -87,7 +84,7 @@ local function linked_pr_numbers(issue_comments, proposal_id)
   return numbers
 end
 
-function M.linked_pr_surface_snapshot(repo, proposal_id, issue_comments, opts)
+function C.linked_pr_surface_snapshot(M, repo, proposal_id, issue_comments, opts)
   local options = opts or {}
   local snapshot = {
     comments = issue_comments or {},
@@ -96,7 +93,7 @@ function M.linked_pr_surface_snapshot(repo, proposal_id, issue_comments, opts)
     deferred = false,
     defer_reason = nil,
   }
-  for _, pr_number in ipairs(linked_pr_numbers(issue_comments, proposal_id)) do
+  for _, pr_number in ipairs(linked_pr_numbers(M, issue_comments, proposal_id)) do
     local pr_view
     if options.cache_only == true then
       pr_view = M.cached_entity_view(repo, "pr", pr_number)
@@ -131,7 +128,7 @@ function M.linked_pr_surface_snapshot(repo, proposal_id, issue_comments, opts)
   return snapshot
 end
 
-function M.pr_proposal_id(repo, pr_number)
+function C.pr_proposal_id(M, repo, pr_number)
   if not M.is_safe_pr_number(pr_number) then
     error("github-devloop: invalid PR proposal number")
   end
@@ -142,7 +139,7 @@ function M.pr_proposal_id(repo, pr_number)
   return "github-devloop/pr/" .. safe_repo .. "/" .. tostring(pr_number)
 end
 
-function M.parse_pr_proposal_id(proposal_id)
+function C.parse_pr_proposal_id(M, proposal_id)
   local repo_part, number = tostring(proposal_id or ""):match("^github%-devloop/pr/(.+)/(%d+)$")
   if repo_part == nil or not M.is_safe_pr_number(number) then
     return nil, nil
@@ -150,15 +147,15 @@ function M.parse_pr_proposal_id(proposal_id)
   return repo_part, tonumber(number)
 end
 
-function M.pr_transition_lock_key(repo, pr_number)
+function C.pr_transition_lock_key(M, repo, pr_number)
   return "github-devloop/transition/" .. strings.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
 end
 
-function M.merge_lane_lock_key(repo)
+function C.merge_lane_lock_key(M, repo)
   return "github-devloop/merge-lane/" .. strings.sanitize_key(repo, false)
 end
 
-function M.parse_entity_proposal_id(proposal_id)
+function C.parse_entity_proposal_id(M, proposal_id)
   local repo, issue_number = M.parse_proposal_id(proposal_id)
   if repo ~= nil then
     return {
@@ -169,7 +166,7 @@ function M.parse_entity_proposal_id(proposal_id)
       proposal_id = proposal_id,
     }
   end
-  local pr_repo, pr_number = M.parse_pr_proposal_id(proposal_id)
+  local pr_repo, pr_number = C.parse_pr_proposal_id(M, proposal_id)
   if pr_repo ~= nil then
     return {
       kind = "pr",
@@ -182,8 +179,8 @@ function M.parse_entity_proposal_id(proposal_id)
   return nil
 end
 
-function M.is_safe_entity_proposal_ref(proposal_id, dedup_key)
-  local entity = M.parse_entity_proposal_id(proposal_id)
+function C.is_safe_entity_proposal_ref(M, proposal_id, dedup_key)
+  local entity = C.parse_entity_proposal_id(M, proposal_id)
   if entity == nil then
     return false
   end
@@ -194,48 +191,48 @@ function M.is_safe_entity_proposal_ref(proposal_id, dedup_key)
     and M._is_path_safe_key(dedup_key, M._max_dedup_len)
 end
 
-function M.transition_lock_key(proposal_id)
-  local lock = previous_transition_lock_key and previous_transition_lock_key(proposal_id)
+function C.transition_lock_key(M, proposal_id)
+  local lock = require("devloop.base").transition_lock_key(M, proposal_id)
   if lock ~= nil then
     return lock
   end
-  local repo, pr_number = M.parse_pr_proposal_id(proposal_id)
+  local repo, pr_number = C.parse_pr_proposal_id(M, proposal_id)
   if repo == nil then
     return nil
   end
-  return M.pr_transition_lock_key(repo, pr_number)
+  return C.pr_transition_lock_key(M, repo, pr_number)
 end
 
-function M.observe_lock_key(repo, number, kind)
+function C.observe_lock_key(M, repo, number, kind)
   if kind == "pr" then
-    return M.pr_transition_lock_key(repo, number)
+    return C.pr_transition_lock_key(M, repo, number)
   end
-  return previous_observe_lock_key(repo, number)
+  return require("devloop.base").observe_lock_key(M, repo, number)
 end
 
-function M.result_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.result_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.review_result_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.review_result_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.review_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.review_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.loop_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.loop_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.implement_lock_key(proposal_id)
-  return M.transition_lock_key(proposal_id)
+function C.implement_lock_key(M, proposal_id)
+  return C.transition_lock_key(M, proposal_id)
 end
 
-function M.pr_native_origin(repo, pr_number, pr)
+function C.pr_native_origin(M, repo, pr_number, pr)
   return {
-    proposal_id = M.pr_proposal_id(repo, pr_number),
+    proposal_id = C.pr_proposal_id(M, repo, pr_number),
     repo = repo,
     issue_number = nil,
     branch = pr.head_ref_name,
@@ -244,6 +241,5 @@ function M.pr_native_origin(repo, pr_number, pr)
     pr_native = true,
   }
 end
-end
 
-return S
+return C

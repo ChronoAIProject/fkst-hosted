@@ -30,7 +30,7 @@ local function entity(labels, comments, extra)
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
-  value.current_state = core.current_entity_state(value.comments, value.proposal_id)
+  value.current_state = require("devloop.entity").current_entity_state(core, value.comments, value.proposal_id)
   return value
 end
 
