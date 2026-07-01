@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -20,14 +21,14 @@ return {
   test_run_required_returns_success_result = function()
     local expected = result(0, "ok\n", "")
 
-    local actual = core.run_required(expected, "scan op")
+    local actual = git_mechanics.run_required(expected, "scan op")
 
     t.eq(actual, expected)
   end,
 
   test_run_required_raises_with_github_devloop_prefix = function()
     assert_error_contains(function()
-      core.run_required(result(7, "", "bad ref"), "scan op")
+      git_mechanics.run_required(result(7, "", "bad ref"), "scan op")
     end, "github-devloop: scan op failed: bad ref")
   end,
 

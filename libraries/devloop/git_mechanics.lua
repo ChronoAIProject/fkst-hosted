@@ -79,7 +79,7 @@ local forge_validators = require("devloop.forge_validators")
     return tostring(result.stdout or ""):gsub("%s+$", "")
   end
 
-  function C.run_required(M, result, error_class)
+  function C.run_required(result, error_class)
     if result.exit_code ~= 0 then
       error("github-devloop: " .. error_class .. " failed: " .. tostring(result.stderr))
     end
@@ -87,7 +87,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.fetch_branch(M, branch, error_class)
-    M.run_required(M.git_fetch_branch("origin", branch, 60), error_class)
+    C.run_required(M.git_fetch_branch("origin", branch, 60), error_class)
   end
 
   function C.fetch_branches(M, repo, branches, error_class)
@@ -99,7 +99,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.remote_head(M, branch, error_class, unsafe_error)
-    local result = M.run_required(M.git_remote_branch_head("origin", branch, 30), error_class)
+    local result = C.run_required(M.git_remote_branch_head("origin", branch, 30), error_class)
     local head = trim_stdout(result)
     if not require("devloop.pr_safety").is_safe_head_sha(head) then
       error("github-devloop: " .. unsafe_error)
@@ -119,7 +119,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.runtime_root_with_exec(M, exec_sync_fn)
-    local result = M.run_required(exec_sync_fn({ cmd = M.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
+    local result = C.run_required(exec_sync_fn({ cmd = M.read_runtime_root_cmd(), timeout = 30 }), "FKST_RUNTIME_ROOT read")
     return result.stdout
   end
 

@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local core = require("core")
@@ -40,8 +41,8 @@ local function with_temp_worktree(conflict, fn)
     conflict.integration_sha
   )
   local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, conflict.integration_sha)
-  core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
-  core.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
+  git_mechanics.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
+  git_mechanics.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree, runtime)
   cleanup_worktree(worktree)
@@ -52,12 +53,12 @@ local function with_temp_worktree(conflict, fn)
 end
 
 local function require_clean_resolution(worktree)
-  local unmerged = core.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
+  local unmerged = git_mechanics.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
   if tostring(unmerged.stdout or "") ~= "" then
     return false, tostring(unmerged.stdout or "")
   end
-  core.run_required(core.git_diff_check(worktree, 30), "diff check")
-  core.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check")
+  git_mechanics.run_required(core.git_diff_check(worktree, 30), "diff check")
+  git_mechanics.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check")
   return true, ""
 end
 
@@ -78,12 +79,12 @@ local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, re
 end
 
 local function commit_resolution(worktree, runtime, conflict)
-  core.run_required(core.git_add_all(worktree, 30), "stage conflict resolution")
-  local unmerged = core.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check before commit")
+  git_mechanics.run_required(core.git_add_all(worktree, 30), "stage conflict resolution")
+  local unmerged = git_mechanics.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check before commit")
   if tostring(unmerged.stdout or "") ~= "" then
     error("github-devloop: sync conflict remains unresolved before commit")
   end
-  core.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check before commit")
+  git_mechanics.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check before commit")
   local message_file = core.branch_sync_message_file(
     runtime,
     conflict.repo,
@@ -100,7 +101,7 @@ local function commit_resolution(worktree, runtime, conflict)
     conflict.integration_sha,
     "resolved"
   ))
-  core.run_required(core.git.commit_message_file(worktree, message_file, 60), "sync commit")
+  git_mechanics.run_required(core.git.commit_message_file(worktree, message_file, 60), "sync commit")
 end
 
 local function push_if_real(conflict, worktree)
@@ -128,11 +129,11 @@ local function push_if_real(conflict, worktree)
     return
   end
 
-  local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "resolved sync head"))
+  local merge_head = trim_stdout(git_mechanics.run_required(git("github-devloop").git_head_sha(worktree, 30), "resolved sync head"))
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe resolved branch sync head")
   end
-  core.run_required(core.git_push_worktree_branch_update(worktree, conflict.integration_branch, 120), "resolved branch sync push")
+  git_mechanics.run_required(core.git_push_worktree_branch_update(worktree, conflict.integration_branch, 120), "resolved branch sync push")
   core.fetch_branches(conflict.repo, { conflict.integration_branch }, "branch fetch")
   local pushed_head = core.remote_head(conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
@@ -183,7 +184,7 @@ local function act(event)
       if merge_result.exit_code == 0 then
         error("github-devloop: sync conflict event replayed without merge conflict")
       end
-      local unmerged = core.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
+      local unmerged = git_mechanics.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
       if tostring(unmerged.stdout or "") == "" then
         error("github-devloop: sync conflict merge failed without unmerged paths")
       end

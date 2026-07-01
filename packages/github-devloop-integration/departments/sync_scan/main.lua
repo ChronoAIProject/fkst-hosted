@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
@@ -58,8 +59,8 @@ end
 local function with_temp_worktree(runtime, repo, upstream, integration, integration_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, upstream, integration, integration_sha)
   local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, integration_sha)
-  core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
-  core.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
+  git_mechanics.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
+  git_mechanics.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -72,7 +73,7 @@ end
 local function write_sync_commit(worktree, runtime, repo, upstream, integration, upstream_sha, integration_sha, result)
   local message_file = core.branch_sync_message_file(runtime, repo, upstream, integration, upstream_sha, integration_sha)
   file.write(message_file, core.sync_commit_message(repo, upstream, integration, upstream_sha, integration_sha, result))
-  core.run_required(core.git.commit_message_file(worktree, message_file, 60), "sync commit")
+  git_mechanics.run_required(core.git.commit_message_file(worktree, message_file, 60), "sync commit")
 end
 
 local function raise_conflict(repo, upstream, integration, upstream_sha, integration_sha)
@@ -114,11 +115,11 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     return
   end
 
-  local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "sync head"))
+  local merge_head = trim_stdout(git_mechanics.run_required(git("github-devloop").git_head_sha(worktree, 30), "sync head"))
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe branch sync merge head")
   end
-  core.run_required(core.git_push_worktree_branch_update(worktree, integration, 120), "branch sync push")
+  git_mechanics.run_required(core.git_push_worktree_branch_update(worktree, integration, 120), "branch sync push")
   core.fetch_branches(repo, { integration }, "branch fetch")
   local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
@@ -160,7 +161,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
     return
   end
 
-  core.run_required(core.git_push_branch_force_with_lease(integration, upstream_sha, integration_sha, 120), "branch sync converge")
+  git_mechanics.run_required(core.git_push_branch_force_with_lease(integration, upstream_sha, integration_sha, 120), "branch sync converge")
   core.fetch_branches(repo, { integration }, "branch fetch")
   local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= upstream_sha then
@@ -172,7 +173,7 @@ end
 local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
   local runtime = core.runtime_root()
   with_temp_worktree(runtime, repo, upstream, integration, integration_sha, function(worktree)
-    core.run_required(core.git_fast_forward(worktree, upstream_sha, 120), "branch sync fast-forward")
+    git_mechanics.run_required(core.git_fast_forward(worktree, upstream_sha, 120), "branch sync fast-forward")
     push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
   end)
 end

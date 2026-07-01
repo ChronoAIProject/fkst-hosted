@@ -99,7 +99,6 @@ local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
 M.repo_ref_store_lock_key = function(...) return git_mechanics.repo_ref_store_lock_key(M, ...) end
 M.with_repo_ref_store_lock = function(...) return git_mechanics.with_repo_ref_store_lock(M, ...) end
-M.run_required = function(...) return git_mechanics.run_required(M, ...) end
 M.fetch_branch = function(...) return git_mechanics.fetch_branch(M, ...) end
 M.fetch_branches = function(...) return git_mechanics.fetch_branches(M, ...) end
 M.remote_head = function(...) return git_mechanics.remote_head(M, ...) end

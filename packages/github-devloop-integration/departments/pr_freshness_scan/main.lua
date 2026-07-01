@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
@@ -52,8 +53,8 @@ end
 local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
   local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, branch_sha)
-  core.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
-  core.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
+  git_mechanics.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
+  git_mechanics.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
 
   local ok, result = pcall(fn, worktree)
   cleanup_worktree(worktree)
@@ -99,7 +100,7 @@ local function issue_state(repo, issue_number)
   if issue_number == nil then
     return { labels = {}, comments = {} }
   end
-  local viewed = core.run_required(core.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
+  local viewed = git_mechanics.run_required(core.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
   return parsers_issue.parse_issue_view_result(core, viewed.stdout)
 end
 
@@ -136,12 +137,12 @@ local function candidate_reason(pr, origin, issue, state)
 end
 
 local function load_current_pr(repo, pr_number)
-  local viewed = core.run_required(core.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
+  local viewed = git_mechanics.run_required(core.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
   return parsers_pr.parse_pr_view_merge(core, viewed.stdout)
 end
 
 local function list_open_prs(repo)
-  local listed = core.run_required(core.gh_pr_list_freshness(repo, 30), "PR freshness list")
+  local listed = git_mechanics.run_required(core.gh_pr_list_freshness(repo, 30), "PR freshness list")
   return parsers_pr.parse_pr_list_freshness(core, listed.stdout)
 end
 
@@ -162,7 +163,7 @@ end
 local function write_refresh_commit(worktree, runtime, repo, branch, integration, branch_sha, integration_sha)
   local message_file = core.pr_freshness_message_file(runtime, repo, branch, integration, branch_sha, integration_sha)
   file.write(message_file, core.pr_freshness_commit_message(repo, branch, integration, branch_sha, integration_sha))
-  core.run_required(core.git.commit_message_file(worktree, message_file, 60), "PR freshness commit")
+  git_mechanics.run_required(core.git.commit_message_file(worktree, message_file, 60), "PR freshness commit")
 end
 
 local function push_if_real(repo, branch, branch_sha, worktree)
@@ -187,11 +188,11 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
     return
   end
-  local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "PR freshness head"))
+  local merge_head = trim_stdout(git_mechanics.run_required(git("github-devloop").git_head_sha(worktree, 30), "PR freshness head"))
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe PR freshness merge head")
   end
-  core.run_required(git("github-devloop").git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
+  git_mechanics.run_required(git("github-devloop").git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
   core.fetch_branches(repo, { branch }, "PR freshness fetch")
   local pushed_head = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if pushed_head ~= merge_head then
