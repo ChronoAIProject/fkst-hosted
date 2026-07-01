@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_builders = require("devloop.payloads.builders")
@@ -280,7 +281,7 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
       local consensus_dedup = marker:match('dedup="([^"]*)"')
       local round = tonumber(marker:match('round="(%d+)"'))
       local _, pr_number, review_version = M.parse_pr_review_proposal_id(review_proposal)
-      local repo = M.parse_proposal_id(issue_proposal_id)
+      local repo = base_ids.parse_proposal_id(issue_proposal_id)
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(heartbeat_version)
         and review_version == tostring(heartbeat_version)
@@ -303,7 +304,7 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
 end
 
 function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, n)
-  local repo = M.parse_proposal_id(issue_proposal_id)
+  local repo = base_ids.parse_proposal_id(issue_proposal_id)
   if repo == nil
     or not forge_validators.is_positive_pr_number(pr_number)
     or not forge_validators.is_git_sha(head_sha)

@@ -25,7 +25,7 @@ function C.liveness_scan_read_repo(M)
 end
 
 function C.liveness_scan_cursor_key(M, repo, prefix)
-  return tostring(prefix or "github-devloop/liveness-scan/cursor/") .. M.safe_repo(repo)
+  return tostring(prefix or "github-devloop/liveness-scan/cursor/") .. base_ids.safe_repo(repo)
 end
 
 function C.liveness_scan_log_deferred(M, reason, fields)

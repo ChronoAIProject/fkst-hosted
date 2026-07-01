@@ -90,7 +90,7 @@ local function mock_issue_result_view(labels, comments, extra)
 end
 
 local function mock_decompose_child_issue_list(event, indexes)
-  local repo = core.parse_proposal_id(event.proposal_id)
+  local repo = base_ids.parse_proposal_id(event.proposal_id)
   local rendered = {}
   for _, index in ipairs(indexes or {}) do
     table.insert(rendered, string.format(

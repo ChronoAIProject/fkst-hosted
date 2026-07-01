@@ -73,7 +73,7 @@ end
 
 function M.build_issue_create_request(repo, decompose, issue, index)
   local safe_title = bounded_text(issue.title, M._max_title_len, fallback_title)
-  local parent_summary = "Parent issue: #" .. tostring(select(2, M.parse_proposal_id(decompose.proposal_id)) or "unknown")
+  local parent_summary = "Parent issue: #" .. tostring(select(2, base_ids.parse_proposal_id(decompose.proposal_id)) or "unknown")
     .. "\nParent PR: #" .. tostring(decompose.pr_number)
     .. "\nBlocked reason: fix loop reached " .. tostring(decompose.round) .. " rounds and was reconciled to blocked."
   local body = parent_summary

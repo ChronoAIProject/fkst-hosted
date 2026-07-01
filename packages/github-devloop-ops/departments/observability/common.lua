@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local strings = require("contract.strings")
@@ -64,7 +65,7 @@ end
 
 function M.require_observe_repo(core)
   local repo = core.read_env("FKST_GITHUB_REPO")
-  if repo == nil or core.safe_repo(repo) ~= tostring(repo) then
+  if repo == nil or base_ids.safe_repo(repo) ~= tostring(repo) then
     error("github-devloop: FKST_GITHUB_REPO is required for observability")
   end
   return repo

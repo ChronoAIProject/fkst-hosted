@@ -99,7 +99,7 @@ end
 function M.failure_triage_dedup_key(repo, fingerprint)
   return base_ids.dedup_key({
     "failure-triage",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     tostring(fingerprint or "unknown"),
   })
 end
@@ -111,7 +111,7 @@ end
 function M.failure_triage_count_key(repo, fingerprint, window_key)
   return base_ids.dedup_key({
     "failure-triage-count",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     tostring(fingerprint or "unknown"),
     tostring(window_key or triage_window_key()),
   })
@@ -120,7 +120,7 @@ end
 local function seen_key(repo, fingerprint)
   return base_ids.dedup_key({
     "failure-triage-seen",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     tostring(fingerprint or "unknown"),
   })
 end
@@ -128,7 +128,7 @@ end
 local function threshold_key(repo, fingerprint, window_key)
   return base_ids.dedup_key({
     "failure-triage-threshold",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     tostring(fingerprint or "unknown"),
     tostring(window_key or triage_window_key()),
   })

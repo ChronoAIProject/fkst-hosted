@@ -173,7 +173,7 @@ local function merged_blocker_cache_key(repo, blocker_number)
     error("github-devloop: invalid merged blocker cache key target")
   end
   local key = "github-devloop/dependency/merged/"
-    .. core.safe_repo(repo)
+    .. base_ids.safe_repo(repo)
     .. "/issue/"
     .. core.safe_issue(blocker_number)
   if not strings_c.is_path_safe_key(key, core._max_key_len) then

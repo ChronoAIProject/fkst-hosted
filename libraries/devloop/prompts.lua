@@ -133,7 +133,7 @@ local function local_context_block(M, manifest, fallback)
 end
 
 local function issue_ref_from_proposal_id(M, proposal_id)
-  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo ~= nil and issue_number ~= nil then
     return repo, issue_number
   end

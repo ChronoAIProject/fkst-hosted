@@ -58,7 +58,7 @@ local function rollup_red_started_at(pr)
 end
 
 local function snapshot_path(repo, pr_number, head_sha)
-  local safe_repo = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
+  local safe_repo = base_ids.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
   local safe_head = strings.sanitize_key(tostring(head_sha or "unknown"), false):gsub("[/%s]+", "-")
   safe_head = safe_head:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if safe_head == "" then

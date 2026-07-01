@@ -30,7 +30,7 @@ local function format_timestamp(seconds)
 end
 
 local function snapshot_path(M, repo, window_key)
-  local safe_repo = M.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
+  local safe_repo = base_ids.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
   local safe_window = strings.sanitize_key(tostring(window_key or "unknown"), false):gsub("[/%s]+", "-")
   safe_window = safe_window:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if safe_window == "" then
@@ -250,7 +250,7 @@ local function merge_queue_head_entity(M, repo, now_seconds)
   if head == nil then
     return nil
   end
-  local repo_from_proposal, issue_number = M.parse_proposal_id(head.proposal_id)
+  local repo_from_proposal, issue_number = base_ids.parse_proposal_id(head.proposal_id)
   if repo_from_proposal == nil then
     return nil
   end

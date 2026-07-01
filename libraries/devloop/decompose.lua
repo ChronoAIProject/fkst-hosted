@@ -13,7 +13,7 @@ function C.is_supported_decompose(M, payload)
   if type(payload) ~= "table" then
     return false
   end
-  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(payload.proposal_id)
   local has_review_binding = payload.review_proposal_id ~= nil
     or payload.review_dedup_key ~= nil
     or payload.head_sha ~= nil

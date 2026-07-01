@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local Shared = {}
 local forge_validators = require("devloop.forge_validators")
@@ -21,7 +22,7 @@ function Shared.install(M)
 
   local function require_safe_repo(repo)
     local value = tostring(repo or "")
-    if value == "" or M.safe_repo(value) ~= value then
+    if value == "" or base_ids.safe_repo(value) ~= value then
       error("github-devloop: invalid branch sync repo")
     end
     return value
@@ -75,7 +76,7 @@ function Shared.install(M)
 
   function M.repo_ref_store_lock_key(repo)
     local key = "github-devloop/git/"
-      .. M.safe_repo(require_safe_repo(repo))
+      .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/fetch"
     if not strings.is_path_safe_key(key, M._max_key_len) then
       error("github-devloop: invalid git ref-store lock key")

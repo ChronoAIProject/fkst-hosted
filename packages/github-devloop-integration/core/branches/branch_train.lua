@@ -13,7 +13,7 @@ function BranchTrain.install(M, shared)
 
   function M.branch_sync_lock_key(repo, upstream, integration)
     local key = "github-devloop/branch-sync/"
-      .. M.safe_repo(require_safe_repo(repo))
+      .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/"
       .. require_safe_branch("upstream branch", upstream)
       .. "/"
@@ -26,7 +26,7 @@ function BranchTrain.install(M, shared)
 
   function M.rollup_lock_key(repo, upstream, integration)
     local key = "github-devloop/rollup/"
-      .. M.safe_repo(require_safe_repo(repo))
+      .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/"
       .. require_safe_branch("upstream branch", upstream)
       .. "/"

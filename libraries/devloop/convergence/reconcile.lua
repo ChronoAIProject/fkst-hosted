@@ -37,7 +37,7 @@ function C.is_supported_reconcile(M, payload)
   local inner_dedup = dedup_tail ~= nil and (dedup_tail:match("^consensus:(.+)$") or dedup_tail) or nil
   -- parse_proposal_id returns TWO values; do NOT wrap it in `and ... or` (that truncates
   -- the multi-return so issue_number would always be nil).
-  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(payload.proposal_id)
   return payload.schema == "github-devloop.reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
@@ -175,7 +175,7 @@ function C.is_supported_review_reconcile(M, payload)
   if type(payload) ~= "table" then
     return false
   end
-  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(payload.proposal_id)
   return payload.schema == "github-devloop.review-reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
@@ -193,7 +193,7 @@ function C.is_supported_fix_reconcile(M, payload)
   if type(payload) ~= "table" then
     return false
   end
-  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(payload.proposal_id)
   return payload.schema == "github-devloop.fix-reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
@@ -214,7 +214,7 @@ function C.is_supported_timeout_reconcile(M, payload)
   if type(payload) ~= "table" then
     return false
   end
-  local repo, issue_number = M.parse_proposal_id(payload.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(payload.proposal_id)
   local row = replay_fields.restart_transition_row(M.restart_transition_table(), payload.state)
   return payload.schema == "github-devloop.timeout-reconcile.v1"
     and repo ~= nil

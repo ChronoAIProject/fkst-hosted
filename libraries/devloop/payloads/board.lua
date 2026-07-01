@@ -132,7 +132,7 @@ function C.board_digest_block(M, repo, tick)
   if tick == nil or tostring(tick) == "" then
     return ""
   end
-  local key = "github-devloop/board-digest/" .. M.safe_repo(repo) .. "/" .. M.safe_updated_at(tick)
+  local key = "github-devloop/board-digest/" .. base_ids.safe_repo(repo) .. "/" .. M.safe_updated_at(tick)
   local cached = cache_get(key)
   if cached ~= nil and cached ~= "" then
     return cached

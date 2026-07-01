@@ -286,7 +286,7 @@ local function pipeline_timeout(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   local _, pr_number = core.parse_pr_source_ref(reconcile.source_ref)
   local lock_key = core.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then

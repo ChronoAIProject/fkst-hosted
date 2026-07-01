@@ -776,7 +776,7 @@ function C.pr_origin_fact(M, comments)
       local marker_branch = marker:match('branch="([^"]+)"')
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
-      local repo, issue_number = M.parse_proposal_id(marker_proposal)
+      local repo, issue_number = base_ids.parse_proposal_id(marker_proposal)
       if repo ~= nil
         and marker_issue == issue_number
         and forge_validators.is_git_ref_safe(marker_branch)

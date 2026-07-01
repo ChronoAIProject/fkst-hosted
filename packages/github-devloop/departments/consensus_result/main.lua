@@ -138,7 +138,7 @@ local function make_department(ports)
 
     core.log_entry("consensus_result", event, reached.proposal_id, reached.dedup_key)
     local version = result_version(reached)
-    local repo, issue_number = core.parse_proposal_id(reached.proposal_id)
+    local repo, issue_number = base_ids.parse_proposal_id(reached.proposal_id)
     if repo == nil then
       core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
       return

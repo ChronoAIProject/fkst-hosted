@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
@@ -156,7 +157,7 @@ function C.merge_lane_lock_key(M, repo)
 end
 
 function C.parse_entity_proposal_id(M, proposal_id)
-  local repo, issue_number = M.parse_proposal_id(proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo ~= nil then
     return {
       kind = "issue",

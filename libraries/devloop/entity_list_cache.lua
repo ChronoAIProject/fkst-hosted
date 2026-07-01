@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local github_view = require("forge.github_view")
 
@@ -24,7 +25,7 @@ local function list_cache_key(M, repo, kind, scope, poll_key)
   return table.concat({
     "github-devloop",
     "entity-list",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     selected_kind,
     strings.sanitize_key(scope or "open", 80):gsub("/", "-"),
     normalized_poll_key,

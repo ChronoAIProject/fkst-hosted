@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local base = require("tests.devloop_base_helpers")
 local t = base.t
 local core = base.core
@@ -45,7 +46,7 @@ local function mock_setup_worktree(path)
 end
 
 local function deterministic_branch_for(event)
-  local repo, issue_number = core.parse_proposal_id(event.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(event.proposal_id)
   return core.implement_branch(repo, issue_number, event.dedup_key)
 end
 

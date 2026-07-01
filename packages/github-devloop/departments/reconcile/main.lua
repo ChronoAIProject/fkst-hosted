@@ -97,7 +97,7 @@ local function pipeline_thinking(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   if repo == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
@@ -166,7 +166,7 @@ local function pipeline_timeout(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(reconcile.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   local lock_key = core.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, reconcile.state, "blocked", "skip-foreign(proposal_id)", "no transition lock key")

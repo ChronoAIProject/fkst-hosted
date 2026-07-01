@@ -354,7 +354,7 @@ function C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry)
   return base_ids.dedup_key({
     "merge-queue",
     "requeue",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     "merged-pr",
     M.safe_issue(merged_pr_number),
     "next-pr",
@@ -390,7 +390,7 @@ function C.merge_queue_starvation_tick_payload(M, repo, incident_identity, head_
     dedup_key = base_ids.dedup_key({
       "merge-queue",
       "queue-starvation",
-      M.safe_repo(repo),
+      base_ids.safe_repo(repo),
       tostring(incident_identity or "merge-ready"),
       bounded_attempt,
     }),

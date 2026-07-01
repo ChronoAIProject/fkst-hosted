@@ -603,7 +603,7 @@ function core.publish_observability_dashboard(repo, dashboard, limits, deadline)
   end
   local deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
   local outcome = nil
-  with_lock("github-devloop/dashboard/" .. core.safe_repo(repo), function()
+  with_lock("github-devloop/dashboard/" .. base_ids.safe_repo(repo), function()
     outcome = publish_observability_dashboard_locked(repo, dashboard, limits, deadline)
   end)
   return outcome

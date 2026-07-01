@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local core = require("core")
 local git_adapter = require("forge.git")
@@ -19,7 +20,7 @@ end
 
 local function require_repo(repo)
   local value = tostring(repo or "")
-  if value == "" or core.safe_repo(value) ~= value then
+  if value == "" or base_ids.safe_repo(value) ~= value then
     error("github-devloop: FKST_GITHUB_REPO is required for branch sync")
   end
   return value

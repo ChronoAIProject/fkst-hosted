@@ -17,7 +17,7 @@ local dept = common.dept
 local max_reap_reason_len = common.max_reap_reason_len
 
 local function reaper_body_path(repo, pr_number, proposal_id)
-  local safe_repo = core.safe_repo(repo):gsub("[/%s]+", "-")
+  local safe_repo = base_ids.safe_repo(repo):gsub("[/%s]+", "-")
   local safe_issue = strings.sanitize_key(tostring(proposal_id or "unknown"), false):gsub("[/%s]+", "-")
   local identity = safe_repo .. "-pr-" .. tostring(pr_number) .. "-" .. safe_issue
   identity = identity:gsub("[^%w%._%-]", "-"):gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
@@ -82,7 +82,7 @@ local function terminal_parent_reason(parent_issue, entity)
   if tostring(parent_issue and parent_issue.state or ""):upper() == "CLOSED" then
     return {
       code = "parent-closed",
-      text = "Parent issue #" .. tostring(select(2, core.parse_proposal_id(proposal_id)) or "unknown") .. " is closed.",
+      text = "Parent issue #" .. tostring(select(2, base_ids.parse_proposal_id(proposal_id)) or "unknown") .. " is closed.",
       successors = successors,
     }
   end
@@ -94,7 +94,7 @@ local function terminal_parent_reason(parent_issue, entity)
     return {
       code = "parent-decomposed",
       text = "Parent issue #"
-        .. tostring(select(2, core.parse_proposal_id(proposal_id)) or "unknown")
+        .. tostring(select(2, base_ids.parse_proposal_id(proposal_id)) or "unknown")
         .. " has a trusted decomposed marker with successors: "
         .. successor_summary(successors, decomposed.count),
       successors = successors,
@@ -104,7 +104,7 @@ local function terminal_parent_reason(parent_issue, entity)
 end
 
 local function reaper_comment_body(proposal_id, pr_number, reason)
-  local _repo, issue_number = core.parse_proposal_id(proposal_id)
+  local _repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   local parent_ref = "#" .. tostring(issue_number or "unknown")
   local reason_text = tostring(reason and reason.text or "")
   if #reason_text > max_reap_reason_len then

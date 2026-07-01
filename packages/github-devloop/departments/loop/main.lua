@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
@@ -31,7 +32,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.log_entry("loop", event, unresolved.proposal_id, unresolved.dedup_key)
-  local repo, issue_number = core.parse_proposal_id(unresolved.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(unresolved.proposal_id)
   if repo == nil then
     core.log_cas_decision("loop", unresolved.proposal_id, { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local saga = require("workflow.saga")
@@ -17,7 +18,7 @@ end
 
 local function require_repo(repo)
   local value = tostring(repo or "")
-  if value == "" or core.safe_repo(value) ~= value then
+  if value == "" or base_ids.safe_repo(value) ~= value then
     error("github-devloop: FKST_GITHUB_REPO is required for rollup scan")
   end
   return value

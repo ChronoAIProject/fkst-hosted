@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
 local pr_safety = require("devloop.pr_safety")
@@ -24,7 +25,7 @@ local blocked_by_skew_label = "fkst-dev:blocked-by-skew"
 
 local function require_repo(repo)
   local value = tostring(repo or "")
-  if value == "" or core.safe_repo(value) ~= value then
+  if value == "" or base_ids.safe_repo(value) ~= value then
     error("github-devloop: FKST_GITHUB_REPO is required for PR freshness")
   end
   return value

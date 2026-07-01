@@ -178,10 +178,6 @@ end
 
 local dedup_key = base_ids.dedup_key
 
-function C.safe_repo(M, repo)
-  return base_ids.safe_repo(repo)
-end
-
 function C.safe_issue(M, issue_number)
   return base_ids.safe_issue(issue_number)
 end
@@ -195,7 +191,7 @@ function C.safe_updated_at(M, updated_at)
 end
 
 function C.safe_pr_review_repo_segment(M, repo)
-  local safe = C.safe_repo(M, repo):gsub("/", "-"):gsub("%-+", "-")
+  local safe = base_ids.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
   if safe == "" then
     safe = "repo"
@@ -253,10 +249,6 @@ function C.pr_review_proposal_id(M, repo, pr_number, version, head_sha)
     .. C.safe_head_segment(M, head_sha)
 end
 
-function C.parse_proposal_id(M, id)
-  return base_ids.parse_proposal_id(id)
-end
-
 function C.parse_pr_review_proposal_id(M, id)
   if type(id) ~= "string" then
     return nil
@@ -301,7 +293,7 @@ function C.parse_pr_source_ref(M, source_ref)
   if repo == nil or repo == "" or not forge_validators.is_positive_pr_number(pr_number) then
     return nil
   end
-  if C.safe_repo(M, repo) == "" then
+  if base_ids.safe_repo(repo) == "" then
     return nil
   end
   return repo, pr_number
@@ -331,7 +323,7 @@ function C.is_safe_proposal_ref(M, proposal_id, dedup_key)
     return false
   end
 
-  local repo, issue_number = C.parse_proposal_id(M, proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo == nil or issue_number == nil then
     return false
   end
@@ -351,7 +343,7 @@ function C.is_safe_consensus_result_ref(M, proposal_id, dedup_key)
     return false
   end
 
-  local repo, issue_number = C.parse_proposal_id(M, proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo == nil or issue_number == nil then
     return false
   end
@@ -430,7 +422,7 @@ function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
   return dedup_key({
     "github-devloop",
     "ci-selfheal",
-    C.safe_repo(M, repo),
+    base_ids.safe_repo(repo),
     "pr",
     C.safe_issue(M, pr_number),
     C.safe_head_segment(M, head_sha),
@@ -441,7 +433,7 @@ function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
   return dedup_key({
     "github-devloop",
     "ci-missing-status-observed",
-    C.safe_repo(M, repo),
+    base_ids.safe_repo(repo),
     "pr",
     C.safe_issue(M, pr_number),
     C.safe_head_segment(M, head_sha),
@@ -449,11 +441,11 @@ function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
 end
 
 function C.observe_lock_key(M, repo, issue_number)
-  return "github-devloop/transition/" .. C.safe_repo(M, repo) .. "/issue/" .. C.safe_issue(M, issue_number)
+  return "github-devloop/transition/" .. base_ids.safe_repo(repo) .. "/issue/" .. C.safe_issue(M, issue_number)
 end
 
 function C.transition_lock_key(M, proposal_id)
-  local repo, issue_number = C.parse_proposal_id(M, proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo == nil then
     return nil
   end
@@ -496,7 +488,7 @@ function C.safe_issue_slug(M, repo, issue_number)
 end
 
 function C.implement_branch(M, repo, issue_number, impl_version)
-  local safe_repo = C.safe_repo(M, repo)
+  local safe_repo = base_ids.safe_repo(repo)
   local safe_issue = C.safe_issue(M, issue_number)
   local safe_version = strings.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe_version = safe_version:gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")

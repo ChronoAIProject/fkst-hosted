@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
@@ -36,7 +37,7 @@ local canonical_labels = {
 
 local function require_repo(repo)
   local value = tostring(repo or "")
-  if value == "" or M.safe_repo(value) ~= value then
+  if value == "" or base_ids.safe_repo(value) ~= value then
     error("github-devloop: FKST_GITHUB_REPO is required for ensure_repo")
   end
   return value
@@ -95,7 +96,7 @@ local function dashboard_anchor_body()
 end
 
 local function write_dashboard_anchor_input(repo)
-  local path = "/tmp/fkst-github-devloop-dashboard-anchor-" .. M.safe_repo(repo):gsub("/", "-") .. ".json"
+  local path = "/tmp/fkst-github-devloop-dashboard-anchor-" .. base_ids.safe_repo(repo):gsub("/", "-") .. ".json"
   local body = M.with_github_debug_stamp(dashboard_anchor_body(), {
     emitter = "github-devloop.ensure-repo.dashboard-anchor",
     target = "issue:" .. tostring(repo) .. "#dashboard-anchor",

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
@@ -23,7 +24,7 @@ function C.validate_proposal(M, proposal)
   if proposal.schema ~= "consensus.proposal.v1" then
     return false
   end
-  local repo, issue_number = M.parse_proposal_id(proposal.proposal_id)
+  local repo, issue_number = base_ids.parse_proposal_id(proposal.proposal_id)
   if repo == nil or issue_number == nil then
     local review_repo, pr_number = M.parse_pr_review_proposal_id(proposal.proposal_id)
     if review_repo == nil or pr_number == nil then

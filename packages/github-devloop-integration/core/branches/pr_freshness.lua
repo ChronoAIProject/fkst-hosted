@@ -11,7 +11,7 @@ function PrFreshness.install(M, shared)
 
   function M.pr_freshness_lock_key(repo, branch)
     local key = "github-devloop/pr-freshness/"
-      .. M.safe_repo(require_safe_repo(repo))
+      .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/"
       .. require_safe_branch("managed branch", branch)
     if not strings.is_path_safe_key(key, M._max_key_len) then

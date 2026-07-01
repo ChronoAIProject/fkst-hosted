@@ -20,7 +20,7 @@ local github_handle
 
 local function require_repo(repo)
   local value = tostring(repo or "")
-  if value == "" or M.safe_repo(value) ~= value then
+  if value == "" or base_ids.safe_repo(value) ~= value then
     error("github-devloop: FKST_GITHUB_REPO is required for substrate-ref scan")
   end
   return value
@@ -279,7 +279,7 @@ local function remove_worktree_if_present(worktree)
 end
 
 local function write_pr_body(repo, current_pin, target_sha)
-  local path = "/tmp/fkst-github-devloop-substrate-ref-bump-" .. M.safe_repo(repo):gsub("/", "-") .. ".md"
+  local path = "/tmp/fkst-github-devloop-substrate-ref-bump-" .. base_ids.safe_repo(repo):gsub("/", "-") .. ".md"
   local body = table.concat({
     "Updates `.fkst/substrate-ref` to the current `fkst-substrate` `dev` head.",
     "",
@@ -561,7 +561,7 @@ local function raise_merge_audit(repo, pr, target_sha, outcome, reason)
     number = pr.number,
   }, substrate_ref_merge_audit_body(pr, target_sha, outcome, reason), base_ids.dedup_key({
     "substrate-ref-merge",
-    M.safe_repo(repo),
+    base_ids.safe_repo(repo),
     tostring(pr.number),
     tostring(pr.head_sha),
     tostring(outcome),
@@ -695,7 +695,7 @@ function M.substrate_ref_scan()
   local created_pr_number = nil
   local preupdate_merge_result = nil
   local target_hold_reason = nil
-  with_lock("github-devloop/substrate-ref/" .. M.safe_repo(repo), function()
+  with_lock("github-devloop/substrate-ref/" .. base_ids.safe_repo(repo), function()
     final_existing = existing_bump_pr(repo)
     if final_existing ~= nil then
       preupdate_merge_result = maybe_merge_bump_pr(repo, cfg.upstream_branch, final_existing, target_sha, true)

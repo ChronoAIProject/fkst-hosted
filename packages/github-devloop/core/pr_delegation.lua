@@ -25,7 +25,7 @@ local function issue_fields(issue, impl_version)
   local repo = issue.repo
   local issue_number = issue.number or issue.issue_number
   local proposal_id = issue.proposal_id or M.proposal_id(repo, issue_number)
-  if M.parse_proposal_id(proposal_id) == nil then
+  if base_ids.parse_proposal_id(proposal_id) == nil then
     error("github-devloop: invalid delegation issue proposal")
   end
   if not strings.is_bounded_string(impl_version, M._max_dedup_len) then

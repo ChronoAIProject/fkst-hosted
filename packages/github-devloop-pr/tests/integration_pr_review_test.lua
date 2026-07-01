@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
@@ -99,7 +100,7 @@ local function assert_pr_label_guard(payload, expected_state, expected_version)
   t.eq(payload.expected_version, expected_version)
 end
 local function mock_decompose_child_issue_list(proposal_id, version, pr_number, indexes)
-  local repo = core.parse_proposal_id(proposal_id)
+  local repo = base_ids.parse_proposal_id(proposal_id)
   local rendered = {}
   for _, index in ipairs(indexes or {}) do
     table.insert(rendered, string.format(

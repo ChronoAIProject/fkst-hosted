@@ -35,7 +35,7 @@ function M.max_sync_conflict_attempts()
 end
 
 function M.sync_conflict_attempt_key(conflict, fingerprint)
-  local readable = M.safe_repo(conflict.repo)
+  local readable = base_ids.safe_repo(conflict.repo)
     .. "/"
     .. safe_branch_segment(conflict.upstream_branch)
     .. "/"
@@ -44,7 +44,7 @@ function M.sync_conflict_attempt_key(conflict, fingerprint)
     .. tostring(fingerprint or "")
   local suffix = decimal_checksum(readable)
   local key = "github-devloop/sync-conflict-attempt/"
-    .. M.safe_repo(conflict.repo)
+    .. base_ids.safe_repo(conflict.repo)
     .. "/"
     .. safe_branch_segment(conflict.upstream_branch):sub(1, 40):gsub("%-+$", "")
     .. "/"

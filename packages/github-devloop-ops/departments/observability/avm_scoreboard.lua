@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
@@ -246,8 +247,8 @@ local function fact_from_marker(marker, comment)
     return nil, "missing_identity"
   end
   local fact, reason = autonomy_ledger.autonomy_result_record_from_marker(core, marker, comment, proposal_id, pr_number, version, head_sha)
-  if fact ~= nil and fact.issue_number == nil and core.parse_proposal_id ~= nil then
-    local _, issue_number = core.parse_proposal_id(proposal_id)
+  if fact ~= nil and fact.issue_number == nil then
+    local _, issue_number = base_ids.parse_proposal_id(proposal_id)
     fact.issue_number = tonumber(issue_number)
   end
   return fact, reason
