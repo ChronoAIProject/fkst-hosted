@@ -32,8 +32,8 @@ const GIT_CONFIG_COUNT_ENV: &str = "GIT_CONFIG_COUNT";
 
 // --- LLM defaults (mirror `config::defaults` + `runner`'s defaults so the pod and
 // the HTTP config never diverge on the operator-pinned provider) ---------------
-const DEFAULT_LLM_MODEL: &str = "gpt-5-codex";
-const DEFAULT_LLM_BASE_URL: &str = "https://nyx.chrono-ai.fun/api/v1/proxy/s/chrono-llm";
+const DEFAULT_LLM_MODEL: &str = "gpt-5.5";
+const DEFAULT_LLM_BASE_URL: &str = "https://llm.aelf.dev/v1";
 /// MUST default to `chat`: chrono-llm serves only `/chat/completions`; `responses`
 /// 502s (a verified bug). Never default to `responses`.
 const DEFAULT_LLM_WIRE_API: &str = "chat";
