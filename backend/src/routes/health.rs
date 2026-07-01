@@ -1,6 +1,6 @@
-//! `GET /health` / `GET /api/v1/health`: liveness for the datastore-free
-//! controller. There is no datastore to probe (issue #143 removed MongoDB), so
-//! the controller reports ready unconditionally — it is up iff it can serve.
+//! `GET /health`: liveness for the datastore-free controller. There is no
+//! datastore to probe (issue #143 removed MongoDB), so the controller reports
+//! ready unconditionally — it is up iff it can serve.
 
 use axum::Json;
 use serde::Serialize;
@@ -37,21 +37,5 @@ fn health_body() -> HealthResponse {
     )
 )]
 pub async fn health() -> Json<HealthResponse> {
-    Json(health_body())
-}
-
-/// `GET /api/v1/health`: the same liveness probe under the `/api/v1` prefix (the
-/// proxy may route everything under `/api/v1`). Kept as a distinct documented
-/// operation so the spec lists both live paths.
-#[utoipa::path(
-    get,
-    path = "/api/v1/health",
-    tag = "system",
-    operation_id = "health_v1",
-    responses(
-        (status = 200, description = "Controller is live", body = HealthResponse)
-    )
-)]
-pub async fn health_v1() -> Json<HealthResponse> {
     Json(health_body())
 }

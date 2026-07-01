@@ -81,7 +81,6 @@ async fn paths_are_the_trimmed_v1_surface() {
         // The per-user environment + secret store — ONE endpoint (GET + PATCH).
         "/api/v1/users/me/env",
         "/health",
-        "/api/v1/health",
         "/metrics",
     ] {
         assert!(
@@ -94,6 +93,8 @@ async fn paths_are_the_trimmed_v1_surface() {
     // Absent: the removed legacy API + the removed REST session query/stop
     // (a session is controlled solely through its GitHub issue).
     for gone in [
+        // `/api/v1/health` collapsed into the single top-level `/health`.
+        "/api/v1/health",
         "/api/v1/sessions/{owner}/{repo}/{issue}",
         "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
         // The per-user store collapsed to one endpoint — these split paths went.
