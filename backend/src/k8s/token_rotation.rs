@@ -99,8 +99,12 @@ async fn rotate_one(
     repo: &crate::models::RepoRef,
 ) {
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
+    // FORCED re-mint: extend the mounted token a full TTL every interval. The cached
+    // path only re-mints in the last EXPIRY_BUFFER before expiry, so a rotation
+    // interval longer than that buffer would leave the Secret with an expired token
+    // between rotations for a session that outlives the token TTL.
     match github
-        .token_with_expiry_for_repo(&owner_repo, Some(session_permissions()))
+        .token_with_expiry_for_repo_forced(&owner_repo, Some(session_permissions()))
         .await
     {
         Ok((token, expires_at)) => {

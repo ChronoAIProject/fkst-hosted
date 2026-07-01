@@ -436,6 +436,31 @@ impl GithubAppTokens {
         owner_repo: &str,
         perms: Option<TokenPermissions>,
     ) -> Result<(SecretString, SystemTime), GithubAppError> {
+        self.token_with_expiry_inner(owner_repo, perms, false).await
+    }
+
+    /// Like [`Self::token_with_expiry_for_repo`] but ALWAYS re-mints, bypassing the
+    /// cache-hit. The token-rotation loop uses this so a long-lived session's mounted
+    /// token is extended a FULL TTL every interval: the cached path only re-mints in
+    /// the last [`EXPIRY_BUFFER`] before expiry, so a rotation interval longer than
+    /// that buffer would otherwise leave the Secret holding an expired token between
+    /// the rotation that ran too early and the next one.
+    pub async fn token_with_expiry_for_repo_forced(
+        &self,
+        owner_repo: &str,
+        perms: Option<TokenPermissions>,
+    ) -> Result<(SecretString, SystemTime), GithubAppError> {
+        self.token_with_expiry_inner(owner_repo, perms, true).await
+    }
+
+    /// Shared implementation: mint (or, unless `force_refresh`, return a still-valid
+    /// cached) installation token for `owner/repo` plus its `expires_at`.
+    async fn token_with_expiry_inner(
+        &self,
+        owner_repo: &str,
+        perms: Option<TokenPermissions>,
+        force_refresh: bool,
+    ) -> Result<(SecretString, SystemTime), GithubAppError> {
         if !REPO_REF_RE.is_match(owner_repo) {
             return Err(GithubAppError::InvalidRepoRef);
         }
@@ -446,8 +471,10 @@ impl GithubAppTokens {
             perms: perms.clone(),
         };
 
-        // 1. Check token cache (lock held for map access only).
-        {
+        // 1. Check token cache (lock held for map access only) — UNLESS a forced
+        //    refresh (the rotation loop) is deliberately extending a live session's
+        //    token ahead of the cache's own 5-min-before-expiry re-mint window.
+        if !force_refresh {
             let cache = self.inner.token_cache.lock().expect("token cache lock");
             if let Some(cached) = cache.get(&key) {
                 if cached.expires_at > SystemTime::now() + EXPIRY_BUFFER {
