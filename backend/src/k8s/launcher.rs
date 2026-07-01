@@ -1,7 +1,8 @@
 //! The per-session Job + Secret launcher (issue #293).
 //!
 //! Turns a [`SessionSpec`] + the session's credentials into a running Kubernetes
-//! Job: one per-session Secret (mounted 0400) carrying the spec + tokens, and one
+//! Job: one per-session Secret (mounted 0440, group-readable by the non-root
+//! session user) carrying the spec + tokens, and one
 //! Job running the control-plane image in `run-session` mode. The Job name is the
 //! deterministic session id, so a webhook redelivery is an at-most-one-Job no-op;
 //! the Secret is owner-referenced to the Job, so K8s cascade-deletes it on GC.
@@ -10,7 +11,8 @@ use std::collections::BTreeMap;
 
 use k8s_openapi::api::batch::v1::{Job, JobSpec};
 use k8s_openapi::api::core::v1::{
-    Container, EnvVar, PodSpec, PodTemplateSpec, Secret, SecretVolumeSource, Volume, VolumeMount,
+    Container, EnvVar, PodSecurityContext, PodSpec, PodTemplateSpec, Secret, SecretVolumeSource,
+    Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
 use kube::api::{Api, PostParams};
@@ -31,8 +33,16 @@ const CREDS_MOUNT_DIR: &str = DEFAULT_CREDS_DIR;
 const SPEC_FILE_KEY: &str = "session-spec.json";
 /// The Secret-volume name used by both the volume and its mount.
 const CREDS_VOLUME: &str = "creds";
-/// 0400 file mode for the mounted Secret (octal; k8s wants the decimal value).
-const SECRET_FILE_MODE: i32 = 0o400;
+/// File mode for the mounted Secret (octal; k8s wants the decimal value). 0440 =
+/// owner + GROUP read, no world. The runtime image runs as the non-root `fkst`
+/// user (uid/gid [`RUNNER_UID`]); with `fsGroup = RUNNER_UID` the mounted files
+/// are `root:RUNNER_UID`, so the session process reads them via its group. 0400
+/// (owner-only) would be root-owned and UNREADABLE by the non-root process.
+const SECRET_FILE_MODE: i32 = 0o440;
+/// The uid/gid the runtime image runs as (`USER fkst`, `groupadd/useradd 10001`
+/// in the Dockerfile). The pod's `fsGroup` matches so the 0440 creds are
+/// group-readable by the session process.
+const RUNNER_UID: i64 = 10001;
 /// The container name inside the session pod.
 const RUNNER_CONTAINER: &str = "runner";
 
@@ -191,6 +201,17 @@ pub fn build_job(spec: &SessionSpec, config: &PodConfig) -> Result<Job, LaunchEr
     let pod_spec = PodSpec {
         restart_policy: Some("Never".to_string()),
         service_account_name: Some(config.service_account.clone()),
+        // Run as the image's non-root `fkst` user and set `fsGroup` to its gid so
+        // the 0440 creds Secret (mounted root:fsGroup) is group-readable by the
+        // session process. Without this, the pod runs non-root but the 0400/root
+        // creds are unreadable -> `run-session` fails reading its own spec.
+        security_context: Some(PodSecurityContext {
+            run_as_non_root: Some(true),
+            run_as_user: Some(RUNNER_UID),
+            run_as_group: Some(RUNNER_UID),
+            fs_group: Some(RUNNER_UID),
+            ..Default::default()
+        }),
         containers: vec![container],
         volumes: Some(vec![volume]),
         ..Default::default()
@@ -442,7 +463,14 @@ mod tests {
             secret.secret_name.as_deref(),
             Some(&*object_name(&spec.session_id))
         );
-        assert_eq!(secret.default_mode, Some(0o400));
+        assert_eq!(secret.default_mode, Some(0o440));
+
+        // The pod runs as the non-root fkst user with fsGroup = its gid so the
+        // 0440 creds are group-readable (else run-session can't read its spec).
+        let sc = pod.security_context.as_ref().expect("pod security context");
+        assert_eq!(sc.run_as_non_root, Some(true));
+        assert_eq!(sc.run_as_user, Some(10001));
+        assert_eq!(sc.fs_group, Some(10001));
 
         let ann = job.metadata.annotations.unwrap();
         assert_eq!(ann["fkst.chrono-ai.fun/owner"], "acme");
