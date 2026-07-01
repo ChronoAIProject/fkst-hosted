@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// GitHub repository reference: `owner/name`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, utoipa::ToSchema)]
 pub struct RepoRef {
     pub owner: String,
     pub name: String,

@@ -220,6 +220,7 @@ fn build_session_pod_carries_the_reconciler_annotations() {
     let ann = pod.metadata.annotations.as_ref().expect("annotations");
     assert_eq!(ann["fkst.chrono-ai.fun/owner"], "acme");
     assert_eq!(ann["fkst.chrono-ai.fun/repo"], "site");
+    assert_eq!(ann["fkst.chrono-ai.fun/installation-id"], "42");
     assert_eq!(ann["fkst.chrono-ai.fun/trigger-issue-number"], "7");
     assert_eq!(ann["fkst.chrono-ai.fun/work-label"], "fkst");
     assert_eq!(ann["fkst.chrono-ai.fun/config-hash"], "cfg-deadbeef");

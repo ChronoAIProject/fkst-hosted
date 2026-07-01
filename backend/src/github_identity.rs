@@ -154,6 +154,7 @@ mod tests {
             config,
             github_app: None,
             github_app_webhook_secret: None,
+            reconciler: None,
         }
     }
 
