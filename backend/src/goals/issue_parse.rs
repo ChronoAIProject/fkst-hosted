@@ -17,11 +17,8 @@
 //! Secret hygiene: the `Goal` section becomes the engine prompt (secret
 //! downstream). Never log the parsed `description`; this module logs nothing.
 
-use std::sync::OnceLock;
-
-use regex::Regex;
-
 use crate::error::AppError;
+use crate::goals::section_parse::{non_empty_lines, parse_environment_name, split_sections};
 
 /// The canonical section headings, in template order. A section's content is
 /// every line after its heading up to the next `### ` heading (or EOF).
@@ -31,25 +28,6 @@ const HEADING_PACKAGES: &str = "### Package Name List";
 /// load into the session — its install commands run before the agent starts, and
 /// its variables + secrets are injected. Absent or blank → no environment.
 const HEADING_ENVIRONMENT: &str = "### Environment";
-
-/// The maximum length of an environment `name`, mirroring the named-environment
-/// API (`crate::routes::environments`) so a name that parses here is also
-/// accepted by that API and composes into a valid Kubernetes object name.
-const MAX_ENV_NAME_LEN: usize = 40;
-
-/// Anchored environment-NAME pattern, identical to the rule the named-environment
-/// API (`crate::routes::environments`) enforces: lower-case DNS-1123-label-ish,
-/// so the selected name resolves to the same `fkst-env-<id>-<name>` object.
-fn env_name_regex() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$").expect("static env name regex"))
-}
-
-/// True when `name` satisfies the environments API naming rule (grammar + the
-/// 1..=40 length budget). The regex already forbids the empty string.
-fn is_valid_env_name(name: &str) -> bool {
-    name.len() <= MAX_ENV_NAME_LEN && env_name_regex().is_match(name)
-}
 
 /// The structured result of parsing an `fkst-goal` issue body. Carries only the
 /// body-derived fields — the title comes from the GitHub issue title, not the
@@ -124,83 +102,6 @@ pub fn parse_goal_issue_body(body: &str) -> Result<ParsedGoal, AppError> {
         package_names,
         environment,
     })
-}
-
-/// Parse the OPTIONAL `### Environment` block into the single environment NAME it
-/// selects. The section, when present, must contain EXACTLY ONE non-blank line —
-/// the name of a named environment the issue author owns — that satisfies the
-/// environments API naming rule. Zero non-blank lines yields `None` (equivalent to
-/// omitting the section); two or more is a 422 (ambiguous selection); an invalid
-/// name is a 422 that names the rule.
-fn parse_environment_name(block: &str) -> Result<Option<String>, AppError> {
-    let names = non_empty_lines(block);
-    match names.as_slice() {
-        [] => Ok(None),
-        [name] => {
-            if is_valid_env_name(name) {
-                Ok(Some(name.clone()))
-            } else {
-                Err(AppError::Unprocessable(format!(
-                    "the `### Environment` section names an invalid environment {name:?}: \
-                     must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ and be 1..=40 characters"
-                )))
-            }
-        }
-        _ => Err(AppError::Unprocessable(
-            "the `### Environment` section must name exactly one environment".to_string(),
-        )),
-    }
-}
-
-/// Split a body into `(heading, content)` sections at each `### ` heading line.
-/// Content is the raw text (not yet trimmed) between this heading and the next.
-/// A duplicate `### ` heading is a 422 (the contract forbids ambiguity).
-fn split_sections(body: &str) -> Result<Vec<(String, String)>, AppError> {
-    let mut sections: Vec<(String, String)> = Vec::new();
-    let mut current: Option<(String, String)> = None;
-
-    for line in body.lines() {
-        if is_heading(line) {
-            // A `### ` heading line opens a new section; flush the previous one.
-            if let Some(section) = current.take() {
-                sections.push(section);
-            }
-            let heading = line.trim_end().to_string();
-            if sections.iter().any(|(h, _)| h == &heading)
-                || current.as_ref().is_some_and(|(h, _)| h == &heading)
-            {
-                return Err(AppError::Unprocessable(format!(
-                    "duplicate section heading: `{heading}`"
-                )));
-            }
-            current = Some((heading, String::new()));
-        } else if let Some((_, content)) = current.as_mut() {
-            content.push_str(line);
-            content.push('\n');
-        }
-        // Lines before the first heading (the form's intro markdown) are ignored.
-    }
-    if let Some(section) = current.take() {
-        sections.push(section);
-    }
-    Ok(sections)
-}
-
-/// A line is a section heading when it starts with the literal `### ` marker.
-/// (`####` and deeper are NOT section headings — only exactly-3 `#`.)
-fn is_heading(line: &str) -> bool {
-    let trimmed = line.trim_end();
-    trimmed.starts_with("### ") && !trimmed.starts_with("#### ")
-}
-
-/// Split a block on newlines, trim each line, drop empties.
-fn non_empty_lines(block: &str) -> Vec<String> {
-    block
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 #[cfg(test)]
