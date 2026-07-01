@@ -1,4 +1,5 @@
 local m_claims = require("devloop.claims")
+local pr_safety = require("devloop.pr_safety")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -204,7 +205,7 @@ local function in_managed_scope(repo, branches, pr, origin)
     and origin.branch == pr.head_ref_name
     and origin.base_branch == branches.integration
     and pr.base_ref_name == branches.integration
-    and core.is_devloop_issue_branch(pr.head_ref_name)
+    and pr_safety.is_devloop_issue_branch(core, pr.head_ref_name)
     and core.is_same_repo_pr_head(pr, repo)
 end
 

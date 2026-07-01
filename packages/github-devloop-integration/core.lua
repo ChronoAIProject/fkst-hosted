@@ -26,7 +26,11 @@ require("forge.github_debug_stamp").install(M)
 require("devloop.commands").install(M)
 require("forge.merge_commands").install(M)
 require("devloop.git_mechanics").install(M)
-require("devloop.pr_safety").install(M)
+local pr_safety = require("devloop.pr_safety")
+M.is_safe_branch = function(...) return pr_safety.is_safe_branch(M, ...) end
+M.is_safe_head_sha = function(...) return pr_safety.is_safe_head_sha(M, ...) end
+M.is_safe_pr_number = function(...) return pr_safety.is_safe_pr_number(M, ...) end
+M.is_same_repo_pr_head = function(...) return pr_safety.is_same_repo_pr_head(M, ...) end
 require("forge.merge").install(M)
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
