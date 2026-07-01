@@ -115,6 +115,9 @@ pub(super) fn build_session_spec(
             prompt: parsed.description.clone(),
         },
         package_names: parsed.package_names.clone(),
+        // No named environment is resolved on the issue-trigger path yet (a later
+        // PR wires environment selection); default to no install commands.
+        install: Vec::new(),
     }
 }
 

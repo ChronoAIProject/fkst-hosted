@@ -23,6 +23,7 @@ fn spec() -> SessionSpec {
         },
         package_names: vec!["web".to_string()],
         log_branch: "fkst/session-x".to_string(),
+        install: Vec::new(),
     }
 }
 
