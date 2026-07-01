@@ -27,6 +27,10 @@ pub mod goals;
 pub mod install;
 pub mod models;
 pub mod protocol;
+// Reserved-env "keep-module" (Model B PR0, issue #359 §7/§9): holds
+// `is_reserved_env_key` + `LLM_ENV_KEY` so they survive the later deletion of
+// `engine/` and `sessions/codex_provider/`, which originally defined them.
+pub mod reserved_env;
 // Runtime OpenAPI 3 document (no static spec): assembled from the live
 // `#[utoipa::path]` handlers + `ToSchema` types and served at GET /openapi.json.
 pub mod k8s;

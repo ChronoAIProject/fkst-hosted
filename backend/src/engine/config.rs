@@ -213,7 +213,7 @@ pub const ENGINE_ENV_ALLOWLIST: &[&str] = &[
 /// platform owns them (the goal-session GitHub wiring + #107 git credential
 /// delivery). Combined with the [`RESERVED_ENV_PREFIX`],
 /// [`RESERVED_ENV_NAME_PREFIXES`] and [`ENGINE_ENV_ALLOWLIST`] in
-/// [`is_reserved_env_key`].
+/// [`crate::reserved_env::is_reserved_env_key`].
 pub const RESERVED_ENV_KEYS: &[&str] = &[
     "GITHUB_TOKEN",
     "GH_TOKEN",
@@ -231,24 +231,6 @@ pub const RESERVED_ENV_NAME_PREFIXES: &[&str] = &["GIT_CONFIG_"];
 /// Every platform-managed variable shares this prefix, so a user `env_profile`
 /// can never shadow one (e.g. `FKST_RUNTIME_ROOT`, `FKST_DURABLE_ROOT`).
 pub const RESERVED_ENV_PREFIX: &str = "FKST_";
-
-/// Whether a key is platform-owned and must be dropped from a user-supplied
-/// `env_profile` before it is applied to an engine child. A key is reserved
-/// when it starts with [`RESERVED_ENV_PREFIX`] or any [`RESERVED_ENV_NAME_PREFIXES`]
-/// entry, is listed in [`RESERVED_ENV_KEYS`], or names an [`ENGINE_ENV_ALLOWLIST`]
-/// host var — so a user entry can never shadow an allow-listed host var or a
-/// platform var.
-///
-/// Shared with the vault write-validator (#100) and the env-injection path
-/// (#102) so there is a single source of truth for "keys a user may not set".
-pub fn is_reserved_env_key(key: &str) -> bool {
-    key.starts_with(RESERVED_ENV_PREFIX)
-        || RESERVED_ENV_NAME_PREFIXES
-            .iter()
-            .any(|prefix| key.starts_with(prefix))
-        || RESERVED_ENV_KEYS.contains(&key)
-        || ENGINE_ENV_ALLOWLIST.contains(&key)
-}
 
 #[cfg(test)]
 mod tests {
@@ -418,54 +400,5 @@ mod tests {
         ]))
         .expect("foreign keys must be ignored");
         assert_eq!(config.stop_grace_secs, 10);
-    }
-
-    #[test]
-    fn fkst_prefixed_keys_are_reserved() {
-        assert!(is_reserved_env_key("FKST_RUNTIME_ROOT"));
-        assert!(is_reserved_env_key("FKST_DURABLE_ROOT"));
-        assert!(is_reserved_env_key("FKST_ANYTHING_AT_ALL"));
-        assert!(is_reserved_env_key("FKST_"));
-    }
-
-    #[test]
-    fn explicit_reserved_keys_are_reserved() {
-        for key in RESERVED_ENV_KEYS {
-            assert!(is_reserved_env_key(key), "{key} must be reserved");
-        }
-        assert!(is_reserved_env_key("GITHUB_TOKEN"));
-    }
-
-    #[test]
-    fn allow_list_names_are_reserved_so_user_cannot_shadow_them() {
-        // A user env_profile must never override an allow-listed host var.
-        for key in ENGINE_ENV_ALLOWLIST {
-            assert!(is_reserved_env_key(key), "{key} must be reserved");
-        }
-        assert!(is_reserved_env_key("PATH"));
-        assert!(is_reserved_env_key("HOME"));
-        assert!(is_reserved_env_key("CODEX_HOME"));
-    }
-
-    #[test]
-    fn git_credential_delivery_keys_are_reserved() {
-        // #107: the git credential-delivery env must never be user-overridable,
-        // or a user value could redirect the credential helper / leak the token.
-        assert!(is_reserved_env_key("GH_TOKEN"));
-        assert!(is_reserved_env_key("GIT_CONFIG_COUNT"));
-        assert!(is_reserved_env_key("GIT_CONFIG_KEY_0"));
-        assert!(is_reserved_env_key("GIT_CONFIG_VALUE_0"));
-        assert!(is_reserved_env_key("GIT_CONFIG_KEY_99"));
-        assert!(is_reserved_env_key("FKST_GITHUB_MINT_NONCE"));
-    }
-
-    #[test]
-    fn ordinary_user_keys_are_not_reserved() {
-        assert!(!is_reserved_env_key("OPENAI_API_KEY"));
-        assert!(!is_reserved_env_key("FOO"));
-        assert!(!is_reserved_env_key("MY_SECRET"));
-        // Case matters: only the exact upper-case platform names are reserved.
-        assert!(!is_reserved_env_key("fkst_lowercase"));
-        assert!(!is_reserved_env_key("github_token"));
     }
 }

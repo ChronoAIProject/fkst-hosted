@@ -30,7 +30,6 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::config::Config;
-use crate::engine::config::is_reserved_env_key;
 use crate::error::{AppError, ErrorEnvelope};
 use crate::github_identity::GithubUser;
 use crate::k8s::env_store::{
@@ -39,6 +38,7 @@ use crate::k8s::env_store::{
 };
 use crate::k8s::env_validator::{validate_environment, ValidationOutcome};
 use crate::k8s::KubeClient;
+use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::state::AppState;
 
 /// The maximum length of an environment `name` (before the id/prefix budget).
@@ -47,9 +47,6 @@ const MAX_NAME_LEN: usize = 40;
 const MAX_OBJECT_NAME_LEN: usize = 63;
 /// The status stamped on a fully-written (validated) environment.
 const STATUS_READY: &str = "ready";
-/// The engine's LLM credential slot; a user may never set it as a variable or
-/// secret (it is delivered by the platform, not the user).
-const LLM_ENV_KEY: &str = "LLM_API_KEY";
 
 /// `PUT /users/me/environments/{name}` body: the desired environment contents.
 /// Every field defaults to empty so a caller can omit any of them.

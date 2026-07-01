@@ -36,8 +36,9 @@ use crate::engine::{
     StartSpec,
 };
 use crate::models::RepoRef;
+use crate::reserved_env::LLM_ENV_KEY;
 use crate::session_spec::{CredsLayout, SessionSpec};
-use crate::sessions::codex_provider::{render_codex_config, LLM_ENV_KEY};
+use crate::sessions::codex_provider::render_codex_config;
 
 /// Env var naming the SessionSpec JSON path; defaults to [`DEFAULT_SPEC_PATH`].
 const SPEC_PATH_ENV: &str = "FKST_SESSION_SPEC_PATH";
