@@ -6,6 +6,7 @@
 //! `FKST_POD_DISPATCH=true` — the control plane is Kubernetes-free by default.
 
 pub mod client;
+pub(crate) mod isolation;
 pub mod launcher;
 pub mod user_store;
 pub mod watch;
