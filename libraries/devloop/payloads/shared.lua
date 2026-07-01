@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local C = {}
 local github_view = require("forge.github_view")
 local github_handle = nil
@@ -23,7 +24,7 @@ function C.bounded_framing(M, framing)
   end
   local value = tostring(framing)
   if #value > M._max_framing_len then
-    value = M.truncate_utf8(value, M._max_framing_len)
+    value = base_ids.truncate_utf8(value, M._max_framing_len)
   end
   return value
 end
@@ -39,7 +40,7 @@ function C.bounded_control_text(M, value, limit)
   end
   local cap = limit or M._max_blocking_gap_len
   if #text > cap then
-    text = M.truncate_utf8(text, cap)
+    text = base_ids.truncate_utf8(text, cap)
   end
   return text
 end

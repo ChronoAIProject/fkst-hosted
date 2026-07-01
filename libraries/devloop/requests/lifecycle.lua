@@ -140,7 +140,7 @@ function C.build_intake_decision_comment_request(M, repo, issue_number, candidat
     safe_reason = comment_strings.comment_string(M, "no_reason_provided")
   end
   if #safe_reason > M._max_meta_reason_len then
-    safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)
+    safe_reason = base_ids.truncate_utf8(safe_reason, M._max_meta_reason_len)
   end
   local detail = ""
   if decision == "track" then
@@ -277,7 +277,7 @@ function C.build_impl_failure_comment_request(M, repo, issue_number, ready, reas
   local retry_attempt = tonumber(attempt) or 1
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
-    text = M.truncate_utf8(text, M._max_impl_output_len)
+    text = base_ids.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
     text = comment_strings.comment_string(M, "no_implementation_output")

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local S = {}
 
 S.valid_round = require("devloop.rounds").valid_round
@@ -34,7 +35,7 @@ function S.safe_marker_attr(M, value, limit)
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   local cap = limit or S.max_attr_len
   if #text > cap then
-    text = M.truncate_utf8(text, cap)
+    text = base_ids.truncate_utf8(text, cap)
   end
   return text
 end

@@ -148,7 +148,7 @@ local function alert_body(evidence, snapshot)
   }
   local body = table.concat(lines, "\n")
   if #body > M._max_body_len then
-    body = M.truncate_utf8(body, M._max_body_len)
+    body = base_ids.truncate_utf8(body, M._max_body_len)
   end
   return body
 end

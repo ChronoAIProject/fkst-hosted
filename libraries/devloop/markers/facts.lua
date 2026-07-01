@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
@@ -127,7 +128,7 @@ local function bounded_marker_line(M, value, limit)
   end
   local cap = limit or M._max_blocking_gap_len
   if #text > cap then
-    text = M.truncate_utf8(text, cap)
+    text = base_ids.truncate_utf8(text, cap)
   end
   return text
 end
@@ -190,7 +191,7 @@ function C.review_prior_round_ledger(M, comments, issue_proposal_id, issue_versi
   end
   local ledger = table.concat(lines, "\n")
   if #ledger > M._max_review_ledger_len then
-    ledger = M.truncate_utf8(ledger, M._max_review_ledger_len)
+    ledger = base_ids.truncate_utf8(ledger, M._max_review_ledger_len)
   end
   return M.neutralize_untrusted_prompt_text(ledger)
 end

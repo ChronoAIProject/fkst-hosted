@@ -168,7 +168,7 @@ local function display_text(value, limit)
     text = "unknown"
   end
   if limit ~= nil and #text > limit then
-    text = M.truncate_utf8(text, limit)
+    text = base_ids.truncate_utf8(text, limit)
   end
   return text
 end
@@ -182,7 +182,7 @@ local function title(fact)
   local result = "Investigate L2 failure: " .. display_text(fact.error_class, M._max_key_len)
     .. " in " .. display_text(fact.queue, M._max_key_len)
   if #result > M._max_title_len then
-    result = M.truncate_utf8(result, M._max_title_len)
+    result = base_ids.truncate_utf8(result, M._max_title_len)
   end
   return result
 end
@@ -217,7 +217,7 @@ local function body(fact, count)
   end
   local result = table.concat(lines, "\n")
   if #result > M._max_body_len then
-    result = M.truncate_utf8(result, M._max_body_len)
+    result = base_ids.truncate_utf8(result, M._max_body_len)
   end
   return result
 end

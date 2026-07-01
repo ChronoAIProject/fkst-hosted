@@ -152,7 +152,7 @@ function M.intake_class_issue_title(current, issue_number, class_key)
   local source_title = tostring(current and current.title or ("Issue #" .. tostring(issue_number or "unknown")))
   local title = "Class fix needed: " .. class_identity_label(class_key or ("title:" .. source_title))
   if #title > M._max_title_len then
-    title = M.truncate_utf8(title, M._max_title_len)
+    title = base_ids.truncate_utf8(title, M._max_title_len)
   end
   return title
 end
@@ -198,7 +198,7 @@ function M.build_intake_class_followup_comment_request(repo, issue_number, candi
     safe_reason = comment_strings.comment_string(M, "no_reason_provided")
   end
   if #safe_reason > M._max_meta_reason_len then
-    safe_reason = M.truncate_utf8(safe_reason, M._max_meta_reason_len)
+    safe_reason = base_ids.truncate_utf8(safe_reason, M._max_meta_reason_len)
   end
   local carrier_line = "Class carrier: "
   if carrier and carrier.number ~= nil then
@@ -252,7 +252,7 @@ function M.build_intake_class_issue_create_request(repo, issue_number, candidate
     .. "\nSource proposal: " .. tostring(candidate and candidate.proposal_id or "")
     .. "\n\n" .. M.intake_class_carrier_marker(class_key)
   if #body > M._max_body_len then
-    body = M.truncate_utf8(body, M._max_body_len)
+    body = base_ids.truncate_utf8(body, M._max_body_len)
   end
   return {
     schema = "github-proxy.issue-create.v1",

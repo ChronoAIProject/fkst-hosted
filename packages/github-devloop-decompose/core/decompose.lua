@@ -15,7 +15,7 @@ local function bounded_text(value, limit, fallback)
     text = fallback or "(empty)"
   end
   if #text > limit then
-    text = M.truncate_utf8(text, limit)
+    text = base_ids.truncate_utf8(text, limit)
   end
   return text
 end
@@ -84,7 +84,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\n\n" .. decompose_lib.decompose_lineage_marker(M, decompose.proposal_id, decompose_lib.decompose_lineage_depth(M, decompose.current_issue_body) + 1)
     .. "\n\n" .. decompose_lib.decompose_child_marker(M, decompose.proposal_id, decompose.version, decompose.pr_number, index)
   if #body > M._max_body_len then
-    body = M.truncate_utf8(body, M._max_body_len)
+    body = base_ids.truncate_utf8(body, M._max_body_len)
   end
   local fingerprint = issue_fingerprint(decompose, index)
   return {

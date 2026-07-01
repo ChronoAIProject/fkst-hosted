@@ -115,7 +115,6 @@ local one_line = error_facts.one_line
 local is_bounded_string = strings.is_bounded_string
 local decimal_checksum = strings.decimal_checksum
 
-local sdk_truncate_utf8 = base_ids.truncate_utf8
 
 local function has_value(values, expected)
   if type(values) ~= "table" then
@@ -754,7 +753,6 @@ C._shell_single_quote = shell_single_quote
 C._neutralize_fkst_markers = neutralize_fkst_markers
 C._one_line = one_line
 C._is_bounded_string = is_bounded_string
-C.truncate_utf8 = sdk_truncate_utf8
 C._has_value = has_value
 C._is_review_meta_action = is_review_meta_action
 C.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round

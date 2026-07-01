@@ -9,7 +9,7 @@ local conflict_hotspot_window_days = 7
 local function hotspot_title(file)
   local title = "Split conflict hotspot: " .. tostring(file)
   if #title > M._max_title_len then
-    title = M.truncate_utf8(title, M._max_title_len)
+    title = base_ids.truncate_utf8(title, M._max_title_len)
   end
   return title
 end
@@ -36,7 +36,7 @@ local function hotspot_body(hotspot)
   table.insert(lines, "- Feed the normal intake, consensus, implementation, and review pipeline; this patrol must not restructure code directly.")
   local body = table.concat(lines, "\n")
   if #body > M._max_body_len then
-    body = M.truncate_utf8(body, M._max_body_len)
+    body = base_ids.truncate_utf8(body, M._max_body_len)
   end
   return body
 end

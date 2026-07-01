@@ -31,7 +31,7 @@ local function bounded_commit_subject(M, prefix, issue_number, current)
     local room = 200 - #title_prefix
     if room > 0 then
       if #title > room then
-        title = M.truncate_utf8(title, room)
+        title = base_ids.truncate_utf8(title, room)
       end
       if title ~= "" then
         subject = title_prefix .. title
@@ -321,7 +321,7 @@ function C.build_proposal(M, issue)
   local proposal_id = M.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
   if #title > M._max_title_len then
-    title = M.truncate_utf8(title, M._max_title_len)
+    title = base_ids.truncate_utf8(title, M._max_title_len)
   end
   local body = "Judge the current GitHub issue from the full source content."
     .. "\nIssue: " .. tostring(issue.repo) .. "#" .. tostring(issue.number)
@@ -397,12 +397,12 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
     title = "Review PR #" .. tostring(pr_number) .. ": " .. tostring(current_issue.title)
   end
   if #title > M._max_title_len then
-    title = M.truncate_utf8(title, M._max_title_len)
+    title = base_ids.truncate_utf8(title, M._max_title_len)
   end
 
   local issue_title = type(current_issue) == "table" and tostring(current_issue.title or "") or ""
   if #issue_title > M._max_title_len then
-    issue_title = M.truncate_utf8(issue_title, M._max_title_len)
+    issue_title = base_ids.truncate_utf8(issue_title, M._max_title_len)
   end
   issue_title = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."

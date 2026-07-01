@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local contract_time = require("contract.time")
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
@@ -23,7 +24,7 @@ function C.conflict_path_key(M, path)
   local key = strings.sanitize_key(tostring(path or ""), false):gsub("/", "-"):gsub("%-+", "-")
   if #key > 140 then
     local suffix = "-" .. decimal_checksum(key)
-    key = M.truncate_utf8(key, 140 - #suffix):gsub("%-+$", "") .. suffix
+    key = base_ids.truncate_utf8(key, 140 - #suffix):gsub("%-+$", "") .. suffix
   end
   return key
 end

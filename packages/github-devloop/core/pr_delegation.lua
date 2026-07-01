@@ -78,7 +78,7 @@ local function create_pr(repo, issue_number, branch, base_branch, title, body)
     effective_title = "github-devloop implementation for #" .. tostring(issue_number)
   end
   if #effective_title > M._max_pr_title_len then
-    effective_title = M.truncate_utf8(effective_title, M._max_pr_title_len)
+    effective_title = base_ids.truncate_utf8(effective_title, M._max_pr_title_len)
   end
   local created = M.gh_pr_create_body(repo, branch, base_branch, effective_title, body, 60)
   if created.exit_code ~= 0 then

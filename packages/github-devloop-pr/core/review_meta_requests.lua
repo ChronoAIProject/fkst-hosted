@@ -78,7 +78,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
   local safe_reason = strings.sanitize_key(reason or "no-fix", M._max_key_len):gsub("/", "-")
   local text = tostring(detail or "")
   if #text > M._max_impl_output_len then
-    text = M.truncate_utf8(text, M._max_impl_output_len)
+    text = base_ids.truncate_utf8(text, M._max_impl_output_len)
   end
   if text == "" then
     text = comment_strings.comment_string(M, "no_fix_output")

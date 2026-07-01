@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local forge_validators = require("devloop.forge_validators")
 local m_claims = require("devloop.claims")
 local pr_safety = require("devloop.pr_safety")
@@ -107,7 +108,7 @@ local function reaper_comment_body(proposal_id, pr_number, reason)
   local parent_ref = "#" .. tostring(issue_number or "unknown")
   local reason_text = tostring(reason and reason.text or "")
   if #reason_text > max_reap_reason_len then
-    reason_text = core.truncate_utf8(reason_text, max_reap_reason_len)
+    reason_text = base_ids.truncate_utf8(reason_text, max_reap_reason_len)
   end
   return "github-devloop reaped this managed PR because its parent issue is terminal.\n\n"
     .. "Parent: " .. parent_ref .. "\n"

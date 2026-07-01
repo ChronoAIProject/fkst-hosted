@@ -85,7 +85,7 @@ function M.build_sync_conflict_escalation_request(conflict, fingerprint, attempt
     .. " into "
     .. tostring(conflict.integration_branch)
   if #title > M._max_title_len then
-    title = M.truncate_utf8(title, M._max_title_len)
+    title = base_ids.truncate_utf8(title, M._max_title_len)
   end
 
   local paths = conflict_telemetry.conflict_file_paths_from_unmerged(M, unmerged_stdout)
@@ -116,7 +116,7 @@ function M.build_sync_conflict_escalation_request(conflict, fingerprint, attempt
     "Resolve the branch sync conflict manually or split the conflicting work so the rollup can make progress.",
   }, "\n")
   if #body > M._max_body_len then
-    body = M.truncate_utf8(body, M._max_body_len)
+    body = base_ids.truncate_utf8(body, M._max_body_len)
   end
 
   return {

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local C = {}
 local comment_strings = require("devloop.strings")
 local strings = require("contract.strings")
@@ -16,11 +17,11 @@ function C.bounded_neutralized_text(M, value, limit)
   local text = tostring(value or "")
   local cap = limit or C.max_display_digest_len
   if #text > cap then
-    text = M.truncate_utf8(text, cap)
+    text = base_ids.truncate_utf8(text, cap)
   end
   text = M.neutralize_untrusted_comment_text(text)
   if #text > cap then
-    text = M.truncate_utf8(text, cap)
+    text = base_ids.truncate_utf8(text, cap)
   end
   return text
 end
@@ -69,7 +70,7 @@ function C.build_convergence_display(M, header, unresolved, round)
   end
   local body = table.concat(lines, "\n")
   if #body > C.max_display_block_len then
-    body = M.truncate_utf8(body, C.max_display_block_len)
+    body = base_ids.truncate_utf8(body, C.max_display_block_len)
   end
   return body
 end
@@ -94,7 +95,7 @@ function C.build_verdict_summary(M, angle_results)
   end
   local summary = comment_strings.comment_string(M, "verdict_summary_label") .. table.concat(parts, " ")
   if #summary > C.max_verdict_summary_len then
-    summary = M.truncate_utf8(summary, C.max_verdict_summary_len)
+    summary = base_ids.truncate_utf8(summary, C.max_verdict_summary_len)
   end
   return summary
 end
@@ -110,7 +111,7 @@ function C.bounded_blocking_gap(M, reached)
     return nil
   end
   if #text > M._max_blocking_gap_len then
-    text = M.truncate_utf8(text, M._max_blocking_gap_len)
+    text = base_ids.truncate_utf8(text, M._max_blocking_gap_len)
   end
   return text
 end

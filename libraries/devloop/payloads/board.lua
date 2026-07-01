@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local C = {}
 local shared = require("devloop.payloads.shared")
@@ -31,7 +32,7 @@ end
 local function first_chars(M, value, limit)
   local text = tostring(value or ""):gsub("[%s]+", " ")
   if #text > limit then
-    return M.truncate_utf8(text, limit)
+    return base_ids.truncate_utf8(text, limit)
   end
   return text
 end
@@ -198,7 +199,7 @@ function C.append_board_digest_to_proposal(M, proposal, repo, tick)
       "available=" .. tostring(remaining),
       "needed=" .. tostring(#neutralized),
     })
-    neutralized = M.truncate_utf8(neutralized, remaining)
+    neutralized = base_ids.truncate_utf8(neutralized, remaining)
   end
   proposal.body = body .. prefix .. neutralized
   if #proposal.body > M._max_body_len then

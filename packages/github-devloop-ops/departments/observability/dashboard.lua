@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local common = require("departments.observability.common")
 local dashboard_commands = require("devloop.commands.dashboard")
@@ -156,7 +157,7 @@ local function compact_title(value)
     title = "(untitled)"
   end
   if #title > max_dashboard_title_len then
-    title = core.truncate_utf8(title, max_dashboard_title_len - 3):gsub("%s+$", "") .. "..."
+    title = base_ids.truncate_utf8(title, max_dashboard_title_len - 3):gsub("%s+$", "") .. "..."
   end
   return title
 end

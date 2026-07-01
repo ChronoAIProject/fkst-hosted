@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings_c = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
 local parsers_misc = require("devloop.parsers.misc")
@@ -82,7 +83,7 @@ local function safe_dependency_attr(value)
   text = text:gsub("%c", " "):gsub('"', "'"):gsub("[<>]", ""):gsub("%s+", " ")
   text = text:gsub("^%s+", ""):gsub("%s+$", "")
   if #text > 240 then
-    text = core.truncate_utf8(text, 240)
+    text = base_ids.truncate_utf8(text, 240)
   end
   return text
 end
