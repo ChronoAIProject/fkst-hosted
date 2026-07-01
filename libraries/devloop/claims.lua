@@ -377,7 +377,7 @@ end
 
 function C.claim_required_payload(M, source_ref)
   local normalized = base_ids.normalize_source_ref(source_ref)
-  local repo, issue_number = M.parse_issue_source_ref(normalized)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(normalized)
   if repo == nil or issue_number == nil then
     return nil
   end

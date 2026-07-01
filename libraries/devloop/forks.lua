@@ -135,7 +135,7 @@ local function fork_origin_fact_from_text(core, text)
       kind = marker:match('source_ref_kind="([^"]+)"'),
       ref = marker:match('source_ref="([^"]+)"'),
     }
-    local repo, issue_number = core.parse_issue_source_ref(source_ref)
+    local repo, issue_number = devloop_base.parse_issue_source_ref(source_ref)
     if repo ~= nil and issue_number ~= nil then
       return {
         repo = repo,
@@ -167,7 +167,7 @@ function F.fork_origin_fact(core, entity, managed)
   local title_issue = tostring(entity.title or ""):match("^Fork of #(%d+):")
   if title_issue ~= nil then
     local source_ref = base_ids.issue_source_ref(entity.repo, title_issue)
-    local repo, issue_number = core.parse_issue_source_ref(source_ref)
+    local repo, issue_number = devloop_base.parse_issue_source_ref(source_ref)
     if repo ~= nil and issue_number ~= nil then
       return {
         repo = repo,

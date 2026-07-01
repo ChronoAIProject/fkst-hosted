@@ -61,7 +61,7 @@ local function origin_from_pr(repo, pr_number, current_pr)
   if origin ~= nil then
     return origin, true
   end
-  return core.pr_native_origin(repo, pr_number, current_pr), false
+  return entity_lib.pr_native_origin(repo, pr_number, current_pr), false
 end
 
 local function origin_matches_pr(origin, current_pr, repo, branches, require_issue_backing)

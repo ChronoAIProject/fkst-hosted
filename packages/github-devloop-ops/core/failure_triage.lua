@@ -48,7 +48,7 @@ local function normalized_fact(payload)
   else
     normalized_source_ref = base_ids.normalize_source_ref(source_ref)
   end
-  local repo, issue_number = M.parse_issue_source_ref(normalized_source_ref)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(normalized_source_ref)
   local parent_target
   if repo ~= nil then
     parent_target = {

@@ -205,7 +205,7 @@ local function act_intake_judge(event)
   end
 
   core.log_entry("intake_judge", event, candidate.proposal_id, candidate.dedup_key)
-  local repo, issue_number = core.parse_issue_source_ref(candidate.source_ref)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(candidate.source_ref)
   if repo == nil then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(source_ref)", "invalid source_ref")
     return

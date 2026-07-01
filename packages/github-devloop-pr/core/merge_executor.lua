@@ -193,7 +193,7 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
 
   local current_origin = m_facts.pr_origin_fact(core, pr.comments)
   if current_origin == nil then
-    current_origin = core.pr_native_origin(repo, merge_ready.pr_number, pr)
+    current_origin = entity_lib.pr_native_origin(repo, merge_ready.pr_number, pr)
   end
   local origin_issue_matches = (issue_number == nil and current_origin.pr_native == true)
     or tostring(current_origin.issue_number) == tostring(issue_number)
@@ -417,7 +417,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin == nil then
-    origin = core.pr_native_origin(repo, merge_ready.pr_number, current_pr)
+    origin = entity_lib.pr_native_origin(repo, merge_ready.pr_number, current_pr)
   end
   if origin.proposal_id ~= merge_ready.proposal_id
     or origin.repo ~= repo
@@ -649,7 +649,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     validate_rechecked_pr = function(rechecked_pr)
       local recheck_origin = m_facts.pr_origin_fact(core, rechecked_pr.comments)
       if recheck_origin == nil then
-        recheck_origin = core.pr_native_origin(repo, merge_ready.pr_number, rechecked_pr)
+        recheck_origin = entity_lib.pr_native_origin(repo, merge_ready.pr_number, rechecked_pr)
       end
       local recheck_origin_issue_matches = (issue_number == nil and recheck_origin.pr_native == true)
         or tostring(recheck_origin.issue_number) == tostring(issue_number)

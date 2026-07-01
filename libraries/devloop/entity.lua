@@ -231,7 +231,7 @@ function C.implement_lock_key(M, proposal_id)
   return C.transition_lock_key(M, proposal_id)
 end
 
-function C.pr_native_origin(M, repo, pr_number, pr)
+function C.pr_native_origin(repo, pr_number, pr)
   return {
     proposal_id = C.pr_proposal_id(repo, pr_number),
     repo = repo,

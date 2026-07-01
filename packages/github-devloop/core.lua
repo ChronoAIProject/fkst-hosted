@@ -27,7 +27,6 @@ M.parse_name_only_paths = function(...) return base.parse_name_only_paths(M, ...
 M.configure_trusted_bot_login = function(...) return base.configure_trusted_bot_login(M, ...) end
 M.assert_trusted_bot_configured = function(...) return base.assert_trusted_bot_configured(M, ...) end
 M.safe_updated_at = function(...) return base.safe_updated_at(M, ...) end
-M.parse_issue_source_ref = function(...) return base.parse_issue_source_ref(M, ...) end
 M.is_safe_proposal_ref = function(...) return base.is_safe_proposal_ref(M, ...) end
 M.is_safe_consensus_result_ref = function(...) return base.is_safe_consensus_result_ref(M, ...) end
 M.is_safe_pr_review_result_ref = function(...) return base.is_safe_pr_review_result_ref(M, ...) end
@@ -202,7 +201,6 @@ M.review_result_lock_key = function(...) return entity.review_result_lock_key(M,
 M.review_lock_key = function(...) return entity.review_lock_key(M, ...) end
 M.loop_lock_key = function(...) return entity.loop_lock_key(M, ...) end
 M.implement_lock_key = function(...) return entity.implement_lock_key(M, ...) end
-M.pr_native_origin = function(...) return entity.pr_native_origin(M, ...) end
 require("core.implement_attempt").install(M)
 require("core.ratchet_slice_ledger").install(M)
 require("core.dependencies").install(M)

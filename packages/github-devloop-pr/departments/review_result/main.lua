@@ -60,7 +60,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
   local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin == nil then
-    origin = core.pr_native_origin(repo, pr_number, current_pr)
+    origin = entity_lib.pr_native_origin(repo, pr_number, current_pr)
   end
   if origin.repo ~= repo then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(repo)", "pr-origin repo mismatch")

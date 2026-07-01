@@ -736,7 +736,7 @@ local function act_fix(event)
 
     local origin = m_facts.pr_origin_fact(core, current_pr.comments)
     if origin == nil then
-      origin = core.pr_native_origin(repo, fix.pr_number, current_pr)
+      origin = entity_lib.pr_native_origin(repo, fix.pr_number, current_pr)
     end
     if origin.proposal_id ~= fix.proposal_id
       or origin.repo ~= repo

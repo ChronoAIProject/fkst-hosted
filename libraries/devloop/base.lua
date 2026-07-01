@@ -291,7 +291,7 @@ function C.parse_pr_source_ref(source_ref)
   return repo, pr_number
 end
 
-function C.parse_issue_source_ref(M, source_ref)
+function C.parse_issue_source_ref(source_ref)
   if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
     return nil
   end

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
@@ -12,7 +13,7 @@ function C.is_supported_intake_candidate(M, payload)
     or not source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len) then
     return false
   end
-  local repo, issue_number = M.parse_issue_source_ref(payload.source_ref)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(payload.source_ref)
   return repo ~= nil
     and issue_number ~= nil
     and tostring(repo) == tostring(payload.repo)

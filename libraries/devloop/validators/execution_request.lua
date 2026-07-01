@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local execution_start = require("devloop.execution_start")
@@ -15,7 +16,7 @@ function C.is_supported_execution_request(M, payload)
     or (payload.context ~= nil and type(payload.context) ~= "table") then
     return false
   end
-  local repo, issue_number = M.parse_issue_source_ref(payload.source_ref)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(payload.source_ref)
   return repo ~= nil
     and issue_number ~= nil
     and tostring(payload.proposal_id) == base_ids.proposal_id(repo, issue_number)

@@ -74,7 +74,7 @@ local function act_execute_start(event)
   end
 
   core.log_entry("execute_start", event, request.proposal_id, request.dedup_key)
-  local repo, issue_number = core.parse_issue_source_ref(request.source_ref)
+  local repo, issue_number = devloop_base.parse_issue_source_ref(request.source_ref)
   if repo == nil then
     core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(source_ref)", "invalid source_ref")
     return
