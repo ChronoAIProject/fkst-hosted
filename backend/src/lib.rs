@@ -10,6 +10,9 @@ pub mod config;
 // the same `engine` name so every existing `crate::engine::*` /
 // `fkst_control_plane::engine::*` path keeps resolving unchanged.
 pub mod engine;
+// Named-environment / install-validation config knobs (`FKST_ENV_*`, issue
+// #338 §6.1). Config surface only — no behaviour is wired to these yet.
+pub mod env_config;
 pub mod error;
 pub mod github_app;
 // GitHub-token identity verification + the `GithubUser` axum extractor (PR4a):
