@@ -78,6 +78,11 @@ pub struct SessionSpec {
     /// The dedicated branch the pod commits its `.fkst/log/<run_key>.log`
     /// checkpoints to (e.g. `fkst/session-<id>`), keeping the code PR clean.
     pub log_branch: String,
+    /// The resolved named environment's install commands, run as root before the
+    /// agent starts. Empty when the session uses no environment. `#[serde(default)]`
+    /// keeps a spec serialized before this field existed deserializable.
+    #[serde(default)]
+    pub install: Vec<String>,
 }
 
 #[cfg(test)]
@@ -101,6 +106,7 @@ mod tests {
             },
             package_names: vec!["web".into()],
             log_branch: "fkst/session-x".into(),
+            install: vec!["apt-get install -y jq".into()],
         }
     }
 
@@ -134,6 +140,21 @@ mod tests {
         let json = serde_json::to_string(&spec).unwrap();
         let back: SessionSpec = serde_json::from_str(&json).unwrap();
         assert_eq!(spec, back);
+    }
+
+    #[test]
+    fn session_spec_without_install_defaults_to_empty() {
+        // A spec serialized before `install` existed omits the field entirely;
+        // `#[serde(default)]` must let it deserialize with an empty install list.
+        let mut value = serde_json::to_value(sample()).unwrap();
+        value.as_object_mut().unwrap().remove("install");
+        assert!(
+            value.get("install").is_none(),
+            "the install field is removed for this test"
+        );
+        let spec: SessionSpec =
+            serde_json::from_value(value).expect("deserializes without install");
+        assert_eq!(spec.install, Vec::<String>::new());
     }
 
     #[test]
