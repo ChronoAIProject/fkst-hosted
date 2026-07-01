@@ -1,0 +1,59 @@
+# NetworkPolicy enforcing the session-pod hard-isolation rule (#338 R3): a
+# session pod or an env-validation pod may reach ONLY the external internet
+# (GitHub, the LLM, apt mirrors, package registries) and NOTHING inside the
+# cluster — not the kube-apiserver, not kube-dns, not sibling pods (NyxID, the
+# control plane, other sessions), not any ClusterIP.
+#
+# ENFORCEMENT CAVEAT: a NetworkPolicy is only enforced by a CNI that implements
+# it (Calico, Cilium, ...). docker-desktop's default CNI does NOT enforce it, so
+# on a local cluster this manifest is a no-op. The ALWAYS-ON guarantee (every
+# CNI) is that the pods carry no ServiceAccount token
+# (automountServiceAccountToken:false) and the runner SA is zero-RBAC, so a pod
+# cannot authenticate to anything. On a real cluster this policy is the network
+# half of the rule.
+#
+# OPERATOR ACTION REQUIRED: replace the two `except` CIDRs below with your
+# cluster's REAL pod + service CIDRs, or the egress carve-out will not actually
+# exclude in-cluster traffic. Find them with, e.g.:
+#   kubectl cluster-info dump | grep -E 'cluster-cidr|service-cluster-ip-range'
+# (namespace is intentionally omitted — kustomize sets it for every resource.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fkst-session-isolation
+  labels:
+    app.kubernetes.io/part-of: fkst-hosted
+spec:
+  # Applies to session pods AND env-validation pods (both carry a component
+  # label the launcher sets), never the control plane.
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["session", "env-validation"]
+  policyTypes: [Ingress, Egress]
+  # Deny ALL inbound — no sibling pod may connect to a session/validation pod.
+  ingress: []
+  egress:
+    # Rule A — external DNS ONLY (in-cluster kube-dns is blocked by rule B).
+    - to:
+        - ipBlock: { cidr: 1.1.1.1/32 }
+        - ipBlock: { cidr: 8.8.8.8/32 }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    # Rule B — the public internet only (GitHub / LLM / apt / packages). The
+    # `except` CIDRs carve OUT everything cluster-internal + node/cloud metadata:
+    #   pod CIDR      -> sibling pods (NyxID, control plane, other sessions)
+    #   service CIDR  -> all ClusterIPs incl. the apiserver + kube-dns
+    #   169.254/16    -> link-local / cloud instance metadata (SSRF)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.244.0.0/16    # FKST_CLUSTER_POD_CIDR     — REPLACE with real pod CIDR
+              - 10.96.0.0/12     # FKST_CLUSTER_SERVICE_CIDR — REPLACE with real service CIDR
+              - 169.254.0.0/16   # link-local / metadata
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 80 }

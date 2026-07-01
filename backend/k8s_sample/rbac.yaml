@@ -12,7 +12,10 @@ metadata:
     app.kubernetes.io/name: fkst-control-plane
     app.kubernetes.io/part-of: fkst-hosted
 ---
-# Session Job pods run as this ServiceAccount (FKST_POD_SERVICE_ACCOUNT).
+# Session Job pods AND env-validation pods run as this ServiceAccount
+# (FKST_POD_SERVICE_ACCOUNT). It is DELIBERATELY zero-RBAC: it has NO Role and NO
+# RoleBinding, and one must NEVER be added (#338 R3 hard rule). Combined with the
+# pods' automountServiceAccountToken:false, even a leaked identity grants nothing.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -28,14 +31,14 @@ metadata:
   labels:
     app.kubernetes.io/part-of: fkst-hosted
 rules:
-  # Per-session credentials: created before the Job, mounted 0400, patched to
-  # rotate the short-lived NyxID token; ownerReferenced to the Job for cascade GC.
-  # ALSO backs the per-user secret store (`fkst-user-<id>` Secret, PR4a).
+  # Per-session credentials: created before the Job, mounted 0400, ownerReferenced
+  # to the Job for cascade GC. ALSO backs the named-environment secret store
+  # (`fkst-env-<id>-<name>` Secret, #338).
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
-  # Per-user environment store: one `fkst-user-<id>` ConfigMap per user (PR4a),
-  # merge-upserted / read / key-deleted via the GitHub-token user-store API.
+  # Named-environment store: one `fkst-env-<id>-<name>` ConfigMap per environment
+  # (#338), created/read/deleted via the GitHub-token environments API.
   - apiGroups: [""]
     resources: ["configmaps"]
     verbs: ["create", "get", "list", "watch", "delete", "update", "patch"]
@@ -44,10 +47,17 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch", "delete"]
-  # Read pod status for richer failure diagnostics + the rich session GET view.
+  # Pods: read for failure diagnostics + the session GET view, AND create/delete
+  # the ephemeral env-VALIDATION pod that runs an environment's install commands
+  # before it is persisted (#338 R2). These verbs belong to the CONTROL PLANE SA
+  # only — never to `fkst-session-runner`, which stays zero-RBAC (see below).
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Read the validation pod's logs to capture the per-command install verdict.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

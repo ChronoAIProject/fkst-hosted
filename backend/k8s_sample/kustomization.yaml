@@ -18,6 +18,9 @@ resources:
   - service.yaml
   - deployment.yaml
   - pdb.yaml
+  # Session/validation-pod network isolation (#338 R3). No-op on a CNI that does
+  # not enforce NetworkPolicy (e.g. docker-desktop); set the real CIDRs first.
+  - networkpolicy.yaml
 # Image seam: one image runs BOTH the control plane and each session pod
 # (`run-session`). Keep FKST_POD_IMAGE in configmap.yaml in lockstep.
 images:
