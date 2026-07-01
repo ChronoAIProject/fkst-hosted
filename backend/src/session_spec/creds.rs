@@ -5,6 +5,7 @@
 //! stringly-pathed at each call site) means the writer (the Job/Secret launcher)
 //! and the reader (the run-session subcommand) can never disagree on a filename.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The GitHub App installation token (`ghs_…`): clone + git ops + log commits.
@@ -29,6 +30,30 @@ pub const USER_ENV_PREFIX: &str = "userenv.";
 
 /// Default mount path of the per-session credential Secret volume inside the pod.
 pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
+
+/// Assemble the credential data keys carried by a per-session Kubernetes Secret:
+/// the rotating [`GITHUB_TOKEN_FILE`], the static [`LLM_API_KEY_FILE`], and one
+/// [`USER_ENV_PREFIX`]`<KEY>` entry per injected per-user env var.
+///
+/// Both launchers build their Secret on top of this map — the Model-A Job Secret
+/// additionally writes the serialized `SessionSpec`, the Model-B session-Pod
+/// Secret carries only these creds — so the credential layout lives in exactly
+/// one place and the two can never diverge. Callers expose their own secret
+/// values before calling, which keeps this module free of a `secrecy`
+/// dependency.
+pub fn credential_secret_data<'a>(
+    github_token: &str,
+    llm_api_key: &str,
+    user_env: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> BTreeMap<String, String> {
+    let mut data = BTreeMap::new();
+    data.insert(GITHUB_TOKEN_FILE.to_string(), github_token.to_string());
+    data.insert(LLM_API_KEY_FILE.to_string(), llm_api_key.to_string());
+    for (key, value) in user_env {
+        data.insert(format!("{USER_ENV_PREFIX}{key}"), value.to_string());
+    }
+    data
+}
 
 /// Resolves credential file paths under a mounted Secret volume base directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +164,26 @@ mod tests {
         std::fs::write(dir.path().join(GITHUB_TOKEN_FILE), "ghs").expect("write token");
         let layout = CredsLayout::new(dir.path());
         assert!(layout.user_env_files().expect("list").is_empty());
+    }
+
+    #[test]
+    fn credential_secret_data_carries_the_base_creds_and_user_env() {
+        let user_env = [("FOO", "foo-val"), ("API_TOKEN", "tok-val")];
+        let data = credential_secret_data("ghs_json", "sk-key", user_env);
+        assert_eq!(data["github-token"], "ghs_json");
+        assert_eq!(data["llm-api-key"], "sk-key");
+        assert_eq!(data["userenv.FOO"], "foo-val");
+        assert_eq!(data["userenv.API_TOKEN"], "tok-val");
+        // Exactly the two base keys plus the two user-env keys — nothing else.
+        assert_eq!(data.len(), 4);
+    }
+
+    #[test]
+    fn credential_secret_data_with_no_user_env_carries_only_the_base_creds() {
+        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty());
+        assert_eq!(data.len(), 2);
+        assert!(data.contains_key("github-token"));
+        assert!(data.contains_key("llm-api-key"));
     }
 
     #[test]
