@@ -1,4 +1,11 @@
-//! `/api/v1/users/me/*`: the per-user environment + secret store API (PR4a).
+//! `/api/v1/users/me/env`: the per-user environment + secret store API (PR4a).
+//!
+//! ONE endpoint, two methods:
+//! - `GET /api/v1/users/me/env` — read the caller's variables (values) + secret
+//!   key NAMES (secret *values* are never serialized into any response).
+//! - `PATCH /api/v1/users/me/env` — apply all mutations in a single body:
+//!   `variables` to upsert (non-secret), `secrets` to upsert (write-only), and
+//!   `delete` (key names to remove from either store). Returns the updated view.
 //!
 //! Identity is the GitHub token. Every handler takes the [`GithubUser`]
 //! extractor, which trades the request's `Authorization: Bearer <github token>`
@@ -7,22 +14,16 @@
 //! selects the `fkst-user-<id>` ConfigMap/Secret, so a caller can read or write
 //! their OWN store and no other.
 //!
-//! Secret values are write-only at this layer: a `PUT .../secrets` returns the
-//! resulting key NAMES, and `GET .../env` returns the variable values plus the
-//! secret key names — the secret *values* are never serialized into any
-//! response.
-//!
 //! Validation: every key must be a valid env var name (`^[A-Za-z_][A-Za-z0-9_]*$`,
 //! which is also a valid Kubernetes data key); the per-request entry count is
 //! capped by `FKST_HOSTED_VAULT_ENTRIES_PER_SCOPE_CAP` and each value's byte size
-//! by `FKST_HOSTED_VAULT_VALUE_BYTE_CAP` (reused from the existing vault caps).
-//! A violation is `422` via the standard [`ErrorEnvelope`].
+//! by `FKST_HOSTED_VAULT_VALUE_BYTE_CAP`. A violation is `422` via the standard
+//! [`ErrorEnvelope`].
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::extract::State;
 use axum::Json;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -36,35 +37,26 @@ use crate::github_identity::GithubUser;
 use crate::k8s::{user_store, KubeClient};
 use crate::state::AppState;
 
-/// `PUT /users/me/env` body: variables to merge-upsert.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct PutEnvRequest {
+/// `PATCH /users/me/env` body — every field is OPTIONAL, so one call can upsert
+/// variables, upsert secrets, and/or delete keys. Deletes are applied first,
+/// then the upserts, so a key present in both `delete` and a `variables`/`secrets`
+/// map ends up SET.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+pub struct EnvPatchRequest {
     /// Non-secret env variables (`NAME` -> value) to add/overwrite.
+    #[serde(default)]
     pub variables: BTreeMap<String, String>,
-}
-
-/// The resulting non-secret variable map (returned by `PUT`/`GET`).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct EnvVariablesResponse {
-    pub variables: BTreeMap<String, String>,
-}
-
-/// `PUT /users/me/secrets` body: secrets to merge-upsert. Values are
-/// write-only — they are NEVER echoed back in any response.
-#[derive(Debug, Deserialize, ToSchema)]
-pub struct PutSecretsRequest {
-    /// Secret env variables (`NAME` -> value) to add/overwrite.
+    /// Secret env variables (`NAME` -> value) to add/overwrite. Write-only —
+    /// the values are NEVER echoed back in any response.
+    #[serde(default)]
     pub secrets: BTreeMap<String, String>,
+    /// Key names to remove (from the variable store AND the secret store).
+    #[serde(default)]
+    pub delete: Vec<String>,
 }
 
-/// The NAMES of the user's secret keys (never the values).
-#[derive(Debug, Serialize, ToSchema)]
-pub struct SecretKeysResponse {
-    pub secret_keys: Vec<String>,
-}
-
-/// `GET /users/me/env` view: the non-secret variable values plus the secret key
-/// NAMES. Secret values are deliberately absent.
+/// `GET`/`PATCH /users/me/env` response: the non-secret variable values plus the
+/// secret key NAMES. Secret values are deliberately absent.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct UserEnvView {
     pub variables: BTreeMap<String, String>,
@@ -131,6 +123,16 @@ async fn user_store_client(state: &AppState) -> Result<KubeClient, AppError> {
         })
 }
 
+/// Read the caller's full store view (variable values + secret key names).
+async fn read_view(kube: &KubeClient, user_id: i64) -> Result<UserEnvView, AppError> {
+    let variables = user_store::get_env(kube, user_id).await?;
+    let secret_keys = user_store::get_secret_keys(kube, user_id).await?;
+    Ok(UserEnvView {
+        variables,
+        secret_keys,
+    })
+}
+
 /// `GET /api/v1/users/me/env` — the caller's variables + secret key names.
 #[utoipa::path(
     get,
@@ -148,157 +150,61 @@ async fn get_env(
     user: GithubUser,
 ) -> Result<Json<UserEnvView>, AppError> {
     let kube = user_store_client(&state).await?;
-    let variables = user_store::get_env(&kube, user.id).await?;
-    let secret_keys = user_store::get_secret_keys(&kube, user.id).await?;
-    Ok(Json(UserEnvView {
-        variables,
-        secret_keys,
-    }))
+    Ok(Json(read_view(&kube, user.id).await?))
 }
 
-/// `PUT /api/v1/users/me/env` — merge-upsert the caller's variables.
+/// `PATCH /api/v1/users/me/env` — upsert variables/secrets and/or delete keys in
+/// one call. Returns the updated view.
 #[utoipa::path(
-    put,
+    patch,
     path = "/users/me/env",
     tag = "users",
-    operation_id = "put_user_env",
-    request_body = PutEnvRequest,
+    operation_id = "patch_user_env",
+    request_body = EnvPatchRequest,
     responses(
-        (status = 200, description = "The resulting variable map", body = EnvVariablesResponse),
+        (status = 200, description = "The updated variables + secret key names", body = UserEnvView),
         (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
         (status = 422, description = "Invalid key, oversize value, or cap exceeded", body = ErrorEnvelope),
         (status = 503, description = "User store backend unavailable", body = ErrorEnvelope),
     )
 )]
-async fn put_env(
+async fn patch_env(
     State(state): State<AppState>,
     user: GithubUser,
-    Json(body): Json<PutEnvRequest>,
-) -> Result<Json<EnvVariablesResponse>, AppError> {
+    Json(body): Json<EnvPatchRequest>,
+) -> Result<Json<UserEnvView>, AppError> {
+    // Validate everything up front (fail-closed before any write).
     validate_entries(&body.variables, &state.config)?;
-    let kube = user_store_client(&state).await?;
-    let variables = user_store::merge_env(
-        &kube,
-        user.id,
-        &user.login,
-        body.variables,
-        state.config.vault_entries_per_scope_cap,
-    )
-    .await?;
-    tracing::info!(github_user_id = user.id, "user store: env upserted");
-    Ok(Json(EnvVariablesResponse { variables }))
-}
-
-/// `PUT /api/v1/users/me/secrets` — merge-upsert the caller's secrets.
-#[utoipa::path(
-    put,
-    path = "/users/me/secrets",
-    tag = "users",
-    operation_id = "put_user_secrets",
-    request_body = PutSecretsRequest,
-    responses(
-        (status = 200, description = "The resulting secret key names (never values)", body = SecretKeysResponse),
-        (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
-        (status = 422, description = "Invalid key, oversize value, or cap exceeded", body = ErrorEnvelope),
-        (status = 503, description = "User store backend unavailable", body = ErrorEnvelope),
-    )
-)]
-async fn put_secrets(
-    State(state): State<AppState>,
-    user: GithubUser,
-    Json(body): Json<PutSecretsRequest>,
-) -> Result<Json<SecretKeysResponse>, AppError> {
     validate_entries(&body.secrets, &state.config)?;
-    let kube = user_store_client(&state).await?;
-    let secret_keys = user_store::merge_secrets(
-        &kube,
-        user.id,
-        &user.login,
-        body.secrets,
-        state.config.vault_entries_per_scope_cap,
-    )
-    .await?;
-    tracing::info!(github_user_id = user.id, "user store: secrets upserted");
-    Ok(Json(SecretKeysResponse { secret_keys }))
-}
+    for key in &body.delete {
+        validate_key(key)?;
+    }
 
-/// `DELETE /api/v1/users/me/env/{key}` — remove one variable (idempotent).
-///
-/// A missing object or missing key is treated as already-gone and still returns
-/// `204` — the operation is safe to retry (e.g. on a redelivered request).
-#[utoipa::path(
-    delete,
-    path = "/users/me/env/{key}",
-    tag = "users",
-    operation_id = "delete_user_env_key",
-    params(
-        ("key" = String, Path, description = "Env var name to remove"),
-    ),
-    responses(
-        (status = 204, description = "Key removed or already absent (idempotent)"),
-        (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
-        (status = 422, description = "Invalid key", body = ErrorEnvelope),
-        (status = 503, description = "User store backend unavailable", body = ErrorEnvelope),
-    )
-)]
-async fn delete_env(
-    State(state): State<AppState>,
-    user: GithubUser,
-    Path(key): Path<String>,
-) -> Result<StatusCode, AppError> {
-    validate_key(&key)?;
+    let cap = state.config.vault_entries_per_scope_cap;
     let kube = user_store_client(&state).await?;
-    let removed = user_store::delete_env_key(&kube, user.id, &key).await?;
-    tracing::info!(
-        github_user_id = user.id,
-        removed,
-        "user store: env key delete"
-    );
-    Ok(StatusCode::NO_CONTENT)
-}
 
-/// `DELETE /api/v1/users/me/secrets/{key}` — remove one secret (idempotent).
-#[utoipa::path(
-    delete,
-    path = "/users/me/secrets/{key}",
-    tag = "users",
-    operation_id = "delete_user_secret_key",
-    params(
-        ("key" = String, Path, description = "Secret env var name to remove"),
-    ),
-    responses(
-        (status = 204, description = "Key removed or already absent (idempotent)"),
-        (status = 401, description = "Missing/invalid GitHub token", body = ErrorEnvelope),
-        (status = 422, description = "Invalid key", body = ErrorEnvelope),
-        (status = 503, description = "User store backend unavailable", body = ErrorEnvelope),
-    )
-)]
-async fn delete_secrets(
-    State(state): State<AppState>,
-    user: GithubUser,
-    Path(key): Path<String>,
-) -> Result<StatusCode, AppError> {
-    validate_key(&key)?;
-    let kube = user_store_client(&state).await?;
-    let removed = user_store::delete_secret_key(&kube, user.id, &key).await?;
-    tracing::info!(
-        github_user_id = user.id,
-        removed,
-        "user store: secret key delete"
-    );
-    Ok(StatusCode::NO_CONTENT)
+    // Deletes first (from BOTH stores; idempotent), then upserts, so a key in
+    // both `delete` and a set map ends up set.
+    for key in &body.delete {
+        user_store::delete_env_key(&kube, user.id, key).await?;
+        user_store::delete_secret_key(&kube, user.id, key).await?;
+    }
+    if !body.variables.is_empty() {
+        user_store::merge_env(&kube, user.id, &user.login, body.variables, cap).await?;
+    }
+    if !body.secrets.is_empty() {
+        user_store::merge_secrets(&kube, user.id, &user.login, body.secrets, cap).await?;
+    }
+    tracing::info!(github_user_id = user.id, "user store: env patched");
+
+    Ok(Json(read_view(&kube, user.id).await?))
 }
 
 /// The user-store router (nested under `/api/v1`). Open at the app layer — the
 /// per-request GitHub token IS the auth (the [`GithubUser`] extractor), so no
-/// middleware and no documented security scheme.
+/// middleware and no documented security scheme. GET + PATCH share one path.
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new()
-        // GET + PUT share the same path, so they group into one `routes!`.
-        .routes(routes!(get_env, put_env))
-        .routes(routes!(put_secrets))
-        .routes(routes!(delete_env))
-        .routes(routes!(delete_secrets))
+    OpenApiRouter::new().routes(routes!(get_env, patch_env))
 }
 
 #[cfg(test)]
@@ -368,39 +274,36 @@ mod tests {
         assert!(matches!(err, AppError::Unprocessable(_)));
     }
 
-    // ---- DTO round-trips -------------------------------------------------------
+    // ---- request body -------------------------------------------------------
 
     #[test]
-    fn put_env_request_deserializes_from_variables_object() {
-        let req: PutEnvRequest =
+    fn patch_request_deserializes_all_fields() {
+        let req: EnvPatchRequest = serde_json::from_value(serde_json::json!({
+            "variables": { "FOO": "bar" },
+            "secrets": { "TOKEN": "s3cr3t" },
+            "delete": ["OLD"]
+        }))
+        .expect("deserializes");
+        assert_eq!(req.variables["FOO"], "bar");
+        assert_eq!(req.secrets["TOKEN"], "s3cr3t");
+        assert_eq!(req.delete, vec!["OLD".to_string()]);
+    }
+
+    #[test]
+    fn patch_request_fields_are_optional() {
+        // A body with only `variables` leaves `secrets`/`delete` empty (not an
+        // error) — one endpoint supports partial mutations.
+        let req: EnvPatchRequest =
             serde_json::from_value(serde_json::json!({ "variables": { "FOO": "bar" } }))
                 .expect("deserializes");
         assert_eq!(req.variables["FOO"], "bar");
-    }
+        assert!(req.secrets.is_empty());
+        assert!(req.delete.is_empty());
 
-    #[test]
-    fn put_secrets_request_deserializes_from_secrets_object() {
-        let req: PutSecretsRequest =
-            serde_json::from_value(serde_json::json!({ "secrets": { "TOKEN": "s3cr3t" } }))
-                .expect("deserializes");
-        assert_eq!(req.secrets["TOKEN"], "s3cr3t");
-    }
-
-    #[test]
-    fn env_variables_response_serializes_under_variables() {
-        let mut variables = BTreeMap::new();
-        variables.insert("FOO".to_string(), "bar".to_string());
-        let json = serde_json::to_value(EnvVariablesResponse { variables }).expect("serializes");
-        assert_eq!(json["variables"]["FOO"], "bar");
-    }
-
-    #[test]
-    fn secret_keys_response_serializes_names_only() {
-        let json = serde_json::to_value(SecretKeysResponse {
-            secret_keys: vec!["TOKEN".to_string(), "API_KEY".to_string()],
-        })
-        .expect("serializes");
-        assert_eq!(json["secret_keys"], serde_json::json!(["TOKEN", "API_KEY"]));
+        // An empty body is valid (a no-op patch).
+        let empty: EnvPatchRequest =
+            serde_json::from_value(serde_json::json!({})).expect("deserializes");
+        assert!(empty.variables.is_empty() && empty.secrets.is_empty() && empty.delete.is_empty());
     }
 
     #[test]
