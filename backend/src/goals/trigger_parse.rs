@@ -9,12 +9,13 @@
 //! ignored) is identical to the `fkst-goal` parser.
 //!
 //! Scope boundary: this parser *structures + validates the shape* of the launch
-//! inputs. It does NOT resolve package roots to concrete packages or dirs, nor
-//! reconcile the work label against GitHub — that is deferred to the launcher.
-//! What it DOES enforce is the safety-relevant grammar: a DNS-label session name,
-//! path-safe package roots (no absolute path, no `..` traversal), and a
-//! single-value comma-free work label (the substrate reads it from a
-//! comma-separated env var).
+//! inputs. It does NOT fetch the referenced packages, resolve them to concrete
+//! directories, nor reconcile the work label against GitHub — that is deferred to
+//! the launcher and a later fetch/reachability pass. What it DOES enforce is the
+//! safety-relevant grammar: a DNS-label session name, fully-qualified GitHub
+//! package references (`owner/repo@ref:path`) whose ref and path are path-safe (no
+//! absolute path, no `..` traversal), and a single-value comma-free work label
+//! (the substrate reads it from a comma-separated env var).
 //!
 //! Secret hygiene: this module logs nothing and never echoes section content.
 
@@ -30,7 +31,7 @@ use crate::goals::section_parse::{
 
 /// The canonical `fkst-substrate-trigger` section headings, in template order.
 const HEADING_SESSION_NAME: &str = "### Session Name";
-const HEADING_PACKAGE_ROOTS: &str = "### Package Roots";
+const HEADING_PACKAGES: &str = "### Packages";
 const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 
@@ -38,26 +39,56 @@ const HEADING_ENVIRONMENT: &str = "### Environment";
 /// launcher can apply it verbatim.
 const MAX_WORK_LABEL_LEN: usize = 50;
 
-/// Anchored package-root pattern: the safe token set a package root may draw from
-/// (letters, digits, `.`, `_`, `/`, `-`). The leading-`/` and `..`-segment checks
-/// run separately so their 422 messages can be specific.
-fn package_root_regex() -> &'static Regex {
+/// The expected form of one `### Packages` line, echoed in every 422 so the author
+/// can self-correct without leaving the issue.
+const PACKAGE_REF_FORM: &str = "owner/repo@ref:path/to/package";
+
+/// Anchored owner/repo-segment pattern: the safe token set a single `owner` or
+/// `repo` segment of a package reference may draw from (letters, digits, `.`, `_`,
+/// `-`). A `/` is deliberately absent — it separates owner from repo, so neither
+/// segment may itself contain one.
+fn owner_repo_segment_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new("^[A-Za-z0-9._/-]+$").expect("static package root regex"))
+    RE.get_or_init(|| Regex::new("^[A-Za-z0-9_.-]+$").expect("static owner/repo segment regex"))
+}
+
+/// Anchored pattern for the `ref` and `path` parts of a package reference: the
+/// safe token set (letters, digits, `.`, `_`, `/`, `-`). The leading-`/` and
+/// `..`-segment checks run separately so their 422 messages can be specific.
+fn ref_path_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new("^[A-Za-z0-9_./-]+$").expect("static ref/path regex"))
+}
+
+/// A fully-qualified GitHub package reference parsed from one `### Packages` line,
+/// of the form `owner/repo@ref:path`. Every part is shape-validated here; fetching
+/// the package and checking reachability is deferred to a later pass. (`git_ref`
+/// rather than `ref` because `ref` is a Rust keyword.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageRef {
+    /// The GitHub repository owner (user or org) — e.g. `ChronoAIProject`.
+    pub owner: String,
+    /// The GitHub repository name — e.g. `fkst-packages`.
+    pub repo: String,
+    /// The git ref (branch, tag, or SHA) the package is fetched at — e.g. `dev`.
+    pub git_ref: String,
+    /// The repo-relative path to the package directory — e.g.
+    /// `packages/github-devloop`.
+    pub path: String,
 }
 
 /// The structured launch inputs parsed from an `fkst-substrate-trigger` issue
-/// body. Every field is shape-validated; semantic resolution (which package a root
-/// names, whether the label exists) is the launcher's job.
+/// body. Every field is shape-validated; semantic resolution (fetching a package,
+/// whether the label exists) is the launcher's job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TriggerSpec {
     /// The session name — a DNS-1123-label-ish token (same rule as an environment
     /// name) so it composes into valid Kubernetes object names downstream.
     pub name: String,
-    /// One package root per non-empty `### Package Roots` line. Each is a path-safe
-    /// token naming a platform package or a repo-relative package directory;
-    /// interpretation is deferred to the launcher.
-    pub package_roots: Vec<String>,
+    /// One [`PackageRef`] per non-empty `### Packages` line, in author order. Each
+    /// is a fully-qualified GitHub package reference (`owner/repo@ref:path`);
+    /// fetching + resolving it is deferred to a later pass.
+    pub packages: Vec<PackageRef>,
     /// The single GitHub work label the launcher applies to drive the session.
     /// Guaranteed ≤ 50 chars and comma-free.
     pub work_label: String,
@@ -70,14 +101,14 @@ pub struct TriggerSpec {
 ///
 /// Returns [`AppError::Unprocessable`] (→ 422) whose message NAMES the offending
 /// section for every malformed case: a missing/mis-shaped `### Session Name`; a
-/// missing/empty/unsafe `### Package Roots`; a missing/mis-shaped `### Work Label`;
+/// missing/empty/mis-shaped `### Packages`; a missing/mis-shaped `### Work Label`;
 /// an invalid `### Environment`; or a duplicate `### ` heading. The 422 (not 400)
 /// matches the template-format contract shared with the `fkst-goal` parser.
 pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     let sections = split_sections(body)?;
 
     let name = parse_session_name(&sections)?;
-    let package_roots = parse_package_roots(&sections)?;
+    let packages = parse_packages(&sections)?;
     let work_label = parse_work_label(&sections)?;
 
     // `### Environment` — OPTIONAL, reusing the shared rule verbatim: absent or
@@ -93,7 +124,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
 
     Ok(TriggerSpec {
         name,
-        package_roots,
+        packages,
         work_label,
         environment,
     })
@@ -124,49 +155,104 @@ fn parse_session_name(sections: &[(String, String)]) -> Result<String, AppError>
     }
 }
 
-/// `### Package Roots` — required; at least one non-empty line, EACH a path-safe
-/// token. A root may not be absolute (leading `/`), may not contain a `..` path
-/// segment, and must draw only from the safe token set. Any violation is a 422
-/// naming the section and the offending value.
-fn parse_package_roots(sections: &[(String, String)]) -> Result<Vec<String>, AppError> {
+/// `### Packages` — required; at least one non-empty line, EACH a fully-qualified
+/// GitHub package reference `owner/repo@ref:path`. A missing/empty section, or any
+/// malformed line, is a 422 naming the section (and, for a malformed line, the
+/// offending value and which part failed).
+fn parse_packages(sections: &[(String, String)]) -> Result<Vec<PackageRef>, AppError> {
     let block = sections
         .iter()
-        .find(|(heading, _)| heading == HEADING_PACKAGE_ROOTS)
+        .find(|(heading, _)| heading == HEADING_PACKAGES)
         .map(|(_, content)| content.as_str())
         .ok_or_else(|| {
-            AppError::Unprocessable("the `### Package Roots` section is required".to_string())
+            AppError::Unprocessable("the `### Packages` section is required".to_string())
         })?;
-    let roots = non_empty_lines(block);
-    if roots.is_empty() {
+    let lines = non_empty_lines(block);
+    if lines.is_empty() {
         return Err(AppError::Unprocessable(
-            "the `### Package Roots` section must list at least one package root".to_string(),
+            "the `### Packages` section must list at least one package".to_string(),
         ));
     }
-    for root in &roots {
-        validate_package_root(root)?;
+    let mut packages = Vec::with_capacity(lines.len());
+    for line in &lines {
+        packages.push(parse_package_ref(line)?);
     }
-    Ok(roots)
+    Ok(packages)
 }
 
-/// Reject a package root that is absolute, escapes via `..`, or contains a
-/// character outside the safe token set. Ordered so the 422 message pins the most
-/// specific reason (absolute path, then traversal, then illegal character).
-fn validate_package_root(root: &str) -> Result<(), AppError> {
+/// Parse one `### Packages` line as a fully-qualified GitHub package reference
+/// `owner/repo@ref:path`. The split is greedy on the FIRST `@` (`owner/repo` vs
+/// `ref:path`) then the FIRST `:` (`ref` vs `path`). Every failure is a 422 that
+/// names the section, echoes the offending value, states which part failed, and
+/// recalls the expected form.
+fn parse_package_ref(value: &str) -> Result<PackageRef, AppError> {
     let reject = |reason: &str| {
         AppError::Unprocessable(format!(
-            "the `### Package Roots` section lists an invalid package root {root:?}: {reason}"
+            "the `### Packages` section lists an invalid package reference {value:?}: {reason}; \
+             expected the form {PACKAGE_REF_FORM}"
         ))
     };
-    if root.starts_with('/') {
-        return Err(reject("must not start with `/`"));
+
+    // Split on the FIRST `@`: everything before is `owner/repo`, everything after
+    // is `ref:path`.
+    let (owner_repo, ref_path) = value
+        .split_once('@')
+        .ok_or_else(|| reject("missing `@` separating `owner/repo` from `ref:path`"))?;
+    // Split `ref:path` on the FIRST `:`: the ref, then the repo-relative path.
+    let (git_ref, path) = ref_path
+        .split_once(':')
+        .ok_or_else(|| reject("missing `:` separating the ref from the path"))?;
+
+    // `owner/repo`: exactly one `/`, each side a non-empty safe segment.
+    if owner_repo.matches('/').count() != 1 {
+        return Err(reject(
+            "the part before `@` must be exactly `owner/repo` with a single `/`",
+        ));
     }
-    if root.split('/').any(|segment| segment == "..") {
-        return Err(reject("must not contain a `..` path segment"));
+    let (owner, repo) = owner_repo
+        .split_once('/')
+        .expect("a single `/` is present after the count check");
+    for (segment, which) in [(owner, "owner"), (repo, "repo")] {
+        if segment.is_empty() {
+            return Err(reject(&format!("the {which} must not be empty")));
+        }
+        if !owner_repo_segment_regex().is_match(segment) {
+            return Err(reject(&format!("the {which} must match ^[A-Za-z0-9_.-]+$")));
+        }
     }
-    if !package_root_regex().is_match(root) {
-        return Err(reject("must match ^[A-Za-z0-9._/-]+$"));
+
+    // `ref`: non-empty, no `..` traversal segment, only the safe token set.
+    if git_ref.is_empty() {
+        return Err(reject("the ref must not be empty"));
     }
-    Ok(())
+    if git_ref.split('/').any(|segment| segment == "..") {
+        return Err(reject("the ref must not contain a `..` path segment"));
+    }
+    if !ref_path_regex().is_match(git_ref) {
+        return Err(reject("the ref must match ^[A-Za-z0-9_./-]+$"));
+    }
+
+    // `path`: non-empty, not absolute, no `..` traversal segment, only the safe
+    // token set. Mirrors the path-safety checks the old Package Roots applied.
+    if path.is_empty() {
+        return Err(reject("the path must not be empty"));
+    }
+    if path.starts_with('/') {
+        return Err(reject("the path must not start with `/`"));
+    }
+    if path.split('/').any(|segment| segment == "..") {
+        return Err(reject("the path must not contain a `..` path segment"));
+    }
+    if !ref_path_regex().is_match(path) {
+        return Err(reject("the path must match ^[A-Za-z0-9_./-]+$"));
+    }
+
+    Ok(PackageRef {
+        owner: owner.to_string(),
+        repo: repo.to_string(),
+        git_ref: git_ref.to_string(),
+        path: path.to_string(),
+    })
 }
 
 /// `### Work Label` — required; EXACTLY ONE non-empty line that is a valid GitHub
@@ -206,178 +292,5 @@ fn parse_work_label(sections: &[(String, String)]) -> Result<String, AppError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A fully-populated body parses to the documented [`TriggerSpec`], preserving
-    /// the package-root order and reading the optional environment.
-    #[test]
-    fn worked_example_parses_all_four_sections() {
-        let body = "\
-### Session Name
-
-my-session
-
-### Package Roots
-
-platform-pkg
-repo/dir/pkg
-
-### Work Label
-
-fkst-cloud
-
-### Environment
-
-prod-env
-";
-        let spec = parse_trigger_issue_body(body).expect("worked example parses");
-        assert_eq!(
-            spec,
-            TriggerSpec {
-                name: "my-session".to_string(),
-                package_roots: vec!["platform-pkg".to_string(), "repo/dir/pkg".to_string()],
-                work_label: "fkst-cloud".to_string(),
-                environment: Some("prod-env".to_string()),
-            }
-        );
-    }
-
-    #[test]
-    fn absent_environment_section_yields_none() {
-        let body = "### Session Name\nsess\n### Package Roots\npkg-a\n### Work Label\nlabel\n";
-        let spec = parse_trigger_issue_body(body).expect("parses without Environment");
-        assert!(spec.environment.is_none());
-    }
-
-    #[test]
-    fn intro_before_first_heading_is_ignored() {
-        let body =
-            "Form intro the user never edits\n\n### Session Name\nsess\n### Package Roots\npkg-a\n### Work Label\nlabel\n";
-        let spec = parse_trigger_issue_body(body).expect("intro ignored");
-        assert_eq!(spec.name, "sess");
-    }
-
-    // ---- Malformed cases (each names the offending section in the 422) ----
-
-    fn err_message(body: &str) -> String {
-        match parse_trigger_issue_body(body) {
-            Err(AppError::Unprocessable(msg)) => msg,
-            other => panic!("expected Unprocessable (422), got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn missing_session_name_is_422_naming_the_section() {
-        let msg = err_message("### Package Roots\npkg-a\n### Work Label\nlabel\n");
-        assert!(msg.contains("Session Name"), "must name the section: {msg}");
-    }
-
-    #[test]
-    fn multiline_session_name_is_422_naming_the_section() {
-        let body =
-            "### Session Name\nfirst\nsecond\n### Package Roots\npkg-a\n### Work Label\nlabel\n";
-        let msg = err_message(body);
-        assert!(msg.contains("Session Name"), "must name the section: {msg}");
-        assert!(msg.contains("exactly one"), "must flag the count: {msg}");
-    }
-
-    #[test]
-    fn invalid_session_name_chars_is_422_naming_the_value() {
-        let body =
-            "### Session Name\nMy_Session\n### Package Roots\npkg-a\n### Work Label\nlabel\n";
-        let msg = err_message(body);
-        assert!(msg.contains("Session Name"), "must name the section: {msg}");
-        assert!(msg.contains("My_Session"), "must name the value: {msg}");
-    }
-
-    #[test]
-    fn missing_package_roots_lines_is_422_naming_the_section() {
-        // The heading is present but has zero non-empty lines.
-        let body = "### Session Name\nsess\n### Package Roots\n\n### Work Label\nlabel\n";
-        let msg = err_message(body);
-        assert!(
-            msg.contains("Package Roots"),
-            "must name the section: {msg}"
-        );
-        assert!(
-            msg.contains("at least one"),
-            "must flag the emptiness: {msg}"
-        );
-    }
-
-    #[test]
-    fn package_root_with_leading_slash_is_422_naming_the_value() {
-        let body = "### Session Name\nsess\n### Package Roots\n/abs/pkg\n### Work Label\nlabel\n";
-        let msg = err_message(body);
-        assert!(
-            msg.contains("Package Roots"),
-            "must name the section: {msg}"
-        );
-        assert!(msg.contains("/abs/pkg"), "must name the value: {msg}");
-    }
-
-    #[test]
-    fn package_root_with_dotdot_segment_is_422_naming_the_value() {
-        let body = "### Session Name\nsess\n### Package Roots\nfoo/../bar\n### Work Label\nlabel\n";
-        let msg = err_message(body);
-        assert!(
-            msg.contains("Package Roots"),
-            "must name the section: {msg}"
-        );
-        assert!(msg.contains("foo/../bar"), "must name the value: {msg}");
-        assert!(msg.contains(".."), "must flag the traversal: {msg}");
-    }
-
-    #[test]
-    fn package_root_with_illegal_char_is_422_naming_the_value() {
-        let body = "### Session Name\nsess\n### Package Roots\nbad pkg\n### Work Label\nlabel\n";
-        let msg = err_message(body);
-        assert!(
-            msg.contains("Package Roots"),
-            "must name the section: {msg}"
-        );
-        assert!(msg.contains("bad pkg"), "must name the value: {msg}");
-    }
-
-    #[test]
-    fn missing_work_label_is_422_naming_the_section() {
-        let msg = err_message("### Session Name\nsess\n### Package Roots\npkg-a\n");
-        assert!(msg.contains("Work Label"), "must name the section: {msg}");
-    }
-
-    #[test]
-    fn multiline_work_label_is_422_naming_the_section() {
-        let body = "### Session Name\nsess\n### Package Roots\npkg-a\n### Work Label\none\ntwo\n";
-        let msg = err_message(body);
-        assert!(msg.contains("Work Label"), "must name the section: {msg}");
-        assert!(msg.contains("exactly one"), "must flag the count: {msg}");
-    }
-
-    #[test]
-    fn work_label_with_comma_is_422_naming_the_section() {
-        let body = "### Session Name\nsess\n### Package Roots\npkg-a\n### Work Label\nred, blue\n";
-        let msg = err_message(body);
-        assert!(msg.contains("Work Label"), "must name the section: {msg}");
-        assert!(msg.contains("comma"), "must flag the comma: {msg}");
-    }
-
-    #[test]
-    fn duplicate_work_label_heading_is_422() {
-        let body = "### Session Name\nsess\n### Package Roots\npkg-a\n### Work Label\nx\n### Work Label\ny\n";
-        let msg = err_message(body);
-        assert!(msg.contains("duplicate"), "must flag the duplicate: {msg}");
-        assert!(msg.contains("Work Label"), "must name the section: {msg}");
-    }
-
-    #[test]
-    fn environment_with_two_lines_is_422_naming_the_section() {
-        let body = "### Session Name\nsess\n### Package Roots\npkg-a\n### Work Label\nlabel\n### Environment\nfirst\nsecond\n";
-        let msg = err_message(body);
-        assert!(msg.contains("Environment"), "must name the section: {msg}");
-        assert!(
-            msg.contains("exactly one"),
-            "must flag the ambiguity: {msg}"
-        );
-    }
-}
+#[path = "trigger_parse_tests.rs"]
+mod tests;
