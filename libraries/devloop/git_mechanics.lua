@@ -235,17 +235,8 @@ local forge_validators = require("devloop.forge_validators")
     return M.git.diff_check(worktree, true, timeout)
   end
 
-  function C.git_conflict_markers(M, worktree, timeout)
-    return M.git.conflict_markers(worktree, timeout)
-  end
 
-  function C.git_commit_message_file(M, worktree, message_file, timeout)
-    return M.git.commit_message_file(worktree, message_file, timeout)
-  end
 
-  function C.git_worktree_remove(M, worktree, timeout)
-    return M.git.worktree_remove(worktree, timeout)
-  end
 
 function C.helpers(M)
   return {

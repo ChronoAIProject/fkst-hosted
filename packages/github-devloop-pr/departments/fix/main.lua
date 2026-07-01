@@ -60,7 +60,7 @@ local function branch_worktree(repo, issue_number, version, branch)
         error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
       end
     else
-      local remove_result = core.git_worktree_remove(existing, 60)
+      local remove_result = core.git.worktree_remove(existing, 60)
       if remove_result.exit_code ~= 0 then
         error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
       end
@@ -247,7 +247,7 @@ local function assert_no_unmerged_paths(worktree)
 end
 
 local function assert_no_conflict_markers(worktree)
-  local markers_result = core.git_conflict_markers(worktree, 30)
+  local markers_result = core.git.conflict_markers(worktree, 30)
   if markers_result.exit_code == 1 then
     return
   end

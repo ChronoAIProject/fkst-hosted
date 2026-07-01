@@ -20,7 +20,7 @@ local function cleanup_worktree(worktree)
   if worktree == nil then
     return
   end
-  local result = core.git_worktree_remove(worktree, 60)
+  local result = core.git.worktree_remove(worktree, 60)
   if result.exit_code ~= 0 then
     core.log_line("warn", "sync_conflict", "branch-sync", "CLEANUP", {
       "worktree=" .. tostring(worktree),
@@ -99,7 +99,7 @@ local function commit_resolution(worktree, runtime, conflict)
     conflict.integration_sha,
     "resolved"
   ))
-  core.run_required(core.git_commit_message_file(worktree, message_file, 60), "sync commit")
+  core.run_required(core.git.commit_message_file(worktree, message_file, 60), "sync commit")
 end
 
 local function push_if_real(conflict, worktree)

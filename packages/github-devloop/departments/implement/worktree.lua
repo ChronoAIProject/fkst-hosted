@@ -43,7 +43,7 @@ function M.remove_stale_worktree(path)
     end
     return
   end
-  local remove_result = core.git_worktree_remove(path, 60)
+  local remove_result = core.git.worktree_remove(path, 60)
   if remove_result.exit_code ~= 0 then
     error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
   end

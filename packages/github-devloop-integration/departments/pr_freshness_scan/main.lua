@@ -40,7 +40,7 @@ local function cleanup_worktree(worktree)
   if worktree == nil then
     return
   end
-  local result = core.git_worktree_remove(worktree, 60)
+  local result = core.git.worktree_remove(worktree, 60)
   if result.exit_code ~= 0 then
     core.log_line("warn", "pr_freshness_scan", "pr-freshness", "CLEANUP", {
       "worktree=" .. tostring(worktree),
@@ -162,7 +162,7 @@ end
 local function write_refresh_commit(worktree, runtime, repo, branch, integration, branch_sha, integration_sha)
   local message_file = core.pr_freshness_message_file(runtime, repo, branch, integration, branch_sha, integration_sha)
   file.write(message_file, core.pr_freshness_commit_message(repo, branch, integration, branch_sha, integration_sha))
-  core.run_required(core.git_commit_message_file(worktree, message_file, 60), "PR freshness commit")
+  core.run_required(core.git.commit_message_file(worktree, message_file, 60), "PR freshness commit")
 end
 
 local function push_if_real(repo, branch, branch_sha, worktree)

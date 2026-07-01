@@ -192,7 +192,7 @@ function S.install(M)
     if dir_result.exit_code ~= 0 then
       return dir_result
     end
-    return M.git_worktree_remove(worktree, timeout)
+    return M.git.worktree_remove(worktree, timeout)
   end
 
   function M.git_worktree_force_clean(worktree, timeout)
@@ -200,7 +200,7 @@ function S.install(M)
     if value == "" or value:find("[\r\n]") ~= nil then
       error("github-devloop: invalid worktree path")
     end
-    M.git_worktree_remove(value, timeout)
+    M.git.worktree_remove(value, timeout)
     local prune = M.git_worktree_prune(timeout)
     if prune.exit_code ~= 0 then
       return prune

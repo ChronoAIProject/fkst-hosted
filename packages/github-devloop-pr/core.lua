@@ -127,9 +127,6 @@ M.git_push_branch_update = function(...) return git_mechanics.git_push_branch_up
 M.git_push_worktree_branch_update = function(...) return git_mechanics.git_push_worktree_branch_update(M, ...) end
 M.git_diff_check = function(...) return git_mechanics.git_diff_check(M, ...) end
 M.git_diff_cached_check = function(...) return git_mechanics.git_diff_cached_check(M, ...) end
-M.git_conflict_markers = function(...) return git_mechanics.git_conflict_markers(M, ...) end
-M.git_commit_message_file = function(...) return git_mechanics.git_commit_message_file(M, ...) end
-M.git_worktree_remove = function(...) return git_mechanics.git_worktree_remove(M, ...) end
 M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end
 require("forge.merge").install(M)
 require("core.review_carry_over").install(M)

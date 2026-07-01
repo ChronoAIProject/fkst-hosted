@@ -273,7 +273,7 @@ local function remove_worktree_if_present(worktree)
   if dir.exit_code ~= 0 then
     return
   end
-  local remove = M.git_worktree_remove(value, 60)
+  local remove = M.git.worktree_remove(value, 60)
   if remove.exit_code ~= 0 then
     error("github-devloop: git stale substrate-ref worktree remove failed: " .. tostring(remove.stderr))
   end
@@ -346,7 +346,7 @@ local function remove_existing_branch_worktree(branch)
   end
   local existing = M.find_worktree_for_branch(list.stdout, branch)
   if existing ~= nil then
-    local remove = M.git_worktree_remove(existing, 60)
+    local remove = M.git.worktree_remove(existing, 60)
     if remove.exit_code ~= 0 then
       error("github-devloop: stale substrate-ref branch worktree remove failed: " .. tostring(remove.stderr))
     end
@@ -417,7 +417,7 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
     end
   end)
   if added then
-    local remove = M.git_worktree_remove(worktree, 60)
+    local remove = M.git.worktree_remove(worktree, 60)
     if ok and remove.exit_code ~= 0 then
       error("github-devloop: substrate-ref worktree remove failed: " .. tostring(remove.stderr))
     end
