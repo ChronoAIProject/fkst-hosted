@@ -3,17 +3,10 @@
 //! v1 runs every session against a single, operator-pinned LLM provider. The
 //! model, base URL, and wire_api are config-driven (`FKST_LLM_MODEL` /
 //! `FKST_LLM_BASE_URL` / `FKST_LLM_WIRE_API`), and the static LLM API key rides
-//! the `env_key` ([`LLM_ENV_KEY`]) — never embedded in the config. (The old
-//! vault-driven Raw/Structured provider selection was removed with the in-memory
-//! vault; a custom-provider path can return as a typed layer if v1 needs it.)
-
-/// `env_key` the engine's codex reads the LLM API key from.
-///
-/// MUST be `LLM_API_KEY`, NOT `FKST_LLM_API_KEY`: the engine's
-/// `is_reserved_env_key` strips any `FKST_`-prefixed env var, so an `FKST_`-named
-/// key would be silently dropped and the engine would 401. `FKST_LLM_API_KEY` is
-/// the CONTROL-PLANE config var name only.
-pub const LLM_ENV_KEY: &str = "LLM_API_KEY";
+//! the `env_key` ([`crate::reserved_env::LLM_ENV_KEY`]) — never embedded in the
+//! config. (The old vault-driven Raw/Structured provider selection was removed
+//! with the in-memory vault; a custom-provider path can return as a typed layer
+//! if v1 needs it.)
 
 /// Default `wire_api` for the LLM provider.
 ///
@@ -29,8 +22,8 @@ pub const LLM_PROVIDER_ID: &str = "llm";
 ///
 /// `model` / `base_url` / `wire_api` are the config-driven provider values and
 /// `env_key` is the environment variable the codex reads the API key from (the
-/// caller passes [`LLM_ENV_KEY`]). `disable_response_storage = true` because the
-/// provider is stateless for the session.
+/// caller passes [`crate::reserved_env::LLM_ENV_KEY`]). `disable_response_storage
+/// = true` because the provider is stateless for the session.
 pub fn render_codex_config(model: &str, base_url: &str, wire_api: &str, env_key: &str) -> String {
     format!(
         "model_provider = \"{LLM_PROVIDER_ID}\"\n\
@@ -48,6 +41,7 @@ pub fn render_codex_config(model: &str, base_url: &str, wire_api: &str, env_key:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reserved_env::LLM_ENV_KEY;
 
     #[test]
     fn renders_pinned_model_with_neutral_provider_and_llm_env_key() {

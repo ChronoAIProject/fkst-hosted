@@ -19,10 +19,9 @@ use std::time::Duration;
 use secrecy::{ExposeSecret, SecretString};
 
 use super::creds;
-use crate::engine::config::is_reserved_env_key;
 use crate::install::{run_ordered, Verdict};
+use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::{CredsLayout, SessionSpec};
-use crate::sessions::codex_provider::LLM_ENV_KEY;
 
 /// Optional env var bounding the pre-agent install step's whole-sequence
 /// wall-clock. Reuses the validation-path name so an operator sets ONE knob for
