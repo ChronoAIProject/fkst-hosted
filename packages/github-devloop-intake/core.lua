@@ -107,7 +107,6 @@ require("devloop.logging").install(M)
 require("devloop.state").install(M)
 require("core.admission").install(M)
 local entity = require("devloop.entity")
-M.pr_source_ref = function(...) return entity.pr_source_ref(M, ...) end
 M.issue_source_ref = function(...) return entity.issue_source_ref(M, ...) end
 M.build_entity_comment_request = function(...) return entity.build_entity_comment_request(M, ...) end
 M.linked_pr_surface_snapshot = function(...) return entity.linked_pr_surface_snapshot(M, ...) end

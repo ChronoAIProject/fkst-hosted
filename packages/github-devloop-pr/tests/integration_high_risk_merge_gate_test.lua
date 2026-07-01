@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local m_facts = require("devloop.markers.facts")
 local t = h.t
@@ -245,7 +246,7 @@ return {
       type = "pr",
       number = event.pr_number,
       dedup_key = "owner/repo#pr#7@2026-06-04T01:02:03Z",
-      source_ref = core.pr_source_ref("owner/repo", event.pr_number),
+      source_ref = entity_lib.pr_source_ref("owner/repo", event.pr_number),
     }, opts("observe-pr-replays-high-risk-merge-ready"))
     local replayed = find_raise(observed.raises, "devloop_merge_ready")
     t.is_true(replayed ~= nil)

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
@@ -127,7 +128,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
 
-    local pr_source_ref = core.pr_source_ref(repo, reviewing.pr_number)
+    local pr_source_ref = entity_lib.pr_source_ref(repo, reviewing.pr_number)
     local current_issue = {
       title = "PR #" .. tostring(reviewing.pr_number),
       body = "(PR-only review context; issue backing is absent)",

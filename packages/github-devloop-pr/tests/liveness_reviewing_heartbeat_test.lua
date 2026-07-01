@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
@@ -55,7 +56,7 @@ local function run_observe_pr(name)
       updated_at = "2026-06-04T01:02:03Z",
       dedup_key = "liveness-scan/owner/repo/pr/7",
       source = "liveness-scan",
-      source_ref = core.pr_source_ref(repo, 7),
+      source_ref = entity_lib.pr_source_ref(repo, 7),
     },
   }, opts(name or "observe-pr-reviewing-heartbeat"))
 end
@@ -138,11 +139,11 @@ local function state_comment(state_name, state_version, created_at)
 end
 
 local function timeout_attempt_comment(state_version, round)
-  return trusted_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, "reviewing", round, core.pr_source_ref(repo, 7)))
+  return trusted_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, "reviewing", round, entity_lib.pr_source_ref(repo, 7)))
 end
 
 local function review_round_comment(created_at)
-  local source_ref = core.pr_source_ref(repo, 7)
+  local source_ref = entity_lib.pr_source_ref(repo, 7)
   local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
   return trusted_comment(conv_rounds.review_converge_round_marker(core,
     review_proposal_id,
@@ -215,7 +216,7 @@ return {
 
   test_liveness_scan_reviewing_issue_side_heartbeat_is_not_read_as_pr_live = function()
     local row = restart_transition_row("reviewing")
-    local source_ref = core.pr_source_ref(repo, 7)
+    local source_ref = entity_lib.pr_source_ref(repo, 7)
     local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
     local signal = core.restart_row_liveness_signal(row, {
       state = "reviewing",

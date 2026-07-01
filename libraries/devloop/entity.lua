@@ -14,7 +14,7 @@ local function pr_source_ref(repo, pr_number)
   }
 end
 
-function C.pr_source_ref(M, repo, pr_number)
+function C.pr_source_ref(repo, pr_number)
   return pr_source_ref(repo, pr_number)
 end
 

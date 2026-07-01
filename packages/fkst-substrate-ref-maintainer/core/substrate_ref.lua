@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local S = {}
@@ -566,7 +567,7 @@ local function raise_merge_audit(repo, pr, target_sha, outcome, reason)
     tostring(pr.head_sha),
     tostring(outcome),
     tostring(reason or ""),
-  }), M.pr_source_ref(repo, pr.number))
+  }), entity_lib.pr_source_ref(repo, pr.number))
   M.log_raise("substrate_ref_scan", "substrate-ref-merge", "github-proxy.github_pr_comment_request", request)
   raise("github-proxy.github_pr_comment_request", request)
   return request

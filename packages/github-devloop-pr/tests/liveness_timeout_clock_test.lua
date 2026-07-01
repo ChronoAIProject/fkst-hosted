@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
@@ -133,7 +134,7 @@ end
 local function merge_timeout_facts(pr_comments, now_seconds)
   return {
     proposal_id = proposal_id,
-    source_ref = core.pr_source_ref(repo, 7),
+    source_ref = entity_lib.pr_source_ref(repo, 7),
     current = { comments = {} },
     current_pr = {
       head_sha = head_sha,
@@ -362,7 +363,7 @@ return {
   test_timeout_reconcile_why_reports_merge_gate_wait_age = function()
     local row = restart_transition_row("merge-ready")
     local timeout_version = version .. "/timeout/merge-ready/3"
-    local source_ref = core.pr_source_ref(repo, 7)
+    local source_ref = entity_lib.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
     local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
@@ -386,7 +387,7 @@ return {
   test_timeout_reconcile_why_reports_fix_lineage_merge_gate_wait_age = function()
     local row = restart_transition_row("merge-ready")
     local timeout_version = lineages.fix .. "/timeout/merge-ready/3"
-    local source_ref = core.pr_source_ref(repo, 7)
+    local source_ref = entity_lib.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
     local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
@@ -409,7 +410,7 @@ return {
   test_timeout_reconcile_why_reports_review_loop_lineage_merge_gate_wait_age = function()
     local row = restart_transition_row("merge-ready")
     local timeout_version = lineages.review_loop .. "/timeout/merge-ready/3"
-    local source_ref = core.pr_source_ref(repo, 7)
+    local source_ref = entity_lib.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
     local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {

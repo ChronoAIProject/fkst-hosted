@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
@@ -15,7 +16,7 @@ local review_proposal_id = core.pr_review_proposal_id(repo, pr_number, version, 
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
 
 local function source_ref()
-  return core.pr_source_ref(repo, pr_number)
+  return entity_lib.pr_source_ref(repo, pr_number)
 end
 
 local function review_result_comment_request()

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local v_reviewing = require("devloop.validators.reviewing")
@@ -26,7 +27,7 @@ end
 
 return {
   test_comment_written_pr_open_ack_redrives_pr_observer = function()
-    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_marker_comment("IC_pr_open_1", core.state_marker(proposal_id, "pr-open", version))
@@ -61,7 +62,7 @@ return {
   end,
 
   test_comment_written_reviewing_ack_raises_durable_reviewing_with_verifiable_hand_off = function()
-    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
       stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
@@ -102,7 +103,7 @@ return {
   end,
 
   test_comment_written_reviewing_ack_skips_other_owned_issue = function()
-    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", 42), {
       stdout = '{"assignees":[{"login":"human"}],"author":{"login":"fkst-test-bot"}}\n',
@@ -133,7 +134,7 @@ return {
   end,
 
   test_comment_written_reviewing_ack_allows_pr_native_proposal = function()
-    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local version = "pr-native-version/fix/1"
     local proposal_id = core.pr_proposal_id("owner/repo", 7)
     mock_marker_comment("IC_pr_native_reviewing_1", core.state_marker(proposal_id, "reviewing", version))
@@ -170,7 +171,7 @@ return {
   end,
 
   test_comment_written_fixing_ack_raises_byte_equivalent_payload = function()
-    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/v1/fix/1"
     local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/v1", "def456")
@@ -253,7 +254,7 @@ return {
   end,
 
   test_comment_written_merge_ready_ack_raises_byte_equivalent_payload = function()
-    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"

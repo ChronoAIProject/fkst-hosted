@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local requests_labels = require("devloop.requests.labels")
@@ -257,7 +258,7 @@ local function child_from_pr(issue, impl_version, generation, pr, repo, issue_nu
     error("github-devloop: pr-delegation adopted invalid PR")
   end
   local pr_number = tonumber(pr.number)
-  local pr_source_ref = M.pr_source_ref(repo, pr_number)
+  local pr_source_ref = entity_lib.pr_source_ref(repo, pr_number)
   local pr_proposal_id = M.pr_proposal_id(repo, pr_number)
   local head_sha = pr.head_sha or issue.head_sha or (issue.implementation and issue.implementation.head_sha)
   local effects = {}

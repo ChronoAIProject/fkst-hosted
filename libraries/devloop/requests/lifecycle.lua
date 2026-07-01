@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -334,7 +335,7 @@ function C.build_queue_starvation_reconcile_comment_request(M, repo, merge_ready
     tostring(merge_ready.version),
     tostring(merge_ready.reviewed_head_sha),
     tostring(attempt_key),
-  }), M.pr_source_ref(repo, merge_ready.pr_number))
+  }), entity_lib.pr_source_ref(repo, merge_ready.pr_number))
 end
 
 return C

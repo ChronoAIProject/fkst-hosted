@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
@@ -155,7 +156,7 @@ local function review_meta_comments(event, version)
       event.proposal_id,
       event.version,
       "def456",
-      convergence_shared.source_ref_digest(core.pr_source_ref(repo, event.pr_number)),
+      convergence_shared.source_ref_digest(entity_lib.pr_source_ref(repo, event.pr_number)),
       event.n,
       event.review_dedup_key,
       "Need a meta decision.",
@@ -169,7 +170,7 @@ local function timeout_attempt_v2_comment(row, state, comments, round)
     proposal_id = state.proposal_id,
     current = { comments = comments or {} },
     current_pr = { comments = comments or {}, head_sha = "def456" },
-    source_ref = core.pr_source_ref(repo, 7),
+    source_ref = entity_lib.pr_source_ref(repo, 7),
   }
   local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
   return trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
@@ -178,14 +179,14 @@ local function timeout_attempt_v2_comment(row, state, comments, round)
     row.liveness_class_id,
     eval.generation_key,
     round,
-    core.pr_source_ref(repo, 7)
+    entity_lib.pr_source_ref(repo, 7)
   ))
 end
 
 local function timeout_facts(event, state, comments)
   return {
     proposal_id = event.proposal_id,
-    source_ref = core.pr_source_ref(repo, event.pr_number),
+    source_ref = entity_lib.pr_source_ref(repo, event.pr_number),
     current = { comments = {} },
     current_pr = {
       comments = comments,
@@ -397,7 +398,7 @@ return {
         local handled = core.maybe_timeout_redrive_from_table("liveness_scan", {
           repo = repo,
           number = event.pr_number,
-          source_ref = core.pr_source_ref(repo, event.pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, event.pr_number),
         }, state, row, facts)
         t.eq(handled, true)
       end)
@@ -425,7 +426,7 @@ return {
         local handled = core.maybe_timeout_redrive_from_table("liveness_scan", {
           repo = repo,
           number = event.pr_number,
-          source_ref = core.pr_source_ref(repo, event.pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, event.pr_number),
         }, state, row, facts)
         t.eq(handled, true)
       end)
@@ -538,7 +539,7 @@ return {
         local handled = core.maybe_timeout_redrive_from_table("liveness_scan", {
           repo = repo,
           number = event.pr_number,
-          source_ref = core.pr_source_ref(repo, event.pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, event.pr_number),
         }, state, row, facts)
         t.eq(handled, true)
       end)
@@ -571,7 +572,7 @@ return {
         local handled = core.maybe_timeout_redrive_from_table("liveness_scan", {
           repo = repo,
           number = event.pr_number,
-          source_ref = core.pr_source_ref(repo, event.pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, event.pr_number),
         }, state, row, facts)
         t.eq(handled, true)
       end)

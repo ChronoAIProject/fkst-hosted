@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
@@ -37,7 +38,7 @@ local spec = {
 }
 
 local function pr_source_ref(repo, pr_number)
-  return core.pr_source_ref(repo, pr_number)
+  return entity_lib.pr_source_ref(repo, pr_number)
 end
 
 local function pr_context(event)
@@ -164,7 +165,7 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
   end
   local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
   local review_version = transition_version.safe_version_segment(state.version)
-  local sr_digest = convergence_shared.source_ref_digest(core.pr_source_ref(origin.repo, pr_number))
+  local sr_digest = convergence_shared.source_ref_digest(entity_lib.pr_source_ref(origin.repo, pr_number))
   local facts = conv_rounds.review_converge_round_facts(core,
     current_pr.comments,
     review_proposal_id,

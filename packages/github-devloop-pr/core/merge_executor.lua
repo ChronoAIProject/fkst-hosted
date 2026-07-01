@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_bodies = require("devloop.requests.bodies")
 local requests_labels = require("devloop.requests.labels")
@@ -95,7 +96,7 @@ local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, re
 end
 
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
-  local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
   if core.version_fix_round(current_state.version) >= config.max_fix_rounds(core) then
     raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
     return
@@ -140,7 +141,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
 end
 
 local function raise_reviewing_for_current_head(repo, issue_number, merge_ready, current_state, current_pr, reason)
-  local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
   local review_version = core.next_review_loop_version(merge_ready.version)
   if core.has_state_marker(current_pr.comments, merge_ready.proposal_id, "reviewing", review_version) then
     core.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "skip-idempotent(already at to_state)", reason)
@@ -314,7 +315,7 @@ local function write_merging_marker(repo, merge_ready, comments)
 end
 
 local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)
-  local merged_source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  local merged_source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
   local autonomy_record = issue_number ~= nil and autonomy_ledger.autonomy_result_record(core, repo, issue_number, merge_ready, nil, merged_pr) or nil
   local merged_body = requests_bodies.build_merged_comment_body(core, merge_ready, autonomy_record)
   local comment_request = core.build_entity_comment_request({
@@ -738,7 +739,7 @@ local function synthesize_merge_ready_from_queue_head(repo, head)
     review_proposal_id = head.review_proposal_id,
     review_dedup_key = head.review_dedup_key,
     reviewed_head_sha = head.head_sha,
-  }, core.pr_source_ref(repo, head.pr_number))
+  }, entity_lib.pr_source_ref(repo, head.pr_number))
 end
 local function merge_queue_head_all(repo, base_branch)
   local head, entries = m_mq.merge_queue_head(core, repo, base_branch); return head, entries or {}

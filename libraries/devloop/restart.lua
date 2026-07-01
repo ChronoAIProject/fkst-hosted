@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
@@ -293,7 +294,7 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
         best = {
           proposal_id = review_proposal,
           dedup_key = consensus_dedup,
-          source_ref = M.pr_source_ref(repo, pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, pr_number),
           pr_number = tonumber(pr_number),
           n = (round or 0) + 1,
         }
@@ -326,7 +327,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         return {
           proposal_id = review_proposal,
           dedup_key = marker_dedup,
-          source_ref = M.pr_source_ref(repo, pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, pr_number),
           pr_number = tonumber(pr_number),
           n = tonumber(n) or 0,
         }
@@ -362,7 +363,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
           proposal_id = review_proposal,
           dedup_key = reflection_dedup,
           review_dedup_key = marker_dedup,
-          source_ref = M.pr_source_ref(repo, pr_number),
+          source_ref = entity_lib.pr_source_ref(repo, pr_number),
           pr_number = tonumber(pr_number),
           n = tonumber(n) or 0,
           mode = "fix-reflection",
@@ -381,7 +382,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
     return {
       proposal_id = reject_fact.review_proposal_id,
       dedup_key = reject_fact.review_dedup_key,
-      source_ref = M.pr_source_ref(repo, pr_number),
+      source_ref = entity_lib.pr_source_ref(repo, pr_number),
       pr_number = tonumber(pr_number),
       n = tonumber(n) or 0,
     }

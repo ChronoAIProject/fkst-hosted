@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
@@ -18,7 +19,7 @@ local function source_ref()
 end
 
 local function pr_source_ref(pr_number)
-  return core.pr_source_ref(repo, pr_number)
+  return entity_lib.pr_source_ref(repo, pr_number)
 end
 
 local function pr_proposal(pr_number)

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
 local payloads_builders = require("devloop.payloads.builders")
@@ -182,7 +183,7 @@ return {
       marker_created_at = "2026-06-03T00:00:00Z",
     }, {
       proposal_id = "github-devloop/issue/owner/repo/42",
-      source_ref = core.pr_source_ref("owner/repo", 7),
+      source_ref = entity_lib.pr_source_ref("owner/repo", 7),
       head_sha = "def456",
       current = {
         comments = {},

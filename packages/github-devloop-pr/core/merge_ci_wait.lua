@@ -1,9 +1,10 @@
+local entity_lib = require("devloop.entity")
 local M = {}
 local m_mgw = require("devloop.merge_gate_wait")
 
 function M.hold(core, merge_ready, repo, current_pr, classification)
   local reason = tostring(classification and classification.reason or "ci-wait")
-  local source_ref = core.pr_source_ref(repo, merge_ready.pr_number)
+  local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
   local comment_request = m_mgw.build_merge_gate_wait_comment_request(core,
     repo,
     merge_ready,

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -13,7 +14,7 @@ local function observe_spec()
 end
 
 local function source_ref()
-  return core.pr_source_ref(repo, pr_number)
+  return entity_lib.pr_source_ref(repo, pr_number)
 end
 
 local function initial_event()

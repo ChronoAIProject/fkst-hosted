@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
@@ -19,7 +20,7 @@ local review_proposal_id = core.pr_review_proposal_id(repo, pr_number, reviewed_
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
 
 local function pr_source_ref()
-  return core.pr_source_ref(repo, pr_number)
+  return entity_lib.pr_source_ref(repo, pr_number)
 end
 
 local function initial_event(queue, payload)

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -118,7 +119,7 @@ local function replay_fields(M, row, state, issue, proposal_id)
     issue = issue,
     state = state,
     proposal_id = proposal_id,
-  }, M.pr_source_ref)
+  }, entity_lib.pr_source_ref)
 end
 
 local function read_fact(facts, family)

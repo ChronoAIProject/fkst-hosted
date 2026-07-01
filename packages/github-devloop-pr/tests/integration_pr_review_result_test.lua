@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local m_builders = require("devloop.markers.builders")
@@ -67,7 +68,7 @@ return {
       review_dedup_key = event.dedup_key,
       reviewed_head_sha = "def456",
       current_head_sha = "def456",
-    }, core.pr_source_ref("owner/repo", 7))
+    }, entity_lib.pr_source_ref("owner/repo", 7))
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:merge-ready")
     t.eq(#label_raise.payload.remove_labels, 12)
     t.is_true(comment_raise.payload.body:find("github-devloop PR review decision: approve", 1, true) ~= nil)

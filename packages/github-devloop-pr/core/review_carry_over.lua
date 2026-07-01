@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local m_facts = require("devloop.markers.facts")
 local S = {}
@@ -97,7 +98,7 @@ function M.raise_review_carry_over(dept, repo, pr_number, issue_proposal_id, ver
   if carry == nil then
     return nil, reason
   end
-  local source_ref = M.pr_source_ref(repo, pr_number)
+  local source_ref = entity_lib.pr_source_ref(repo, pr_number)
   local comment_request = requests_review.build_review_carry_over_comment_request(M, repo, pr_number, issue_proposal_id, version, carry, source_ref)
   M.log_cas_decision(dept, issue_proposal_id, current_state, "merge-ready", "merge-ready", "applied(review-carry-over)", "approved head is ancestor and resolution delta is empty")
   M.log_apply(dept, issue_proposal_id, "merge-ready", version, { add = {}, remove = {} }, {

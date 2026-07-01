@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
@@ -370,7 +371,7 @@ function C.merge_queue_tick_payload(M, repo, merged_pr_number, next_entry)
   return {
     schema = "github-devloop.merge-queue-tick.v1",
     dedup_key = C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry),
-    source_ref = M.pr_source_ref(repo, next_entry.pr_number),
+    source_ref = entity_lib.pr_source_ref(repo, next_entry.pr_number),
     cause = {
       kind = "merge-progress",
       merged_pr_number = tonumber(merged_pr_number),
@@ -394,7 +395,7 @@ function C.merge_queue_starvation_tick_payload(M, repo, incident_identity, head_
       tostring(incident_identity or "merge-ready"),
       bounded_attempt,
     }),
-    source_ref = M.pr_source_ref(repo, head_entry.pr_number),
+    source_ref = entity_lib.pr_source_ref(repo, head_entry.pr_number),
     cause = {
       kind = "queue-starvation",
       incident_identity = tostring(incident_identity or "merge-ready"),

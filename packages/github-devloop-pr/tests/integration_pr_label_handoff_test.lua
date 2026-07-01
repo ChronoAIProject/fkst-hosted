@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -20,7 +21,7 @@ local function run_handoff(handoff, comment_id, name)
       comment_id = comment_id or "IC_reviewing_1",
       request_dedup_key = "observe-pr/comment/github-devloop/issue/owner/repo/42/v1/7",
       dedup_key = "observe-pr/comment/github-devloop/issue/owner/repo/42/v1/7/written/" .. tostring(comment_id or "IC_reviewing_1"),
-      source_ref = core.pr_source_ref("owner/repo", 7),
+      source_ref = entity_lib.pr_source_ref("owner/repo", 7),
       handoff = handoff,
     },
   }, opts(name))
@@ -32,7 +33,7 @@ local function reviewing_handoff(version)
     proposal_id = "github-devloop/issue/owner/repo/42",
     pr_number = 7,
     version = version or "v1",
-    source_ref = core.pr_source_ref("owner/repo", 7),
+    source_ref = entity_lib.pr_source_ref("owner/repo", 7),
   }
 end
 
@@ -42,7 +43,7 @@ local function closed_unmerged_handoff(version)
     proposal_id = "github-devloop/issue/owner/repo/42",
     pr_number = 7,
     version = version or "v1",
-    source_ref = core.pr_source_ref("owner/repo", 7),
+    source_ref = entity_lib.pr_source_ref("owner/repo", 7),
   }
 end
 

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local m_builders = require("devloop.markers.builders")
@@ -135,7 +136,7 @@ return {
       review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,
       current_head_sha = new_head,
-    }, core.pr_source_ref("owner/repo", event.pr_number))
+    }, entity_lib.pr_source_ref("owner/repo", event.pr_number))
     t.eq(merge_raise.payload.schema, expected.schema)
     t.eq(merge_raise.payload.proposal_id, expected.proposal_id)
     t.eq(merge_raise.payload.pr_number, expected.pr_number)

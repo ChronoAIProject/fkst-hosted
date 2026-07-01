@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -132,7 +133,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "no issue transition lock key")
     return
   end
-  local pr_source_ref = core.pr_source_ref(repo, pr_number)
+  local pr_source_ref = entity_lib.pr_source_ref(repo, pr_number)
 
   with_lock(lock_key, function()
     core.log_forged_markers("review_loop", origin.proposal_id, current_pr.comments)

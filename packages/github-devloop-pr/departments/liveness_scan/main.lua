@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
@@ -62,7 +63,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   if not liveness_scan.liveness_scan_should_reinject_state(core, proposal_id, state) then
     return false
   end
-  local source_ref = core.pr_source_ref(repo, pr.number)
+  local source_ref = entity_lib.pr_source_ref(repo, pr.number)
   local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(core, origin.repo, origin.issue_number), state, {
     proposal_id = origin.proposal_id,
     current = { comments = current.comments or {}, labels = current.labels or {} },

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
@@ -19,7 +20,7 @@ local decompose_lib = require("devloop.decompose")
 local skip_capture_by_core = setmetatable({}, { __mode = "k" })
 
 local function resolve_payload_fields(M, row, state, facts)
-  return replay_fields.resolve(row, state, facts or {}, M.pr_source_ref)
+  return replay_fields.resolve(row, state, facts or {}, entity_lib.pr_source_ref)
 end
 
 local function restart_row(M, state_name)
@@ -586,7 +587,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       return log_skip(M, dept, proposal_id, state, "fixing", "fixing", "skip-foreign(fix-feedback-binding)", "trusted fix feedback marker lacks review binding")
     end
     if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
-      return replay_fixing_to_reviewing(M, dept, issue, state, proposal_id, link, current_pr, feedback, facts.source_ref or M.pr_source_ref(issue.repo, link.pr_number))
+      return replay_fixing_to_reviewing(M, dept, issue, state, proposal_id, link, current_pr, feedback, facts.source_ref or entity_lib.pr_source_ref(issue.repo, link.pr_number))
     end
     local reviewing_version = M.next_fix_version(state.version)
     if has_reviewing_marker_for_comments(M, facts.snapshot.comments, proposal_id, reviewing_version)
@@ -618,7 +619,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
 
   if dept ~= "observe_pr" then
     local new_version = M.next_fix_version(state.version)
-    local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
+    local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
     local comment_request = requests_review.build_merge_head_reviewing_comment_request(M,
       issue.repo,
       issue.number,
@@ -706,7 +707,7 @@ local function raise_reviewing_for_current_head(M, dept, issue, state, proposal_
   if not forge_validators.is_git_sha(current_pr.head_sha) then
     return log_skip(M, dept, proposal_id, state, "merge-ready", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
-  local reviewing_payload = payloads_builders.build_current_head_reviewing_payload(M, { repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, M.pr_source_ref(issue.repo, link.pr_number))
+  local reviewing_payload = payloads_builders.build_current_head_reviewing_payload(M, { repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, entity_lib.pr_source_ref(issue.repo, link.pr_number))
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "reviewing", outcome, reason)
   if reviewing_payload == nil then
     return false
@@ -723,7 +724,7 @@ local function raise_reviewing_for_current_head(M, dept, issue, state, proposal_
       merge_ready and merge_ready.head_sha or current_pr.head_sha,
       current_pr.head_sha,
       state.version,
-      M.pr_source_ref(issue.repo, link.pr_number)
+      entity_lib.pr_source_ref(issue.repo, link.pr_number)
     )
     return raise_effects(M, dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
       { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
@@ -764,7 +765,7 @@ local function maybe_replay_review_carry_over(M, dept, issue, state, row, facts,
   if m_facts.has_any_review_result_marker(M, current_pr.comments, carry.new_review_proposal_id, proposal_id) then
     return false
   end
-  local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
+  local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
   local comment_request = requests_review.build_review_carry_over_comment_request(M, issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
   M.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
   return raise_effects(M, dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {

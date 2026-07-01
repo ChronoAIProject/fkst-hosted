@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -54,7 +55,7 @@ end
 function C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
   local number = tostring(entity.number or "")
   local updated_at = tostring(entity.updated_at or "")
-  local source_ref = kind == "pr" and M.pr_source_ref(repo, number) or M.issue_source_ref(repo, number)
+  local source_ref = kind == "pr" and entity_lib.pr_source_ref(repo, number) or M.issue_source_ref(repo, number)
   return {
     schema = "github-proxy.v1",
     type = kind,

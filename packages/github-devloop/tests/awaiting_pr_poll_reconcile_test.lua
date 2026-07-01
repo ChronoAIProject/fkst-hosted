@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local entity_mocks = require("tests.entity_read_mock_helpers")
 local contract_time = require("contract.time")
@@ -239,7 +240,7 @@ local function run_pr_observe(issue_comments, pr_comments, opts)
       state = "OPEN",
       updated_at = "2026-06-03T02:03:04Z",
       dedup_key = "owner/repo#pr#7@2026-06-03T02:03:04Z",
-      source_ref = core.pr_source_ref(repo, pr_number),
+      source_ref = entity_lib.pr_source_ref(repo, pr_number),
     },
   })
 end

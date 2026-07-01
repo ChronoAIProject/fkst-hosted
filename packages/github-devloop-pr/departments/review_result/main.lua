@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local m_claims = require("devloop.claims")
@@ -100,7 +101,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   with_lock(lock_key, function()
-    local pr_source_ref = core.pr_source_ref(origin.repo, pr_number)
+    local pr_source_ref = entity_lib.pr_source_ref(origin.repo, pr_number)
     if not m_claims.verify_pr_review_issue_claim(core, "review_result", origin.repo, origin.issue_number, nil, origin.proposal_id) then
       return
     end
