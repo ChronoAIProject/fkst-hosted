@@ -271,8 +271,8 @@ merged_child_landed_on_upstream = function(dept, issue, state, delegation, curre
   if not forge_validators.is_git_sha(merge_commit_sha) then
     return false, "skip-pending(merge-commit-missing)", "canonical merged child PR has no GitHub mergeCommit.oid"
   end
-  M.fetch_branch(branches.upstream, "awaiting-pr upstream fetch")
-  local upstream_head = M.remote_head(branches.upstream, "awaiting-pr upstream head", "unsafe awaiting-pr upstream head")
+  git_mechanics.fetch_branch(M.git, branches.upstream, "awaiting-pr upstream fetch")
+  local upstream_head = git_mechanics.remote_head(M.git, branches.upstream, "awaiting-pr upstream head", "unsafe awaiting-pr upstream head")
   if not git_mechanics.is_ancestor(M.git, merge_commit_sha, upstream_head, "awaiting-pr rollup merge-commit reachability") then
     return false, "skip-pending(rollup-not-landed)", "child PR merge commit is not reachable from upstream branch"
   end

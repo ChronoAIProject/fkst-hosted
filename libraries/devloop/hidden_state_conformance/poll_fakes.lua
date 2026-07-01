@@ -8,11 +8,10 @@ function S.with(core, opts, fn)
   local base_branch = opts.base_branch
   local previous_children = core.gh_issue_list_decompose_children
   local previous_branch_config = config.branch_config
-  local previous_fetch_branch = core.fetch_branch
-  local previous_remote_head = core.remote_head
   local previous_git_is_ancestor = core.git.is_ancestor
   local previous_git_fetch_branch = core.git.fetch_branch
   local previous_git_fetch_head_commit = core.git.fetch_head_commit
+  local previous_git_remote_branch_head = core.git.remote_branch_head
   local previous_context_fetch_ref_from_bundle = context_bundle.context_fetch_ref_from_bundle
   local previous_context_fetch_from_bundle = context_bundle.context_fetch_from_bundle
   local previous_board_digest_block = payloads_board.board_digest_block
@@ -25,11 +24,8 @@ function S.with(core, opts, fn)
   config.branch_config = function(_core)
     return { integration = base_branch, upstream = "dev" }
   end
-  core.fetch_branch = function()
-    return nil
-  end
-  core.remote_head = function()
-    return head_sha
+  core.git.remote_branch_head = function()
+    return { exit_code = 0, stdout = head_sha, stderr = "" }
   end
   core.git.is_ancestor = function(ancestor_sha, descendant_sha)
     local matched = tostring(ancestor_sha or "") == tostring(head_sha)
@@ -57,11 +53,10 @@ function S.with(core, opts, fn)
     core.gh_issue_list_decompose_children = previous_children
   end
   config.branch_config = previous_branch_config
-  core.fetch_branch = previous_fetch_branch
-  core.remote_head = previous_remote_head
   core.git.is_ancestor = previous_git_is_ancestor
   core.git.fetch_branch = previous_git_fetch_branch
   core.git.fetch_head_commit = previous_git_fetch_head_commit
+  core.git.remote_branch_head = previous_git_remote_branch_head
   context_bundle.context_fetch_ref_from_bundle = previous_context_fetch_ref_from_bundle
   context_bundle.context_fetch_from_bundle = previous_context_fetch_from_bundle
   payloads_board.board_digest_block = previous_board_digest_block

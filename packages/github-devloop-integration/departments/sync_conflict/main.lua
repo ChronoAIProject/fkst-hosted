@@ -119,8 +119,8 @@ local function push_if_real(conflict, worktree)
   end
 
   devloop_base.assert_trusted_bot_configured()
-  core.fetch_branches(conflict.repo, { conflict.integration_branch }, "branch fetch")
-  local rechecked_integration_sha = core.remote_head(conflict.integration_branch, "remote branch head", "unsafe remote branch head")
+  git_mechanics.fetch_branches(core.git, conflict.repo, { conflict.integration_branch }, "branch fetch")
+  local rechecked_integration_sha = git_mechanics.remote_head(core.git, conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= conflict.integration_sha then
     core.log_cas_decision("sync_conflict", "branch-sync", {
       state = "integration",
@@ -134,8 +134,8 @@ local function push_if_real(conflict, worktree)
     error("github-devloop: unsafe resolved branch sync head")
   end
   git_mechanics.run_required(git_mechanics.git_push_worktree_branch_update(core.git, worktree, conflict.integration_branch, 120), "resolved branch sync push")
-  core.fetch_branches(conflict.repo, { conflict.integration_branch }, "branch fetch")
-  local pushed_head = core.remote_head(conflict.integration_branch, "remote branch head", "unsafe remote branch head")
+  git_mechanics.fetch_branches(core.git, conflict.repo, { conflict.integration_branch }, "branch fetch")
+  local pushed_head = git_mechanics.remote_head(core.git, conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
     error("github-devloop: resolved branch sync push verification failed")
   end
@@ -156,9 +156,9 @@ local function act(event)
   core.log_entry("sync_conflict", event, "branch-sync", conflict.dedup_key)
 
   with_lock(core.branch_sync_lock_key(conflict.repo, conflict.upstream_branch, conflict.integration_branch), function()
-    core.fetch_branches(conflict.repo, { conflict.upstream_branch, conflict.integration_branch }, "branch fetch")
-    local upstream_sha = core.remote_head(conflict.upstream_branch, "remote branch head", "unsafe remote branch head")
-    local integration_sha = core.remote_head(conflict.integration_branch, "remote branch head", "unsafe remote branch head")
+    git_mechanics.fetch_branches(core.git, conflict.repo, { conflict.upstream_branch, conflict.integration_branch }, "branch fetch")
+    local upstream_sha = git_mechanics.remote_head(core.git, conflict.upstream_branch, "remote branch head", "unsafe remote branch head")
+    local integration_sha = git_mechanics.remote_head(core.git, conflict.integration_branch, "remote branch head", "unsafe remote branch head")
     if integration_sha ~= conflict.integration_sha then
       core.log_cas_decision("sync_conflict", "branch-sync", { state = "integration", version = integration_sha }, "conflict", "resolved", "skip-stale(integration-head)", "integration head advanced after conflict event")
       return

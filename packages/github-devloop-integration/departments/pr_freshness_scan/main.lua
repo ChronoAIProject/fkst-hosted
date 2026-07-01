@@ -179,8 +179,8 @@ local function push_if_real(repo, branch, branch_sha, worktree)
   end
 
   devloop_base.assert_trusted_bot_configured()
-  core.fetch_branches(repo, { branch }, "PR freshness fetch")
-  local rechecked_branch_sha = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
+  git_mechanics.fetch_branches(core.git, repo, { branch }, "PR freshness fetch")
+  local rechecked_branch_sha = git_mechanics.remote_head(core.git, branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if rechecked_branch_sha ~= branch_sha then
     core.log_cas_decision("pr_freshness_scan", "pr-freshness", {
       state = "branch",
@@ -193,8 +193,8 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     error("github-devloop: unsafe PR freshness merge head")
   end
   git_mechanics.run_required(git("github-devloop").git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
-  core.fetch_branches(repo, { branch }, "PR freshness fetch")
-  local pushed_head = core.remote_head(branch, "PR freshness remote head", "unsafe PR freshness branch head")
+  git_mechanics.fetch_branches(core.git, repo, { branch }, "PR freshness fetch")
+  local pushed_head = git_mechanics.remote_head(core.git, branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if pushed_head ~= merge_head then
     error("github-devloop: PR freshness push verification failed")
   end
@@ -234,9 +234,9 @@ local function process_pr(repo, branches, listed_pr)
   end
 
   with_lock(core.pr_freshness_lock_key(repo, pr.head_ref_name), function()
-    core.fetch_branches(repo, { branches.integration, pr.head_ref_name }, "PR freshness fetch")
-    local integration_sha = core.remote_head(branches.integration, "PR freshness remote head", "unsafe PR freshness branch head")
-    local branch_sha = core.remote_head(pr.head_ref_name, "PR freshness remote head", "unsafe PR freshness branch head")
+    git_mechanics.fetch_branches(core.git, repo, { branches.integration, pr.head_ref_name }, "PR freshness fetch")
+    local integration_sha = git_mechanics.remote_head(core.git, branches.integration, "PR freshness remote head", "unsafe PR freshness branch head")
+    local branch_sha = git_mechanics.remote_head(core.git, pr.head_ref_name, "PR freshness remote head", "unsafe PR freshness branch head")
     if branch_sha ~= pr.head_sha then
       core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-stale(head)", "PR head changed after GitHub read")
       return

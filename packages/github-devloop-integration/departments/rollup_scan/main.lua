@@ -104,7 +104,7 @@ local function act(event)
   end
 
   with_lock(core.rollup_lock_key(repo, branches.upstream, branches.integration), function()
-    core.fetch_branches(repo, { branches.upstream, branches.integration }, "rollup fetch")
+    git_mechanics.fetch_branches(core.git, repo, { branches.upstream, branches.integration }, "rollup fetch")
     local ahead = ahead_count(branches.upstream, branches.integration)
     if ahead == 0 then
       core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(not-ahead)", "integration is not ahead of upstream")
@@ -128,7 +128,7 @@ local function act(event)
         })
         return
       end
-      integration_head = core.remote_head(branches.integration, "rollup remote head", "unsafe rollup branch head")
+      integration_head = git_mechanics.remote_head(core.git, branches.integration, "rollup remote head", "unsafe rollup branch head")
       local created = create_rollup_pr(
         repo,
         branches.upstream,
@@ -147,7 +147,7 @@ local function act(event)
       end
     end
 
-    integration_head = integration_head or core.remote_head(branches.integration, "rollup remote head", "unsafe rollup branch head")
+    integration_head = integration_head or git_mechanics.remote_head(core.git, branches.integration, "rollup remote head", "unsafe rollup branch head")
     core.observe_rollup_health(
       repo,
       branches.upstream,

@@ -105,8 +105,8 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   end
 
   devloop_base.assert_trusted_bot_configured()
-  core.fetch_branches(repo, { integration }, "branch fetch")
-  local rechecked_integration_sha = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
+  git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
+  local rechecked_integration_sha = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
     core.log_cas_decision("sync_scan", "branch-sync", {
       state = "integration",
@@ -120,8 +120,8 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
     error("github-devloop: unsafe branch sync merge head")
   end
   git_mechanics.run_required(git_mechanics.git_push_worktree_branch_update(core.git, worktree, integration, 120), "branch sync push")
-  core.fetch_branches(repo, { integration }, "branch fetch")
-  local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
+  git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
+  local pushed_head = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
     error("github-devloop: branch sync push verification failed")
   end
@@ -143,8 +143,8 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   end
 
   devloop_base.assert_trusted_bot_configured()
-  core.fetch_branches(repo, { integration }, "branch fetch")
-  local rechecked_integration_sha = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
+  git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
+  local rechecked_integration_sha = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
     core.log_cas_decision("sync_scan", "branch-sync", {
       state = "integration",
@@ -162,8 +162,8 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   end
 
   git_mechanics.run_required(git_mechanics.git_push_branch_force_with_lease(core.git, integration, upstream_sha, integration_sha, 120), "branch sync converge")
-  core.fetch_branches(repo, { integration }, "branch fetch")
-  local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
+  git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
+  local pushed_head = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= upstream_sha then
     error("github-devloop: branch sync converge verification failed")
   end
@@ -190,9 +190,9 @@ local function act(event)
   end
 
   with_lock(core.branch_sync_lock_key(repo, branches.upstream, branches.integration), function()
-    core.fetch_branches(repo, { branches.upstream, branches.integration }, "branch fetch")
-    local upstream_sha = core.remote_head(branches.upstream, "remote branch head", "unsafe remote branch head")
-    local integration_sha = core.remote_head(branches.integration, "remote branch head", "unsafe remote branch head")
+    git_mechanics.fetch_branches(core.git, repo, { branches.upstream, branches.integration }, "branch fetch")
+    local upstream_sha = git_mechanics.remote_head(core.git, branches.upstream, "remote branch head", "unsafe remote branch head")
+    local integration_sha = git_mechanics.remote_head(core.git, branches.integration, "remote branch head", "unsafe remote branch head")
 
     if git_mechanics.is_ancestor(core.git, upstream_sha, integration_sha, "ancestor check") then
       core.log_cas_decision("sync_scan", "branch-sync", { state = "synced", version = integration_sha }, "tick", "sync", "skip-idempotent(upstream-ancestor)", "upstream head is already contained in integration")

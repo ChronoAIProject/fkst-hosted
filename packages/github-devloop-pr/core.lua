@@ -97,9 +97,6 @@ M.invalidate_entity_after_write = function(...) return github_proxy_entity_view.
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
-M.fetch_branch = function(...) return git_mechanics.fetch_branch(M, ...) end
-M.fetch_branches = function(...) return git_mechanics.fetch_branches(M, ...) end
-M.remote_head = function(...) return git_mechanics.remote_head(M, ...) end
 M.has_empty_resolution_delta = function(...) return git_mechanics.has_empty_resolution_delta(M, ...) end
 M.git_diff_cached_check = function(...) return git_mechanics.git_diff_cached_check(M, ...) end
 M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end

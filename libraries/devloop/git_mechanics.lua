@@ -11,6 +11,10 @@ local forge_validators = require("devloop.forge_validators")
     return tostring(branch)
   end
 
+  local function require_safe_remote(remote)
+    return forge_validators.require_safe_remote(remote, "github-devloop")
+  end
+
   local function require_safe_sha(name, sha)
     if not forge_validators.is_git_sha(sha) then
       error("github-devloop: invalid " .. tostring(name))
@@ -86,20 +90,20 @@ local forge_validators = require("devloop.forge_validators")
     return result
   end
 
-  function C.fetch_branch(M, branch, error_class)
-    C.run_required(M.git_fetch_branch("origin", branch, 60), error_class)
+  function C.fetch_branch(git, branch, error_class)
+    C.run_required(git.fetch_branch(require_safe_remote("origin"), require_safe_branch("fetch branch", branch), 60), error_class)
   end
 
-  function C.fetch_branches(M, repo, branches, error_class)
+  function C.fetch_branches(git, repo, branches, error_class)
     C.with_repo_ref_store_lock(repo, function()
       for _, branch in ipairs(branches) do
-        M.fetch_branch(branch, error_class)
+        C.fetch_branch(git, branch, error_class)
       end
     end)
   end
 
-  function C.remote_head(M, branch, error_class, unsafe_error)
-    local result = C.run_required(M.git_remote_branch_head("origin", branch, 30), error_class)
+  function C.remote_head(git, branch, error_class, unsafe_error)
+    local result = C.run_required(git.remote_branch_head(require_safe_remote("origin"), require_safe_branch("remote branch", branch), 30), error_class)
     local head = trim_stdout(result)
     if not require("devloop.pr_safety").is_safe_head_sha(head) then
       error("github-devloop: " .. unsafe_error)
