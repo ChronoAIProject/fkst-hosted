@@ -109,17 +109,9 @@ M.fetch_branches = function(...) return git_mechanics.fetch_branches(M, ...) end
 M.remote_head = function(...) return git_mechanics.remote_head(M, ...) end
 M.is_ancestor = function(...) return git_mechanics.is_ancestor(M, ...) end
 M.git_is_ancestor = function(...) return git_mechanics.git_is_ancestor(M, ...) end
-M.git_merge_no_ff = function(...) return git_mechanics.git_merge_no_ff(M, ...) end
-M.git_fast_forward = function(...) return git_mechanics.git_fast_forward(M, ...) end
-M.git_remote_trees_equal_quiet = function(...) return git_mechanics.git_remote_trees_equal_quiet(M, ...) end
-M.git_trees_equal_quiet = function(...) return git_mechanics.git_trees_equal_quiet(M, ...) end
 M.current_base_head = function(...) return git_mechanics.current_base_head(M, ...) end
 M.has_empty_resolution_delta = function(...) return git_mechanics.has_empty_resolution_delta(M, ...) end
 M.current_branch_head_sha = function(...) return git_mechanics.current_branch_head_sha(M, ...) end
-M.git_push_branch_force_with_lease = function(...) return git_mechanics.git_push_branch_force_with_lease(M, ...) end
-M.git_push_branch_update = function(...) return git_mechanics.git_push_branch_update(M, ...) end
-M.git_push_worktree_branch_update = function(...) return git_mechanics.git_push_worktree_branch_update(M, ...) end
-M.git_diff_check = function(...) return git_mechanics.git_diff_check(M, ...) end
 M.git_diff_cached_check = function(...) return git_mechanics.git_diff_cached_check(M, ...) end
 M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end
 require("forge.merge").install(M)

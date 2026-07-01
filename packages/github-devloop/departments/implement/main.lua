@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -92,7 +93,7 @@ local function publish_implementation_branch(repo, issue_number, ready, worktree
     })
     return
   end
-  local push = core.git_push_worktree_branch_update(worktree, branch, 120)
+  local push = git_mechanics.git_push_worktree_branch_update(core.git, worktree, branch, 120)
   if push.exit_code ~= 0 then
     error("github-devloop: IMPLEMENT_BRANCH_PUSH_FAILED: git implementation branch push failed: " .. tostring(push.stderr))
   end

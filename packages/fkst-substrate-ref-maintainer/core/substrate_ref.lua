@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
@@ -406,7 +407,7 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
       return git().commit_message(worktree, "chore: bump fkst-substrate pin", 60)
     end, "substrate-ref commit")
     if old_branch_head == nil then
-      local push = M.git_push_worktree_branch_update(worktree, bump_branch, 120)
+      local push = git_mechanics.git_push_worktree_branch_update(M.git, worktree, bump_branch, 120)
       if push.exit_code ~= 0 then
         error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
       end

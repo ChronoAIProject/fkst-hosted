@@ -248,7 +248,7 @@ local function process_pr(repo, branches, listed_pr)
 
     local runtime = core.runtime_root()
     with_temp_worktree(runtime, repo, pr.head_ref_name, branches.integration, branch_sha, function(worktree)
-      local merge_result = core.git_merge_no_ff(worktree, integration_sha, 120)
+      local merge_result = git_mechanics.git_merge_no_ff(core.git, worktree, integration_sha, 120)
       if merge_result.exit_code == 0 then
         write_refresh_commit(worktree, runtime, repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha)
         push_if_real(repo, pr.head_ref_name, branch_sha, worktree)

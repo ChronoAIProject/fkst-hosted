@@ -57,7 +57,7 @@ local function require_clean_resolution(worktree)
   if tostring(unmerged.stdout or "") ~= "" then
     return false, tostring(unmerged.stdout or "")
   end
-  git_mechanics.run_required(core.git_diff_check(worktree, 30), "diff check")
+  git_mechanics.run_required(git_mechanics.git_diff_check(core.git, worktree, 30), "diff check")
   git_mechanics.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check")
   return true, ""
 end
@@ -133,7 +133,7 @@ local function push_if_real(conflict, worktree)
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe resolved branch sync head")
   end
-  git_mechanics.run_required(core.git_push_worktree_branch_update(worktree, conflict.integration_branch, 120), "resolved branch sync push")
+  git_mechanics.run_required(git_mechanics.git_push_worktree_branch_update(core.git, worktree, conflict.integration_branch, 120), "resolved branch sync push")
   core.fetch_branches(conflict.repo, { conflict.integration_branch }, "branch fetch")
   local pushed_head = core.remote_head(conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
@@ -180,7 +180,7 @@ local function act(event)
     }
 
     with_temp_worktree(active_conflict, function(worktree, runtime)
-      local merge_result = core.git_merge_no_ff(worktree, active_conflict.upstream_sha, 120)
+      local merge_result = git_mechanics.git_merge_no_ff(core.git, worktree, active_conflict.upstream_sha, 120)
       if merge_result.exit_code == 0 then
         error("github-devloop: sync conflict event replayed without merge conflict")
       end

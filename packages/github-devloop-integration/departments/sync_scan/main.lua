@@ -33,7 +33,7 @@ local function trim_stdout(result)
 end
 
 local function trees_equal(sha_a, sha_b)
-  local result = core.git_trees_equal_quiet(sha_a, sha_b, 30)
+  local result = git_mechanics.git_trees_equal_quiet(core.git, sha_a, sha_b, 30)
   if result.exit_code == 0 then
     return true
   end
@@ -119,7 +119,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe branch sync merge head")
   end
-  git_mechanics.run_required(core.git_push_worktree_branch_update(worktree, integration, 120), "branch sync push")
+  git_mechanics.run_required(git_mechanics.git_push_worktree_branch_update(core.git, worktree, integration, 120), "branch sync push")
   core.fetch_branches(repo, { integration }, "branch fetch")
   local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
@@ -161,7 +161,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
     return
   end
 
-  git_mechanics.run_required(core.git_push_branch_force_with_lease(integration, upstream_sha, integration_sha, 120), "branch sync converge")
+  git_mechanics.run_required(git_mechanics.git_push_branch_force_with_lease(core.git, integration, upstream_sha, integration_sha, 120), "branch sync converge")
   core.fetch_branches(repo, { integration }, "branch fetch")
   local pushed_head = core.remote_head(integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= upstream_sha then
@@ -173,7 +173,7 @@ end
 local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
   local runtime = core.runtime_root()
   with_temp_worktree(runtime, repo, upstream, integration, integration_sha, function(worktree)
-    git_mechanics.run_required(core.git_fast_forward(worktree, upstream_sha, 120), "branch sync fast-forward")
+    git_mechanics.run_required(git_mechanics.git_fast_forward(core.git, worktree, upstream_sha, 120), "branch sync fast-forward")
     push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
   end)
 end
@@ -209,7 +209,7 @@ local function act(event)
 
     local runtime = core.runtime_root()
     with_temp_worktree(runtime, repo, branches.upstream, branches.integration, integration_sha, function(worktree)
-      local merge_result = core.git_merge_no_ff(worktree, upstream_sha, 120)
+      local merge_result = git_mechanics.git_merge_no_ff(core.git, worktree, upstream_sha, 120)
       if merge_result.exit_code == 0 then
         write_sync_commit(worktree, runtime, repo, branches.upstream, branches.integration, upstream_sha, integration_sha, "clean")
         push_if_real(repo, branches.upstream, branches.integration, upstream_sha, integration_sha, worktree)

@@ -40,7 +40,7 @@ local function ahead_count(upstream, integration)
 end
 
 local function has_content_diff(upstream, integration)
-  local result = core.git_remote_trees_equal_quiet(upstream, integration, 30)
+  local result = git_mechanics.git_remote_trees_equal_quiet(core.git, upstream, integration, 30)
   if result.exit_code == 0 then
     return false
   end

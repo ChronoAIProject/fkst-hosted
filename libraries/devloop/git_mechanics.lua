@@ -131,24 +131,24 @@ local forge_validators = require("devloop.forge_validators")
     )
   end
 
-  function C.git_merge_no_ff(M, worktree, sha, timeout)
-    return M.git.merge_no_ff(worktree, require_safe_sha("merge sha", sha), timeout)
+  function C.git_merge_no_ff(git, worktree, sha, timeout)
+    return git.merge_no_ff(worktree, require_safe_sha("merge sha", sha), timeout)
   end
 
-  function C.git_fast_forward(M, worktree, sha, timeout)
-    return M.git.fast_forward(worktree, require_safe_sha("fast-forward sha", sha), timeout)
+  function C.git_fast_forward(git, worktree, sha, timeout)
+    return git.fast_forward(worktree, require_safe_sha("fast-forward sha", sha), timeout)
   end
 
-  function C.git_remote_trees_equal_quiet(M, upstream, integration, timeout)
-    return M.git.remote_trees_equal_quiet(
+  function C.git_remote_trees_equal_quiet(git, upstream, integration, timeout)
+    return git.remote_trees_equal_quiet(
       require_safe_branch("upstream branch", upstream),
       require_safe_branch("integration branch", integration),
       timeout
     )
   end
 
-  function C.git_trees_equal_quiet(M, sha_a, sha_b, timeout)
-    return M.git.trees_equal_quiet(
+  function C.git_trees_equal_quiet(git, sha_a, sha_b, timeout)
+    return git.trees_equal_quiet(
       require_safe_sha("tree compare sha", sha_a),
       require_safe_sha("tree compare sha", sha_b),
       timeout
@@ -209,8 +209,8 @@ local forge_validators = require("devloop.forge_validators")
     return head_sha
   end
 
-  function C.git_push_branch_force_with_lease(M, branch, new_sha, expected_old_sha, timeout)
-    return M.git.push_branch_force_with_lease(
+  function C.git_push_branch_force_with_lease(git, branch, new_sha, expected_old_sha, timeout)
+    return git.push_branch_force_with_lease(
       require_safe_branch("push branch", branch),
       require_safe_sha("new branch sha", new_sha),
       require_safe_sha("expected old branch sha", expected_old_sha),
@@ -218,17 +218,17 @@ local forge_validators = require("devloop.forge_validators")
     )
   end
 
-  function C.git_push_branch_update(M, branch, timeout)
-    return M.git.push_branch_update(require_safe_branch("push branch", branch), timeout)
+  function C.git_push_branch_update(git, branch, timeout)
+    return git.push_branch_update(require_safe_branch("push branch", branch), timeout)
   end
 
-  function C.git_push_worktree_branch_update(M, worktree, branch, timeout)
-    return M.git.push_worktree_branch_update(worktree, require_safe_branch("push branch", branch), nil, timeout)
+  function C.git_push_worktree_branch_update(git, worktree, branch, timeout)
+    return git.push_worktree_branch_update(worktree, require_safe_branch("push branch", branch), nil, timeout)
   end
 
 
-  function C.git_diff_check(M, worktree, timeout)
-    return M.git.diff_check(worktree, false, timeout)
+  function C.git_diff_check(git, worktree, timeout)
+    return git.diff_check(worktree, false, timeout)
   end
 
   function C.git_diff_cached_check(M, worktree, timeout)
