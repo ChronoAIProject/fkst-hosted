@@ -179,6 +179,11 @@ struct PodVars {
     /// String (not a Vec) to avoid envy's Vec quirks; split in `from_vars`.
     #[serde(default = "defaults::pod_dns_nameservers_raw")]
     dns_nameservers: String,
+    /// Optional `runtimeClassName` for the session/validation pods. Absent (or
+    /// blank) means the cluster default runtime (runc); split/trimmed in
+    /// `from_vars`.
+    #[serde(default)]
+    runtime_class: Option<String>,
 }
 
 /// `FKST_LLM_*`-prefixed variables (static LLM-provider config). The session
@@ -235,6 +240,13 @@ pub struct PodConfig {
     /// Default `["1.1.1.1", "8.8.8.8"]`; a session with no DNS cannot resolve
     /// GitHub/LLM, so a blank list is rejected.
     pub dns_nameservers: Vec<String>,
+    /// The pod `runtimeClassName` for both the session and the env-validation
+    /// pod. Env: `FKST_POD_RUNTIME_CLASS`. Default **unset = runc** (the cluster
+    /// default runtime, so local/docker-desktop keeps working). Set to e.g.
+    /// `kata` in prod to run every session under a sandboxed runtime (Kata
+    /// Containers) — the nodes must have the Kata runtime installed and nested
+    /// virtualization enabled. Session and validation pods share this value.
+    pub runtime_class: Option<String>,
 }
 
 impl Default for PodConfig {
@@ -250,6 +262,7 @@ impl Default for PodConfig {
             llm_model: defaults::llm_model(),
             llm_wire_api: defaults::llm_wire_api(),
             dns_nameservers: defaults::pod_dns_nameservers(),
+            runtime_class: None,
         }
     }
 }
@@ -452,6 +465,12 @@ impl Config {
             llm_model: llm.model,
             llm_wire_api: llm.wire_api,
             dns_nameservers,
+            // Blank (or an empty ConfigMap value) means the cluster default
+            // runtime (runc); only a real name selects a sandboxed RuntimeClass.
+            runtime_class: pod
+                .runtime_class
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         };
 
         // Named-environment / install-validation knobs (FKST_ENV_*). Shares the
@@ -601,6 +620,32 @@ mod tests {
             .expect_err("blank nameservers must fail");
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains("FKST_POD_DNS_NAMESERVERS"));
+    }
+
+    // ---- pod runtime-class (Kata) tests ---------------------------------------
+
+    #[test]
+    fn pod_runtime_class_defaults_to_none() {
+        // Unset means the cluster default runtime (runc) — local docker-desktop
+        // has no Kata RuntimeClass, so the default must not select one.
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(config.pod.runtime_class, None);
+    }
+
+    #[test]
+    fn pod_runtime_class_override_is_kept() {
+        let config =
+            Config::from_vars(vars(&[("FKST_POD_RUNTIME_CLASS", "kata")])).expect("override");
+        assert_eq!(config.pod.runtime_class.as_deref(), Some("kata"));
+    }
+
+    #[test]
+    fn blank_pod_runtime_class_is_treated_as_none() {
+        // A blank ConfigMap value must fall back to runc, not to an empty (and
+        // therefore invalid) runtimeClassName.
+        let config = Config::from_vars(vars(&[("FKST_POD_RUNTIME_CLASS", "   ")]))
+            .expect("blank runtime class");
+        assert_eq!(config.pod.runtime_class, None);
     }
 
     #[test]

@@ -45,3 +45,7 @@ data:
   FKST_POD_SERVICE_ACCOUNT: "fkst-session-runner"
   FKST_POD_RUN_TTL_SECS: "600" # ttlSecondsAfterFinished; > 0
   FKST_POD_ACTIVE_DEADLINE_SECS: "7200" # activeDeadlineSeconds; > 0
+  # Sandbox runtime for session + validation pods. Empty = runc (the cluster
+  # default; fine for local/docker-desktop). Set to your Kata RuntimeClass name
+  # in prod (nodes must have the Kata runtime installed + nested virtualization).
+  # FKST_POD_RUNTIME_CLASS: "kata"

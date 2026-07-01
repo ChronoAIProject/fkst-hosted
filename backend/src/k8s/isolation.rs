@@ -80,7 +80,17 @@ pub(crate) fn isolated_container_security() -> SecurityContext {
 /// env, pins DNS to the given external `dns_nameservers`, turns off host
 /// namespaces, and stamps the isolated pod/container security contexts onto the
 /// spec and every container.
-pub(crate) fn apply_isolation(pod_spec: &mut PodSpec, dns_nameservers: &[String]) {
+///
+/// `runtime_class` selects the pod `runtimeClassName`: `None` leaves it unset —
+/// the cluster default runtime (runc) — which is all local/docker-desktop can
+/// do, while a value like `kata` selects a sandboxed RuntimeClass (Kata
+/// Containers). Kata is the real isolation boundary layered on top of the K8s
+/// hardening above; the nodes must provide the named RuntimeClass.
+pub(crate) fn apply_isolation(
+    pod_spec: &mut PodSpec,
+    dns_nameservers: &[String],
+    runtime_class: Option<&str>,
+) {
     // The always-on floor: no API credential mounted into the pod.
     pod_spec.automount_service_account_token = Some(false);
     // No `*_SERVICE_HOST/PORT` env exposing the in-cluster service topology.
@@ -96,6 +106,10 @@ pub(crate) fn apply_isolation(pod_spec: &mut PodSpec, dns_nameservers: &[String]
     pod_spec.host_network = Some(false);
     pod_spec.host_pid = Some(false);
     pod_spec.host_ipc = Some(false);
+    // Sandbox runtime: None = the cluster default runtime (runc), a value like
+    // `kata` selects the sandboxed RuntimeClass — the strongest isolation tier,
+    // layered on top of the K8s hardening above.
+    pod_spec.runtime_class_name = runtime_class.map(|s| s.to_string());
     // Root, boxed (see module docs).
     pod_spec.security_context = Some(isolated_pod_security());
     for container in &mut pod_spec.containers {
@@ -121,7 +135,11 @@ mod tests {
     #[test]
     fn apply_isolation_sets_the_pod_level_floor() {
         let mut pod = pod_with_one_container();
-        apply_isolation(&mut pod, &["1.1.1.1".to_string(), "8.8.8.8".to_string()]);
+        apply_isolation(
+            &mut pod,
+            &["1.1.1.1".to_string(), "8.8.8.8".to_string()],
+            None,
+        );
 
         assert_eq!(pod.automount_service_account_token, Some(false));
         assert_eq!(pod.enable_service_links, Some(false));
@@ -135,7 +153,7 @@ mod tests {
     fn apply_isolation_pins_external_dns_nameservers() {
         let mut pod = pod_with_one_container();
         let servers = vec!["9.9.9.9".to_string(), "1.0.0.1".to_string()];
-        apply_isolation(&mut pod, &servers);
+        apply_isolation(&mut pod, &servers, None);
 
         let dns = pod.dns_config.as_ref().expect("dns config");
         assert_eq!(dns.nameservers.as_deref(), Some(&servers[..]));
@@ -146,7 +164,7 @@ mod tests {
     #[test]
     fn apply_isolation_runs_the_pod_as_boxed_root() {
         let mut pod = pod_with_one_container();
-        apply_isolation(&mut pod, &["1.1.1.1".to_string()]);
+        apply_isolation(&mut pod, &["1.1.1.1".to_string()], None);
 
         let sc = pod.security_context.as_ref().expect("pod security context");
         assert_eq!(sc.run_as_user, Some(0));
@@ -161,7 +179,7 @@ mod tests {
     #[test]
     fn apply_isolation_boxes_every_container() {
         let mut pod = pod_with_one_container();
-        apply_isolation(&mut pod, &["1.1.1.1".to_string()]);
+        apply_isolation(&mut pod, &["1.1.1.1".to_string()], None);
 
         let csc = pod.containers[0]
             .security_context
@@ -187,5 +205,21 @@ mod tests {
                 ][..]
             )
         );
+    }
+
+    #[test]
+    fn apply_isolation_sets_the_runtime_class_when_given() {
+        let mut pod = pod_with_one_container();
+        apply_isolation(&mut pod, &["1.1.1.1".to_string()], Some("kata"));
+        assert_eq!(pod.runtime_class_name.as_deref(), Some("kata"));
+    }
+
+    #[test]
+    fn apply_isolation_leaves_the_runtime_class_unset_by_default() {
+        // None keeps the cluster default runtime (runc) — required for
+        // local/docker-desktop, which has no Kata RuntimeClass.
+        let mut pod = pod_with_one_container();
+        apply_isolation(&mut pod, &["1.1.1.1".to_string()], None);
+        assert_eq!(pod.runtime_class_name, None);
     }
 }

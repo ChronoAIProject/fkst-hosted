@@ -169,7 +169,11 @@ pub(crate) fn build_validation_pod(
     };
     // The SAME hard-isolation box as a session pod (no API token, no service
     // discovery, external DNS only, host namespaces off, root boxed).
-    crate::k8s::isolation::apply_isolation(&mut pod_spec, &pod_config.dns_nameservers);
+    crate::k8s::isolation::apply_isolation(
+        &mut pod_spec,
+        &pod_config.dns_nameservers,
+        pod_config.runtime_class.as_deref(),
+    );
 
     Ok(Pod {
         metadata: ObjectMeta {
@@ -251,6 +255,7 @@ mod tests {
             llm_model: "gpt-5-codex".to_string(),
             llm_wire_api: "chat".to_string(),
             dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
+            runtime_class: None,
         }
     }
 
@@ -291,6 +296,9 @@ mod tests {
         assert_eq!(spec.automount_service_account_token, Some(false));
         assert_eq!(spec.enable_service_links, Some(false));
         assert_eq!(spec.dns_policy.as_deref(), Some("None"));
+        // The test config leaves runtime_class unset: the validation pod runs
+        // under the cluster default runtime (runc), matching the session pod.
+        assert_eq!(spec.runtime_class_name, None);
         let sc = spec
             .security_context
             .as_ref()

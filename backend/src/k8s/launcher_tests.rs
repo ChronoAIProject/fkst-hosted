@@ -39,6 +39,7 @@ fn config() -> PodConfig {
         llm_model: "gpt-5-codex".to_string(),
         llm_wire_api: "chat".to_string(),
         dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
+        runtime_class: None,
     }
 }
 
@@ -107,6 +108,9 @@ fn build_job_sets_the_run_session_shape() {
         dns.nameservers.as_deref(),
         Some(&config().dns_nameservers[..])
     );
+    // The test config leaves runtime_class unset, so the pod uses the cluster
+    // default runtime (runc) — no sandboxed RuntimeClass is stamped.
+    assert_eq!(pod.runtime_class_name, None);
 
     let sc = pod.security_context.as_ref().expect("pod security context");
     assert_eq!(sc.run_as_user, Some(0));
