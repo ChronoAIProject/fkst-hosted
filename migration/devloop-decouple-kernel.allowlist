@@ -1,0 +1,7 @@
+# G-DEVLOOP-DECOUPLE kernel allowlist: devloop symbols that may legitimately remain
+# reachable through the composed package core M (the small version-CAS lifecycle kernel).
+# Everything NOT listed here must be driven to 0 reader-calls-through-M (called directly
+# via require(module).fn(...)). This list is the documented endpoint = "no devloop god-table
+# except a small reviewed kernel". Add a symbol here ONLY with review justification.
+# (empty to start — the current 582 is all non-kernel; as decoupling proceeds the count
+#  drops and the true version-CAS kernel is added here explicitly.)
