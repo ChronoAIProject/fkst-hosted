@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base = require("tests.devloop_base_helpers")
 local t = base.t
 local core = base.core
@@ -34,7 +35,7 @@ local function append_merged_pr_merging_fact(comments, pr_state)
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       local marker_head_sha = marker:match('head_sha="([^"]+)"')
-      if core.parse_entity_proposal_id(marker_proposal) ~= nil and require("devloop.pr_safety").is_safe_head_sha(marker_head_sha) then
+      if entity_lib.parse_entity_proposal_id(marker_proposal) ~= nil and require("devloop.pr_safety").is_safe_head_sha(marker_head_sha) then
         proposal_id = marker_proposal
         version = marker_version
         head_sha = marker_head_sha

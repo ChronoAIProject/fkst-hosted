@@ -23,7 +23,7 @@ local function pr_source_ref(pr_number)
 end
 
 local function pr_proposal(pr_number)
-  return core.pr_proposal_id(repo, pr_number)
+  return entity_lib.pr_proposal_id(repo, pr_number)
 end
 
 local function issue(extra)

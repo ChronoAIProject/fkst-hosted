@@ -338,7 +338,7 @@ end
 local function process_merge_ready_locked(repo, issue_number, merge_ready, branches, initial_pr, options)
   local enforce_queue = options == nil or options.enforce_queue ~= false
   local write_mode = options and options.write_mode or nil
-  local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
   if entity == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
@@ -866,7 +866,7 @@ local function process_merge_queue_tick(event)
       })
       return
     end
-    local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+    local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
     if entity == nil then
       core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
       return
@@ -898,7 +898,7 @@ local function process_merge_ready_event(event)
   end
 
   core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
-  local entity = core.parse_entity_proposal_id(merge_ready.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
   if entity == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return

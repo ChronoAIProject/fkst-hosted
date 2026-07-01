@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -137,7 +138,7 @@ local function pipeline_review(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local entity = core.parse_entity_proposal_id(reconcile.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(reconcile.proposal_id)
   if entity == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
@@ -213,7 +214,7 @@ local function pipeline_fix(event)
   end
 
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
-  local entity = core.parse_entity_proposal_id(reconcile.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(reconcile.proposal_id)
   if entity == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return

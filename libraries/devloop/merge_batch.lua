@@ -77,7 +77,7 @@ local function head_contains_base(M, base_head, entry)
 end
 
 local function entry_issue_number(M, entry)
-  local entity = M.parse_entity_proposal_id(entry and entry.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(entry and entry.proposal_id)
   return entity and entity.issue_number or nil
 end
 
@@ -211,7 +211,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       return last_merged_pr_number
     end
     merge_ready._merge_pass = "poll"
-    local entity = M.parse_entity_proposal_id(merge_ready.proposal_id)
+    local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
     local outcome = process_merge_ready(repo, entity and entity.issue_number or nil, merge_ready, branches, nil, {
       enforce_queue = false,
       write_mode = options and options.write_mode or nil,

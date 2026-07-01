@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -248,7 +249,7 @@ local function decompose_context(event)
   end
 
   core.log_entry("decompose", event, decompose.proposal_id, decompose.dedup_key)
-  local entity = core.parse_entity_proposal_id(decompose.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(decompose.proposal_id)
   if entity == nil or entity.issue_number == nil then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "proposal_id is outside issue-backed github-devloop")
     if type(event) == "table" then

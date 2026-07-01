@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
@@ -9,7 +10,7 @@ function C.is_supported_review_meta(M, payload)
     return false
   end
   local has_valid_identity = payload.mode == "fix-reflection"
-    and M.parse_entity_proposal_id(payload.proposal_id) ~= nil
+    and entity_lib.parse_entity_proposal_id(payload.proposal_id) ~= nil
     and strings.is_path_safe_key(payload.dedup_key, M._max_dedup_len)
   if payload.mode ~= "fix-reflection" then
     has_valid_identity = M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)

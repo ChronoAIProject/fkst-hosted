@@ -259,7 +259,7 @@ local function child_from_pr(issue, impl_version, generation, pr, repo, issue_nu
   end
   local pr_number = tonumber(pr.number)
   local pr_source_ref = entity_lib.pr_source_ref(repo, pr_number)
-  local pr_proposal_id = M.pr_proposal_id(repo, pr_number)
+  local pr_proposal_id = entity_lib.pr_proposal_id(repo, pr_number)
   local head_sha = pr.head_sha or issue.head_sha or (issue.implementation and issue.implementation.head_sha)
   local effects = {}
   if child_start_visible == nil then

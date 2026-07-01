@@ -144,7 +144,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     or tostring(delegation.version or "") ~= tostring(state.version or "") then
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-version)", "pr-delegation proposal or version does not match awaiting-pr state")
   end
-  local pr_repo, pr_number = M.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
+  local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
   if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or cross-repo")
   end

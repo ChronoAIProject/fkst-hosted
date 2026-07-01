@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local strings_c = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
@@ -666,7 +667,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   if delegation == nil then
     return false, nil
   end
-  local pr_repo, pr_number = core.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
+  local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
   if tostring(pr_repo or "") ~= tostring(repo)
     or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
     return nil, "pr-delegation-mismatch"

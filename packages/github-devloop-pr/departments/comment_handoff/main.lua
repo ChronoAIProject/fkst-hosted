@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local strings = require("contract.strings")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
@@ -53,7 +54,7 @@ local function valid_fixing_handoff(handoff)
 end
 
 local function issue_claim_ok(payload, handoff)
-  local entity = core.parse_entity_proposal_id(handoff.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(handoff.proposal_id)
   if entity == nil then
     return false
   end
@@ -255,7 +256,7 @@ local function issue_number_for_label(payload, handoff, repo)
   if payload.issue_number ~= nil then
     return payload.issue_number
   end
-  local entity = core.parse_entity_proposal_id(handoff.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(handoff.proposal_id)
   if entity ~= nil and entity.kind == "issue" and entity.repo == repo then
     return entity.issue_number
   end

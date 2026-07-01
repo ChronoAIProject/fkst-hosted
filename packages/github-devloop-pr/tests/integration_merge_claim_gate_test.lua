@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -62,7 +63,7 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
 end
 
 local function comments_for(event, created_at, state, state_version)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   local comments = {
     m_builders.pr_origin_marker(core, event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
@@ -125,7 +126,7 @@ local function mock_merge_pr_view(event)
 end
 
 local function mock_merged_pr_view(event)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   local comments = {
     m_builders.pr_origin_marker(core, event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
@@ -275,7 +276,7 @@ return {
 
   test_merge_direct_merge_ready_skips_pr_native_without_backing_issue = function()
     local current = merge_ready({
-      proposal_id = core.pr_proposal_id("owner/repo", 7),
+      proposal_id = entity_lib.pr_proposal_id("owner/repo", 7),
     })
     mock_bot_env()
     mock_write_env("1")

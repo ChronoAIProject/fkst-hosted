@@ -141,11 +141,8 @@ require("devloop.logging").install(M)
 local entity = require("devloop.entity")
 M.build_entity_comment_request = function(...) return entity.build_entity_comment_request(M, ...) end
 M.linked_pr_surface_snapshot = function(...) return entity.linked_pr_surface_snapshot(M, ...) end
-M.pr_proposal_id = function(...) return entity.pr_proposal_id(M, ...) end
-M.parse_pr_proposal_id = function(...) return entity.parse_pr_proposal_id(M, ...) end
 M.pr_transition_lock_key = function(...) return entity.pr_transition_lock_key(M, ...) end
 M.merge_lane_lock_key = function(...) return entity.merge_lane_lock_key(M, ...) end
-M.parse_entity_proposal_id = function(...) return entity.parse_entity_proposal_id(M, ...) end
 M.is_safe_entity_proposal_ref = function(...) return entity.is_safe_entity_proposal_ref(M, ...) end
 M.transition_lock_key = function(...) return entity.transition_lock_key(M, ...) end
 M.observe_lock_key = function(...) return entity.observe_lock_key(M, ...) end

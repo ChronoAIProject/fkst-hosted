@@ -160,7 +160,7 @@ return {
     local event = h.ready()
     local run_opts = opts("liveness-delegated-implement-codex-run-no-timeout-count")
     local exec_ref = core.implement_exec_ref(event.proposal_id, event.dedup_key)
-    local pr_proposal = core.pr_proposal_id(repo, 7)
+    local pr_proposal = entity_lib.pr_proposal_id(repo, 7)
     codex_status.seed_implement_codex_run(run_opts, event.proposal_id, event.dedup_key)
     local comments = {
       state_comment("implementing", event.dedup_key, "2026-06-03T00:00:00Z"),

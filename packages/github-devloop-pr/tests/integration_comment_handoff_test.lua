@@ -137,7 +137,7 @@ return {
   test_comment_written_reviewing_ack_allows_pr_native_proposal = function()
     local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local version = "pr-native-version/fix/1"
-    local proposal_id = core.pr_proposal_id("owner/repo", 7)
+    local proposal_id = entity_lib.pr_proposal_id("owner/repo", 7)
     mock_marker_comment("IC_pr_native_reviewing_1", core.state_marker(proposal_id, "reviewing", version))
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",

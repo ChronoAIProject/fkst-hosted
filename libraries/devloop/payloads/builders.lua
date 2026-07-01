@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
@@ -407,13 +408,13 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
   end
   issue_title = devloop_base.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
-    .. "\nEntity proposal: " .. tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
+    .. "\nEntity proposal: " .. tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
     .. "\nIssue title: " .. issue_title
     .. "\n" .. M.short_review_observation_boundary_clause()
     .. "\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment."
     .. "\nRead the local context bundle before judging."
-  local issue_proposal_id = tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
+  local issue_proposal_id = tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
   local ledger = m_facts.review_prior_round_ledger(M, pr_comments, issue_proposal_id, version)
   if ledger ~= nil and ledger ~= "" then
     body = body

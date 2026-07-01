@@ -55,7 +55,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.log_entry("review_pr", event, reviewing.proposal_id, reviewing.dedup_key)
-  local entity = core.parse_entity_proposal_id(reviewing.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(reviewing.proposal_id)
   if entity == nil then
     core.log_cas_decision("review_pr", reviewing.proposal_id, { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return

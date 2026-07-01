@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local S = {}
 local conflict_telemetry = require("devloop.conflict_telemetry")
@@ -43,7 +44,7 @@ end
 
 local function hotspot_parent_comment_target(repo, hotspot)
   for _, fact in ipairs(hotspot and hotspot.evidence or {}) do
-    local entity = M.parse_entity_proposal_id(fact.proposal_id)
+    local entity = entity_lib.parse_entity_proposal_id(fact.proposal_id)
     if entity ~= nil
       and entity.kind == "issue"
       and tostring(entity.repo or "") == tostring(repo or "")

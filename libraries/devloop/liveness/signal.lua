@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local parsers_misc = require("devloop.parsers.misc")
@@ -314,7 +315,7 @@ local function fact_child_state_proposal_id(M, fact, parent_proposal_id, version
     return nil
   end
   local child_pr_proposal_id = fact.pr_proposal_id or fact.pr_proposal
-  if M.parse_pr_proposal_id(child_pr_proposal_id) == nil then
+  if entity_lib.parse_pr_proposal_id(child_pr_proposal_id) == nil then
     return nil
   end
   return tostring(fact.proposal_id)

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
@@ -489,7 +490,7 @@ function C.merge_ready_approval_matches_event(M, fact, merge_ready)
     return false, "merge-ready-approval-mismatch"
   end
 
-  local entity = M.parse_entity_proposal_id(merge_ready.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
   local entity_repo = entity and entity.repo or nil
   local review_repo, review_pr_number, review_version, review_head_sha = M.parse_pr_review_proposal_id(fact.review_proposal_id)
   local expected_review_repo = entity_repo and devloop_base.safe_pr_review_repo_segment(entity_repo) or nil
@@ -741,7 +742,7 @@ function C.pr_delegation_fact(M, comments, proposal_id, version, delegation)
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       local marker_delegation = marker:match('delegation="([^"]*)"')
-      local _, pr_number = M.parse_pr_proposal_id(marker_pr_proposal)
+      local _, pr_number = entity_lib.parse_pr_proposal_id(marker_pr_proposal)
       if marker_proposal == tostring(proposal_id)
         and (version == nil or marker_version == tostring(version))
         and (delegation == nil or marker_delegation == tostring(delegation))
@@ -792,7 +793,7 @@ function C.pr_origin_fact(M, comments)
           base_branch = marker_base_branch,
         }
       end
-      local pr_repo, pr_number = M.parse_pr_proposal_id(marker_proposal)
+      local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(marker_proposal)
       if pr_repo ~= nil
         and marker_issue == tostring(pr_number)
         and forge_validators.is_git_ref_safe(marker_branch)

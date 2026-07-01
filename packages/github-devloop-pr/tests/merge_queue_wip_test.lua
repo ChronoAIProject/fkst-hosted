@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
@@ -97,7 +98,7 @@ local function merge_comments_with_origin(event, origin_marker)
 end
 
 local function merge_comments_for_event(event)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   return {
     m_builders.pr_origin_marker(core, 
       event.proposal_id,
@@ -127,7 +128,7 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
 end
 
 local function mock_claimed_issue_for_event(event, times)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   for _ = 1, times or 1 do
     entity_read_mocks.mock_issue_view_selector(t, {
       repo = "owner/repo",
@@ -197,7 +198,7 @@ local function mock_merge_pr_view(event, state, mergeable, merge_state, rollup_s
 end
 
 local function mock_merged_pr_view(event)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   local comments = {
     m_builders.pr_origin_marker(core, event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),

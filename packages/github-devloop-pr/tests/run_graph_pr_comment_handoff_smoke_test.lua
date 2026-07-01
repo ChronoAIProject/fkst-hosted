@@ -12,7 +12,7 @@ local pr_number = 7
 local comment_id = "123456"
 local head_sha = "def456"
 local version = "pr-native-version/review/1"
-local proposal_id = core.pr_proposal_id(repo, pr_number)
+local proposal_id = entity_lib.pr_proposal_id(repo, pr_number)
 local review_proposal_id = devloop_base.pr_review_proposal_id(repo, pr_number, version, head_sha)
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
 

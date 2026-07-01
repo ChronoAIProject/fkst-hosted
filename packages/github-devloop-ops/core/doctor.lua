@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
@@ -210,7 +211,7 @@ local function fetch_pr_entity(repo, pr)
   end
   local current = parsers_pr.parse_pr_view_origin(M, view.stdout)
   local origin = m_facts.pr_origin_fact(M, current.comments)
-  local proposal_id = origin and origin.proposal_id or M.pr_proposal_id(repo, pr.number)
+  local proposal_id = origin and origin.proposal_id or entity_lib.pr_proposal_id(repo, pr.number)
   return {
     kind = "pr",
     repo = repo,

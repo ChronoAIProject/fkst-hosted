@@ -196,7 +196,7 @@ function C.liveness_scan_activation_slice(M, repo, kind, items, cursor_prefix)
 end
 
 function C.liveness_scan_reinject(M, repo, entity, kind, tick)
-  local proposal_id = kind == "pr" and M.pr_proposal_id(repo, entity.number) or base_ids.proposal_id(repo, entity.number)
+  local proposal_id = kind == "pr" and entity_lib.pr_proposal_id(repo, entity.number) or base_ids.proposal_id(repo, entity.number)
   local payload = C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
   local queue = C.liveness_scan_observe_queue(M, kind)
   M.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {

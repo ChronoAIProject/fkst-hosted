@@ -129,7 +129,7 @@ function C.linked_pr_surface_snapshot(M, repo, proposal_id, issue_comments, opts
   return snapshot
 end
 
-function C.pr_proposal_id(M, repo, pr_number)
+function C.pr_proposal_id(repo, pr_number)
   if not require("devloop.pr_safety").is_safe_pr_number(pr_number) then
     error("github-devloop: invalid PR proposal number")
   end
@@ -140,7 +140,7 @@ function C.pr_proposal_id(M, repo, pr_number)
   return "github-devloop/pr/" .. safe_repo .. "/" .. tostring(pr_number)
 end
 
-function C.parse_pr_proposal_id(M, proposal_id)
+function C.parse_pr_proposal_id(proposal_id)
   local repo_part, number = tostring(proposal_id or ""):match("^github%-devloop/pr/(.+)/(%d+)$")
   if repo_part == nil or not require("devloop.pr_safety").is_safe_pr_number(number) then
     return nil, nil
@@ -156,7 +156,7 @@ function C.merge_lane_lock_key(M, repo)
   return "github-devloop/merge-lane/" .. strings.sanitize_key(repo, false)
 end
 
-function C.parse_entity_proposal_id(M, proposal_id)
+function C.parse_entity_proposal_id(proposal_id)
   local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo ~= nil then
     return {
@@ -167,7 +167,7 @@ function C.parse_entity_proposal_id(M, proposal_id)
       proposal_id = proposal_id,
     }
   end
-  local pr_repo, pr_number = C.parse_pr_proposal_id(M, proposal_id)
+  local pr_repo, pr_number = C.parse_pr_proposal_id(proposal_id)
   if pr_repo ~= nil then
     return {
       kind = "pr",
@@ -181,7 +181,7 @@ function C.parse_entity_proposal_id(M, proposal_id)
 end
 
 function C.is_safe_entity_proposal_ref(M, proposal_id, dedup_key)
-  local entity = C.parse_entity_proposal_id(M, proposal_id)
+  local entity = C.parse_entity_proposal_id(proposal_id)
   if entity == nil then
     return false
   end
@@ -197,7 +197,7 @@ function C.transition_lock_key(M, proposal_id)
   if lock ~= nil then
     return lock
   end
-  local repo, pr_number = C.parse_pr_proposal_id(M, proposal_id)
+  local repo, pr_number = C.parse_pr_proposal_id(proposal_id)
   if repo == nil then
     return nil
   end
@@ -233,7 +233,7 @@ end
 
 function C.pr_native_origin(M, repo, pr_number, pr)
   return {
-    proposal_id = C.pr_proposal_id(M, repo, pr_number),
+    proposal_id = C.pr_proposal_id(repo, pr_number),
     repo = repo,
     issue_number = nil,
     branch = pr.head_ref_name,

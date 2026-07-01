@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
@@ -40,7 +41,7 @@ end
 
 local function pr_native_fixing(extra)
   local event = pr_native_review_reached()
-  local proposal_id = core.pr_proposal_id("owner/repo", 7)
+  local proposal_id = entity_lib.pr_proposal_id("owner/repo", 7)
   local value = {
     schema = "github-devloop.fixing.v1",
     proposal_id = proposal_id,

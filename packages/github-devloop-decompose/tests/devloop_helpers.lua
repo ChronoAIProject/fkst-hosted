@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base = require("tests.devloop_base_helpers")
 local pr = require("tests.devloop_pr_helpers")
 local worktree = require("tests.devloop_worktree_helpers")
@@ -17,7 +18,7 @@ end
 local base_run_decompose = helpers.run_decompose
 
 local function issue_identity_from_payload(payload)
-  local entity = helpers.core.parse_entity_proposal_id(payload and payload.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(payload and payload.proposal_id)
   local source_ref = payload and payload.source_ref and payload.source_ref.ref
   local source_repo, source_issue = tostring(source_ref or ""):match("^(.+)#issue/(%d+)$")
   return source_repo or (entity and entity.repo) or "owner/repo",

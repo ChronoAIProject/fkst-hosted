@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local parsers_misc = require("devloop.parsers.misc")
 local transition_version = require("contract.transition_version")
@@ -104,7 +105,7 @@ end
 local function pr_native_merge_ready(extra)
   local event = pr_native_review_reached()
   local value = payloads_builders.build_devloop_merge_ready_payload(core,
-    core.pr_proposal_id("owner/repo", 7),
+    entity_lib.pr_proposal_id("owner/repo", 7),
     7,
     "pr-native-version",
     {

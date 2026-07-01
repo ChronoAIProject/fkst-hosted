@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
@@ -138,7 +139,7 @@ local function issue_ref_from_proposal_id(M, proposal_id)
   if repo ~= nil and issue_number ~= nil then
     return repo, issue_number
   end
-  local entity = M.parse_entity_proposal_id(proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(proposal_id)
   if entity ~= nil and entity.issue_number ~= nil then
     return entity.repo, entity.issue_number
   end

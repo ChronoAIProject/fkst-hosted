@@ -594,7 +594,7 @@ local function process_issue_event(event)
         core.log_cas_decision("observe_issue", proposal_id, issue_state, "pr-open", "awaiting-pr", "skip-pending(open-pr-missing)", "legacy pr-open canonicalization requires an open linked PR")
         return false
       end
-      local pr_proposal_id = core.pr_proposal_id(issue.repo, link.pr_number)
+      local pr_proposal_id = entity_lib.pr_proposal_id(issue.repo, link.pr_number)
       local delegation = "g" .. tostring(core.implementation_retry_attempt(issue_state.version) or 1)
       local comment_body = "github-devloop canonicalized legacy issue PR state to delegated PR child"
         .. "\n\n" .. core.state_marker(proposal_id, "awaiting-pr", issue_state.version)

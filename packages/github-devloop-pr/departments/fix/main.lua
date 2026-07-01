@@ -632,7 +632,7 @@ local function act_fix(event)
   end
 
   core.log_entry("fix", event, fix.proposal_id, fix.dedup_key)
-  local entity = core.parse_entity_proposal_id(fix.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(fix.proposal_id)
   if entity == nil then
     core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return

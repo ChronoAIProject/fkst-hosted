@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local strings = require("contract.strings")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
@@ -27,7 +28,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.log_entry("review_meta", event, review_meta.proposal_id, review_meta.dedup_key)
-  local entity = core.parse_entity_proposal_id(review_meta.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(review_meta.proposal_id)
   if entity == nil then
     core.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return

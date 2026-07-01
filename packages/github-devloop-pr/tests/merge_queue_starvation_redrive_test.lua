@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
@@ -56,7 +57,7 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
 end
 
 local function merge_comments_for_event(event)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   return {
     m_builders.pr_origin_marker(core, 
       event.proposal_id,
@@ -117,7 +118,7 @@ local function mock_queue_pr(event, created_at)
 end
 
 local function mock_claimed_issue_for_event(event)
-  local entity = core.parse_entity_proposal_id(event.proposal_id)
+  local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   t.mock_command(core.gh_issue_view_claim_cmd("owner/repo", entity.issue_number), {
     stdout = '{"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
     stderr = "",

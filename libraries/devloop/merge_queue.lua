@@ -110,7 +110,7 @@ local function current_any_entity_state(M, entity_comments)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, entity_comments or {})) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
-      if marker_proposal ~= nil and M.parse_entity_proposal_id(marker_proposal) ~= nil then
+      if marker_proposal ~= nil and entity_lib.parse_entity_proposal_id(marker_proposal) ~= nil then
         local candidate = M.current_state(entity_comments, marker_proposal)
         candidate.proposal_id = marker_proposal
         if best == nil or M.compare_state_marker_order(best, candidate.state, candidate.version) < 0 then

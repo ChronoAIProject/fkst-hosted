@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local contract_time = require("contract.time")
@@ -312,7 +313,7 @@ return {
     local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
     local now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-06-03T10:33:02Z")
     local parent_proposal_id = "github-devloop/issue/owner/repo/1248"
-    local child_pr_proposal_id = core.pr_proposal_id("owner/repo", 7)
+    local child_pr_proposal_id = entity_lib.pr_proposal_id("owner/repo", 7)
     local version = "ready/1248"
     local due, age = core.liveness_timeout_due_with_facts(row, {
       state = "awaiting-pr",
@@ -340,7 +341,7 @@ return {
           {
             author_login = "fkst-test-bot",
             created_at = "2026-06-03T10:30:00Z",
-            body = core.state_marker(core.pr_proposal_id("owner/repo", 99), "merged", version),
+            body = core.state_marker(entity_lib.pr_proposal_id("owner/repo", 99), "merged", version),
           },
         },
       },
@@ -352,7 +353,7 @@ return {
   test_awaiting_pr_child_workflow_wait_actionable_on_terminal_child_state = function()
     local row = rows_by_state(core.restart_transition_table())["awaiting-pr"]
     local parent_proposal_id = "github-devloop/issue/owner/repo/1248"
-    local child_pr_proposal_id = core.pr_proposal_id("owner/repo", 7)
+    local child_pr_proposal_id = entity_lib.pr_proposal_id("owner/repo", 7)
     local version = "ready/1248"
     local facts = {
       proposal_id = parent_proposal_id,
