@@ -61,7 +61,9 @@ local restart_liveness_resolved = require("devloop.liveness").with_restart_polic
 })
 restart_liveness_resolved.workflow_ports = workflow_ports.from_devloop(M)
 require("workflow.restart_liveness_contract").install(M, restart_liveness_resolved)
-require("devloop.restart_responsibility_contract").install(M)
+local restart_responsibility_contract = require("devloop.restart_responsibility_contract")
+M.restart_responsibility_inventory_errors = function(...) return restart_responsibility_contract.restart_responsibility_inventory_errors(M, ...) end
+M.strict_restart_responsibility_contract_errors = function(...) return restart_responsibility_contract.strict_restart_responsibility_contract_errors(M, ...) end
 require("devloop.restart_actionable_epoch").install(M)
 require("core.review_redrive").install(M)
 local review_replayers = require("core.pr_review_replayer").install(M)

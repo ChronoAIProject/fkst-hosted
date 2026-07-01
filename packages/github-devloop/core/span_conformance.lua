@@ -1,5 +1,6 @@
 local S = {}
 local hidden_state_conformance = require("devloop.hidden_state_conformance")
+local m_rrc = require("devloop.restart_responsibility_contract")
 
 local START_WORDS = {
   start = true,
@@ -913,7 +914,7 @@ end
 
 local function span_declaration_errors(core)
   local out = {}
-  for _, message in ipairs(core.strict_restart_responsibility_contract_errors(core.restart_transition_table())) do
+  for _, message in ipairs(m_rrc.strict_restart_responsibility_contract_errors(core, core.restart_transition_table())) do
     if tostring(message):find("span_contract", 1, true) ~= nil then
       table.insert(out, record("gspan.span-contract", tostring(message)))
     end

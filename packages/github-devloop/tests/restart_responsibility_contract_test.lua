@@ -1,4 +1,5 @@
 local h = require("tests.devloop_core_helpers")
+local m_rrc = require("devloop.restart_responsibility_contract")
 local core = h.core
 local t = h.t
 
@@ -117,7 +118,7 @@ end
 
 return {
   test_known_god_states_inventory_is_exact = function()
-    local inventory = core.known_god_states()
+    local inventory = m_rrc.known_god_states(core)
     local count = 0
     for _ in pairs(inventory) do
       count = count + 1
@@ -127,21 +128,21 @@ return {
 
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
-    local strict = core.strict_restart_responsibility_contract_errors()
-    t.eq(core.responsibility_contract_inventory_is_listed_violation("ready", strict), false)
-    t.eq(core.responsibility_contract_inventory_is_listed_violation("dependency_wait", strict), false)
-    t.eq(core.responsibility_contract_inventory_is_listed_violation("blocked", strict), false)
-    t.eq(core.responsibility_contract_inventory_is_listed_violation("implementing", strict), false)
-    t.eq(core.responsibility_contract_inventory_is_listed_violation("awaiting-pr", strict), false)
+    local strict = m_rrc.strict_restart_responsibility_contract_errors(core)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "ready", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "dependency_wait", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "blocked", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "implementing", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "awaiting-pr", strict), false)
   end,
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()
     local by_state = rows_by_state(core.restart_transition_table())
     for _, state in ipairs({ "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "blocked" }) do
-      local errors = core.strict_restart_responsibility_contract_errors({ by_state[state] })
+      local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { by_state[state] })
       t.eq(#errors, 0, state .. ": " .. joined_errors(errors))
     end
-    t.eq(#core.strict_restart_responsibility_contract_errors({ clean_row() }), 0)
+    t.eq(#m_rrc.strict_restart_responsibility_contract_errors(core, { clean_row() }), 0)
   end,
 
   test_blocked_is_clean_budget_bounded_recovery_signature = function()
@@ -164,7 +165,7 @@ return {
     t.eq(signature.watchdog_escape.kind, "watchdog_escape")
     t.eq(signature.watchdog_escape.queue, "github-devloop-decompose.devloop_decompose")
     t.eq(#signature.successors, 0)
-    t.eq(#core.strict_restart_responsibility_contract_errors({ row }), 0)
+    t.eq(#m_rrc.strict_restart_responsibility_contract_errors(core, { row }), 0)
   end,
 
   test_budget_bounded_recovery_rejects_autonomous_successor = function()
@@ -187,7 +188,9 @@ return {
       end
       return original_stage_rank(state)
     end
-    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    local ok, errors = pcall(function()
+      return m_rrc.strict_restart_responsibility_contract_errors(core, { row })
+    end)
     core.stage_rank = original_stage_rank
     if not ok then
       error(errors)
@@ -266,7 +269,9 @@ return {
       end
       return original_stage_rank(state)
     end
-    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row, forward, blocked })
+    local ok, errors = pcall(function()
+      return m_rrc.strict_restart_responsibility_contract_errors(core, { row, forward, blocked })
+    end)
     core.stage_rank = original_stage_rank
     if not ok then
       error(errors)
@@ -293,7 +298,9 @@ return {
       end
       return original_stage_rank(state)
     end
-    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    local ok, errors = pcall(function()
+      return m_rrc.strict_restart_responsibility_contract_errors(core, { row })
+    end)
     core.stage_rank = original_stage_rank
     if not ok then
       error(errors)
@@ -307,7 +314,7 @@ return {
     local row = clean_row()
     row.from_state = "synthetic-worker-without-span"
     row.span_contract = nil
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "synthetic-worker-without-span: worker row must declare span_contract"), joined_errors(errors))
   end,
 
@@ -319,7 +326,7 @@ return {
       durable_start_marker = "synthetic-start",
       spawn_predecessor = "raise_synthetic_start",
     }
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "synthetic-worker-bad-span: span_contract.durable_start_marker must name a durable marker family"), joined_errors(errors))
   end,
 
@@ -328,7 +335,7 @@ return {
       local row = clean_row()
       row.from_state = "synthetic-worker-missing-" .. field
       row.span_contract[field] = nil
-      local errors = core.strict_restart_responsibility_contract_errors({ row })
+      local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
       t.is_true(contains_error(errors, row.from_state .. ": span_contract." .. field .. " must be declared"), joined_errors(errors))
     end
   end,
@@ -337,7 +344,7 @@ return {
     local row = clean_row()
     row.from_state = "synthetic-worker-empty-spawn-function"
     row.span_contract.spawn_function = ""
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "synthetic-worker-empty-spawn-function: span_contract.spawn_function must be a non-empty string when declared"), joined_errors(errors))
   end,
 
@@ -362,7 +369,7 @@ return {
         },
       },
     }
-    local errors = core.restart_responsibility_inventory_errors(rows)
+    local errors = m_rrc.restart_responsibility_inventory_errors(core, rows)
     t.is_true(contains_error(errors, "ready: responsibility_signature.receiver_kind must be exactly one receiver"))
     t.is_true(contains_error(errors, "ready: responsibility_signature.driving_queue must match row.driving_queue"))
   end,
@@ -399,7 +406,9 @@ return {
       end
       return original_stage_rank(state)
     end
-    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    local ok, errors = pcall(function()
+      return m_rrc.strict_restart_responsibility_contract_errors(core, { row })
+    end)
     core.stage_rank = original_stage_rank
     if not ok then
       error(errors)
@@ -408,7 +417,7 @@ return {
   end,
 
   test_known_god_states_inventory_remains_empty = function()
-    local errors = core.restart_responsibility_inventory_errors()
+    local errors = m_rrc.restart_responsibility_inventory_errors(core)
     t.eq(#errors, 0, joined_errors(errors))
   end,
 
@@ -431,7 +440,7 @@ return {
       },
     }
     table.insert(rows, other)
-    local errors = core.restart_responsibility_inventory_errors(rows)
+    local errors = m_rrc.restart_responsibility_inventory_errors(core, rows)
     t.is_true(contains_error(errors, "synthetic-ready-duplicate: duplicate responsibility_signature shared with ready"), joined_errors(errors))
   end,
 
@@ -453,7 +462,7 @@ return {
     row.responsibility_signature.liveness_class = "ready.actionable"
     row.responsibility_signature.input_fact_family = "ready-base-preconditions partitioned by blockedBy empty/nonempty"
     row.responsibility_signature.output_postcondition_family = "implementation_kickoff and dependency-release-or-blocker-tracking"
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "ready: invariant #6 forbids dependency release_gate defer on actionable ready"), joined_errors(errors))
     t.is_true(contains_error(errors, "ready: invariant #6 forbids mixing implementation kickoff and dependency release/blocker tracking"), joined_errors(errors))
   end,
@@ -462,12 +471,12 @@ return {
     local row = clean_row()
     row.from_state = "synthetic-omits-edge"
     row.to_states = { "synthetic-done", "synthetic-also-done" }
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "synthetic-omits-edge: responsibility_signature.successors missing row successor synthetic-also-done"), joined_errors(errors))
   end,
 
   test_real_restart_responsibility_table_passes_generation_entry_policy = function()
-    local errors = core.restart_responsibility_inventory_errors()
+    local errors = m_rrc.restart_responsibility_inventory_errors(core)
     t.eq(#errors, 0, joined_errors(errors))
   end,
 
@@ -516,7 +525,9 @@ return {
       end
       return original_stage_rank(state)
     end
-    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    local ok, errors = pcall(function()
+      return m_rrc.strict_restart_responsibility_contract_errors(core, { row })
+    end)
     core.stage_rank = original_stage_rank
     if not ok then
       error(errors)
@@ -566,7 +577,9 @@ return {
       end
       return original_stage_rank(state)
     end
-    local ok, errors = pcall(core.strict_restart_responsibility_contract_errors, { row })
+    local ok, errors = pcall(function()
+      return m_rrc.strict_restart_responsibility_contract_errors(core, { row })
+    end)
     core.stage_rank = original_stage_rank
     if not ok then
       error(errors)
@@ -581,7 +594,7 @@ return {
     row.responsibility_signature.milestone = "pr-open"
     row.responsibility_signature.milestone_domain = "github-devloop-pr"
     row.responsibility_signature.current_state_accessor = "devloop.state.current_state"
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare an approved positive milestone accessor"), joined_errors(errors))
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must not declare current cursor accessors"), joined_errors(errors))
   end,
@@ -592,7 +605,7 @@ return {
     row.responsibility_signature.milestone_implementation = "packages/github-devloop/core/pr_delegation.lua:M.ensure_pr_child"
     row.responsibility_signature.milestone = "pr-open"
     row.responsibility_signature.milestone_domain = nil
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare milestone_domain"), joined_errors(errors))
   end,
   test_monotone_milestone_gate_requires_bound_implementation = function()
@@ -602,7 +615,7 @@ return {
     row.responsibility_signature.milestone = "pr-open"
     row.responsibility_signature.milestone_domain = "github-devloop-pr"
     row.responsibility_signature.milestone_implementation = nil
-    local errors = core.strict_restart_responsibility_contract_errors({ row })
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, { row })
     t.is_true(contains_error(errors, "awaiting-pr: monotone_milestone gate must declare milestone_implementation"), joined_errors(errors))
   end,
 }

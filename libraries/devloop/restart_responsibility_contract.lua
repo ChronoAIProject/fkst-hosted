@@ -1,6 +1,4 @@
-local S = {}
-
-function S.install(M)
+local C = {}
 
 local state_kinds = {
   queue_wait = true,
@@ -41,7 +39,7 @@ local function copy_table(map)
   return out
 end
 
-function M.known_god_states()
+function C.known_god_states(M)
   return copy_table(known_god_states)
 end
 
@@ -174,7 +172,7 @@ local function missing_signature_field(signature, field)
     or (type(signature[field]) == "table" and next(signature[field]) == nil)
 end
 
-local function validate_signature_shape(row, signature, errors)
+local function validate_signature_shape(M, row, signature, errors)
   local state = state_name(row)
   if type(signature.receiver_kind) == "table" then
     table.insert(errors, state .. ": responsibility_signature.receiver_kind must be exactly one receiver")
@@ -271,7 +269,7 @@ local function validate_output_family(row, signature, edges, errors)
   end
 end
 
-local function validate_kind_fanout(row, signature, edges, errors)
+local function validate_kind_fanout(M, row, signature, edges, errors)
   local state = state_name(row)
   local normal = normal_edges(edges)
   local failures = failure_edges(edges)
@@ -352,7 +350,7 @@ local function validate_kind_fanout(row, signature, edges, errors)
   end
 end
 
-local function validate_gate_kind(row, signature, errors)
+local function validate_gate_kind(M, row, signature, errors)
   local state = state_name(row)
   if signature.gate_kind == nil then
     return
@@ -391,7 +389,7 @@ local function validate_gate_kind(row, signature, errors)
   end
 end
 
-local function validate_phase_monotonicity(row, signature, edges, errors)
+local function validate_phase_monotonicity(M, row, signature, edges, errors)
   local state = state_name(row)
   local current_rank = tonumber(signature.phase_rank)
   for _, edge in ipairs(edges or {}) do
@@ -493,7 +491,7 @@ local function validate_blocked_by_partition_invariant(row, signature, errors)
   end
 end
 
-local function validate_row(row, seen, all_rows, errors)
+local function validate_row(M, row, seen, all_rows, errors)
   if row == nil or row.terminal == true then
     return
   end
@@ -503,19 +501,19 @@ local function validate_row(row, seen, all_rows, errors)
     table.insert(errors, state .. ": non-terminal row must declare responsibility_signature")
     return
   end
-  validate_signature_shape(row, signature, errors)
+  validate_signature_shape(M, row, signature, errors)
   local actual_edges = validate_successor_coverage(row, signature, errors)
   validate_terminal_escape_targets(row, actual_edges, all_rows, errors)
   validate_output_family(row, signature, actual_edges, errors)
-  validate_kind_fanout(row, signature, actual_edges, errors)
-  validate_gate_kind(row, signature, errors)
-  validate_phase_monotonicity(row, signature, actual_edges, errors)
+  validate_kind_fanout(M, row, signature, actual_edges, errors)
+  validate_gate_kind(M, row, signature, errors)
+  validate_phase_monotonicity(M, row, signature, actual_edges, errors)
   validate_generation_entry_policy(row, actual_edges, all_rows, errors)
   validate_blocked_by_partition_invariant(row, signature, errors); if signature.state_kind == "worker" then local contract = row.span_contract; if type(contract) ~= "table" then table.insert(errors, state .. ": worker row must declare span_contract") else for _, field in ipairs({ "department", "durable_start_marker", "spawn_predecessor" }) do if not non_empty_string(contract[field]) then table.insert(errors, state .. ": span_contract." .. field .. " must be declared") end end; if tostring(contract.durable_start_marker or ""):find(":v1", 1, true) == nil then table.insert(errors, state .. ": span_contract.durable_start_marker must name a durable marker family") end; if contract.spawn_function ~= nil and not non_empty_string(contract.spawn_function) then table.insert(errors, state .. ": span_contract.spawn_function must be a non-empty string when declared") end end end
   validate_unique_signature(row, signature, seen, errors)
 end
 
-function M.strict_restart_responsibility_contract_errors(rows)
+function C.strict_restart_responsibility_contract_errors(M, rows)
   local errors = {}
   local seen = {}
   local source_rows = rows or M.restart_transition_table()
@@ -524,7 +522,7 @@ function M.strict_restart_responsibility_contract_errors(rows)
     all_rows[state] = row
   end
   for _, row in ipairs(source_rows) do
-    validate_row(row, seen, all_rows, errors)
+    validate_row(M, row, seen, all_rows, errors)
   end
   return errors
 end
@@ -533,8 +531,8 @@ local function error_state(error_text)
   return tostring(error_text or ""):match("^([^:]+):")
 end
 
-function M.restart_responsibility_inventory_errors(rows, inventory)
-  local strict_errors = M.strict_restart_responsibility_contract_errors(rows)
+function C.restart_responsibility_inventory_errors(M, rows, inventory)
+  local strict_errors = C.strict_restart_responsibility_contract_errors(M, rows)
   local listed = inventory or known_god_states
   local observed_listed_errors = {}
   local errors = {}
@@ -558,7 +556,7 @@ function M.restart_responsibility_inventory_errors(rows, inventory)
   return errors
 end
 
-function M.responsibility_contract_inventory_is_listed_violation(state, errors)
+function C.responsibility_contract_inventory_is_listed_violation(M, state, errors)
   for _, err in ipairs(errors or {}) do
     if error_state(err) == state then
       return true
@@ -567,6 +565,4 @@ function M.responsibility_contract_inventory_is_listed_violation(state, errors)
   return false
 end
 
-end
-
-return S
+return C

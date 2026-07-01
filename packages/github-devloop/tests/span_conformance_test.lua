@@ -2,6 +2,7 @@ local requests_lifecycle = require("devloop.requests.lifecycle")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local replayer = require("devloop.replayer")
+local m_rrc = require("devloop.restart_responsibility_contract")
 local h = require("tests.devloop_core_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local core = h.core
@@ -625,7 +626,7 @@ local outcome = run_fix_attempt(attempt_plan)
         row.span_contract = nil
       end
     end
-    local errors = core.strict_restart_responsibility_contract_errors(rows)
+    local errors = m_rrc.strict_restart_responsibility_contract_errors(core, rows)
     t.is_true(contains_error(errors, "implementing: worker row must declare span_contract"), "missing strict span error")
   end,
 
