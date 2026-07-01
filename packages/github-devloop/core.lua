@@ -137,7 +137,34 @@ M.is_safe_head_sha = function(...) return pr_safety.is_safe_head_sha(M, ...) end
 M.is_safe_pr_number = function(...) return pr_safety.is_safe_pr_number(M, ...) end
 M.is_same_repo_pr_head = function(...) return pr_safety.is_same_repo_pr_head(M, ...) end
 require("forge.merge").install(M)
-require("devloop.git_mechanics").install(M)
+local git_mechanics = require("devloop.git_mechanics")
+local function dept_exec_argv(...) return exec_argv(...) end
+M._git = require("forge.git").new(dept_exec_argv)
+M.repo_ref_store_lock_key = function(...) return git_mechanics.repo_ref_store_lock_key(M, ...) end
+M.with_repo_ref_store_lock = function(...) return git_mechanics.with_repo_ref_store_lock(M, ...) end
+M.run_required = function(...) return git_mechanics.run_required(M, ...) end
+M.fetch_branch = function(...) return git_mechanics.fetch_branch(M, ...) end
+M.fetch_branches = function(...) return git_mechanics.fetch_branches(M, ...) end
+M.remote_head = function(...) return git_mechanics.remote_head(M, ...) end
+M.is_ancestor = function(...) return git_mechanics.is_ancestor(M, ...) end
+M.git_is_ancestor = function(...) return git_mechanics.git_is_ancestor(M, ...) end
+M.git_merge_no_ff = function(...) return git_mechanics.git_merge_no_ff(M, ...) end
+M.git_fast_forward = function(...) return git_mechanics.git_fast_forward(M, ...) end
+M.git_remote_trees_equal_quiet = function(...) return git_mechanics.git_remote_trees_equal_quiet(M, ...) end
+M.git_trees_equal_quiet = function(...) return git_mechanics.git_trees_equal_quiet(M, ...) end
+M.current_base_head = function(...) return git_mechanics.current_base_head(M, ...) end
+M.has_empty_resolution_delta = function(...) return git_mechanics.has_empty_resolution_delta(M, ...) end
+M.current_branch_head_sha = function(...) return git_mechanics.current_branch_head_sha(M, ...) end
+M.git_push_branch_force_with_lease = function(...) return git_mechanics.git_push_branch_force_with_lease(M, ...) end
+M.git_push_branch_update = function(...) return git_mechanics.git_push_branch_update(M, ...) end
+M.git_push_worktree_branch_update = function(...) return git_mechanics.git_push_worktree_branch_update(M, ...) end
+M.git_unmerged_paths = function(...) return git_mechanics.git_unmerged_paths(M, ...) end
+M.git_diff_check = function(...) return git_mechanics.git_diff_check(M, ...) end
+M.git_diff_cached_check = function(...) return git_mechanics.git_diff_cached_check(M, ...) end
+M.git_conflict_markers = function(...) return git_mechanics.git_conflict_markers(M, ...) end
+M.git_commit_message_file = function(...) return git_mechanics.git_commit_message_file(M, ...) end
+M.git_worktree_remove = function(...) return git_mechanics.git_worktree_remove(M, ...) end
+M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
 require("devloop.gate").install({ sources = wiring.gate_sources() })
