@@ -545,6 +545,37 @@ impl GithubAppTokens {
         self.inner.api_base.clone()
     }
 
+    /// Mint a short-lived App JWT (Bearer credential for the `/app/*` endpoints).
+    /// The Model B reconciler's full-resync uses it to enumerate the App's
+    /// installations ([`GithubListing::list_installations`]). Never logged.
+    pub fn app_jwt(&self) -> Result<SecretString, GithubAppError> {
+        mint_app_jwt(self.inner.app_id, &self.inner.encoding_key)
+            .map_err(|e| GithubAppError::Http(format!("jwt mint: {e}")))
+    }
+
+    /// Mint an installation-WIDE token (all repos the installation covers, default
+    /// permissions) for `installation_id`. The Model B reconciler's full-resync
+    /// uses it to list the installation's repositories
+    /// ([`GithubListing::list_installation_repos`]); unlike
+    /// [`Self::token_for_repo`] it is not scoped to a single repo and is not
+    /// cached (it is minted once per resync tick). Never logged.
+    pub async fn installation_wide_token(
+        &self,
+        installation_id: i64,
+    ) -> Result<SecretString, GithubAppError> {
+        let app_jwt = self.app_jwt()?;
+        let req = InstallationTokenRequest {
+            repositories: Vec::new(),
+            permissions: None,
+        };
+        let token = self
+            .inner
+            .api
+            .create_installation_token(&app_jwt, InstallationId(installation_id as u64), &req)
+            .await?;
+        Ok(token.token)
+    }
+
     /// The install URL for this app (if slug is configured).
     pub fn install_url(&self) -> Option<String> {
         self.inner

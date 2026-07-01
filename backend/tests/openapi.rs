@@ -26,6 +26,7 @@ fn app(webhook_secret: bool) -> axum::Router {
         config: Config::default(),
         github_app: None,
         github_app_webhook_secret,
+        reconciler: None,
     })
     .expect("router builds")
 }

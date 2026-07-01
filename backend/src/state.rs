@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use crate::github_app::GithubAppTokens;
+use crate::reconcile::ReconcileHandle;
 
 /// Clonable state shared across the router. The control plane is API-only and
 /// datastore-free: a session IS a Kubernetes Job (read/stopped via the K8s API
@@ -21,4 +22,9 @@ pub struct AppState {
     /// mounted. Held in a `SecretString` and never logged; the webhook handler
     /// uses it to verify `X-Hub-Signature-256` over the raw body before any parse.
     pub github_app_webhook_secret: Option<secrecy::SecretString>,
+    /// Model B reconcile queue handle (issue #359, PR5b): `Some` only when
+    /// `FKST_POD_DISPATCH` is on AND the reconciler spawned. The webhook will
+    /// enqueue repos through it at the PR6 flip; today nothing reads it (Model A
+    /// is unchanged), so it defaults to `None`.
+    pub reconciler: Option<ReconcileHandle>,
 }

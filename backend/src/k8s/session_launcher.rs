@@ -16,12 +16,13 @@
 //! Pod is the SAME #338 R3 hard-isolation box as a Job pod.
 
 use std::collections::BTreeMap;
+use std::time::SystemTime;
 
 use k8s_openapi::api::core::v1::{
     Container, EnvVar, Pod, PodSpec, Secret, SecretVolumeSource, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
-use k8s_openapi::chrono::Utc;
+use k8s_openapi::chrono::{DateTime, Utc};
 use kube::api::{Api, PostParams};
 use secrecy::{ExposeSecret, SecretString};
 
@@ -84,14 +85,27 @@ const SESSION_PACKAGE_ROOTS_ENV: &str = "FKST_SESSION_PACKAGE_ROOTS";
 const SESSION_WORK_LABEL_ENV: &str = "FKST_SESSION_WORK_LABEL";
 
 // --- labels + annotations ----------------------------------------------------
+// These keys are the single source of truth for the Model B session pod's
+// selector + metadata: the builder here STAMPS them and the reconciler (PR5b)
+// SELECTS + READS them, so both must agree. They are `pub` for that reason.
 /// `app.kubernetes.io/component` value the NetworkPolicy + reconciler select on.
-const COMPONENT_LABEL_VALUE: &str = "substrate-session";
-const ANNOTATION_OWNER: &str = "fkst.chrono-ai.fun/owner";
-const ANNOTATION_REPO: &str = "fkst.chrono-ai.fun/repo";
-const ANNOTATION_TRIGGER_ISSUE: &str = "fkst.chrono-ai.fun/trigger-issue-number";
-const ANNOTATION_WORK_LABEL: &str = "fkst.chrono-ai.fun/work-label";
-const ANNOTATION_CONFIG_HASH: &str = "fkst.chrono-ai.fun/config-hash";
-const ANNOTATION_LAST_PENDING_AT: &str = "fkst.chrono-ai.fun/last-pending-at";
+pub const COMPONENT_LABEL_VALUE: &str = "substrate-session";
+/// The `app.kubernetes.io/component` label KEY the reconciler builds its pod-LIST
+/// selector from (`<key>=<COMPONENT_LABEL_VALUE>`).
+pub const COMPONENT_LABEL_KEY: &str = "app.kubernetes.io/component";
+pub const ANNOTATION_OWNER: &str = "fkst.chrono-ai.fun/owner";
+pub const ANNOTATION_REPO: &str = "fkst.chrono-ai.fun/repo";
+/// The GitHub App installation id the pod's token is minted from. Stamped so the
+/// reconciler's pod-sweep can recover the `(installation, repo)` key a live pod
+/// belongs to without re-resolving it from GitHub.
+pub const ANNOTATION_INSTALLATION: &str = "fkst.chrono-ai.fun/installation-id";
+pub const ANNOTATION_TRIGGER_ISSUE: &str = "fkst.chrono-ai.fun/trigger-issue-number";
+pub const ANNOTATION_WORK_LABEL: &str = "fkst.chrono-ai.fun/work-label";
+pub const ANNOTATION_CONFIG_HASH: &str = "fkst.chrono-ai.fun/config-hash";
+pub const ANNOTATION_LAST_PENDING_AT: &str = "fkst.chrono-ai.fun/last-pending-at";
+/// The label KEY carrying the deterministic session id (the reconciler reads it
+/// back off a listed pod to map it to its registration).
+pub const SESSION_ID_LABEL: &str = "fkst.chrono-ai.fun/session-id";
 
 /// What the control plane needs to launch (and later reconcile) one long-lived
 /// substrate-session Pod. Non-secret: a `{:?}` of it can never leak a token.
@@ -116,9 +130,27 @@ pub struct SessionPodSpec {
     pub config_hash: String,
 }
 
-/// The deterministic Pod/Secret name for a session.
-fn session_object_name(session_id: &str) -> String {
+/// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
+/// `pub` so the reconciler (PR5b) can address a session's Pod/Secret by id for
+/// its patch (last-pending), delete (idle/config/deregister kill), and token
+/// rotation without duplicating the naming convention.
+pub fn session_object_name(session_id: &str) -> String {
     format!("fkst-sess-{session_id}")
+}
+
+/// Serialize the rotating `github-token` Secret value: the
+/// `{"token": "ghs_…", "expires_at": "<RFC3339>"}` JSON the in-pod git credential
+/// helper + `gh` PATH shim read on every op (§5.2/§5.4). `expires_at` is RFC3339
+/// (a reader compares it against `now`); the token is exposed only to serialize it
+/// here and is NEVER logged. One control-plane Secret rewrite through this shape
+/// refreshes both `git` and `gh` with no in-pod refresh loop.
+pub fn session_github_token_json(token: &SecretString, expires_at: SystemTime) -> String {
+    let expires_rfc3339 = DateTime::<Utc>::from(expires_at).to_rfc3339();
+    serde_json::json!({
+        "token": token.expose_secret(),
+        "expires_at": expires_rfc3339,
+    })
+    .to_string()
 }
 
 /// Shorthand for a plain `name=value` [`EnvVar`].
@@ -166,13 +198,10 @@ fn session_labels(spec: &SessionPodSpec) -> BTreeMap<String, String> {
             "fkst-hosted".to_string(),
         ),
         (
-            "app.kubernetes.io/component".to_string(),
+            COMPONENT_LABEL_KEY.to_string(),
             COMPONENT_LABEL_VALUE.to_string(),
         ),
-        (
-            "fkst.chrono-ai.fun/session-id".to_string(),
-            spec.session_id.clone(),
-        ),
+        (SESSION_ID_LABEL.to_string(), spec.session_id.clone()),
     ])
 }
 
@@ -183,6 +212,10 @@ fn session_annotations(spec: &SessionPodSpec) -> BTreeMap<String, String> {
     BTreeMap::from([
         (ANNOTATION_OWNER.to_string(), spec.repo.owner.clone()),
         (ANNOTATION_REPO.to_string(), spec.repo.name.clone()),
+        (
+            ANNOTATION_INSTALLATION.to_string(),
+            spec.installation_id.to_string(),
+        ),
         (
             ANNOTATION_TRIGGER_ISSUE.to_string(),
             spec.trigger_issue_number.to_string(),

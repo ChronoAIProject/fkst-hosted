@@ -7,8 +7,14 @@
 //! pod-per-session execution will later run (milestone #9).
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use fkst_control_plane::config::Config;
+use fkst_control_plane::github_app::HttpGithubListing;
+use fkst_control_plane::reconcile::{
+    reconcile_channel, run_full_resync_loop, run_reconcile_loop, run_sweep_loop, ReconcileCtx,
+    ReconcileHandle,
+};
 use fkst_control_plane::router::build_router;
 use fkst_control_plane::state::AppState;
 use tracing_subscriber::EnvFilter;
@@ -161,10 +167,24 @@ async fn main() -> ExitCode {
     let sweep_namespace = config.pod.namespace.clone();
     let sweep_deadline = config.env.validate_deadline_secs;
 
+    // Model B reconciler (issue #359, PR5b): when pod dispatch is on AND the GitHub
+    // App + a cluster are available, spawn the reconcile queue consumer + the two
+    // producer loops (sweep, full-resync) + the token-rotation loop, and hand the
+    // enqueue handle to AppState. ADDITIVE + GATED: the webhook is NOT rewired to
+    // enqueue here yet (that is the PR6 flip); with zero trigger issues this is a
+    // harmless idle set of loops. Runs BEFORE build_router so the handle rides on
+    // AppState.
+    let reconciler = if pod_dispatch {
+        spawn_reconciler(&config, github_app.clone()).await
+    } else {
+        None
+    };
+
     let app = match build_router(AppState {
         config,
         github_app,
         github_app_webhook_secret,
+        reconciler,
     }) {
         Ok(router) => router,
         Err(error) => {
@@ -249,6 +269,81 @@ async fn main() -> ExitCode {
 
     tracing::info!("server stopped");
     ExitCode::SUCCESS
+}
+
+/// Build the Model B reconcile context and spawn its four loops, returning the
+/// enqueue handle for `AppState` (or `None` if any prerequisite is missing). Every
+/// failure is a WARN, never fatal: a misconfigured/unreachable reconciler must not
+/// stop the API server (Model A stays fully functional).
+async fn spawn_reconciler(
+    config: &Config,
+    github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
+) -> Option<ReconcileHandle> {
+    let Some(github) = github_app else {
+        tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
+        return None;
+    };
+    let kube = match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await
+    {
+        Ok(kube) => kube,
+        Err(error) => {
+            tracing::warn!(error = %error, "pod dispatch on but kubernetes client unavailable; reconciler not started");
+            return None;
+        }
+    };
+    // The read-side listing transport + the unauthenticated reachability probe
+    // client both target the configured GitHub REST base.
+    let listing = match HttpGithubListing::new(&config.github_api_base_url) {
+        Ok(listing) => Arc::new(listing),
+        Err(error) => {
+            tracing::warn!(error = %error, "reconciler listing transport build failed; reconciler not started");
+            return None;
+        }
+    };
+    let http = match reqwest::Client::builder()
+        .user_agent("fkst-hosted-api")
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            tracing::warn!(error = %error, "reconciler http client build failed; reconciler not started");
+            return None;
+        }
+    };
+
+    let ctx = ReconcileCtx {
+        kube,
+        github,
+        listing,
+        http,
+        config: config.clone(),
+    };
+
+    let (handle, rx) = reconcile_channel(1024);
+
+    // Consumer: one serial reconcile worker draining the queue.
+    let consumer_ctx = ctx.clone();
+    tokio::spawn(async move { run_reconcile_loop(rx, consumer_ctx).await });
+    // Producer 1: the periodic pod sweep.
+    let sweep_ctx = ctx.clone();
+    let sweep_handle = handle.clone();
+    tokio::spawn(async move { run_sweep_loop(sweep_ctx, sweep_handle).await });
+    // Producer 2: the periodic full resync (installations -> repos).
+    let resync_ctx = ctx.clone();
+    let resync_handle = handle.clone();
+    tokio::spawn(async move { run_full_resync_loop(resync_ctx, resync_handle).await });
+    // The in-place per-session token rotation loop.
+    let rot_kube = ctx.kube.clone();
+    let rot_github = ctx.github.clone();
+    let rot_cfg = ctx.config.reconcile.clone();
+    let rot_handle = handle.clone();
+    tokio::spawn(async move {
+        fkst_control_plane::k8s::run_token_rotation_loop(rot_kube, rot_github, rot_cfg, rot_handle)
+            .await
+    });
+
+    tracing::info!("model B reconciler spawned (reconcile + sweep + full-resync + token rotation)");
+    Some(handle)
 }
 
 /// Resolve when either SIGTERM (how Kubernetes terminates pods) or Ctrl-C
