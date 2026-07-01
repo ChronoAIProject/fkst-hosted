@@ -20,6 +20,7 @@ pub mod api;
 pub mod config;
 pub mod contents;
 pub mod jwt;
+pub mod listing;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -41,6 +42,11 @@ pub use api::{InstallationId, InstallationToken, TokenPermissions};
 /// Re-export the Contents READ helper types (#179): the `get_contents` result
 /// shapes + the injectable `ContentsReader` abstraction the pre-flight uses.
 pub use contents::{ContentsEntry, ContentsListing, ContentsReader};
+
+/// Re-export the Model B listing transport (#359 PR1): the injectable
+/// `GithubListing` abstraction + its HTTP impl and result shapes the reconciler
+/// enumerates work with.
+pub use listing::{GithubListing, HttpGithubListing, InstallationSummary, IssueSummary};
 
 // `InstallationProbe` is defined in this module; it is `pub` already and needs
 // no re-export.
@@ -167,6 +173,24 @@ pub fn default_permissions() -> TokenPermissions {
         pull_requests: Some("write".to_string()),
         issues: Some("write".to_string()),
         administration: Some("write".to_string()),
+        metadata: None,
+    }
+}
+
+/// Least-privilege permissions for the SESSION POD's installation token
+/// (Model B, issue #359). The pod needs to push commits (`contents`), manage the
+/// driving issue and its labels (`issues`), and open pull requests
+/// (`pull_requests`) — but it must NOT administer the repo. This deliberately
+/// withholds the `administration: write` that [`default_permissions`] requests,
+/// scoping the longer-lived per-session token to the minimum the engine needs
+/// (least privilege). `metadata` is omitted because installation tokens always
+/// include `metadata: read` implicitly.
+pub fn session_permissions() -> TokenPermissions {
+    TokenPermissions {
+        contents: Some("write".to_string()),
+        issues: Some("write".to_string()),
+        pull_requests: Some("write".to_string()),
+        administration: None,
         metadata: None,
     }
 }
@@ -1041,6 +1065,27 @@ mod tests {
         assert_eq!(perms.issues.as_deref(), Some("write"));
         assert_eq!(perms.administration.as_deref(), Some("write"));
         assert_eq!(perms.metadata, None);
+    }
+
+    #[test]
+    fn session_permissions_is_least_privilege_without_administration() {
+        // Issue #359 (Model B): the session pod's token grants write to
+        // contents/issues/pull_requests but MUST NOT carry `administration`
+        // (the one permission the admin-equivalent `default_permissions` adds).
+        let perms = session_permissions();
+        assert_eq!(perms.contents.as_deref(), Some("write"));
+        assert_eq!(perms.issues.as_deref(), Some("write"));
+        assert_eq!(perms.pull_requests.as_deref(), Some("write"));
+        assert_eq!(
+            perms.administration, None,
+            "session token must not request administration"
+        );
+        assert_eq!(perms.metadata, None);
+        // Concretely contrast the admin-equivalent default.
+        assert_eq!(
+            default_permissions().administration.as_deref(),
+            Some("write")
+        );
     }
 
     // ---- stateless resolution (#141) -----------------------------------------
