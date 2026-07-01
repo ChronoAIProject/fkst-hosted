@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::env_config::EnvConfig;
 use crate::error::AppError;
+use crate::reconcile_config::ReconcileConfig;
 
 /// Prefix shared by every HTTP/server configuration environment variable.
 const ENV_PREFIX: &str = "FKST_HOSTED_";
@@ -305,6 +306,9 @@ pub struct Config {
     /// Named-environment / install-validation knobs (`FKST_ENV_*`, issue #338
     /// §6.1). Config surface only — no behaviour reads these yet.
     pub env: EnvConfig,
+    /// Model B reconciler knobs (`FKST_*`, issue #359 §4). Config surface only —
+    /// no behaviour reads these yet (PR5b wires the loop; PR6 flips Model B on).
+    pub reconcile: ReconcileConfig,
 }
 
 impl Default for Config {
@@ -321,6 +325,7 @@ impl Default for Config {
             llm_api_key: SecretString::from(String::new()),
             pod: PodConfig::default(),
             env: EnvConfig::default(),
+            reconcile: ReconcileConfig::default(),
         }
     }
 }
@@ -477,6 +482,10 @@ impl Config {
         // same `vars` snapshot; fails closed on its own zero bounds internally.
         let env = EnvConfig::from_vars(&vars)?;
 
+        // Model B reconciler knobs (FKST_*). Shares the same `vars` snapshot; fails
+        // closed on its own cadence / token-refresh bounds internally.
+        let reconcile = ReconcileConfig::from_vars(&vars)?;
+
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -489,6 +498,7 @@ impl Config {
             github_api_base_url: webhook.github_api_base_url.trim().to_string(),
             pod,
             env,
+            reconcile,
         })
     }
 
@@ -787,6 +797,34 @@ mod tests {
             .expect_err("zero env bound must fail closed through Config");
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains("FKST_ENV_MAX_PER_USER"));
+    }
+
+    // ---- Model B reconciler (FKST_*) wiring tests ------------------------------
+
+    #[test]
+    fn reconcile_config_defaults_are_wired_into_config() {
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(
+            config.reconcile.substrate_trigger_label,
+            "fkst-substrate-trigger"
+        );
+        assert_eq!(config.reconcile.reconcile_interval_secs, 30);
+        assert_eq!(config.reconcile.github_bot_login, None);
+    }
+
+    #[test]
+    fn reconcile_config_override_surfaces_through_config_from_vars() {
+        let config = Config::from_vars(vars(&[("FKST_RECONCILE_INTERVAL_SECS", "5")]))
+            .expect("override should surface");
+        assert_eq!(config.reconcile.reconcile_interval_secs, 5);
+    }
+
+    #[test]
+    fn reconcile_config_bound_violation_surfaces_through_config_from_vars() {
+        let err = Config::from_vars(vars(&[("FKST_POD_TOKEN_REFRESH_SECS", "3600")]))
+            .expect_err("token refresh at TTL must fail closed through Config");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_POD_TOKEN_REFRESH_SECS"));
     }
 
     // ---- static LLM provider configuration tests -------------------------------

@@ -34,6 +34,10 @@ const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 pub struct IssueSummary {
     pub number: i64,
     pub title: String,
+    /// The raw issue body (Markdown). The Model B reconciler parses this into a
+    /// launch spec (see `crate::reconcile::registry::parse_registration`); GitHub
+    /// omits it entirely for a body-less issue, so it defaults to empty.
+    pub body: String,
     /// Label NAMES (GitHub returns `[{ "name": ... }]`; mapped to the names).
     pub labels: Vec<String>,
     pub state: String,
@@ -79,6 +83,10 @@ struct RawIssue {
     number: i64,
     #[serde(default)]
     title: String,
+    /// GitHub sends `"body": null` (or omits it) for a body-less issue; treat
+    /// both as an empty body rather than erroring the whole page decode.
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    body: String,
     #[serde(default)]
     labels: Vec<RawLabel>,
     #[serde(default)]
@@ -99,6 +107,7 @@ impl RawIssue {
         IssueSummary {
             number: self.number,
             title: self.title,
+            body: self.body,
             labels: self.labels.into_iter().map(|l| l.name).collect(),
             state: self.state,
             assignees: self.assignees.into_iter().map(|a| a.login).collect(),
@@ -106,6 +115,19 @@ impl RawIssue {
             user_id: self.user.id,
         }
     }
+}
+
+/// Deserialize a possibly-`null` value into `T::default()`. GitHub renders an
+/// empty issue body as JSON `null` (not an omitted field), which a plain
+/// `#[serde(default)]` would reject for a non-`Option` `String`; this coerces both
+/// `null` and a present value uniformly.
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    let opt = Option::<T>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
 }
 
 #[derive(Deserialize)]

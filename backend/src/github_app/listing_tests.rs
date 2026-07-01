@@ -38,6 +38,7 @@ async fn list_issues_maps_fields_and_sends_label_state_query() {
             {
                 "number": 7,
                 "title": "Do the thing",
+                "body": "### Session Name\nsite\n",
                 "labels": [{ "name": "fkst-run" }, { "name": "backend" }],
                 "state": "open",
                 "assignees": [{ "login": "alice" }, { "login": "bob" }],
@@ -68,6 +69,7 @@ async fn list_issues_maps_fields_and_sends_label_state_query() {
     let issue = &issues[0];
     assert_eq!(issue.number, 7);
     assert_eq!(issue.title, "Do the thing");
+    assert_eq!(issue.body, "### Session Name\nsite\n");
     assert_eq!(issue.labels, vec!["fkst-run", "backend"]);
     assert_eq!(issue.state, "open");
     assert_eq!(issue.assignees, vec!["alice", "bob"]);
@@ -94,6 +96,9 @@ async fn list_issues_follows_link_pagination_across_two_pages() {
                     {
                         "number": 1,
                         "title": "first",
+                        // GitHub sends `null` for a body-less issue; it must
+                        // coerce to an empty string, not error the page decode.
+                        "body": null,
                         "labels": [],
                         "state": "open",
                         "assignees": [],
@@ -130,6 +135,8 @@ async fn list_issues_follows_link_pagination_across_two_pages() {
 
     let numbers: Vec<i64> = issues.iter().map(|i| i.number).collect();
     assert_eq!(numbers, vec![1, 2], "both pages must be collected in order");
+    // The `"body": null` on issue 1 must have coerced to an empty string.
+    assert_eq!(issues[0].body, "", "a null body must decode as empty");
 }
 
 #[tokio::test]
