@@ -46,8 +46,6 @@ local base = require("devloop.base")
 local function dept_exec_sync(...) return exec_sync(...) end
 M.judgment_worktree = function(...) return base.judgment_worktree_with_exec(M, dept_exec_sync, ...) end
 M.safe_updated_at = function(...) return base.safe_updated_at(M, ...) end
-M.is_safe_proposal_ref = function(...) return base.is_safe_proposal_ref(M, ...) end
-M.proposal_dedup_key = function(...) return base.proposal_dedup_key(M, ...) end
 M.intake_dedup_key = function(...) return base.intake_dedup_key(M, ...) end
 M.intake_candidate_delivery_dedup_key = function(...) return base.intake_candidate_delivery_dedup_key(M, ...) end
 M.ci_selfheal_once_key = function(...) return base.ci_selfheal_once_key(M, ...) end

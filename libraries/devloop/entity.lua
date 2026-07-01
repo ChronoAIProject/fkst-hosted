@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
@@ -186,7 +187,7 @@ function C.is_safe_entity_proposal_ref(M, proposal_id, dedup_key)
     return false
   end
   if entity.kind == "issue" then
-    return M.is_safe_proposal_ref(proposal_id, dedup_key)
+    return devloop_base.is_safe_proposal_ref(proposal_id, dedup_key)
   end
   return strings.is_path_safe_key(proposal_id, M._max_key_len)
     and strings.is_path_safe_key(dedup_key, M._max_dedup_len)

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local forge_validators = require("devloop.forge_validators")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
@@ -7,15 +8,15 @@ local C = {}
 function C.is_supported_ready(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.ready.v1"
-    and M.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     and (payload.framing == nil or strings.is_bounded_string(payload.framing, M._max_framing_len))
     and (payload.operator_reentry == nil
       or (type(payload.operator_reentry) == "table"
         and payload.operator_reentry.command == "reimplement"
         and payload.operator_reentry.from_state == "blocked"
         and forge_validators.is_positive_pr_number(payload.operator_reentry.pr_number)
-        and M.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.impl_version)
-        and M.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.state_version)
+        and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.impl_version)
+        and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.state_version)
         and payload.operator_reentry.impl_version == payload.dedup_key))
     and (payload.ready_hand_off == nil
       or (payload.impl_retry_attempt == nil

@@ -336,7 +336,7 @@ function C.build_proposal(M, issue)
     title = title,
     body = body,
     content_fetch = issue.content_fetch,
-    dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
+    dedup_key = devloop_base.proposal_dedup_key(proposal_id, issue.updated_at),
     source_ref = base_ids.normalize_source_ref(issue.source_ref),
   }
 end

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -409,7 +410,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   for key, value in pairs(issue) do
     replay_issue[key] = value
   end
-  local replay_dedup = M.proposal_dedup_key(proposal_id, issue.updated_at)
+  local replay_dedup = devloop_base.proposal_dedup_key(proposal_id, issue.updated_at)
     .. "/replay"
     .. tostring(state.version or ""):sub(#stable_version + 1)
   replay_issue.content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {

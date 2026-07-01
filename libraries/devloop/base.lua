@@ -307,7 +307,7 @@ function C.parse_issue_source_ref(source_ref)
   return repo, issue_number
 end
 
-function C.is_safe_proposal_ref(M, proposal_id, dedup_key)
+function C.is_safe_proposal_ref(proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
@@ -359,7 +359,7 @@ function C.is_safe_pr_review_result_ref(proposal_id, dedup_key)
   return repo ~= nil and pr_number ~= nil
 end
 
-function C.proposal_dedup_key(M, proposal_id, updated_at)
+function C.proposal_dedup_key(proposal_id, updated_at)
   return tostring(proposal_id) .. "/" .. C.safe_updated_at(M, updated_at)
 end
 

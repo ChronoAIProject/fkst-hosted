@@ -35,7 +35,7 @@ function C.validate_proposal(M, proposal)
       return false
     end
   else
-    if not M.is_safe_proposal_ref(proposal.proposal_id, proposal.dedup_key) then
+    if not devloop_base.is_safe_proposal_ref(proposal.proposal_id, proposal.dedup_key) then
       return false
     end
   end
