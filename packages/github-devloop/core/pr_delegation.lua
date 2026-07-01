@@ -86,18 +86,18 @@ end
 
 local function require_head_sha(branch, expected_head)
   local head = tostring(expected_head or "")
-  if M.is_safe_head_sha(head) then
+  if require("devloop.pr_safety").is_safe_head_sha(head) then
     return head
   end
   local fetched = M.current_branch_head_sha(branch)
-  if not M.is_safe_head_sha(fetched) then
+  if not require("devloop.pr_safety").is_safe_head_sha(fetched) then
     error("github-devloop: pr-delegation branch head is missing")
   end
   return fetched
 end
 
 local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, issue_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, source_ref, delegation)
-  if not M.is_safe_head_sha(head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
     error("github-devloop: invalid pr-delegation head sha")
   end
   local body = "github-devloop PR child open"
@@ -243,7 +243,7 @@ local function child_from_pr(issue, impl_version, generation, pr, repo, issue_nu
   if pr == nil then
     return nil
   end
-  if not M.is_safe_pr_number(pr.number) then
+  if not require("devloop.pr_safety").is_safe_pr_number(pr.number) then
     error("github-devloop: pr-delegation adopted invalid PR")
   end
   local pr_number = tonumber(pr.number)

@@ -738,7 +738,7 @@ local function maybe_replay_review_carry_over(M, dept, issue, state, row, facts,
   if state.state ~= "merge-ready" then
     return false
   end
-  if tostring(current_pr.state or ""):lower() ~= "open" or not M.is_safe_head_sha(current_pr.head_sha) then
+  if tostring(current_pr.state or ""):lower() ~= "open" or not require("devloop.pr_safety").is_safe_head_sha(current_pr.head_sha) then
     return false
   end
   local carry, carry_reason = M.approved_lineage_carry_over(

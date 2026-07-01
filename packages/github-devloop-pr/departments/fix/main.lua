@@ -111,7 +111,7 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
     end
     base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
   end
-  if not core.is_safe_head_sha(base_head) then
+  if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
     error("github-devloop: unsafe integration head")
   end
   local result = {
@@ -220,7 +220,7 @@ local function merge_speculative_predecessors_for_fix(worktree, repo, integratio
   end
   local context = merge_result_context("speculative:" .. integration_branch, current_set)
   for _, predecessor in ipairs(predecessors) do
-    if not core.is_safe_head_sha(predecessor.head_sha) then
+    if not require("devloop.pr_safety").is_safe_head_sha(predecessor.head_sha) then
       error("github-devloop: unsafe speculative predecessor head")
     end
     local predecessor_head = fetch_verified_pr_head(predecessor.pr_number, predecessor.head_sha)
@@ -380,7 +380,7 @@ local function branch_head_if_ahead(base_head_sha, branch)
     error("github-devloop: git branch head check failed: " .. tostring(head_result.stderr))
   end
   local branch_head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(branch_head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(branch_head_sha) then
     error("github-devloop: unsafe deterministic branch head sha")
   end
   if branch_head_sha == base_head_sha then
@@ -513,7 +513,7 @@ local function run_fix_attempt(plan)
     error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
   end
   local new_head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(new_head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(new_head_sha) then
     error("github-devloop: unsafe fix head_sha")
   end
   if new_head_sha == plan.fix.reviewed_head_sha then
@@ -547,7 +547,7 @@ local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_pr
   if tostring(pr.state or ""):lower() ~= "open"
     or tostring(pr.head_ref_name or "") ~= branch
     or tostring(pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
-    or not core.is_same_repo_pr_head(pr, repo) then
+    or not require("forge.merge.shared").is_same_repo_pr_head(pr, repo) then
     local outcome = fail_closed and "fail-closed(write-gate)" or "skip-stale(write-gate)"
     core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
     if fail_closed then
@@ -615,7 +615,7 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
   if tostring(pushed_pr.state or ""):lower() ~= "open"
     or tostring(pushed_pr.head_ref_name or "") ~= branch
     or tostring(pushed_pr.head_sha or "") ~= outcome.new_head_sha
-    or not core.is_same_repo_pr_head(pushed_pr, repo) then
+    or not require("forge.merge.shared").is_same_repo_pr_head(pushed_pr, repo) then
     error("github-devloop: pushed PR head verification failed")
   end
 
@@ -750,7 +750,7 @@ local function act_fix(event)
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
       return
     end
-    if not core.is_same_repo_pr_head(current_pr, repo) then
+    if not require("forge.merge.shared").is_same_repo_pr_head(current_pr, repo) then
       core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(head-repository)", "PR head repository is missing or not the target repository")
       error("github-devloop: PR head repository is missing or not the target repository")
     end
@@ -761,7 +761,7 @@ local function act_fix(event)
         error("github-devloop: PR head changed before fix marker and deterministic branch head is not readable")
       end
       local intended_head_sha = tostring(branch_head.stdout or ""):gsub("%s+$", "")
-      if not core.is_safe_head_sha(intended_head_sha) then
+      if not require("devloop.pr_safety").is_safe_head_sha(intended_head_sha) then
         error("github-devloop: unsafe PR origin branch head sha")
       end
       if tostring(current_pr.head_sha or "") == intended_head_sha

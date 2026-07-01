@@ -6,7 +6,7 @@ local C = {}
 function C.is_supported_fixing(M, payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-devloop.fixing.v1"
-    or not M.is_safe_pr_number(payload.pr_number)
+    or not require("devloop.pr_safety").is_safe_pr_number(payload.pr_number)
     or not M._is_bounded_string(payload.version, M._max_dedup_len)
     or not M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
     or not forge_validators.is_git_sha(payload.reviewed_head_sha)

@@ -127,7 +127,7 @@ local function push_if_real(conflict, worktree)
   end
 
   local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "resolved sync head"))
-  if not core.is_safe_head_sha(merge_head) then
+  if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe resolved branch sync head")
   end
   core.run_required(core.git_push_worktree_branch_update(worktree, conflict.integration_branch, 120), "resolved branch sync push")

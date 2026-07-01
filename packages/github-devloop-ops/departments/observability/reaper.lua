@@ -124,7 +124,7 @@ local function reap_orphan_pr(repo, entity)
   local origin = entity.pr_origin
   local proposal_id = origin.proposal_id
   local pr_number = entity.pr_number
-  if not pr_safety.is_devloop_issue_branch(core, origin.branch) then
+  if not require("devloop.pr_safety").is_devloop_issue_branch(origin.branch) then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "non-devloop-branch"))
     return
   end

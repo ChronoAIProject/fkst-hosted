@@ -99,7 +99,7 @@ local forge_validators = require("devloop.forge_validators")
   function C.remote_head(M, branch, error_class, unsafe_error)
     local result = M.run_required(M.git_remote_branch_head("origin", branch, 30), error_class)
     local head = trim_stdout(result)
-    if not M.is_safe_head_sha(head) then
+    if not require("devloop.pr_safety").is_safe_head_sha(head) then
       error("github-devloop: " .. unsafe_error)
     end
     return head
@@ -168,7 +168,7 @@ local forge_validators = require("devloop.forge_validators")
       return nil, head_error
     end
     local base_head = tostring(head_result.stdout or ""):gsub("%s+$", "")
-    if not M.is_safe_head_sha(base_head) then
+    if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
       return nil, "unsafe base head"
     end
     return base_head
@@ -201,7 +201,7 @@ local forge_validators = require("devloop.forge_validators")
       return nil
     end
     local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-    if not M.is_safe_head_sha(head_sha) then
+    if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
       error("github-devloop: unsafe PR origin branch head sha")
     end
     return head_sha

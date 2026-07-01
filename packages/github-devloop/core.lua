@@ -131,11 +131,6 @@ local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
 M.cached_entity_view = function(...) return github_proxy_entity_view.cached_entity_view(M, ...) end
 M.fetch_pr_view_origin = function(...) return github_proxy_entity_view.fetch_pr_view_origin(M, ...) end
 M.invalidate_entity_after_write = function(...) return github_proxy_entity_view.invalidate_entity_after_write(M, ...) end
-local pr_safety = require("devloop.pr_safety")
-M.is_safe_branch = function(...) return pr_safety.is_safe_branch(M, ...) end
-M.is_safe_head_sha = function(...) return pr_safety.is_safe_head_sha(M, ...) end
-M.is_safe_pr_number = function(...) return pr_safety.is_safe_pr_number(M, ...) end
-M.is_same_repo_pr_head = function(...) return pr_safety.is_same_repo_pr_head(M, ...) end
 require("forge.merge").install(M)
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end

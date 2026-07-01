@@ -60,7 +60,7 @@ local function nudge_pr_head(repo, pr_number, pr, proposal_id, first_observed_se
   if not forge_validators.is_git_ref_safe(head_ref) then
     return false, "ci-selfheal-invalid-branch"
   end
-  if not M.is_same_repo_pr_head(pr, repo) then
+  if not require("forge.merge.shared").is_same_repo_pr_head(pr, repo) then
     return false, "ci-selfheal-foreign-head"
   end
   local worktree = merge_ci_selfheal_worktree(repo, pr_number, head_sha)

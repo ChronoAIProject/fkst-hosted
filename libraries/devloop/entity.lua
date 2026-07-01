@@ -129,7 +129,7 @@ function C.linked_pr_surface_snapshot(M, repo, proposal_id, issue_comments, opts
 end
 
 function C.pr_proposal_id(M, repo, pr_number)
-  if not M.is_safe_pr_number(pr_number) then
+  if not require("devloop.pr_safety").is_safe_pr_number(pr_number) then
     error("github-devloop: invalid PR proposal number")
   end
   local safe_repo = strings.sanitize_key(repo, false)
@@ -141,7 +141,7 @@ end
 
 function C.parse_pr_proposal_id(M, proposal_id)
   local repo_part, number = tostring(proposal_id or ""):match("^github%-devloop/pr/(.+)/(%d+)$")
-  if repo_part == nil or not M.is_safe_pr_number(number) then
+  if repo_part == nil or not require("devloop.pr_safety").is_safe_pr_number(number) then
     return nil, nil
   end
   return repo_part, tonumber(number)

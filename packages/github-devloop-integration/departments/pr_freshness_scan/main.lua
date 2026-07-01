@@ -185,7 +185,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
     return
   end
   local merge_head = trim_stdout(core.run_required(git("github-devloop").git_head_sha(worktree, 30), "PR freshness head"))
-  if not core.is_safe_head_sha(merge_head) then
+  if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
     error("github-devloop: unsafe PR freshness merge head")
   end
   core.run_required(git("github-devloop").git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
@@ -205,8 +205,8 @@ local function in_managed_scope(repo, branches, pr, origin)
     and origin.branch == pr.head_ref_name
     and origin.base_branch == branches.integration
     and pr.base_ref_name == branches.integration
-    and pr_safety.is_devloop_issue_branch(core, pr.head_ref_name)
-    and core.is_same_repo_pr_head(pr, repo)
+    and require("devloop.pr_safety").is_devloop_issue_branch(pr.head_ref_name)
+    and require("forge.merge.shared").is_same_repo_pr_head(pr, repo)
 end
 
 local function process_pr(repo, branches, listed_pr)

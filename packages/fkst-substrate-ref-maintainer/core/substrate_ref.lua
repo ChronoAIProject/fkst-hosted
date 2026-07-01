@@ -480,7 +480,7 @@ validate_bump_pr = function(repo, base_branch, pr)
   if tostring(pr.base_ref_name or "") ~= tostring(base_branch or "") then
     return false, "base-branch-mismatch"
   end
-  if not M.is_same_repo_pr_head(pr, repo) then
+  if not require("forge.merge.shared").is_same_repo_pr_head(pr, repo) then
     return false, "foreign-head-repository"
   end
   if not forge_validators.is_git_sha(pr.head_sha) then

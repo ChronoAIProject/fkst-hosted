@@ -13,7 +13,7 @@ function M.prepare_base(branches)
     error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
   end
   local base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(base_head) then
+  if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
     error("github-devloop: unsafe base head")
   end
   return base_head

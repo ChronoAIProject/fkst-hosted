@@ -166,11 +166,6 @@ require("forge.merge").install(M)
 require("core.review_carry_over").install(M)
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
-local pr_safety = require("devloop.pr_safety")
-M.is_safe_branch = function(...) return pr_safety.is_safe_branch(M, ...) end
-M.is_safe_head_sha = function(...) return pr_safety.is_safe_head_sha(M, ...) end
-M.is_safe_pr_number = function(...) return pr_safety.is_safe_pr_number(M, ...) end
-M.is_same_repo_pr_head = function(...) return pr_safety.is_same_repo_pr_head(M, ...) end
 M.restart_package_name = "github-devloop-pr"
 M.restart_lifecycle_states = {
   "pr-open",

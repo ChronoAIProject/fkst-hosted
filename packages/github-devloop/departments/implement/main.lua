@@ -109,7 +109,7 @@ local function remote_branch_fact(branch, base_branch, source_fact)
     error("github-devloop: git implementing remote branch head failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
     error("github-devloop: unsafe implementing remote branch head")
   end
   if source_fact ~= nil and source_fact.head_sha ~= nil and head_sha ~= source_fact.head_sha then
@@ -240,7 +240,7 @@ implemented_branch_head = function(base_head, branch)
     error("github-devloop: git branch head failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
     error("github-devloop: unsafe implementing branch head")
   end
   return head_sha
@@ -385,7 +385,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   if actual_branch ~= branch then
     error("github-devloop: deterministic implementing branch mismatch")
   end
-  if not core.is_safe_branch(branch) then
+  if not require("devloop.pr_safety").is_safe_branch(branch) then
     error("github-devloop: unsafe implementing branch")
   end
 
@@ -394,7 +394,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not core.is_safe_head_sha(head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
     error("github-devloop: unsafe implementing head_sha")
   end
 

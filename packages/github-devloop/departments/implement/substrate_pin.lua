@@ -63,7 +63,7 @@ local function write_pin(worktree, pin)
 end
 
 function M.refresh(worktree, branch, base_head, merge_clean, opts)
-  if not core.is_safe_head_sha(base_head) then
+  if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
     error("github-devloop: implement-substrate-pin-base-unsafe: unsafe implementation base head")
   end
   if not forge_validators.is_git_ref_safe(branch) then
@@ -98,7 +98,7 @@ function M.refresh(worktree, branch, base_head, merge_clean, opts)
 end
 
 function M.is_only_pin_delta(base_head, branch)
-  if not core.is_safe_head_sha(base_head) then
+  if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
     error("github-devloop: implement-substrate-pin-base-unsafe: unsafe implementation base head")
   end
   if not forge_validators.is_git_ref_safe(branch) then

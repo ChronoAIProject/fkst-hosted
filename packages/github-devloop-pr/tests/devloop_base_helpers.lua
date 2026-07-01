@@ -686,7 +686,7 @@ local function latest_fix_head_sha(comments)
       body = comment.body
     end
     local head = tostring(body or ""):match('fkst:github%-devloop:fix:v1[^<]*new_head_sha="([^"]+)"')
-    if head ~= nil and core.is_safe_head_sha(head) then
+    if head ~= nil and require("devloop.pr_safety").is_safe_head_sha(head) then
       found = head
     end
   end

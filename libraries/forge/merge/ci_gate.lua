@@ -37,7 +37,7 @@ local function pr_identity_matches(pr, expected)
   if tostring(pr.base_ref_name or "") ~= tostring(expected and expected.base_branch or "") then
     return false, "base-branch-mismatch"
   end
-  if not M.is_same_repo_pr_head(pr, expected and expected.repo) then
+  if not require("forge.merge.shared").is_same_repo_pr_head(pr, expected and expected.repo) then
     return false, "foreign-head-repository"
   end
   return true, "pr-ok"

@@ -6,7 +6,7 @@ function C.is_supported_reviewing(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.reviewing.v1"
     and M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
-    and M.is_safe_pr_number(payload.pr_number)
+    and require("devloop.pr_safety").is_safe_pr_number(payload.pr_number)
     and M._is_bounded_string(payload.version, M._max_dedup_len)
     and (payload.reviewing_hand_off == nil
       or payloads_predicates.is_own_state_marker_hand_off(M, payload.reviewing_hand_off, {

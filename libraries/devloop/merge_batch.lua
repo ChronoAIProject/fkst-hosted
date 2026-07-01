@@ -51,9 +51,9 @@ end
 
 local function head_contains_base(M, base_head, entry)
   local head_sha = tostring(entry and entry.head_sha or "")
-  if not M.is_safe_head_sha(base_head)
-    or not M.is_safe_head_sha(head_sha)
-    or not M.is_safe_branch(entry and entry.head_branch) then
+  if not require("devloop.pr_safety").is_safe_head_sha(base_head)
+    or not require("devloop.pr_safety").is_safe_head_sha(head_sha)
+    or not require("devloop.pr_safety").is_safe_branch(entry and entry.head_branch) then
     return false, "unsafe-current-base"
   end
   local fetch_result = M.git_fetch_branch("origin", entry.head_branch, 60)

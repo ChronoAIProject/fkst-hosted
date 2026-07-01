@@ -157,11 +157,6 @@ M.git_conflict_markers = function(...) return git_mechanics.git_conflict_markers
 M.git_commit_message_file = function(...) return git_mechanics.git_commit_message_file(M, ...) end
 M.git_worktree_remove = function(...) return git_mechanics.git_worktree_remove(M, ...) end
 M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end
-local pr_safety = require("devloop.pr_safety")
-M.is_safe_branch = function(...) return pr_safety.is_safe_branch(M, ...) end
-M.is_safe_head_sha = function(...) return pr_safety.is_safe_head_sha(M, ...) end
-M.is_safe_pr_number = function(...) return pr_safety.is_safe_pr_number(M, ...) end
-M.is_same_repo_pr_head = function(...) return pr_safety.is_same_repo_pr_head(M, ...) end
 require("forge.merge").install(M)
 require("devloop.logging").install(M)
 local entity = require("devloop.entity")

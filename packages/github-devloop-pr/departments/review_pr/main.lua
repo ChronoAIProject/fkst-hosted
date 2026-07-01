@@ -118,7 +118,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
 
-    if not core.is_safe_head_sha(current_pr.head_sha) then
+    if not require("devloop.pr_safety").is_safe_head_sha(current_pr.head_sha) then
       error("github-devloop: gh pr review head view returned unsafe head sha")
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then

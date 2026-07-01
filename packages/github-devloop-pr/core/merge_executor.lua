@@ -46,7 +46,7 @@ end
 
 local function gate_baseline_sha_from_pr(pr)
   local baseline_sha = tostring(pr and pr.base_ref_oid or "")
-  if not core.is_safe_head_sha(baseline_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(baseline_sha) then
     error("github-devloop: unsafe merge-gate baseline sha")
   end
   return baseline_sha
@@ -62,7 +62,7 @@ local function pr_head_contains_current_base(pr, branches)
     return false, base_reason
   end
   local head_sha = tostring(pr and pr.head_sha or "")
-  if not core.is_safe_head_sha(head_sha) then
+  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
     return false, "unsafe-pr-head"
   end
   local result = core.git_is_ancestor(base_head, head_sha, 30)
@@ -431,7 +431,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     if core.is_merged_pr(current_pr)
       and tostring(current_pr.head_ref_name or "") == tostring(origin.branch)
       and tostring(current_pr.head_sha or "") == tostring(merge_ready.reviewed_head_sha)
-      and core.is_same_repo_pr_head(current_pr, repo) then
+      and require("forge.merge.shared").is_same_repo_pr_head(current_pr, repo) then
       local merging_fact = m_facts.merging_fact(core, current_pr.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
       if merging_fact == nil then
         core.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-external-merge(no-bot-merging-marker)", "PR is already merged without a prior trusted bot merging marker")

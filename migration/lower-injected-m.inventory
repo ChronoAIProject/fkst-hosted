@@ -60,10 +60,6 @@
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"
       },
-      "is_same_repo_pr_head": {
-        "route": "forge",
-        "owner": "forge-github"
-      },
       "log_line": {
         "route": "typed_port",
         "owner": "devloop-seam-dissolution"

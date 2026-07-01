@@ -77,7 +77,7 @@ local function act(event)
       log_skip(payload, "base-branch-mismatch")
       return
     end
-    if not core.is_same_repo_pr_head(pr, payload.repo) then
+    if not require("forge.merge.shared").is_same_repo_pr_head(pr, payload.repo) then
       log_skip(payload, "foreign-head-repository")
       return
     end

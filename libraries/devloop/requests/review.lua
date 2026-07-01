@@ -60,7 +60,7 @@ function C.attach_fixing_handoff(M, request, proposal_id, pr_number, version, re
     end
   end
   if review_fact.current_head_sha ~= nil then
-    if not M.is_safe_head_sha(review_fact.current_head_sha) then
+    if not require("devloop.pr_safety").is_safe_head_sha(review_fact.current_head_sha) then
       error("github-devloop: invalid fixing handoff current head sha")
     end
     request.handoff.current_head_sha = tostring(review_fact.current_head_sha)

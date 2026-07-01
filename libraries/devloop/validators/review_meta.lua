@@ -15,7 +15,7 @@ function C.is_supported_review_meta(M, payload)
   end
   return has_valid_identity
     and M._is_bounded_string(payload.version, M._max_dedup_len)
-    and M.is_safe_pr_number(payload.pr_number)
+    and require("devloop.pr_safety").is_safe_pr_number(payload.pr_number)
     and tonumber(payload.n) ~= nil
     and (payload.mode == nil or payload.mode == "fix-reflection")
     and (payload.fix_round == nil or tonumber(payload.fix_round) ~= nil)

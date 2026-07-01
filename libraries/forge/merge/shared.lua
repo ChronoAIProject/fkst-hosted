@@ -153,4 +153,17 @@ return {
 }
 end
 
+function S.is_same_repo_pr_head(pr, repo)
+  if type(pr) ~= "table" then
+    return false
+  end
+  if pr.is_cross_repository == true then
+    return false
+  end
+  if pr.head_repository == nil then
+    return false
+  end
+  return tostring(pr.head_repository):lower() == tostring(repo):lower()
+end
+
 return S

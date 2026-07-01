@@ -85,7 +85,7 @@ local function run_verified_pr_merge(request)
       if tostring(merged_pr.head_ref_name or "") ~= tostring(expected.head_branch or "")
         or tostring(merged_pr.head_sha or "") ~= tostring(expected.head_sha or "")
         or tostring(merged_pr.base_ref_name or "") ~= tostring(expected.base_branch or "")
-        or not M.is_same_repo_pr_head(merged_pr, repo) then
+        or not require("forge.merge.shared").is_same_repo_pr_head(merged_pr, repo) then
         return false, "merge-confirmation-mismatch", merged_pr
       end
       return true, "merged", merged_pr

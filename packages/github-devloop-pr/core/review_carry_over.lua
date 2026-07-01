@@ -32,7 +32,7 @@ local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version,
 end
 
 function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, version, comments, base_branch, current_head_sha)
-  if type(comments) ~= "table" or not M.is_safe_head_sha(current_head_sha) then
+  if type(comments) ~= "table" or not require("devloop.pr_safety").is_safe_head_sha(current_head_sha) then
     return nil, "invalid-carry-over-input"
   end
   local fact = m_facts.merge_ready_fact(M, comments, issue_proposal_id, version, pr_number)
