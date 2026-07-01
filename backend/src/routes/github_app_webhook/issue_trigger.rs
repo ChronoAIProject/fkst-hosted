@@ -8,15 +8,21 @@
 
 use std::collections::BTreeMap;
 
+use secrecy::SecretString;
 use serde::Deserialize;
 
 use super::Handled;
 use crate::goals::issue_parse::{parse_goal_issue_body, ParsedGoal};
 use crate::goals::labels::GOAL_LABEL;
+use crate::k8s::env_store::{get_environment, load_environment_for_session, EnvRecord};
 use crate::k8s::{KubeClient, PodSessionLauncher, SessionSecrets};
 use crate::models::RepoRef;
 use crate::session_spec::{derive_session_id, SessionGoal, SessionSpec};
 use crate::state::AppState;
+
+/// The `validation-status` value a fully-written, validated environment carries;
+/// only a `ready` environment is loaded into a session.
+const ENV_STATUS_READY: &str = "ready";
 
 /// The subset of a GitHub `issues` webhook payload we consume.
 #[derive(Debug, Deserialize)]
@@ -51,10 +57,11 @@ pub(super) struct LabelPayload {
 #[derive(Debug, Deserialize)]
 pub(super) struct ActorPayload {
     pub login: String,
-    /// The actor's immutable numeric GitHub id. For an issue author it will key
-    /// the named-environment lookup that PR8 wires into session injection; today
-    /// it is recorded for traceability only. Required: GitHub always includes
-    /// `user.id`, and a silent `0` fallback would identify the WRONG user.
+    /// The actor's immutable numeric GitHub id. For an issue author it keys the
+    /// named-environment pre-flight + injection ([`resolve_environment`]): the
+    /// author's `fkst-env-<id>-<name>` objects are looked up by this id. Required:
+    /// GitHub always includes `user.id`, and a silent `0` fallback would identify
+    /// the WRONG user (and read the wrong account's environment).
     pub id: i64,
 }
 
@@ -114,9 +121,110 @@ pub(super) fn build_session_spec(
             prompt: parsed.description.clone(),
         },
         package_names: parsed.package_names.clone(),
-        // No named environment is resolved on the issue-trigger path yet (a later
-        // PR wires environment selection); default to no install commands.
+        // `install` is left empty here (this builder stays pure/synchronous) and
+        // set by `trigger_session` once the issue's named environment is
+        // pre-flighted + resolved. A session with no environment keeps it empty.
         install: Vec::new(),
+    }
+}
+
+/// Whether a resolved environment is usable: present AND validated `ready`.
+fn env_is_ready(record: &EnvRecord) -> bool {
+    record.status == ENV_STATUS_READY
+}
+
+/// Feedback comment when the issue names an environment that is missing or not
+/// yet `ready` for the author. Concrete + actionable; leaks no value.
+fn env_not_ready_comment(name: &str) -> String {
+    format!(
+        "⚠️ fkst couldn't start: environment `{name}` was not found in your account \
+         (or isn't ready). Create it first with `PUT /api/v1/users/me/environments/{name}` \
+         (install commands + variables + secrets), then re-trigger. Omit the `### Environment` \
+         section to run with no environment."
+    )
+}
+
+/// Feedback comment when the environment store could not be read (e.g. the
+/// cluster is momentarily unreachable). We fail closed rather than launch a
+/// session that cannot get its declared environment.
+fn env_verify_failed_comment(name: &str) -> String {
+    format!(
+        "⚠️ fkst couldn't verify environment `{name}` right now (a transient error reading \
+         your environments). Please re-trigger in a moment."
+    )
+}
+
+/// The outcome of pre-flighting the issue's named environment before launch.
+enum EnvResolution {
+    /// Launch: the resolved install commands + merged variables/secrets to inject
+    /// (both empty when the issue declared no environment).
+    Proceed {
+        install: Vec<String>,
+        user_env: BTreeMap<String, String>,
+    },
+    /// Do NOT launch; post `comment` on the issue explaining why.
+    Blocked { comment: String },
+}
+
+/// Pre-flight the issue's named environment against the AUTHOR's store.
+///
+/// A `None` selection resolves to an empty (no-environment) session. A named
+/// selection must EXIST and be `ready` for `author_id`; otherwise (missing, not
+/// ready, or a store-read error) the launch is blocked with a feedback comment —
+/// we fail closed rather than launch a session that cannot get its declared
+/// environment. On success the install commands + merged variables/secret VALUES
+/// are returned for injection.
+async fn resolve_environment(
+    kube: &KubeClient,
+    author_id: i64,
+    environment: Option<&str>,
+) -> EnvResolution {
+    let name = match environment {
+        None => {
+            return EnvResolution::Proceed {
+                install: Vec::new(),
+                user_env: BTreeMap::new(),
+            }
+        }
+        Some(name) => name,
+    };
+
+    match get_environment(kube, author_id, name).await {
+        Ok(Some(record)) if env_is_ready(&record) => {
+            match load_environment_for_session(kube, author_id, name).await {
+                Ok(Some((install, user_env))) => {
+                    // Counts only — never the variable/secret values.
+                    tracing::info!(
+                        github_user_id = author_id,
+                        environment = %name,
+                        install_commands = install.len(),
+                        env_vars = user_env.len(),
+                        "webhook trigger: named environment resolved for session"
+                    );
+                    EnvResolution::Proceed { install, user_env }
+                }
+                // A race (deleted between the readiness read and the load).
+                Ok(None) => EnvResolution::Blocked {
+                    comment: env_not_ready_comment(name),
+                },
+                Err(error) => {
+                    tracing::error!(environment = %name, error = %error, "webhook trigger: environment load failed");
+                    EnvResolution::Blocked {
+                        comment: env_verify_failed_comment(name),
+                    }
+                }
+            }
+        }
+        // Present but not ready, or absent.
+        Ok(_) => EnvResolution::Blocked {
+            comment: env_not_ready_comment(name),
+        },
+        Err(error) => {
+            tracing::error!(environment = %name, error = %error, "webhook trigger: environment pre-flight read failed");
+            EnvResolution::Blocked {
+                comment: env_verify_failed_comment(name),
+            }
+        }
     }
 }
 
@@ -156,7 +264,7 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
 
     let body = event.issue.body.clone().unwrap_or_default();
     let parsed = parse_goal_issue_body(&body).map_err(|e| format!("parse issue body: {e}"))?;
-    let spec = build_session_spec(
+    let mut spec = build_session_spec(
         event.installation.id,
         owner,
         name,
@@ -166,24 +274,45 @@ async fn trigger_session(state: &AppState, event: &IssuesEvent) -> Result<(), St
         &parsed,
     );
 
-    let github_token = github_app
-        .token_for_repo(&owner_repo, None)
-        .await
-        .map_err(|e| format!("mint app token: {e}"))?;
-
     let kube = KubeClient::from_inferred(&state.config.pod.namespace)
         .await
         .map_err(|e| format!("kubernetes client: {e}"))?;
 
-    // PR8 will wire named-environment injection: the issue author selects a named
-    // environment whose install commands + variables + secret values are mounted
-    // into the session. The old flat `### Environment` names-based lookup was
-    // removed with the flat user-env store, so no user env is injected for now.
-    tracing::info!(
-        github_user_id = event.issue.user.id,
-        "webhook trigger: named-environment injection deferred to PR8; no user env injected"
-    );
-    let user_env = BTreeMap::new();
+    // Pre-flight the issue's named environment against the AUTHOR's store (keyed
+    // by the signed numeric GitHub id). A missing / not-ready environment, or a
+    // store-read failure, blocks the launch with a feedback comment — fail closed,
+    // and DO NOT create a Job.
+    let (install, user_env) = match resolve_environment(
+        &kube,
+        event.issue.user.id,
+        parsed.environment.as_deref(),
+    )
+    .await
+    {
+        EnvResolution::Proceed { install, user_env } => (install, user_env),
+        EnvResolution::Blocked { comment } => {
+            let _ = github_app
+                .post_issue_comment(&owner_repo, event.issue.number as u64, &comment)
+                .await;
+            tracing::info!(
+                issue = event.issue.number,
+                "webhook trigger: environment pre-flight blocked the launch (no job created)"
+            );
+            return Ok(());
+        }
+    };
+    spec.install = install;
+    // Wrap the resolved variables + secret VALUES so they ride the per-session
+    // Secret as `userenv.<KEY>` entries (never a plaintext env/ConfigMap).
+    let user_env: BTreeMap<String, SecretString> = user_env
+        .into_iter()
+        .map(|(key, value)| (key, SecretString::from(value)))
+        .collect();
+
+    let github_token = github_app
+        .token_for_repo(&owner_repo, None)
+        .await
+        .map_err(|e| format!("mint app token: {e}"))?;
 
     // The LLM credential is a static config value (FKST_LLM_API_KEY). It is
     // written into the session Secret and read by the engine's codex provider
@@ -284,7 +413,7 @@ mod tests {
         let parsed = ParsedGoal {
             description: "do it".to_string(),
             package_names: vec!["web".to_string()],
-            env_keys: vec![],
+            environment: None,
         };
         let a = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
         let b = build_session_spec(42, "acme", "site", 7, "octocat", "T", &parsed);
@@ -301,5 +430,47 @@ mod tests {
         assert_eq!(a.goal.prompt, "do it");
         assert_eq!(a.package_names, vec!["web".to_string()]);
         assert_eq!(a.log_branch, format!("fkst/session-{}", a.session_id));
+        // The builder never resolves the environment; install stays empty until
+        // `trigger_session` pre-flights + loads it.
+        assert!(a.install.is_empty(), "builder leaves install empty");
+    }
+
+    fn env_record(status: &str) -> EnvRecord {
+        EnvRecord {
+            name: "my-env".to_string(),
+            status: status.to_string(),
+            validated_at: String::new(),
+            install: vec![],
+            variables: BTreeMap::new(),
+            secret_keys: vec![],
+        }
+    }
+
+    #[test]
+    fn env_is_ready_only_when_status_is_ready() {
+        assert!(env_is_ready(&env_record("ready")));
+        assert!(!env_is_ready(&env_record("validating")));
+        assert!(!env_is_ready(&env_record("")));
+    }
+
+    #[test]
+    fn not_ready_comment_names_the_env_and_the_put_endpoint() {
+        let msg = env_not_ready_comment("my-env");
+        assert!(msg.contains("my-env"), "names the env: {msg}");
+        assert!(
+            msg.contains("PUT /api/v1/users/me/environments/my-env"),
+            "points at the create endpoint: {msg}"
+        );
+        assert!(
+            msg.contains("Omit the `### Environment`"),
+            "explains the no-environment escape hatch: {msg}"
+        );
+    }
+
+    #[test]
+    fn verify_failed_comment_names_the_env_and_asks_to_retry() {
+        let msg = env_verify_failed_comment("my-env");
+        assert!(msg.contains("my-env"), "names the env: {msg}");
+        assert!(msg.contains("re-trigger"), "asks to retry: {msg}");
     }
 }

@@ -27,18 +27,28 @@ use crate::error::AppError;
 /// every line after its heading up to the next `### ` heading (or EOF).
 const HEADING_GOAL: &str = "### Goal";
 const HEADING_PACKAGES: &str = "### Package Name List";
-/// OPTIONAL section (PR4b): each non-blank line names ONE env var KEY to inject
-/// into the session from the issue author's `fkst-user-<id>` store. Absent →
-/// no injection.
+/// OPTIONAL section (#338 §5): names EXACTLY ONE named environment (by name) to
+/// load into the session — its install commands run before the agent starts, and
+/// its variables + secrets are injected. Absent or blank → no environment.
 const HEADING_ENVIRONMENT: &str = "### Environment";
 
-/// Anchored env-var-name pattern, identical to the env-var key grammar the
-/// named-environment API (`crate::routes::environments`) enforces. A name that
-/// passes here is also a valid Kubernetes ConfigMap/Secret data key, so the
-/// requested key can be looked up in the author's store and mounted unescaped.
-fn env_key_regex() -> &'static Regex {
+/// The maximum length of an environment `name`, mirroring the named-environment
+/// API (`crate::routes::environments`) so a name that parses here is also
+/// accepted by that API and composes into a valid Kubernetes object name.
+const MAX_ENV_NAME_LEN: usize = 40;
+
+/// Anchored environment-NAME pattern, identical to the rule the named-environment
+/// API (`crate::routes::environments`) enforces: lower-case DNS-1123-label-ish,
+/// so the selected name resolves to the same `fkst-env-<id>-<name>` object.
+fn env_name_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new("^[A-Za-z_][A-Za-z0-9_]*$").expect("static env key regex"))
+    RE.get_or_init(|| Regex::new("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$").expect("static env name regex"))
+}
+
+/// True when `name` satisfies the environments API naming rule (grammar + the
+/// 1..=40 length budget). The regex already forbids the empty string.
+fn is_valid_env_name(name: &str) -> bool {
+    name.len() <= MAX_ENV_NAME_LEN && env_name_regex().is_match(name)
 }
 
 /// The structured result of parsing an `fkst-goal` issue body. Carries only the
@@ -52,11 +62,12 @@ pub struct ParsedGoal {
     /// One package name per non-empty `### Package Name List` line (grammar
     /// validation deferred to `validate_goal_fields`).
     pub package_names: Vec<String>,
-    /// The env var KEY NAMES from the OPTIONAL `### Environment` section, one per
-    /// non-blank line (PR4b). Each is a validated env-var name; the trigger
-    /// resolves these against the issue author's store and injects the matching
-    /// values into the session. Empty when the section is absent.
-    pub env_keys: Vec<String>,
+    /// The single named ENVIRONMENT the OPTIONAL `### Environment` section selects
+    /// (#338 §5). At most one per issue: the trigger pre-flights that it exists and
+    /// is `ready` for the issue author, then loads its install commands +
+    /// variables + secrets into the session. `None` when the section is absent or
+    /// blank.
+    pub environment: Option<String>,
 }
 
 /// Parse the `fkst-goal` issue body into [`ParsedGoal`].
@@ -96,38 +107,49 @@ pub fn parse_goal_issue_body(body: &str) -> Result<ParsedGoal, AppError> {
         ));
     }
 
-    // `### Environment` — OPTIONAL. Each non-blank line names one env var KEY to
-    // inject (PR4b). A malformed name is a 422 naming the section (consistent
-    // with the other structural failures); an absent section means no injection.
-    let env_keys = match sections
+    // `### Environment` — OPTIONAL. When present it names EXACTLY ONE named
+    // environment (#338 §5); zero non-blank lines (or an absent section) means no
+    // environment, two or more is ambiguous (422), and a malformed name is a 422
+    // naming the rule — all consistent with the other structural failures.
+    let environment = match sections
         .iter()
         .find(|(heading, _)| heading == HEADING_ENVIRONMENT)
     {
-        Some((_, content)) => parse_env_keys(content)?,
-        None => Vec::new(),
+        Some((_, content)) => parse_environment_name(content)?,
+        None => None,
     };
 
     Ok(ParsedGoal {
         description,
         package_names,
-        env_keys,
+        environment,
     })
 }
 
-/// Parse the `### Environment` block into validated env var KEY names. Each
-/// non-blank trimmed line must match the env-var-name grammar; the first
-/// violation is a 422 that names the offending key and the section.
-fn parse_env_keys(block: &str) -> Result<Vec<String>, AppError> {
-    let keys = non_empty_lines(block);
-    for key in &keys {
-        if !env_key_regex().is_match(key) {
-            return Err(AppError::Unprocessable(format!(
-                "the `### Environment` section has an invalid env var name {key:?}: \
-                 must match ^[A-Za-z_][A-Za-z0-9_]*$"
-            )));
+/// Parse the OPTIONAL `### Environment` block into the single environment NAME it
+/// selects. The section, when present, must contain EXACTLY ONE non-blank line —
+/// the name of a named environment the issue author owns — that satisfies the
+/// environments API naming rule. Zero non-blank lines yields `None` (equivalent to
+/// omitting the section); two or more is a 422 (ambiguous selection); an invalid
+/// name is a 422 that names the rule.
+fn parse_environment_name(block: &str) -> Result<Option<String>, AppError> {
+    let names = non_empty_lines(block);
+    match names.as_slice() {
+        [] => Ok(None),
+        [name] => {
+            if is_valid_env_name(name) {
+                Ok(Some(name.clone()))
+            } else {
+                Err(AppError::Unprocessable(format!(
+                    "the `### Environment` section names an invalid environment {name:?}: \
+                     must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ and be 1..=40 characters"
+                )))
+            }
         }
+        _ => Err(AppError::Unprocessable(
+            "the `### Environment` section must name exactly one environment".to_string(),
+        )),
     }
-    Ok(keys)
 }
 
 /// Split a body into `(heading, content)` sections at each `### ` heading line.
@@ -210,36 +232,55 @@ digest-writer
     }
 
     #[test]
-    fn environment_section_absent_yields_no_env_keys() {
+    fn environment_section_absent_yields_none() {
         let body = "### Goal\nG\n### Package Name List\npkg-a\n";
         let parsed = parse_goal_issue_body(body).expect("parses without Environment");
-        assert!(parsed.env_keys.is_empty());
+        assert!(parsed.environment.is_none());
     }
 
     #[test]
-    fn environment_section_parses_one_key_per_non_blank_line() {
-        let body =
-            "### Goal\nG\n### Package Name List\npkg-a\n### Environment\n  FOO \n\nBAR_2\n_BAZ\n";
+    fn environment_section_parses_a_single_name() {
+        let body = "### Goal\nG\n### Package Name List\npkg-a\n### Environment\n  my-env  \n";
         let parsed = parse_goal_issue_body(body).expect("parses Environment");
-        assert_eq!(parsed.env_keys, vec!["FOO", "BAR_2", "_BAZ"]);
+        assert_eq!(parsed.environment.as_deref(), Some("my-env"));
     }
 
     #[test]
-    fn environment_section_may_be_empty_and_yields_no_keys() {
+    fn environment_section_blank_yields_none() {
         let body = "### Goal\nG\n### Package Name List\npkg-a\n### Environment\n   \n";
-        let parsed = parse_goal_issue_body(body).expect("empty Environment is allowed");
-        assert!(parsed.env_keys.is_empty());
+        let parsed = parse_goal_issue_body(body).expect("blank Environment is allowed");
+        assert!(parsed.environment.is_none());
     }
 
     #[test]
-    fn malformed_env_key_name_is_422_naming_environment() {
-        let body = "### Goal\nG\n### Package Name List\npkg-a\n### Environment\nMY-VAR\n";
+    fn two_environment_names_is_422() {
+        let body =
+            "### Goal\nG\n### Package Name List\npkg-a\n### Environment\nfirst-env\nsecond-env\n";
         let msg = err_message(body);
         assert!(
             msg.contains("Environment"),
             "must name the Environment section: {msg}"
         );
-        assert!(msg.contains("MY-VAR"), "must name the offending key: {msg}");
+        assert!(
+            msg.contains("exactly one"),
+            "must flag the ambiguity: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_environment_name_is_422_naming_the_rule() {
+        // Upper-case is rejected by the lower-case-only environments name rule.
+        let body = "### Goal\nG\n### Package Name List\npkg-a\n### Environment\nMY_ENV\n";
+        let msg = err_message(body);
+        assert!(
+            msg.contains("Environment"),
+            "must name the Environment section: {msg}"
+        );
+        assert!(
+            msg.contains("MY_ENV"),
+            "must name the offending value: {msg}"
+        );
+        assert!(msg.contains("a-z0-9"), "must state the naming rule: {msg}");
     }
 
     #[test]
