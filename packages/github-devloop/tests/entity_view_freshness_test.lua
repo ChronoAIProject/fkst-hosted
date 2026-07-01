@@ -52,7 +52,7 @@ local function encode_json_string(value)
 end
 
 local function seed_cached_view(repo, kind, number, stdout, updated_at, producer)
-  cache_set(core.entity_view_cache_key(repo, kind, number), '{"updated_at":"' .. encode_json_string(updated_at)
+  cache_set(require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, kind, number), '{"updated_at":"' .. encode_json_string(updated_at)
     .. '","producer":"' .. encode_json_string(producer or "seed")
     .. '","stdout":"' .. encode_json_string(stdout)
     .. '"}')
@@ -70,7 +70,7 @@ return {
     })
 
     local ok, result = pcall(function()
-      return core.fetch_issue_view_state("owner/repo", 42, "2026-06-03T01:02:03Z", {
+      return require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, "owner/repo", 42, "2026-06-03T01:02:03Z", {
         timeout = 10,
       })
     end)
@@ -107,7 +107,7 @@ return {
       updated_at = updated_at,
     }), updated_at)
 
-    local second = core.fetch_issue_view_state(repo, issue_number, updated_at, {
+    local second = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue_number, updated_at, {
       consumer = "state-reader",
     })
 
@@ -137,10 +137,10 @@ return {
       register_all_views = true,
       times = 1,
     })
-    local second = core.fetch_issue_view(repo, issue_number, "2026-06-03T01:02:04Z", {
+    local second = require("devloop.github_proxy_entity_view").fetch_issue_view(core, repo, issue_number, "2026-06-03T01:02:04Z", {
       consumer = "second-reader",
     })
-    local third = core.fetch_issue_view_state(repo, issue_number, "2026-06-03T01:02:04Z")
+    local third = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue_number, "2026-06-03T01:02:04Z")
 
     t.eq(second.exit_code, 0)
     t.is_true(second.stdout:find('"After"', 1, true) ~= nil)
@@ -172,11 +172,11 @@ return {
       register_all_views = true,
       times = 1,
     })
-    local forced = core.fetch_issue_view(repo, issue_number, updated_at, {
+    local forced = require("devloop.github_proxy_entity_view").fetch_issue_view(core, repo, issue_number, updated_at, {
       consumer = "claim-gate",
       force_fresh = true,
     })
-    local cached = core.fetch_issue_view_state(repo, issue_number, updated_at)
+    local cached = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue_number, updated_at)
 
     t.eq(forced.exit_code, 0)
     t.is_true(forced.stdout:find('"After"', 1, true) ~= nil)
@@ -210,7 +210,7 @@ return {
       times = 1,
     })
 
-    local after = core.fetch_issue_view(repo, issue_number, updated_at, {
+    local after = require("devloop.github_proxy_entity_view").fetch_issue_view(core, repo, issue_number, updated_at, {
       consumer = "second-reader",
     })
 
@@ -219,7 +219,7 @@ return {
     t.eq(count_calls(view_command), 0)
     t.eq(count_exact_calls(rest_command), 1)
     t.eq(count_exact_calls(comments_command), 1)
-    t.eq(cache_get(core.entity_view_cache_key(repo, "issue", issue_number)) ~= "", true)
+    t.eq(cache_get(require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, "issue", issue_number)) ~= "", true)
   end,
 
   test_no_validator_uses_rest_probe_before_serving_cached_pr_view = function()
@@ -235,7 +235,7 @@ return {
       head_sha = "abc123",
       updated_at = updated_at,
     }), updated_at)
-    t.is_true(tostring(cache_get(core.entity_view_cache_key(repo, "pr", pr_number)) or ""):find('"updated_at"', 1, true) ~= nil)
+    t.is_true(tostring(cache_get(require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, "pr", pr_number)) or ""):find('"updated_at"', 1, true) ~= nil)
     seam.mock_pr_read_forms(t, {
       repo = repo,
       number = pr_number,

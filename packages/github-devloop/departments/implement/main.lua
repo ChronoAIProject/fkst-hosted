@@ -371,7 +371,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   local commit_result = core.git_commit(worktree, payloads_builders.implement_commit_subject(core,
       issue_number,
-      core.commit_issue_subject_snapshot(repo, issue_number)
+      require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(core, repo, issue_number)
     ), 60)
   if commit_result.exit_code ~= 0 then
     error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))

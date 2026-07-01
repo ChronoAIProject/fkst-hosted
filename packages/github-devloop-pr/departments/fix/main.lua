@@ -496,7 +496,7 @@ local function run_fix_attempt(plan)
   end
   local commit_result = core.git_commit(worktree, payloads_builders.fix_commit_subject(core,
       plan.issue_number,
-      core.commit_issue_subject_snapshot(plan.repo, plan.issue_number)
+      require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(core, plan.repo, plan.issue_number)
     ), 60)
   if commit_result.exit_code ~= 0 then
     error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))

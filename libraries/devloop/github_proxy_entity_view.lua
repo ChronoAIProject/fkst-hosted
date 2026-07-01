@@ -1,9 +1,8 @@
-local S = {}
+local C = {}
 local github_view = require("forge.github_view")
 local gh_exec_mod = require("devloop.gh_exec")
 local github_handle = nil
 
-function S.install(M)
 local parse_view_updated_at = github_view.parse_view_updated_at
 local parse_updated_at_stdout = github_view.parse_updated_at_stdout
 local json_string = github_view.json_string
@@ -347,20 +346,20 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   return result
 end
 
-function M.entity_view_cache_key(repo, kind, number)
+function C.entity_view_cache_key(M, repo, kind, number)
   return entity_view_cache_key(repo, kind, number)
 end
 
-function M.entity_cache_key(repo, entity_type, number)
+function C.entity_cache_key(M, repo, entity_type, number)
   return "github-proxy/" .. tostring(entity_type) .. "/" .. tostring(repo) .. "/" .. tostring(number)
 end
 
-function M.invalidate_entity_after_write(repo, kind, number)
+function C.invalidate_entity_after_write(M, repo, kind, number)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
     error("github-devloop: invalid post-write invalidation kind")
   end
-  local entity_key = M.entity_cache_key(repo, selected_kind, number)
+  local entity_key = C.entity_cache_key(M, repo, selected_kind, number)
   local view_key = entity_view_cache_key(repo, selected_kind, number)
   with_lock(entity_key, function()
     cache_set(entity_key, "")
@@ -368,11 +367,11 @@ function M.invalidate_entity_after_write(repo, kind, number)
   end)
 end
 
-function M.fetch_entity_view(repo, kind, number, updated_at, opts)
+function C.fetch_entity_view(M, repo, kind, number, updated_at, opts)
   return fetch_entity_view(repo, kind, number, updated_at, opts)
 end
 
-function M.cached_entity_view(repo, kind, number)
+function C.cached_entity_view(M, repo, kind, number)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
     error("github-devloop: invalid cached entity view kind")
@@ -384,39 +383,39 @@ function M.cached_entity_view(repo, kind, number)
   return success_from_cache(cached)
 end
 
-function M.fetch_issue_view(repo, issue_number, updated_at, opts)
+function C.fetch_issue_view(M, repo, issue_number, updated_at, opts)
   return fetch_entity_view(repo, "issue", issue_number, updated_at, opts)
 end
 
-function M.fetch_pr_view(repo, pr_number, updated_at, opts)
+function C.fetch_pr_view(M, repo, pr_number, updated_at, opts)
   return fetch_entity_view(repo, "pr", pr_number, updated_at, opts)
 end
 
-function M.fetch_marker_issue_view(repo, issue_number, updated_at, opts)
+function C.fetch_marker_issue_view(M, repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "marker-reader"
-  return M.fetch_issue_view(repo, issue_number, updated_at, options)
+  return C.fetch_issue_view(M, repo, issue_number, updated_at, options)
 end
 
-function M.fetch_marker_pr_view(repo, pr_number, updated_at, opts)
+function C.fetch_marker_pr_view(M, repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "marker-reader"
-  return M.fetch_pr_view(repo, pr_number, updated_at, options)
+  return C.fetch_pr_view(M, repo, pr_number, updated_at, options)
 end
 
-function M.fetch_issue_view_state(repo, issue_number, updated_at, opts)
+function C.fetch_issue_view_state(M, repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_issue"
-  return M.fetch_marker_issue_view(repo, issue_number, updated_at, options)
+  return C.fetch_marker_issue_view(M, repo, issue_number, updated_at, options)
 end
 
-function M.fetch_issue_view_open_pr(repo, issue_number, updated_at, opts)
+function C.fetch_issue_view_open_pr(M, repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "open_pr"
-  return M.fetch_marker_issue_view(repo, issue_number, updated_at, options)
+  return C.fetch_marker_issue_view(M, repo, issue_number, updated_at, options)
 end
 
-function M.commit_issue_subject_snapshot(repo, issue_number)
+function C.commit_issue_subject_snapshot(M, repo, issue_number)
   if issue_number == nil then
     return {}
   end
@@ -433,10 +432,10 @@ function M.commit_issue_subject_snapshot(repo, issue_number)
   }
 end
 
-function M.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
+function C.fetch_pr_view_origin(M, repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_pr"
-  return M.fetch_marker_pr_view(repo, pr_number, updated_at, options)
+  return C.fetch_marker_pr_view(M, repo, pr_number, updated_at, options)
 end
 
 -- Opt-in cross-process stale-tolerant read cache (manual TTL). For OBSERVATION
@@ -450,7 +449,7 @@ end
 -- share a slot. This collapses the dominant GraphQL drain: the same entity
 -- re-read every poll by the same scan dept (measured ~10x duplication on hot
 -- issues).
-function M.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
+function C.gh_exec_cached(M, cmd, cache_key, ttl_seconds, exec)
   local cached = cache_get(cache_key)
   if type(cached) == "string" and cached ~= "" then
     local sep = cached:find("\n", 1, true)
@@ -472,7 +471,7 @@ function M.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
 end
 
 -- Readable cache key for an opt-in scan read: github-devloop/ghread/<variant>/<repo>/<number>.
-function M.gh_read_cache_key(variant, repo, number)
+function C.gh_read_cache_key(M, variant, repo, number)
   return "github-devloop/ghread/"
     .. sanitize_cache_segment(variant, false)
     .. "/"
@@ -481,6 +480,4 @@ function M.gh_read_cache_key(variant, repo, number)
     .. sanitize_cache_segment(number, false)
 end
 
-end
-
-return S
+return C

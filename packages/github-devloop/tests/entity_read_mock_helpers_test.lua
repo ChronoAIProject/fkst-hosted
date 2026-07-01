@@ -35,7 +35,7 @@ return {
       register_all_views = true,
     })
 
-    local view = decode(core.fetch_issue_view("owner/repo", 42, "2026-06-14T10:11:12Z", { consumer = "view" }).stdout)
+    local view = decode(require("devloop.github_proxy_entity_view").fetch_issue_view(core, "owner/repo", 42, "2026-06-14T10:11:12Z", { consumer = "view" }).stdout)
     local rest = decode(github().issue_rest_view("owner/repo", 42, 30).stdout)
     local probe = github().issue_updated_at("owner/repo", 42, 30)
     local comments = decode(github().issue_comments("owner/repo", 42, 30).stdout)
@@ -80,7 +80,7 @@ return {
       register_all_views = true,
     })
 
-    local view = decode(core.fetch_pr_view("owner/repo", 7, "2026-06-14T11:11:12Z", { consumer = "view" }).stdout)
+    local view = decode(require("devloop.github_proxy_entity_view").fetch_pr_view(core, "owner/repo", 7, "2026-06-14T11:11:12Z", { consumer = "view" }).stdout)
     local rest = decode(github().pr_rest_view("owner/repo", 7, 30).stdout)
     local probe = github().entity_updated_at("owner/repo", "pr", 7, 30)
     local comments = decode(github().issue_comments("owner/repo", 7, 30).stdout)
@@ -127,7 +127,7 @@ return {
 
   test_unregistered_entity_read_fails_closed = function()
     local ok = pcall(function()
-      core.fetch_issue_view("owner/repo", 404, "2026-06-14T00:00:00Z", { consumer = "unregistered" })
+      require("devloop.github_proxy_entity_view").fetch_issue_view(core, "owner/repo", 404, "2026-06-14T00:00:00Z", { consumer = "unregistered" })
     end)
     t.eq(ok, false)
   end,

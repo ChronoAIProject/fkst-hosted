@@ -179,7 +179,7 @@ local function read_repo()
 end
 
 local function fetch_issue_entity(repo, issue)
-  local view = M.fetch_issue_view_state(repo, issue.number, issue.updated_at, {
+  local view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(M, repo, issue.number, issue.updated_at, {
     consumer = "saga_doctor",
   })
   if view.exit_code ~= 0 then

@@ -522,7 +522,7 @@ local function process_issue_event(event)
   with_lock(lock_key, function()
     core.assert_trusted_bot_configured()
 
-    local state_view = core.fetch_issue_view_state(issue.repo, issue.number, issue.updated_at, {
+    local state_view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, issue.repo, issue.number, issue.updated_at, {
       force_fresh = true,
     })
     if state_view.exit_code ~= 0 then
