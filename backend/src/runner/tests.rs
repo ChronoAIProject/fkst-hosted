@@ -139,6 +139,7 @@ fn sample_spec() -> SessionSpec {
         },
         package_names: vec!["demo".into()],
         log_branch: "fkst/session-x".into(),
+        install: Vec::new(),
     }
 }
 
