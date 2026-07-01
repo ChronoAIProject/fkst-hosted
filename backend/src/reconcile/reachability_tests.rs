@@ -44,7 +44,7 @@ async fn all_reachable_is_ok() {
     mount(&server, &b, 200).await;
 
     let refs = vec![a, b];
-    check_reachable(&refs, &client(), &server.uri())
+    check_reachable(&refs, &client(), &server.uri(), None)
         .await
         .expect("all reachable");
 }
@@ -56,7 +56,7 @@ async fn a_404_ref_is_named_in_the_error() {
     mount(&server, &bad, 404).await;
 
     let refs = vec![bad.clone()];
-    let failures = check_reachable(&refs, &client(), &server.uri())
+    let failures = check_reachable(&refs, &client(), &server.uri(), None)
         .await
         .expect_err("must fail");
     assert_eq!(failures.len(), 1);
@@ -77,7 +77,7 @@ async fn mixed_reports_only_the_unreachable() {
     mount(&server, &bad, 404).await;
 
     let refs = vec![good, bad.clone()];
-    let failures = check_reachable(&refs, &client(), &server.uri())
+    let failures = check_reachable(&refs, &client(), &server.uri(), None)
         .await
         .expect_err("one is unreachable");
     assert_eq!(failures.len(), 1, "only the bad ref is reported");
@@ -91,7 +91,7 @@ async fn a_non_404_status_is_reported_verbatim() {
     mount(&server, &r, 500).await;
 
     let refs = vec![r];
-    let failures = check_reachable(&refs, &client(), &server.uri())
+    let failures = check_reachable(&refs, &client(), &server.uri(), None)
         .await
         .expect_err("500 is a failure");
     assert!(
