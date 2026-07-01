@@ -43,6 +43,16 @@ async fn main() -> ExitCode {
         return fkst_control_plane::runner::run_session_from_env().await;
     }
 
+    // 1c. Subcommand dispatch: `validate-env` is the in-pod, isolated
+    //     install-validation runner (issue #338 §3.4). It executes a named
+    //     environment's ordered install commands, prints a single-line JSON
+    //     verdict as the final stdout line, and exits SUCCESS/FAILURE — it never
+    //     binds a socket or builds the server router. Mirrors the `run-session`
+    //     arm so the default arg-less invocation stays the API server unchanged.
+    if std::env::args().nth(1).as_deref() == Some("validate-env") {
+        return fkst_control_plane::install::run_validate_env().await;
+    }
+
     // 2. Load the configuration from the environment.
     let config = match Config::load_from_env() {
         Ok(config) => config,
