@@ -24,7 +24,6 @@ M.judgment_worktree = function(...) return base.judgment_worktree_with_exec(M, d
 M.read_env_command = function(...) return base.read_env_command(M, ...) end
 M.read_env = function(...) return base.read_env(M, ...) end
 M.parse_name_only_paths = function(...) return base.parse_name_only_paths(M, ...) end
-M.strip_bot_login_suffix = function(...) return base.strip_bot_login_suffix(M, ...) end
 M.configure_trusted_bot_login = function(...) return base.configure_trusted_bot_login(M, ...) end
 M.assert_trusted_bot_configured = function(...) return base.assert_trusted_bot_configured(M, ...) end
 M.safe_repo = function(...) return base.safe_repo(M, ...) end

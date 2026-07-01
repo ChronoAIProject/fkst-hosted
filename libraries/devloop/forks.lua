@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_issue = require("devloop.parsers.issue")
@@ -18,7 +19,7 @@ function F.managed_fork_trust_set(core, bot_login, managed)
       if trusted then trust_set[login] = true end
     end
   end
-  local normalized = core.strip_bot_login_suffix(bot_login)
+  local normalized = devloop_base.strip_bot_login_suffix(bot_login)
   if normalized ~= nil and normalized ~= "" then
     trust_set[normalized] = true
   end

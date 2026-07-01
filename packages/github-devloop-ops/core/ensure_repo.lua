@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
@@ -255,7 +256,7 @@ end
 
 local function ensure_dashboard_anchor(repo, mode, issues, bot_login)
   for _, issue in ipairs(issues or {}) do
-    if M.strip_bot_login_suffix(issue.author_login or "") == M.strip_bot_login_suffix(bot_login or "")
+    if devloop_base.strip_bot_login_suffix(issue.author_login or "") == devloop_base.strip_bot_login_suffix(bot_login or "")
       and tostring(issue.title or "") == dashboard_title
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
       local label_added = ensure_dashboard_anchor_label(repo, mode, issue)

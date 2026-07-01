@@ -148,7 +148,7 @@ local is_path_safe_key = strings.is_path_safe_key
 -- Nil-safe (nil in → nil out) and a no-op for ordinary user logins (which never
 -- end in "[bot]"), so claim_owner() and author comparisons keep their existing
 -- nil semantics when the bot login is unconfigured.
-function C.strip_bot_login_suffix(M, login)
+function C.strip_bot_login_suffix(login)
   if login == nil then
     return nil
   end
@@ -160,7 +160,7 @@ function C.configure_trusted_bot_login(M, login)
     trusted_bot_login_by_M[M] = nil
     return nil
   end
-  trusted_bot_login_by_M[M] = C.strip_bot_login_suffix(M, login)
+  trusted_bot_login_by_M[M] = C.strip_bot_login_suffix(login)
   return trusted_bot_login_by_M[M]
 end
 

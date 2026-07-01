@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local C = {}
 local github_handle = nil
@@ -77,14 +78,14 @@ end
 -- downstream comparisons get the bare slug regardless of whether the deployment
 -- configured "<slug>" or "<slug>[bot]". No-op for ordinary user logins.
 function C.claim_owner(M)
-  return M.strip_bot_login_suffix(M.assert_trusted_bot_configured() or M.trusted_bot_login())
+  return devloop_base.strip_bot_login_suffix(M.assert_trusted_bot_configured() or M.trusted_bot_login())
 end
 
 function C.managed_bot_logins(M, exec)
   local raw = M.read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec)
   local logins = {}
   for entry in tostring(raw or ""):gmatch("[^,%s]+") do
-    local login = M.strip_bot_login_suffix(strings.trim(entry))
+    local login = devloop_base.strip_bot_login_suffix(strings.trim(entry))
     if login ~= nil and login ~= "" then
       logins[login] = true
     end
@@ -93,7 +94,7 @@ function C.managed_bot_logins(M, exec)
 end
 
 function C.is_managed_bot_login(M, login, managed)
-  local normalized = M.strip_bot_login_suffix(login)
+  local normalized = devloop_base.strip_bot_login_suffix(login)
   return normalized ~= nil and normalized ~= "" and type(managed) == "table" and managed[normalized] == true
 end
 
@@ -123,7 +124,7 @@ function C.issue_claim_state(M, assignees, owner, labels)
   if #logins == 0 then
     return "unassigned"
   end
-  if #logins == 1 and M.strip_bot_login_suffix(logins[1]) == tostring(owner or "") then
+  if #logins == 1 and devloop_base.strip_bot_login_suffix(logins[1]) == tostring(owner or "") then
     return "self"
   end
   return "other"
@@ -145,7 +146,7 @@ function C.is_self_owned_issue(M, ownership, owner)
   if author == nil then
     return false
   end
-  return M.strip_bot_login_suffix(author) == tostring(owner or "")
+  return devloop_base.strip_bot_login_suffix(author) == tostring(owner or "")
 end
 
 function C.read_current_issue_assignees(M, repo, issue_number)
@@ -288,7 +289,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
     log_claim(M, dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
     return false
   end
-  author = M.strip_bot_login_suffix(author)
+  author = devloop_base.strip_bot_login_suffix(author)
   -- Fork-and-block isolation (grace + fork of other-authored issues) is an
   -- assignee-mode policy: it keeps an assignee-claim bot from intruding on a
   -- human's issue. In label-mode the loop is single-tenant and explicitly

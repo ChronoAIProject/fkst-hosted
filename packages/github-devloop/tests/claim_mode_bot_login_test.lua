@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local h = require("tests.devloop_core_helpers")
@@ -89,13 +90,13 @@ local claimed_label = m_claims.claimed_label(core)
 return {
   -- (a) [bot] normalization on BOTH sides of the author-vs-bot comparison.
   test_strip_bot_login_suffix_is_nil_safe_and_no_op_for_users = function()
-    t.eq(core.strip_bot_login_suffix("octocat"), "octocat")
-    t.eq(core.strip_bot_login_suffix("chronoai-bot[bot]"), "chronoai-bot")
+    t.eq(devloop_base.strip_bot_login_suffix("octocat"), "octocat")
+    t.eq(devloop_base.strip_bot_login_suffix("chronoai-bot[bot]"), "chronoai-bot")
     -- Nil-safe: nil in → nil out (preserves existing nil semantics for an
     -- unconfigured bot login / missing author).
-    t.eq(core.strip_bot_login_suffix(nil), nil)
+    t.eq(devloop_base.strip_bot_login_suffix(nil), nil)
     -- Only a trailing [bot] is stripped.
-    t.eq(core.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
+    t.eq(devloop_base.strip_bot_login_suffix("user[bot]name"), "user[bot]name")
   end,
 
   test_configure_trusted_bot_login_normalizes_bracket_bot_suffix = function()

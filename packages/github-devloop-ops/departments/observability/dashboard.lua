@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local common = require("departments.observability.common")
@@ -460,7 +461,7 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
   end
   for _, issue in ipairs(parsers_misc.parse_dashboard_issue_list(core, listed.stdout)) do
     -- Normalize both sides so a "<slug>[bot]" author (REST) matches a bare bot login.
-    if core.strip_bot_login_suffix(issue.author_login) == core.strip_bot_login_suffix(bot_login)
+    if devloop_base.strip_bot_login_suffix(issue.author_login) == devloop_base.strip_bot_login_suffix(bot_login)
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
       return issue
     end
@@ -479,7 +480,7 @@ local function trusted_dashboard_issue_by_number(repo, issue_number, bot_login, 
   end
   local issue = parse_dashboard_issue_get(view.stdout)
   if issue.number == tonumber(issue_number)
-    and core.strip_bot_login_suffix(issue.author_login) == core.strip_bot_login_suffix(bot_login)
+    and devloop_base.strip_bot_login_suffix(issue.author_login) == devloop_base.strip_bot_login_suffix(bot_login)
     and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then
     return issue
   end

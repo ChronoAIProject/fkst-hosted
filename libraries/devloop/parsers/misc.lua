@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.parsers.shared")
@@ -81,13 +82,13 @@ local function comment_author_login(M, comment)
   -- matches a bare-"<slug>" configured bot login (GraphQL). No-op for ordinary logins.
   if type(comment) == "table" then
     if comment.author_login ~= nil then
-      return M.strip_bot_login_suffix(comment.author_login)
+      return devloop_base.strip_bot_login_suffix(comment.author_login)
     end
     if type(comment.author) == "table" and comment.author.login ~= nil then
-      return M.strip_bot_login_suffix(comment.author.login)
+      return devloop_base.strip_bot_login_suffix(comment.author.login)
     end
     if type(comment.user) == "table" and comment.user.login ~= nil then
-      return M.strip_bot_login_suffix(comment.user.login)
+      return devloop_base.strip_bot_login_suffix(comment.user.login)
     end
     return nil
   end
