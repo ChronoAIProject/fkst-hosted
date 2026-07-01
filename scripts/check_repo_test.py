@@ -522,10 +522,11 @@ class LineLimitGuardTest(unittest.TestCase):
                     os.environ["FKST_G1_LINE_WARNING_THRESHOLD"] = old_threshold
 
         self.assertEqual(violations, [])
+        margin = check_repo.LINE_WARNING_MARGIN
         self.assertEqual(
             warnings,
             [
-                "G1: packages/near-limit/core.lua has 50 lines; warning threshold is 50; hard limit is 1000",
+                f"G1: packages/near-limit/core.lua has {margin} lines; warning threshold is {margin}; hard limit is 1000",
             ],
         )
 

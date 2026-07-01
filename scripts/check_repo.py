@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, ratchet_base
 LINE_LIMIT = 1000
-LINE_WARNING_MARGIN = 50
+# Soft-split threshold is 900 (LINE_LIMIT - 100): warn early so files split at ~900 by
+# stable responsibility rather than being forced at the 1000-line hard limit, where any
+# small later change (even one new require alias) tips them over and blocks unrelated PRs.
+LINE_WARNING_MARGIN = 100
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
 TEST_DEF_RE = re.compile(
     r"\b(?P<bare>test_[A-Za-z0-9_]+)\s*=\s*function\b"
