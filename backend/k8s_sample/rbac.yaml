@@ -53,9 +53,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["create", "get", "list", "watch", "delete", "patch"]
-  # Read the validation pod's logs to capture the per-command install verdict.
+  # Read the validation pod's logs to capture the per-command install verdict,
+  # and poll its status subresource for the terminal phase (env_validator uses
+  # `pods.get_status`). Both are read-only on the launcher's own pods.
   - apiGroups: [""]
-    resources: ["pods/log"]
+    resources: ["pods/log", "pods/status"]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
