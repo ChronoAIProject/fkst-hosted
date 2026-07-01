@@ -15,15 +15,15 @@ return {
     local version = fixtures.full_review_issue_version(repo)
     local head_sha = fixtures.review_head_sha()
     local id = devloop_base.pr_review_proposal_id(repo, 7, version, head_sha)
-    local parsed_repo, pr_number, parsed_version, parsed_head_sha = core.parse_pr_review_proposal_id(id)
+    local parsed_repo, pr_number, parsed_version, parsed_head_sha = devloop_base.parse_pr_review_proposal_id(id)
     t.is_true(#fixtures.unbounded_full_review_proposal_id() > core._max_key_len)
     t.is_true(#id <= core._max_key_len)
     t.eq(parsed_repo, devloop_base.safe_pr_review_repo_segment(repo))
     t.eq(pr_number, "7")
     t.eq(parsed_version, transition_version.safe_version_segment(version))
     t.eq(parsed_head_sha, head_sha)
-    t.eq(core.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/not-number/v1/" .. head_sha), nil)
-    t.eq(core.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/7/v1"), nil)
+    t.eq(devloop_base.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/not-number/v1/" .. head_sha), nil)
+    t.eq(devloop_base.parse_pr_review_proposal_id("github-devloop/pr-review/owner/repo/7/v1"), nil)
 
     local issue_proposal_id = "github-devloop/issue/" .. repo .. "/42"
     local proposal = payloads_builders.build_pr_review_proposal(core,
@@ -104,7 +104,7 @@ return {
     local head_sha = fixtures.review_head_sha()
     local id = devloop_base.pr_review_proposal_id(repo, 7, version, head_sha)
     t.is_true(#id <= 200)
-    local parsed_repo, pr_number, parsed_version, parsed_head_sha = core.parse_pr_review_proposal_id(id)
+    local parsed_repo, pr_number, parsed_version, parsed_head_sha = devloop_base.parse_pr_review_proposal_id(id)
     t.eq(parsed_repo, devloop_base.safe_pr_review_repo_segment(repo))
     t.eq(pr_number, "7")
     t.eq(parsed_version, transition_version.safe_version_segment(version))

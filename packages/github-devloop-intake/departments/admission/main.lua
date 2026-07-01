@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_issue = require("devloop.parsers.issue")
@@ -44,7 +45,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an existing intake decision", source_ref)
     return true
   end
-  if core.is_intake_held(current.labels) then
+  if devloop_base.is_intake_held(current.labels) then
     core.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "reintake-command", "candidate", "skip-held", "fkst-dev:hold label is present")
     return true
   end

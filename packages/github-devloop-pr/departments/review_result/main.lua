@@ -40,7 +40,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.log_entry("review_result", event, reached.proposal_id, reached.dedup_key)
-  local review_repo, proposal_pr_number, review_version, reviewed_head_sha = core.parse_pr_review_proposal_id(reached.proposal_id)
+  local review_repo, proposal_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
   if review_repo == nil then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop pr-review")
     return

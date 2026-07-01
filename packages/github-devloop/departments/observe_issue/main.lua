@@ -545,7 +545,7 @@ local function process_issue_event(event)
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
     local link = m_facts.pr_link_fact(core, current.comments, proposal_id)
     local issue_state = core.current_state(current.comments, proposal_id)
-    if core.is_intake_held(current.labels) then
+    if devloop_base.is_intake_held(current.labels) then
       core.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-held", "fkst-dev:hold label is present")
       return
     end

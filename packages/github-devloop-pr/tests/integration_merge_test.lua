@@ -748,7 +748,7 @@ return {
     t.eq(reviewing_raise.payload.schema, "github-devloop.reviewing.v1")
     t.eq(reviewing_raise.payload.version, event.version .. "/review-loop/1")
     t.eq(reviewing_raise.payload.pr_number, event.pr_number)
-    local review_repo, review_pr, review_version, review_head = core.parse_pr_review_proposal_id(
+    local review_repo, review_pr, review_version, review_head = devloop_base.parse_pr_review_proposal_id(
       devloop_base.pr_review_proposal_id("owner/repo", reviewing_raise.payload.pr_number, reviewing_raise.payload.version, "feedface")
     )
     t.eq(review_repo, devloop_base.safe_pr_review_repo_segment("owner/repo"))

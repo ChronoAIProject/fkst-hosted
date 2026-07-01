@@ -20,7 +20,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
   local marker_issue = marker_attr(marker, "issue_proposal")
   local decision = marker_attr(marker, "decision")
   local review_dedup = marker_attr(marker, "dedup")
-  local _, _, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+  local _, _, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
   local expected_dedup = review_proposal ~= nil and ("consensus:" .. tostring(review_proposal) .. "/review") or nil
   if marker_issue == tostring(issue_proposal_id)
     and (expected_decision == nil or decision == expected_decision)
@@ -216,7 +216,7 @@ function C.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)
         and version == tostring(issue_version)
         and strings.is_bounded_string(gap, M._max_blocking_gap_len) then
         local review_proposal = review_proposal_from_dedup(marker_dedup)
-        local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+        local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
         return {
           review_proposal_id = review_proposal,
           review_dedup_key = marker_dedup,
@@ -249,7 +249,7 @@ function C.review_meta_decision_fact(M, comments, issue_proposal_id, issue_versi
         and (action == "fix" or action == "block" or action == "spec-amendment")
         and strings.is_bounded_string(marker_dedup, M._max_dedup_len) then
         local review_proposal = review_proposal_from_dedup(marker_dedup)
-        local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+        local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
         if review_proposal ~= nil and forge_validators.is_git_sha(reviewed_head_sha) then
           if action == "fix" and (gap == nil or not strings.is_bounded_string(gap, M._max_blocking_gap_len)) then
             return nil
@@ -448,7 +448,7 @@ function C.review_result_approval_matches_event(M, comments, merge_ready)
       local issue_proposal = marker:match('issue_proposal="([^"]+)"')
       local decision = marker:match('decision="([^"]+)"')
       local review_dedup = marker:match('dedup="([^"]*)"')
-      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
       if tostring(review_proposal or "") == tostring(merge_ready.review_proposal_id or "")
         and tostring(issue_proposal or "") == tostring(merge_ready.proposal_id or "")
         and decision == "approve"
@@ -492,7 +492,7 @@ function C.merge_ready_approval_matches_event(M, fact, merge_ready)
 
   local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
   local entity_repo = entity and entity.repo or nil
-  local review_repo, review_pr_number, review_version, review_head_sha = M.parse_pr_review_proposal_id(fact.review_proposal_id)
+  local review_repo, review_pr_number, review_version, review_head_sha = devloop_base.parse_pr_review_proposal_id(fact.review_proposal_id)
   local expected_review_repo = entity_repo and devloop_base.safe_pr_review_repo_segment(entity_repo) or nil
   if review_repo == nil
     or tostring(review_repo) ~= tostring(expected_review_repo or "")

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
@@ -82,7 +83,7 @@ local function has_approval_marker(comments, issue_proposal_id, pr_number, head_
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
     for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
       local review_proposal = marker:match('proposal="([^"]+)"')
-      local _, reviewed_pr_number, _, reviewed_head_sha = core.parse_pr_review_proposal_id(review_proposal)
+      local _, reviewed_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
       if marker:match('decision="([^"]+)"') == "approve"
         and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id)
         and tostring(reviewed_pr_number or "") == tostring(pr_number or "")

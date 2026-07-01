@@ -184,7 +184,7 @@ local function replay_review_result(dept, issue, state, facts, tools, link, curr
   if fact == nil then
     return nil
   end
-  local _, review_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(fact.review_proposal_id)
+  local _, review_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(fact.review_proposal_id)
   if tostring(review_pr_number or "") ~= tostring(link.pr_number or "")
     or tostring(reviewed_head_sha or "") ~= tostring(current_pr.head_sha or "") then
     return tools.log_skip(dept, proposal_id, state, "reviewing", "review-result", "skip-foreign(review-result-binding)", "review result does not bind the current linked PR head")

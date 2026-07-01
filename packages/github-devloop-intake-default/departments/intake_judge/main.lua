@@ -113,7 +113,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
     return nil
   end
-  if core.is_intake_held(current.labels) then
+  if devloop_base.is_intake_held(current.labels) then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-held", "fkst-dev:hold label is present")
     return nil
   end

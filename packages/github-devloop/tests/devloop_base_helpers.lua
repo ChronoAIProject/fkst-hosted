@@ -444,7 +444,7 @@ end
 
 local function run_review_result(payload, run_opts)
   mock_branch_config_env()
-  local _, _, _, head_sha = core.parse_pr_review_proposal_id(payload.proposal_id)
+  local _, _, _, head_sha = devloop_base.parse_pr_review_proposal_id(payload.proposal_id)
   mock_pr_origin_from_cached({ proposal_id = "github-devloop/issue/owner/repo/42", version = reviewing().version }, head_sha)
   return t.run_department("departments/review_result/main.lua", {
     queue = "consensus.consensus_reached",
@@ -485,7 +485,7 @@ end
 
 local function run_review_loop(payload, run_opts)
   mock_branch_config_env()
-  local _, _, _, head_sha = core.parse_pr_review_proposal_id(payload.proposal_id)
+  local _, _, _, head_sha = devloop_base.parse_pr_review_proposal_id(payload.proposal_id)
   mock_pr_origin_from_cached({ proposal_id = "github-devloop/issue/owner/repo/42", version = reviewing().version }, head_sha)
   return t.run_department("departments/review_loop/main.lua", {
     queue = "consensus.consensus_converge",

@@ -89,7 +89,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   core.log_entry("review_loop", event, unresolved.proposal_id, unresolved.dedup_key)
-  local _, pr_number, review_version, reviewed_head_sha = core.parse_pr_review_proposal_id(unresolved.proposal_id)
+  local _, pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(unresolved.proposal_id)
   local repo, source_pr_number = devloop_base.parse_pr_source_ref(unresolved.source_ref)
   if repo == nil or tostring(source_pr_number) ~= tostring(pr_number) then
     core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(source_ref)", "review source_ref does not match PR review proposal")

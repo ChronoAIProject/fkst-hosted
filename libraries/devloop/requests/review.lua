@@ -189,7 +189,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   end
   local merge_marker = ""
   if reached.decision == "approve" then
-    local _, pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
+    local _, pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
     merge_marker = "\n" .. m_builders.merge_ready_marker(M, issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
   end
   local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
@@ -220,7 +220,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     tostring(reached.dedup_key),
   }), source_ref)
   if reached.decision == "approve" then
-    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
+    local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
     request.handoff = {
       kind = "github-devloop.merge_ready",
       proposal_id = issue_proposal_id,
@@ -233,7 +233,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
       source_ref = base_ids.normalize_source_ref(source_ref),
     }
   elseif reached.decision == "reject" and not reached.reflection_checkpoint then
-    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
+    local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
     C.attach_fixing_handoff(M, request, issue_proposal_id, pr_number, issue_version, {
       review_proposal_id = reached.proposal_id,
       review_dedup_key = reached.dedup_key,

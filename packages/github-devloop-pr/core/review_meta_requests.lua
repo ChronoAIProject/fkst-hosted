@@ -140,7 +140,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     tostring(state_version),
   }), review_meta.source_ref)
   if action == "fix" or action == "continue" then
-    local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_meta.review_proposal_id)
+    local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_meta.review_proposal_id)
     return requests_review.attach_fixing_handoff(M, request, review_meta.proposal_id, review_meta.pr_number, state_version, {
       review_proposal_id = review_meta.review_proposal_id,
       review_dedup_key = review_meta.dedup_key,

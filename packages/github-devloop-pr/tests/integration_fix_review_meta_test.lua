@@ -632,7 +632,7 @@ return {
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
-    local _, _, review_version = core.parse_pr_review_proposal_id(proposal_id)
+    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(proposal_id)
     local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
     t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
     t.eq(review_version, transition_version.safe_version_segment(full_version))
@@ -735,7 +735,7 @@ return {
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
-    local _, _, review_version = core.parse_pr_review_proposal_id(proposal_id)
+    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(proposal_id)
     local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", issue_version, "dev")
     t.is_true(transition_version.safe_version_segment(issue_version) ~= review_version)
 
@@ -803,7 +803,7 @@ return {
       },
     })
     local impl_version = reviewing().version
-    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
     local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_bot_env()

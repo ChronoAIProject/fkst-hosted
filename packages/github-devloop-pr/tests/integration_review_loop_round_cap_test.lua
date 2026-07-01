@@ -26,7 +26,7 @@ return {
       },
     })
     local impl_version = reviewing().version
-    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
     local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     mock_bot_env()
     mock_pr_origin({
@@ -61,7 +61,7 @@ return {
       },
     })
     local impl_version = reviewing().version
-    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
     local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local function varying_digest(round)
@@ -105,7 +105,7 @@ return {
       },
     })
     local impl_version = reviewing().version
-    local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
+    local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
     local drift_version = review_version .. "-drift"
     local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local current_digest = convergence_shared.source_ref_digest(event.source_ref)

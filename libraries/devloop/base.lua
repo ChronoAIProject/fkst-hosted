@@ -213,7 +213,7 @@ function C.is_opted_in(labels)
   return false
 end
 
-function C.is_intake_held(M, labels)
+function C.is_intake_held(labels)
   return has_value(labels, hold_label)
 end
 
@@ -241,7 +241,7 @@ function C.pr_review_proposal_id(repo, pr_number, version, head_sha)
     .. C.safe_head_segment(head_sha)
 end
 
-function C.parse_pr_review_proposal_id(M, id)
+function C.parse_pr_review_proposal_id(id)
   if type(id) ~= "string" then
     return nil
   end
@@ -355,7 +355,7 @@ function C.is_safe_pr_review_result_ref(M, proposal_id, dedup_key)
     return false
   end
 
-  local repo, pr_number = C.parse_pr_review_proposal_id(M, proposal_id)
+  local repo, pr_number = C.parse_pr_review_proposal_id(proposal_id)
   return repo ~= nil and pr_number ~= nil
 end
 

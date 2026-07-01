@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local m_claims = require("devloop.claims")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
@@ -32,7 +33,7 @@ local function read_current(repo, issue_number, request)
     core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-closed", "issue is not open")
     return nil
   end
-  if core.is_intake_held(current.labels) then
+  if devloop_base.is_intake_held(current.labels) then
     core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-held", "fkst-dev:hold label is present")
     return nil
   end

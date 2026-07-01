@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
@@ -281,7 +282,7 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
       local review_proposal = marker:match('proposal="([^"]+)"')
       local consensus_dedup = marker:match('dedup="([^"]*)"')
       local round = tonumber(marker:match('round="(%d+)"'))
-      local _, pr_number, review_version = M.parse_pr_review_proposal_id(review_proposal)
+      local _, pr_number, review_version = devloop_base.parse_pr_review_proposal_id(review_proposal)
       local repo = base_ids.parse_proposal_id(issue_proposal_id)
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(heartbeat_version)
@@ -318,7 +319,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
-      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
       if marker_issue == tostring(issue_proposal_id)
         and tostring(review_pr_number or "") == tostring(pr_number)
         and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
@@ -343,7 +344,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
       local marker_version = marker:match('version="([^"]*)"')
       local round = tonumber(marker:match('fix_round="(%d+)"'))
       local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
-      local _, review_pr_number, review_version, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
+      local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
       if marker_issue == tostring(issue_proposal_id)
         and verdict == "checkpoint"
         and marker_version == tostring(issue_version)
@@ -374,7 +375,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
     end
   end
   local reject_fact = m_facts.review_reject_fact(M, comments, issue_proposal_id, issue_version)
-  local _, reject_pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
+  local _, reject_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
   if reject_fact ~= nil
     and tostring(reject_pr_number or "") == tostring(pr_number)
     and tostring(reviewed_head_sha or "") == tostring(head_sha)

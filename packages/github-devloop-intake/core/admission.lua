@@ -15,7 +15,7 @@ local function has_devloop_state_label(labels)
 end
 
 function M.should_skip_known_intake_issue(labels)
-  return M.is_intake_held(labels) or devloop_base.is_opted_in(labels) or has_devloop_state_label(labels)
+  return devloop_base.is_intake_held(labels) or devloop_base.is_opted_in(labels) or has_devloop_state_label(labels)
 end
 
 function M.pending_reintake_command(comments)
