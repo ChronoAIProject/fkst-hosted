@@ -455,7 +455,7 @@ function C.merge_queue_changed_files(M, repo, entry)
   if result.exit_code ~= 0 then
     return nil, "diff-name-only-failed: " .. tostring(result.stderr)
   end
-  local paths = M.parse_name_only_paths(result.stdout)
+  local paths = devloop_base.parse_name_only_paths(result.stdout)
   return {
     pr_number = entry.pr_number,
     proposal_id = entry.proposal_id,

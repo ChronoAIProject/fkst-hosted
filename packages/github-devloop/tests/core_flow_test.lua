@@ -439,7 +439,7 @@ return {
     t.is_nil(ready_with_hand_off.ready_hand_off)
     t.eq(v_ready.is_supported_ready(core, ready_with_hand_off), true)
 
-    t.eq(core.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
+    t.eq(devloop_base.safe_issue_slug("owner/repo", "42"), "owner-repo-42")
     local deterministic_branch = devloop_base.implement_branch("owner/repo", "42", ready.dedup_key)
     t.is_true(deterministic_branch:find("devloop/issue/owner/repo/42/", 1, true) == 1)
     t.eq(require("devloop.pr_safety").is_safe_branch(deterministic_branch), true)

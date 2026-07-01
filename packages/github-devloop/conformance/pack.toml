@@ -9,7 +9,7 @@ kind = "text_forbid_regex"
 include = ["**/*.lua"]
 exclude = ["core.lua", "**/tests/**", "tests/**"]
 pattern = "\\blocal\\s+function\\s+parse_name_only_paths\\s*\\("
-message = "local parse_name_only_paths helper is forbidden; use core.parse_name_only_paths"
+message = "local parse_name_only_paths helper is forbidden; use require(\"devloop.base\").parse_name_only_paths"
 
 [[rules]]
 id = "tests.no-entity-read-count-assertions"

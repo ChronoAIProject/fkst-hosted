@@ -24,10 +24,8 @@ end
 local base = require("devloop.base")
 local function dept_exec_sync(...) return exec_sync(...) end
 M.judgment_worktree = function(...) return base.judgment_worktree_with_exec(M, dept_exec_sync, ...) end
-M.parse_name_only_paths = function(...) return base.parse_name_only_paths(M, ...) end
 M.safe_updated_at = function(...) return base.safe_updated_at(M, ...) end
 M.is_safe_proposal_ref = function(...) return base.is_safe_proposal_ref(M, ...) end
-M.is_safe_pr_review_result_ref = function(...) return base.is_safe_pr_review_result_ref(M, ...) end
 M.proposal_dedup_key = function(...) return base.proposal_dedup_key(M, ...) end
 M.intake_dedup_key = function(...) return base.intake_dedup_key(M, ...) end
 M.intake_candidate_delivery_dedup_key = function(...) return base.intake_candidate_delivery_dedup_key(M, ...) end
@@ -40,7 +38,6 @@ M.review_result_lock_key = function(...) return base.review_result_lock_key(M, .
 M.review_lock_key = function(...) return base.review_lock_key(M, ...) end
 M.loop_lock_key = function(...) return base.loop_lock_key(M, ...) end
 M.implement_lock_key = function(...) return base.implement_lock_key(M, ...) end
-M.safe_issue_slug = function(...) return base.safe_issue_slug(M, ...) end
 M.implement_worktree_path = function(...) return base.implement_worktree_path(M, ...) end
 M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, ...) end
 M.max_body_len = function(...) return base.max_body_len(M, ...) end

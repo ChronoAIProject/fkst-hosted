@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
@@ -10,7 +11,7 @@ function C.is_supported_fixing(M, payload)
     or payload.schema ~= "github-devloop.fixing.v1"
     or not require("devloop.pr_safety").is_safe_pr_number(payload.pr_number)
     or not strings.is_bounded_string(payload.version, M._max_dedup_len)
-    or not M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
+    or not devloop_base.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
     or not forge_validators.is_git_sha(payload.reviewed_head_sha)
     or (payload.gate_baseline_sha ~= nil and not forge_validators.is_git_sha(payload.gate_baseline_sha))
     or (payload.predecessor_set ~= nil and not strings.is_path_safe_key(payload.predecessor_set, M._max_dedup_len))

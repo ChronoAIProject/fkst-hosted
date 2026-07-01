@@ -465,7 +465,7 @@ local function changed_paths(repo, pr_number_value)
   local diff = run_gh(function()
     return github().pr_diff_name_only(repo, pr_number_value, 30)
   end, "substrate-ref PR diff")
-  return M.parse_name_only_paths(diff.stdout)
+  return devloop_base.parse_name_only_paths(diff.stdout)
 end
 
 validate_bump_pr = function(repo, base_branch, pr)

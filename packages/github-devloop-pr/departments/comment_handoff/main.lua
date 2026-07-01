@@ -33,7 +33,7 @@ end
 
 local function valid_review_handoff(handoff)
   return valid_base_pr_handoff(handoff)
-    and core.is_safe_pr_review_result_ref(handoff.review_proposal_id, handoff.review_dedup_key)
+    and devloop_base.is_safe_pr_review_result_ref(handoff.review_proposal_id, handoff.review_dedup_key)
     and require("devloop.pr_safety").is_safe_head_sha(handoff.reviewed_head_sha)
 end
 

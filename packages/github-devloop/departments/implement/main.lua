@@ -789,7 +789,7 @@ local function process_ready_event(event)
       return
     end
 
-    local issue_slug = core.safe_issue_slug(repo, issue_number)
+    local issue_slug = devloop_base.safe_issue_slug(repo, issue_number)
     core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
       "issue_slug=" .. tostring(issue_slug),
       "branch=" .. tostring(branch),

@@ -324,7 +324,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         and tostring(review_pr_number or "") == tostring(pr_number)
         and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
         and tostring(reviewed_head_sha or "") == tostring(head_sha)
-        and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
+        and devloop_base.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
         return {
           proposal_id = review_proposal,
           dedup_key = marker_dedup,
@@ -351,7 +351,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         and tostring(review_pr_number or "") == tostring(pr_number)
         and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
         and tostring(reviewed_head_sha or "") == tostring(head_sha)
-        and M.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
+        and devloop_base.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
         local reject_fact = m_facts.review_reject_fact(M, comments, issue_proposal_id, issue_version)
         if reject_fact == nil
           or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
@@ -379,7 +379,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
   if reject_fact ~= nil
     and tostring(reject_pr_number or "") == tostring(pr_number)
     and tostring(reviewed_head_sha or "") == tostring(head_sha)
-    and M.is_safe_pr_review_result_ref(reject_fact.review_proposal_id, reject_fact.review_dedup_key) then
+    and devloop_base.is_safe_pr_review_result_ref(reject_fact.review_proposal_id, reject_fact.review_dedup_key) then
     return {
       proposal_id = reject_fact.review_proposal_id,
       dedup_key = reject_fact.review_dedup_key,

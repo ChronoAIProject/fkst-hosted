@@ -97,7 +97,7 @@ return {
     t.is_nil(core.valid_round)
   end,
   test_parse_name_only_paths_trims_deduplicates_and_sorts = function()
-    local paths = core.parse_name_only_paths("  b.lua\r\na.lua\n\n b.lua \r  c.lua  \n")
+    local paths = devloop_base.parse_name_only_paths("  b.lua\r\na.lua\n\n b.lua \r  c.lua  \n")
     t.eq(#paths, 3)
     t.eq(paths[1], "a.lua")
     t.eq(paths[2], "b.lua")

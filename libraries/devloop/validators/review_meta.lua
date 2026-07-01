@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
@@ -6,7 +7,7 @@ local C = {}
 function C.is_supported_review_meta(M, payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-devloop.review-meta.v1"
-    or not M.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key) then
+    or not devloop_base.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key) then
     return false
   end
   local has_valid_identity = payload.mode == "fix-reflection"

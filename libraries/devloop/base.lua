@@ -78,7 +78,7 @@ local label_colors = {
   [blocked_on_dependency_label] = "E99695",
 }
 
-function C.parse_name_only_paths(M, stdout)
+function C.parse_name_only_paths(stdout)
   local paths = {}
   local seen = {}
   for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
@@ -342,7 +342,7 @@ function C.is_safe_consensus_result_ref(proposal_id, dedup_key)
   return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
-function C.is_safe_pr_review_result_ref(M, proposal_id, dedup_key)
+function C.is_safe_pr_review_result_ref(proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
@@ -460,7 +460,7 @@ function C.implement_lock_key(M, proposal_id)
   return C.transition_lock_key(M, proposal_id)
 end
 
-function C.safe_issue_slug(M, repo, issue_number)
+function C.safe_issue_slug(repo, issue_number)
   local slug = strings.sanitize_key(tostring(repo or "") .. "-" .. tostring(issue_number or ""), false):gsub("/", "-")
   slug = slug:gsub("%-+", "-"):gsub("^%-+", ""):gsub("%-+$", "")
   if slug == "" then
@@ -509,7 +509,7 @@ function C.implement_worktree_path(M, runtime_root, repo, issue_number, impl_ver
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")
   end
-  local slug = C.safe_issue_slug(M, repo, issue_number)
+  local slug = C.safe_issue_slug(repo, issue_number)
   local suffix = decimal_checksum(tostring(repo) .. "#" .. tostring(issue_number) .. "#" .. tostring(impl_version))
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
 end
