@@ -1,12 +1,10 @@
 //! Shared session-Job query + control helpers.
 //!
-//! Both the REST surface (`routes::sessions`) and the issue-comment control path
-//! (`routes::github_app_webhook::comment_control`) locate, read, and stop a
-//! session's Kubernetes Job through THESE functions. Keeping them in one place is
-//! deliberate: the REST `/stop` and a `/stop` issue comment delete the SAME Job
-//! the SAME way, and a `/status` comment reads the SAME view the REST `GET`
-//! returns — there is no second, divergent implementation of "find / read / stop
-//! a session" to drift out of sync.
+//! The issue-comment control path
+//! (`routes::github_app_webhook::comment_control`) locates, reads, and stops a
+//! session's Kubernetes Job through THESE functions — a session is controlled
+//! solely through its GitHub issue (`/status` reads, `/stop` deletes the Job),
+//! so there is one place that knows how to "find / read / stop a session".
 
 use k8s_openapi::api::batch::v1::Job;
 use k8s_openapi::api::core::v1::Pod;
