@@ -15,6 +15,7 @@ local core = h.core
 local t = h.t
 local decompose_lib = require("devloop.decompose")
 local prompt_installers = require("devloop.prompts")
+local m_builders = require("devloop.markers.builders")
 local has_value = h.has_value
 local source_ref = h.source_ref
 local reached = h.reached
@@ -381,7 +382,7 @@ return {
     local review_proposal = core.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(version), "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
     local comments = {
-      core.merge_gate_marker(proposal_id, 7, version, review_proposal, review_dedup, "def456", nil, "rollup-red"),
+      m_builders.merge_gate_marker(core, proposal_id, 7, version, review_proposal, review_dedup, "def456", nil, "rollup-red"),
     }
     local fact = {
       proposal_id = proposal_id,
@@ -503,10 +504,10 @@ return {
       "/tmp/fkst-rt"
     ))
 
-    local marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
+    local marker = m_builders.implementing_marker(core, ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
     t.eq(m_facts.has_implementing_marker(core, { marker }, ready.proposal_id, ready.dedup_key), true)
-    local branch_marker = core.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
+    local branch_marker = m_builders.implementing_marker(core, ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     local fact = m_facts.implementing_fact(core, { branch_marker }, ready.proposal_id, ready.dedup_key)
     t.eq(fact.branch, "devloop-owner-repo-42-01HY")
     t.eq(fact.head_sha, "abc123")
@@ -595,7 +596,7 @@ return {
     t.eq(current.version, ready.dedup_key)
 
     local origin = m_facts.pr_origin_fact(core, {
-      core.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
+      m_builders.pr_origin_marker(core, ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     })
     t.eq(origin.proposal_id, ready.proposal_id)
     t.eq(origin.issue_number, "42")
@@ -606,7 +607,7 @@ return {
     }))
 
     local link = m_facts.pr_link_fact(core, {
-      core.pr_link_marker(ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
+      m_builders.pr_link_marker(core, ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     }, ready.proposal_id)
     t.eq(link.pr_number, 7)
     t.eq(link.base_branch, "dev")

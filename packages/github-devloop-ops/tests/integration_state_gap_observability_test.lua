@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
+local m_builders = require("devloop.markers.builders")
 
 local function opts(name)
   return {
@@ -263,10 +264,10 @@ return {
     mock_pr_list({})
     mock_issue_view({
       render_comment(core.state_marker(proposal_id, "pr-open", "v1"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
-      render_comment(core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42", "v1", "integration/dev"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
+      render_comment(m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42", "v1", "integration/dev"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
     })
     mock_pr_view({
-      render_comment(core.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42", "v1", "integration/dev"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
+      render_comment(m_builders.pr_origin_marker(core, proposal_id, "42", "devloop-owner-repo-42", "v1", "integration/dev"), "fkst-test-bot", "2026-06-03T01:00:00Z"),
       render_comment(core.state_marker(proposal_id, "reviewing", "v1"), "fkst-test-bot", "2026-06-03T01:03:00Z"),
     })
 

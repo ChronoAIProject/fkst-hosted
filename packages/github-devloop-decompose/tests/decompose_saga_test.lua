@@ -7,13 +7,14 @@ local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
 local decompose_lib = require("devloop.decompose")
+local m_builders = require("devloop.markers.builders")
 
 local two_issue_json = [[{"issues":[{"title":"Extract retry helper","body":"Smaller scope: implement retry helper.\nNon-goals: no workflow rewrite.\nAcceptance: helper tests pass."},{"title":"Wire retry helper","body":"Smaller scope: wire one caller.\nNon-goals: no unrelated states.\nAcceptance: integration test passes."}]}]]
 local first_delivery_facts = nil
 
 local function blocked_comments(event, extra)
   local comments = {
-    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     core.state_marker(event.proposal_id, "blocked", event.version),
     conv_reconcile.fix_reconcile_marker(core, event.proposal_id, event.version, "drop"),
   }
@@ -77,7 +78,7 @@ end
 
 local function mock_pr_view(event, comments)
   local selected = {
-    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
   }
   for _, comment in ipairs(comments) do
     table.insert(selected, comment)

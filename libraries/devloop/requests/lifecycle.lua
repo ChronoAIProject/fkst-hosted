@@ -2,6 +2,8 @@ local C = {}
 local forge_validators = require("devloop.forge_validators")
 local comment_strings = require("devloop.strings")
 local shared = require("devloop.requests.shared")
+local m_shared = require("devloop.markers.shared")
+local m_builders = require("devloop.markers.builders")
 
 local strings = shared.strings
 local ai_sentinel = shared.ai_sentinel
@@ -23,7 +25,7 @@ function C.build_observe_comment_request(M, issue, proposal)
   }, issue.source_ref)
 end
 function C.build_result_comment_request(M, repo, issue_number, reached, state_name)
-  local marker = M.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
+  local marker = m_builders.result_marker(M, reached.proposal_id, reached.decision, reached.dedup_key)
   local canonical_state = state_name or "ready"
   local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready" or "result-marker,ready-label,dependency-hold"
   local state_marker = M.state_marker(reached.proposal_id, canonical_state, tostring(reached.effect_version or reached.dedup_key), effects)
@@ -125,11 +127,11 @@ function C.build_dependency_release_comment_request(M, repo, issue_number, propo
 end
 
 function C.build_intake_decision_comment_request(M, repo, issue_number, candidate, decision, reason, service_class)
-  if not M.is_intake_service_class(service_class) then
+  if not m_shared.is_intake_service_class(service_class) then
     error("github-devloop: invalid intake service class")
   end
-  local normalized_class = M.normalize_intake_service_class(service_class)
-  local marker = M.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
+  local normalized_class = m_shared.normalize_intake_service_class(service_class)
+  local marker = m_builders.intake_decision_marker(M, candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
   local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
     safe_reason = comment_strings.comment_string(M, "no_reason_provided")
@@ -173,7 +175,7 @@ function C.build_implementing_comment_request(M, repo, issue_number, ready, work
   if not forge_validators.is_git_sha(base_sha) then
     error("github-devloop: invalid implementing base_sha")
   end
-  local marker = M.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
+  local marker = m_builders.implementing_marker(M, ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
   local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
   return M.attach_issue_claim({
     schema = "github-proxy.v1",

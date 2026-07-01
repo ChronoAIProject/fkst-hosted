@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -12,7 +13,7 @@ local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 
 local function origin_marker(version)
-  return core.pr_origin_marker(
+  return m_builders.pr_origin_marker(core, 
     "github-devloop/issue/owner/repo/42",
     "42",
     "devloop-owner-repo-42-01HY",

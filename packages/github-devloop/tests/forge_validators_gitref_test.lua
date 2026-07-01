@@ -74,13 +74,7 @@ return {
 
   test_marker_builders_gitref_validation_does_not_need_base_install = function()
     local M = {}
-    marker_builders.install(M, {
-      valid_round = function(value) return tonumber(value) end,
-      strings = require("contract.strings"),
-      safe_marker_attr = function(_, value) return tostring(value or "") end,
-    })
-
-    local marker = M.implementing_marker(
+    local marker = marker_builders.implementing_marker(M,
       "github-devloop/issue/owner/repo/42",
       "dedup-key",
       "feature/foo",

@@ -5,6 +5,7 @@ local core = require("core")
 local h = require("tests.devloop_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local decompose_lib = require("devloop.decompose")
+local m_builders = require("devloop.markers.builders")
 
 local function production_decompose_payload()
   return payloads_builders.build_devloop_decompose_payload(core, conv_reconcile.build_devloop_fix_reconcile_payload(core, {
@@ -31,7 +32,7 @@ return {
     }, "title,body,labels,comments")
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = {
-        core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
+        m_builders.pr_origin_marker(core, payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
         core.state_marker(payload.proposal_id, "blocked", payload.version),
         conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
       },

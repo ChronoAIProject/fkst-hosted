@@ -18,6 +18,7 @@ local mock_git_commit = h.mock_git_commit
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 local codex_status = require("tests.codex_status_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local function stale_attempt_started_at()
   return tostring(now() - 7201)
@@ -105,7 +106,7 @@ return {
   test_implementing_redelivery_sees_remote_branch_without_direct_open_pr = function()
     local event = ready()
     local branch = deterministic_branch_for(event)
-    local fact = core.implementing_marker(event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123")
+    local fact = m_builders.implementing_marker(core, event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123")
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
       core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, stale_attempt_started_at()),
@@ -125,7 +126,7 @@ return {
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
       core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, stale_attempt_started_at()),
-      core.pr_link_marker(event.proposal_id, 7, branch, event.dedup_key, "dev"),
+      m_builders.pr_link_marker(core, event.proposal_id, 7, branch, event.dedup_key, "dev"),
     }
     mock_issue_implement({ "fkst-dev:implementing" }, comments)
 
@@ -220,7 +221,7 @@ return {
     local branch = deterministic_branch_for(current)
     local comments = {
       core.state_marker(current.proposal_id, "implementing", current.dedup_key),
-      core.implementing_marker(current.proposal_id, current.dedup_key, branch, "abc123", "dev", "abc123"),
+      m_builders.implementing_marker(core, current.proposal_id, current.dedup_key, branch, "abc123", "dev", "abc123"),
     }
     mock_issue_implement({ "fkst-dev:implementing" }, comments)
     mock_missing_remote_branch(branch)
@@ -372,7 +373,7 @@ return {
     local branch = deterministic_branch_for(event)
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implementing_marker(event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123"),
+      m_builders.implementing_marker(core, event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123"),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
 
@@ -461,7 +462,7 @@ return {
     local progress = {
       core.state_marker(event.proposal_id, "implementing", retry_version),
       core.implement_attempt_marker(event.proposal_id, retry_version, 2, stale_attempt_started_at()),
-      core.implementing_marker(event.proposal_id, retry_version, branch, "abc123", "dev", "abc123"),
+      m_builders.implementing_marker(core, event.proposal_id, retry_version, branch, "abc123", "dev", "abc123"),
     }
     mock_issue_implement({ "fkst-dev:implementing" }, progress)
     mock_remote_branch(branch, "abc123")
@@ -543,7 +544,7 @@ return {
     local branch = deterministic_branch_for(event)
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      core.implementing_marker(event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123"),
+      m_builders.implementing_marker(core, event.proposal_id, event.dedup_key, branch, "abc123", "dev", "abc123"),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", comments)
 

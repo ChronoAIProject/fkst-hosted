@@ -1,5 +1,6 @@
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -77,7 +78,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_fix_recovery_context(event, branch, origin_marker, reject_comment)
     mock_missing_fix_worktree(branch, "def456")
     mock_fix_writeback(event, branch, origin_marker)
@@ -120,7 +121,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_fix_recovery_context(event, branch, origin_marker, reject_comment)
     mock_outside_runtime_fix_worktree(branch, "def456")
     mock_fix_writeback(event, branch, origin_marker)

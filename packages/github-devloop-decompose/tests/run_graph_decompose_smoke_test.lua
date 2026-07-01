@@ -7,6 +7,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local decompose_lib = require("devloop.decompose")
+local m_builders = require("devloop.markers.builders")
 
 local function source_ref()
   return {
@@ -78,7 +79,7 @@ local function mock_claim_and_reads(payload)
     repo = "owner/repo",
     number = 7,
     comments = {
-      core.pr_origin_marker(payload.proposal_id, 7, "devloop-owner-repo-42-01HY", payload.version, "dev"),
+      m_builders.pr_origin_marker(core, payload.proposal_id, 7, "devloop-owner-repo-42-01HY", payload.version, "dev"),
       core.state_marker(payload.proposal_id, "blocked", payload.version),
       conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
     },

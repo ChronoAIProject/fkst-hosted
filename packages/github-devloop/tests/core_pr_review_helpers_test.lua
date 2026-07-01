@@ -4,6 +4,7 @@ local transition_version = require("contract.transition_version")
 local payloads_builders = require("devloop.payloads.builders")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_facts = require("devloop.markers.facts")
+local m_builders = require("devloop.markers.builders")
 local core = h.core
 local t = h.t
 
@@ -49,17 +50,17 @@ return {
     t.is_nil(proposal.content_fetch:find("gh ", 1, true))
     t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
 
-    local marker = core.review_result_marker(id, issue_proposal_id, "approve", "consensus:v1")
+    local marker = m_builders.review_result_marker(core, id, issue_proposal_id, "approve", "consensus:v1")
     t.eq(m_facts.has_review_result_marker(core, { marker }, id, issue_proposal_id, "approve", "consensus:v1"), true)
     t.eq(m_facts.has_any_review_result_marker(core, { marker }, id, issue_proposal_id), true)
     local review_v1 = core.pr_review_proposal_id(repo, 7, version .. "/fix/1", head_sha)
-    local reject_marker = core.review_result_marker(review_v1, issue_proposal_id, "reject", "consensus:" .. review_v1 .. "/review", 1, "missing regression guard")
+    local reject_marker = m_builders.review_result_marker(core, review_v1, issue_proposal_id, "reject", "consensus:" .. review_v1 .. "/review", 1, "missing regression guard")
     t.is_true(reject_marker:find('fix_round="1"', 1, true) ~= nil)
     t.is_true(reject_marker:find('gap="missing regression guard"', 1, true) ~= nil)
     local action_version = core.next_review_meta_action_version(version)
     local meta_comment = "github-devloop review-meta action: fix\n\nReason:\nRun another fix pass."
       .. "\n\n" .. core.state_marker(issue_proposal_id, "fixing", action_version)
-      .. "\n" .. core.review_meta_marker(issue_proposal_id, "meta-dedup", "fix", action_version, "missing retry guard")
+      .. "\n" .. m_builders.review_meta_marker(core, issue_proposal_id, "meta-dedup", "fix", action_version, "missing retry guard")
     local meta_fact = m_facts.review_meta_fix_fact(core, { meta_comment }, issue_proposal_id, action_version)
     t.eq(meta_fact.review_dedup_key, "meta-dedup")
     t.eq(meta_fact.blocking_gap, "missing retry guard")
@@ -70,7 +71,7 @@ return {
     local review_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local issue_version = review_version .. "/fix/1"
     local expected_review = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
-    local marker = core.review_meta_marker(issue_proposal_id, "consensus:" .. expected_review .. "/review")
+    local marker = m_builders.review_meta_marker(core, issue_proposal_id, "consensus:" .. expected_review .. "/review")
     local fact = core.review_meta_replay_fact({ marker }, issue_proposal_id, issue_version, 7, "def456")
     t.eq(fact.proposal_id, expected_review)
     t.eq(fact.dedup_key, "consensus:" .. expected_review .. "/review")
@@ -86,7 +87,7 @@ return {
     local issue_version = review_version .. "/fix/1"
     local expected_review = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local expected_dedup = "consensus:" .. expected_review .. "/review"
-    local marker = core.review_result_marker(expected_review, issue_proposal_id, "reject", expected_dedup, 1, "missing regression guard")
+    local marker = m_builders.review_result_marker(core, expected_review, issue_proposal_id, "reject", expected_dedup, 1, "missing regression guard")
     local fact = core.review_meta_replay_fact({ marker }, issue_proposal_id, issue_version, 7, "def456")
     t.eq(fact.proposal_id, expected_review)
     t.eq(fact.dedup_key, expected_dedup)

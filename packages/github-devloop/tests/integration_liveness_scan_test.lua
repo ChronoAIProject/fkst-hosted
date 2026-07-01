@@ -18,6 +18,7 @@ local replay_fields = require("devloop.replay_fields")
 local mock_issue_reconcile = h.mock_issue_reconcile
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local codex_status = require("tests.codex_status_helpers")
+local m_builders = require("devloop.markers.builders")
 local ISSUE_REDRIVE_QUEUE = "devloop_observe_issue"
 local _cache_seed_helpers = cache_seed_helpers
 
@@ -523,9 +524,9 @@ return {
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
       timeout_state_comment("blocked", version, "2026-06-01T00:00:00Z"),
-      core.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+      m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
       decompose_lib.decomposed_marker(core, proposal_id, version, 7, 1),
-      core.review_result_marker(review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
+      m_builders.review_result_marker(core, review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
     })
     t.mock_command(core.gh_issue_list_decompose_children_cmd(repo, proposal_id), {
       stdout = "[]\n",

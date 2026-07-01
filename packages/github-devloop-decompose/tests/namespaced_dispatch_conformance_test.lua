@@ -6,6 +6,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local t = fkst.test
 local decompose_lib = require("devloop.decompose")
+local m_builders = require("devloop.markers.builders")
 
 local function load_department(path, module_name)
   local old_pipeline = pipeline
@@ -48,7 +49,7 @@ local function mock_decompose_reads(payload)
   }, "title,body,labels,comments")
   entity_read_mocks.mock_pr_view_selector(t, {
     comments = {
-      core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
+      m_builders.pr_origin_marker(core, payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
       core.state_marker(payload.proposal_id, "blocked", payload.version),
       conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
     },

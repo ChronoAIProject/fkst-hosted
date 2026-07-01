@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local m_shared = require("devloop.markers.shared")
 local t = h.t
 local core = h.core
 
@@ -7,8 +8,8 @@ return {
     local parsed = core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ urgent\n⟦FKST:REASON⟧ Invalid class values normalize to standard.")
     t.is_nil(parsed)
     t.is_nil(core.parse_intake_action("⟦FKST:INTAKE⟧ enable\n⟦FKST:REASON⟧ Missing class facts fail closed."))
-    t.eq(core.normalize_intake_service_class(nil), "standard")
-    t.eq(core.normalize_intake_service_class("EXPEDITE"), "expedite")
+    t.eq(m_shared.normalize_intake_service_class(nil), "standard")
+    t.eq(m_shared.normalize_intake_service_class("EXPEDITE"), "expedite")
   end,
 
   test_intake_service_class_labels_are_display_only_projection = function()

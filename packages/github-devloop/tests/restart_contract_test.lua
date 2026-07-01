@@ -56,8 +56,8 @@ local function parse_marker_builders(paths)
       local family_pattern = "fkst:github%-devloop:" .. family:gsub("%-", "%%-") .. ":v1"
       local start_pos = text:find(family_pattern)
       if start_pos ~= nil then
-        local function_pos = text:sub(1, start_pos):match("^.*()\nfunction M%.[^\n]+")
-        local next_function = text:find("\nfunction M%.", start_pos + 1)
+        local function_pos = text:sub(1, start_pos):match("^.*()\nfunction [MC]%.[^\n]+")
+        local next_function = text:find("\nfunction [MC]%.", start_pos + 1)
         local block = text:sub(function_pos or start_pos, next_function or #text)
         for attr in block:gmatch('" ([%w_]+)="') do
           attrs[attr] = true

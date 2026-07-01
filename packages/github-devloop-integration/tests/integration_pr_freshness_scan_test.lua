@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local branch = "devloop/issue/owner/repo/42/ready-1234567890"
 local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -71,10 +72,10 @@ end
 
 local function pr_comments(state)
   return {
-    core.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
+    m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
     core.state_marker("github-devloop/issue/owner/repo/42", state or "merge-ready", version),
-    core.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
-    core.merge_ready_marker("github-devloop/issue/owner/repo/42", 7, version, review_proposal, review_dedup, branch_sha),
+    m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
+    m_builders.merge_ready_marker(core, "github-devloop/issue/owner/repo/42", 7, version, review_proposal, review_dedup, branch_sha),
   }
 end
 
@@ -167,9 +168,9 @@ return {
     mock_env("")
     mock_pr_list(false)
     mock_pr_view("fixing", {
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
+      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", version),
-      core.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
+      m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
     })
     mock_issue_view({})
 
@@ -187,9 +188,9 @@ return {
     mock_env("")
     mock_pr_list(false)
     mock_pr_view("reviewing", {
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
+      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", version .. "/fix/1"),
-      core.review_result_marker(old_review_proposal, "github-devloop/issue/owner/repo/42", "approve", old_review_dedup),
+      m_builders.review_result_marker(core, old_review_proposal, "github-devloop/issue/owner/repo/42", "approve", old_review_dedup),
     }, { head_sha = new_head_sha })
     mock_issue_view({})
 

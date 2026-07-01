@@ -4,6 +4,7 @@ local forks = require("devloop.forks")
 local config = require("devloop.config")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -336,7 +337,7 @@ return {
     t.eq(find_raise(stale_ready.raises, "devloop_ready"), nil)
 
     local completed = reached()
-    local marker = core.result_marker(completed.proposal_id, completed.decision, completed.dedup_key)
+    local marker = m_builders.result_marker(core, completed.proposal_id, completed.decision, completed.dedup_key)
     mock_issue_result({ "fkst-dev:ready" }, { marker })
 
     local complete = run_result(completed, opts("result-approve-complete"))
@@ -404,7 +405,7 @@ return {
 
   test_consensus_result_raises_label_when_result_marker_present_without_terminal_label = function()
     local current = reached()
-    local marker = core.result_marker(current.proposal_id, current.decision, current.dedup_key)
+    local marker = m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key)
     mock_issue_result({ "fkst-dev:thinking" }, { marker })
 
     local result = run_result(current, opts("result-marker"))
@@ -417,7 +418,7 @@ return {
 
   test_consensus_result_skips_when_terminal_label_and_result_marker_present = function()
     local current = reached()
-    local marker = core.result_marker(current.proposal_id, current.decision, current.dedup_key)
+    local marker = m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key)
     mock_issue_result({ "fkst-dev:ready" }, { marker })
 
     local result = run_result(current, opts("result-complete"))
@@ -427,7 +428,7 @@ return {
 
   test_consensus_result_same_decision_without_thinking_skips = function()
     local current = reached()
-    local stale_marker = core.result_marker(current.proposal_id, "approve", current.dedup_key)
+    local stale_marker = m_builders.result_marker(core, current.proposal_id, "approve", current.dedup_key)
     mock_issue_result({ "fkst-dev:ready" }, { stale_marker })
 
     local result = run_result(current, opts("result-stale-same-marker"))
@@ -447,7 +448,7 @@ return {
     local current = reached({
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/v2",
     })
-    local older_marker = core.result_marker(current.proposal_id, "approve", "consensus:github-devloop/issue/owner/repo/42/v1")
+    local older_marker = m_builders.result_marker(core, current.proposal_id, "approve", "consensus:github-devloop/issue/owner/repo/42/v1")
     mock_issue_result({ "fkst-dev:thinking" }, {
       core.state_marker(current.proposal_id, "thinking", current.dedup_key),
       older_marker,
@@ -457,7 +458,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
-    t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
     t.is_true(comment_raise.payload.dedup_key:find("/v2", 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
   end,
@@ -476,7 +477,7 @@ return {
     t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment_raise.payload.body:find(core.state_marker(current.proposal_id, "ready", current.effect_version, "result-marker,ready-label,devloop-ready"), 1, true) ~= nil)
-    t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_ready"), nil)
     t.eq(comment_raise.payload.handoff.marker_version, current.effect_version)
   end,

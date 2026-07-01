@@ -2,6 +2,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local h = require("tests.devloop_core_helpers")
+local m_builders = require("devloop.markers.builders")
 local core = h.core
 local t = h.t
 
@@ -151,7 +152,7 @@ return {
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/v1"
     local result = parsers_issue.parse_issue_view_result(core,
       '{"labels":["fkst-dev:ready"],"comments":[{"body":"'
-        .. core.result_marker(proposal_id, decision, dedup_key):gsub('"', '\\"')
+        .. m_builders.result_marker(core, proposal_id, decision, dedup_key):gsub('"', '\\"')
         .. '","author":{"login":"fkst-test-bot"}}]}'
     )
     t.eq(core.has_terminal_label(result.labels), true)

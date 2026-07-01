@@ -8,6 +8,7 @@ local mock_issue_state = h.mock_issue_state
 local find_raise = h.find_raise
 local render_comment = h.render_comment
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -15,7 +16,7 @@ local branch = "devloop-owner-repo-42-01HY"
 local pr_proposal_id = "github-devloop/pr/owner/repo/7"
 
 local function pr_link()
-  return core.pr_link_marker(proposal_id, 7, branch, impl_version, "dev")
+  return m_builders.pr_link_marker(core, proposal_id, 7, branch, impl_version, "dev")
 end
 
 local function mock_linked_pr(state, comments)
@@ -23,7 +24,7 @@ local function mock_linked_pr(state, comments)
     repo = "owner/repo",
     number = 7,
 	    comments = comments or {
-	      render_comment(core.pr_origin_marker(proposal_id, 42, branch, impl_version, "dev")
+	      render_comment(m_builders.pr_origin_marker(core, proposal_id, 42, branch, impl_version, "dev")
 	        .. "\n" .. core.state_marker(proposal_id, "pr-open", impl_version)),
 	    },
     head = branch,
@@ -64,7 +65,7 @@ return {
   test_awaiting_pr_issue_is_idempotent_for_legacy_canonicalizer = function()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:awaiting-pr" }, "OPEN", {
       core.state_marker(proposal_id, "awaiting-pr", impl_version),
-      core.pr_delegation_marker(proposal_id, pr_proposal_id, 7, impl_version, "g1"),
+      m_builders.pr_delegation_marker(core, proposal_id, pr_proposal_id, 7, impl_version, "g1"),
     })
     mock_linked_pr("OPEN")
 

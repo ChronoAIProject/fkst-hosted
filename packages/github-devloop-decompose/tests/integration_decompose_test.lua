@@ -12,12 +12,13 @@ local find_raise = h.find_raise
 local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local decompose_lib = require("devloop.decompose")
+local m_builders = require("devloop.markers.builders")
 
 local blocked_comments
 
 local function mock_pr_view(event, comments, updated_at)
   local selected = {
-    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
   }
   for _, comment in ipairs(comments) do
     table.insert(selected, comment)
@@ -116,7 +117,7 @@ end
 
 blocked_comments = function(event, extra)
   local comments = {
-    core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     core.state_marker(event.proposal_id, "blocked", event.version),
     conv_reconcile.fix_reconcile_marker(core, event.proposal_id, event.version, "drop"),
   }

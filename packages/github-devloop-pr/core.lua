@@ -34,7 +34,6 @@ require("core.review_carry_over").install(M)
 require("devloop.merge_queue").install(M)
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
-require("devloop.markers").install(M)
 require("devloop.pr_safety").install(M)
 M.restart_package_name = "github-devloop-pr"
 M.restart_lifecycle_states = {

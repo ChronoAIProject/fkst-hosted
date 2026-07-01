@@ -4,6 +4,7 @@ local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
 local source_ref = require("contract.source_ref")
 local transition_version = require("contract.transition_version")
+local m_builders = require("devloop.markers.builders")
 local order_number_width = 12
 
 local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", blocked = "fkst-dev:blocked" }
@@ -951,7 +952,7 @@ function M.has_result_marker(comments, proposal_id, decision, dedup_key)
   end
   -- Match the FULL marker (proposal + decision + dedup) so a stale opposite/older-version marker
   -- does not suppress writing the current decision's result marker.
-  local needle = M.result_marker(proposal_id, decision, dedup_key)
+  local needle = m_builders.result_marker(M, proposal_id, decision, dedup_key)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     if parsers_misc._comment_body(M, comment):find(needle, 1, true) ~= nil then
       return true

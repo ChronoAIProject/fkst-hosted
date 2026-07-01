@@ -3,6 +3,7 @@ local contract_time = require("contract.time")
 local decompose_lib = require("devloop.decompose")
 local replayer = require("devloop.replayer")
 local conv_rounds = require("devloop.convergence.rounds")
+local m_builders = require("devloop.markers.builders")
 
 local C = {}
 
@@ -372,12 +373,12 @@ local function base_entity(core, row, source_ref)
 end
 
 local function child_pr(core, state, child_state)
-  local body = core.pr_origin_marker(ISSUE_PROPOSAL, ISSUE_NUMBER, BRANCH, state.version, BASE_BRANCH)
+  local body = m_builders.pr_origin_marker(core, ISSUE_PROPOSAL, ISSUE_NUMBER, BRANCH, state.version, BASE_BRANCH)
   if child_state ~= nil then
     body = body .. "\n" .. core.state_marker(PR_PROPOSAL, child_state, state.version)
   end
   if child_state == "merged" then
-    body = body .. "\n" .. core.merged_marker(PR_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA)
+    body = body .. "\n" .. m_builders.merged_marker(core, PR_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA)
   end
   return {
     repo = REPO,
@@ -420,7 +421,7 @@ local function add_common_pr_facts(core, entity, state, facts, include_pr_link_m
   facts.current_pr = facts.current_pr or child_pr(core, state, nil)
   if include_pr_link_marker == true then
     facts["pr-link"] = link
-    table.insert(entity.comments, comment(core, core.pr_link_marker(ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
+    table.insert(entity.comments, comment(core, m_builders.pr_link_marker(core, ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
   else
     facts._synthetic_pr_link = true
   end
@@ -614,22 +615,22 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "implement-attempt" then
     table.insert(entity.comments, comment(core, core.implement_attempt_marker(ISSUE_PROPOSAL, state.version, value.attempt, value.started_at), "2026-06-03T01:03:06Z"))
   elseif family == "implementing" then
-    table.insert(entity.comments, comment(core, core.implementing_marker(ISSUE_PROPOSAL, state.version, BRANCH, HEAD_SHA, BASE_BRANCH, BASE_SHA), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, m_builders.implementing_marker(core, ISSUE_PROPOSAL, state.version, BRANCH, HEAD_SHA, BASE_BRANCH, BASE_SHA), "2026-06-03T01:03:07Z"))
   elseif family == "impl-failure" then
     table.insert(entity.comments, comment(core, core.impl_failure_marker(ISSUE_PROPOSAL, state.version, value.reason or "codex-failed", value.attempt or 1), "2026-06-03T01:03:07Z"))
   elseif family == "decomposed" then
     table.insert(entity.comments, comment(core, decompose_lib.decomposed_marker(core, ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
-    table.insert(entity.comments, comment(core, core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then
-    table.insert(entity.comments, comment(core, core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, core.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, core.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     if value.decision == "approve" then
-      table.insert(entity.comments, comment(core, core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
     else
-      table.insert(entity.comments, comment(core, core.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     end
   elseif family == "review-meta" then
-    table.insert(entity.comments, comment(core, core.review_meta_marker(ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_meta_marker(core, ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-converge-round" then
     local digest = convergence_shared.source_ref_digest(PR_SOURCE_REF)
     if value.action == "block" then
@@ -645,13 +646,13 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
     end
   elseif family == "merge-ready" then
     if value.approve ~= false then
-      table.insert(entity.comments, comment(core, core.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
+      table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
     end
-    table.insert(entity.comments, comment(core, core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "merging" then
-    table.insert(entity.comments, comment(core, core.review_result_marker(value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
-    table.insert(entity.comments, comment(core, core.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
-    table.insert(entity.comments, comment(core, core.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
+    table.insert(entity.comments, comment(core, m_builders.merging_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "converge-round" then
     if value.true_stall_fixture == true then
       for round = 1, value.round do
@@ -685,7 +686,7 @@ local function add_context_facts(core, row, entity, state, facts, source_ref, in
       facts.current_pr.merged_at = "2026-06-03T01:04:03Z"
       facts.current_pr.merge_commit_sha = HEAD_SHA
     end
-    table.insert(entity.comments, comment(core, core.pr_delegation_marker(ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
+    table.insert(entity.comments, comment(core, m_builders.pr_delegation_marker(core, ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
     facts.pr_delegation = {
       proposal_id = ISSUE_PROPOSAL,
       pr_proposal_id = PR_PROPOSAL,

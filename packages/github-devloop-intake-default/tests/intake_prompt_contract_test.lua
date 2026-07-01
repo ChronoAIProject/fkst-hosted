@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local m_facts = require("devloop.markers.facts")
+local m_builders = require("devloop.markers.builders")
 local core = h.core
 local t = h.t
 
@@ -17,19 +18,19 @@ return {
 
   test_intake_marker_fact_trusts_only_bot_comments = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
-    local marker = core.intake_decision_marker(proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1", "background")
+    local marker = m_builders.intake_decision_marker(core, proposal_id, "decline", "intake/github-devloop/issue/owner/repo/42/v1", "background")
     t.eq(m_facts.has_intake_decision_marker(core, { { body = marker, author_login = "ordinary-user" } }, proposal_id), false)
     local fact = m_facts.intake_decision_fact(core, { { body = marker, author_login = core.trusted_bot_login() } }, proposal_id)
     t.eq(fact.decision, "decline")
     t.eq(fact.service_class, "background")
     t.eq(fact.proposal_id, proposal_id)
 
-    local track_marker = core.intake_decision_marker(proposal_id, "track", "intake/github-devloop/issue/owner/repo/42/v-track", "standard")
+    local track_marker = m_builders.intake_decision_marker(core, proposal_id, "track", "intake/github-devloop/issue/owner/repo/42/v-track", "standard")
     local tracked = m_facts.intake_decision_fact(core, { { body = track_marker, author_login = core.trusted_bot_login() } }, proposal_id)
     t.eq(tracked.decision, "track")
     t.eq(tracked.service_class, "standard")
 
-    local escalation_marker = core.intake_decision_marker(proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v2", "standard")
+    local escalation_marker = m_builders.intake_decision_marker(core, proposal_id, "escalate-to-class", "intake/github-devloop/issue/owner/repo/42/v2", "standard")
     local escalation = m_facts.intake_decision_fact(core, { { body = escalation_marker, author_login = core.trusted_bot_login() } }, proposal_id)
     t.eq(escalation.decision, "escalate-to-class")
     t.eq(escalation.service_class, "standard")

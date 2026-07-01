@@ -12,6 +12,7 @@ local mock_pr_origin = h.mock_pr_origin
 local mock_issue_review = h.mock_issue_review
 local find_raise = h.find_raise
 local config = require("devloop.config")
+local m_builders = require("devloop.markers.builders")
 
 return {
   test_review_loop_reraised_proposal_dedup_follows_incoming_review_lineage = function()
@@ -25,7 +26,7 @@ return {
     })
     local impl_version = reviewing().version
     local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     mock_bot_env()
     mock_pr_origin({
       origin_marker,
@@ -60,7 +61,7 @@ return {
     })
     local impl_version = reviewing().version
     local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local function varying_digest(round)
       return {
@@ -105,7 +106,7 @@ return {
     local impl_version = reviewing().version
     local _, _, review_version = core.parse_pr_review_proposal_id(event.proposal_id)
     local drift_version = review_version .. "-drift"
-    local origin_marker = core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local current_digest = convergence_shared.source_ref_digest(event.source_ref)
     local drift_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?drift=1" })
     mock_bot_env()

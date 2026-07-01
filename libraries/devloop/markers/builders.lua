@@ -1,13 +1,13 @@
-local S = {}
+local C = {}
 local forge_validators = require("devloop.forge_validators")
 local autonomy_ledger = require("devloop.autonomy_ledger")
+local shared = require("devloop.markers.shared")
 
-function S.install(M, shared)
 local valid_round = shared.valid_round
 local strings = shared.strings
 local safe_marker_attr = shared.safe_marker_attr
 
-function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blocking_gap, reason)
+function C.review_meta_marker(M, issue_proposal_id, dedup_key, action, version, blocking_gap, reason)
   local fields = ""
   if action ~= nil then
     if not M._is_review_meta_action(action) then
@@ -33,7 +33,7 @@ function M.review_meta_marker(issue_proposal_id, dedup_key, action, version, blo
     .. '" -->'
 end
 
-function M.fix_reflection_marker(issue_proposal_id, dedup_key, verdict, version, fix_round)
+function C.fix_reflection_marker(M, issue_proposal_id, dedup_key, verdict, version, fix_round)
   if verdict ~= "checkpoint" and verdict ~= "continue" and verdict ~= "spec-gap" then
     error("github-devloop: invalid fix reflection verdict")
   end
@@ -53,7 +53,7 @@ function M.fix_reflection_marker(issue_proposal_id, dedup_key, verdict, version,
     .. '" -->'
 end
 
-function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+function C.fix_marker(M, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
   if not forge_validators.is_git_sha(old_head_sha) or not forge_validators.is_git_sha(new_head_sha) then
     error("github-devloop: invalid fix head sha")
   end
@@ -65,7 +65,7 @@ function M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, o
     .. '" -->'
 end
 
-function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, gate_baseline_sha, reason, predecessor_set)
+function C.merge_gate_marker(M, issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, gate_baseline_sha, reason, predecessor_set)
   if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-gate marker")
   end
@@ -95,7 +95,7 @@ function M.merge_gate_marker(issue_proposal_id, pr_number, version, review_propo
     .. '" -->'
 end
 
-function M.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_branch, base_sha)
+function C.implementing_marker(M, proposal_id, dedup_key, branch, head_sha, base_branch, base_sha)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -117,7 +117,7 @@ function M.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_br
     .. '" -->'
 end
 
-function M.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_branch)
+function C.pr_link_marker(M, proposal_id, pr_number, branch, impl_version, base_branch)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
@@ -135,7 +135,7 @@ function M.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_bra
     .. '" -->'
 end
 
-function M.pr_link_marker_template(proposal_id, branch, impl_version, base_branch)
+function C.pr_link_marker_template(M, proposal_id, branch, impl_version, base_branch)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -150,7 +150,7 @@ function M.pr_link_marker_template(proposal_id, branch, impl_version, base_branc
     .. '" -->'
 end
 
-function M.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, version, delegation)
+function C.pr_delegation_marker(M, issue_proposal_id, pr_proposal_id, pr_number, version, delegation)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr-delegation pr number")
   end
@@ -168,7 +168,7 @@ function M.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, ve
     .. '" -->'
 end
 
-function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch)
+function C.pr_origin_marker(M, proposal_id, issue_number, branch, impl_version, base_branch)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -183,7 +183,7 @@ function M.pr_origin_marker(proposal_id, issue_number, branch, impl_version, bas
     .. '" -->'
 end
 
-function M.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key, fix_round, blocking_gap)
+function C.review_result_marker(M, review_proposal_id, issue_proposal_id, decision, dedup_key, fix_round, blocking_gap)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid review decision")
   end
@@ -212,7 +212,7 @@ function M.review_result_marker(review_proposal_id, issue_proposal_id, decision,
     .. '" -->'
 end
 
-function M.merge_ready_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha)
+function C.merge_ready_marker(M, issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid merge-ready pr number")
   end
@@ -233,7 +233,7 @@ function M.merge_ready_marker(issue_proposal_id, pr_number, version, review_prop
     .. '" -->'
 end
 
-function M.high_risk_review_evidence_marker(issue_proposal_id, version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest, angle_digest)
+function C.high_risk_review_evidence_marker(M, issue_proposal_id, version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest, angle_digest)
   if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid high-risk review evidence marker")
   end
@@ -255,7 +255,7 @@ function M.high_risk_review_evidence_marker(issue_proposal_id, version, pr_numbe
     .. '" -->'
 end
 
-function M.review_carry_over_marker(issue_proposal_id, version, old_review_proposal_id, old_review_dedup_key, approved_head_sha, new_review_proposal_id, new_review_dedup_key, new_head_sha, base_head_sha)
+function C.review_carry_over_marker(M, issue_proposal_id, version, old_review_proposal_id, old_review_dedup_key, approved_head_sha, new_review_proposal_id, new_review_dedup_key, new_head_sha, base_head_sha)
   if not forge_validators.is_git_sha(approved_head_sha)
     or not forge_validators.is_git_sha(new_head_sha)
     or not forge_validators.is_git_sha(base_head_sha) then
@@ -280,7 +280,7 @@ function M.review_carry_over_marker(issue_proposal_id, version, old_review_propo
     .. '" proof="merge-tree-empty-delta" -->'
 end
 
-function M.merged_marker(issue_proposal_id, pr_number, version, head_sha, autonomy_record)
+function C.merged_marker(M, issue_proposal_id, pr_number, version, head_sha, autonomy_record)
   if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merged marker")
   end
@@ -291,7 +291,7 @@ function M.merged_marker(issue_proposal_id, pr_number, version, head_sha, autono
     .. '" head_sha="' .. tostring(head_sha) .. '"' .. autonomy_attrs .. ' -->'
 end
 
-function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
+function C.merging_marker(M, issue_proposal_id, pr_number, version, head_sha)
   if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merging marker")
   end
@@ -302,17 +302,17 @@ function M.merging_marker(issue_proposal_id, pr_number, version, head_sha)
     .. '" -->'
 end
 
-function M.intake_decision_marker(issue_proposal_id, decision, dedup_key, service_class)
+function C.intake_decision_marker(M, issue_proposal_id, decision, dedup_key, service_class)
   if decision ~= "enable" and decision ~= "track" and decision ~= "decline" and decision ~= "escalate-to-class" then
     error("github-devloop: invalid intake decision")
   end
   if not M._is_bounded_string(dedup_key, M._max_dedup_len) then
     error("github-devloop: invalid intake dedup")
   end
-  if not M.is_intake_service_class(service_class) then
+  if not shared.is_intake_service_class(service_class) then
     error("github-devloop: invalid intake service class")
   end
-  local normalized_class = M.normalize_intake_service_class(service_class)
+  local normalized_class = shared.normalize_intake_service_class(service_class)
   return '<!-- fkst:github-devloop:intake-decision:v1 proposal="' .. tostring(issue_proposal_id)
     .. '" decision="' .. tostring(decision)
     .. '" class="' .. normalized_class
@@ -320,7 +320,7 @@ function M.intake_decision_marker(issue_proposal_id, decision, dedup_key, servic
     .. '" -->'
 end
 
-function M.orphan_reaped_marker(proposal_id, pr_number, reason)
+function C.orphan_reaped_marker(M, proposal_id, pr_number, reason)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid orphan reaped pr number")
   end
@@ -331,7 +331,7 @@ function M.orphan_reaped_marker(proposal_id, pr_number, reason)
     .. '" -->'
 end
 
-function M.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration_branch)
+function C.pr_base_unmanaged_marker(M, proposal_id, pr_number, pr_base, integration_branch)
   if not M._is_positive_pr_number(pr_number) then
     error("github-devloop: invalid unmanaged-base pr number")
   end
@@ -346,7 +346,7 @@ function M.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration
     .. '" -->'
 end
 
-function M.result_marker(proposal_id, decision, dedup_key)
+function C.result_marker(M, proposal_id, decision, dedup_key)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid decision")
   end
@@ -355,6 +355,4 @@ function M.result_marker(proposal_id, decision, dedup_key)
     .. '" dedup="' .. tostring(dedup_key)
     .. '" -->'
 end
-end
-
-return S
+return C

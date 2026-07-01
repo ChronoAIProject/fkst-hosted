@@ -16,6 +16,7 @@ local mock_write_env = h.mock_write_env
 local mock_bot_env = h.mock_bot_env
 local run_fix = h.run_fix
 local gh_argv = require("testkit.gh_argv_mock")
+local m_builders = require("devloop.markers.builders")
 
 local function has_commit_subject(subject)
   for _, call in ipairs(t.command_calls()) do
@@ -65,7 +66,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -117,7 +118,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -168,7 +169,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {

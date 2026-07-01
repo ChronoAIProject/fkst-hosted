@@ -10,6 +10,7 @@ local run_fake = testing.run_fake
 local run_fake_expecting_failure = testing.run_fake_expecting_failure
 local gh_fake = require("forge.github_fake")
 local git_fake = require("forge.git_fake")
+local m_builders = require("devloop.markers.builders")
 local action_label = "⟦FKST:ACTION⟧"
 local reason_label = "⟦FKST:REASON⟧"
 
@@ -207,7 +208,7 @@ local function fixing(extra)
 end
 
 local function pr_link_marker_for_fix(fix, branch, impl_version)
-  return core.pr_link_marker(fix.proposal_id, fix.pr_number, branch, impl_version or fix.version, "dev")
+  return m_builders.pr_link_marker(core, fix.proposal_id, fix.pr_number, branch, impl_version or fix.version, "dev")
 end
 
 local function review_meta_event(extra)
@@ -367,7 +368,7 @@ end
 local function run_review_reconcile(payload, run_opts)
   local cached = take_pr_phase_comments()
   if cached ~= nil then
-    local comments = { core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
+    local comments = { m_builders.pr_origin_marker(core, payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
     for _, comment in ipairs(cached) do
       table.insert(comments, comment)
     end
@@ -382,7 +383,7 @@ end
 local function run_fix_reconcile(payload, run_opts)
   local cached = take_pr_phase_comments()
   if cached ~= nil then
-    local comments = { core.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
+    local comments = { m_builders.pr_origin_marker(core, payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
     for _, comment in ipairs(cached) do
       table.insert(comments, comment)
     end
@@ -459,7 +460,7 @@ local function run_fix(payload, run_opts)
     local head = pending and pending.head or "devloop-owner-repo-42-01HY"
     local base_branch = pending and pending.base_branch or "dev"
     local state = pending and pending.state or "OPEN"
-    for _, comment in ipairs(pending and pending.comments or { core.pr_origin_marker(payload.proposal_id, "42", head, payload.version, base_branch) }) do
+    for _, comment in ipairs(pending and pending.comments or { m_builders.pr_origin_marker(core, payload.proposal_id, "42", head, payload.version, base_branch) }) do
       table.insert(comments, comment)
     end
     for _, comment in ipairs(cached or {}) do
@@ -706,7 +707,7 @@ mock_pr_origin_from_cached = function(payload, head_sha)
       table.insert(comments, comment)
     end
   elseif cached ~= nil then
-    table.insert(comments, core.pr_origin_marker(payload.proposal_id, "42", head, payload.version or reviewing().version, base_branch))
+    table.insert(comments, m_builders.pr_origin_marker(core, payload.proposal_id, "42", head, payload.version or reviewing().version, base_branch))
   end
   for _, comment in ipairs(cached or {}) do
     table.insert(comments, comment)

@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local payloads_builders = require("devloop.payloads.builders")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -55,7 +56,7 @@ end
 local function merge_comments_for_event(event)
   local entity = core.parse_entity_proposal_id(event.proposal_id)
   return {
-    core.pr_origin_marker(
+    m_builders.pr_origin_marker(core, 
       event.proposal_id,
       tostring(entity.issue_number),
       branch_for_pr(event.pr_number),
@@ -63,7 +64,7 @@ local function merge_comments_for_event(event)
       "dev"
     ),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    core.merge_ready_marker(
+    m_builders.merge_ready_marker(core, 
       event.proposal_id,
       event.pr_number,
       event.version,
@@ -71,7 +72,7 @@ local function merge_comments_for_event(event)
       event.review_dedup_key,
       event.reviewed_head_sha
     ),
-    core.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
+    m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
   }
 end
 
@@ -151,7 +152,7 @@ end
 local function merged_comments_for_event(event)
   local comments = merge_comments_for_event(event)
   table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
-  table.insert(comments, core.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
+  table.insert(comments, m_builders.merging_marker(core, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
   return comments
 end
 

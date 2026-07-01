@@ -12,6 +12,7 @@ local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local find_raise = h.find_raise
 local config = require("devloop.config")
+local m_builders = require("devloop.markers.builders")
 
 local function mock_base_head_for_stale_mergeability()
   t.mock_command("git fetch origin dev", { stdout = "", stderr = "", exit_code = 0 })
@@ -43,7 +44,7 @@ end
 return {
   test_merge_conflict_churn_at_max_fix_rounds_decomposes_without_another_fix = function()
     local event = max_fix_round_merge_ready()
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")

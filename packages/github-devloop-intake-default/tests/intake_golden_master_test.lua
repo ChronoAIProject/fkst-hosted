@@ -5,6 +5,7 @@ local core = h.core
 local operator_commands = require("devloop.operator_commands")
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local function mock_repo_env(repo)
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
@@ -423,7 +424,7 @@ return {
     payload.dedup_key = core.intake_candidate_delivery_dedup_key(payload.proposal_id, payload.effect_id, payload.effect_id)
     h.mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "decline", payload.effect_id, "standard"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "decline", payload.effect_id, "standard"),
       command,
     })
 

@@ -5,6 +5,7 @@ local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local shared = require("devloop.markers.shared")
+local m_builders = require("devloop.markers.builders")
 
 local valid_round = shared.valid_round
 local marker_attr = shared.marker_attr
@@ -66,12 +67,12 @@ function C.intake_decision_fact(M, comments, issue_proposal_id)
       local dedup = marker:match('dedup="([^"]*)"')
       if marker_issue == tostring(issue_proposal_id)
         and (decision == "enable" or decision == "track" or decision == "decline" or decision == "escalate-to-class")
-        and M.is_intake_service_class(service_class)
+        and shared.is_intake_service_class(service_class)
         and M._is_bounded_string(dedup, M._max_dedup_len) then
         return {
           proposal_id = marker_issue,
           decision = decision,
-          service_class = M.normalize_intake_service_class(service_class),
+          service_class = shared.normalize_intake_service_class(service_class),
           dedup_key = dedup,
           comment_created_at = parsers_misc._comment_created_at(M, comment),
         }
@@ -609,7 +610,7 @@ function C.has_fix_marker(M, comments, issue_proposal_id, review_proposal_id, re
   if type(comments) ~= "table" then
     return false
   end
-  local needle = M.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  local needle = m_builders.fix_marker(M, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     if parsers_misc._comment_body(M, comment):find(needle, 1, true) ~= nil then
       return true

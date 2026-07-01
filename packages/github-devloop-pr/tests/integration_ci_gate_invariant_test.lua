@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -17,7 +18,7 @@ local count_calls = h.count_calls
 local find_raise = h.find_raise
 
 local function origin_marker(event, impl_version)
-  return core.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version or event.version, "dev")
+  return m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version or event.version, "dev")
 end
 
 return {

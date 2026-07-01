@@ -16,6 +16,7 @@ local mock_write_env = h.mock_write_env
 local deterministic_branch_for = h.deterministic_branch_for
 local find_raise = h.find_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local proposal_id = "github-devloop/issue/owner/repo/42"
 local pr_proposal_id = "github-devloop/pr/owner/repo/7"
@@ -64,7 +65,7 @@ end
 
 local function visible_child_comments(event, branch)
   return {
-    core.pr_origin_marker(event.proposal_id, 42, branch, event.dedup_key, "dev")
+    m_builders.pr_origin_marker(core, event.proposal_id, 42, branch, event.dedup_key, "dev")
       .. "\n" .. core.state_marker(event.proposal_id, "pr-open", event.dedup_key),
   }
 end
@@ -72,8 +73,8 @@ end
 local function visible_issue_comments(event, branch)
   return {
     core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-    core.implementing_marker(event.proposal_id, event.dedup_key, branch, head_sha, "dev", base_sha),
-    core.pr_delegation_marker(event.proposal_id, pr_proposal_id, 7, event.dedup_key, "g1"),
+    m_builders.implementing_marker(core, event.proposal_id, event.dedup_key, branch, head_sha, "dev", base_sha),
+    m_builders.pr_delegation_marker(core, event.proposal_id, pr_proposal_id, 7, event.dedup_key, "g1"),
   }
 end
 

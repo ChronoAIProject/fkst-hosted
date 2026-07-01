@@ -1,4 +1,5 @@
 local h = require("tests.devloop_helpers")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -20,7 +21,7 @@ return {
     t.eq(#result.raises, 2)
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     local label_raise = find_raise(result.raises, "github-proxy.github_issue_label_request")
-    t.is_true(comment_raise.payload.body:find(core.result_marker(current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key), 1, true) ~= nil)
     t.eq(comment_raise.payload.handoff.kind, "github-devloop.ready")
     t.eq(comment_raise.payload.handoff.version, current.dedup_key)
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:ready")
@@ -31,7 +32,7 @@ return {
     local current = reached()
     mock_issue_result({ "fkst-dev:ready" }, {
       core.state_marker(current.proposal_id, "ready", current.dedup_key),
-      core.result_marker(current.proposal_id, current.decision, current.dedup_key),
+      m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key),
     })
 
     local result = run_result(current, opts("result-outbox-complete"))
@@ -43,7 +44,7 @@ return {
   test_consensus_result_result_marker_heals_only_missing_label_and_ready_replay = function()
     local current = reached()
     mock_issue_result({ "fkst-dev:thinking" }, {
-      core.result_marker(current.proposal_id, current.decision, current.dedup_key),
+      m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key),
     })
 
     local result = run_result(current, opts("result-outbox-result-marker-no-label"))

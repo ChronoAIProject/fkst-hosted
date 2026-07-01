@@ -4,6 +4,7 @@ local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
+local m_builders = require("devloop.markers.builders")
 
 local t = h.t
 local core = h.core
@@ -37,7 +38,7 @@ local function state_marker(state)
 end
 
 local function pr_origin_marker()
-  return core.pr_origin_marker(issue_proposal_id, tostring(issue_number), "devloop-owner-repo-42-01HY", reviewed_version, "dev")
+  return m_builders.pr_origin_marker(core, issue_proposal_id, tostring(issue_number), "devloop-owner-repo-42-01HY", reviewed_version, "dev")
 end
 
 local function mock_env(times)

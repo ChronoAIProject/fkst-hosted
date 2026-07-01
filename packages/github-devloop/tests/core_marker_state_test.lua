@@ -7,6 +7,7 @@ local core = h.core
 local transition_version = require("contract.transition_version")
 local t = h.t
 local gate = require("devloop.gate")
+local m_builders = require("devloop.markers.builders")
 local reached = h.reached
 local unresolved = h.unresolved
 local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 159, 167)
@@ -214,7 +215,7 @@ return {
     t.eq(core.compare_state_marker_order({ state = "merge-ready", version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z" }, "reviewing", review_version), -1)
     t.eq(core.compare_state_marker_order({ state = "pr-open", version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-06T01-02-03Z" }, "reviewing", review_version), 1)
 
-    local marker = core.result_marker(
+    local marker = m_builders.result_marker(core, 
       proposal_id,
       "approve",
       "consensus:github-devloop/issue/owner/repo/42/v1"
@@ -685,7 +686,7 @@ return {
     local current = core.current_state({
       core.state_marker(proposal_id, "fixing", version),
       core.state_marker(proposal_id, "reviewing", new_version),
-      core.fix_marker(proposal_id, "github-devloop/pr-review/owner-repo-0000000000/7/v1/def456", "review", "def456", sha_like_lower_version),
+      m_builders.fix_marker(core, proposal_id, "github-devloop/pr-review/owner-repo-0000000000/7/v1/def456", "review", "def456", sha_like_lower_version),
     }, proposal_id)
 
     t.eq(core.version_fix_round(new_version), core.version_fix_round(version) + 1)

@@ -17,7 +17,6 @@ require("devloop.commands").install(M)
 require("devloop.github_proxy_entity_view").install(M)
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
-require("devloop.markers").install(M)
 require("core.intake_service_class").install(M)
 local prompts = require("devloop.prompts")
 prompts.install(M, wiring.prompts(), {

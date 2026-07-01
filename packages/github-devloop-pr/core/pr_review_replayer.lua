@@ -12,6 +12,7 @@ local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
 local config = require("devloop.config")
 local comment_strings = require("devloop.strings")
+local m_builders = require("devloop.markers.builders")
 
 function S.install(M)
 local function linked_pr_state(pr)
@@ -632,7 +633,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
   end
   local merged_body = comment_strings.comment_string(M, "merged_pr_prefix") .. tostring(link.pr_number)
     .. "\n\n" .. M.state_marker(proposal_id, "merged", state.version)
-    .. "\n" .. M.merged_marker(proposal_id, link.pr_number, state.version, head_sha)
+    .. "\n" .. m_builders.merged_marker(M, proposal_id, link.pr_number, state.version, head_sha)
   local source_ref = M.pr_source_ref(issue.repo, link.pr_number)
   local comment_request = M.build_entity_comment_request({
     kind = "issue",

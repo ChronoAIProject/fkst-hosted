@@ -6,6 +6,7 @@ local config = require("devloop.config")
 
 function S.install(M)
 local gate = require("devloop.gate")
+local m_builders = require("devloop.markers.builders")
 local child_start_visible_gate = nil
 
 local function load_child_start_visible_gate()
@@ -100,8 +101,8 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     error("github-devloop: invalid pr-delegation head sha")
   end
   local body = "github-devloop PR child open"
-    .. "\n\n" .. M.pr_origin_marker(issue_proposal_id, issue_number, branch, impl_version, base_branch)
-    .. "\n" .. M.pr_link_marker(issue_proposal_id, pr_number, branch, impl_version, base_branch)
+    .. "\n\n" .. m_builders.pr_origin_marker(M, issue_proposal_id, issue_number, branch, impl_version, base_branch)
+    .. "\n" .. m_builders.pr_link_marker(M, issue_proposal_id, pr_number, branch, impl_version, base_branch)
     .. "\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
   return M.build_entity_comment_request({
     kind = "pr",
@@ -116,7 +117,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
 end
 
 local function build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, source_ref)
-  local marker = M.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation)
+  local marker = m_builders.pr_delegation_marker(M, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation)
   return M.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -135,7 +136,7 @@ end
 local function build_parent_awaiting_comment(repo, issue_number, ready, child)
   local body = "github-devloop delegated implementation to PR #" .. tostring(child.pr_number)
     .. "\n\n" .. M.state_marker(ready.proposal_id, "awaiting-pr", ready.dedup_key)
-    .. "\n" .. M.pr_delegation_marker(
+    .. "\n" .. m_builders.pr_delegation_marker(M, 
       ready.proposal_id,
       child.pr_proposal_id,
       child.pr_number,

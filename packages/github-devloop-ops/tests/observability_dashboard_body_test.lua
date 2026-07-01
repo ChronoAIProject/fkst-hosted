@@ -3,6 +3,7 @@ local core = h.core
 local t = h.t
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local autonomy_ledger = require("devloop.autonomy_ledger")
+local m_builders = require("devloop.markers.builders")
 require("departments.observability.main")
 
 local old_dashboard_body_cap = 12000
@@ -227,8 +228,8 @@ return {
       trusted_comment(attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
       trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
       trusted_comment(attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
-      trusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, record), "2026-06-03T01:30:00Z", 1004),
-      untrusted_comment(core.merged_marker(proposal_id, "7", second_version, head_sha, record), "2026-06-03T01:31:00Z", 1005),
+      trusted_comment(m_builders.merged_marker(core, proposal_id, "7", second_version, head_sha, record), "2026-06-03T01:30:00Z", 1004),
+      untrusted_comment(m_builders.merged_marker(core, proposal_id, "7", second_version, head_sha, record), "2026-06-03T01:31:00Z", 1005),
     }
     local dashboard = core.render_observability_dashboard({
       entities = {
@@ -304,7 +305,7 @@ return {
         title = "Implement AVM fact",
         merged_at = "2026-06-03T01:30:00Z",
         comments = {
-          trusted_comment(core.merged_marker(proposal_id, "9", version, head_sha, record), "2026-06-03T01:30:00Z", 2001),
+          trusted_comment(m_builders.merged_marker(core, proposal_id, "9", version, head_sha, record), "2026-06-03T01:30:00Z", 2001),
         },
       },
       {
@@ -361,7 +362,7 @@ return {
         title = "Implement AVM fact",
         merged_at = "2026-06-03T01:30:00Z",
         comments = {
-          trusted_comment(core.merged_marker(proposal_id, "11", version, head_sha, record), "2026-06-03T01:30:00Z", 2021),
+          trusted_comment(m_builders.merged_marker(core, proposal_id, "11", version, head_sha, record), "2026-06-03T01:30:00Z", 2021),
         },
       },
     }, {}, {
@@ -415,7 +416,7 @@ return {
         title = "Implement stable AVM gate",
         merged_at = "2026-06-03T01:30:00Z",
         comments = {
-          trusted_comment(core.merged_marker(proposal_id, "14", version, head_sha, record), "2026-06-03T01:30:00Z", 2011),
+          trusted_comment(m_builders.merged_marker(core, proposal_id, "14", version, head_sha, record), "2026-06-03T01:30:00Z", 2011),
         },
       },
     }
@@ -463,7 +464,7 @@ return {
         number = 12,
         merged_at = "2026-06-03T01:30:00Z",
         comments = {
-          trusted_comment(core.merged_marker(record.proposal_id, "12", record.version, record.head_sha, record), "2026-06-03T01:30:00Z", 2002),
+          trusted_comment(m_builders.merged_marker(core, record.proposal_id, "12", record.version, record.head_sha, record), "2026-06-03T01:30:00Z", 2002),
         },
       },
       {
@@ -611,7 +612,7 @@ return {
           number = 12,
           merged_at = "2026-06-03T01:30:00Z",
           comments = {
-            trusted_comment(core.merged_marker(proposal_id, "12", version, head_sha, record), "2026-06-03T01:30:00Z", 3001),
+            trusted_comment(m_builders.merged_marker(core, proposal_id, "12", version, head_sha, record), "2026-06-03T01:30:00Z", 3001),
           },
         },
         {

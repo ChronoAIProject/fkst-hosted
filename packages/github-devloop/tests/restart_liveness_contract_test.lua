@@ -1,6 +1,7 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local contract_time = require("contract.time")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 
 local function copy_value(value)
@@ -324,7 +325,7 @@ return {
           {
             author_login = "fkst-test-bot",
             created_at = "2026-06-03T09:45:00Z",
-            body = core.pr_delegation_marker(parent_proposal_id, child_pr_proposal_id, 7, version, "delegate-owner-repo-7"),
+            body = m_builders.pr_delegation_marker(core, parent_proposal_id, child_pr_proposal_id, 7, version, "delegate-owner-repo-7"),
           },
         },
       },
@@ -359,7 +360,7 @@ return {
           {
             author_login = "fkst-test-bot",
             created_at = "2026-06-03T09:45:00Z",
-            body = core.pr_delegation_marker(parent_proposal_id, child_pr_proposal_id, 7, version, "delegate-owner-repo-7"),
+            body = m_builders.pr_delegation_marker(core, parent_proposal_id, child_pr_proposal_id, 7, version, "delegate-owner-repo-7"),
           },
         },
       },

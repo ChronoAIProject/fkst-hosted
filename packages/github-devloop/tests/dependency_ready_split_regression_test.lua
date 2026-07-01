@@ -6,6 +6,7 @@ local core = h.core
 local operator_commands = require("devloop.operator_commands")
 local replay_fields = require("devloop.replay_fields")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -482,7 +483,7 @@ return {
     local current = reached()
     h.mock_issue_result({ "fkst-dev:ready" }, {
       core.state_marker(current.proposal_id, "dependency_wait", current.dedup_key),
-      core.result_marker(current.proposal_id, current.decision, current.dedup_key),
+      m_builders.result_marker(core, current.proposal_id, current.decision, current.dedup_key),
     })
     mock_blocked_by(42, { { number = 51 } })
     mock_blocked_by(51, {})

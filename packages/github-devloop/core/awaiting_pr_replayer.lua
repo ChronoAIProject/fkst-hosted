@@ -9,6 +9,7 @@ local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
+local m_builders = require("devloop.markers.builders")
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -99,7 +100,7 @@ local function resume_terminal_markers(issue, next_state, delegation, current_pr
     reviewed_head_sha = head_sha,
   }
   local autonomy_record = autonomy_ledger.autonomy_result_record(M, issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr))
-  return "\n" .. M.merged_marker(delegation.proposal_id, delegation.pr_number, next_state.version, head_sha, autonomy_record)
+  return "\n" .. m_builders.merged_marker(M, delegation.proposal_id, delegation.pr_number, next_state.version, head_sha, autonomy_record)
     .. "\n" .. autonomy_ledger.autonomy_result_marker(M, autonomy_record)
 end
 

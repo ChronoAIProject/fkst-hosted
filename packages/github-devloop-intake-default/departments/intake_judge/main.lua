@@ -9,6 +9,7 @@ local context_bundle = require("devloop.context_bundle")
 local v_execution_request = require("devloop.validators.execution_request")
 local v_intake_candidate = require("devloop.validators.intake_candidate")
 local m_facts = require("devloop.markers.facts")
+local m_shared = require("devloop.markers.shared")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -244,10 +245,10 @@ local function act_intake_judge(event)
   local parsed = core.parse_intake_action(result.stdout)
   if parsed == nil then
     parsed = decline_result()
-    parsed.service_class = core.normalize_intake_service_class(nil)
+    parsed.service_class = m_shared.normalize_intake_service_class(nil)
     core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
   else
-    parsed.service_class = core.normalize_intake_service_class(parsed.service_class)
+    parsed.service_class = m_shared.normalize_intake_service_class(parsed.service_class)
     core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " class=" .. tostring(parsed.service_class) .. " reason=" .. tostring(parsed.reason), nil)
   end
 

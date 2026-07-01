@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
+local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
 local action_label = h.action_label
@@ -33,7 +34,7 @@ end
 local function mock_reflection_context(event, ledger)
   mock_issue_review_meta({ "fkst-dev:review-meta" }, {
     core.state_marker(event.proposal_id, "review-meta", event.version),
-    core.fix_reflection_marker(event.proposal_id, event.dedup_key, "checkpoint", event.version, 3),
+    m_builders.fix_reflection_marker(core, event.proposal_id, event.dedup_key, "checkpoint", event.version, 3),
     ledger,
   })
   h.mock_context_bundle()
@@ -58,7 +59,7 @@ return {
     })
     local reflection_version = core.fix_version_from_review_version(review_version)
     mock_pr_origin({
-      core.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", review_version, "dev"),
+      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", review_version, "dev"),
     })
     mock_issue_result({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", review_version),
@@ -119,8 +120,8 @@ return {
         author_login = core._test_bot_login,
         body = table.concat({
           core.state_marker("github-devloop/issue/owner/repo/42", "review-meta", issue_version),
-          core.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "reject", review_dedup, 3, "missing regression guard"),
-          core.fix_reflection_marker("github-devloop/issue/owner/repo/42", review_dedup, "checkpoint", issue_version, 3),
+          m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "reject", review_dedup, 3, "missing regression guard"),
+          m_builders.fix_reflection_marker(core, "github-devloop/issue/owner/repo/42", review_dedup, "checkpoint", issue_version, 3),
         }, "\n"),
         created_at = "2026-06-03T01:02:03Z",
       },

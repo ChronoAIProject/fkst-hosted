@@ -6,6 +6,7 @@ local opts = h.opts
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local function mock_repo_env(repo)
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
@@ -643,7 +644,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:tracking" }, {
-      core.intake_decision_marker(payload.proposal_id, "track", expected_decision_key(payload), "standard"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "track", expected_decision_key(payload), "standard"),
     })
 
     local result = run_judge(payload, opts("intake-track-idempotent"))
@@ -702,7 +703,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
     })
 
     local result = run_judge(payload, opts("intake-idempotent"))
@@ -729,7 +730,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:enabled" }, {
-      core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
     })
     h.mock_context_bundle()
 
@@ -747,7 +748,7 @@ return {
     local payload = candidate()
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "enable", expected_decision_key(payload), "expedite"),
       core.state_marker(payload.proposal_id, "thinking", expected_decision_key(payload)),
     })
 
@@ -762,7 +763,7 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command), "standard"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command), "standard"),
       command,
     })
     mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
@@ -785,7 +786,7 @@ return {
     local command = trusted_reintake_command("IC_reintake_stale")
     mock_bot_env()
     mock_intake_judge_view({}, {
-      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
       command,
     })
 
@@ -800,7 +801,7 @@ return {
     local payload = reintake_candidate(command)
     mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      core.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload, nil, command), "standard"),
+      m_builders.intake_decision_marker(core, payload.proposal_id, "decline", expected_decision_key(payload, nil, command), "standard"),
       command,
     })
 

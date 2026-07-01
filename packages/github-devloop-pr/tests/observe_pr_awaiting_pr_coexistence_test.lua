@@ -5,6 +5,7 @@ local opts = h.opts
 local run_observe_pr = h.run_observe_pr
 local find_raise = h.find_raise
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local m_builders = require("devloop.markers.builders")
 
 local issue_proposal_id = "github-devloop/issue/owner/repo/42"
 local pr_proposal_id = "github-devloop/pr/owner/repo/7"
@@ -31,7 +32,7 @@ end
 local function awaiting_pr_comments()
   return {
     core.state_marker(issue_proposal_id, "awaiting-pr", impl_version),
-    core.pr_delegation_marker(issue_proposal_id, pr_proposal_id, 7, impl_version, "g1"),
+    m_builders.pr_delegation_marker(core, issue_proposal_id, pr_proposal_id, 7, impl_version, "g1"),
   }
 end
 
@@ -62,7 +63,7 @@ end
 
 local function pr_open_comments()
   return {
-    core.pr_origin_marker(issue_proposal_id, 42, branch, impl_version, "dev"),
+    m_builders.pr_origin_marker(core, issue_proposal_id, 42, branch, impl_version, "dev"),
     core.state_marker(issue_proposal_id, "pr-open", impl_version),
   }
 end

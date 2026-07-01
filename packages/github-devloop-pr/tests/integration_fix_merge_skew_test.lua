@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
 local gh_argv = require("testkit.gh_argv_mock")
+local m_builders = require("devloop.markers.builders")
 local opts = h.opts
 local fixing = h.fixing
 local run_fix = h.run_fix
@@ -24,7 +25,7 @@ return {
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: mergeable-conflicting"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
-      .. "\n" .. core.merge_gate_marker(
+      .. "\n" .. m_builders.merge_gate_marker(core, 
         event.proposal_id,
         event.pr_number,
         event.version,
@@ -34,7 +35,7 @@ return {
         event.gate_baseline_sha,
         "mergeable-conflicting"
       )
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -93,7 +94,7 @@ return {
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
-      .. "\n" .. core.merge_gate_marker(
+      .. "\n" .. m_builders.merge_gate_marker(core, 
         event.proposal_id,
         event.pr_number,
         event.version,
@@ -103,7 +104,7 @@ return {
         event.gate_baseline_sha,
         "own-ci-red"
       )
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -174,7 +175,7 @@ return {
     local branch = core.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
-      .. "\n" .. core.merge_gate_marker(
+      .. "\n" .. m_builders.merge_gate_marker(core, 
         event.proposal_id,
         event.pr_number,
         event.version,
@@ -184,7 +185,7 @@ return {
         event.gate_baseline_sha,
         "own-ci-red"
       )
-    local origin_marker = core.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {

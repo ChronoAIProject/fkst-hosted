@@ -6,6 +6,7 @@ local comment_strings = require("devloop.strings")
 
 function S.install(M)
 local strings = require("contract.strings")
+local m_builders = require("devloop.markers.builders")
 local ai_sentinel = "⟦AI:FKST⟧"
 
 local function normalized_reflection_action(review_meta, action)
@@ -34,9 +35,9 @@ end
 
 local function review_meta_result_marker(review_meta, action, reason, state_version, blocking_gap)
   if review_meta.mode ~= "fix-reflection" then
-    return M.review_meta_marker(review_meta.proposal_id, review_meta.dedup_key, action, state_version, blocking_gap, reason)
+    return m_builders.review_meta_marker(M, review_meta.proposal_id, review_meta.dedup_key, action, state_version, blocking_gap, reason)
   end
-  local marker = M.fix_reflection_marker(
+  local marker = m_builders.fix_reflection_marker(M, 
     review_meta.proposal_id,
     review_meta.dedup_key,
     action,
@@ -44,7 +45,7 @@ local function review_meta_result_marker(review_meta, action, reason, state_vers
     review_meta.fix_round or review_meta.n or M.version_fix_round(review_meta.version)
   )
   if action == "continue" then
-    marker = marker .. "\n" .. M.review_meta_marker(
+    marker = marker .. "\n" .. m_builders.review_meta_marker(M, 
       review_meta.proposal_id,
       review_meta.dedup_key,
       "fix",
@@ -90,7 +91,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
   }, comment_strings.comment_string(M, "fix_escalated_to_review_meta_prefix") .. safe_reason
     .. "\n\n" .. text
     .. "\n\n" .. state_marker
-    .. "\n" .. M.review_meta_marker(fix.proposal_id, fix.review_dedup_key), M._dedup_key({
+    .. "\n" .. m_builders.review_meta_marker(M, fix.proposal_id, fix.review_dedup_key), M._dedup_key({
     "fix",
     "comment",
     "review-meta",

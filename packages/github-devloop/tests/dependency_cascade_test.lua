@@ -3,6 +3,7 @@ local t = h.t
 local core = h.core
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
+local m_builders = require("devloop.markers.builders")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -154,7 +155,7 @@ local function mock_blocker_issue_with_pr_link(issue_number, pr_number, state_na
   if state_name ~= nil then
     table.insert(comments, core.state_marker(blocker_proposal_id, state_name, impl_version))
   end
-  table.insert(comments, core.pr_link_marker(blocker_proposal_id, pr_number, branch, impl_version, "dev"))
+  table.insert(comments, m_builders.pr_link_marker(core, blocker_proposal_id, pr_number, branch, impl_version, "dev"))
   t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
     stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
     stderr = "",
@@ -170,7 +171,7 @@ end
 
 local function mock_blocker_pr(issue_number, pr_number, link, comments)
   local rendered_comments = comments or {
-    core.pr_origin_marker(link.proposal_id, issue_number, link.branch, link.impl_version, link.base_branch),
+    m_builders.pr_origin_marker(core, link.proposal_id, issue_number, link.branch, link.impl_version, link.base_branch),
   }
   t.mock_command(core.gh_pr_view_observe_cmd(repo, pr_number), {
     stdout = '{"headRefName":"' .. encode_json_string(link.branch)
@@ -481,9 +482,9 @@ return {
     mock_blocked_by_failure(31)
     local link = mock_blocker_issue_with_pr_link(31, 32, "pr-open")
     mock_blocker_pr(31, 32, link, {
-      core.pr_origin_marker(link.proposal_id, 31, link.branch, link.impl_version, link.base_branch),
+      m_builders.pr_origin_marker(core, link.proposal_id, 31, link.branch, link.impl_version, link.base_branch),
       core.state_marker(link.proposal_id, "merged", "merge-version-7"),
-      core.merged_marker(link.proposal_id, 32, "merge-version-7", "def456"),
+      m_builders.merged_marker(core, link.proposal_id, 32, "merge-version-7", "def456"),
     })
     local gate = core.dependency_gate(repo, 42)
     t.eq(gate.ok, true)
@@ -495,7 +496,7 @@ return {
     mock_blocked_by(33, {})
     local link = mock_blocker_issue_with_pr_link(33, 34, "pr-open")
     mock_blocker_pr(33, 34, link, {
-      core.pr_origin_marker(link.proposal_id, 33, link.branch, link.impl_version, link.base_branch),
+      m_builders.pr_origin_marker(core, link.proposal_id, 33, link.branch, link.impl_version, link.base_branch),
       core.state_marker(link.proposal_id, "merge-ready", "merge-version-7"),
     })
     local gate = core.dependency_gate(repo, 42)
