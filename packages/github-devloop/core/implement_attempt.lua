@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local dispatch_live_run = require("devloop.dispatch_live_run")
@@ -84,7 +85,7 @@ function M.implement_version_mismatch_marker(proposal_id, expected_version, curr
     error("github-devloop: invalid implement version mismatch attempt")
   end
   return '<!-- fkst:github-devloop:implement-version-mismatch:v1 proposal="' .. tostring(proposal_id)
-    .. '" key="' .. M.implement_version_mismatch_key(expected_version, current_version)
+    .. '" key="' .. devloop_base.implement_version_mismatch_key(expected_version, current_version)
     .. '" attempt="' .. tostring(n)
     .. '" -->'
 end
@@ -93,7 +94,7 @@ function M.latest_implement_version_mismatch_fact(comments, proposal_id, expecte
   if type(comments) ~= "table" then
     return nil
   end
-  local expected_key = M.implement_version_mismatch_key(expected_version, current_version)
+  local expected_key = devloop_base.implement_version_mismatch_key(expected_version, current_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-version%-mismatch:v1.-%-%->"
   local latest = nil
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do

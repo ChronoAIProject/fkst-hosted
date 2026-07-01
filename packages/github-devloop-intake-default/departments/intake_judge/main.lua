@@ -156,7 +156,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
       return nil
     end
   end
-  local decision_dedup_key = core.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil)
+  local decision_dedup_key = devloop_base.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil)
   if expected_decision_dedup_key ~= nil and tostring(decision_dedup_key or "") ~= tostring(expected_decision_dedup_key or "") then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-stale(decision-dedup-changed)", "issue intake inputs changed while codex was running")
     return nil

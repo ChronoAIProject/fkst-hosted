@@ -267,7 +267,7 @@ function C.build_implement_version_mismatch_comment_request(M, repo, issue_numbe
       "comment",
       "version-mismatch",
       tostring(ready.proposal_id),
-      M.implement_version_mismatch_key(expected_version, current_version),
+      devloop_base.implement_version_mismatch_key(expected_version, current_version),
       tostring(attempt),
     }),
     source_ref = base_ids.normalize_source_ref(ready.source_ref),

@@ -322,7 +322,7 @@ function C.is_safe_proposal_ref(M, proposal_id, dedup_key)
   return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
-function C.is_safe_consensus_result_ref(M, proposal_id, dedup_key)
+function C.is_safe_consensus_result_ref(proposal_id, dedup_key)
   if not is_path_safe_key(proposal_id, max_key_len) then
     return false
   end
@@ -380,7 +380,7 @@ function C.intake_candidate_delivery_dedup_key(M, proposal_id, effect_id, delive
   })
 end
 
-function C.implement_version_mismatch_key(M, expected_version, current_version)
+function C.implement_version_mismatch_key(expected_version, current_version)
   return dedup_key({
     "ivm",
     decimal_checksum(table.concat({
@@ -390,7 +390,7 @@ function C.implement_version_mismatch_key(M, expected_version, current_version)
   })
 end
 
-function C.intake_decision_dedup_key(M, proposal_id, current, reintake_command)
+function C.intake_decision_dedup_key(proposal_id, current, reintake_command)
   local reintake_created_at = "none"
   if reintake_command ~= nil then
     reintake_created_at = tostring(reintake_command.created_at or "unknown")
@@ -475,7 +475,7 @@ function C.safe_issue_slug(M, repo, issue_number)
   return slug
 end
 
-function C.implement_branch(M, repo, issue_number, impl_version)
+function C.implement_branch(repo, issue_number, impl_version)
   local safe_repo = base_ids.safe_repo(repo)
   local safe_issue = base_ids.safe_issue(issue_number)
   local safe_version = strings.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
@@ -514,7 +514,7 @@ function C.implement_worktree_path(M, runtime_root, repo, issue_number, impl_ver
   return root:gsub("/+$", "") .. "/worktrees/devloop-" .. slug .. "-" .. suffix
 end
 
-function C.path_under_runtime_root(M, runtime_root, path)
+function C.path_under_runtime_root(runtime_root, path)
   local root = trim(runtime_root)
   local target = trim(path)
   if root == "" or root:find("[\r\n]") ~= nil then
@@ -567,7 +567,7 @@ function C.max_body_len(M)
   return max_body_len
 end
 
-function C.render_template(M, template, vars)
+function C.render_template(template, vars)
   if type(template) ~= "string" then
     error("github-devloop: template must be a string")
   end

@@ -157,7 +157,7 @@ local function mock_branch_config()
 end
 
 local function mock_empty_implementation_pr_list(issue_number, impl_version)
-  local branch = core.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
+  local branch = devloop_base.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
   mock_branch_config()
   t.mock_command(core.gh_pr_list_head_base_cmd(repo, branch, "dev"), {
     stdout = "[[]]\n",
@@ -734,7 +734,7 @@ return {
     t.is_true(attempt.payload.body:find('state="implementing"', 1, true) ~= nil)
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", stuck)
-    local branch = core.implement_branch(repo, 42, core.implementation_base_version(reraised.payload.dedup_key))
+    local branch = devloop_base.implement_branch(repo, 42, core.implementation_base_version(reraised.payload.dedup_key))
     t.mock_command(core.git_fetch_branch_cmd("origin", branch), { stdout = "", stderr = "", exit_code = 0 })
     t.mock_command(core.git_remote_branch_head_cmd("origin", branch), { stdout = "abc123\n", stderr = "", exit_code = 0 })
     local implemented = h.run_implement(reraised.payload, opts("liveness-scan-implementing-redrive-consumable"))

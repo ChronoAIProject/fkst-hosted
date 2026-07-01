@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -50,7 +51,7 @@ end
 return {
   test_fix_commit_uses_issue_title_subject = function()
     local event = fixing()
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
@@ -102,7 +103,7 @@ return {
 
   test_fix_commit_subject_shell_quotes_single_quote_title = function()
     local event = fixing()
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
@@ -153,7 +154,7 @@ return {
 
   test_fix_commit_subject_falls_back_to_issue_number_when_title_absent = function()
     local event = fixing()
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",

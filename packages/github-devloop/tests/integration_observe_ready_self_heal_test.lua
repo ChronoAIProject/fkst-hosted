@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
@@ -282,7 +283,7 @@ return {
   test_observe_issue_ready_self_heal_does_not_duplicate_after_implementing = function()
     local event = reached()
     local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
-    local branch = core.implement_branch("owner/repo", 42, ready_payload.dedup_key)
+    local branch = devloop_base.implement_branch("owner/repo", 42, ready_payload.dedup_key)
     local run_opts = opts("observe-issue-ready-self-heal-advanced")
     local exec_ref = core.implement_exec_ref(event.proposal_id, ready_payload.dedup_key)
     codex_status.seed_implement_codex_run(run_opts, event.proposal_id, ready_payload.dedup_key)

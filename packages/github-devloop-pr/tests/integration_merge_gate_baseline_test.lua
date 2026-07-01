@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -158,7 +159,7 @@ return {
       gate_baseline_sha = "828df8d3",
       gate_failure_excerpt = "mergeable-conflicting",
     })
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local old_feedback = "github-devloop merge gate failed: mergeable-conflicting"
       .. "\n" .. m_builders.merge_gate_marker(core, 
         event.proposal_id,
@@ -246,7 +247,7 @@ return {
       gate_baseline_sha = event.gate_baseline_sha,
       review_reason = "mergeable-conflicting",
     }, event.source_ref)
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local feedback = "github-devloop merge gate failed: mergeable-conflicting"
       .. "\n" .. m_builders.merge_gate_marker(core, 
         event.proposal_id,

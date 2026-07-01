@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
@@ -62,7 +63,7 @@ end
 return {
   test_fix_rebuilds_missing_recorded_worktree_under_current_runtime_root = function()
     local event = fixing()
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",
@@ -105,7 +106,7 @@ return {
 
   test_fix_removes_existing_outside_runtime_worktree_before_rebuild = function()
     local event = fixing()
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = requests_review.build_review_result_comment_request(core,
       "owner/repo",
       "42",

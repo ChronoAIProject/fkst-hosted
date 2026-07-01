@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -150,7 +151,7 @@ local default_current = {
 }
 
 local function decision_key(payload, current, command)
-  return core.intake_decision_dedup_key(payload.proposal_id, current or default_current, command)
+  return devloop_base.intake_decision_dedup_key(payload.proposal_id, current or default_current, command)
 end
 
 local function trusted_reintake_command(id)

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local core = require("core")
 local exec_sync = exec_sync
 
@@ -67,7 +68,7 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
     end
     local existing_worktree = core.find_worktree_for_branch_under_runtime(list_result.stdout, branch, runtime_result.stdout)
     for _, stale_worktree in ipairs(core.find_worktrees_for_branch(list_result.stdout, branch)) do
-      if not core.path_under_runtime_root(runtime_result.stdout, stale_worktree) then
+      if not devloop_base.path_under_runtime_root(runtime_result.stdout, stale_worktree) then
         core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
           "branch=" .. tostring(branch),
           "worktree=" .. tostring(stale_worktree),

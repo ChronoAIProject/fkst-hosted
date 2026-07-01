@@ -152,7 +152,7 @@ function C.pr_transition_lock_key(M, repo, pr_number)
   return "github-devloop/transition/" .. strings.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
 end
 
-function C.merge_lane_lock_key(M, repo)
+function C.merge_lane_lock_key(repo)
   return "github-devloop/merge-lane/" .. strings.sanitize_key(repo, false)
 end
 

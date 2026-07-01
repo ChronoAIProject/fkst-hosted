@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -43,7 +44,7 @@ end
 return {
   test_implement_commit_uses_issue_title_subject = function()
     local event = ready()
-    local branch = core.implement_branch("owner/repo", "42", event.dedup_key)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.dedup_key)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     }, {
@@ -62,7 +63,7 @@ return {
 
   test_implement_commit_subject_shell_quotes_single_quote_title = function()
     local event = ready()
-    local branch = core.implement_branch("owner/repo", "42", event.dedup_key)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.dedup_key)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     }, {
@@ -80,7 +81,7 @@ return {
 
   test_implement_commit_subject_preserves_chinese_title = function()
     local event = ready()
-    local branch = core.implement_branch("owner/repo", "42", event.dedup_key)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.dedup_key)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     }, {
@@ -98,7 +99,7 @@ return {
 
   test_implement_commit_subject_falls_back_to_issue_number = function()
     local event = ready()
-    local branch = core.implement_branch("owner/repo", "42", event.dedup_key)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.dedup_key)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     }, {
@@ -117,7 +118,7 @@ return {
 
   test_implement_commit_subject_falls_back_when_title_fetch_fails = function()
     local event = ready()
-    local branch = core.implement_branch("owner/repo", "42", event.dedup_key)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.dedup_key)
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     }, {

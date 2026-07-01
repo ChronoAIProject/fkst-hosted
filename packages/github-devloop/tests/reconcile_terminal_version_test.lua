@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
@@ -159,7 +160,7 @@ return {
         created_at = "2026-06-03T00:02:00Z",
       },
     })
-    local branch = core.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
+    local branch = devloop_base.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
     mock_branch_config()
     t.mock_command(core.gh_pr_list_head_base_cmd(repo, branch, "dev"), {
       stdout = pr_list_json(branch, "dev"),

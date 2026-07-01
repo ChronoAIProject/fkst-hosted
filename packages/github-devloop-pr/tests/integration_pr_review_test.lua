@@ -407,7 +407,7 @@ return {
   end,
   test_observe_pr_without_visible_backpointer_uses_pr_native_origin = function()
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local branch = core.implement_branch("owner/repo", "42", impl_version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", impl_version)
     mock_pr_origin({}, branch)
     local result = run_observe_pr({
       schema = "github-proxy.v1",

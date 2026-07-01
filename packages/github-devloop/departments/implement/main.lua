@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -666,7 +667,7 @@ local function process_ready_event(event)
     local implementation_version = core.implementation_attempt_version(ready.dedup_key, ready.impl_retry_attempt)
     local branch_version = core.implementation_base_version(ready.dedup_key)
     local marker_ready = ready_for_implementation_version(ready, implementation_version)
-    local branch = core.implement_branch(repo, issue_number, branch_version)
+    local branch = devloop_base.implement_branch(repo, issue_number, branch_version)
 
     if state.state == "implementing" then
       if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then

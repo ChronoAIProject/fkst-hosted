@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
@@ -45,7 +46,7 @@ local function delegation_key(proposal_id, impl_version, generation)
 end
 
 local function branch_for(repo, issue_number, impl_version)
-  return M.implement_branch(repo, issue_number, M.implementation_base_version(impl_version))
+  return devloop_base.implement_branch(repo, issue_number, M.implementation_base_version(impl_version))
 end
 
 local function parse_open_prs_for_branch(stdout, branch, base_branch)

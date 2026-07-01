@@ -794,7 +794,7 @@ local function process_merge_queue_tick(event)
     })
     return
   end
-  local lock_key = core.merge_lane_lock_key(repo)
+  local lock_key = entity_lib.merge_lane_lock_key(repo)
   if lock_key == nil then
     core.log_entry("merge", event, "unknown", "")
     core.log_line("info", "merge", "unknown", "GATE", {
@@ -905,7 +905,7 @@ local function process_merge_ready_event(event)
   end
   local repo = entity.repo
   local issue_number = entity.issue_number
-  local lock_key = core.merge_lane_lock_key(repo)
+  local lock_key = entity_lib.merge_lane_lock_key(repo)
   if lock_key == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "no transition lock key")
     return

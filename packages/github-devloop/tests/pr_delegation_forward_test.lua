@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_core_helpers")
@@ -10,7 +11,7 @@ local repo = "owner/repo"
 local issue_number = 42
 local issue_proposal = "github-devloop/issue/owner/repo/42"
 local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-local branch = core.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
+local branch = devloop_base.implement_branch(repo, issue_number, core.implementation_base_version(impl_version))
 local base_branch = "dev"
 local head_sha = "abc123def456"
 

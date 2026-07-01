@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local S = {}
 local support = require("devloop.commands.support")
 local validators = require("devloop.commands.validators")
@@ -311,7 +312,7 @@ function S.install(M)
         elseif line == "branch " .. wanted
           and path ~= nil
           and path ~= ""
-          and M.path_under_runtime_root(runtime_root, path) then
+          and devloop_base.path_under_runtime_root(runtime_root, path) then
           return path
         end
       end

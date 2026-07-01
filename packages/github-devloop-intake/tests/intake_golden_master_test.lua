@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
@@ -131,7 +132,7 @@ return {
     t.eq(payload.repo, "owner/repo")
     t.eq(payload.issue_number, "42")
     t.eq(payload.proposal_id, "github-devloop/issue/owner/repo/42")
-    t.eq(payload.effect_id, core.intake_decision_dedup_key(payload.proposal_id, { title = "Issue", body = "" }))
+    t.eq(payload.effect_id, devloop_base.intake_decision_dedup_key(payload.proposal_id, { title = "Issue", body = "" }))
     assert_admission_candidate_delivery_key(payload)
     assert_source_ref(payload)
   end,

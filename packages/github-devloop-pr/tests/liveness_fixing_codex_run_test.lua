@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
@@ -466,7 +467,7 @@ return {
 
   test_fixing_dispatch_with_live_run_without_completion_markers_skips_redelivery = function()
     local event = fixing()
-    local branch = core.implement_branch(repo, "42", event.version)
+    local branch = devloop_base.implement_branch(repo, "42", event.version)
     local rejection = reject_comment(event)
     local run_opts = opts("fixing-dispatch-live-run-no-marker", { FKST_GITHUB_WRITE = "1" })
     seed_role_codex_run(run_opts, "fix", event.proposal_id, event.version)

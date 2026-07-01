@@ -94,7 +94,7 @@ end
 
 function M.build_release_notes_prompt(repo, upstream, integration, head_sha, ahead)
   local prompt = require("prompts.release_notes")
-  return M.render_template(prompt.template, {
+  return devloop_base.render_template(prompt.template, {
     repo = devloop_base.neutralize_untrusted_prompt_text(repo),
     upstream_branch = devloop_base.neutralize_untrusted_prompt_text(upstream),
     integration_branch = devloop_base.neutralize_untrusted_prompt_text(integration),

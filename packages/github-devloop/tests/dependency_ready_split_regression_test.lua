@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -595,7 +596,7 @@ return {
     t.eq(ready.payload.ready_hand_off.comment_id, "IC_dependency_release_ready")
     t.eq(ready.payload.ready_hand_off.marker_version, split_version)
 
-    local branch = core.implement_branch(repo, 42, ready.payload.dedup_key)
+    local branch = devloop_base.implement_branch(repo, 42, ready.payload.dedup_key)
     mock_implement_issue({ "fkst-dev:ready" }, {
       core.state_marker(proposal_id, "dependency_wait", version),
     })

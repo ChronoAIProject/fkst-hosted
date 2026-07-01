@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
@@ -98,7 +99,7 @@ local function default_intake_current(extra)
 end
 
 local function expected_decision_key(payload, extra, reintake_command)
-  return core.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command)
+  return devloop_base.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command)
 end
 
 local function assert_execution_request_chain(raises, payload, extra, reintake_command, service_class)

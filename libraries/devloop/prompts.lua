@@ -75,7 +75,7 @@ function M.render_prompt_template(template, vars, exec, opts)
   if type(opts) == "table" and opts.entity_history == true then
     table.insert(lines, github_entity_history_line())
   end
-  return table.concat(lines, "\n") .. "\n\n" .. M.render_template(template, vars)
+  return table.concat(lines, "\n") .. "\n\n" .. devloop_base.render_template(template, vars)
 end
 end
 

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -22,7 +23,7 @@ local find_causal_raise = h.find_causal_raise
 return {
   test_mergeable_conflicting_fix_skips_pr_merge_ref_verification = function()
     local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "mergeable-conflicting" })
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: mergeable-conflicting"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
       .. "\n" .. m_builders.merge_gate_marker(core, 
@@ -91,7 +92,7 @@ return {
 
   test_fix_merges_gate_baseline_before_codex = function()
     local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "own-ci-red" })
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
       .. "\n" .. m_builders.merge_gate_marker(core, 
@@ -172,7 +173,7 @@ return {
 
   test_fix_errors_on_leftover_conflict_markers = function()
     local event = fixing({ gate_baseline_sha = "abc123", gate_failure_excerpt = "own-ci-red" })
-    local branch = core.implement_branch("owner/repo", "42", event.version)
+    local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
       .. "\n" .. m_builders.merge_gate_marker(core, 

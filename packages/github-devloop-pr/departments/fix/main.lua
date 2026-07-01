@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -50,7 +51,7 @@ local function branch_worktree(repo, issue_number, version, branch)
     if dir_result.exit_code ~= 0 and dir_result.exit_code ~= 1 then
       error("github-devloop: git worktree path check failed: " .. tostring(dir_result.stderr))
     end
-    if dir_result.exit_code == 0 and core.path_under_runtime_root(runtime_root, existing) then
+    if dir_result.exit_code == 0 and devloop_base.path_under_runtime_root(runtime_root, existing) then
       return existing
     end
     if dir_result.exit_code == 1 then

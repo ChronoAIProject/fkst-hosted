@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local core = require("core")
 local saga = require("workflow.saga")
@@ -27,14 +28,14 @@ local function supported_handoff(payload)
   end
   local handoff = payload.handoff
   if handoff.kind == "github-devloop.ready"
-    and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.version)
-    and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.marker_version)
+    and devloop_base.is_safe_consensus_result_ref(handoff.proposal_id, handoff.version)
+    and devloop_base.is_safe_consensus_result_ref(handoff.proposal_id, handoff.marker_version)
     and strings.is_bounded_string(handoff.version, core._max_dedup_len)
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then
     return handoff
   end
   if handoff.kind == "github-devloop.reconcile"
-    and core.is_safe_consensus_result_ref(handoff.proposal_id, handoff.base_version)
+    and devloop_base.is_safe_consensus_result_ref(handoff.proposal_id, handoff.base_version)
     and strings.is_bounded_string(handoff.base_version, core._max_dedup_len)
     and valid_round(handoff.round) ~= nil
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len) then

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local t = h.t
@@ -85,7 +86,7 @@ local function find_comment_body(raises, needle)
 end
 
 local function expected_effect_key(proposal_id, command)
-  return core.intake_decision_dedup_key(proposal_id, { title = "Issue", body = "" }, command)
+  return devloop_base.intake_decision_dedup_key(proposal_id, { title = "Issue", body = "" }, command)
 end
 
 return {
