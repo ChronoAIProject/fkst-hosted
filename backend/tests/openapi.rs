@@ -203,3 +203,28 @@ async fn webhook_path_tracks_configuration() {
         "webhook must be documented when a secret is configured"
     );
 }
+
+/// The document-level `tags` must be exactly the live set — no phantom tag left
+/// behind by a removed surface (the audit found stale `goals`/`catalog`/etc.;
+/// dropping the REST session endpoints left a phantom `sessions` tag until this
+/// guard). Guards against declared-but-unused tags in the served contract.
+#[tokio::test]
+async fn document_tags_are_exactly_the_live_surface() {
+    let spec = fetch_spec(app(true)).await;
+    let mut tags: Vec<String> = spec["tags"]
+        .as_array()
+        .expect("tags array")
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    tags.sort();
+    assert_eq!(
+        tags,
+        vec![
+            "system".to_string(),
+            "users".to_string(),
+            "webhooks".to_string()
+        ],
+        "root `tags` must equal the live operation tags (no phantom/removed tags)"
+    );
+}
