@@ -155,16 +155,16 @@ local forge_validators = require("devloop.forge_validators")
     )
   end
 
-  function C.current_base_head(M, base_branch)
+  function C.current_base_head(git, base_branch)
     local branch = require_safe_branch("base branch", base_branch)
     local fetch_result, fetch_error = run_git_ok(function()
-      return M.git.fetch_branch("origin", branch, 60)
+      return git.fetch_branch("origin", branch, 60)
     end, "base fetch")
     if fetch_result == nil then
       return nil, fetch_error
     end
     local head_result, head_error = run_git_ok(function()
-      return M.git.remote_branch_head("origin", branch, 30)
+      return git.remote_branch_head("origin", branch, 30)
     end, "base head")
     if head_result == nil then
       return nil, head_error

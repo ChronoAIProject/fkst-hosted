@@ -60,7 +60,7 @@ local function gate_baseline_sha_for_reason(_proposal_id, _pr_number, pr, _reaso
 end
 
 local function pr_head_contains_current_base(pr, branches)
-  local base_head, base_reason = core.current_base_head(branches.integration)
+  local base_head, base_reason = git_mechanics.current_base_head(core.git, branches.integration)
   if base_head == nil then
     return false, base_reason
   end

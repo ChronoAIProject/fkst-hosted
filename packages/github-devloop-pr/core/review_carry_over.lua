@@ -61,7 +61,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if ancestry.exit_code ~= 0 then
     return nil, "approved-head-not-ancestor"
   end
-  local base_head, base_error = M.current_base_head(base_branch)
+  local base_head, base_error = git_mechanics.current_base_head(M.git, base_branch)
   if base_head == nil then
     return nil, "carry-over-proof-unavailable: " .. tostring(base_error)
   end

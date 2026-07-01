@@ -316,7 +316,7 @@ function C.merge_queue_predecessor_set_matches_current_base(M, recorded_set, cur
   if offset == 0 then
     return true, "predecessor-set-current"
   end
-  local base_head, base_reason = M.current_base_head(base_branch)
+  local base_head, base_reason = git_mechanics.current_base_head(M.git, base_branch)
   if base_head == nil then
     return false, base_reason
   end

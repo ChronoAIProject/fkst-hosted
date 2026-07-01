@@ -44,7 +44,7 @@ local function files_disjoint_from_window(M, files, merged_files)
 end
 
 local function current_base_head(M, branches)
-  local base_head, reason = M.current_base_head(branches.integration)
+  local base_head, reason = git_mechanics.current_base_head(M.git, branches.integration)
   if base_head == nil then
     return nil, reason
   end

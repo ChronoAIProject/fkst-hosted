@@ -371,7 +371,7 @@ end
 
 local function create_or_update_branch(repo, base_branch, current_pin, target_sha)
   local old_branch_head = fetch_bump_branch_head()
-  local base_head = M.current_base_head(base_branch)
+  local base_head = git_mechanics.current_base_head(M.git, base_branch)
   if base_head == nil then
     error("github-devloop: unable to read base branch head for substrate-ref bump")
   end
