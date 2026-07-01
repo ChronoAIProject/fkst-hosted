@@ -18,7 +18,7 @@ function C.attach_reviewing_handoff(M, request, proposal_id, pr_number, version,
     proposal_id = proposal_id,
     pr_number = pr_number,
     version = version,
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
   return request
 end
@@ -29,7 +29,7 @@ function C.attach_blocked_handoff(M, request, proposal_id, pr_number, version, s
     proposal_id = proposal_id,
     pr_number = pr_number,
     version = version,
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
   return request
 end
@@ -100,7 +100,7 @@ function C.build_issue_review_converge_round_comment_request(M, repo, issue_numb
       tostring(round),
       tostring(unresolved.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref or unresolved.source_ref),
   }, source_ref or unresolved.source_ref)
 end
 
@@ -229,7 +229,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
       review_dedup_key = reached.dedup_key,
       reviewed_head_sha = reviewed_head_sha,
       current_head_sha = reached.current_head_sha or reviewed_head_sha,
-      source_ref = M.normalize_source_ref(source_ref),
+      source_ref = base_ids.normalize_source_ref(source_ref),
     }
   elseif reached.decision == "reject" and not reached.reflection_checkpoint then
     local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
@@ -453,7 +453,7 @@ function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_pro
     review_dedup_key = carry.new_review_dedup_key,
     reviewed_head_sha = carry.new_head_sha,
     current_head_sha = carry.new_head_sha,
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
   return request
 end

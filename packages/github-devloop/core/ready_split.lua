@@ -28,7 +28,7 @@ function M.build_ready_split_canonicalized_comment_request(repo, issue_number, p
       .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. tostring(gate and gate.reason or "ready_split_rederive")
       .. "\n\n" .. markers,
     dedup_key = base_ids.dedup_key({ "ready-split", "canonicalized", tostring(proposal_id), tostring(from_version), tostring(to_version) }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }, source_ref)
   if to_state == "ready" then
     request.handoff = {
@@ -36,7 +36,7 @@ function M.build_ready_split_canonicalized_comment_request(repo, issue_number, p
       proposal_id = proposal_id,
       version = to_version,
       marker_version = to_version,
-      source_ref = M.normalize_source_ref(source_ref),
+      source_ref = base_ids.normalize_source_ref(source_ref),
     }
   end
   return request
@@ -227,7 +227,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
       .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. tostring(gate.reason or "dependency-gate-unresolvable")
       .. "\n\n" .. M.state_marker(proposal_id, "blocked", state.version),
     dedup_key = base_ids.dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
-    source_ref = M.normalize_source_ref(issue.source_ref),
+    source_ref = base_ids.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
   local label_request = requests_labels.build_label_request(M,
     issue.repo,

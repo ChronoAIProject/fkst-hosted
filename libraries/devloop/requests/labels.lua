@@ -26,7 +26,7 @@ function C.build_label_request(M, repo, issue_number, add_labels, remove_labels,
     remove_labels = remove_labels or {},
     label_colors = label_colors_for(M, add_labels),
     dedup_key = dedup_key,
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }, source_ref)
 end
 

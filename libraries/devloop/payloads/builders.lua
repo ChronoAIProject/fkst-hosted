@@ -51,7 +51,7 @@ function C.build_devloop_ready_payload(M, source)
     schema = "github-devloop.ready.v1",
     proposal_id = source.proposal_id,
     dedup_key = ready_version,
-    source_ref = M.normalize_source_ref(source.source_ref),
+    source_ref = base_ids.normalize_source_ref(source.source_ref),
   }
   if source.include_ready_hand_off == true and source.ready_comment_id ~= nil then
     payload.ready_hand_off = {
@@ -95,7 +95,7 @@ function C.build_devloop_reviewing_payload(M, origin, pr_number, source_ref, ver
       tostring(review_version),
       tostring(pr_number),
     }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
   if origin.reviewing_comment_id ~= nil then
     payload.reviewing_hand_off = {
@@ -142,7 +142,7 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
       tostring(pr_number),
       tostring(review_fact.review_dedup_key),
     }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
   local framing = shared.bounded_framing(M, review_fact.framing or origin.framing)
   if framing ~= nil then
@@ -222,7 +222,7 @@ function C.build_devloop_review_meta_payload(M, unresolved, issue_proposal_id, i
       tostring(n),
       tostring(unresolved.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(source_ref or unresolved.source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref or unresolved.source_ref),
   }
 end
 
@@ -271,7 +271,7 @@ function C.build_devloop_merge_ready_payload(M, issue_proposal_id, pr_number, ve
       tostring(review_fact and review_fact.review_dedup_key or "review"),
       tostring(current_head_sha or "nohead"),
     }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
 end
 
@@ -290,7 +290,7 @@ function C.build_devloop_decompose_payload(M, fix_reconcile)
       tostring(fix_reconcile.proposal_id),
       tostring(fix_reconcile.issue_version),
     }),
-    source_ref = M.normalize_source_ref(fix_reconcile.source_ref),
+    source_ref = base_ids.normalize_source_ref(fix_reconcile.source_ref),
   }
 end
 
@@ -335,7 +335,7 @@ function C.build_proposal(M, issue)
     body = body,
     content_fetch = issue.content_fetch,
     dedup_key = M.proposal_dedup_key(proposal_id, issue.updated_at),
-    source_ref = M.normalize_source_ref(issue.source_ref),
+    source_ref = base_ids.normalize_source_ref(issue.source_ref),
   }
 end
 
@@ -435,7 +435,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
       review_id,
       "review",
     }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }, high_risk)
 end
 

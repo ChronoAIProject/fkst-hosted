@@ -356,9 +356,9 @@ function C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry)
     "requeue",
     base_ids.safe_repo(repo),
     "merged-pr",
-    M.safe_issue(merged_pr_number),
+    base_ids.safe_issue(merged_pr_number),
     "next-pr",
-    M.safe_issue(next_entry.pr_number),
+    base_ids.safe_issue(next_entry.pr_number),
     M.safe_head_segment(next_entry.head_sha),
   })
 end

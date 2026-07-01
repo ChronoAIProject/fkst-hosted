@@ -69,7 +69,7 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
       "comment",
       tostring(reconcile.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(reconcile.source_ref),
+    source_ref = base_ids.normalize_source_ref(reconcile.source_ref),
   }, reconcile.source_ref)
 end
 

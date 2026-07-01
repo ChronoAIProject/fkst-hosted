@@ -268,7 +268,7 @@ function M.build_intake_class_issue_create_request(repo, issue_number, candidate
       repo = repo,
       issue_number = issue_number,
     },
-    source_ref = M.normalize_source_ref(candidate and candidate.source_ref),
+    source_ref = base_ids.normalize_source_ref(candidate and candidate.source_ref),
   }
 end
 

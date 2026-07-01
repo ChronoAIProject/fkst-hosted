@@ -422,7 +422,7 @@ local function pipeline_timeout(event)
       attempt_limit = limit,
       driving_queue = row and row.driving_queue or nil,
       reason_class = reason_class,
-      source_ref = core.normalize_source_ref(reconcile.source_ref),
+      source_ref = base_ids.normalize_source_ref(reconcile.source_ref),
     }
     local comment_request = target_pr_number ~= nil
       and build_timeout_reconcile_pr_comment_request(repo, target_pr_number, reconcile, action, reason, version, why_fields)

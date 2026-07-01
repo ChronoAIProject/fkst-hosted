@@ -178,10 +178,6 @@ end
 
 local dedup_key = base_ids.dedup_key
 
-function C.safe_issue(M, issue_number)
-  return base_ids.safe_issue(issue_number)
-end
-
 function C.safe_updated_at(M, updated_at)
   local safe = strings.sanitize_key(updated_at, max_key_len):sub(1, max_update_key_len):gsub("/+$", "")
   if safe == "" then
@@ -242,7 +238,7 @@ function C.pr_review_proposal_id(M, repo, pr_number, version, head_sha)
   return "github-devloop/pr-review/"
     .. C.safe_pr_review_repo_segment(M, repo)
     .. "/"
-    .. C.safe_issue(M, pr_number)
+    .. base_ids.safe_issue(pr_number)
     .. "/"
     .. transition_version.safe_version_segment(version)
     .. "/"
@@ -275,7 +271,7 @@ function C.parse_pr_review_proposal_id(M, id)
     return nil
   end
   if not is_path_safe_key(repo, 64)
-    or C.safe_issue(M, pr_number) ~= pr_number
+    or base_ids.safe_issue(pr_number) ~= pr_number
     or transition_version.safe_version_segment(version) ~= version
     or C.safe_head_segment(M, head_sha) ~= head_sha then
     return nil
@@ -424,7 +420,7 @@ function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
     "ci-selfheal",
     base_ids.safe_repo(repo),
     "pr",
-    C.safe_issue(M, pr_number),
+    base_ids.safe_issue(pr_number),
     C.safe_head_segment(M, head_sha),
   })
 end
@@ -435,13 +431,13 @@ function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
     "ci-missing-status-observed",
     base_ids.safe_repo(repo),
     "pr",
-    C.safe_issue(M, pr_number),
+    base_ids.safe_issue(pr_number),
     C.safe_head_segment(M, head_sha),
   })
 end
 
 function C.observe_lock_key(M, repo, issue_number)
-  return "github-devloop/transition/" .. base_ids.safe_repo(repo) .. "/issue/" .. C.safe_issue(M, issue_number)
+  return "github-devloop/transition/" .. base_ids.safe_repo(repo) .. "/issue/" .. base_ids.safe_issue(issue_number)
 end
 
 function C.transition_lock_key(M, proposal_id)
@@ -489,7 +485,7 @@ end
 
 function C.implement_branch(M, repo, issue_number, impl_version)
   local safe_repo = base_ids.safe_repo(repo)
-  local safe_issue = C.safe_issue(M, issue_number)
+  local safe_issue = base_ids.safe_issue(issue_number)
   local safe_version = strings.sanitize_key(impl_version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe_version = safe_version:gsub("^%-+", ""):gsub("%-+$", ""):gsub("%.+$", "")
   if safe_version == "" then
@@ -679,10 +675,6 @@ function C.neutralize_untrusted_comment_text(M, text)
   end
 
   return table.concat(output)
-end
-
-function C.normalize_source_ref(M, source_ref)
-  return base_ids.normalize_source_ref(source_ref)
 end
 
 function C.gh_exec_opts(M, cmd_or_opts, timeout)

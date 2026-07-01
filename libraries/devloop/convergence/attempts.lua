@@ -14,7 +14,7 @@ function C.timeout_attempt_marker(M, proposal_id, issue_version, state_name, rou
   if n == nil or n <= 0 then
     error("github-devloop: invalid timeout attempt round")
   end
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   local lineage_version = transition_version.strip_suffixes(issue_version)
   return '<!-- fkst:github-devloop:timeout-attempt:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
     .. '" version="' .. safe_attr(lineage_version, M._max_dedup_len)
@@ -31,7 +31,7 @@ function C.timeout_attempt_v2_marker(M, proposal_id, state_name, liveness_class_
   if n == nil or n <= 0 then
     error("github-devloop: invalid timeout attempt round")
   end
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   return '<!-- fkst:github-devloop:timeout-attempt:v2 proposal="' .. safe_attr(proposal_id, M._max_key_len)
     .. '" state="' .. safe_attr(state_name, max_attr_len)
     .. '" liveness_class_id="' .. safe_attr(liveness_class_id, max_attr_len)
@@ -52,7 +52,7 @@ function C.timeout_attempt_latest_marker(M, proposal_id, state_name, liveness_cl
 end
 
 function C.build_timeout_attempt_comment_request(M, target, proposal_id, state, row, source_ref, attempt)
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.timeout_attempt_marker(M, proposal_id, state.version, row.from_state, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(M, proposal_id, row.from_state, "", transition_version.strip_suffixes(state.version))
   return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
@@ -76,7 +76,7 @@ function C.build_timeout_attempt_comment_request(M, target, proposal_id, state, 
 end
 
 function C.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, generation_key)
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.timeout_attempt_v2_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key)
   return M.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
@@ -105,7 +105,7 @@ function C.decompose_exhausted_marker(M, proposal_id, issue_version, round, sour
   if n == nil or n <= 0 then
     error("github-devloop: invalid decompose exhausted round")
   end
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   local lineage_version = transition_version.strip_suffixes(issue_version)
   return '<!-- fkst:github-devloop:decompose-exhausted:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
     .. '" version="' .. safe_attr(lineage_version, M._max_dedup_len)
@@ -117,7 +117,7 @@ function C.decompose_exhausted_marker(M, proposal_id, issue_version, round, sour
 end
 
 function C.build_decompose_exhausted_comment_request(M, target, proposal_id, state, source_ref, attempt)
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.decompose_exhausted_marker(M, proposal_id, state.version, attempt, normalized)
   return M.build_entity_comment_request(target, "github-devloop decompose output obligation exhausted\n\n"
     .. "Structured WHY:\n"

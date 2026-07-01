@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local C = {}
@@ -23,7 +24,7 @@ local function visible_true_stall(M, issue, state, facts)
       base_version = base_version,
       round = round,
       dedup_key = "reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(round),
-      source_ref = M.normalize_source_ref(source_ref),
+      source_ref = base_ids.normalize_source_ref(source_ref),
     }
 end
 

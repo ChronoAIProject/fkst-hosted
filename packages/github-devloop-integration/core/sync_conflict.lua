@@ -132,7 +132,7 @@ function M.build_sync_conflict_escalation_request(conflict, fingerprint, attempt
       tostring(conflict.integration_branch),
       tostring(fingerprint),
     }),
-    source_ref = M.normalize_source_ref(conflict.source_ref),
+    source_ref = base_ids.normalize_source_ref(conflict.source_ref),
   }
 end
 end

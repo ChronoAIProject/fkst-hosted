@@ -34,7 +34,7 @@ function C.build_entity_comment_request(M, target, body, dedup_key, source_ref, 
     repo = target.repo,
     body = body,
     dedup_key = dedup_key,
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }
   if type(opts) == "table" and opts.replace_marker ~= nil then
     request.replace_marker = tostring(opts.replace_marker)

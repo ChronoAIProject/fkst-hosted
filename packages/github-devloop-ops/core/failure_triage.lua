@@ -45,7 +45,7 @@ local function normalized_fact(payload)
   if source_ref.kind == "cron" and tostring(source_ref.ref or "") == "" then
     normalized_source_ref = { kind = "cron", ref = "" }
   else
-    normalized_source_ref = M.normalize_source_ref(source_ref)
+    normalized_source_ref = base_ids.normalize_source_ref(source_ref)
   end
   local repo, issue_number = M.parse_issue_source_ref(normalized_source_ref)
   local parent_target

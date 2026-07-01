@@ -92,7 +92,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         proposal_id = unresolved.proposal_id,
         round = round,
         base_version = base_version,
-        source_ref = core.normalize_source_ref(unresolved.source_ref),
+        source_ref = base_ids.normalize_source_ref(unresolved.source_ref),
       })
       local reason = hit_round_cap
         and ("convergence budget reached at round " .. tostring(budget_round))

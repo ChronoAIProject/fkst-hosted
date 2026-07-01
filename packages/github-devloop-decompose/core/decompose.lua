@@ -104,7 +104,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
       repo = repo,
       pr_number = decompose.pr_number,
     },
-    source_ref = M.normalize_source_ref(decompose.source_ref),
+    source_ref = base_ids.normalize_source_ref(decompose.source_ref),
   }
 end
 

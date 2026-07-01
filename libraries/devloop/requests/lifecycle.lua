@@ -24,7 +24,7 @@ function C.build_observe_comment_request(M, issue, proposal)
       "thinking",
       tostring(proposal.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(issue.source_ref),
+    source_ref = base_ids.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
 end
 function C.build_result_comment_request(M, repo, issue_number, reached, state_name)
@@ -50,7 +50,7 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
     body = body,
     dedup_key = tostring(reached.proposal_id) .. "/comment/" .. tostring(reached.decision)
       .. "/" .. (tostring(reached.dedup_key):gsub(":", "-")),
-    source_ref = M.normalize_source_ref(reached.source_ref),
+    source_ref = base_ids.normalize_source_ref(reached.source_ref),
   }, reached.source_ref)
   if canonical_state == "ready" then
     request.handoff = {
@@ -58,7 +58,7 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
       proposal_id = reached.proposal_id,
       version = reached.dedup_key,
       marker_version = tostring(reached.effect_version or reached.dedup_key),
-      source_ref = M.normalize_source_ref(reached.source_ref),
+      source_ref = base_ids.normalize_source_ref(reached.source_ref),
     }
   end
   return request
@@ -86,7 +86,7 @@ function C.build_converge_round_comment_request(M, repo, issue_number, unresolve
       tostring(round),
       tostring(unresolved.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(unresolved.source_ref), handoff = handoff,
+    source_ref = base_ids.normalize_source_ref(unresolved.source_ref), handoff = handoff,
   }, unresolved.source_ref)
 end
 
@@ -103,7 +103,7 @@ function C.build_dependency_hold_comment_request(M, repo, issue_number, proposal
       .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. reason
       .. "\n\n" .. tostring(marker),
     dedup_key = base_ids.dedup_key({ "dependency", "comment", tostring(proposal_id), tostring(version), tostring(gate and gate.kind or "unknown") }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }, source_ref)
 end
 
@@ -125,7 +125,7 @@ function C.build_dependency_release_comment_request(M, repo, issue_number, propo
       .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. reason
       .. "\n\n" .. markers,
     dedup_key = base_ids.dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(version), reason }),
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }, source_ref)
 end
 
@@ -161,7 +161,7 @@ function C.build_intake_decision_comment_request(M, repo, issue_number, candidat
       tostring(candidate.proposal_id),
       tostring(candidate.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(candidate.source_ref),
+    source_ref = base_ids.normalize_source_ref(candidate.source_ref),
   }, candidate.source_ref)
 end
 
@@ -198,7 +198,7 @@ function C.build_implementing_comment_request(M, repo, issue_number, ready, work
       "implementing",
       tostring(ready.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(ready.source_ref),
+    source_ref = base_ids.normalize_source_ref(ready.source_ref),
   }, ready.source_ref)
 end
 
@@ -231,7 +231,7 @@ function C.build_implementing_state_comment_request(M, repo, issue_number, ready
       "implementing-state",
       tostring(ready.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(ready.source_ref),
+    source_ref = base_ids.normalize_source_ref(ready.source_ref),
   }, ready.source_ref)
 end
 
@@ -249,7 +249,7 @@ function C.build_implement_attempt_comment_request(M, repo, issue_number, ready,
       tostring(ready.dedup_key),
       tostring(attempt),
     }),
-    source_ref = M.normalize_source_ref(ready.source_ref),
+    source_ref = base_ids.normalize_source_ref(ready.source_ref),
   }
 end
 
@@ -268,7 +268,7 @@ function C.build_implement_version_mismatch_comment_request(M, repo, issue_numbe
       M.implement_version_mismatch_key(expected_version, current_version),
       tostring(attempt),
     }),
-    source_ref = M.normalize_source_ref(ready.source_ref),
+    source_ref = base_ids.normalize_source_ref(ready.source_ref),
   }
 end
 
@@ -302,7 +302,7 @@ function C.build_impl_failure_comment_request(M, repo, issue_number, ready, reas
       tostring(retry_attempt),
       tostring(ready.dedup_key),
     }),
-    source_ref = M.normalize_source_ref(ready.source_ref),
+    source_ref = base_ids.normalize_source_ref(ready.source_ref),
   }, ready.source_ref)
 end
 

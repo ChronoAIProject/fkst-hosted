@@ -59,7 +59,7 @@ function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_
     remove_labels = remove_labels,
     label_colors = label_colors_for(add_labels),
     dedup_key = dedup_key_value,
-    source_ref = M.normalize_source_ref(source_ref),
+    source_ref = base_ids.normalize_source_ref(source_ref),
   }, issue_number ~= nil and M.issue_source_ref(repo, issue_number) or nil)
 end
 

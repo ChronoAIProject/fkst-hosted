@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local S = {}
 local strings = require("contract.strings")
 local error_facts = require("contract.error_facts")
@@ -150,7 +151,7 @@ function M.error_fact_class(value)
 end
 
 function M.error_fact_source_ref_digest(source_ref)
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   return normalized.kind .. ":" .. normalized.ref
 end
 
@@ -198,7 +199,7 @@ function M.build_error_fact(opts)
   }
 
   if opts.source_ref ~= nil then
-    fact.source_ref = M.normalize_source_ref(opts.source_ref)
+    fact.source_ref = base_ids.normalize_source_ref(opts.source_ref)
   end
   if opts.attempt ~= nil then
     fact.attempt = normalize_attempt(opts.attempt)

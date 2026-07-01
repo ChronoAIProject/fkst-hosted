@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local C = {}
@@ -375,7 +376,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
 end
 
 function C.claim_required_payload(M, source_ref)
-  local normalized = M.normalize_source_ref(source_ref)
+  local normalized = base_ids.normalize_source_ref(source_ref)
   local repo, issue_number = M.parse_issue_source_ref(normalized)
   if repo == nil or issue_number == nil then
     return nil
