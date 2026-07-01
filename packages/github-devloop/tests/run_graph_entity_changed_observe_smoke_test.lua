@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
@@ -16,7 +17,7 @@ local function observe_spec()
 end
 
 local function source_ref()
-  return core.issue_source_ref(repo, issue_number)
+  return entity_lib.issue_source_ref(repo, issue_number)
 end
 
 local function initial_event()

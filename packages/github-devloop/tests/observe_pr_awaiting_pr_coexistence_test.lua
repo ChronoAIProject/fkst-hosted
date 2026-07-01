@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -23,7 +24,7 @@ local function observe_issue_event()
     updated_at = "2026-06-03T02:03:04Z",
     labels = { "fkst-dev:enabled", "fkst-dev:awaiting-pr" },
     dedup_key = "owner/repo#issue#42@2026-06-03T02:03:04Z",
-    source_ref = core.issue_source_ref("owner/repo", 42),
+    source_ref = entity_lib.issue_source_ref("owner/repo", 42),
   }
 end
 

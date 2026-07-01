@@ -137,7 +137,7 @@ local function replay_pr_local_state(origin, pr_number, current_pr, state, sourc
   return replayer.replay_from_table(core, "observe_pr", {
     repo = origin.repo,
     number = origin.issue_number,
-    source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref,
+    source_ref = origin.issue_number ~= nil and entity_lib.issue_source_ref(origin.repo, origin.issue_number) or source_ref,
   }, state, replay_fields.restart_transition_row(core.restart_transition_table(), state.state), {
     proposal_id = origin.proposal_id,
     current = { comments = current_pr.comments or {} },
@@ -263,7 +263,7 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
   if not core.restart_row_observable_on(row, "pr") then
     return false
   end
-  local issue_source_ref = origin.issue_number ~= nil and core.issue_source_ref(origin.repo, origin.issue_number) or source_ref
+  local issue_source_ref = origin.issue_number ~= nil and entity_lib.issue_source_ref(origin.repo, origin.issue_number) or source_ref
   local head_sha = current_pr and current_pr.head_sha
   return core.maybe_timeout_redrive_from_table("observe_pr", {
     repo = origin.repo,
@@ -359,7 +359,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
     origin.issue_number,
     "fixing",
     tostring(state.version) .. "/observe-pr-conflict/label/fixing",
-    core.issue_source_ref(origin.repo, origin.issue_number)
+    entity_lib.issue_source_ref(origin.repo, origin.issue_number)
   ) or nil
   core.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "applied(not-mergeable)", reason)
   local raised = {

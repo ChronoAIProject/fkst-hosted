@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local contract_time = require("contract.time")
@@ -72,10 +73,10 @@ return {
       local applied = core.maybe_timeout_redrive_from_table("observe_issue", {
         repo = "owner/repo",
         number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
+        source_ref = entity_lib.issue_source_ref("owner/repo", 42),
       }, state, row, {
         proposal_id = state.proposal_id,
-        source_ref = core.issue_source_ref("owner/repo", 42),
+        source_ref = entity_lib.issue_source_ref("owner/repo", 42),
         current = { comments = {} },
         current_pr = { comments = {} },
         now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),

@@ -40,7 +40,7 @@ local function state_comment(state_name, state_version, created_at)
 end
 
 local function converge_round_comment(created_at)
-  local source_ref = core.issue_source_ref(repo, 42)
+  local source_ref = entity_lib.issue_source_ref(repo, 42)
   return trusted_comment(conv_rounds.converge_round_marker(core,
     proposal_id,
     version,
@@ -164,7 +164,7 @@ local function assert_fresh_merge_wait_does_not_extend_absolute_cap(state_name, 
     local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
       repo = repo,
       number = 42,
-      source_ref = core.issue_source_ref(repo, 42),
+      source_ref = entity_lib.issue_source_ref(repo, 42),
     }, old_merge_state(state_name, timeout_version), row, merge_timeout_facts({ wait }, now_seconds))
     t.eq(applied, true)
   end)
@@ -192,7 +192,7 @@ local function assert_fresh_merge_wait_defers_within_absolute_cap(state_name)
     local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
       repo = repo,
       number = 42,
-      source_ref = core.issue_source_ref(repo, 42),
+      source_ref = entity_lib.issue_source_ref(repo, 42),
     }, recent_merge_state(state_name, version), row, merge_timeout_facts({ wait }, now_seconds))
     t.eq(applied, true)
   end)
@@ -208,7 +208,7 @@ local function assert_stale_or_missing_merge_wait_escalates(state_name, wait_com
     local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
       repo = repo,
       number = 42,
-      source_ref = core.issue_source_ref(repo, 42),
+      source_ref = entity_lib.issue_source_ref(repo, 42),
     }, old_merge_state(state_name, timeout_version), row, merge_timeout_facts(wait_comment and { wait_comment } or {}, now_seconds))
     t.eq(applied, true)
   end)
@@ -236,7 +236,7 @@ local function assert_stale_merge_wait_falls_back_to_under_budget_state_age(stat
     local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
       repo = repo,
       number = 42,
-      source_ref = core.issue_source_ref(repo, 42),
+      source_ref = entity_lib.issue_source_ref(repo, 42),
     }, recent_merge_state(state_name, version), row, merge_timeout_facts({ stale_wait }, now_seconds))
     t.eq(applied, false)
   end)

@@ -216,7 +216,7 @@ local function run_observe(issue_comments, pr_comments, opts)
       updated_at = "2026-06-03T01:02:03Z",
       labels = { "fkst-dev:enabled", "fkst-dev:awaiting-pr" },
       dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
-      source_ref = core.issue_source_ref(repo, issue_number),
+      source_ref = entity_lib.issue_source_ref(repo, issue_number),
     },
   })
 end
@@ -525,7 +525,7 @@ return {
     local comments = parent_comments({ version = state.version, delegation_version = state.version })
     local facts = {
       proposal_id = parent,
-      source_ref = core.issue_source_ref(repo, issue_number),
+      source_ref = entity_lib.issue_source_ref(repo, issue_number),
       current = { comments = comments },
       current_pr = { comments = {} },
       ["pr-delegation"] = m_facts.pr_delegation_fact(core, comments, parent, state.version),
@@ -541,7 +541,7 @@ return {
       t.eq(core.maybe_timeout_redrive_from_table("observe_issue", {
         repo = repo,
         number = issue_number,
-        source_ref = core.issue_source_ref(repo, issue_number),
+        source_ref = entity_lib.issue_source_ref(repo, issue_number),
       }, state, row, facts), true)
     end)
     core.log_raise = original_log_raise

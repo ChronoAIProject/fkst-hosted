@@ -174,7 +174,7 @@ local function issue_source_ref(issue)
   if issue.number == nil then
     return issue.source_ref
   end
-  return M.issue_source_ref(issue.repo, issue.number)
+  return entity_lib.issue_source_ref(issue.repo, issue.number)
 end
 
 local function replay_review_result(dept, issue, state, facts, tools, link, current_pr)

@@ -55,7 +55,7 @@ end
 function C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
   local number = tostring(entity.number or "")
   local updated_at = tostring(entity.updated_at or "")
-  local source_ref = kind == "pr" and entity_lib.pr_source_ref(repo, number) or M.issue_source_ref(repo, number)
+  local source_ref = kind == "pr" and entity_lib.pr_source_ref(repo, number) or entity_lib.issue_source_ref(repo, number)
   return {
     schema = "github-proxy.v1",
     type = kind,
@@ -97,7 +97,7 @@ function C.liveness_scan_issue_entity(M, repo, issue_number)
   return {
     repo = repo,
     number = issue_number,
-    source_ref = M.issue_source_ref(repo, issue_number),
+    source_ref = entity_lib.issue_source_ref(repo, issue_number),
   }
 end
 

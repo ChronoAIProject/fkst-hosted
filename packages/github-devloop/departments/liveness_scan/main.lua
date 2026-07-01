@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -83,7 +84,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     pr_delegation = delegation,
     snapshot = snapshot,
     event_ts = issue.updated_at,
-    source_ref = core.issue_source_ref(repo, issue.number),
+    source_ref = entity_lib.issue_source_ref(repo, issue.number),
     fresh_current_state = state,
     now_seconds = now(),
   })

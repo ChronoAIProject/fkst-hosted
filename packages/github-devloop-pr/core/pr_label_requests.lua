@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local S = {}
@@ -60,7 +61,7 @@ function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_
     label_colors = label_colors_for(add_labels),
     dedup_key = dedup_key_value,
     source_ref = base_ids.normalize_source_ref(source_ref),
-  }, issue_number ~= nil and M.issue_source_ref(repo, issue_number) or nil)
+  }, issue_number ~= nil and entity_lib.issue_source_ref(repo, issue_number) or nil)
 end
 
 function M.build_reconcile_pr_state_label_request(repo, issue_number, pr_number, proposal_id, state, version, source_ref, current_labels)

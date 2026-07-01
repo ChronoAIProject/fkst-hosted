@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local convergence_shared = require("devloop.convergence.shared")
 local contract_time = require("contract.time")
 local operator_commands = require("devloop.operator_commands")
@@ -473,7 +474,7 @@ return {
   test_live_thinking_codex_run_defers_timeout_count = function()
     local row = table_by_state().thinking
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local source_ref = entity_lib.issue_source_ref("owner/repo", 42)
     local raised = capture_raises(function()
       with_codex_runs({
         {
@@ -509,7 +510,7 @@ return {
   test_stale_thinking_converge_round_climbs_to_blocked_reconcile = function()
     local row = table_by_state().thinking
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local source_ref = entity_lib.issue_source_ref("owner/repo", 42)
     local raised = capture_raises(function()
       local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
         repo = "owner/repo",
@@ -555,7 +556,7 @@ return {
       local applied = core.maybe_timeout_redrive_from_table("observe_issue", {
         repo = "owner/repo",
         number = 42,
-        source_ref = core.issue_source_ref("owner/repo", 42),
+        source_ref = entity_lib.issue_source_ref("owner/repo", 42),
       }, {
         state = "thinking",
         version = base .. "/timeout/thinking/3",

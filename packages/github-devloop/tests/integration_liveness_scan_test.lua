@@ -1,4 +1,4 @@
-local base_ids, h = require("devloop.base_ids"), require("tests.devloop_helpers")
+local base_ids, h, entity_lib = require("devloop.base_ids"), require("tests.devloop_helpers"), require("devloop.entity")
 local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile, conv_attempts = require("devloop.convergence.reconcile"), require("devloop.convergence.attempts")
@@ -273,7 +273,7 @@ local function ready_state_comment(comment_id, state_version, created_at)
 end
 local function timeout_attempt_comment(state_name, state_version, round, created_at)
   return {
-    body = conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, state_name, round, core.issue_source_ref(repo, 42)),
+    body = conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, state_name, round, entity_lib.issue_source_ref(repo, 42)),
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
@@ -281,7 +281,7 @@ end
 
 local function timeout_attempt_v2_comment(row, generation_key, round, created_at)
   return {
-    body = conv_attempts.timeout_attempt_v2_marker(core, proposal_id, row.from_state, row.liveness_class_id, generation_key, round, core.issue_source_ref(repo, 42)),
+    body = conv_attempts.timeout_attempt_v2_marker(core, proposal_id, row.from_state, row.liveness_class_id, generation_key, round, entity_lib.issue_source_ref(repo, 42)),
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
@@ -544,7 +544,7 @@ return {
     t.eq(decompose.payload.version, version)
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(conv_attempts.timeout_attempt_marker(core, proposal_id, version, "blocked", 1, core.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find(conv_attempts.timeout_attempt_marker(core, proposal_id, version, "blocked", 1, entity_lib.issue_source_ref(repo, 42)), 1, true) ~= nil)
   end,
 
   test_liveness_scan_over_budget_ready_escalates_to_timeout_reconcile = function()
@@ -663,7 +663,7 @@ return {
         proposal_id = proposal_id,
       },
       proposal_id,
-      core.issue_source_ref(repo, 42),
+      entity_lib.issue_source_ref(repo, 42),
       3
     )
     mock_issue_reconcile({ "fkst-dev:ready" }, {
@@ -695,7 +695,7 @@ return {
         proposal_id = proposal_id,
       },
       proposal_id,
-      core.issue_source_ref(repo, 42),
+      entity_lib.issue_source_ref(repo, 42),
       3
     )
     mock_issue_reconcile({ "fkst-dev:implementing" }, {
@@ -872,7 +872,7 @@ return {
         local applied = core.maybe_timeout_redrive_from_table("liveness_scan", {
           repo = repo,
           number = 42,
-          source_ref = core.issue_source_ref(repo, 42),
+          source_ref = entity_lib.issue_source_ref(repo, 42),
         }, state, row, facts)
         t.eq(applied, true)
       end)

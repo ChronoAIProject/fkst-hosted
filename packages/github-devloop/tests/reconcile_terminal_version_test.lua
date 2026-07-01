@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile = require("devloop.convergence.reconcile")
@@ -124,7 +125,7 @@ return {
       row,
       state,
       proposal_id,
-      core.issue_source_ref(repo, issue_number),
+      entity_lib.issue_source_ref(repo, issue_number),
       3
     )
     mock_issue_reconcile({ "fkst-dev:implementing" }, {

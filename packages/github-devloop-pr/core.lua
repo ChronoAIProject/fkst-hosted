@@ -194,7 +194,6 @@ prompts.install(M, wiring.prompts(), {
 require("core.pr_label_requests").install(M)
 require("core.review_meta_requests").install(M)
 local entity = require("devloop.entity")
-M.issue_source_ref = function(...) return entity.issue_source_ref(M, ...) end
 M.build_entity_comment_request = function(...) return entity.build_entity_comment_request(M, ...) end
 M.linked_pr_surface_snapshot = function(...) return entity.linked_pr_surface_snapshot(M, ...) end
 M.pr_proposal_id = function(...) return entity.pr_proposal_id(M, ...) end

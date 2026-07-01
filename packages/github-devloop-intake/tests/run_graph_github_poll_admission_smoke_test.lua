@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local graph = require("testkit.graph")
 local t = fkst.test
@@ -8,7 +9,7 @@ local repo = "owner/repo"
 local issue_number = 42
 
 local function source_ref()
-  return core.issue_source_ref(repo, issue_number)
+  return entity_lib.issue_source_ref(repo, issue_number)
 end
 
 local function mock_env()

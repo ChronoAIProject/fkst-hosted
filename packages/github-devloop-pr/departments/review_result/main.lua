@@ -243,7 +243,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local label_request = nil
     if origin.issue_number ~= nil then
-      label_request = requests_labels.build_review_result_label_request(core, origin.repo, origin.issue_number, origin.proposal_id, comment_reached, core.issue_source_ref(origin.repo, origin.issue_number))
+      label_request = requests_labels.build_review_result_label_request(core, origin.repo, origin.issue_number, origin.proposal_id, comment_reached, entity_lib.issue_source_ref(origin.repo, origin.issue_number))
     end
     local add_labels, remove_labels = core.state_label_changes(to_state)
     local raised = {

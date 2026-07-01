@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
@@ -334,7 +335,7 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
     issue_number,
     "fixing",
     fix.dedup_key .. "/label/refix/" .. tostring(core.version_fix_round(next_version)),
-    core.issue_source_ref(repo, issue_number)
+    entity_lib.issue_source_ref(repo, issue_number)
   ) or nil
   local add_labels, remove_labels = core.state_label_changes("fixing")
   core.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)

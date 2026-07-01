@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local t = fkst.test
 local core = require("core")
 
@@ -47,7 +48,7 @@ local function payload_for_queue(queue)
       labels = {},
       updated_at = "2026-06-03T01:02:03Z",
       dedup_key = "owner/repo#issue#42@2026-06-03T01:02:03Z",
-      source_ref = core.issue_source_ref("owner/repo", 42),
+      source_ref = entity_lib.issue_source_ref("owner/repo", 42),
     },
   }
   local payload = payloads[queue]

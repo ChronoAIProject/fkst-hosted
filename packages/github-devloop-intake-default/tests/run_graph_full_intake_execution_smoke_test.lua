@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local graph = require("testkit.graph")
 local t = fkst.test
@@ -15,7 +16,7 @@ local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 
 local function source_ref()
-  return core.issue_source_ref(repo, issue_number)
+  return entity_lib.issue_source_ref(repo, issue_number)
 end
 
 local function initial_event()

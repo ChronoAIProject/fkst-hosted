@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -50,7 +51,7 @@ local function mock_admission_view(number)
 end
 
 local function source_ref(number)
-  return core.issue_source_ref("owner/repo", number)
+  return entity_lib.issue_source_ref("owner/repo", number)
 end
 
 local function event(number)

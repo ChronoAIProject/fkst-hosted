@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -758,7 +759,7 @@ local function process_pr_event(event)
       state = "OPEN",
       updated_at = pr.updated_at,
       dedup_key = tostring(pr.dedup_key or "") .. "/parent-awaiting-pr",
-      source_ref = core.issue_source_ref(origin.repo, origin.issue_number),
+      source_ref = entity_lib.issue_source_ref(origin.repo, origin.issue_number),
       source = "pr-entity-change",
       child_pr = current_pr,
     },

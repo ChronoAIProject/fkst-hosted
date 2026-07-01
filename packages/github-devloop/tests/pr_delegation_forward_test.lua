@@ -15,7 +15,7 @@ local base_branch = "dev"
 local head_sha = "abc123def456"
 
 local function source_ref()
-  return core.issue_source_ref(repo, issue_number)
+  return entity_lib.issue_source_ref(repo, issue_number)
 end
 
 local function pr_source_ref(pr_number)

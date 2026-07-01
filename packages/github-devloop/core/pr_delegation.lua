@@ -283,7 +283,7 @@ local function child_from_pr(issue, impl_version, generation, pr, repo, issue_nu
   if not issue_delegation_visible then
     table.insert(effects, {
       queue = "github-proxy.github_issue_comment_request",
-      payload = build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, M.issue_source_ref(repo, issue_number)),
+      payload = build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, entity_lib.issue_source_ref(repo, issue_number)),
     })
   end
   return {

@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local conv_attempts = require("devloop.convergence.attempts")
@@ -95,7 +96,7 @@ local function run_timeout(row, state, facts)
     local handled = core.maybe_timeout_redrive_from_table("liveness_scan", {
       repo = repo,
       number = 42,
-      source_ref = core.issue_source_ref(repo, 42),
+      source_ref = entity_lib.issue_source_ref(repo, 42),
     }, state, row, facts)
     t.eq(handled, true)
   end)

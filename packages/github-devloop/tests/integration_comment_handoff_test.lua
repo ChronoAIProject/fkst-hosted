@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local v_ready = require("devloop.validators.ready")
@@ -15,7 +16,7 @@ end
 
 return {
   test_comment_written_ready_ack_raises_durable_ready_with_verifiable_hand_off = function()
-    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local source_ref = entity_lib.issue_source_ref("owner/repo", 42)
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local result = run_handoff({
       schema = "github-proxy.comment-written.v1",
@@ -46,7 +47,7 @@ return {
   end,
 
   test_comment_written_ready_ack_preserves_effect_version_marker_identity = function()
-    local source_ref = core.issue_source_ref("owner/repo", 42)
+    local source_ref = entity_lib.issue_source_ref("owner/repo", 42)
     local event_version = "consensus:github-devloop/issue/owner/repo/42/intake/1234567890"
     local marker_version = "intake/github-devloop/issue/owner/repo/42/2026-06-03T02-02-03Z"
     local result = run_handoff({

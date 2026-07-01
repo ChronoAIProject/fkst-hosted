@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
@@ -106,7 +107,7 @@ local function resume_terminal_markers(issue, next_state, delegation, current_pr
 end
 
 local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
-  local source_ref = issue.source_ref or M.issue_source_ref(issue.repo, issue.number)
+  local source_ref = issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
   local state_marker = M.state_marker(delegation.proposal_id, next_state.to_state, next_state.version)
   return M.build_entity_comment_request({
     kind = "issue",
@@ -194,7 +195,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
       tostring(next_state.to_state),
       tostring(next_state.version),
     }),
-    issue.source_ref or M.issue_source_ref(issue.repo, issue.number)
+    issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
   )
   local add_labels, remove_labels = M.state_label_changes(next_state.to_state)
   M.log_cas_decision(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "applied(" .. next_state.reason .. ")", "delegated child terminal fact matched parent delegation")

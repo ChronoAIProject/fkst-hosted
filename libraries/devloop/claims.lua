@@ -318,7 +318,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
       return false
     end
     current = forks().rederive_issue_state(M, repo, issue_number)
-    local request, request_reason = forks().build_fork_issue_create_request(M, repo, issue_number, current, M.issue_source_ref(repo, issue_number))
+    local request, request_reason = forks().build_fork_issue_create_request(M, repo, issue_number, current, require("devloop.entity").issue_source_ref(repo, issue_number))
     if request == nil then
       log_claim(M, dept, proposal_id, "skip-fork-" .. tostring(request_reason or "invalid"), "fork request could not be built from current issue")
       return false

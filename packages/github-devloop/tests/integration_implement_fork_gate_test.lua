@@ -1,3 +1,4 @@
+local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
 local t = h.t
@@ -70,7 +71,7 @@ return {
     local event = ready()
     mock_issue_implement({ "fkst-dev:ready" }, {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
-      forks.fork_origin_marker("owner/repo", original_issue, "human", core.issue_source_ref("owner/repo", original_issue)),
+      forks.fork_origin_marker("owner/repo", original_issue, "human", entity_lib.issue_source_ref("owner/repo", original_issue)),
     })
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", original_issue), {
       stdout = original_view_with_fork_ledger(),
@@ -98,7 +99,7 @@ return {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
     }, {
       author_login = "ElonSG",
-      body = forks.fork_issue_body("owner/repo", original_issue, "human", core.issue_source_ref("owner/repo", original_issue)),
+      body = forks.fork_issue_body("owner/repo", original_issue, "human", entity_lib.issue_source_ref("owner/repo", original_issue)),
     })
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", original_issue), {
       stdout = original_view_with_peer_fork_ledger(),
