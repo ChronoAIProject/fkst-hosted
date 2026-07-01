@@ -20,6 +20,11 @@ ARG RUST_VERSION=1
 # default chrono-llm provider needs `wire_api = "responses"`, so an older codex
 # breaks the run. Bumped deliberately, never floated to "latest".
 ARG CODEX_VERSION=0.139.0
+# Operator-pinned GitHub CLI version (Model B, issue #359 §5.2). The
+# `run-substrate` entrypoint's github-proxy poll loop + `gh pr create` shell out
+# to `gh`; the runtime gh shim shadows this binary on PATH to inject the rotating
+# App token per-op (never overwriting /usr/bin/gh). Pinned, never floated.
+ARG GH_VERSION=2.63.2
 
 # ---- codex install stage: download the prebuilt release asset ----
 # This is a DOWNLOAD of a published binary, not a cargo build — no registry/
@@ -44,6 +49,31 @@ RUN set -eux; \
     mv "/tmp/codex-${A}-unknown-linux-musl" /usr/local/bin/codex; \
     chmod +x /usr/local/bin/codex; \
     rm -f /tmp/codex.tgz
+
+# ---- gh install stage: download the prebuilt GitHub CLI release asset ----
+# A DOWNLOAD of a published binary (like codex-builder) — no cargo build. Model B
+# fetches packages at runtime and does NOT bake any fkst-packages; the ONLY new
+# runtime tool is `gh`. TARGETARCH maps onto the gh asset arch token
+# (amd64/arm64); any other arch fails the build loudly. Feeds the runtime image
+# where it lands at /usr/bin/gh (the runtime gh shim shadows it on PATH).
+FROM debian:bookworm-slim AS gh-builder
+ARG GH_VERSION
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) A=amd64;; \
+      arm64) A=arm64;; \
+      *) echo "ERROR: unsupported TARGETARCH '${TARGETARCH}' for gh install" && exit 1;; \
+    esac; \
+    curl -fsSL -o /tmp/gh.tgz \
+      "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${A}.tar.gz"; \
+    tar xzf /tmp/gh.tgz -C /tmp; \
+    mkdir -p /gh-dist; \
+    mv "/tmp/gh_${GH_VERSION}_linux_${A}/bin/gh" /gh-dist/gh; \
+    chmod +x /gh-dist/gh; \
+    rm -f /tmp/gh.tgz
 
 # ---- engine build stage: compile fkst-substrate at a pinned ref ----
 # The engine is encapsulated: built from a pinned upstream ref inside this image
@@ -187,6 +217,7 @@ ARG FKST_SUBSTRATE_REF=cb072b224d817a8a4b57f92b613cf5f2174d8759
 ARG FKST_SUBSTRATE_REPO=https://github.com/ChronoAIProject/fkst-substrate.git
 ARG PRODUCT_VERSION=0.0.0
 ARG CODEX_VERSION
+ARG GH_VERSION
 # git + bash for spawned engine sessions, ca-certificates for outbound TLS
 # (codex talks HTTPS to its LLM provider), and libdbus-1-3 so the bundled nyxid
 # CLI (which links libdbus via its keyring store) loads in the slim runtime.
@@ -213,6 +244,14 @@ RUN nyxid --version && nyxid --version | grep -q "0.7.0"
 COPY --from=codex-builder /usr/local/bin/codex /usr/local/bin/codex
 RUN test "$(codex --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$CODEX_VERSION" \
     && codex --version
+# GitHub CLI (Model B, issue #359 §5.2): required on PATH for the run-substrate
+# session's github-proxy poll loop + `gh pr create`. Placed at /usr/bin/gh so the
+# runtime gh shim (installed early on PATH by the entrypoint) can `exec` it after
+# injecting the rotating App token as GH_TOKEN. The assertion fails the build on
+# version drift OR a missing shared lib (a launch failure would exit non-zero).
+COPY --from=gh-builder /gh-dist/gh /usr/bin/gh
+RUN test "$(gh --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$GH_VERSION" \
+    && gh --version
 ENV FKST_ROLE=control-plane \
     FKST_RUNTIME_ROOT=/var/lib/fkst/runtime \
     PATH=/usr/local/bin:$PATH \

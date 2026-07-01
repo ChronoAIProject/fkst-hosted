@@ -53,6 +53,17 @@ async fn main() -> ExitCode {
         return fkst_control_plane::install::run_validate_env().await;
     }
 
+    // 1d. Subcommand dispatch: `run-substrate` is the in-pod, Model B substrate
+    //     session entrypoint (issue #359 §5). It fetches the workspace packages +
+    //     the target repo, wires the rotating GitHub token into git + gh, renders
+    //     the codex config, and execs `fkst-framework supervise` (forwarding
+    //     SIGTERM) — it never binds a socket or builds the server router. Mirrors
+    //     the `run-session` / `validate-env` arms so the default arg-less
+    //     invocation stays the API server unchanged.
+    if std::env::args().nth(1).as_deref() == Some("run-substrate") {
+        return fkst_control_plane::session_pod::run_substrate_from_env().await;
+    }
+
     // 2. Load the configuration from the environment.
     let config = match Config::load_from_env() {
         Ok(config) => config,
