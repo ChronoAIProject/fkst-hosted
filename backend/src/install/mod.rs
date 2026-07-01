@@ -25,7 +25,9 @@ use tokio::process::Command;
 
 /// Fixed mount path of the validation spec inside the validation pod. The
 /// control plane writes a [`ValidateSpec`] JSON here before the pod boots.
-const VALIDATE_SPEC_PATH: &str = "/var/run/fkst/validate/validate-spec.json";
+/// Public so the orchestrator ([`crate::k8s::env_validator`]) can drift-guard
+/// its mount dir + filename against this single source of truth.
+pub const VALIDATE_SPEC_PATH: &str = "/var/run/fkst/validate/validate-spec.json";
 
 /// In-pod cap on how many trailing stderr bytes a failed command surfaces in the
 /// verdict frame. Mirrors `FKST_ENV_INSTALL_STDERR_TAIL_BYTES`'s default so the
@@ -38,7 +40,11 @@ const IN_POD_STDERR_TAIL_BYTES: usize = 4096;
 /// into every command, and `deadline_secs` the whole-sequence wall-clock. All
 /// three are non-secret (variables are user-declared plaintext env for the
 /// isolated validation pod, never platform credentials).
-#[derive(Debug, Deserialize)]
+///
+/// `Serialize` is derived (not just `Deserialize`) so the control plane WRITES
+/// the exact same shape it later READS — the orchestrator + the in-pod runner
+/// share one struct and can never drift on field names or types.
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ValidateSpec {
     /// Shell install commands, executed in order under `bash -c`.
     pub install: Vec<String>,
