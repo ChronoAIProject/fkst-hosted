@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local m_facts = require("devloop.markers.facts")
 local C = {}
@@ -157,7 +158,7 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
     payload.gate_baseline_sha = tostring(review_fact.gate_baseline_sha)
   end
   if review_fact.predecessor_set ~= nil then
-    if not M._is_path_safe_key(review_fact.predecessor_set, M._max_dedup_len) then
+    if not strings.is_path_safe_key(review_fact.predecessor_set, M._max_dedup_len) then
       error("github-devloop: invalid predecessor set")
     end
     payload.predecessor_set = tostring(review_fact.predecessor_set)

@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
 
@@ -63,7 +64,7 @@ local forge_validators = require("devloop.forge_validators")
     local key = "github-devloop/git/"
       .. M.safe_repo(require_safe_repo(M, repo))
       .. "/fetch"
-    if not M._is_path_safe_key(key, M._max_key_len) then
+    if not strings.is_path_safe_key(key, M._max_key_len) then
       error("github-devloop: invalid git ref-store lock key")
     end
     return key

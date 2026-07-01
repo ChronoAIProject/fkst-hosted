@@ -1,3 +1,4 @@
+local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local S = {}
@@ -301,7 +302,7 @@ local function ensure_topology(branches)
     log_ensure("topology", "hold", {
       "integration=" .. branches.integration,
       "reason=missing-integration-branch",
-      "detail=" .. M._one_line(fetch_error),
+      "detail=" .. error_facts.one_line(fetch_error),
     })
     return { ok = false, held = true, reason = "missing-integration-branch" }
   end
@@ -313,7 +314,7 @@ local function ensure_topology(branches)
     log_ensure("topology", "hold", {
       "integration=" .. branches.integration,
       "reason=missing-integration-branch",
-      "detail=" .. M._one_line(head_error),
+      "detail=" .. error_facts.one_line(head_error),
     })
     return { ok = false, held = true, reason = "missing-integration-branch" }
   end

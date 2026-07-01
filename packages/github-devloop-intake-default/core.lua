@@ -107,14 +107,10 @@ M._label_colors = base._label_colors
 M._shell_single_quote = base._shell_single_quote
 M._trim = base._trim
 M._neutralize_fkst_markers = base._neutralize_fkst_markers
-M._one_line = base._one_line
-M._is_bounded_string = base._is_bounded_string
 M.truncate_utf8 = base.truncate_utf8
 M._has_value = base._has_value
 M._is_review_meta_action = base._is_review_meta_action
 M.fix_reflection_checkpoint_round = base.fix_reflection_checkpoint_round
-M._is_path_safe_key = base._is_path_safe_key
-M._is_positive_pr_number = base._is_positive_pr_number
 M._dedup_key = base._dedup_key
 require("forge.github_debug_stamp").install(M)
 require("devloop.commands").install(M)

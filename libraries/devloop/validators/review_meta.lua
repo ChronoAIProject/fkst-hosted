@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
 local C = {}
@@ -9,17 +10,17 @@ function C.is_supported_review_meta(M, payload)
   end
   local has_valid_identity = payload.mode == "fix-reflection"
     and M.parse_entity_proposal_id(payload.proposal_id) ~= nil
-    and M._is_path_safe_key(payload.dedup_key, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.dedup_key, M._max_dedup_len)
   if payload.mode ~= "fix-reflection" then
     has_valid_identity = M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
   end
   return has_valid_identity
-    and M._is_bounded_string(payload.version, M._max_dedup_len)
+    and strings.is_bounded_string(payload.version, M._max_dedup_len)
     and require("devloop.pr_safety").is_safe_pr_number(payload.pr_number)
     and tonumber(payload.n) ~= nil
     and (payload.mode == nil or payload.mode == "fix-reflection")
     and (payload.fix_round == nil or tonumber(payload.fix_round) ~= nil)
-    and (payload.blocking_gap == nil or M._is_bounded_string(payload.blocking_gap, M._max_blocking_gap_len))
+    and (payload.blocking_gap == nil or strings.is_bounded_string(payload.blocking_gap, M._max_blocking_gap_len))
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 

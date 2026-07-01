@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local t = fkst.test
 
 local package_root = "packages/github-external-pr-intake"
@@ -10,7 +11,7 @@ local function load_department()
 end
 
 local function json_string(value)
-  return require("contract.strings").json_string(value)
+  return strings.json_string(value)
 end
 
 local function shell_quote(value)

@@ -115,7 +115,7 @@ local function is_digest(value)
 end
 
 local function is_bounded_attr(M, value, limit)
-  return M._is_bounded_string(value, limit or max_attr_len) and value:find("%c") == nil
+  return strings.is_bounded_string(value, limit or max_attr_len) and value:find("%c") == nil
 end
 
 local Shared = {

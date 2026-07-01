@@ -24,8 +24,8 @@ end
 
 function M.log_error_fact(level, dept, proposal_id, tag, error_class, queue, message, context)
   local fields = error_facts.error_fact_fields(error_class, queue, dept, message, context)
-  table.insert(fields, "queue=" .. M._one_line(queue))
-  table.insert(fields, "error=" .. M._one_line(message))
+  table.insert(fields, "queue=" .. error_facts.one_line(queue))
+  table.insert(fields, "error=" .. error_facts.one_line(message))
   M.log_line(level or "error", dept, proposal_id, tag or "FAILURE", fields)
 end
 
@@ -69,7 +69,7 @@ function M.log_cas_decision(dept, proposal_id, current, from_state, to_state, ou
     "current_source=trusted-marker",
     "transition=" .. tostring(from_state or "unknown") .. "->" .. tostring(to_state or "unknown"),
     "outcome=" .. tostring(outcome or "unknown"),
-    "reason=" .. M._one_line(reason or ""),
+    "reason=" .. error_facts.one_line(reason or ""),
   })
 end
 
@@ -122,7 +122,7 @@ function M.log_codex_result(dept, proposal_id, role, result, parsed, failure, co
     "exit_code=" .. tostring(type(result) == "table" and result.exit_code or "nil"),
   }
   if parsed ~= nil then
-    table.insert(fields, "parsed=" .. M._one_line(parsed))
+    table.insert(fields, "parsed=" .. error_facts.one_line(parsed))
   end
   if failure ~= nil then
     for _, field in ipairs(error_facts.error_fact_fields(
@@ -134,7 +134,7 @@ function M.log_codex_result(dept, proposal_id, role, result, parsed, failure, co
     )) do
       table.insert(fields, field)
     end
-    table.insert(fields, "failure=" .. M._one_line(failure))
+    table.insert(fields, "failure=" .. error_facts.one_line(failure))
   end
   M.log_line(level, dept, proposal_id, "CODEX", fields)
 end

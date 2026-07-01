@@ -71,9 +71,9 @@ local function linked_pr_numbers(M, issue_comments, proposal_id)
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
       if marker_proposal == proposal_id
-        and M._is_positive_pr_number(marker_pr)
+        and forge_validators.is_positive_pr_number(marker_pr)
         and forge_validators.is_git_ref_safe(marker_branch)
-        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and strings.is_bounded_string(marker_impl_version, M._max_dedup_len)
         and forge_validators.is_git_ref_safe(marker_base_branch)
         and not seen[tostring(marker_pr)] then
         seen[tostring(marker_pr)] = true
@@ -187,8 +187,8 @@ function C.is_safe_entity_proposal_ref(M, proposal_id, dedup_key)
   if entity.kind == "issue" then
     return M.is_safe_proposal_ref(proposal_id, dedup_key)
   end
-  return M._is_path_safe_key(proposal_id, M._max_key_len)
-    and M._is_path_safe_key(dedup_key, M._max_dedup_len)
+  return strings.is_path_safe_key(proposal_id, M._max_key_len)
+    and strings.is_path_safe_key(dedup_key, M._max_dedup_len)
 end
 
 function C.transition_lock_key(M, proposal_id)

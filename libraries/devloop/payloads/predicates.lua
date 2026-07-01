@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local shared = require("devloop.payloads.shared")
@@ -118,7 +119,7 @@ function C.is_ready_hand_off(M, hand_off, ready)
     and hand_off.proposal_id == ready.proposal_id
     and hand_off.state == "ready"
     and hand_off.event_version == ready.dedup_key
-    and M._is_bounded_string(hand_off.marker_version, M._max_dedup_len)
+    and strings.is_bounded_string(hand_off.marker_version, M._max_dedup_len)
     and hand_off.stage_rank == M.stage_rank("ready")
     and C.is_safe_comment_id(M, hand_off.comment_id)
 end

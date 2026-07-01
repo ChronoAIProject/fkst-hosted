@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local S = {}
 local config = require("devloop.config")
 
@@ -285,7 +286,7 @@ function M.parse_intake_action(stdout)
   if reason == nil or M._trim(reason) == "" then
     return nil
   end
-  if not M._is_bounded_string(reason, M._max_meta_reason_len) then
+  if not strings.is_bounded_string(reason, M._max_meta_reason_len) then
     return nil
   end
   return {
@@ -323,7 +324,7 @@ function M.parse_review_meta_action(stdout)
     return nil
   end
   local reason = M._trim(captured_reason)
-  if not M._is_bounded_string(reason, M._max_meta_reason_len) then
+  if not strings.is_bounded_string(reason, M._max_meta_reason_len) then
     return nil
   end
 
@@ -337,7 +338,7 @@ function M.parse_review_meta_action(stdout)
       return nil
     end
     gap = M._trim(captured_gap)
-    if not M._is_bounded_string(gap, M._max_blocking_gap_len)
+    if not strings.is_bounded_string(gap, M._max_blocking_gap_len)
       or gap:find("%c") ~= nil
       or gap:find("<!%-%- fkst:") ~= nil
       or gap:find("&lt;!%-%- fkst:") ~= nil then

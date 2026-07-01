@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local m_builders = require("devloop.markers.builders")
@@ -223,8 +224,8 @@ return {
     t.is_true(label ~= nil)
     t.is_true(#comment.payload.dedup_key <= core._max_dedup_len)
     t.is_true(#label.payload.dedup_key <= core._max_dedup_len)
-    t.eq(core._is_path_safe_key(comment.payload.dedup_key, core._max_dedup_len), true)
-    t.eq(core._is_path_safe_key(label.payload.dedup_key, core._max_dedup_len), true)
+    t.eq(strings.is_path_safe_key(comment.payload.dedup_key, core._max_dedup_len), true)
+    t.eq(strings.is_path_safe_key(label.payload.dedup_key, core._max_dedup_len), true)
     t.is_true(comment.payload.body:find('dedup="' .. review_meta.dedup_key .. '"', 1, true) ~= nil)
   end,
 }

@@ -1,3 +1,4 @@
+local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
 local pr_safety = require("devloop.pr_safety")
 local parsers_misc = require("devloop.parsers.misc")
@@ -41,7 +42,7 @@ local function cleanup_worktree(worktree)
   if result.exit_code ~= 0 then
     core.log_line("warn", "pr_freshness_scan", "pr-freshness", "CLEANUP", {
       "worktree=" .. tostring(worktree),
-      "reason=" .. core._one_line(result.stderr or ""),
+      "reason=" .. error_facts.one_line(result.stderr or ""),
     })
   end
 end

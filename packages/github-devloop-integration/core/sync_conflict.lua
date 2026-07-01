@@ -50,7 +50,7 @@ function M.sync_conflict_attempt_key(conflict, fingerprint)
     .. safe_branch_segment(conflict.integration_branch):sub(1, 40):gsub("%-+$", "")
     .. "/"
     .. suffix
-  if not M._is_path_safe_key(key, M._max_dedup_len) then
+  if not strings.is_path_safe_key(key, M._max_dedup_len) then
     error("github-devloop: invalid sync conflict attempt key")
   end
   return key

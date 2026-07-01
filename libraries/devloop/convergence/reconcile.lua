@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local shared = require("devloop.convergence.shared")
 local C = {}
@@ -39,12 +40,12 @@ function C.is_supported_reconcile(M, payload)
   return payload.schema == "github-devloop.reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
-    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
-    and M._is_bounded_string(payload.base_version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and strings.is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and strings.is_bounded_string(payload.base_version, M._max_dedup_len)
     and tostring(payload.dedup_key) == "reconcile:" .. tostring(payload.base_version) .. "/loop/" .. tostring(payload.round)
     and inner_dedup ~= nil
-    and M._is_path_safe_key(inner_dedup, M._max_dedup_len)
+    and strings.is_path_safe_key(inner_dedup, M._max_dedup_len)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
     and valid_round(payload.round) ~= nil
 end
@@ -177,12 +178,12 @@ function C.is_supported_review_reconcile(M, payload)
   return payload.schema == "github-devloop.review-reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
-    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and strings.is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+    and strings.is_bounded_string(payload.issue_version, M._max_dedup_len)
     and forge_validators.is_git_sha(payload.head_sha)
     and valid_round(payload.round) ~= nil
-    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and strings.is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "review-reconcile:" .. tostring(payload.issue_version) .. "/review-loop/" .. tostring(payload.round)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
@@ -195,15 +196,15 @@ function C.is_supported_fix_reconcile(M, payload)
   return payload.schema == "github-devloop.fix-reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
-    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
-    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and strings.is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+    and strings.is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
+    and strings.is_bounded_string(payload.issue_version, M._max_dedup_len)
     and forge_validators.is_git_sha(payload.head_sha)
     and valid_round(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.issue_version)
-    and M._is_positive_pr_number(payload.pr_number)
-    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and forge_validators.is_positive_pr_number(payload.pr_number)
+    and strings.is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "fix-reconcile:" .. tostring(payload.issue_version)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
@@ -219,10 +220,10 @@ function C.is_supported_timeout_reconcile(M, payload)
     and issue_number ~= nil
     and row ~= nil
     and row.terminal == false
-    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and M._is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and strings.is_bounded_string(payload.issue_version, M._max_dedup_len)
     and valid_round(payload.round) ~= nil
-    and M._is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and strings.is_bounded_string(payload.dedup_key, M._max_dedup_len)
     and tostring(payload.dedup_key) == "timeout-reconcile:" .. tostring(payload.issue_version) .. "/timeout-reconcile/" .. tostring(payload.state) .. "/" .. tostring(payload.round)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
@@ -409,7 +410,7 @@ function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id,
         and from_state == state_name
         and replay_fields.restart_transition_row(M.restart_transition_table(), from_state) ~= nil
         and replay_fields.restart_transition_row(M.restart_transition_table(), from_state).terminal == false
-        and M._is_bounded_string(from_version, M._max_dedup_len)
+        and strings.is_bounded_string(from_version, M._max_dedup_len)
         and dedup == expected_dedup then
         return {
           proposal_id = marker_proposal,

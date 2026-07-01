@@ -494,7 +494,7 @@ validate_bump_pr = function(repo, base_branch, pr)
 end
 
 local function substrate_ref_merge_marker(pr, target_sha, outcome, reason)
-  if not M._is_positive_pr_number(pr and pr.number) or not forge_validators.is_git_sha(pr and pr.head_sha) or not forge_validators.is_git_sha(target_sha) then
+  if not forge_validators.is_positive_pr_number(pr and pr.number) or not forge_validators.is_git_sha(pr and pr.head_sha) or not forge_validators.is_git_sha(target_sha) then
     error("github-devloop: invalid substrate-ref merge marker")
   end
   return '<!-- fkst:github-devloop:substrate-ref-merge:v1 pr="' .. tostring(pr.number)

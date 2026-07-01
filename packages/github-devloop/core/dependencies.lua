@@ -1,3 +1,5 @@
+local strings_c = require("contract.strings")
+local forge_validators = require("devloop.forge_validators")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -41,7 +43,7 @@ end
 
 local function add_unmet(unmet, seen, number)
   local core = root()
-  if not core._is_positive_pr_number(number) then
+  if not forge_validators.is_positive_pr_number(number) then
     return
   end
   local value = tonumber(number)
@@ -56,7 +58,7 @@ local function dependency_unmet_field(unmet_numbers)
   local core = root()
   local parts = {}
   for _, number in ipairs(unmet_numbers or {}) do
-    if core._is_positive_pr_number(number) then
+    if forge_validators.is_positive_pr_number(number) then
       local next_value = tostring(math.floor(tonumber(number)))
       local candidate = #parts == 0 and next_value or (table.concat(parts, ",") .. "," .. next_value)
       if #candidate > 200 then
@@ -115,7 +117,7 @@ local function parse_blocked_by(stdout)
 
   local blockers = {}
   for _, node in ipairs(nodes) do
-    if type(node) ~= "table" or not core._is_positive_pr_number(node.number) then
+    if type(node) ~= "table" or not forge_validators.is_positive_pr_number(node.number) then
       return nil
     end
     local blocker_repo = node.repository and node.repository.nameWithOwner
@@ -173,7 +175,7 @@ local function merged_blocker_cache_key(repo, blocker_number)
     .. core.safe_repo(repo)
     .. "/issue/"
     .. core.safe_issue(blocker_number)
-  if not core._is_path_safe_key(key, core._max_key_len) then
+  if not strings_c.is_path_safe_key(key, core._max_key_len) then
     error("github-devloop: invalid merged blocker cache key")
   end
   return key
@@ -428,7 +430,7 @@ end
 function M.gh_blocked_by(repo, issue_number, timeout, exec)
   local core = root()
   local owner, name = strings.split_repo(repo)
-  if owner == nil or not core._is_positive_pr_number(issue_number) then
+  if owner == nil or not forge_validators.is_positive_pr_number(issue_number) then
     error("github-devloop: invalid dependency query target")
   end
   return core.github_graphql("dependency_blocked_by", {
@@ -440,7 +442,7 @@ end
 
 function M.dependency_gate(repo, issue_number, context)
   local core = root()
-  if strings.split_repo(repo) == nil or not core._is_positive_pr_number(issue_number) then
+  if strings.split_repo(repo) == nil or not forge_validators.is_positive_pr_number(issue_number) then
     return gate("unresolvable", "invalid-target", {})
   end
   local gate_context = context

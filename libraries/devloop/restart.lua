@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
@@ -284,9 +285,9 @@ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal
         and marker_version == tostring(heartbeat_version)
         and review_version == tostring(heartbeat_version)
         and repo ~= nil
-        and M._is_positive_pr_number(pr_number)
-        and M._is_path_safe_key(review_proposal, M._max_key_len)
-        and M._is_bounded_string(consensus_dedup, M._max_dedup_len)
+        and forge_validators.is_positive_pr_number(pr_number)
+        and strings.is_path_safe_key(review_proposal, M._max_key_len)
+        and strings.is_bounded_string(consensus_dedup, M._max_dedup_len)
         and (best == nil or (round or 0) > (best.n or 0)) then
         best = {
           proposal_id = review_proposal,
@@ -304,9 +305,9 @@ end
 function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, n)
   local repo = M.parse_proposal_id(issue_proposal_id)
   if repo == nil
-    or not M._is_positive_pr_number(pr_number)
+    or not forge_validators.is_positive_pr_number(pr_number)
     or not forge_validators.is_git_sha(head_sha)
-    or not M._is_bounded_string(issue_version, M._max_dedup_len) then
+    or not strings.is_bounded_string(issue_version, M._max_dedup_len) then
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
@@ -352,7 +353,7 @@ function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue
         if reject_fact == nil
           or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
           or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
-          or not M._is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
+          or not strings.is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
           return nil
         end
         local reflection_dedup = payloads_builders.fix_reflection_dedup_key(M, issue_proposal_id, issue_version, pr_number, round, marker_dedup)

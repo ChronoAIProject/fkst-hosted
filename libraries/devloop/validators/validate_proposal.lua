@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
 local C = {}
@@ -28,7 +29,7 @@ function C.validate_proposal(M, proposal)
     if review_repo == nil or pr_number == nil then
       return false
     end
-    if not M._is_path_safe_key(proposal.proposal_id, M._max_key_len) or not M._is_path_safe_key(proposal.dedup_key, M._max_dedup_len) then
+    if not strings.is_path_safe_key(proposal.proposal_id, M._max_key_len) or not strings.is_path_safe_key(proposal.dedup_key, M._max_dedup_len) then
       return false
     end
   else
@@ -36,19 +37,19 @@ function C.validate_proposal(M, proposal)
       return false
     end
   end
-  if not M._is_bounded_string(proposal.title, M._max_title_len) then
+  if not strings.is_bounded_string(proposal.title, M._max_title_len) then
     return false
   end
-  if not M._is_bounded_string(proposal.body, M._max_body_len) then
+  if not strings.is_bounded_string(proposal.body, M._max_body_len) then
     return false
   end
-  if proposal.content_fetch ~= nil and not M._is_bounded_string(proposal.content_fetch, 4000) then
+  if proposal.content_fetch ~= nil and not strings.is_bounded_string(proposal.content_fetch, 4000) then
     return false
   end
   if not source_refs.has_bounded_source_ref(proposal.source_ref, M._max_key_len) then
     return false
   end
-  if proposal.effect_version ~= nil and not M._is_bounded_string(proposal.effect_version, M._max_dedup_len) then
+  if proposal.effect_version ~= nil and not strings.is_bounded_string(proposal.effect_version, M._max_dedup_len) then
     return false
   end
   return proposal.intake_hand_off == nil or C.is_intake_hand_off(M, proposal.intake_hand_off, proposal)

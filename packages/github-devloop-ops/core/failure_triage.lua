@@ -1,3 +1,5 @@
+local error_facts = require("contract.error_facts")
+local strings = require("contract.strings")
 local S = {}
 
 function S.install(M)
@@ -19,12 +21,12 @@ local function normalized_fact(payload)
   end
 
   local queue = source.queue or payload.queue
-  if not M._is_bounded_string(queue, M._max_key_len) then
+  if not strings.is_bounded_string(queue, M._max_key_len) then
     return nil, "missing-queue"
   end
 
   local fingerprint = source.fingerprint or payload.fingerprint
-  if not M._is_bounded_string(fingerprint, M._max_key_len) then
+  if not strings.is_bounded_string(fingerprint, M._max_key_len) then
     return nil, "missing-fingerprint"
   end
 
@@ -159,7 +161,7 @@ local function claim_threshold(repo, fingerprint, window_key)
 end
 
 local function display_text(value, limit)
-  local text = M.neutralize_untrusted_comment_text(M._one_line(value))
+  local text = M.neutralize_untrusted_comment_text(error_facts.one_line(value))
   text = text:gsub("`", "'"):gsub("^%s+", ""):gsub("%s+$", "")
   if text == "" then
     text = "unknown"

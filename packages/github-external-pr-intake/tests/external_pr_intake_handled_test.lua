@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local t = fkst.test
 
 local function load_department()
@@ -8,7 +9,7 @@ local function load_department()
 end
 
 local function json_string(value)
-  return require("contract.strings").json_string(value)
+  return strings.json_string(value)
 end
 
 local function render_comments(comments)

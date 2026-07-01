@@ -102,9 +102,9 @@ local function merged_fact_from_issue(M, issue)
       local pr_number = marker_attr(marker, "pr")
       local version = marker_attr(marker, "version")
       local head_sha = marker_attr(marker, "head_sha")
-      if M._is_bounded_string(proposal_id, M._max_key_len)
-        and M._is_positive_pr_number(pr_number)
-        and M._is_bounded_string(version, M._max_dedup_len)
+      if strings.is_bounded_string(proposal_id, M._max_key_len)
+        and forge_validators.is_positive_pr_number(pr_number)
+        and strings.is_bounded_string(version, M._max_dedup_len)
         and forge_validators.is_git_sha(head_sha) then
         return {
           proposal_id = proposal_id,

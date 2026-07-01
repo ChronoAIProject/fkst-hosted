@@ -28,7 +28,7 @@ local spec = {
 }
 
 local function should_reinject_pr(repo, pr, limits, deadline)
-  if not core._is_positive_pr_number(pr.number) then
+  if not forge_validators.is_positive_pr_number(pr.number) then
     return false
   end
 

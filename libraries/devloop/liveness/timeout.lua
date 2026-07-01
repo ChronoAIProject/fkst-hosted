@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local m_rae = require("devloop.restart_actionable_epoch")
@@ -131,8 +132,8 @@ local function build_timeout_reconcile(row, entity, state, facts, decision)
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   if source_refs.has_bounded_source_ref(source_ref, M._max_key_len)
-    and M._is_path_safe_key(proposal_id, M._max_key_len)
-    and M._is_bounded_string(state and state.version, M._max_dedup_len) then
+    and strings.is_path_safe_key(proposal_id, M._max_key_len)
+    and strings.is_bounded_string(state and state.version, M._max_dedup_len) then
     return "devloop_timeout_reconcile", conv_reconcile.build_devloop_timeout_reconcile_payload(M, row, state, proposal_id, source_ref, decision.attempt)
   end
   return nil, nil

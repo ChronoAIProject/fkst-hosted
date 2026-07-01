@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_builders = require("devloop.payloads.builders")
 local C = {}
@@ -16,8 +17,8 @@ function C.is_supported_decompose(M, payload)
     or payload.review_dedup_key ~= nil
     or payload.head_sha ~= nil
   local valid_review_binding = not has_review_binding
-    or (M._is_path_safe_key(payload.review_proposal_id, M._max_key_len)
-      and M._is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
+    or (strings.is_path_safe_key(payload.review_proposal_id, M._max_key_len)
+      and strings.is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
       and forge_validators.is_git_sha(payload.head_sha))
   local forward_dedup = M._dedup_key({
     "decompose",
@@ -46,13 +47,13 @@ function C.is_supported_decompose(M, payload)
   return payload.schema == "github-devloop.decompose.v1"
     and repo ~= nil
     and issue_number ~= nil
-    and M._is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and M._is_positive_pr_number(payload.pr_number)
-    and M._is_bounded_string(payload.version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
+    and forge_validators.is_positive_pr_number(payload.pr_number)
+    and strings.is_bounded_string(payload.version, M._max_dedup_len)
     and valid_review_binding
     and tonumber(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.version)
-    and M._is_path_safe_key(payload.dedup_key, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.dedup_key, M._max_dedup_len)
     and valid_replay_counts
     and ((not has_replay_counts and tostring(payload.dedup_key) == forward_dedup)
       or (has_replay_counts and tostring(payload.dedup_key) == replay_dedup))
@@ -64,7 +65,7 @@ function C.decomposed_marker(M, proposal_id, version, pr_number, count)
   if issue_count == nil or issue_count < 1 or issue_count > max_decompose_issues or issue_count % 1 ~= 0 then
     error("github-devloop: invalid decomposed count")
   end
-  if not M._is_positive_pr_number(pr_number) then
+  if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid decomposed pr number")
   end
   return '<!-- fkst:github-devloop:decomposed:v1 proposal="' .. tostring(proposal_id)
@@ -104,7 +105,7 @@ function C.decomposed_fact(M, comments, proposal_id, version, pr_number)
         local count = tonumber(marker:match('count="([^"]+)"'))
         if (version == nil or marker_version == tostring(version))
           and (pr_number == nil or tostring(marker_pr_number) == tostring(pr_number))
-          and M._is_positive_pr_number(marker_pr_number)
+          and forge_validators.is_positive_pr_number(marker_pr_number)
           and count ~= nil
           and count >= 1
           and count <= max_decompose_issues

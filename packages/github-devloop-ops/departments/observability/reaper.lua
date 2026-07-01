@@ -1,3 +1,4 @@
+local forge_validators = require("devloop.forge_validators")
 local m_claims = require("devloop.claims")
 local pr_safety = require("devloop.pr_safety")
 local parsers_misc = require("devloop.parsers.misc")
@@ -51,7 +52,7 @@ local function successor_issue_numbers(comments, proposal_id)
       local dedup = marker:match('dedup="([^"]+)"')
       local issue = marker:match('issue="([^"]+)"')
       if tostring(dedup or ""):sub(1, #dedup_prefix) == dedup_prefix
-        and core._is_positive_pr_number(issue)
+        and forge_validators.is_positive_pr_number(issue)
         and not seen[tostring(issue)] then
         seen[tostring(issue)] = true
         table.insert(successors, tonumber(issue))

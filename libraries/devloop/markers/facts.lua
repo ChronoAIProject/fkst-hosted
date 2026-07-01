@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
@@ -23,7 +24,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
     and (decision == "approve" or decision == "reject")
     and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
     and review_dedup == expected_dedup
-    and M._is_bounded_string(review_dedup, M._max_dedup_len)
+    and strings.is_bounded_string(review_dedup, M._max_dedup_len)
     and forge_validators.is_git_sha(reviewed_head_sha) then
     local fact = {
       review_proposal_id = review_proposal,
@@ -39,7 +40,7 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
         return nil
       end
       local gap = decode_marker_attr(marker_attr(marker, "gap"))
-      if gap == nil or not M._is_bounded_string(gap, M._max_blocking_gap_len) then
+      if gap == nil or not strings.is_bounded_string(gap, M._max_blocking_gap_len) then
         return nil
       end
       fact.blocking_gap = gap
@@ -68,7 +69,7 @@ function C.intake_decision_fact(M, comments, issue_proposal_id)
       if marker_issue == tostring(issue_proposal_id)
         and (decision == "enable" or decision == "track" or decision == "decline" or decision == "escalate-to-class")
         and shared.is_intake_service_class(service_class)
-        and M._is_bounded_string(dedup, M._max_dedup_len) then
+        and strings.is_bounded_string(dedup, M._max_dedup_len) then
         return {
           proposal_id = marker_issue,
           decision = decision,
@@ -210,7 +211,7 @@ function C.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)
         and marker_dedup ~= nil
         and action == "fix"
         and version == tostring(issue_version)
-        and M._is_bounded_string(gap, M._max_blocking_gap_len) then
+        and strings.is_bounded_string(gap, M._max_blocking_gap_len) then
         local review_proposal = review_proposal_from_dedup(marker_dedup)
         local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
         return {
@@ -243,11 +244,11 @@ function C.review_meta_decision_fact(M, comments, issue_proposal_id, issue_versi
       if marker_issue == tostring(issue_proposal_id)
         and marker_lineage == expected_lineage
         and (action == "fix" or action == "block" or action == "spec-amendment")
-        and M._is_bounded_string(marker_dedup, M._max_dedup_len) then
+        and strings.is_bounded_string(marker_dedup, M._max_dedup_len) then
         local review_proposal = review_proposal_from_dedup(marker_dedup)
         local _, _, _, reviewed_head_sha = M.parse_pr_review_proposal_id(review_proposal)
         if review_proposal ~= nil and forge_validators.is_git_sha(reviewed_head_sha) then
-          if action == "fix" and (gap == nil or not M._is_bounded_string(gap, M._max_blocking_gap_len)) then
+          if action == "fix" and (gap == nil or not strings.is_bounded_string(gap, M._max_blocking_gap_len)) then
             return nil
           end
           return {
@@ -296,12 +297,12 @@ function C.merge_gate_fix_fact(M, comments, issue_proposal_id, issue_version, op
       local marker_reason = marker:match('reason="([^"]+)"')
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(issue_version)
-        and M._is_bounded_string(marker_review_proposal, M._max_key_len)
-        and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
-        and M._is_bounded_string(marker_reason, M._max_key_len)
+        and strings.is_bounded_string(marker_review_proposal, M._max_key_len)
+        and strings.is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and strings.is_bounded_string(marker_reason, M._max_key_len)
         and forge_validators.is_git_sha(marker_head_sha)
         and (marker_gate_baseline_sha == nil or forge_validators.is_git_sha(marker_gate_baseline_sha))
-        and (marker_predecessor_set == nil or M._is_path_safe_key(marker_predecessor_set, M._max_dedup_len)) then
+        and (marker_predecessor_set == nil or strings.is_path_safe_key(marker_predecessor_set, M._max_dedup_len)) then
         local fact = {
           review_proposal_id = marker_review_proposal,
           review_dedup_key = marker_review_dedup,
@@ -345,8 +346,8 @@ function C.merge_ready_fact(M, comments, issue_proposal_id, issue_version, pr_nu
         and (pr_number == nil or tostring(marker_pr) == tostring(pr_number))
         and tostring(marker_version) == tostring(issue_version)
         and (head_sha == nil or tostring(marker_head_sha) == tostring(head_sha))
-        and M._is_bounded_string(marker_review_proposal, M._max_key_len)
-        and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and strings.is_bounded_string(marker_review_proposal, M._max_key_len)
+        and strings.is_bounded_string(marker_review_dedup, M._max_dedup_len)
         and forge_validators.is_git_sha(marker_head_sha) then
         local candidate = {
           proposal_id = marker_issue,
@@ -373,7 +374,7 @@ function C.high_risk_review_evidence_fact(M, comments, issue_proposal_id, issue_
   if type(comments) ~= "table" then
     return nil
   end
-  if not M._is_bounded_string(paths_digest, M._max_key_len) then
+  if not strings.is_bounded_string(paths_digest, M._max_key_len) then
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:high%-risk%-review%-evidence:v1.-%-%->"
@@ -403,10 +404,10 @@ function C.high_risk_review_evidence_fact(M, comments, issue_proposal_id, issue_
         and marker_verdict == "approve"
         and tostring(marker_paths_digest or "") == tostring(paths_digest)
         and forge_validators.is_git_sha(marker_head_sha)
-        and M._is_bounded_string(marker_review_proposal, M._max_key_len)
-        and M._is_bounded_string(marker_review_dedup, M._max_dedup_len)
-        and M._is_bounded_string(marker_paths_digest, M._max_key_len)
-        and M._is_bounded_string(marker_angle_digest, M._max_key_len) then
+        and strings.is_bounded_string(marker_review_proposal, M._max_key_len)
+        and strings.is_bounded_string(marker_review_dedup, M._max_dedup_len)
+        and strings.is_bounded_string(marker_paths_digest, M._max_key_len)
+        and strings.is_bounded_string(marker_angle_digest, M._max_key_len) then
         local candidate = {
           proposal_id = marker_issue,
           version = marker_version,
@@ -709,9 +710,9 @@ function C.pr_link_fact(M, comments, proposal_id)
       local marker_impl_version = marker:match('impl_version="([^"]*)"')
       local marker_base_branch = marker:match('base_branch="([^"]+)"')
       if marker_proposal == proposal_id
-        and M._is_positive_pr_number(marker_pr)
+        and forge_validators.is_positive_pr_number(marker_pr)
         and forge_validators.is_git_ref_safe(marker_branch)
-        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and strings.is_bounded_string(marker_impl_version, M._max_dedup_len)
         and forge_validators.is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
@@ -744,9 +745,9 @@ function C.pr_delegation_fact(M, comments, proposal_id, version, delegation)
         and (delegation == nil or marker_delegation == tostring(delegation))
         and pr_number ~= nil
         and tostring(pr_number) == tostring(marker_pr)
-        and M._is_positive_pr_number(marker_pr)
-        and M._is_bounded_string(marker_version, M._max_dedup_len)
-        and M._is_path_safe_key(marker_delegation, M._max_dedup_len) then
+        and forge_validators.is_positive_pr_number(marker_pr)
+        and strings.is_bounded_string(marker_version, M._max_dedup_len)
+        and strings.is_path_safe_key(marker_delegation, M._max_dedup_len) then
         return {
           proposal_id = marker_proposal,
           pr_proposal_id = marker_pr_proposal,
@@ -778,7 +779,7 @@ function C.pr_origin_fact(M, comments)
       if repo ~= nil
         and marker_issue == issue_number
         and forge_validators.is_git_ref_safe(marker_branch)
-        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and strings.is_bounded_string(marker_impl_version, M._max_dedup_len)
         and forge_validators.is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,
@@ -793,7 +794,7 @@ function C.pr_origin_fact(M, comments)
       if pr_repo ~= nil
         and marker_issue == tostring(pr_number)
         and forge_validators.is_git_ref_safe(marker_branch)
-        and M._is_bounded_string(marker_impl_version, M._max_dedup_len)
+        and strings.is_bounded_string(marker_impl_version, M._max_dedup_len)
         and forge_validators.is_git_ref_safe(marker_base_branch) then
         return {
           proposal_id = marker_proposal,

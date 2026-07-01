@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
@@ -86,7 +87,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     return
   end
   if reached.decision == "reject"
-    and not core._is_bounded_string(reached.blocking_gap, core._max_blocking_gap_len) then
+    and not strings.is_bounded_string(reached.blocking_gap, core._max_blocking_gap_len) then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
     return
   end

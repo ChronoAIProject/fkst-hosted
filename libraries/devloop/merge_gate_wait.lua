@@ -25,7 +25,7 @@ function C.merge_gate_wait_version_lineage(M, version)
 end
 
 function C.merge_gate_wait_marker(M, issue_proposal_id, pr_number, version, head_sha, reason, kind)
-  if not M._is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
+  if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-gate-wait marker")
   end
   return '<!-- fkst:github-devloop:merge-gate-wait:v1 proposal="' .. tostring(issue_proposal_id)
@@ -83,8 +83,8 @@ function C.merge_gate_wait_fact(M, comments, issue_proposal_id, issue_version, p
         and marker_version == tostring(wait_version)
         and tostring(marker_head_sha) == tostring(head_sha)
         and forge_validators.is_git_sha(marker_head_sha)
-        and M._is_bounded_string(marker_kind, M._max_key_len)
-        and M._is_bounded_string(marker_reason, M._max_key_len) then
+        and strings.is_bounded_string(marker_kind, M._max_key_len)
+        and strings.is_bounded_string(marker_reason, M._max_key_len) then
         return {
           proposal_id = marker_issue,
           pr_number = tonumber(marker_pr),

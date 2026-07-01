@@ -1,3 +1,4 @@
+local error_facts = require("contract.error_facts")
 local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.parsers.shared")
 local strings = require("forge.strings")
@@ -193,7 +194,7 @@ local function safe_rollup_check_name(M, entry)
     end
   end
   name = M.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(name))
-  name = M._one_line(name):gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
+  name = error_facts.one_line(name):gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
   if name == "" then
     name = "unknown"
   end

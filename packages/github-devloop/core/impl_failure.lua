@@ -57,7 +57,7 @@ function M.impl_failure_fact(comments, proposal_id, dedup_key)
       if marker_proposal == tostring(proposal_id)
         and marker_dedup == tostring(dedup_key)
         and reason ~= nil
-        and M._is_bounded_string(reason, M._max_key_len) then
+        and strings.is_bounded_string(reason, M._max_key_len) then
         local attempt = valid_attempt(marker_attr(marker, "attempt")) or 1
         local fact = {
           proposal_id = marker_proposal,

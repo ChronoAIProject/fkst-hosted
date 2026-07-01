@@ -1,3 +1,4 @@
+local error_facts = require("contract.error_facts")
 local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 local check_runs = require("forge.github.check_runs")
@@ -92,7 +93,7 @@ local function failure_identity(failing_check)
   identity = identity:gsub(";.*$", "")
   identity = identity:gsub(":.*$", "")
   identity = M.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(identity))
-  identity = M._one_line(identity):gsub("^%s+", ""):gsub("%s+$", "")
+  identity = error_facts.one_line(identity):gsub("^%s+", ""):gsub("%s+$", "")
   if identity == "" then
     identity = "rollup-red"
   end
@@ -229,7 +230,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     .. " head_sha=" .. tostring(pr and pr.head_sha or "")
     .. " age_minutes=" .. tostring(age)
     .. " threshold_minutes=" .. tostring(threshold)
-    .. " failing_check=" .. M._one_line(failing_check)
+    .. " failing_check=" .. error_facts.one_line(failing_check)
     .. " snapshot_path=" .. tostring(snapshot)
     .. " dedup_key=" .. tostring(request.dedup_key))
   return {

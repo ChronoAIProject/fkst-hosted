@@ -1,5 +1,6 @@
 local S = {}
 local strings = require("contract.strings")
+local error_facts = require("contract.error_facts")
 local decimal_checksum = strings.decimal_checksum
 
 function S.install(M)
@@ -68,7 +69,7 @@ local function wrapped_error_class(message)
 end
 
 local function normalize_fingerprint_text(value)
-  local text = M._one_line(value):lower()
+  local text = error_facts.one_line(value):lower()
   text = text:gsub("%d%d%d%d%-%d%d%-%d%dt%d%d[:%-]%d%d[:%-]%d%d%.?%d*z?", "<timestamp>")
   text = text:gsub("%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d%.?%d*", "<timestamp>")
   text = text:gsub("/private/tmp/[^%s'\"%)%]]+", "<tmp-path>")

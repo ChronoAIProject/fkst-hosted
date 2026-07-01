@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
@@ -256,7 +257,7 @@ local function collect_autonomy_claim_events(M, comments, proposal_id, repo, iss
       local attempt = tonumber(marker_attr(marker, "attempt"))
       local started_at = marker_attr(marker, "started_at")
       if marker_proposal == proposal_id
-        and M._is_bounded_string(dedup_key, M._max_dedup_len)
+        and strings.is_bounded_string(dedup_key, M._max_dedup_len)
         and attempt ~= nil
         and attempt >= 1
         and attempt == math.floor(attempt) then
@@ -304,7 +305,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
       local version = marker_attr(marker, "version")
       if marker_proposal == proposal_id
         and terminal_attempt_states[state] == true
-        and M._is_bounded_string(version, M._max_dedup_len) then
+        and strings.is_bounded_string(version, M._max_dedup_len) then
         put_terminal_event(terminals, tostring(state) .. ":" .. tostring(version), {
           kind = "terminal",
           marker_family = "state",
@@ -326,8 +327,8 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
       local pr_number = marker_attr(marker, "pr")
       local head_sha = marker_attr(marker, "head_sha")
       if marker_proposal == proposal_id
-        and M._is_bounded_string(version, M._max_dedup_len)
-        and M._is_positive_pr_number(pr_number)
+        and strings.is_bounded_string(version, M._max_dedup_len)
+        and forge_validators.is_positive_pr_number(pr_number)
         and forge_validators.is_git_sha(head_sha) then
         local autonomy_result = nil
         if marker:find('autonomy_result="v1"', 1, true) ~= nil then
@@ -524,11 +525,11 @@ local function autonomy_result_parts(M, record)
   if valid ~= "true" and valid ~= "false" and valid ~= "pending" then
     error("github-devloop: invalid autonomy result predicate")
   end
-  if not M._is_path_safe_key(proposal_id, M._max_key_len)
-    or not M._is_path_safe_key(repo, M._max_key_len)
-    or not M._is_positive_pr_number(issue_number)
-    or not M._is_positive_pr_number(pr_number)
-    or not M._is_bounded_string(version, M._max_dedup_len)
+  if not strings.is_path_safe_key(proposal_id, M._max_key_len)
+    or not strings.is_path_safe_key(repo, M._max_key_len)
+    or not forge_validators.is_positive_pr_number(issue_number)
+    or not forge_validators.is_positive_pr_number(pr_number)
+    or not strings.is_bounded_string(version, M._max_dedup_len)
     or not forge_validators.is_git_sha(head_sha)
     or human_touch_count == nil or human_touch_count < 0 or human_touch_count % 1 ~= 0
     or rounds == nil or rounds < 0 or rounds % 1 ~= 0

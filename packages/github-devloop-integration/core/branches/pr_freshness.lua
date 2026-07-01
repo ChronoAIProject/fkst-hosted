@@ -13,7 +13,7 @@ function PrFreshness.install(M, shared)
       .. M.safe_repo(require_safe_repo(repo))
       .. "/"
       .. require_safe_branch("managed branch", branch)
-    if not M._is_path_safe_key(key, M._max_key_len) then
+    if not strings.is_path_safe_key(key, M._max_key_len) then
       error("github-devloop: invalid PR freshness lock key")
     end
     return key

@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
 local core = require("core")
@@ -22,7 +23,7 @@ local spec = {
 local function valid_base_pr_handoff(handoff)
   return core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
     and require("devloop.pr_safety").is_safe_pr_number(handoff.pr_number)
-    and core._is_bounded_string(handoff.version, core._max_dedup_len)
+    and strings.is_bounded_string(handoff.version, core._max_dedup_len)
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len)
 end
 
@@ -40,12 +41,12 @@ end
 local function valid_fixing_handoff(handoff)
   return valid_review_handoff(handoff)
     and (handoff.current_head_sha == nil or require("devloop.pr_safety").is_safe_head_sha(handoff.current_head_sha))
-    and (handoff.blocking_gap == nil or core._is_bounded_string(handoff.blocking_gap, core._max_blocking_gap_len))
-    and (handoff.framing == nil or core._is_bounded_string(handoff.framing, core._max_framing_len))
+    and (handoff.blocking_gap == nil or strings.is_bounded_string(handoff.blocking_gap, core._max_blocking_gap_len))
+    and (handoff.framing == nil or strings.is_bounded_string(handoff.framing, core._max_framing_len))
     and (handoff.gate_baseline_sha == nil or require("devloop.pr_safety").is_safe_head_sha(handoff.gate_baseline_sha))
-    and (handoff.gate_failure_excerpt == nil or core._is_bounded_string(handoff.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len))
-    and (handoff.predecessor_set == nil or core._is_path_safe_key(handoff.predecessor_set, core._max_dedup_len))
-    and (handoff.dedup_key == nil or core._is_path_safe_key(handoff.dedup_key, core._max_dedup_len))
+    and (handoff.gate_failure_excerpt == nil or strings.is_bounded_string(handoff.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len))
+    and (handoff.predecessor_set == nil or strings.is_path_safe_key(handoff.predecessor_set, core._max_dedup_len))
+    and (handoff.dedup_key == nil or strings.is_path_safe_key(handoff.dedup_key, core._max_dedup_len))
 end
 
 local function issue_claim_ok(payload, handoff)

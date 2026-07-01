@@ -40,8 +40,8 @@ function M.parse_decompose_plan(stdout)
       break
     end
     if type(issue) ~= "table"
-      or not M._is_bounded_string(issue.title, M._max_title_len)
-      or not M._is_bounded_string(issue.body, M._max_body_len) then
+      or not strings.is_bounded_string(issue.title, M._max_title_len)
+      or not strings.is_bounded_string(issue.body, M._max_body_len) then
       return nil
     end
     table.insert(issues, {

@@ -1,3 +1,4 @@
+local error_facts = require("contract.error_facts")
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
@@ -47,7 +48,7 @@ local function cleanup_worktree(worktree)
   if result.exit_code ~= 0 then
     core.log_line("warn", "sync_scan", "branch-sync", "CLEANUP", {
       "worktree=" .. tostring(worktree),
-      "reason=" .. core._one_line(result.stderr or ""),
+      "reason=" .. error_facts.one_line(result.stderr or ""),
     })
   end
 end

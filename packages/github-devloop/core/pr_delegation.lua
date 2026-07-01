@@ -1,3 +1,4 @@
+local strings = require("contract.strings")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
@@ -26,7 +27,7 @@ local function issue_fields(issue, impl_version)
   if M.parse_proposal_id(proposal_id) == nil then
     error("github-devloop: invalid delegation issue proposal")
   end
-  if not M._is_bounded_string(impl_version, M._max_dedup_len) then
+  if not strings.is_bounded_string(impl_version, M._max_dedup_len) then
     error("github-devloop: invalid delegation implementation version")
   end
   return repo, issue_number, proposal_id
@@ -35,7 +36,7 @@ end
 local function delegation_key(proposal_id, impl_version, generation)
   local value = "g" .. tostring(generation or 1)
   value = value:gsub(":", "-")
-  if not M._is_path_safe_key(value, M._max_dedup_len) then
+  if not strings.is_path_safe_key(value, M._max_dedup_len) then
     error("github-devloop: invalid delegation generation")
   end
   return value

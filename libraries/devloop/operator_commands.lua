@@ -43,7 +43,7 @@ local function parse_command(M, body)
   end
   if command == "dependency-waiver" then
     local number = tonumber(line:match("^fkst:%s*dependency%-waiver%s+(%d+)%s*$") or "")
-    if M._is_positive_pr_number(number) then
+    if forge_validators.is_positive_pr_number(number) then
       return {
         command = command,
         blocker_number = math.floor(number),

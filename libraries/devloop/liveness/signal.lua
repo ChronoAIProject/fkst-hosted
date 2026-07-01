@@ -1,3 +1,4 @@
+local error_facts = require("contract.error_facts")
 local parsers_misc = require("devloop.parsers.misc")
 local conv_rounds = require("devloop.convergence.rounds")
 local m_facts = require("devloop.markers.facts")
@@ -72,10 +73,7 @@ end
 
 local function codex_run_status(M)
   local function one_line(value)
-    if type(M._one_line) == "function" then
-      return M._one_line(value)
-    end
-    return tostring(value or ""):gsub("[%s\r\n]+", " ")
+    return error_facts.one_line(value)
   end
   local function fallback(reason)
     if type(M.log_line) == "function" then
