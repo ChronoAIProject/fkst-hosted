@@ -41,6 +41,12 @@ pub mod routes;
 // to completion in a Kubernetes Job, mapping the engine's terminal status onto
 // the process exit code. No ClaimMap/CAS, no `/internal/v1`, no heartbeat.
 pub mod runner;
+// In-pod `run-substrate` subcommand (Model B, issue #359 §5): the long-lived
+// substrate-session entrypoint that fetches packages + the target repo, wires the
+// rotating GitHub token into git + gh, renders the codex config, and execs
+// `fkst-framework supervise`. Additive — nothing dispatches it as the default path
+// yet; Model A (`runner`) is untouched.
+pub mod session_pod;
 pub mod session_spec;
 pub mod sessions;
 pub mod state;
