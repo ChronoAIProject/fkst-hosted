@@ -66,10 +66,6 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // actually served).
     let mut top = OpenApiRouter::with_openapi(openapi::api_doc())
         .routes(routes!(routes::health::health))
-        // The literal /api/v1/health route coexists with the /api/v1 nest:
-        // axum nesting registers the inner routes individually (no catch-all),
-        // so /api/v1/health keeps answering (asserted by integration test).
-        .routes(routes!(routes::health::health_v1))
         // `/metrics` (#144) is TOP-level like `/health`: it carries only counts
         // (no secret) and is served on the ClusterIP-only surface, so Prometheus
         // scrapes it directly.

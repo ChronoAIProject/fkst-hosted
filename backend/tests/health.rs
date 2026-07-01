@@ -1,10 +1,9 @@
 //! Integration tests for the built router, driven via `tower::ServiceExt::oneshot`
 //! (no real TCP bind, no Docker, no datastore).
 //!
-//! The controller is datastore-free (#143): `/health` and `/api/v1/health`
-//! report ready unconditionally, since a process that can answer the route is
-//! healthy. These tests assert the exact `200 ok` wire contract and that the
-//! routes are public.
+//! The controller is datastore-free (#143): `/health` reports ready
+//! unconditionally, since a process that can answer the route is healthy. These
+//! tests assert the exact `200 ok` wire contract and that the route is public.
 
 use std::time::Duration;
 
@@ -73,11 +72,6 @@ async fn assert_ready(path: &str) {
 #[tokio::test]
 async fn health_returns_200_ok_with_no_datastore() {
     assert_ready("/health").await;
-}
-
-#[tokio::test]
-async fn api_v1_health_returns_200_ok_with_no_datastore() {
-    assert_ready("/api/v1/health").await;
 }
 
 #[tokio::test]
