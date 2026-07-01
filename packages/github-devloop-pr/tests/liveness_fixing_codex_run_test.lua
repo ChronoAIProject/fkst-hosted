@@ -5,6 +5,7 @@ local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_attempts = require("devloop.convergence.attempts")
+local m_rae = require("devloop.restart_actionable_epoch")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -170,7 +171,7 @@ local function timeout_attempt_v2_comment(row, state, comments, round)
     current_pr = { comments = comments or {}, head_sha = "def456" },
     source_ref = core.pr_source_ref(repo, 7),
   }
-  local eval = core.actionable_epoch_resolve(row, state, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
+  local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
   return trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
     proposal_id,
     row.from_state,

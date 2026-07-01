@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local contract_time = require("contract.time")
 local m_builders = require("devloop.markers.builders")
+local m_rae = require("devloop.restart_actionable_epoch")
 local t = h.t
 
 local function copy_value(value)
@@ -374,7 +375,7 @@ return {
         },
       },
     }
-    local eval = core.actionable_epoch_resolve(row, {
+    local eval = m_rae.actionable_epoch_resolve(core, row, {
       state = "awaiting-pr",
       version = version,
       proposal_id = parent_proposal_id,

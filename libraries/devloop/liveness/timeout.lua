@@ -1,5 +1,6 @@
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
+local m_rae = require("devloop.restart_actionable_epoch")
 local S = {}
 local contract_time = require("contract.time")
 local source_refs = require("contract.source_ref")
@@ -32,8 +33,8 @@ end
 
 function M.liveness_timeout_attempt(row, state, facts)
   local eval = facts and facts.actionable_epoch_eval
-  if M.restart_row_has_registered_actionable_epoch(row) then
-    return M.actionable_epoch_timeout_attempt(row, state, facts)
+  if m_rae.restart_row_has_registered_actionable_epoch(M, row) then
+    return m_rae.actionable_epoch_timeout_attempt(M, row, state, facts)
   end
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   local comments = facts and facts.current and facts.current.comments or nil
@@ -80,8 +81,8 @@ function M.liveness_timeout_due_with_facts(row, state, facts, now_seconds)
   if row == nil or row.terminal == true then
     return false, nil
   end
-  if M.restart_row_has_registered_actionable_epoch(row) then
-    return M.actionable_epoch_timeout_due(row, state, facts, now_seconds)
+  if m_rae.restart_row_has_registered_actionable_epoch(M, row) then
+    return m_rae.actionable_epoch_timeout_due(M, row, state, facts, now_seconds)
   end
   local contract = row.liveness_contract
   if type(contract) == "table" and contract.mode == "row-budget-bounds-receiver" then
@@ -155,11 +156,11 @@ end
 function M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds)
   local due, age = M.liveness_timeout_due_with_facts(row, state, facts, now_seconds)
   local limit = tonumber(row and row.on_timeout and row.on_timeout.escalate_after_attempts) or max_timeout_attempts
-  local heartbeat = M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limit)
+  local heartbeat = m_rae.actionable_epoch_heartbeat_decision(M, row, state, facts, due, age, limit)
   if heartbeat ~= nil then return heartbeat end
-  local codex_run = M.actionable_epoch_codex_run_decision(row, state, facts, due, age)
+  local codex_run = m_rae.actionable_epoch_codex_run_decision(M, row, state, facts, due, age)
   if codex_run ~= nil then return codex_run end
-  local child_workflow = M.actionable_epoch_child_workflow_decision(row, state, facts, due, age)
+  local child_workflow = m_rae.actionable_epoch_child_workflow_decision(M, row, state, facts, due, age)
   if child_workflow ~= nil then return child_workflow end
   if not due then
     return { action = "wait", age_minutes = age }
@@ -199,7 +200,7 @@ local function emit_timeout_attempt_marker(dept, entity, state, row, facts, prop
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
   if target ~= nil then
     local eval = facts and facts.actionable_epoch_eval
-    if M.restart_row_has_registered_actionable_epoch(row)
+    if m_rae.restart_row_has_registered_actionable_epoch(M, row)
       and type(eval) == "table"
       and eval.status == "actionable"
       and eval.generation_key ~= nil then

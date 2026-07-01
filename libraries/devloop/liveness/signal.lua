@@ -2,6 +2,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local conv_rounds = require("devloop.convergence.rounds")
 local m_facts = require("devloop.markers.facts")
 local m_mgw = require("devloop.merge_gate_wait")
+local m_rae = require("devloop.restart_actionable_epoch")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
@@ -529,11 +530,11 @@ function M.restart_row_liveness_signal(row, state, facts, now_seconds)
 end
 
 function M.restart_row_receiver_liveness(row, state, facts, now_seconds)
-  if M.restart_row_has_registered_actionable_epoch(row)
+  if m_rae.restart_row_has_registered_actionable_epoch(M, row)
     and row
     and row.watchdog
     and row.watchdog.mode == "live-defer" then
-    local eval = M.actionable_epoch_resolve(row, state, facts, now_seconds)
+    local eval = m_rae.actionable_epoch_resolve(M, row, state, facts, now_seconds)
     if type(facts) == "table" then
       facts.actionable_epoch_eval = eval
     end

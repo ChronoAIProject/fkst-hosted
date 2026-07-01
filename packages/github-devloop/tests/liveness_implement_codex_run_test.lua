@@ -1,6 +1,7 @@
 local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local conv_attempts = require("devloop.convergence.attempts")
+local m_rae = require("devloop.restart_actionable_epoch")
 local t = h.t
 local core = h.core
 local ready = h.ready
@@ -174,7 +175,7 @@ return {
         timeout_seconds = 3600,
       },
     }, function()
-      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.signal.reason, "codex-run-deadline-expired")
       table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
@@ -246,7 +247,7 @@ return {
       core.state_marker(event.proposal_id, "implementing", timeout_version),
     }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
     with_codex_runs({}, function()
-      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.signal.reason, "codex-run-not-running")
       t.eq(eval.codex_runs_fallback, false)
@@ -271,7 +272,7 @@ return {
       error("synthetic codex_runs failure")
     end
     local ok, err = pcall(function()
-      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "deferred")
       t.eq(eval.signal.reason, "codex-runs-unavailable")
       t.eq(eval.signal.codex_runs_fallback, true)
@@ -302,7 +303,7 @@ return {
       error("synthetic codex_runs failure")
     end
     local ok, err = pcall(function()
-      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.reason, "codex run liveness indeterminate over row budget")
       t.eq(eval.signal.reason, "codex-runs-unavailable")
@@ -357,7 +358,7 @@ return {
         status = "running",
       },
     }, function()
-      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "deferred")
       t.eq(eval.signal.reason, "codex-run-deadline-unavailable")
       t.eq(eval.signal.indeterminate, true)
@@ -373,7 +374,7 @@ return {
       local recovered = facts_for(event, {
         core.state_marker(event.proposal_id, "implementing", event.dedup_key),
       }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T01:00:00Z"))
-      local eval = core.actionable_epoch_resolve(row, state, recovered, recovered.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, recovered, recovered.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.signal.reason, "codex-run-not-running")
       local due, age = core.liveness_timeout_due_with_facts(row, state, recovered, recovered.now_seconds)
@@ -401,7 +402,7 @@ return {
         status = "running",
       },
     }, function()
-      local eval = core.actionable_epoch_resolve(row, state, facts, facts.now_seconds)
+      local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.reason, "codex run liveness indeterminate over row budget")
       t.eq(eval.signal.reason, "codex-run-deadline-unavailable")

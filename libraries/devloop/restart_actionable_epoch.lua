@@ -1,11 +1,9 @@
 local parsers_misc = require("devloop.parsers.misc")
 local conv_attempts = require("devloop.convergence.attempts")
-local S = {}
 local contract_time = require("contract.time")
+local C = {}
 
-function S.install(M)
-
-local function comment_created_ms(comment)
+local function comment_created_ms(M, comment)
   local seconds = contract_time.iso_timestamp_epoch_seconds(parsers_misc._comment_created_at(M, comment))
   if seconds == nil then
     return nil
@@ -43,12 +41,12 @@ local function live_defer_comments(row, facts)
   return facts and facts.current and facts.current.comments or nil
 end
 
-local function signal_version(row, state)
+local function signal_version(M, row, state)
   local signal = row and row.liveness_contract and row.liveness_contract.signal
   return M.liveness_heartbeat_version(state and state.version, signal)
 end
 
-local function matching_live_defer_marker(row, state, facts)
+local function matching_live_defer_marker(M, row, state, facts)
   local family = marker_family(row and row.defer and row.defer.live_marker)
   if family == nil then
     return nil
@@ -58,10 +56,10 @@ local function matching_live_defer_marker(row, state, facts)
     return nil
   end
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
-  local version = signal_version(row, state)
+  local version = signal_version(M, row, state)
   local newest = nil
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    local created_ms = comment_created_ms(comment)
+    local created_ms = comment_created_ms(M, comment)
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern(family)) do
       if marker_attr(marker, "proposal") == tostring(proposal_id)
         and marker_attr(marker, "version") == tostring(version or "") then
@@ -81,7 +79,7 @@ local function matching_live_defer_marker(row, state, facts)
   return newest
 end
 
-local function generation_key(row, state, eval)
+local function generation_key(M, row, state, eval)
   return M._dedup_key({
     "restart-liveness:v2",
     tostring((state and state.proposal_id) or ""),
@@ -93,13 +91,13 @@ local function generation_key(row, state, eval)
   })
 end
 
-local function with_generation_key(row, state, eval)
-  eval.generation_key = generation_key(row, state, eval)
+local function with_generation_key(M, row, state, eval)
+  eval.generation_key = generation_key(M, row, state, eval)
   return eval
 end
 
-local function actionable(row, state, epoch_ms, opened_by, reason)
-  return with_generation_key(row, state, {
+local function actionable(M, row, state, epoch_ms, opened_by, reason)
+  return with_generation_key(M, row, state, {
     status = "actionable",
     epoch_ms = epoch_ms,
     epoch_source = row.actionable_epoch.source,
@@ -122,10 +120,10 @@ local function invalid(reason)
   }
 end
 
-local function clear_fact(row, state, facts)
+local function clear_fact(M, row, state, facts)
   local comments = live_defer_comments(row, facts)
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
-  local version = signal_version(row, state)
+  local version = signal_version(M, row, state)
   if row and row.defer and row.defer.clear_fact == "dependency-release:v1" then
     local fact = M.dependency_release_fact(comments, proposal_id, version)
     if fact ~= nil then
@@ -136,7 +134,7 @@ local function clear_fact(row, state, facts)
   return nil
 end
 
-local function observed_fact(row, state, facts)
+local function observed_fact(M, row, state, facts)
   local comments = live_defer_comments(row, facts)
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   if row and row.defer and row.defer.observed_fact == "dependency-wait-observed:v1" then
@@ -171,18 +169,18 @@ local function fact_created_ms(fact)
   return seconds * 1000
 end
 
-local function resolve_state_entry(row, state)
+local function resolve_state_entry(M, row, state)
   local epoch_ms = state_entry_ms(state)
   if epoch_ms == nil then
     return invalid("state entry epoch is missing")
   end
-  return actionable(row, state, epoch_ms, "state-entry:v1:" .. tostring(state and state.version or ""), "state entry")
+  return actionable(M, row, state, epoch_ms, "state-entry:v1:" .. tostring(state and state.version or ""), "state entry")
 end
 
-local function resolve_live_defer_epoch(row, state, facts, now_seconds)
-  local clear = clear_fact(row, state, facts)
+local function resolve_live_defer_epoch(M, row, state, facts, now_seconds)
+  local clear = clear_fact(M, row, state, facts)
   local clear_ms = fact_created_ms(clear)
-  local live = matching_live_defer_marker(row, state, facts)
+  local live = matching_live_defer_marker(M, row, state, facts)
   if live ~= nil and clear_ms ~= nil and live.updated_ms ~= nil and live.updated_ms <= clear_ms then
     live = nil
   end
@@ -193,19 +191,19 @@ local function resolve_live_defer_epoch(row, state, facts, now_seconds)
     if stale_at > now_ms then
       return deferred("live defer marker fresh")
     end
-    return actionable(row, state, stale_at, tostring(live.id) .. ":stale", "live defer marker stale")
+    return actionable(M, row, state, stale_at, tostring(live.id) .. ":stale", "live defer marker stale")
   end
   if clear ~= nil and clear_ms ~= nil then
-    return actionable(row, state, clear_ms, tostring(clear.id or "clear-fact"), "live defer clear fact")
+    return actionable(M, row, state, clear_ms, tostring(clear.id or "clear-fact"), "live defer clear fact")
   end
-  local observed = observed_fact(row, state, facts)
+  local observed = observed_fact(M, row, state, facts)
   if observed == nil and row.actionable_epoch.allows_state_entry_if_never_deferred == true then
     local gate, gate_error = dependency_gate_fact(row, state, facts)
     if type(gate) ~= "table" then
       return invalid("live-defer-never-deferred-proof-missing:" .. tostring(gate_error or "dependency-gate-missing"))
     end
     if gate.ok == true then
-      return resolve_state_entry(row, state)
+      return resolve_state_entry(M, row, state)
     end
     return invalid("live-defer-clear-absent-after-dependency-gate:" .. tostring(gate.reason or gate.kind or "dependency-held"))
   end
@@ -220,7 +218,7 @@ local function heartbeat_freshness_minutes(row)
   return freshness_ms / (60 * 1000)
 end
 
-local function resolve_live_defer_heartbeat(row, state, facts, now_seconds)
+local function resolve_live_defer_heartbeat(M, row, state, facts, now_seconds)
   if type(M.restart_row_liveness_signal) ~= "function" then
     return invalid("heartbeat liveness signal resolver is unavailable")
   end
@@ -238,7 +236,7 @@ local function resolve_live_defer_heartbeat(row, state, facts, now_seconds)
     end
     local heartbeat_ms = now_ms - (signal.age_minutes * 60 * 1000)
     local stale_ms = heartbeat_ms + (freshness_minutes * 60 * 1000)
-    local eval = actionable(row, state, stale_ms, tostring(row.defer.producer) .. ":stale", "heartbeat marker stale")
+    local eval = actionable(M, row, state, stale_ms, tostring(row.defer.producer) .. ":stale", "heartbeat marker stale")
     eval.heartbeat_age_minutes = signal.age_minutes
     return eval
   end
@@ -246,12 +244,12 @@ local function resolve_live_defer_heartbeat(row, state, facts, now_seconds)
   if entry_ms == nil then
     return invalid("heartbeat marker absent and state entry epoch is missing")
   end
-  local eval = actionable(row, state, entry_ms + (freshness_minutes * 60 * 1000), tostring(row.defer.producer) .. ":missing", "heartbeat marker missing")
+  local eval = actionable(M, row, state, entry_ms + (freshness_minutes * 60 * 1000), tostring(row.defer.producer) .. ":missing", "heartbeat marker missing")
   eval.heartbeat_age_minutes = nil
   return eval
 end
 
-local function resolve_codex_run(row, state, facts, now_seconds)
+local function resolve_codex_run(M, row, state, facts, now_seconds)
   if type(M.restart_row_liveness_signal) ~= "function" then
     return invalid("codex run liveness signal resolver is unavailable")
   end
@@ -273,7 +271,7 @@ local function resolve_codex_run(row, state, facts, now_seconds)
     end
     local age = math.floor((now_ms - entry_ms) / 60000)
     if age >= budget then
-      local eval = actionable(row, state, entry_ms, "codex-run:indeterminate", "codex run liveness indeterminate over row budget")
+      local eval = actionable(M, row, state, entry_ms, "codex-run:indeterminate", "codex run liveness indeterminate over row budget")
       eval.signal = signal
       eval.codex_runs_fallback = signal.codex_runs_fallback == true
       eval.indeterminate = signal.indeterminate == true
@@ -287,14 +285,14 @@ local function resolve_codex_run(row, state, facts, now_seconds)
   if entry_ms == nil then
     return invalid("codex run fallback epoch is missing state entry")
   end
-  local eval = actionable(row, state, entry_ms, tostring(row.defer and row.defer.producer or "codex-run") .. ":" .. tostring(signal.reason or "not-running"), "codex run not positively live")
+  local eval = actionable(M, row, state, entry_ms, tostring(row.defer and row.defer.producer or "codex-run") .. ":" .. tostring(signal.reason or "not-running"), "codex run not positively live")
   eval.signal = signal
   eval.codex_runs_fallback = signal.codex_runs_fallback == true
   eval.indeterminate = signal.indeterminate == true
   return eval
 end
 
-local function resolve_child_workflow_wait(row, state, facts, now_seconds)
+local function resolve_child_workflow_wait(M, row, state, facts, now_seconds)
   if type(M.restart_row_liveness_signal) ~= "function" then
     return invalid("child workflow liveness signal resolver is unavailable")
   end
@@ -308,19 +306,19 @@ local function resolve_child_workflow_wait(row, state, facts, now_seconds)
   if entry_ms == nil then
     return invalid("child workflow wait delegation epoch is missing")
   end
-  local eval = actionable(row, state, entry_ms, "pr-delegation:v1:" .. tostring(state and state.version or ""), "child workflow terminal or absent")
+  local eval = actionable(M, row, state, entry_ms, "pr-delegation:v1:" .. tostring(state and state.version or ""), "child workflow terminal or absent")
   eval.signal = signal
   return eval
 end
 
-function M.actionable_epoch_generation_key(row, state, eval)
+function C.actionable_epoch_generation_key(M, row, state, eval)
   if type(eval) ~= "table" or eval.status ~= "actionable" then
     return nil
   end
-  return generation_key(row, state, eval)
+  return generation_key(M, row, state, eval)
 end
 
-function M.actionable_epoch_resolve(row, state, facts, now_seconds)
+function C.actionable_epoch_resolve(M, row, state, facts, now_seconds)
   if type(row) ~= "table" or type(row.actionable_epoch) ~= "table" then
     return invalid("row does not declare actionable_epoch")
   end
@@ -329,25 +327,25 @@ function M.actionable_epoch_resolve(row, state, facts, now_seconds)
     return invalid("unregistered actionable_epoch.source")
   end
   if row.actionable_epoch.source == "state_entry:v1" then
-    return resolve_state_entry(row, state)
+    return resolve_state_entry(M, row, state)
   end
   if row.actionable_epoch.source == "live_defer_epoch:v1" then
-    return resolve_live_defer_epoch(row, state, facts, now_seconds)
+    return resolve_live_defer_epoch(M, row, state, facts, now_seconds)
   end
   if row.actionable_epoch.source == "live_defer_heartbeat:v1" then
-    return resolve_live_defer_heartbeat(row, state, facts, now_seconds)
+    return resolve_live_defer_heartbeat(M, row, state, facts, now_seconds)
   end
   if row.actionable_epoch.source == "codex_run:v1" then
-    return resolve_codex_run(row, state, facts, now_seconds)
+    return resolve_codex_run(M, row, state, facts, now_seconds)
   end
   if row.actionable_epoch.source == "child_workflow_wait:v1" then
-    return resolve_child_workflow_wait(row, state, facts, now_seconds)
+    return resolve_child_workflow_wait(M, row, state, facts, now_seconds)
   end
   return invalid("unsupported actionable_epoch.source")
 end
 
-function M.actionable_epoch_timeout_due(row, state, facts, now_seconds)
-  local eval = M.actionable_epoch_resolve(row, state, facts, now_seconds)
+function C.actionable_epoch_timeout_due(M, row, state, facts, now_seconds)
+  local eval = C.actionable_epoch_resolve(M, row, state, facts, now_seconds)
   if type(facts) == "table" then
     facts.actionable_epoch_eval = eval
   end
@@ -399,7 +397,7 @@ function M.actionable_epoch_timeout_due(row, state, facts, now_seconds)
   return true, age
 end
 
-function M.actionable_epoch_timeout_attempt(row, state, facts)
+function C.actionable_epoch_timeout_attempt(M, row, state, facts)
   local eval = facts and facts.actionable_epoch_eval
   if type(eval) ~= "table" or eval.status ~= "actionable" or eval.generation_key == nil then
     return 0
@@ -434,7 +432,7 @@ function M.actionable_epoch_timeout_attempt(row, state, facts)
   return current
 end
 
-function M.actionable_epoch_codex_run_decision(row, state, facts, due, age)
+function C.actionable_epoch_codex_run_decision(M, row, state, facts, due, age)
   local eval = facts and facts.actionable_epoch_eval
   if not (row
     and row.actionable_epoch
@@ -455,7 +453,7 @@ function M.actionable_epoch_codex_run_decision(row, state, facts, due, age)
   }
 end
 
-function M.actionable_epoch_child_workflow_decision(row, state, facts, due, age)
+function C.actionable_epoch_child_workflow_decision(M, row, state, facts, due, age)
   local eval = facts and facts.actionable_epoch_eval
   if not (row
     and row.actionable_epoch
@@ -470,7 +468,7 @@ function M.actionable_epoch_child_workflow_decision(row, state, facts, due, age)
   return { action = "wait", age_minutes = age }
 end
 
-function M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limit)
+function C.actionable_epoch_heartbeat_decision(M, row, state, facts, due, age, limit)
   local eval = facts and facts.actionable_epoch_eval
   if not (row
     and row.actionable_epoch
@@ -509,7 +507,7 @@ function M.actionable_epoch_heartbeat_decision(row, state, facts, due, age, limi
   }
 end
 
-function M.restart_row_has_registered_actionable_epoch(row)
+function C.restart_row_has_registered_actionable_epoch(M, row)
   if type(row) ~= "table" or type(row.actionable_epoch) ~= "table" then
     return false
   end
@@ -518,6 +516,4 @@ function M.restart_row_has_registered_actionable_epoch(row)
     and M.restart_liveness_epoch_sources()[source] ~= nil
 end
 
-end
-
-return S
+return C

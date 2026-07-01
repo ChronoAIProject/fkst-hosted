@@ -1,8 +1,8 @@
 local h = require("tests.devloop_helpers")
 local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
-local conv_reconcile = require("devloop.convergence.reconcile")
-local conv_attempts = require("devloop.convergence.attempts")
+local conv_reconcile, conv_attempts = require("devloop.convergence.reconcile"), require("devloop.convergence.attempts")
+local m_rae = require("devloop.restart_actionable_epoch")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -785,7 +785,7 @@ return {
       fkst.codex_runs = function()
         return { running = {}, recent = {} }
       end
-      eval = core.actionable_epoch_resolve(row, state, {
+      eval = m_rae.actionable_epoch_resolve(core, row, state, {
         proposal_id = event.proposal_id,
         current = { comments = { attempt_comment } },
       }, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))

@@ -65,7 +65,8 @@ require("workflow.restart_liveness_contract").install(M, restart_liveness_resolv
 local restart_responsibility_contract = require("devloop.restart_responsibility_contract")
 M.restart_responsibility_inventory_errors = function(...) return restart_responsibility_contract.restart_responsibility_inventory_errors(M, ...) end
 M.strict_restart_responsibility_contract_errors = function(...) return restart_responsibility_contract.strict_restart_responsibility_contract_errors(M, ...) end
-require("devloop.restart_actionable_epoch").install(M)
+local restart_actionable_epoch = require("devloop.restart_actionable_epoch")
+M.actionable_epoch_resolve = function(...) return restart_actionable_epoch.actionable_epoch_resolve(M, ...) end
 local ready_split_replayers = require("core.ready_split").install(M)
 local awaiting_pr_replayers = require("core.awaiting_pr_replayer").install(M)
 M.replayer_registry = {

@@ -2,6 +2,7 @@ local h = require("tests.devloop_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
+local m_rae = require("devloop.restart_actionable_epoch")
 local t = h.t
 local core = h.core
 local replay_fields = require("devloop.replay_fields")
@@ -111,7 +112,7 @@ return {
       return { running = {}, recent = {} }
     end
     local ok, eval = pcall(function()
-      return core.actionable_epoch_resolve(row, state, facts, now_seconds)
+      return m_rae.actionable_epoch_resolve(core, row, state, facts, now_seconds)
     end)
     fkst.codex_runs = original
     if not ok then
