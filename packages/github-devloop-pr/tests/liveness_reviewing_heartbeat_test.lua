@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
@@ -144,7 +145,7 @@ end
 
 local function review_round_comment(created_at)
   local source_ref = entity_lib.pr_source_ref(repo, 7)
-  local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
+  local review_proposal_id = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
   return trusted_comment(conv_rounds.review_converge_round_marker(core,
     review_proposal_id,
     proposal_id,
@@ -217,7 +218,7 @@ return {
   test_liveness_scan_reviewing_issue_side_heartbeat_is_not_read_as_pr_live = function()
     local row = restart_transition_row("reviewing")
     local source_ref = entity_lib.pr_source_ref(repo, 7)
-    local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
     local signal = core.restart_row_liveness_signal(row, {
       state = "reviewing",
       version = version,

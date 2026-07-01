@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
@@ -160,7 +161,7 @@ return {
     t.eq(review_result.exit_code, 0)
     t.eq(#review_result.raises, 1)
     local proposal = find_raise(review_result.raises, "consensus.proposal").payload
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, expected_version, "feedface"))
+    t.eq(proposal.proposal_id, devloop_base.pr_review_proposal_id("owner/repo", 7, expected_version, "feedface"))
     t.is_nil(proposal.body:find("+fixed again", 1, true))
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
 	  end,
@@ -353,8 +354,8 @@ return {
     local second_review_version = first_event.version
     local second_event = fixing({
       version = second_version,
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, second_review_version, "feedface"),
-      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, second_review_version, "feedface") .. "/review",
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, second_review_version, "feedface"),
+      review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, second_review_version, "feedface") .. "/review",
       reviewed_head_sha = "feedface",
       dedup_key = "fixing/github-devloop/issue/owner/repo/42/v2",
     })
@@ -626,7 +627,7 @@ return {
     for _ = 1, 6 do
       full_version = core.next_fix_version(full_version)
     end
-    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
     local event = review_unresolved({
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
@@ -656,7 +657,7 @@ return {
     for _ = 1, 6 do
       full_version = core.next_fix_version(full_version)
     end
-    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
     local event = review_unresolved({
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
@@ -681,7 +682,7 @@ return {
     for _ = 1, 6 do
       full_version = core.next_fix_version(full_version)
     end
-    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
     local event = review_unresolved({
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
@@ -706,7 +707,7 @@ return {
     for _ = 1, 6 do
       full_version = core.next_fix_version(full_version)
     end
-    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
     local event = review_unresolved({
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
@@ -729,7 +730,7 @@ return {
       issue_version = core.next_fix_version(issue_version)
     end
     local event_version = core.next_fix_version(issue_version)
-    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, event_version, "def456")
+    local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event_version, "def456")
     local event = review_unresolved({
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
@@ -755,7 +756,7 @@ return {
     for _ = 1, 6 do
       full_version = core.next_fix_version(full_version)
     end
-    local proposal_id = core.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
+    local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, full_version, "def456")
     local event = review_unresolved({
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
@@ -794,7 +795,7 @@ return {
 
   test_review_loop_true_stall_records_round_and_raises_review_reconcile = function()
     local event = review_unresolved({
-      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
+      dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
       round = 3,
       narrowed_question = "Same review framing",
       angle_digests = {

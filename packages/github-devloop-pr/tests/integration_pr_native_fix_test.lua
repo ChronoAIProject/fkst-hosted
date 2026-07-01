@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local t = h.t
@@ -21,7 +22,7 @@ local render_comment = h.render_comment
 
 local function pr_native_review_reached(extra)
   local version = "pr-native-version"
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456")
   local value = {
     schema = "consensus.consensus_reached.v1",
     proposal_id = proposal_id,

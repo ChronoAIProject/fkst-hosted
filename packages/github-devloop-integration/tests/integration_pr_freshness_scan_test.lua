@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -9,7 +10,7 @@ local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T0
 local branch_sha = "bbbb2222"
 local integration_sha = "aaaa1111"
 local merge_sha = "cccc3333"
-local review_proposal = core.pr_review_proposal_id("owner/repo", 7, version, branch_sha)
+local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, version, branch_sha)
 local review_dedup = "consensus:" .. review_proposal .. "/review"
 
 local function opts(name, extra)
@@ -183,7 +184,7 @@ return {
   test_pr_freshness_skips_stale_review_approval_for_new_head = function()
     local old_head_sha = branch_sha
     local new_head_sha = "dddd4444"
-    local old_review_proposal = core.pr_review_proposal_id("owner/repo", 7, version, old_head_sha)
+    local old_review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, version, old_head_sha)
     local old_review_dedup = "consensus:" .. old_review_proposal .. "/review"
     mock_env("")
     mock_pr_list(false)

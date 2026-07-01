@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
@@ -114,7 +115,7 @@ end
 local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/" .. tostring(version_time)
   local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
-  local review_proposal_id = core.pr_review_proposal_id("owner/repo", pr_number, version, head_sha)
+  local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", pr_number, version, head_sha)
   return payloads_builders.build_devloop_merge_ready_payload(core, proposal_id, pr_number, version, {
     review_proposal_id = review_proposal_id,
     review_dedup_key = "consensus:" .. review_proposal_id .. "/review",
@@ -585,12 +586,12 @@ return {
     local predecessor = event_for_pr(5, 41, "2026-06-03T00-00-00Z", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     local current = event_for_pr(7, 42, "2026-06-03T01-02-03Z", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
     current.version = current.version .. "/fix/1/fix/2"
-    current.review_proposal_id = core.pr_review_proposal_id("owner/repo", current.pr_number, current.version, current.reviewed_head_sha)
+    current.review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", current.pr_number, current.version, current.reviewed_head_sha)
     current.review_dedup_key = "consensus:" .. current.review_proposal_id .. "/review"
     current.dedup_key = "merge-ready/" .. current.proposal_id .. "/" .. current.version
     local fix_version = core._strip_latest_fix_version_suffix(current.version)
     local old_review_version = core._strip_latest_fix_version_suffix(fix_version)
-    local old_review_proposal = core.pr_review_proposal_id("owner/repo", current.pr_number, old_review_version, "cccccccccccccccccccccccccccccccccccccccc")
+    local old_review_proposal = devloop_base.pr_review_proposal_id("owner/repo", current.pr_number, old_review_version, "cccccccccccccccccccccccccccccccccccccccc")
     local old_review_dedup = "consensus:" .. old_review_proposal .. "/review"
     local predecessor_set = predecessor_set_for(predecessor)
     local comments = merge_comments_for_event(current)
@@ -649,7 +650,7 @@ return {
   test_merge_conflicting_but_current_base_contained_waits_without_fixing = function()
     local current_head = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     local base_event = merge_ready()
-    local current_review = core.pr_review_proposal_id("owner/repo", base_event.pr_number, base_event.version, current_head)
+    local current_review = devloop_base.pr_review_proposal_id("owner/repo", base_event.pr_number, base_event.version, current_head)
     local current = merge_ready({
       review_proposal_id = current_review,
       review_dedup_key = "consensus:" .. current_review .. "/review",

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
@@ -27,7 +28,7 @@ local departments = conformance.loaded_departments({
 })
 
 local function review_proposal_id(version, head_sha)
-  return core.pr_review_proposal_id("owner/repo", 7, version or h.reviewing().version, head_sha or "def456")
+  return devloop_base.pr_review_proposal_id("owner/repo", 7, version or h.reviewing().version, head_sha or "def456")
 end
 
 local function review_reached(extra)

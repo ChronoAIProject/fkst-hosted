@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
@@ -83,7 +84,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     source_ref = source_ref,
     head_sha = current.head_sha,
     review_proposal_id = state.state == "reviewing" and forge_validators.is_git_sha(current.head_sha)
-      and core.pr_review_proposal_id(origin.repo, pr.number, state.version, current.head_sha)
+      and devloop_base.pr_review_proposal_id(origin.repo, pr.number, state.version, current.head_sha)
       or nil,
     fresh_current_state = state,
     now_seconds = now(),

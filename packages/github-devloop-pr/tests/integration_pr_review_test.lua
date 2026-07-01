@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
@@ -337,7 +338,7 @@ return {
     t.eq(find_label_raise(first.raises, "pr").payload.add_labels[1], "fkst-dev:reviewing")
     t.eq(reviewing_raise.payload.version, impl_version .. "/review-loop/1")
 
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "def456")
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "def456")
     mock_pr_origin({
       m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
@@ -400,7 +401,7 @@ return {
     t.eq(review.exit_code, 0)
     t.eq(#review.raises, 1)
     local proposal = find_raise(review.raises, "consensus.proposal").payload
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "feedface"))
+    t.eq(proposal.proposal_id, devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing_raise.payload.version, "feedface"))
     t.is_nil(proposal.body:find("+fixed by replay", 1, true))
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
   end,
@@ -516,7 +517,7 @@ return {
     t.eq(result.raises[1].queue, "consensus.proposal")
     local proposal = result.raises[1].payload
     t.eq(proposal.schema, "consensus.proposal.v1")
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
+    t.eq(proposal.proposal_id, devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
     t.eq(proposal.source_ref.ref, "owner/repo#pr/7")
     t.is_true(#proposal.body < 512)
     t.is_nil(proposal.body:find("BEGIN UNTRUSTED ISSUE DATA", 1, true))
@@ -544,7 +545,7 @@ return {
     t.eq(#review.raises, 1)
     local proposal = find_raise(review.raises, "consensus.proposal").payload
     t.eq(proposal.verdict_mode, "gate")
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
+    t.eq(proposal.proposal_id, devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
 
     local reached_payload = {
       schema = "consensus.consensus_reached.v1",
@@ -670,7 +671,7 @@ return {
     t.eq(#result.raises, 1)
     local proposal = result.raises[1].payload
     t.is_true(#proposal.proposal_id <= 200)
-    t.eq(proposal.proposal_id, core.pr_review_proposal_id(repo, 7, version, "def456"))
+    t.eq(proposal.proposal_id, devloop_base.pr_review_proposal_id(repo, 7, version, "def456"))
     t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
   end,
 

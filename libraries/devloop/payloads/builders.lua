@@ -113,7 +113,7 @@ function C.build_devloop_reviewing_payload(M, origin, pr_number, source_ref, ver
 end
 
 function C.build_current_head_reviewing_payload(M, origin, pr_number, current_pr, state, source_ref)
-  local review_proposal_id = M.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  local review_proposal_id = devloop_base.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
   if m_facts.has_any_review_result_marker(M, current_pr.comments, review_proposal_id, origin.proposal_id) then
     return nil
   end
@@ -389,7 +389,7 @@ local function apply_high_risk_angles(proposal, high_risk)
 end
 
 function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
-  local review_id = M.pr_review_proposal_id(repo, pr_number, version, head_sha)
+  local review_id = devloop_base.pr_review_proposal_id(repo, pr_number, version, head_sha)
   local title = "Review PR #" .. tostring(pr_number)
   if issue_number ~= nil then
     title = title .. " for issue #" .. tostring(issue_number)

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_core_helpers")
 local fixtures = require("tests.production_fixture_helpers")
 local transition_version = require("contract.transition_version")
@@ -13,11 +14,11 @@ return {
     local repo = fixtures.long_repo()
     local version = fixtures.full_review_issue_version(repo)
     local head_sha = fixtures.review_head_sha()
-    local id = core.pr_review_proposal_id(repo, 7, version, head_sha)
+    local id = devloop_base.pr_review_proposal_id(repo, 7, version, head_sha)
     local parsed_repo, pr_number, parsed_version, parsed_head_sha = core.parse_pr_review_proposal_id(id)
     t.is_true(#fixtures.unbounded_full_review_proposal_id() > core._max_key_len)
     t.is_true(#id <= core._max_key_len)
-    t.eq(parsed_repo, core.safe_pr_review_repo_segment(repo))
+    t.eq(parsed_repo, devloop_base.safe_pr_review_repo_segment(repo))
     t.eq(pr_number, "7")
     t.eq(parsed_version, transition_version.safe_version_segment(version))
     t.eq(parsed_head_sha, head_sha)
@@ -53,7 +54,7 @@ return {
     local marker = m_builders.review_result_marker(core, id, issue_proposal_id, "approve", "consensus:v1")
     t.eq(m_facts.has_review_result_marker(core, { marker }, id, issue_proposal_id, "approve", "consensus:v1"), true)
     t.eq(m_facts.has_any_review_result_marker(core, { marker }, id, issue_proposal_id), true)
-    local review_v1 = core.pr_review_proposal_id(repo, 7, version .. "/fix/1", head_sha)
+    local review_v1 = devloop_base.pr_review_proposal_id(repo, 7, version .. "/fix/1", head_sha)
     local reject_marker = m_builders.review_result_marker(core, review_v1, issue_proposal_id, "reject", "consensus:" .. review_v1 .. "/review", 1, "missing regression guard")
     t.is_true(reject_marker:find('fix_round="1"', 1, true) ~= nil)
     t.is_true(reject_marker:find('gap="missing regression guard"', 1, true) ~= nil)
@@ -70,7 +71,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local review_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local issue_version = review_version .. "/fix/1"
-    local expected_review = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local expected_review = devloop_base.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local marker = m_builders.review_meta_marker(core, issue_proposal_id, "consensus:" .. expected_review .. "/review")
     local fact = core.review_meta_replay_fact({ marker }, issue_proposal_id, issue_version, 7, "def456")
     t.eq(fact.proposal_id, expected_review)
@@ -85,7 +86,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local review_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local issue_version = review_version .. "/fix/1"
-    local expected_review = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local expected_review = devloop_base.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local expected_dedup = "consensus:" .. expected_review .. "/review"
     local marker = m_builders.review_result_marker(core, expected_review, issue_proposal_id, "reject", expected_dedup, 1, "missing regression guard")
     local fact = core.review_meta_replay_fact({ marker }, issue_proposal_id, issue_version, 7, "def456")
@@ -101,10 +102,10 @@ return {
     t.eq(#repo, 92)
     local version = fixtures.full_review_issue_version(repo)
     local head_sha = fixtures.review_head_sha()
-    local id = core.pr_review_proposal_id(repo, 7, version, head_sha)
+    local id = devloop_base.pr_review_proposal_id(repo, 7, version, head_sha)
     t.is_true(#id <= 200)
     local parsed_repo, pr_number, parsed_version, parsed_head_sha = core.parse_pr_review_proposal_id(id)
-    t.eq(parsed_repo, core.safe_pr_review_repo_segment(repo))
+    t.eq(parsed_repo, devloop_base.safe_pr_review_repo_segment(repo))
     t.eq(pr_number, "7")
     t.eq(parsed_version, transition_version.safe_version_segment(version))
     t.eq(parsed_head_sha, head_sha)

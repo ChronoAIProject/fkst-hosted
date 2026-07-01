@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -174,7 +175,7 @@ return {
     local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/v1/fix/1"
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/v1", "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/v1", "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
     local expected_replay = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = proposal_id,
@@ -256,7 +257,7 @@ return {
   test_comment_written_merge_ready_ack_raises_byte_equivalent_payload = function()
     local source_ref = entity_lib.pr_source_ref("owner/repo", 7)
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
     mock_marker_comment("IC_merge_ready_1", core.state_marker("github-devloop/issue/owner/repo/42", "merge-ready", version))
     local result = run_handoff({

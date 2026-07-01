@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local t = h.t
@@ -59,7 +60,7 @@ return {
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal")
     t.eq(proposal.payload.schema, "consensus.proposal.v1")
-    t.eq(proposal.payload.proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
+    t.eq(proposal.payload.proposal_id, devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456"))
   end,
 
   test_review_pr_skips_after_canonical_state_advances = function()

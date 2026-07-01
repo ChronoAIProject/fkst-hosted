@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local convergence_shared, poll_fakes = require("devloop.convergence.shared"), require("devloop.hidden_state_conformance.poll_fakes")
 local contract_time = require("contract.time")
 local decompose_lib = require("devloop.decompose")
@@ -406,7 +407,7 @@ local function awaiting_pr_child_state_for_successor(successor)
   return successor
 end
 
-local function review_proposal(core, state) return core.pr_review_proposal_id(REPO, PR_NUMBER, state.version, HEAD_SHA) end
+local function review_proposal(core, state) return devloop_base.pr_review_proposal_id(REPO, PR_NUMBER, state.version, HEAD_SHA) end
 local function review_dedup(core, state) return "consensus:" .. review_proposal(core, state) .. "/review" end
 
 local function add_common_pr_facts(core, entity, state, facts, include_pr_link_marker)
@@ -506,7 +507,7 @@ local function fact_value(core, row, state, family, successor)
   end
   if family == "fix-feedback" then
     local reviewed = successor == "reviewing" and BASE_SHA or HEAD_SHA
-    local review_id = core.pr_review_proposal_id(REPO, PR_NUMBER, state.version, reviewed)
+    local review_id = devloop_base.pr_review_proposal_id(REPO, PR_NUMBER, state.version, reviewed)
     return {
       proposal_id = ISSUE_PROPOSAL,
       version = state.version,

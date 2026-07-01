@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -122,7 +123,7 @@ return {
 
   test_observe_pr_fixing_conflict_replays_current_fixing_round = function()
     local fixing_version = version .. "/fix/1"
-    local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
     local review_dedup_key = "observe-pr-conflict/" .. proposal_id .. "/" .. version .. "/7"
     local comments = {
       m_builders.pr_origin_marker(core, proposal_id, "42", branch, fixing_version, "dev"),
@@ -160,7 +161,7 @@ return {
 
   test_observe_pr_conflict_redrive_is_idempotent_when_fixing_marker_visible = function()
     local fix_version = version .. "/fix/1"
-    local review_proposal_id = core.pr_review_proposal_id(repo, 7, version, "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
     mock_pr("reviewing", "CONFLICTING", "DIRTY", {
       m_builders.pr_origin_marker(core, proposal_id, "42", branch, fix_version, "dev"),
       core.state_marker(proposal_id, "fixing", fix_version),

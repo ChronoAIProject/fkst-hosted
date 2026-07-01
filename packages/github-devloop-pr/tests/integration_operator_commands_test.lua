@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
@@ -223,7 +224,7 @@ return {
   test_rereview_command_stalled_reviewing_reenters_reviewing = function()
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_stalled_reviewing")
-    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, impl_version, "feedface")
+    local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, impl_version, "feedface")
     local review_version = transition_version.safe_version_segment(impl_version)
     local sr_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local angle_digests = {

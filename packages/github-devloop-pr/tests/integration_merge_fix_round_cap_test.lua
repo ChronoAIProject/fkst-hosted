@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -33,7 +34,7 @@ local function max_fix_round_merge_ready()
   for n = 1, config.max_fix_rounds(core) do
     version = version .. "/fix/" .. tostring(n)
   end
-  local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456")
   return merge_ready({
     version = version,
     review_proposal_id = review_proposal_id,

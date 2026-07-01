@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_labels = require("devloop.requests.labels")
 local pr_safety = require("devloop.pr_safety")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -27,7 +28,7 @@ local ai_sentinel = string.char(226, 159, 166) .. "AI:FKST" .. string.char(226, 
 
 local function review_unresolved(extra)
   local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
   local value = {
     schema = "consensus.consensus_converge.v1",
     proposal_id = proposal_id,
@@ -259,7 +260,7 @@ return {
   test_fix_reconcile_payload_marker_validator_and_requests = function()
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/4"
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
     local reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
       proposal_id = issue_proposal_id,
       review_proposal_id = review_id,
@@ -380,7 +381,7 @@ return {
   test_decompose_replay_dedup_binds_child_completion_identity = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1/fix/2/fix/3"
-    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(version), "def456")
+    local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(version), "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
     local comments = {
       m_builders.merge_gate_marker(core, proposal_id, 7, version, review_proposal, review_dedup, "def456", nil, "rollup-red"),
@@ -676,7 +677,7 @@ return {
     }, { fix = true })
     local fix = {
       proposal_id = "github-devloop/issue/owner/repo/42",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
       reviewed_head_sha = "abcdef123456",
       blocking_gap = "missing rollback guard",
     }
@@ -725,7 +726,7 @@ return {
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     }, 7, {
-      review_proposal_id = core.pr_review_proposal_id(
+      review_proposal_id = devloop_base.pr_review_proposal_id(
         "owner/repo",
         7,
         "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
@@ -744,7 +745,7 @@ return {
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1",
     }
-    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, origin.impl_version, "def456")
+    local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, origin.impl_version, "def456")
     local feedback = {
       review_proposal_id = review_proposal,
       review_dedup_key = "consensus:" .. review_proposal .. "/review",

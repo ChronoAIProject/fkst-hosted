@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
@@ -12,7 +13,7 @@ local comment_id = "123456"
 local head_sha = "def456"
 local version = "pr-native-version/review/1"
 local proposal_id = core.pr_proposal_id(repo, pr_number)
-local review_proposal_id = core.pr_review_proposal_id(repo, pr_number, version, head_sha)
+local review_proposal_id = devloop_base.pr_review_proposal_id(repo, pr_number, version, head_sha)
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
 
 local function source_ref()

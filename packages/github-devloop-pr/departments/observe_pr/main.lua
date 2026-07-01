@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -163,7 +164,7 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
   if state.state ~= "reviewing" or not forge_validators.is_git_sha(current_pr.head_sha) then
     return false
   end
-  local review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
+  local review_proposal_id = devloop_base.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
   local review_version = transition_version.safe_version_segment(state.version)
   local sr_digest = convergence_shared.source_ref_digest(entity_lib.pr_source_ref(origin.repo, pr_number))
   local facts = conv_rounds.review_converge_round_facts(core,
@@ -285,7 +286,7 @@ local function maybe_liveness_timeout(origin, pr_number, current_pr, state, sour
     head_sha = head_sha,
     fresh_current_state = state,
     review_proposal_id = state and state.state == "reviewing" and forge_validators.is_git_sha(head_sha)
-      and core.pr_review_proposal_id(origin.repo, pr_number, state.version, head_sha)
+      and devloop_base.pr_review_proposal_id(origin.repo, pr_number, state.version, head_sha)
       or nil,
   })
 end
@@ -296,7 +297,7 @@ local function build_conflict_review_fact(origin, pr_number, current_pr, version
     return nil, "head-missing"
   end
   return {
-    review_proposal_id = core.pr_review_proposal_id(origin.repo, pr_number, version, head_sha),
+    review_proposal_id = devloop_base.pr_review_proposal_id(origin.repo, pr_number, version, head_sha),
     review_dedup_key = "observe-pr-conflict/" .. tostring(origin.proposal_id) .. "/" .. tostring(version) .. "/" .. tostring(pr_number),
     reviewed_head_sha = head_sha,
     gate_failure_excerpt = reason,

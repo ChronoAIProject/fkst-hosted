@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -229,8 +230,8 @@ return {
     local old_version = reviewing().version
     local fix_round_version = core.next_fix_version(old_version)
     local event = review_reached({
-      proposal_id = core.pr_review_proposal_id("owner/repo", 7, fix_round_version, "feedface"),
-      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, fix_round_version, "feedface") .. "/review",
+      proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, fix_round_version, "feedface"),
+      dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, fix_round_version, "feedface") .. "/review",
     })
     mock_pr_origin({
       m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", old_version, "dev"),

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -105,22 +106,22 @@ return {
     t.is_true(comment_body:find("review%-carry%-over:v1") ~= nil)
     t.is_true(comment_body:find('approved_head_sha="' .. event.reviewed_head_sha .. '"', 1, true) ~= nil)
     t.is_true(comment_body:find('new_head_sha="' .. new_head .. '"', 1, true) ~= nil)
-    t.is_true(comment_body:find('review_proposal="' .. core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. '"', 1, true) ~= nil)
+    t.is_true(comment_body:find('review_proposal="' .. devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. '"', 1, true) ~= nil)
     t.is_true(comment_body:find('proof="merge-tree-empty-delta"', 1, true) ~= nil)
     t.eq(comment_request.handoff.kind, "github-devloop.merge_ready")
     t.eq(comment_request.handoff.proposal_id, event.proposal_id)
     t.eq(comment_request.handoff.pr_number, event.pr_number)
     t.eq(comment_request.handoff.version, event.version)
-    t.eq(comment_request.handoff.review_proposal_id, core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head))
-    t.eq(comment_request.handoff.review_dedup_key, "consensus:" .. core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. "/review")
+    t.eq(comment_request.handoff.review_proposal_id, devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head))
+    t.eq(comment_request.handoff.review_dedup_key, "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. "/review")
     t.eq(comment_request.handoff.reviewed_head_sha, new_head)
     t.eq(comment_request.handoff.current_head_sha, new_head)
     local handoff = run_comment_handoff_from_request(comment_request, "IC_carry_over_1", "merge-carry-over-comment-handoff")
     t.eq(handoff.exit_code, 0)
     local merge_ready_raise = find_raise(handoff.raises, "devloop_merge_ready").payload
     local expected = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head),
-      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. "/review",
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head),
+      review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,
       current_head_sha = new_head,
     }, entity_lib.pr_source_ref("owner/repo", event.pr_number))

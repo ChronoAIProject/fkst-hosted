@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local convergence_shared = require("devloop.convergence.shared")
 local comment_strings = require("devloop.strings")
@@ -19,7 +20,7 @@ local cjk_probe = string.char(228, 184, 173)
 
 local issue_proposal_id = "github-devloop/issue/owner/repo/42"
 local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
 local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
 
 local function ready_payload()

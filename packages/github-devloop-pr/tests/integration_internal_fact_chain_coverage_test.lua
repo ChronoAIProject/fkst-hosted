@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_review = require("devloop.requests.review")
@@ -314,7 +315,7 @@ local function advanced_fixing_fixture(extra)
   local reviewed_head = "def456"
   local current_head = extra and extra.current_head or "feedface"
   local branch_head = extra and extra.branch_head or current_head
-  local review_proposal = core.pr_review_proposal_id("owner/repo", 7, previous_version, reviewed_head)
+  local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, previous_version, reviewed_head)
   local review_dedup = "consensus:" .. review_proposal .. "/review"
   local feedback = requests_review.build_review_result_comment_request(core, "owner/repo", 42, event.proposal_id, version, {
     proposal_id = review_proposal,

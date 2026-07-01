@@ -430,7 +430,7 @@ local function live_signal_age(M, row, state, facts, now_seconds)
     if source_repo ~= nil
       and source_pr ~= nil
       and forge_validators.is_git_sha(head_sha) then
-      review_proposal_id = M.pr_review_proposal_id(source_repo, source_pr, strip_liveness_timeout_suffixes(state and state.version), head_sha)
+      review_proposal_id = devloop_base.pr_review_proposal_id(source_repo, source_pr, strip_liveness_timeout_suffixes(state and state.version), head_sha)
     end
     local sr_digest = convergence_shared.source_ref_digest(facts and facts.source_ref)
     return matching_marker_age_or_zero(M, comments, "review-converge-round", function(marker)

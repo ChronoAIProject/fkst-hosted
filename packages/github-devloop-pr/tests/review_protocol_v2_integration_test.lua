@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
@@ -156,8 +157,8 @@ return {
   test_reviewing_liveness_defers_from_real_review_loop_heartbeat = function()
     local raw_version = reviewing().version .. "/review-loop/1"
     local event = review_unresolved({
-      proposal_id = core.pr_review_proposal_id("owner/repo", 7, raw_version, "def456"),
-      dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, raw_version, "def456") .. "/review",
+      proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, raw_version, "def456"),
+      dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, raw_version, "def456") .. "/review",
       round = 1,
       narrowed_question = "Does the loop still need review?",
       angle_digests = {
@@ -263,7 +264,7 @@ return {
   test_observe_pr_fixing_self_heal_recovers_structured_gap = function()
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     local review_dedup_key = "consensus:" .. review_id .. "/review"
     local expected = payloads_builders.build_replayed_fixing_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
@@ -361,7 +362,7 @@ return {
   test_observe_pr_fixing_self_heal_fails_closed_when_head_advanced = function()
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     h.mock_pr_origin({
       m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),

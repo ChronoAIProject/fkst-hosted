@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
 local conv_reconcile = require("devloop.convergence.reconcile")
@@ -32,7 +33,7 @@ local function fix_round_version(round)
 end
 
 local function reject_review_event(version)
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "feedface")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "feedface")
   return review_reached({
     decision = "reject",
     body = "Review consensus rejects the diff.",
@@ -44,7 +45,7 @@ local function reject_review_event(version)
 end
 
 local function reject_marker(version, created_at)
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "feedface")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "feedface")
   return {
     body = m_builders.review_result_marker(core, 
       proposal_id,

@@ -186,7 +186,7 @@ function C.safe_updated_at(M, updated_at)
   return safe
 end
 
-function C.safe_pr_review_repo_segment(M, repo)
+function C.safe_pr_review_repo_segment(repo)
   local safe = base_ids.safe_repo(repo):gsub("/", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
   if safe == "" then
@@ -217,14 +217,14 @@ function C.is_intake_held(M, labels)
   return has_value(labels, hold_label)
 end
 
-function C.safe_head_segment(M, head_sha)
+function C.safe_head_segment(head_sha)
   if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid head sha")
   end
   return tostring(head_sha)
 end
 
-function C.pr_review_proposal_id(M, repo, pr_number, version, head_sha)
+function C.pr_review_proposal_id(repo, pr_number, version, head_sha)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
@@ -232,13 +232,13 @@ function C.pr_review_proposal_id(M, repo, pr_number, version, head_sha)
     error("github-devloop: missing reviewed head sha")
   end
   return "github-devloop/pr-review/"
-    .. C.safe_pr_review_repo_segment(M, repo)
+    .. C.safe_pr_review_repo_segment(repo)
     .. "/"
     .. base_ids.safe_issue(pr_number)
     .. "/"
     .. transition_version.safe_version_segment(version)
     .. "/"
-    .. C.safe_head_segment(M, head_sha)
+    .. C.safe_head_segment(head_sha)
 end
 
 function C.parse_pr_review_proposal_id(M, id)
@@ -269,7 +269,7 @@ function C.parse_pr_review_proposal_id(M, id)
   if not is_path_safe_key(repo, 64)
     or base_ids.safe_issue(pr_number) ~= pr_number
     or transition_version.safe_version_segment(version) ~= version
-    or C.safe_head_segment(M, head_sha) ~= head_sha then
+    or C.safe_head_segment(head_sha) ~= head_sha then
     return nil
   end
   return repo, pr_number, version, head_sha
@@ -413,7 +413,7 @@ function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
     base_ids.safe_repo(repo),
     "pr",
     base_ids.safe_issue(pr_number),
-    C.safe_head_segment(M, head_sha),
+    C.safe_head_segment(head_sha),
   })
 end
 
@@ -424,7 +424,7 @@ function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
     base_ids.safe_repo(repo),
     "pr",
     base_ids.safe_issue(pr_number),
-    C.safe_head_segment(M, head_sha),
+    C.safe_head_segment(head_sha),
   })
 end
 

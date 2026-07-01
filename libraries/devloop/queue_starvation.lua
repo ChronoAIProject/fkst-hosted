@@ -322,7 +322,7 @@ local function stable_incident_identity(M, queue_head)
   end
   if entity.head_sha ~= nil and forge_validators.is_git_sha(entity.head_sha) then
     table.insert(parts, "head")
-    table.insert(parts, M.safe_head_segment(entity.head_sha))
+    table.insert(parts, devloop_base.safe_head_segment(entity.head_sha))
   end
   return table.concat(parts, "/")
 end

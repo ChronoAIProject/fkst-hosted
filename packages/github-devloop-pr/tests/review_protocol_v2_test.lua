@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
@@ -76,20 +77,20 @@ return {
     local fix_reflection_prompt = core.build_review_meta_prompt({
       mode = "fix-reflection",
       proposal_id = "github-devloop/issue/owner/repo/42",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
       fix_round = 3,
     }, issue, manifest)
     local judge_prompts = {
       core.build_review_meta_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
-        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+        review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
       }, issue, manifest),
       fix_reflection_prompt,
     }
     local actor_prompts = {
       core.build_fix_prompt({
         proposal_id = "github-devloop/issue/owner/repo/42",
-        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
+        review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "version", "abcdef123456"),
         reviewed_head_sha = "abcdef123456",
       }, issue, "Review feedback.", "Approved framing.", manifest),
     }
@@ -214,7 +215,7 @@ return {
   test_review_meta_prompt_requires_block_on_fetch_failure_without_fetch_marker = function()
     local event = {
       proposal_id = "github-devloop/issue/owner/repo/42",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "reviewing/v1", "def456"),
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "reviewing/v1", "def456"),
     }
     local prompt = core.build_review_meta_prompt(event, {
       title = "PR #7",
@@ -230,7 +231,7 @@ return {
 
   test_review_result_approve_with_advisory_still_authorizes_merge_ready = function()
     local event = review_event({
-      proposal_id = core.pr_review_proposal_id("owner/repo", 7, h.reviewing().version, "def456"),
+      proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, h.reviewing().version, "def456"),
       body = "minimal:\nLooks good.\n\nAdvisory (non-blocking):\nstructural:\nRename helper later.",
       angle_results = {
         { angle = "minimal", verdict = "approve" },
@@ -276,11 +277,11 @@ return {
       "github-devloop/issue/owner/repo/42",
       version,
       {
-        proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456"),
+        proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456"),
         decision = "reject",
         body = "Reject body.",
         blocking_gap = "CI green evidence is missing for the current head.",
-        dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, version, "def456") .. "/review",
+        dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456") .. "/review",
         source_ref = h.pr_source_ref(),
       },
       h.pr_source_ref()
@@ -291,8 +292,8 @@ return {
       {
         proposal_id = "github-devloop/issue/owner/repo/42",
         pr_number = 7,
-        review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456"),
-        review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, version, "def456") .. "/review",
+        review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456"),
+        review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456") .. "/review",
         source_ref = h.pr_source_ref(),
         fix_summary = "Reproduced the failing check locally and changed the diff.",
       },
@@ -526,7 +527,7 @@ return {
   test_review_result_foreign_dedup_is_excluded = function()
     local issue_version = h.reviewing().version
     local fix_version = core.next_fix_version(issue_version)
-    local review_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
     local foreign = {
       body = m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:foreign/review", 1, "foreign gap"),
       author_login = "fkst-test-bot",
@@ -547,8 +548,8 @@ return {
   test_prior_round_ledger_rejects_stale_version_and_untrusted_author = function()
     local current_version = h.reviewing().version
     local stale_version = current_version .. "/fix/1"
-    local current_review = core.pr_review_proposal_id("owner/repo", 7, current_version, "def456")
-    local stale_review = core.pr_review_proposal_id("owner/repo", 7, stale_version, "def456")
+    local current_review = devloop_base.pr_review_proposal_id("owner/repo", 7, current_version, "def456")
+    local stale_review = devloop_base.pr_review_proposal_id("owner/repo", 7, stale_version, "def456")
     local trusted_stale = {
       body = m_builders.review_result_marker(core, stale_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. stale_review .. "/review", 1, "stale gap"),
       author_login = "fkst-test-bot",
@@ -566,8 +567,8 @@ return {
     local round1_fix = core.next_fix_version(base_version)
     local round2_fix = core.next_fix_version(round1_fix)
     local round3_fix = core.next_fix_version(round2_fix)
-    local round1_review = core.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
-    local round2_review = core.pr_review_proposal_id("owner/repo", 7, round2_fix, "feedface")
+    local round1_review = devloop_base.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
+    local round2_review = devloop_base.pr_review_proposal_id("owner/repo", 7, round2_fix, "feedface")
     local round1 = {
       body = m_builders.review_result_marker(core, round1_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. round1_review .. "/review", 1, "round one gap")
         .. "\nFix-round summary: Closed round one."
@@ -590,7 +591,7 @@ return {
   test_prior_round_ledger_truncates_utf8_safely = function()
     local base_version = h.reviewing().version
     local fix_version = core.next_fix_version(base_version)
-    local review = core.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
+    local review = devloop_base.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
     local cjk = fixtures.cjk_char()
     local reject = {
       body = m_builders.review_result_marker(core, 

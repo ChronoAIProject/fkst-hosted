@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local h = require("tests.devloop_core_helpers")
 local fixtures = require("tests.production_fixture_helpers")
@@ -180,7 +181,7 @@ return {
   test_context_bundle_manifest_key_accepts_full_pr_review_proposal_id = function()
     local repo = fixtures.long_repo()
     local version = fixtures.full_review_issue_version(repo)
-    local proposal_id = core.pr_review_proposal_id(repo, 187, version, fixtures.review_head_sha())
+    local proposal_id = devloop_base.pr_review_proposal_id(repo, 187, version, fixtures.review_head_sha())
     local manifest_key = context_bundle.context_bundle_manifest_key(proposal_id, version)
     local bundle_key = context_bundle.context_bundle_key(proposal_id, version)
 

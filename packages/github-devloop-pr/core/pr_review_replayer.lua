@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -229,7 +230,7 @@ local function replay_review_result(dept, issue, state, facts, tools, link, curr
 end
 
 local function review_converge_fact(facts, state, link, current_pr)
-  local review_proposal = M.pr_review_proposal_id(facts.issue.repo, link.pr_number, state.version, current_pr.head_sha)
+  local review_proposal = devloop_base.pr_review_proposal_id(facts.issue.repo, link.pr_number, state.version, current_pr.head_sha)
   local source_ref = entity_lib.pr_source_ref(facts.issue.repo, link.pr_number)
   local records = conv_rounds.review_converge_round_facts(M,
     comments_for_pr_facts(facts, current_pr),
@@ -719,7 +720,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
         local review_fact = {
           proposal_id = proposal_id,
-          review_proposal_id = M.pr_review_proposal_id(issue.repo, link.pr_number, state.version, pr.head_sha),
+          review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, link.pr_number, state.version, pr.head_sha),
           review_dedup_key = "observe-pr-conflict/" .. tostring(proposal_id) .. "/" .. tostring(state.version) .. "/" .. tostring(link.pr_number),
           reviewed_head_sha = pr.head_sha,
           blocking_gap = mergeable_reason,
@@ -736,7 +737,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         number = link.pr_number,
         head_sha = pr.head_sha,
       })
-      local review_proposal_id = M.pr_review_proposal_id(issue.repo, link.pr_number, review_version, pr.head_sha)
+      local review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, link.pr_number, review_version, pr.head_sha)
       if m_facts.has_any_review_result_marker(M, facts.snapshot.comments, review_proposal_id, proposal_id) then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
       end
@@ -786,7 +787,7 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
     proposal_id = proposal_id,
   })
   fields.version = review_version
-  local review_proposal_id = M.pr_review_proposal_id(issue.repo, fields.pr_number, fields.version, current_pr.head_sha)
+  local review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, fields.pr_number, fields.version, current_pr.head_sha)
   if m_facts.has_any_review_result_marker(M, current_pr.comments, review_proposal_id, proposal_id) then
     tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
     return true

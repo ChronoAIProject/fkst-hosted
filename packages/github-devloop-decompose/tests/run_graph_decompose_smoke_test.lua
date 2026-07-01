@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -21,13 +22,13 @@ local function decompose_payload()
     proposal_id = "github-devloop/issue/owner/repo/42",
     pr_number = 7,
     issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3",
-    review_proposal_id = core.pr_review_proposal_id(
+    review_proposal_id = devloop_base.pr_review_proposal_id(
       "owner/repo",
       7,
       "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3",
       "def456"
     ),
-    review_dedup_key = "consensus:" .. core.pr_review_proposal_id(
+    review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id(
       "owner/repo",
       7,
       "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3",

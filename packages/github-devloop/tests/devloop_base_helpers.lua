@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local t = fkst.test
@@ -151,7 +152,7 @@ end
 
 local function review_reached(extra)
   local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456")
   local value = {
     schema = "consensus.consensus_reached.v1",
     proposal_id = proposal_id,
@@ -171,7 +172,7 @@ end
 
 local function review_unresolved(extra)
   local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456")
   local value = {
     schema = "consensus.consensus_converge.v1",
     proposal_id = proposal_id,
@@ -213,7 +214,7 @@ end
 
 local function review_meta_event(extra)
   local unresolved_event = review_unresolved({
-    dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
+    dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
   })
   local value = payloads_builders.build_devloop_review_meta_payload(core, unresolved_event, "github-devloop/issue/owner/repo/42", reviewing().version, 7, 3)
   for key, field in pairs(extra or {}) do
@@ -224,7 +225,7 @@ end
 
 local function review_reconcile(extra)
   local event = review_unresolved({
-    dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
+    dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
     round = 3,
   })
   local value = conv_reconcile.build_devloop_review_reconcile_payload(core, event, 3, "github-devloop/issue/owner/repo/42", reviewing().version, "def456")
@@ -238,8 +239,8 @@ local function fix_reconcile(extra)
   local issue_version = core.next_fix_version(core.next_fix_version(core.next_fix_version(reviewing().version)))
   local value = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
     proposal_id = "github-devloop/issue/owner/repo/42",
-    review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456"),
-    review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, issue_version, "def456") .. "/review",
+    review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456"),
+    review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456") .. "/review",
     reviewed_head_sha = "def456",
     pr_number = 7,
     source_ref = pr_source_ref(),

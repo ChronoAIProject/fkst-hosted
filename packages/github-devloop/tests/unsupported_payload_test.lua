@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local t = fkst.test
@@ -63,7 +64,7 @@ local function issue_consensus_payload()
 end
 
 local function review_proposal_id()
-  return core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456")
+  return devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456")
 end
 
 local function review_consensus_payload()
@@ -166,8 +167,8 @@ local function payload_for_queue(queue)
     }),
     devloop_fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
       proposal_id = "github-devloop/issue/owner/repo/42",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
-      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
+      review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",
       reviewed_head_sha = "def456",
       pr_number = 7,
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
@@ -177,8 +178,8 @@ local function payload_for_queue(queue)
       proposal_id = "github-devloop/issue/owner/repo/42",
       pr_number = 7,
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/1",
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
-      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456") .. "/review",
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
+      review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456") .. "/review",
       reviewed_head_sha = "def456",
       blocking_gap = "missing regression guard",
       dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
@@ -196,8 +197,8 @@ local function payload_for_queue(queue)
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }),
     devloop_merge_ready = payloads_builders.build_devloop_merge_ready_payload(core, "github-devloop/issue/owner/repo/42", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", {
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
-      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456") .. "/review",
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
+      review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456") .. "/review",
       reviewed_head_sha = "def456",
     }, { kind = "external", ref = "owner/repo#pr/7" }),
     devloop_observe_tick = { schema = "github-devloop.observe-tick.v1" },

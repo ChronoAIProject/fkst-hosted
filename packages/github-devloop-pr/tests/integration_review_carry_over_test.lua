@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -121,19 +122,19 @@ return {
     t.eq(comment_raise.payload.handoff.proposal_id, event.proposal_id)
     t.eq(comment_raise.payload.handoff.pr_number, event.pr_number)
     t.eq(comment_raise.payload.handoff.version, event.version)
-    t.eq(comment_raise.payload.handoff.review_proposal_id, core.pr_review_proposal_id("owner/repo", 7, event.version, new_head))
-    t.eq(comment_raise.payload.handoff.review_dedup_key, "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review")
+    t.eq(comment_raise.payload.handoff.review_proposal_id, devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head))
+    t.eq(comment_raise.payload.handoff.review_dedup_key, "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review")
     t.eq(comment_raise.payload.handoff.reviewed_head_sha, new_head)
     t.eq(comment_raise.payload.handoff.current_head_sha, new_head)
-    t.is_true(comment_raise.payload.body:find('review_proposal="' .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. '"', 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find('review_proposal="' .. devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. '"', 1, true) ~= nil)
     local handoff = run_comment_handoff_from_request(comment_raise.payload, "IC_replay_carry_over_1", "review-carry-over-replayer-comment-handoff")
     t.eq(handoff.exit_code, 0)
     local merge_raise = find_raise(handoff.raises, "devloop_merge_ready", function(payload)
       return payload.reviewed_head_sha == new_head
     end)
     local expected = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
-      review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, event.version, new_head),
-      review_dedup_key = "consensus:" .. core.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review",
+      review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head),
+      review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,
       current_head_sha = new_head,
     }, entity_lib.pr_source_ref("owner/repo", event.pr_number))
@@ -208,7 +209,7 @@ return {
   test_observe_pr_carry_over_is_idempotent_when_new_review_result_visible = function()
     local event = h.merge_ready()
     local new_head = "feedface"
-    local new_review = core.pr_review_proposal_id("owner/repo", 7, event.version, new_head)
+    local new_review = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head)
     local comments = merge_comments(event)
     table.insert(comments, m_builders.review_result_marker(core, new_review, event.proposal_id, "approve", "consensus:" .. new_review .. "/review"))
     table.insert(comments, m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, new_review, "consensus:" .. new_review .. "/review", new_head))

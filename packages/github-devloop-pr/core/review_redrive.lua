@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local S = {}
 local transition_version = require("contract.transition_version")
 
@@ -19,8 +20,8 @@ function M.review_redrive_version(state, pr)
     :gsub("/timeout/" .. escaped_state .. "/%d+$", "")
     :gsub("%-timeout%-" .. escaped_state .. "%-%d+$", "")
   local next_version = M.next_review_loop_version(lineage_version)
-  local current_review_id = M.pr_review_proposal_id(pr.repo, pr.number, lineage_version, pr.head_sha)
-  local next_review_id = M.pr_review_proposal_id(pr.repo, pr.number, next_version, pr.head_sha)
+  local current_review_id = devloop_base.pr_review_proposal_id(pr.repo, pr.number, lineage_version, pr.head_sha)
+  local next_review_id = devloop_base.pr_review_proposal_id(pr.repo, pr.number, next_version, pr.head_sha)
   if current_review_id == next_review_id then
     return version
   end

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local parsers_misc = require("devloop.parsers.misc")
 local transition_version = require("contract.transition_version")
 local h = require("tests.devloop_helpers")
@@ -85,7 +86,7 @@ local find_raise = h.find_raise
 
 local function pr_native_review_reached(extra)
   local version = "pr-native-version"
-  local proposal_id = core.pr_review_proposal_id("owner/repo", 7, version, "def456")
+  local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "def456")
   local value = {
     schema = "consensus.consensus_reached.v1",
     proposal_id = proposal_id,
@@ -462,7 +463,7 @@ return {
         event.proposal_id,
         event.pr_number,
         event.version,
-        core.pr_review_proposal_id("owner/repo", 8, event.version, event.reviewed_head_sha),
+        devloop_base.pr_review_proposal_id("owner/repo", 8, event.version, event.reviewed_head_sha),
         event.review_dedup_key,
         event.reviewed_head_sha
       ),
@@ -488,7 +489,7 @@ return {
         event.proposal_id,
         event.pr_number,
         event.version,
-        core.pr_review_proposal_id("owner/repo", event.pr_number, "other-version", event.reviewed_head_sha),
+        devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, "other-version", event.reviewed_head_sha),
         event.review_dedup_key,
         event.reviewed_head_sha
       ),
@@ -613,7 +614,7 @@ return {
         event.proposal_id,
         event.pr_number,
         event.version,
-        core.pr_review_proposal_id("owner/repo", event.pr_number, event.version, "feedface"),
+        devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, "feedface"),
         event.review_dedup_key,
         "feedface"
       ),
@@ -747,9 +748,9 @@ return {
     t.eq(reviewing_raise.payload.version, event.version .. "/review-loop/1")
     t.eq(reviewing_raise.payload.pr_number, event.pr_number)
     local review_repo, review_pr, review_version, review_head = core.parse_pr_review_proposal_id(
-      core.pr_review_proposal_id("owner/repo", reviewing_raise.payload.pr_number, reviewing_raise.payload.version, "feedface")
+      devloop_base.pr_review_proposal_id("owner/repo", reviewing_raise.payload.pr_number, reviewing_raise.payload.version, "feedface")
     )
-    t.eq(review_repo, core.safe_pr_review_repo_segment("owner/repo"))
+    t.eq(review_repo, devloop_base.safe_pr_review_repo_segment("owner/repo"))
     t.eq(review_pr, tostring(event.pr_number))
     t.eq(review_version, transition_version.safe_version_segment(reviewing_raise.payload.version))
     t.eq(review_head, "feedface")

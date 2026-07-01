@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_helpers")
 local conv_attempts = require("devloop.convergence.attempts")
@@ -177,7 +178,7 @@ return {
   end,
 
   test_blocked_decompose_exhaustion_reaches_non_recycling_terminal_stop = function()
-    local review_proposal = core.pr_review_proposal_id(repo, 7, version, "def456")
+    local review_proposal = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
     local comments = {
       state_comment("blocked", version, "2026-06-01T00:00:00Z"),
       m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),

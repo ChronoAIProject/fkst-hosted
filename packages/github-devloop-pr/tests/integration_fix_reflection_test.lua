@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
@@ -49,7 +50,7 @@ end
 return {
   test_review_result_third_fix_round_enters_reflection_checkpoint = function()
     local review_version = reflection_review_version()
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local event = review_reached({
       proposal_id = review_proposal_id,
       dedup_key = "consensus:" .. review_proposal_id .. "/review",
@@ -107,7 +108,7 @@ return {
   test_fix_reflection_replay_fact_restores_blocking_gap = function()
     local issue_version = core.fix_version_from_review_version(reflection_review_version())
     local review_version = core._strip_latest_fix_version_suffix(issue_version)
-    local review_proposal = core.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
     local fresh_payload = payloads_builders.build_devloop_fix_reflection_payload(core, {
       proposal_id = review_proposal,

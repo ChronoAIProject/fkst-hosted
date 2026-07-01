@@ -1,4 +1,4 @@
-local base_ids, h, entity_lib = require("devloop.base_ids"), require("tests.devloop_helpers"), require("devloop.entity")
+local base_ids, h, entity_lib, devloop_base = require("devloop.base_ids"), require("tests.devloop_helpers"), require("devloop.entity"), require("devloop.base")
 local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile, conv_attempts = require("devloop.convergence.reconcile"), require("devloop.convergence.attempts")
@@ -519,7 +519,7 @@ return {
   end,
 
   test_liveness_scan_over_budget_blocked_redrives_decompose = function()
-    local review_proposal = core.pr_review_proposal_id(repo, 7, version, "def456")
+    local review_proposal = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
     mock_repo()
     mock_issue_list({ { number = 42, state = "open", updated_at = "2026-06-03T01:02:03Z" } })
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {

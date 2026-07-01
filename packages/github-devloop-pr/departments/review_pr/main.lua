@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -144,7 +145,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if not m_claims.verify_pr_review_issue_claim(core, "review_pr", repo, issue_number, current_issue, reviewing.proposal_id) then
       return
     end
-    local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
+    local review_id = devloop_base.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
     local review_dedup_key = base_ids.dedup_key({ review_id, "review" })
     local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_pr",

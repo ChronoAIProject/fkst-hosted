@@ -492,7 +492,7 @@ function C.merge_ready_approval_matches_event(M, fact, merge_ready)
   local entity = M.parse_entity_proposal_id(merge_ready.proposal_id)
   local entity_repo = entity and entity.repo or nil
   local review_repo, review_pr_number, review_version, review_head_sha = M.parse_pr_review_proposal_id(fact.review_proposal_id)
-  local expected_review_repo = entity_repo and M.safe_pr_review_repo_segment(entity_repo) or nil
+  local expected_review_repo = entity_repo and devloop_base.safe_pr_review_repo_segment(entity_repo) or nil
   if review_repo == nil
     or tostring(review_repo) ~= tostring(expected_review_repo or "")
     or tostring(review_pr_number) ~= tostring(merge_ready.pr_number or "")

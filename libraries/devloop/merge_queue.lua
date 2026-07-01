@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
@@ -360,7 +361,7 @@ function C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry)
     base_ids.safe_issue(merged_pr_number),
     "next-pr",
     base_ids.safe_issue(next_entry.pr_number),
-    M.safe_head_segment(next_entry.head_sha),
+    devloop_base.safe_head_segment(next_entry.head_sha),
   })
 end
 

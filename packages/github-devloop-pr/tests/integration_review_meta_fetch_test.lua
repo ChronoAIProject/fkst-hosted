@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local h = require("tests.devloop_helpers")
@@ -133,7 +134,7 @@ return {
 
   test_observe_pr_review_meta_fix_marker_advances_to_fixing = function()
     local event = review_meta_event()
-    local review_proposal_id = core.pr_review_proposal_id("owner/repo", 7, event.version, "def456")
+    local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
     local comments = {
       m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
@@ -190,7 +191,7 @@ return {
   test_review_meta_replayed_entity_writes_bounded_outbound_dedup = function()
     local long_repo = fixtures.long_repo()
     local version = fixtures.full_review_issue_version(long_repo) .. "/fix/1/review-loop/2/review-meta-action/1"
-    local review_proposal_id = core.pr_review_proposal_id(long_repo, 187, version, fixtures.review_head_sha())
+    local review_proposal_id = devloop_base.pr_review_proposal_id(long_repo, 187, version, fixtures.review_head_sha())
     local review_meta = review_meta_event({
       review_proposal_id = review_proposal_id,
       review_dedup_key = "consensus:" .. review_proposal_id .. "/review/loop/3/review-meta",

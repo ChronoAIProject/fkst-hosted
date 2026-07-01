@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local m_facts = require("devloop.markers.facts")
@@ -14,7 +15,7 @@ local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version,
   if risk.high_risk ~= true then
     return true, "normal-risk"
   end
-  local new_review_proposal = M.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
+  local new_review_proposal = devloop_base.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
   local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
   local fact = m_facts.high_risk_review_evidence_fact(M, 
     comments,
@@ -71,7 +72,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if not risk_ok then
     return nil, risk_reason
   end
-  local new_review_proposal = M.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
+  local new_review_proposal = devloop_base.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
   local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
   return {
     version = version,
