@@ -24,6 +24,7 @@ return {
     t.is_true(body:find("local handoff_strategies = {", 1, true) ~= nil)
 
     for _, kind in ipairs({
+      "github-devloop.pr_open",
       "github-devloop.reviewing",
       "github-devloop.blocked",
       "github-devloop.closed_unmerged",

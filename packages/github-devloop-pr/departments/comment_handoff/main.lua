@@ -5,12 +5,15 @@ local core = require("core")
 local saga = require("workflow.saga")
 local source_refs = require("contract.source_ref")
 local handoff_helpers = require("devloop.comment_handoff")
+local base_ids = require("devloop.base_ids")
+local devloop_base = require("devloop.base")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
+    "devloop_observe_pr",
     "devloop_merge_ready",
     "devloop_fixing",
     "devloop_reviewing",
@@ -57,7 +60,7 @@ local function issue_claim_ok(payload, handoff)
   if entity.kind == "pr" then
     local repo = payload.repo
     if repo == nil then
-      repo = select(1, core.parse_pr_source_ref(handoff.source_ref))
+      repo = select(1, devloop_base.parse_pr_source_ref(core, handoff.source_ref))
     end
     return entity.repo == repo and tostring(entity.pr_number) == tostring(handoff.pr_number)
   end
@@ -130,6 +133,46 @@ local function emit_claimed_label(payload, handoff)
   maybe_raise_pr_label(payload, handoff)
 end
 
+local function emit_pr_open(payload, handoff)
+  local repo = payload.repo
+  if repo == nil then
+    repo = select(1, devloop_base.parse_pr_source_ref(core, handoff.source_ref))
+  end
+  if repo == nil then
+    error("comment-handoff: pr-open-missing-repo: PR-open handoff missing repo")
+  end
+  local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, "pr-open")
+  if verified_state == nil then
+    if retryable_visibility_reason(reason) then
+      core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "devloop_observe_pr", "retry-pending(pr-open marker not visible)", "pr-open marker comment write was acknowledged but exact marker is not visible")
+      error("comment-handoff: pr-open-marker-not-visible: pr-open marker not visible for PR observer handoff; retrying")
+    end
+    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "devloop_observe_pr", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR-open observer precondition")
+    return
+  end
+
+  local observe = {
+    schema = "github-proxy.v1",
+    type = "pr",
+    repo = repo,
+    number = tonumber(handoff.pr_number),
+    state = "OPEN",
+    updated_at = payload.updated_at or "",
+    source = "comment-handoff",
+    dedup_key = base_ids.dedup_key({
+      "comment-handoff",
+      "pr-open",
+      tostring(handoff.proposal_id),
+      tostring(handoff.version),
+      tostring(handoff.pr_number),
+      tostring(payload.comment_id),
+    }),
+    source_ref = base_ids.normalize_source_ref(handoff.source_ref),
+  }
+  core.log_cas_decision("comment_handoff", handoff.proposal_id, verified_state, "comment-written", "devloop_observe_pr", "applied(own-write-comment-id)", "pr-open marker comment write was acknowledged")
+  core.log_raise("comment_handoff", handoff.proposal_id, "devloop_observe_pr", observe)
+end
+
 local function emit_reviewing(payload, handoff)
   if not issue_claim_ok(payload, handoff) then
     return
@@ -145,6 +188,11 @@ local function emit_reviewing(payload, handoff)
 end
 
 local handoff_strategies = {
+  ["github-devloop.pr_open"] = {
+    validate = valid_base_pr_handoff,
+    state = "pr-open",
+    emit = emit_pr_open,
+  },
   ["github-devloop.reviewing"] = {
     validate = valid_base_pr_handoff,
     state = "reviewing",
@@ -221,7 +269,7 @@ maybe_raise_pr_label = function(payload, handoff)
   end
   local repo = payload.repo
   if repo == nil then
-    repo = select(1, core.parse_pr_source_ref(handoff.source_ref))
+    repo = select(1, devloop_base.parse_pr_source_ref(core, handoff.source_ref))
   end
   if repo == nil then
     error("github-devloop: PR label handoff missing repo")

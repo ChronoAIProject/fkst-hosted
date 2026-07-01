@@ -106,7 +106,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     .. "\n\n" .. m_builders.pr_origin_marker(M, issue_proposal_id, issue_number, branch, impl_version, base_branch)
     .. "\n" .. m_builders.pr_link_marker(M, issue_proposal_id, pr_number, branch, impl_version, base_branch)
     .. "\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
-  return M.build_entity_comment_request({
+  local request = M.build_entity_comment_request({
     kind = "pr",
     repo = repo,
     number = pr_number,
@@ -116,6 +116,14 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     tostring(issue_proposal_id),
     tostring(delegation),
   }), source_ref)
+  request.handoff = {
+    kind = "github-devloop.pr_open",
+    proposal_id = issue_proposal_id,
+    pr_number = pr_number,
+    version = impl_version,
+    source_ref = base_ids.normalize_source_ref(source_ref),
+  }
+  return request
 end
 
 local function build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, source_ref)

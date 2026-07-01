@@ -25,6 +25,41 @@ local function mock_marker_comment(comment_id, body, author_login)
 end
 
 return {
+  test_comment_written_pr_open_ack_redrives_pr_observer = function()
+    local source_ref = core.pr_source_ref("owner/repo", 7)
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    mock_marker_comment("IC_pr_open_1", core.state_marker(proposal_id, "pr-open", version))
+
+    local result = run_handoff({
+      schema = "github-proxy.comment-written.v1",
+      repo = "owner/repo",
+      target = "pr",
+      pr_number = 7,
+      comment_id = "IC_pr_open_1",
+      request_dedup_key = "pr-delegation/pr-open/github-devloop/issue/owner/repo/42/g1",
+      dedup_key = "pr-delegation/pr-open/github-devloop/issue/owner/repo/42/g1/written/IC_pr_open_1",
+      source_ref = source_ref,
+      handoff = {
+        kind = "github-devloop.pr_open",
+        proposal_id = proposal_id,
+        pr_number = 7,
+        version = version,
+        source_ref = source_ref,
+      },
+    }, "comment-handoff-pr-open")
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local observe = find_raise(result.raises, "devloop_observe_pr").payload
+    t.eq(observe.schema, "github-proxy.v1")
+    t.eq(observe.type, "pr")
+    t.eq(observe.repo, "owner/repo")
+    t.eq(observe.number, 7)
+    t.eq(observe.source_ref.kind, source_ref.kind)
+    t.eq(observe.source_ref.ref, source_ref.ref)
+  end,
+
   test_comment_written_reviewing_ack_raises_durable_reviewing_with_verifiable_hand_off = function()
     local source_ref = core.pr_source_ref("owner/repo", 7)
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
