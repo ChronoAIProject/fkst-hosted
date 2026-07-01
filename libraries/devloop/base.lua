@@ -217,10 +217,6 @@ function C.is_intake_held(M, labels)
   return has_value(labels, hold_label)
 end
 
-function C.proposal_id(M, repo, issue_number)
-  return base_ids.proposal_id(repo, issue_number)
-end
-
 function C.safe_head_segment(M, head_sha)
   if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid head sha")
@@ -305,7 +301,7 @@ function C.parse_issue_source_ref(M, source_ref)
   if repo == nil or repo == "" or not forge_validators.is_positive_pr_number(issue_number) then
     return nil
   end
-  if not C.issue_ref_round_trips(M, repo, issue_number) then
+  if not base_ids.issue_ref_round_trips(repo, issue_number) then
     return nil
   end
   return repo, issue_number
@@ -323,7 +319,7 @@ function C.is_safe_proposal_ref(M, proposal_id, dedup_key)
   if repo == nil or issue_number == nil then
     return false
   end
-  return C.issue_ref_round_trips(M, repo, issue_number)
+  return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
 function C.is_safe_consensus_result_ref(M, proposal_id, dedup_key)
@@ -343,7 +339,7 @@ function C.is_safe_consensus_result_ref(M, proposal_id, dedup_key)
   if repo == nil or issue_number == nil then
     return false
   end
-  return C.issue_ref_round_trips(M, repo, issue_number)
+  return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
 function C.is_safe_pr_review_result_ref(M, proposal_id, dedup_key)
@@ -361,10 +357,6 @@ function C.is_safe_pr_review_result_ref(M, proposal_id, dedup_key)
 
   local repo, pr_number = C.parse_pr_review_proposal_id(M, proposal_id)
   return repo ~= nil and pr_number ~= nil
-end
-
-function C.issue_ref_round_trips(M, repo, issue_number)
-  return base_ids.issue_ref_round_trips(repo, issue_number)
 end
 
 function C.proposal_dedup_key(M, proposal_id, updated_at)

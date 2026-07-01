@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local common = require("departments.observability.common")
 local contract_time = require("contract.time")
 local m_facts = require("devloop.markers.facts")
@@ -16,7 +17,7 @@ local function state_or_nil(state)
 end
 
 local function put_issue_entity(entities, repo, issue_number, issue)
-  local proposal_id = core.proposal_id(repo, issue_number)
+  local proposal_id = base_ids.proposal_id(repo, issue_number)
   local issue_state = core.current_state(issue.comments, proposal_id)
   local link = m_facts.pr_link_fact(core, issue.comments, proposal_id)
   local dependency_wait = core.dependency_wait_fact(issue.comments, proposal_id)

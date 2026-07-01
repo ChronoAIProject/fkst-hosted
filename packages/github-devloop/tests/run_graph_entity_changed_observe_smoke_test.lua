@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
@@ -7,7 +8,7 @@ local core = h.core
 
 local repo = "owner/repo"
 local issue_number = 42
-local proposal_id = core.proposal_id(repo, issue_number)
+local proposal_id = base_ids.proposal_id(repo, issue_number)
 local blocked_version = "blocked/github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
 local function observe_spec()

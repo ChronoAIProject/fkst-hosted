@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
@@ -120,7 +121,7 @@ function C.managed_sibling_repos(M, exec)
   end
   for entry in tostring(raw):gmatch("[^,%s]+") do
     local repo = tostring(entry)
-    if M.issue_ref_round_trips(repo, 1) then
+    if base_ids.issue_ref_round_trips(repo, 1) then
       repos[repo] = true
     end
   end

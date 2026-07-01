@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_review = require("devloop.requests.review")
 local convergence_shared = require("devloop.convergence.shared")
 local operator_commands = require("devloop.operator_commands")
@@ -57,7 +58,7 @@ local function trusted_issue_command(command, id)
 end
 
 local function thinking_converge_comments(event, rounds, command)
-  local proposal_id = core.proposal_id(event.repo, event.number)
+  local proposal_id = base_ids.proposal_id(event.repo, event.number)
   local base_version = payloads_builders.build_proposal(core, event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local angle_digests = {
@@ -84,7 +85,7 @@ local function thinking_converge_comments(event, rounds, command)
 end
 
 local function thinking_changing_converge_comments(event, rounds, command)
-  local proposal_id = core.proposal_id(event.repo, event.number)
+  local proposal_id = base_ids.proposal_id(event.repo, event.number)
   local base_version = payloads_builders.build_proposal(core, event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local comments = {

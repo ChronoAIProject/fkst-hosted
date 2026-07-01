@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local execution_start = require("devloop.execution_start")
 local source_refs = require("contract.source_ref")
@@ -17,7 +18,7 @@ function C.is_supported_execution_request(M, payload)
   local repo, issue_number = M.parse_issue_source_ref(payload.source_ref)
   return repo ~= nil
     and issue_number ~= nil
-    and tostring(payload.proposal_id) == M.proposal_id(repo, issue_number)
+    and tostring(payload.proposal_id) == base_ids.proposal_id(repo, issue_number)
 end
 
 return C

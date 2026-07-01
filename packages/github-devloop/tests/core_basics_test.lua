@@ -137,12 +137,12 @@ return {
     t.eq(core.is_opted_in({ "fkst-dev:enabled", "fkst-dev:blocked" }), true)
   end,
   test_proposal_id_round_trip = function()
-    local id = core.proposal_id("owner/repo", 42)
+    local id = base_ids.proposal_id("owner/repo", 42)
     t.eq(id, "github-devloop/issue/owner/repo/42")
     local repo, issue_number = base_ids.parse_proposal_id(id)
     t.eq(repo, "owner/repo")
     t.eq(issue_number, "42")
-    t.eq(core.issue_ref_round_trips("owner/repo", 42), true)
+    t.eq(base_ids.issue_ref_round_trips("owner/repo", 42), true)
     t.is_nil(base_ids.parse_proposal_id("autochrono/issue/owner/repo/42"))
   end,
   test_error_fact_fields_include_available_delivery_context = function()

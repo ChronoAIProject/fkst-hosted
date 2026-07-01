@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
@@ -172,7 +173,7 @@ end
 
 local function read_repo()
   local repo = M.read_env("FKST_GITHUB_REPO")
-  if repo == nil or not M.issue_ref_round_trips(repo, 1) then
+  if repo == nil or not base_ids.issue_ref_round_trips(repo, 1) then
     error("github-devloop: saga-doctor-invalid-repo: FKST_GITHUB_REPO is missing or invalid")
   end
   return repo
@@ -186,7 +187,7 @@ local function fetch_issue_entity(repo, issue)
     error("github-devloop: saga-doctor-issue-view-failed: " .. tostring(view.stderr))
   end
   local current = parsers_issue.parse_issue_view_state(M, view.stdout)
-  local proposal_id = M.proposal_id(repo, issue.number)
+  local proposal_id = base_ids.proposal_id(repo, issue.number)
   return {
     kind = "issue",
     repo = repo,

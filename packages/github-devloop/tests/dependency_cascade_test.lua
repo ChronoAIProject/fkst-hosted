@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local t = h.t
 local core = h.core
@@ -121,7 +122,7 @@ end
 local function mock_blocker_issue(issue_number, state_name)
   local comments = {}
   if state_name ~= nil then
-    table.insert(comments, core.state_marker(core.proposal_id(repo, issue_number), state_name, "v-" .. tostring(issue_number)))
+    table.insert(comments, core.state_marker(base_ids.proposal_id(repo, issue_number), state_name, "v-" .. tostring(issue_number)))
   end
   t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
     stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
@@ -148,7 +149,7 @@ local function mock_blocker_issue_failure(issue_number)
 end
 
 local function mock_blocker_issue_with_pr_link(issue_number, pr_number, state_name)
-  local blocker_proposal_id = core.proposal_id(repo, issue_number)
+  local blocker_proposal_id = base_ids.proposal_id(repo, issue_number)
   local branch = "devloop-owner-repo-" .. tostring(issue_number) .. "-01HY"
   local impl_version = "v-" .. tostring(issue_number)
   local comments = {}

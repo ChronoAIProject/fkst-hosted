@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_mocks = require("tests.entity_read_mock_helpers")
@@ -10,7 +11,7 @@ local repo = "rollup-owner/rollup-repo"
 local issue_number = 4242
 local child_pr_number = 4247
 local rollup_pr_number = 4249
-local parent = core.proposal_id(repo, issue_number)
+local parent = base_ids.proposal_id(repo, issue_number)
 local child_pr = core.pr_proposal_id(repo, child_pr_number)
 local version = "ready/consensus-" .. parent .. "/2026-06-03T01-02-03Z"
 local child_head_sha = "0123456789abcdef0123456789abcdef01234567"

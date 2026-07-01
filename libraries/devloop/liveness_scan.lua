@@ -18,7 +18,7 @@ end
 
 function C.liveness_scan_read_repo(M)
   local repo = M.read_env("FKST_GITHUB_REPO")
-  if repo == nil or not M.issue_ref_round_trips(repo, 1) then
+  if repo == nil or not base_ids.issue_ref_round_trips(repo, 1) then
     return nil
   end
   return repo
@@ -195,7 +195,7 @@ function C.liveness_scan_activation_slice(M, repo, kind, items, cursor_prefix)
 end
 
 function C.liveness_scan_reinject(M, repo, entity, kind, tick)
-  local proposal_id = kind == "pr" and M.pr_proposal_id(repo, entity.number) or M.proposal_id(repo, entity.number)
+  local proposal_id = kind == "pr" and M.pr_proposal_id(repo, entity.number) or base_ids.proposal_id(repo, entity.number)
   local payload = C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
   local queue = C.liveness_scan_observe_queue(M, kind)
   M.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {

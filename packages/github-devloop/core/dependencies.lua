@@ -169,7 +169,7 @@ end
 
 local function merged_blocker_cache_key(repo, blocker_number)
   local core = root()
-  if not core.issue_ref_round_trips(repo, blocker_number) then
+  if not base_ids.issue_ref_round_trips(repo, blocker_number) then
     error("github-devloop: invalid merged blocker cache key target")
   end
   local key = "github-devloop/dependency/merged/"
@@ -194,7 +194,7 @@ end
 
 local function blocker_merged(repo, blocker_number)
   local core = root()
-  local blocker_proposal_id = core.proposal_id(repo, blocker_number)
+  local blocker_proposal_id = base_ids.proposal_id(repo, blocker_number)
   local result = core.gh_issue_view_observe(repo, blocker_number, 30)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"

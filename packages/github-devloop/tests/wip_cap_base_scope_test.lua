@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_core_helpers")
 local m_builders = require("devloop.markers.builders")
 local m_mgw = require("devloop.merge_gate_wait")
@@ -46,7 +47,7 @@ end
 
 -- markers may be nil to model an implementing holder with no pr-link yet
 local function mock_wip_state(issue_number, state_name, base_branch)
-  local proposal_id = core.proposal_id(REPO, issue_number)
+  local proposal_id = base_ids.proposal_id(REPO, issue_number)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/intake/1/loop/1"
   local comments = { render_comment(core.state_marker(proposal_id, state_name, version)) }
   if base_branch ~= nil then
@@ -102,7 +103,7 @@ return {
   test_merge_gate_wait_holder_is_excluded_from_cap = function()
     mock_env(1)
     local issue_number = 51
-    local proposal_id = core.proposal_id(REPO, issue_number)
+    local proposal_id = base_ids.proposal_id(REPO, issue_number)
     local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/intake/1/loop/1"
     local pr_number = issue_number + 500
     local head_sha = "abcdef1234567890abcdef1234567890abcdef12"

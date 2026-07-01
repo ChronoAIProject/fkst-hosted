@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_attempts = require("devloop.convergence.attempts")
@@ -116,7 +117,7 @@ end
 local function mock_blocker_issue(issue_number, state_name)
   local comments = {}
   if state_name ~= nil then
-    table.insert(comments, core.state_marker(core.proposal_id(repo, issue_number), state_name, "v-" .. tostring(issue_number)))
+    table.insert(comments, core.state_marker(base_ids.proposal_id(repo, issue_number), state_name, "v-" .. tostring(issue_number)))
   end
   t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
     stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',

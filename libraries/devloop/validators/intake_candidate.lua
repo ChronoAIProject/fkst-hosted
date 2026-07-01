@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
@@ -16,7 +17,7 @@ function C.is_supported_intake_candidate(M, payload)
     and issue_number ~= nil
     and tostring(repo) == tostring(payload.repo)
     and tostring(issue_number) == tostring(payload.issue_number)
-    and tostring(payload.proposal_id) == M.proposal_id(repo, issue_number)
+    and tostring(payload.proposal_id) == base_ids.proposal_id(repo, issue_number)
 end
 
 return C

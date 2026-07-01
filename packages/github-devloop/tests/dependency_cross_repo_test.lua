@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local m_builders = require("devloop.markers.builders")
 local t = h.t
@@ -91,13 +92,13 @@ end
 
 local function state_comment(target_repo, issue_number, state_name, author_login)
   return {
-    body = core.state_marker(core.proposal_id(target_repo, issue_number), state_name, "v-" .. tostring(issue_number)),
+    body = core.state_marker(base_ids.proposal_id(target_repo, issue_number), state_name, "v-" .. tostring(issue_number)),
     author_login = author_login or "fkst-test-bot",
   }
 end
 
 local function sibling_link(issue_number, pr_number)
-  local proposal_id = core.proposal_id(sibling_repo, issue_number)
+  local proposal_id = base_ids.proposal_id(sibling_repo, issue_number)
   return {
     proposal_id = proposal_id,
     branch = "devloop-owner-substrate-" .. tostring(issue_number) .. "-01HY",

@@ -517,7 +517,7 @@ local function process_issue_event(event)
     return
   end
 
-  local proposal_id = core.proposal_id(issue.repo, issue.number)
+  local proposal_id = base_ids.proposal_id(issue.repo, issue.number)
   core.log_entry("observe_issue", event, proposal_id, issue.dedup_key)
   local lock_key = core.observe_lock_key(issue.repo, issue.number)
   with_lock(lock_key, function()

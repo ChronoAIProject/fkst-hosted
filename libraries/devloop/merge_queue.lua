@@ -494,7 +494,7 @@ function C.wip_capacity_allows_start(M, repo, current_issue_number)
         error("github-devloop: WIP issue state view failed: " .. tostring(view.stderr))
       end
       local current = parsers_issue.parse_issue_view_state(M, view.stdout)
-      local proposal_id = M.proposal_id(repo, issue_number)
+      local proposal_id = base_ids.proposal_id(repo, issue_number)
       local state = M.current_state(current.comments, proposal_id)
       local classification = C.wip_admission_classification(M, repo, proposal_id, current.comments, state, integration_branch)
       if classification.counts then

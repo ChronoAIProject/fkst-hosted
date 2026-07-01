@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local graph = require("testkit.graph")
 local t = fkst.test
 local core = require("core")
@@ -81,7 +82,7 @@ return {
         and payload.source_ref.ref == source_ref().ref
     end)
     t.eq(raised_step_index, admission_index)
-    t.eq(raised.payload.proposal_id, core.proposal_id(repo, issue_number))
+    t.eq(raised.payload.proposal_id, base_ids.proposal_id(repo, issue_number))
 
     for _, step in ipairs(trace.steps or {}) do
       t.is_true(step.consumer ~= "github-devloop-intake.intake_scan")

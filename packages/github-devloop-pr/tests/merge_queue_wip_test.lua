@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local transition_version = require("contract.transition_version")
 local payloads_builders = require("devloop.payloads.builders")
@@ -301,7 +302,7 @@ local function mock_wip_issue_list(numbers)
 end
 
 local function mock_wip_issue_state(issue_number, state)
-  local proposal_id = core.proposal_id("owner/repo", issue_number)
+  local proposal_id = base_ids.proposal_id("owner/repo", issue_number)
   t.mock_command(core.gh_issue_view_state_cmd("owner/repo", issue_number), {
     stdout = string.format(
       '{"title":"Issue","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',

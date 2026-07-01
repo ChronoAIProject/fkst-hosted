@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
@@ -74,7 +75,7 @@ local function admit_issue_event(event, entity)
     core.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "entity", "candidate", "skip-foreign(source_ref)", "invalid issue source_ref")
     return
   end
-  local proposal_id = core.proposal_id(repo, issue_number)
+  local proposal_id = base_ids.proposal_id(repo, issue_number)
   core.assert_trusted_bot_configured()
 
   local view = core.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)

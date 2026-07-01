@@ -1,4 +1,4 @@
-local h = require("tests.devloop_helpers")
+local base_ids, h = require("devloop.base_ids"), require("tests.devloop_helpers")
 local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile, conv_attempts = require("devloop.convergence.reconcile"), require("devloop.convergence.attempts")
@@ -254,7 +254,7 @@ local function has_liveness_action_for_proposal(result, target_proposal_id)
     if payload.proposal_id == target_proposal_id
       or (raised.queue == ISSUE_REDRIVE_QUEUE
         and payload.type == "issue"
-        and core.proposal_id(payload.repo, payload.number) == target_proposal_id) then
+        and base_ids.proposal_id(payload.repo, payload.number) == target_proposal_id) then
       return true
     end
   end
@@ -373,7 +373,7 @@ return {
         updated_at = "2026-06-03T01:02:03Z",
       })
       local fresh_version = state == "implementing" and "ready/2999-01-01T00-00-00Z" or "2999-01-01T00-00-00Z"
-      local proposal = core.proposal_id(repo, number)
+      local proposal = base_ids.proposal_id(repo, number)
       local comments = { { body = core.state_marker(proposal, state, fresh_version), author_login = "fkst-test-bot", created_at = "2999-01-01T00:00:00Z" } }
       if state == "implementing" then table.insert(comments, { body = core.implement_attempt_marker(proposal, fresh_version, 1, tostring(now() - 60)), author_login = "fkst-test-bot", created_at = "2999-01-01T00:00:00Z" }) end
       mock_issue_state_number(number, { "fkst-dev:enabled", core.state_label(state) }, "OPEN", comments)
@@ -397,10 +397,10 @@ return {
     local result = run_liveness_scan("liveness-scan-non-terminal-issue-marker-conformance", run_opts)
     t.eq(result.exit_code, 0)
     for issue_number, state in pairs(expected) do
-      t.eq(has_liveness_action_for_proposal(result, core.proposal_id(repo, issue_number)), true, "non-terminal issue marker state not sweep-reachable: " .. tostring(state))
+      t.eq(has_liveness_action_for_proposal(result, base_ids.proposal_id(repo, issue_number)), true, "non-terminal issue marker state not sweep-reachable: " .. tostring(state))
     end
     for issue_number, state in pairs(live_defer) do
-      local target_proposal = core.proposal_id(repo, issue_number)
+      local target_proposal = base_ids.proposal_id(repo, issue_number)
       t.eq(find_raise(result.raises, "devloop_timeout_reconcile", function(payload)
         return payload.proposal_id == target_proposal
       end), nil, "live codex-run state should not timeout-reconcile: " .. tostring(state))
@@ -902,7 +902,7 @@ return {
     mock_empty_pr_list()
     for number = 1, 101 do
       mock_issue_state_number(number, { "fkst-dev:enabled", "fkst-dev:merged" }, "OPEN", {
-        core.state_marker(core.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
+        core.state_marker(base_ids.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
       })
     end
 
@@ -928,7 +928,7 @@ return {
     mock_empty_pr_list()
     for number = 1, 101 do
       mock_issue_state_number(number, { "fkst-dev:enabled", "fkst-dev:merged" }, "OPEN", {
-        core.state_marker(core.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
+        core.state_marker(base_ids.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
       })
     end
 
@@ -962,7 +962,7 @@ return {
       mock_empty_pr_list()
       for number = 1, 250 do
         mock_issue_state_number(number, { "fkst-dev:enabled", "fkst-dev:merged" }, "OPEN", {
-          core.state_marker(core.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
+          core.state_marker(base_ids.proposal_id(repo, number), "merged", "v-" .. tostring(number)),
         })
       end
 

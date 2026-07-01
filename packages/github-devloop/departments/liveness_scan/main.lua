@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
@@ -25,14 +26,14 @@ local spec = {
 }
 
 local function should_reinject_issue(repo, issue, limits, deadline)
-  if not core.issue_ref_round_trips(repo, issue.number) then
+  if not base_ids.issue_ref_round_trips(repo, issue.number) then
     return false
   end
 
   if not sweep_bounds.sweep_has_budget(deadline) then
     return nil, "deadline"
   end
-  local proposal_id = core.proposal_id(repo, issue.number)
+  local proposal_id = base_ids.proposal_id(repo, issue.number)
   local state_view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue.number, issue.updated_at, {
     consumer = "liveness_scan",
     timeout = sweep_bounds.sweep_call_timeout(limits, deadline),

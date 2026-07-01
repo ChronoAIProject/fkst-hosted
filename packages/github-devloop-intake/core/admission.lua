@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local payloads_builders = require("devloop.payloads.builders")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
@@ -33,7 +34,7 @@ end
 
 function M.build_intake_admission_candidate(repo, issue, command, delivery_version)
   local updated_at = M.intake_candidate_updated_at(issue, command)
-  local proposal_id = M.proposal_id(repo, tostring(issue.number))
+  local proposal_id = base_ids.proposal_id(repo, tostring(issue.number))
   local effect_id = M.intake_decision_dedup_key(proposal_id, {
     title = issue.title,
     body = issue.body,

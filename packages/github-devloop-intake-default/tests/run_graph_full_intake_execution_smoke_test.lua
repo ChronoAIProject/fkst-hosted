@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local graph = require("testkit.graph")
 local t = fkst.test
 local core = require("core")
@@ -9,7 +10,7 @@ local issue_number = 42
 local updated_at = "2026-06-03T01:02:03Z"
 local title = "Add retry backoff to failed widget sync"
 local body = "Implement exponential backoff for widget sync retries."
-local proposal_id = core.proposal_id(repo, issue_number)
+local proposal_id = base_ids.proposal_id(repo, issue_number)
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 

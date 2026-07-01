@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -55,7 +56,7 @@ local function trusted_issue_command(command, id)
 end
 
 local function thinking_converge_comments(event, rounds, command)
-  local proposal_id = core.proposal_id(event.repo, event.number)
+  local proposal_id = base_ids.proposal_id(event.repo, event.number)
   local base_version = payloads_builders.build_proposal(core, event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local angle_digests = {
@@ -82,7 +83,7 @@ local function thinking_converge_comments(event, rounds, command)
 end
 
 local function thinking_changing_converge_comments(event, rounds, command)
-  local proposal_id = core.proposal_id(event.repo, event.number)
+  local proposal_id = base_ids.proposal_id(event.repo, event.number)
   local base_version = payloads_builders.build_proposal(core, event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local comments = {
@@ -158,7 +159,7 @@ return {
     local command = trusted_issue_command("rereview", "IC_issue_rereview_plain_stalled")
     local base_version = payloads_builders.build_proposal(core, event).dedup_key
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+      core.state_marker(base_ids.proposal_id(event.repo, event.number), "thinking", base_version),
       command,
     })
 
@@ -178,7 +179,7 @@ return {
     local base_version = payloads_builders.build_proposal(core, event).dedup_key
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
-        body = core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+        body = core.state_marker(base_ids.proposal_id(event.repo, event.number), "thinking", base_version),
         created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
       },
       command,
@@ -194,7 +195,7 @@ return {
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
-        body = core.state_marker(core.proposal_id(event.repo, event.number), "thinking", base_version),
+        body = core.state_marker(base_ids.proposal_id(event.repo, event.number), "thinking", base_version),
         created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now()),
       },
       command,
@@ -237,7 +238,7 @@ return {
     local event = issue()
     local command = trusted_issue_command("reready", "IC_issue_reready_invalid")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
-      core.state_marker(core.proposal_id(event.repo, event.number), "thinking", payloads_builders.build_proposal(core, event).dedup_key),
+      core.state_marker(base_ids.proposal_id(event.repo, event.number), "thinking", payloads_builders.build_proposal(core, event).dedup_key),
       command,
     })
 
@@ -251,7 +252,7 @@ return {
 
   test_issue_reready_command_reenters_timeout_reconcile_blocked_from_ready = function()
     local event = issue()
-    local proposal_id = core.proposal_id(event.repo, event.number)
+    local proposal_id = base_ids.proposal_id(event.repo, event.number)
     local ready_version = "consensus:github-devloop/issue/owner/repo/42/intake/1116/loop/1"
     local blocked_version = conv_reconcile.timeout_reconcile_state_version(core, ready_version, "ready", 3)
     local command = trusted_issue_command("reready", "IC_issue_reready_timeout_ready")
@@ -282,7 +283,7 @@ return {
     local event = issue()
     local command = trusted_issue_command("reready", "IC_issue_reready_blocked_plain")
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
-      core.state_marker(core.proposal_id(event.repo, event.number), "blocked", "manual-blocked"),
+      core.state_marker(base_ids.proposal_id(event.repo, event.number), "blocked", "manual-blocked"),
       command,
     })
 
@@ -296,7 +297,7 @@ return {
 
   test_issue_reready_command_refuses_timeout_reconcile_blocked_with_pr_link = function()
     local event = issue()
-    local proposal_id = core.proposal_id(event.repo, event.number)
+    local proposal_id = base_ids.proposal_id(event.repo, event.number)
     local ready_version = "consensus:github-devloop/issue/owner/repo/42/intake/1116/loop/1"
     local blocked_version = conv_reconcile.timeout_reconcile_state_version(core, ready_version, "ready", 3)
     local command = trusted_issue_command("reready", "IC_issue_reready_timeout_pr_link")
