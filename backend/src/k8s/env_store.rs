@@ -12,8 +12,8 @@
 //!
 //! This file owns the cluster I/O; the pure metadata/projection helpers live in
 //! the sibling [`meta`] module (split only to respect the 500-line limit). The
-//! whole layer is SELF-CONTAINED — it shares no code with [`crate::k8s::user_store`]
-//! — so a later PR can delete `user_store` cleanly.
+//! whole layer is SELF-CONTAINED — it shares no code with the old flat per-user
+//! `user_store`, which this feature replaced and removed outright.
 //!
 //! Secret VALUES leave this module through EXACTLY ONE function —
 //! [`load_environment_for_session`], the in-cluster session-injection path. Every

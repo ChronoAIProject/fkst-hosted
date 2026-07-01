@@ -10,7 +10,6 @@ pub mod env_store;
 pub mod env_validator;
 pub(crate) mod isolation;
 pub mod launcher;
-pub mod user_store;
 pub mod watch;
 
 pub use client::{KubeClient, KubeError};

@@ -17,6 +17,12 @@ use crate::openapi;
 use crate::routes;
 use crate::state::AppState;
 
+/// Seconds added beyond `env.validate_deadline_secs` for the route-scoped PUT
+/// timeout. It must comfortably exceed the validator's own internal backstop
+/// (`deadline + WAIT_BUFFER(30)`) plus pod-setup and log-read overhead, so the
+/// descriptive `422` (a timed-out verdict) wins the race over a bare `408`.
+const ENV_PUT_TIMEOUT_BUFFER_SECS: u64 = 60;
+
 /// Permissive CORS for v1 local development only.
 // TODO(frontend issue): tighten CORS to the real origin.
 fn cors_layer() -> CorsLayer {
@@ -47,14 +53,23 @@ fn cors_layer() -> CorsLayer {
 /// webhook actor — the only authenticated inbound is the signature-verified
 /// GitHub App webhook (which lives outside the `/api/v1` nest, like `/health`).
 pub fn build_router(state: AppState) -> Result<Router, AppError> {
-    let timeout = Duration::from_secs(state.config.request_timeout_secs);
+    let short_timeout = Duration::from_secs(state.config.request_timeout_secs);
+    // The named-environment PUT runs the isolated install-validation pod for up to
+    // `env.validate_deadline_secs` — far beyond the short global timeout. So the
+    // environments surface carries its OWN, much longer timeout; every OTHER route
+    // keeps the short one. See `ENV_PUT_TIMEOUT_BUFFER_SECS`.
+    let env_timeout = Duration::from_secs(
+        u64::try_from(state.config.env.validate_deadline_secs)
+            .unwrap_or(0)
+            .saturating_add(ENV_PUT_TIMEOUT_BUFFER_SECS),
+    );
 
-    // The per-user environment/secret store (PR4a) under `/api/v1`. It is open at
+    // The named-environment REST API (issue #338) under `/api/v1`. It is open at
     // the app layer: identity is the per-request GitHub token verified by the
     // `GithubUser` extractor, not middleware. Session query/stop are NOT a REST
     // surface — a session is controlled solely through its GitHub issue (the
     // `/status` + `/stop` issue comments, authorized by sender == issue author).
-    let api_routes = routes::user_env::router();
+    let api_routes = routes::environments::router();
 
     // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
     // but signature-verified inside the handler over the raw body. It lives at
@@ -80,10 +95,28 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
         );
     }
 
-    // Nest the (open, read-only) API under `/api/v1`, then split the assembled
-    // router from its OpenAPI document. The spec is rendered + served by a
-    // top-level `/openapi.json` route, merged back onto the concrete axum router.
-    let (router, spec) = top.nest("/api/v1", api_routes).split_for_parts();
+    // The route-scoped timeout is the reason the timeout is NOT applied in the
+    // global ServiceBuilder below: axum's `.layer()` only wraps the routes present
+    // when it is called. We give `top` the SHORT timeout, give the `/api/v1`
+    // environments subtree its OWN long timeout, and only then merge the two — so
+    // the environments PUT escapes the short global timeout while everything else
+    // is still bounded by it.
+    let top = top.layer(TimeoutLayer::with_status_code(
+        StatusCode::REQUEST_TIMEOUT,
+        short_timeout,
+    ));
+    let env =
+        OpenApiRouter::new()
+            .nest("/api/v1", api_routes)
+            .layer(TimeoutLayer::with_status_code(
+                StatusCode::REQUEST_TIMEOUT,
+                env_timeout,
+            ));
+
+    // Merge the two independently-timed subtrees, then split the assembled router
+    // from its OpenAPI document. The spec is rendered + served by a top-level
+    // `/openapi.json` route, merged back onto the concrete axum router.
+    let (router, spec) = top.merge(env).split_for_parts();
 
     Ok(router
         .merge(openapi::spec_route(spec)?)
@@ -93,10 +126,6 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
                 .layer(TraceLayer::new_for_http())
                 .layer(PropagateRequestIdLayer::x_request_id())
-                .layer(cors_layer())
-                .layer(TimeoutLayer::with_status_code(
-                    StatusCode::REQUEST_TIMEOUT,
-                    timeout,
-                )),
+                .layer(cors_layer()),
         ))
 }

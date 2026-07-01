@@ -32,10 +32,10 @@ const HEADING_PACKAGES: &str = "### Package Name List";
 /// no injection.
 const HEADING_ENVIRONMENT: &str = "### Environment";
 
-/// Anchored env-var-name pattern, identical to the user-store key grammar in
-/// [`crate::routes::user_env`]. A name that passes here is also a valid
-/// Kubernetes ConfigMap/Secret data key, so the requested key can be looked up in
-/// the author's store and mounted unescaped.
+/// Anchored env-var-name pattern, identical to the env-var key grammar the
+/// named-environment API (`crate::routes::environments`) enforces. A name that
+/// passes here is also a valid Kubernetes ConfigMap/Secret data key, so the
+/// requested key can be looked up in the author's store and mounted unescaped.
 fn env_key_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new("^[A-Za-z_][A-Za-z0-9_]*$").expect("static env key regex"))
