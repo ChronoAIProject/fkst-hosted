@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
@@ -93,7 +94,7 @@ local function require_head_sha(branch, expected_head)
   if require("devloop.pr_safety").is_safe_head_sha(head) then
     return head
   end
-  local fetched = M.current_branch_head_sha(branch)
+  local fetched = git_mechanics.current_branch_head_sha(M.git, branch)
   if not require("devloop.pr_safety").is_safe_head_sha(fetched) then
     error("github-devloop: pr-delegation branch head is missing")
   end

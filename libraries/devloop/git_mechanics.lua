@@ -192,13 +192,13 @@ local forge_validators = require("devloop.forge_validators")
     return false, tostring(result.stderr or "")
   end
 
-  function C.current_branch_head_sha(M, branch)
+  function C.current_branch_head_sha(git, branch)
     local safe_branch = require_safe_branch("branch", branch)
-    local fetch_result = M.git.fetch_branch("origin", safe_branch, 60)
+    local fetch_result = git.fetch_branch("origin", safe_branch, 60)
     if fetch_result.exit_code ~= 0 then
       return nil
     end
-    local head_result = M.git.fetch_head_commit(30)
+    local head_result = git.fetch_head_commit(30)
     if head_result.exit_code ~= 0 then
       return nil
     end

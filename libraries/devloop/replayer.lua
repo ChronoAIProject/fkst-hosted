@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
@@ -524,7 +525,7 @@ local function replay_impl_failed(M, dept, issue, state, row, facts)
 end
 
 local function replay_fixing_to_reviewing(M, dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)
-  local intended_head_sha = M.current_branch_head_sha(link.branch)
+  local intended_head_sha = git_mechanics.current_branch_head_sha(M.git, link.branch)
   if intended_head_sha == nil then
     M.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
     error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")

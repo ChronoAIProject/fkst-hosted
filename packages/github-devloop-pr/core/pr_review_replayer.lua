@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
@@ -296,7 +297,7 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
     return tools.log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-foreign(fix-feedback-binding)", "trusted fix feedback marker lacks review binding")
   end
   if tostring(current_pr.head_sha or "") ~= tostring(feedback.reviewed_head_sha or "") then
-    local intended_head_sha = M.current_branch_head_sha(link.branch)
+    local intended_head_sha = git_mechanics.current_branch_head_sha(M.git, link.branch)
     if intended_head_sha ~= nil and tostring(current_pr.head_sha or "") ~= intended_head_sha then
       return tools.log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
     end

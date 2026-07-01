@@ -11,7 +11,8 @@ function S.with(core, opts, fn)
   local previous_fetch_branch = core.fetch_branch
   local previous_remote_head = core.remote_head
   local previous_git_is_ancestor = core.git.is_ancestor
-  local previous_current_branch_head_sha = core.current_branch_head_sha
+  local previous_git_fetch_branch = core.git.fetch_branch
+  local previous_git_fetch_head_commit = core.git.fetch_head_commit
   local previous_context_fetch_ref_from_bundle = context_bundle.context_fetch_ref_from_bundle
   local previous_context_fetch_from_bundle = context_bundle.context_fetch_from_bundle
   local previous_board_digest_block = payloads_board.board_digest_block
@@ -35,8 +36,11 @@ function S.with(core, opts, fn)
       and tostring(descendant_sha or "") == tostring(head_sha)
     return { exit_code = matched and 0 or 1, stdout = "", stderr = "" }
   end
-  core.current_branch_head_sha = function()
-    return head_sha
+  core.git.fetch_branch = function()
+    return { exit_code = 0, stdout = "", stderr = "" }
+  end
+  core.git.fetch_head_commit = function()
+    return { exit_code = 0, stdout = head_sha, stderr = "" }
   end
   context_bundle.context_fetch_ref_from_bundle = function(_core, args)
     return "runtime-cache:hidden-state-conformance/" .. tostring(args and args.version or "fixture")
@@ -56,7 +60,8 @@ function S.with(core, opts, fn)
   core.fetch_branch = previous_fetch_branch
   core.remote_head = previous_remote_head
   core.git.is_ancestor = previous_git_is_ancestor
-  core.current_branch_head_sha = previous_current_branch_head_sha
+  core.git.fetch_branch = previous_git_fetch_branch
+  core.git.fetch_head_commit = previous_git_fetch_head_commit
   context_bundle.context_fetch_ref_from_bundle = previous_context_fetch_ref_from_bundle
   context_bundle.context_fetch_from_bundle = previous_context_fetch_from_bundle
   payloads_board.board_digest_block = previous_board_digest_block
