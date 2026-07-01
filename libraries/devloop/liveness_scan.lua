@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local C, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
@@ -61,7 +62,7 @@ function C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
     number = tonumber(number), title = entity.title,
     state = entity.state,
     updated_at = updated_at,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "liveness-scan",
       tostring(repo),
       kind,

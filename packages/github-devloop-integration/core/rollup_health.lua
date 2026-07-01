@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local parsers_misc = require("devloop.parsers.misc")
 local S = {}
@@ -116,7 +117,7 @@ function M.rollup_red_window_minutes(exec)
 end
 
 function M.rollup_health_dedup_key(repo, failing_check)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     detector,
     tostring(repo or ""),
     failure_identity(failing_check),

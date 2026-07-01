@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -281,7 +282,7 @@ local function raise_stale_dependency_label_clear(issue, proposal_id, state, lab
     issue.number,
     {},
     { core._blocked_on_dependency_label },
-    core._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version or "unversioned") }),
+    base_ids.dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version or "unversioned") }),
     issue.source_ref
   ))
   return true
@@ -600,14 +601,14 @@ local function process_issue_event(event)
         kind = "issue",
         repo = issue.repo,
         number = issue.number,
-      }, comment_body, core._dedup_key({
+      }, comment_body, base_ids.dedup_key({
         "canonicalize",
         "pr-open",
         tostring(proposal_id),
         tostring(issue_state.version),
         tostring(link.pr_number),
       }), issue.source_ref)
-      local label_request = requests_labels.build_state_label_request(core, issue.repo, issue.number, "awaiting-pr", core._dedup_key({
+      local label_request = requests_labels.build_state_label_request(core, issue.repo, issue.number, "awaiting-pr", base_ids.dedup_key({
         "canonicalize",
         "pr-open",
         "label",
@@ -649,7 +650,7 @@ local function process_issue_event(event)
           issue.number,
           add_labels,
           remove_labels,
-          core._dedup_key({
+          base_ids.dedup_key({
             "reconcile",
             "label",
             proposal_id,

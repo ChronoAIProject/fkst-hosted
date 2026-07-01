@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
 local S = {}
@@ -96,7 +97,7 @@ local function normalized_fact(payload)
 end
 
 function M.failure_triage_dedup_key(repo, fingerprint)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "failure-triage",
     M.safe_repo(repo),
     tostring(fingerprint or "unknown"),
@@ -108,7 +109,7 @@ local function fact_count_key(repo, fingerprint)
 end
 
 function M.failure_triage_count_key(repo, fingerprint, window_key)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "failure-triage-count",
     M.safe_repo(repo),
     tostring(fingerprint or "unknown"),
@@ -117,7 +118,7 @@ function M.failure_triage_count_key(repo, fingerprint, window_key)
 end
 
 local function seen_key(repo, fingerprint)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "failure-triage-seen",
     M.safe_repo(repo),
     tostring(fingerprint or "unknown"),
@@ -125,7 +126,7 @@ local function seen_key(repo, fingerprint)
 end
 
 local function threshold_key(repo, fingerprint, window_key)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "failure-triage-threshold",
     M.safe_repo(repo),
     tostring(fingerprint or "unknown"),

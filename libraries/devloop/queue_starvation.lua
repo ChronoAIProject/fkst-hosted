@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_issue = require("devloop.parsers.issue")
 local C = {}
@@ -366,7 +367,7 @@ local function raise_redrive(M, redrive)
 end
 
 function C.queue_starvation_dedup_key(M, repo, identity)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     detector,
     tostring(repo or ""),
     tostring(identity or "queue"),

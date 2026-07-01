@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local S = {}
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
@@ -92,7 +93,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     title = safe_title,
     body = body,
     labels = json.decode("[]"),
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "decompose",
       tostring(decompose.proposal_id),
       tostring(decompose.version),

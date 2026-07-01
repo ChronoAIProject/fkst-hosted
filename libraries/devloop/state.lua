@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_predicates = require("devloop.payloads.predicates")
@@ -845,7 +846,7 @@ function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, 
     issue_number,
     add_labels,
     remove_labels,
-    M._dedup_key({
+    base_ids.dedup_key({
       "reconcile",
       "label",
       tostring(proposal_id),

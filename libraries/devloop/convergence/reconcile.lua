@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local shared = require("devloop.convergence.shared")
@@ -125,7 +126,7 @@ function C.build_timeout_reconcile_comment_request(M, repo, issue_number, reconc
       .. "\n\nStructured WHY:\n" .. C.timeout_reconcile_reason_body(M, fields or {})
       .. "\n\n" .. state_marker .. "\n" .. marker
       .. "\n" .. "⟦AI:FKST⟧",
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "timeout-reconcile",
       "comment",
       tostring(reconcile.dedup_key),

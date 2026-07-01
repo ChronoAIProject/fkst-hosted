@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
@@ -17,7 +18,7 @@ function C.build_observe_comment_request(M, issue, proposal)
     issue_number = issue.number,
     body = comment_strings.comment_string(M, "thinking_started") .. "\n\n"
       .. M.state_marker(proposal.proposal_id, "thinking", tostring(proposal.effect_version or proposal.dedup_key)),
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       tostring(proposal.proposal_id),
       "comment",
       "thinking",
@@ -78,7 +79,7 @@ function C.build_converge_round_comment_request(M, repo, issue_number, unresolve
     body = shared.build_convergence_display(M, comment_strings.comment_string(M, "convergence_round_prefix"), unresolved, round)
       .. "\n\n" .. tostring(marker_body)
       .. "\n" .. ai_sentinel,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "converge-round",
       "comment",
       tostring(unresolved.proposal_id),
@@ -101,7 +102,7 @@ function C.build_dependency_hold_comment_request(M, repo, issue_number, proposal
     body = comment_strings.comment_string(M, "dependency_hold_prefix") .. tostring(gate and gate.kind or "unknown")
       .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. reason
       .. "\n\n" .. tostring(marker),
-    dedup_key = M._dedup_key({ "dependency", "comment", tostring(proposal_id), tostring(version), tostring(gate and gate.kind or "unknown") }),
+    dedup_key = base_ids.dedup_key({ "dependency", "comment", tostring(proposal_id), tostring(version), tostring(gate and gate.kind or "unknown") }),
     source_ref = M.normalize_source_ref(source_ref),
   }, source_ref)
 end
@@ -123,7 +124,7 @@ function C.build_dependency_release_comment_request(M, repo, issue_number, propo
     body = comment_strings.comment_string(M, "dependency_release_prefix") .. reason
       .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. reason
       .. "\n\n" .. markers,
-    dedup_key = M._dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(version), reason }),
+    dedup_key = base_ids.dedup_key({ "dependency", "comment", "release", tostring(proposal_id), tostring(version), reason }),
     source_ref = M.normalize_source_ref(source_ref),
   }, source_ref)
 end
@@ -154,7 +155,7 @@ function C.build_intake_decision_comment_request(M, repo, issue_number, candidat
       .. detail
       .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
       .. "\n\n" .. marker,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "intake",
       "comment",
       tostring(candidate.proposal_id),
@@ -191,7 +192,7 @@ function C.build_implementing_comment_request(M, repo, issue_number, ready, work
       .. "\n" .. comment_strings.comment_string(M, "base_head_label") .. tostring(base_sha)
       .. "\n\n" .. attempt_marker
       .. "\n" .. marker,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "implement",
       "comment",
       "implementing",
@@ -224,7 +225,7 @@ function C.build_implementing_state_comment_request(M, repo, issue_number, ready
       .. "\n" .. comment_strings.comment_string(M, "base_head_label") .. tostring(base_sha)
       .. "\n\n" .. state_marker
       .. "\n" .. attempt_marker,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "implement",
       "comment",
       "implementing-state",
@@ -241,7 +242,7 @@ function C.build_implement_attempt_comment_request(M, repo, issue_number, ready,
     repo = repo,
     issue_number = issue_number,
     body = "github-devloop implementation attempt started\n\n" .. marker,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "implement",
       "comment",
       "attempt",
@@ -259,7 +260,7 @@ function C.build_implement_version_mismatch_comment_request(M, repo, issue_numbe
     repo = repo,
     issue_number = issue_number,
     body = "github-devloop implementation version mismatch observed\n\n" .. marker,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "implement",
       "comment",
       "version-mismatch",
@@ -293,7 +294,7 @@ function C.build_impl_failure_comment_request(M, repo, issue_number, ready, reas
       .. "\n\n" .. text
       .. "\n\n" .. state_marker
       .. "\n" .. marker,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "implement",
       "comment",
       "failure",
@@ -324,7 +325,7 @@ function C.build_queue_starvation_reconcile_comment_request(M, repo, merge_ready
     .. "\n\nQueue head PR: #" .. tostring(merge_ready.pr_number)
     .. "\nReviewed head: " .. tostring(merge_ready.reviewed_head_sha)
     .. "\nAttempt: " .. tostring(attempt_key)
-    .. "\n\n" .. marker, M._dedup_key({
+    .. "\n\n" .. marker, base_ids.dedup_key({
     "queue-starvation",
     "reconcile",
     tostring(merge_ready.proposal_id),

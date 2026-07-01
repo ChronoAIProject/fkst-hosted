@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local config = require("devloop.config")
@@ -116,7 +117,7 @@ local function build_resume_comment_request(issue, state, next_state, child_stat
     .. "\nChild state: " .. tostring(child_state.state)
     .. "\nReason: " .. tostring(next_state.reason)
     .. "\n\n" .. state_marker
-    .. resume_terminal_markers(issue, next_state, delegation, current_pr), M._dedup_key({
+    .. resume_terminal_markers(issue, next_state, delegation, current_pr), base_ids.dedup_key({
     "awaiting-pr",
     "resume",
     tostring(delegation.proposal_id),
@@ -184,7 +185,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     issue.repo,
     issue.number,
     next_state.to_state,
-    M._dedup_key({
+    base_ids.dedup_key({
       "awaiting-pr",
       "label",
       tostring(proposal_id),

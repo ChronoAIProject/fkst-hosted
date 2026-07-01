@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_pr = require("devloop.parsers.pr")
@@ -630,7 +631,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       new_version,
       source_ref
     )
-    local label_request = requests_labels.build_state_label_request(M, issue.repo, issue.number, "reviewing", M._dedup_key({
+    local label_request = requests_labels.build_state_label_request(M, issue.repo, issue.number, "reviewing", base_ids.dedup_key({
       "observe",
       "fixing",
       "renormalize",

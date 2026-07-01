@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -403,7 +404,7 @@ return {
     t.eq(label_raise.payload.add_labels[1], "fkst-dev:blocked")
     t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:reviewing"))
     t.eq(has_value(label_raise.payload.remove_labels, "fkst-dev:thinking"), false)
-    t.eq(label_raise.payload.dedup_key, core._dedup_key({
+    t.eq(label_raise.payload.dedup_key, base_ids.dedup_key({
       "reconcile",
       "label",
       proposal_id,

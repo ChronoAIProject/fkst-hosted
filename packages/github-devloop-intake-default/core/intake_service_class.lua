@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local m_shared = require("devloop.markers.shared")
 local S = {}
@@ -36,7 +37,7 @@ function M.build_intake_service_class_label_request(repo, issue_number, candidat
     issue_number,
     add_labels,
     remove_labels,
-    M._dedup_key({
+    base_ids.dedup_key({
       "intake",
       "class-label",
       tostring(candidate and candidate.proposal_id or ""),

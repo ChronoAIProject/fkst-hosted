@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_issue = require("devloop.parsers.issue")
 local core, replay_fields = require("core"), require("devloop.replay_fields")
@@ -282,7 +283,7 @@ local function pipeline_timeout(event)
       source_ref = core.normalize_source_ref(reconcile.source_ref),
     }
     local comment_request = conv_reconcile.build_timeout_reconcile_comment_request(core, repo, issue_number, reconcile, action, reason, version, why_fields)
-    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", core._dedup_key({
+    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",
       tostring(reconcile.dedup_key),

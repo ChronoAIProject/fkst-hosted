@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
@@ -26,7 +27,7 @@ function M.build_ready_split_canonicalized_comment_request(repo, issue_number, p
     body = "github-devloop ready split canonicalized"
       .. "\n\n" .. comment_strings.comment_string(M, "reason_inline_label") .. tostring(gate and gate.reason or "ready_split_rederive")
       .. "\n\n" .. markers,
-    dedup_key = M._dedup_key({ "ready-split", "canonicalized", tostring(proposal_id), tostring(from_version), tostring(to_version) }),
+    dedup_key = base_ids.dedup_key({ "ready-split", "canonicalized", tostring(proposal_id), tostring(from_version), tostring(to_version) }),
     source_ref = M.normalize_source_ref(source_ref),
   }, source_ref)
   if to_state == "ready" then
@@ -94,7 +95,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
       issue.number,
       { M._blocked_on_dependency_label },
       {},
-      M._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(to_version), tostring(gate.kind) }),
+      base_ids.dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(to_version), tostring(gate.kind) }),
       issue.source_ref
     ))
     return true
@@ -105,7 +106,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
       issue.number,
       {},
       { M._blocked_on_dependency_label },
-      M._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(to_version) }),
+      base_ids.dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(to_version) }),
       issue.source_ref
     ))
   end
@@ -176,7 +177,7 @@ local function raise_dependency_release(M, dept, issue, proposal_id, state, curr
   if has_blocked_label then
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo, issue.number, {}, { M._blocked_on_dependency_label },
-      M._dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }), issue.source_ref
+      base_ids.dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }), issue.source_ref
     ))
   end
   return true
@@ -209,7 +210,7 @@ local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, cu
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", requests_lifecycle.build_dependency_hold_comment_request(M, issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
-      M._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }), issue.source_ref
+      base_ids.dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }), issue.source_ref
     ))
   end
   return #raised > 0
@@ -225,7 +226,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     body = "github-devloop dependency gate blocked"
       .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. tostring(gate.reason or "dependency-gate-unresolvable")
       .. "\n\n" .. M.state_marker(proposal_id, "blocked", state.version),
-    dedup_key = M._dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
+    dedup_key = base_ids.dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
     source_ref = M.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
   local label_request = requests_labels.build_label_request(M,
@@ -233,7 +234,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     issue.number,
     add_labels,
     remove_labels,
-    M._dedup_key({ "dependency", "blocked", "label", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
+    base_ids.dedup_key({ "dependency", "blocked", "label", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
     issue.source_ref
   )
   M.log_cas_decision(dept, proposal_id, state, "dependency_wait", "blocked", "applied(dependency-gate-unresolvable)", gate.reason)
@@ -296,7 +297,7 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     ))
     M.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
-      M._dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(dep_version), tostring(gate.kind) }), issue.source_ref
+      base_ids.dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(dep_version), tostring(gate.kind) }), issue.source_ref
     ))
     return true
   end

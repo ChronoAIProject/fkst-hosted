@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local PrFreshness = {}
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
@@ -20,7 +21,7 @@ function PrFreshness.install(M, shared)
   end
 
   function M.pr_freshness_dedup_key(repo, branch, baseline_sha)
-    return M._dedup_key({
+    return base_ids.dedup_key({
       "pr-freshness",
       require_safe_repo(repo),
       require_safe_branch("managed branch", branch),

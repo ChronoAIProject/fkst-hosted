@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local execution_start = require("devloop.execution_start")
@@ -68,7 +69,7 @@ local function assert_execution_effects(raises, request)
   t.eq(comment.schema, "github-proxy.v1")
   t.eq(comment.repo, "owner/repo")
   t.eq(tostring(comment.issue_number), "42")
-  t.eq(comment.dedup_key, core._dedup_key({
+  t.eq(comment.dedup_key, base_ids.dedup_key({
     request.proposal_id,
     "comment",
     "thinking",

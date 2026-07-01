@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -143,7 +144,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
     local review_id = core.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)
-    local review_dedup_key = core._dedup_key({ review_id, "review" })
+    local review_dedup_key = base_ids.dedup_key({ review_id, "review" })
     local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_pr",
       repo = repo,

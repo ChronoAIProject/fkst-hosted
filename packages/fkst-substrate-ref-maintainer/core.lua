@@ -121,7 +121,6 @@ M.truncate_utf8 = base.truncate_utf8
 M._has_value = base._has_value
 M._is_review_meta_action = base._is_review_meta_action
 M.fix_reflection_checkpoint_round = base.fix_reflection_checkpoint_round
-M._dedup_key = base._dedup_key
 require("forge.github_debug_stamp").install(M)
 require("devloop.commands").install(M)
 require("forge.merge_commands").install(M)

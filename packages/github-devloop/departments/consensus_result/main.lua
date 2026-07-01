@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local core = require("core")
@@ -58,7 +59,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       issue_number,
       { core._blocked_on_dependency_label },
       {},
-      core._dedup_key({ "dependency", "label", "hold", tostring(reached.proposal_id), version, tostring(gate.kind) }),
+      base_ids.dedup_key({ "dependency", "label", "hold", tostring(reached.proposal_id), version, tostring(gate.kind) }),
       reached.source_ref
     )
   elseif core.dependency_gate_has_notes(gate) then

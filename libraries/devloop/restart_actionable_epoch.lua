@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local conv_attempts = require("devloop.convergence.attempts")
 local contract_time = require("contract.time")
@@ -80,7 +81,7 @@ local function matching_live_defer_marker(M, row, state, facts)
 end
 
 local function generation_key(M, row, state, eval)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "restart-liveness:v2",
     tostring((state and state.proposal_id) or ""),
     tostring(row and row.from_state or ""),

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local payloads_builders = require("devloop.payloads.builders")
 local C = {}
@@ -75,7 +76,7 @@ function C.build_review_converge_round_comment_request(M, repo, issue_number, un
     number = unresolved.pr_number or select(2, M.parse_pr_source_ref(unresolved.source_ref)),
   }, shared.build_convergence_display(M, comment_strings.comment_string(M, "pr_review_convergence_round_prefix"), unresolved, round)
     .. "\n\n" .. tostring(marker_body)
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "review-converge-round",
     "comment",
     tostring(issue_proposal_id),
@@ -92,7 +93,7 @@ function C.build_issue_review_converge_round_comment_request(M, repo, issue_numb
     body = shared.build_convergence_display(M, comment_strings.comment_string(M, "pr_review_convergence_round_prefix"), unresolved, round)
       .. "\n\n" .. tostring(marker_body)
       .. "\n" .. ai_sentinel,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "review-converge-round",
       "comment",
       tostring(issue_proposal_id),
@@ -110,7 +111,7 @@ function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_num
     repo = repo,
     number = pr_number,
   }, comment_strings.comment_string(M, "pr_ready_for_review")
-    .. "\n\n" .. state_marker, M._dedup_key({
+    .. "\n\n" .. state_marker, base_ids.dedup_key({
     "observe-pr",
     "comment",
     tostring(origin.proposal_id),
@@ -130,7 +131,7 @@ function C.build_operator_rereview_comment_request(M, repo, pr_number, proposal_
   }, "github-devloop operator command accepted: rereview"
     .. "\n\n" .. state_marker
     .. "\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -158,7 +159,7 @@ function C.build_pr_base_unmanaged_comment_request(M, repo, pr_number, origin, i
     .. "\nConfigured integration branch: " .. tostring(integration_branch)
     .. "\n\n" .. state_marker
     .. "\n" .. reason_marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "observe-pr",
     "blocked",
     "pr-base-unmanaged",
@@ -210,7 +211,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     .. "\n" .. marker
     .. reflection_marker
     .. merge_marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "review-result",
     "comment",
     tostring(issue_proposal_id),
@@ -261,7 +262,7 @@ function C.build_high_risk_review_evidence_comment_request(M, repo, issue_propos
     number = pr_number,
   }, "github-devloop high-risk PR review evidence"
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "high-risk-review-evidence",
     "comment",
     tostring(issue_proposal_id),
@@ -302,7 +303,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
   }, comment_strings.comment_string(M, "merge_gate_failed_prefix") .. display_reason
     .. "\n" .. comment_strings.comment_string(M, "reproduce_locally_prefix") .. test_command .. comment_strings.comment_string(M, "reproduce_locally_suffix")
     .. "\n\n" .. state_marker
-    .. "\n" .. marker, M._dedup_key({
+    .. "\n" .. marker, base_ids.dedup_key({
     "merge",
     "comment",
     "fixing",
@@ -345,7 +346,7 @@ function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_h
     .. "\n" .. comment_strings.comment_string(M, "new_head_label") .. tostring(new_head_sha)
     .. summary
     .. "\n\n" .. state_marker
-    .. "\n" .. marker, M._dedup_key({
+    .. "\n" .. marker, base_ids.dedup_key({
     "fix",
     "comment",
     tostring(fix.proposal_id),
@@ -396,7 +397,7 @@ function C.build_merge_head_reviewing_comment_request(M, repo, issue_number, mer
   }, comment_strings.comment_string(M, "pr_head_advanced")
     .. "\n\n" .. comment_strings.comment_string(M, "previous_reviewed_head_label") .. tostring(old_head_sha)
     .. "\n" .. comment_strings.comment_string(M, "current_head_label") .. tostring(new_head_sha)
-    .. "\n\n" .. state_marker, M._dedup_key({
+    .. "\n\n" .. state_marker, base_ids.dedup_key({
     "merge",
     "comment",
     "reviewing",
@@ -435,7 +436,7 @@ function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_pro
     .. "\n" .. review_marker
     .. "\n" .. merge_marker
     .. "\n" .. carry_marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "review-carry-over",
     "comment",
     tostring(issue_proposal_id),

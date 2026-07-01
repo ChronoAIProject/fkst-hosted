@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local S = {}
 local strings = require("contract.strings")
 local decimal_checksum = strings.decimal_checksum
@@ -124,7 +125,7 @@ function M.build_sync_conflict_escalation_request(conflict, fingerprint, attempt
     title = title,
     body = body,
     labels = json.decode("[]"),
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "sync-conflict-escalation",
       tostring(conflict.repo),
       tostring(conflict.upstream_branch),

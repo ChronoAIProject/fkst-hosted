@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local conv_reconcile = require("devloop.convergence.reconcile")
@@ -12,7 +13,7 @@ function M.build_reconcile_label_request(repo, issue_number, reconcile)
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "reconcile",
       "label",
       tostring(reconcile.dedup_key),
@@ -26,7 +27,7 @@ function M.build_review_reconcile_label_request(repo, issue_number, review_recon
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "review-reconcile",
       "label",
       tostring(review_reconcile.dedup_key),
@@ -40,7 +41,7 @@ function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "fix-reconcile",
       "label",
       tostring(fix_reconcile.dedup_key),
@@ -63,7 +64,7 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
       .. "\n\n"
       .. state_marker .. "\n" .. marker
       .. "\n" .. ai_sentinel,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "reconcile",
       "comment",
       tostring(reconcile.dedup_key),
@@ -86,7 +87,7 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
     .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "fix-reconcile",
     "comment",
     tostring(fix_reconcile.dedup_key),
@@ -107,7 +108,7 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
     .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "review-reconcile",
     "comment",
     tostring(review_reconcile.dedup_key),

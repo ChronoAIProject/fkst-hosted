@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local parsers_misc = require("devloop.parsers.misc")
@@ -49,7 +50,7 @@ local function build_timeout_reconcile_pr_comment_request(repo, pr_number, recon
     .. "\n\nReason:\n" .. tostring(reason or "")
     .. "\n\nStructured WHY:\n" .. conv_reconcile.timeout_reconcile_reason_body(core, fields or {})
     .. "\n\n" .. state_marker .. "\n" .. marker
-    .. "\n" .. "⟦AI:FKST⟧", core._dedup_key({
+    .. "\n" .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "timeout-reconcile",
     "pr-comment",
     tostring(reconcile.dedup_key),
@@ -426,7 +427,7 @@ local function pipeline_timeout(event)
     local comment_request = target_pr_number ~= nil
       and build_timeout_reconcile_pr_comment_request(repo, target_pr_number, reconcile, action, reason, version, why_fields)
       or conv_reconcile.build_timeout_reconcile_comment_request(core, repo, issue_number, reconcile, action, reason, version, why_fields)
-    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", core._dedup_key({
+    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",
       tostring(reconcile.dedup_key),

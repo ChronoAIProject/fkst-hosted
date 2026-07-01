@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_issue = require("devloop.parsers.issue")
 local S = {}
@@ -213,7 +214,7 @@ function M.build_intake_class_followup_comment_request(repo, issue_number, candi
     .. "\n\n" .. carrier_line
     .. "\n\nReason:\n" .. safe_reason
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "intake-class",
     "followup",
     tostring(candidate.proposal_id),
@@ -228,7 +229,7 @@ function M.build_intake_class_folded_label_request(repo, issue_number, candidate
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "intake-class",
       "label",
       "folded",
@@ -259,7 +260,7 @@ function M.build_intake_class_issue_create_request(repo, issue_number, candidate
     title = title,
     body = body,
     labels = json.decode("[]"),
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "intake-class",
       tostring(class_key or ""),
     }),

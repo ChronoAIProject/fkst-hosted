@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local source_refs = require("contract.source_ref")
@@ -27,7 +28,7 @@ function C.is_supported_fixing(M, payload)
     return true
   end
 
-  local replay_dedup = M._dedup_key({
+  local replay_dedup = base_ids.dedup_key({
     "fixing",
     "replay",
     tostring(payload.proposal_id),

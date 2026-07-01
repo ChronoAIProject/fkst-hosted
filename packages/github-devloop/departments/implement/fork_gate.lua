@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local core = require("core")
@@ -19,7 +20,7 @@ local function duplicate_comment(repo, issue_number, ready, origin, canonical_nu
     kind = "issue",
     repo = repo,
     number = issue_number,
-  }, body, core._dedup_key({
+  }, body, base_ids.dedup_key({
     "implement",
     "duplicate-fork",
     tostring(origin.repo),
@@ -35,7 +36,7 @@ local function duplicate_label(repo, issue_number, ready, origin, canonical_numb
     issue_number,
     { duplicate_label_name },
     {},
-    core._dedup_key({
+    base_ids.dedup_key({
       "implement",
       "duplicate-fork",
       "label",

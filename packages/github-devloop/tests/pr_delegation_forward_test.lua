@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -194,7 +195,7 @@ return {
     local issue_effect = find_effect(first.effects, "github-proxy.github_issue_comment_request")
     t.is_true(pr_effect ~= nil)
     t.is_true(issue_effect ~= nil)
-    t.eq(pr_effect.payload.dedup_key, core._dedup_key({ "pr-delegation", "pr-open", issue_proposal, "g1" }))
+    t.eq(pr_effect.payload.dedup_key, base_ids.dedup_key({ "pr-delegation", "pr-open", issue_proposal, "g1" }))
     t.eq(pr_effect.payload.handoff, nil)
 
     local visible_pr_open = m_builders.pr_origin_marker(core, issue_proposal, issue_number, branch, impl_version, base_branch)

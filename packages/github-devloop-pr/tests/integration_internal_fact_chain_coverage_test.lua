@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_review = require("devloop.requests.review")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
@@ -139,7 +140,7 @@ local function live_308_decompose_reconcile_marker_substream(event)
   event.proposal_id = proposal_id
   event.pr_number = pr_number
   event.version = version
-  event.dedup_key = core._dedup_key({ "decompose", proposal_id, version })
+  event.dedup_key = base_ids.dedup_key({ "decompose", proposal_id, version })
   event.source_ref = core.pr_source_ref(repo, pr_number)
   return {
     source_ref = event.source_ref,
@@ -181,7 +182,7 @@ local function live_305_merge_gate_fix_marker_substream(event)
   event.reviewed_head_sha = head_sha
   event.gate_baseline_sha = gate_baseline_sha
   event.source_ref = core.pr_source_ref(repo, pr_number)
-  event.dedup_key = core._dedup_key({ "merge-ready", proposal_id, version, tostring(pr_number), head_sha })
+  event.dedup_key = base_ids.dedup_key({ "merge-ready", proposal_id, version, tostring(pr_number), head_sha })
   local merge_gate = 'github-devloop merge gate failed: rollup-red\nReproduce locally with `scripts/run.sh test` from the repository root.\n\n<!-- fkst:github-devloop:state:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" state="fixing" version="' .. fixing_version .. '" stage_rank="700" -->\n<!-- fkst:github-devloop:merge-gate:v1 proposal="github-devloop/issue/ChronoAIProject/fkst-packages/300" pr="305" version="' .. fixing_version .. '" review_proposal="' .. review_proposal .. '" review_dedup="' .. review_dedup .. '" head_sha="' .. head_sha .. '" gate_baseline_sha="' .. gate_baseline_sha .. '" reason="rollup-red" -->'
   return {
     repo = repo,

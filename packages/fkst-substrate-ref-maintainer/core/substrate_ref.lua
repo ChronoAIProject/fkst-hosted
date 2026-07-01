@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local S = {}
 local check_runs = require("forge.github.check_runs")
@@ -558,7 +559,7 @@ local function raise_merge_audit(repo, pr, target_sha, outcome, reason)
     kind = "pr",
     repo = repo,
     number = pr.number,
-  }, substrate_ref_merge_audit_body(pr, target_sha, outcome, reason), M._dedup_key({
+  }, substrate_ref_merge_audit_body(pr, target_sha, outcome, reason), base_ids.dedup_key({
     "substrate-ref-merge",
     M.safe_repo(repo),
     tostring(pr.number),

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_builders = require("devloop.payloads.builders")
@@ -20,12 +21,12 @@ function C.is_supported_decompose(M, payload)
     or (strings.is_path_safe_key(payload.review_proposal_id, M._max_key_len)
       and strings.is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
       and forge_validators.is_git_sha(payload.head_sha))
-  local forward_dedup = M._dedup_key({
+  local forward_dedup = base_ids.dedup_key({
     "decompose",
     tostring(payload.proposal_id),
     tostring(payload.version),
   })
-  local replay_dedup = M._dedup_key({
+  local replay_dedup = base_ids.dedup_key({
     "decompose",
     "replay",
     tostring(payload.proposal_id),
@@ -229,7 +230,7 @@ function C.build_decompose_replay_payload(M, fact, comments_or_feedback, source_
   })
   payload.expected_child_count = fact.count
   payload.completed_child_count = tonumber(completed_count) or 0
-  payload.dedup_key = M._dedup_key({
+  payload.dedup_key = base_ids.dedup_key({
     "decompose",
     "replay",
     tostring(fact.proposal_id),

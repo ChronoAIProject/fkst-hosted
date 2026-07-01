@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -29,7 +30,7 @@ local function marker_body_file(repo, pr_number)
 end
 
 local function parse_failure_key(decompose)
-  return core._dedup_key({
+  return base_ids.dedup_key({
     "github-devloop",
     "decompose-parse-failure",
     tostring(decompose.proposal_id),

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local S = {}
 local conflict_telemetry = require("devloop.conflict_telemetry")
 
@@ -64,7 +65,7 @@ function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
     title = hotspot_title(hotspot.file),
     body = hotspot_body(hotspot),
     labels = json.decode("[]"),
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "conflict-hotspot",
       tostring(repo or ""),
       key,

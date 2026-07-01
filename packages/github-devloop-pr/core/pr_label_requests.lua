@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local S = {}
 
@@ -70,7 +71,7 @@ function M.build_reconcile_pr_state_label_request(repo, issue_number, pr_number,
     proposal_id,
     state,
     version,
-    M._dedup_key({
+    base_ids.dedup_key({
       "reconcile",
       "pr-label",
       tostring(proposal_id),
@@ -111,7 +112,7 @@ function M.build_pr_reviewing_label_request(repo, issue_number, origin, pr_numbe
     origin.proposal_id,
     "reviewing",
     origin.impl_version,
-    M._dedup_key({
+    base_ids.dedup_key({
       "observe-pr",
       "pr-label",
       tostring(origin.proposal_id),

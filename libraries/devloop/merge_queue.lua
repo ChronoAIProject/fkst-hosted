@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
@@ -350,7 +351,7 @@ function C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry)
   if type(next_entry) ~= "table" then
     error("github-devloop: invalid merge queue next entry")
   end
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "merge-queue",
     "requeue",
     M.safe_repo(repo),
@@ -386,7 +387,7 @@ function C.merge_queue_starvation_tick_payload(M, repo, incident_identity, head_
   local bounded_attempt = strings.sanitize_key(attempt_key or "attempt", false)
   return {
     schema = "github-devloop.merge-queue-tick.v1",
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "merge-queue",
       "queue-starvation",
       M.safe_repo(repo),

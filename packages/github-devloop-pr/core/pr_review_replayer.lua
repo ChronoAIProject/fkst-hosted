@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local parsers_misc = require("devloop.parsers.misc")
@@ -104,7 +105,7 @@ local function add_issue_label_effect(issue, proposal_id, to_state, version, sou
   end
   table.insert(effects, {
     queue = "github-proxy.github_issue_label_request",
-    payload = requests_labels.build_state_label_request(M, issue.repo, issue.number, to_state, M._dedup_key(dedup_parts), source_ref),
+    payload = requests_labels.build_state_label_request(M, issue.repo, issue.number, to_state, base_ids.dedup_key(dedup_parts), source_ref),
   })
 end
 
@@ -378,7 +379,7 @@ local function replay_review_meta_result(dept, issue, state, row, facts, tools)
     M.log_cas_decision(dept, proposal_id, state, "review-meta", "fixing", "applied(replay)", "trusted review-meta fix decision fact is visible")
     return tools.raise_effects(dept, proposal_id, "fixing", fact.version, { add = { "fkst-dev:fixing" }, remove = { "fkst-dev:review-meta" } }, effects)
   end
-  local label_key = M._dedup_key({
+  local label_key = base_ids.dedup_key({
     "review-meta",
     "label",
     "blocked",
@@ -605,7 +606,7 @@ mark_child_closed_unmerged = function(dept, issue, state, proposal_id, link, too
   }, "github-devloop marked delegated PR child closed without merge"
     .. "\n\nReason: " .. tostring(reason or "closed without merge")
     .. "\n\n" .. M.state_marker(proposal_id, "closed-unmerged", version)
-    .. "\n" .. "⟦AI:FKST⟧", M._dedup_key({
+    .. "\n" .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "child-pr",
     "closed-unmerged",
     tostring(proposal_id),
@@ -639,7 +640,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
     kind = "issue",
     repo = issue.repo,
     number = issue.number,
-  }, merged_body, M._dedup_key({
+  }, merged_body, base_ids.dedup_key({
     "orphaned-pr",
     "merged",
     tostring(proposal_id),
@@ -651,7 +652,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
     issue.repo,
     issue.number,
     "merged",
-    M._dedup_key({
+    base_ids.dedup_key({
       "orphaned-pr",
       "label",
       "merged",

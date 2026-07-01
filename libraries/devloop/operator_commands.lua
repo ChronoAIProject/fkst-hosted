@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local strings = require("contract.strings")
@@ -7,14 +8,14 @@ local ai_sentinel = "⟦AI:FKST⟧"
 
 local function command_key(M, comment, fallback_index)
   if type(comment) == "table" and comment.id ~= nil and tostring(comment.id) ~= "" then
-    return M._dedup_key({
+    return base_ids.dedup_key({
       "operator-command",
       tostring(comment.id),
     })
   end
   local created = parsers_misc._comment_created_at(M, comment) or "unknown-time"
   local author = parsers_misc._comment_author_login(M, comment) or "unknown-author"
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "operator-command",
     tostring(author),
     tostring(created),
@@ -160,7 +161,7 @@ function C.build_operator_issue_rereview_comment_request(M, repo, issue_number, 
     number = issue_number,
   }, "github-devloop operator command accepted: rereview"
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -177,7 +178,7 @@ function C.build_operator_issue_reready_comment_request(M, repo, issue_number, c
     number = issue_number,
   }, "github-devloop operator command accepted: reready"
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -195,7 +196,7 @@ function C.build_operator_issue_reimplement_comment_request(M, repo, issue_numbe
   }, "github-devloop operator command accepted: reimplement"
     .. "\n\nRetry attempt: " .. tostring(attempt)
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -215,7 +216,7 @@ function C.build_operator_issue_dependency_waiver_comment_request(M, repo, issue
   }, "github-devloop operator command accepted: dependency-waiver"
     .. "\n\n" .. waiver_marker
     .. "\n" .. command_marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -234,7 +235,7 @@ function C.build_operator_issue_reintake_comment_request(M, repo, issue_number, 
     number = issue_number,
   }, "github-devloop operator command accepted: reintake"
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -252,7 +253,7 @@ function C.build_operator_command_refusal_request(M, repo, pr_number, command, r
     number = pr_number,
   }, "github-devloop operator command refused: " .. safe_reason
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),
@@ -270,7 +271,7 @@ function C.build_operator_issue_command_refusal_request(M, repo, issue_number, c
     number = issue_number,
   }, "github-devloop operator command refused: " .. safe_reason
     .. "\n\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "operator-command",
     "comment",
     tostring(command.key),

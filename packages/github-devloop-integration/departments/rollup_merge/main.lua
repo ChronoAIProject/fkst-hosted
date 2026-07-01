@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local saga = require("workflow.saga")
@@ -36,7 +37,7 @@ local function rollup_liveness_tick_payload(payload)
     repo = payload.repo,
     reason = "rollup-merged",
     source_ref = payload.source_ref,
-    dedup_key = core._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "rollup",
       "liveness-tick",
       tostring(payload.repo),

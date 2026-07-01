@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local t = h.t
@@ -204,7 +205,7 @@ local function assert_common_issue_request(payload, schema, dedup_key)
 end
 
 local function assert_decision_comment(payload, action, class, expected_key, reason_fragment)
-  assert_common_issue_request(payload, "github-proxy.v1", core._dedup_key({
+  assert_common_issue_request(payload, "github-proxy.v1", base_ids.dedup_key({
     "intake",
     "comment",
     "github-devloop/issue/owner/repo/42",
@@ -233,7 +234,7 @@ end
 
 local function assert_enable_successor(raises, offset, payload, expected_key, service_class)
   local enabled_label = raises[offset].payload
-  assert_common_issue_request(enabled_label, "github-proxy.label.v1", core._dedup_key({
+  assert_common_issue_request(enabled_label, "github-proxy.label.v1", base_ids.dedup_key({
     "intake",
     "label",
     payload.proposal_id,
@@ -305,7 +306,7 @@ return {
       "github-proxy.github_issue_label_request",
     })
     assert_decision_comment(result.raises[1].payload, "decline", "standard", expected_key, "Requires production credentials")
-    assert_class_label(result.raises[2].payload, core._dedup_key({
+    assert_class_label(result.raises[2].payload, base_ids.dedup_key({
       "intake",
       "class-label",
       payload.proposal_id,
@@ -329,7 +330,7 @@ return {
     })
     assert_decision_comment(result.raises[1].payload, "track", "background", expected_key, "Acknowledged as a tracking umbrella")
     local label = result.raises[2].payload
-    assert_common_issue_request(label, "github-proxy.label.v1", core._dedup_key({
+    assert_common_issue_request(label, "github-proxy.label.v1", base_ids.dedup_key({
       "intake",
       "label",
       "tracking",
@@ -375,7 +376,7 @@ return {
     })
     assert_decision_comment(result.raises[1].payload, "escalate-to-class", "standard", expected_key, "Rule of Three")
     local followup = result.raises[2].payload
-    assert_common_issue_request(followup, "github-proxy.v1", core._dedup_key({
+    assert_common_issue_request(followup, "github-proxy.v1", base_ids.dedup_key({
       "intake-class",
       "followup",
       payload.proposal_id,
@@ -385,7 +386,7 @@ return {
     }))
     t.is_true(followup.body:find('carrier="pending-create"', 1, true) ~= nil)
     local folded = result.raises[3].payload
-    assert_common_issue_request(folded, "github-proxy.label.v1", core._dedup_key({
+    assert_common_issue_request(folded, "github-proxy.label.v1", base_ids.dedup_key({
       "intake-class",
       "label",
       "folded",
@@ -399,13 +400,13 @@ return {
     local create = result.raises[4].payload
     t.eq(create.schema, "github-proxy.issue-create.v1")
     t.eq(create.repo, "owner/repo")
-    t.eq(create.dedup_key, core._dedup_key({ "intake-class", class_key }))
+    t.eq(create.dedup_key, base_ids.dedup_key({ "intake-class", class_key }))
     t.eq(#create.labels, 0)
     t.eq(create.parent_comment_target.repo, "owner/repo")
     t.eq(create.parent_comment_target.issue_number, "42")
     t.is_true(create.body:find(core.intake_class_carrier_marker(class_key), 1, true) ~= nil)
     assert_source_ref(create)
-    assert_class_label(result.raises[5].payload, core._dedup_key({
+    assert_class_label(result.raises[5].payload, base_ids.dedup_key({
       "intake",
       "class-label",
       payload.proposal_id,
@@ -433,7 +434,7 @@ return {
     t.eq(result.exit_code, 0)
     assert_queues(result.raises, { "github-proxy.github_issue_comment_request" })
     local request = result.raises[1].payload
-    assert_common_issue_request(request, "github-proxy.v1", core._dedup_key({
+    assert_common_issue_request(request, "github-proxy.v1", base_ids.dedup_key({
       "operator-command",
       "comment",
       command_fact.key,

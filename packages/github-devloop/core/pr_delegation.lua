@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
@@ -109,7 +110,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     kind = "pr",
     repo = repo,
     number = pr_number,
-  }, body, M._dedup_key({
+  }, body, base_ids.dedup_key({
     "pr-delegation",
     "pr-open",
     tostring(issue_proposal_id),
@@ -124,7 +125,7 @@ local function build_issue_delegation_comment_request(repo, issue_number, issue_
     repo = repo,
     number = issue_number,
   }, "github-devloop delegated implementation to PR #" .. tostring(pr_number)
-    .. "\n\n" .. marker, M._dedup_key({
+    .. "\n\n" .. marker, base_ids.dedup_key({
     "pr-delegation",
     "issue",
     tostring(issue_proposal_id),
@@ -148,7 +149,7 @@ local function build_parent_awaiting_comment(repo, issue_number, ready, child)
     kind = "issue",
     repo = repo,
     number = issue_number,
-  }, body, M._dedup_key({
+  }, body, base_ids.dedup_key({
     "awaiting-pr",
     tostring(ready.proposal_id),
     tostring(ready.dedup_key),
@@ -158,7 +159,7 @@ local function build_parent_awaiting_comment(repo, issue_number, ready, child)
 end
 
 local function build_parent_awaiting_label(repo, issue_number, ready, child)
-  return requests_labels.build_state_label_request(M, repo, issue_number, "awaiting-pr", M._dedup_key({
+  return requests_labels.build_state_label_request(M, repo, issue_number, "awaiting-pr", base_ids.dedup_key({
     "awaiting-pr",
     "label",
     tostring(ready.proposal_id),

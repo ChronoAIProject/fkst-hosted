@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local m_facts = require("devloop.markers.facts")
@@ -41,7 +42,7 @@ local function bounded_commit_subject(M, prefix, issue_number, current)
 end
 
 function C.build_devloop_ready_payload(M, source)
-  local ready_version = M._dedup_key({
+  local ready_version = base_ids.dedup_key({
     "ready",
     tostring(source.dedup_key),
   })
@@ -88,7 +89,7 @@ function C.build_devloop_reviewing_payload(M, origin, pr_number, source_ref, ver
     proposal_id = origin.proposal_id,
     pr_number = pr_number,
     version = review_version,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "reviewing",
       tostring(origin.proposal_id),
       tostring(review_version),
@@ -134,7 +135,7 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
     review_proposal_id = review_fact.review_proposal_id,
     review_dedup_key = review_fact.review_dedup_key,
     reviewed_head_sha = review_fact.reviewed_head_sha,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "fixing",
       tostring(origin.proposal_id),
       tostring(version),
@@ -190,7 +191,7 @@ function C.build_replayed_fixing_payload(M, origin, pr_number, feedback, source_
     predecessor_set = feedback.predecessor_set,
     gate_failure_excerpt = feedback.review_reason,
   }, source_ref)
-  payload.dedup_key = M._dedup_key({
+  payload.dedup_key = base_ids.dedup_key({
     "fixing",
     "replay",
     tostring(origin.proposal_id),
@@ -213,7 +214,7 @@ function C.build_devloop_review_meta_payload(M, unresolved, issue_proposal_id, i
     version = issue_version,
     pr_number = pr_number,
     n = n,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "review-meta",
       tostring(issue_proposal_id),
       tostring(issue_version),
@@ -226,7 +227,7 @@ function C.build_devloop_review_meta_payload(M, unresolved, issue_proposal_id, i
 end
 
 function C.fix_reflection_dedup_key(M, issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "fix-reflection",
     tostring(issue_proposal_id),
     tostring(issue_version),
@@ -262,7 +263,7 @@ function C.build_devloop_merge_ready_payload(M, issue_proposal_id, pr_number, ve
     review_proposal_id = review_fact and review_fact.review_proposal_id,
     review_dedup_key = review_fact and review_fact.review_dedup_key,
     reviewed_head_sha = review_fact and review_fact.reviewed_head_sha,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "merge-ready",
       tostring(issue_proposal_id),
       tostring(version),
@@ -284,7 +285,7 @@ function C.build_devloop_decompose_payload(M, fix_reconcile)
     review_dedup_key = fix_reconcile.review_dedup_key,
     head_sha = fix_reconcile.head_sha,
     round = fix_reconcile.round,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       "decompose",
       tostring(fix_reconcile.proposal_id),
       tostring(fix_reconcile.issue_version),
@@ -430,7 +431,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
     title = M.neutralize_untrusted_prompt_text(title),
     body = body,
     content_fetch = content_fetch,
-    dedup_key = M._dedup_key({
+    dedup_key = base_ids.dedup_key({
       review_id,
       "review",
     }),

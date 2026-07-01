@@ -1,16 +1,17 @@
+local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local C = {}
 
 function C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
   if tostring(role or "") == "implement" then
-    return M._dedup_key({
+    return base_ids.dedup_key({
       "implement-exec",
       tostring(proposal_id or ""),
       tostring(dedup_key or ""),
       "implement",
     })
   end
-  return M._dedup_key({
+  return base_ids.dedup_key({
     "dispatch-live-run",
     tostring(role or ""),
     tostring(proposal_id or ""),

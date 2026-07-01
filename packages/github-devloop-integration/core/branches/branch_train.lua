@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local BranchTrain = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
@@ -44,7 +45,7 @@ function BranchTrain.install(M, shared)
   end
 
   function M.rollup_dedup_key(repo, upstream, integration, pr_number, head_sha)
-    return M._dedup_key({
+    return base_ids.dedup_key({
       "rollup",
       require_safe_repo(repo),
       require_safe_branch("upstream branch", upstream),
@@ -127,7 +128,7 @@ function BranchTrain.install(M, shared)
   end
 
   function M.branch_sync_dedup_key(repo, upstream, integration, upstream_sha)
-    return M._dedup_key({
+    return base_ids.dedup_key({
       "branch-sync",
       require_safe_repo(repo),
       require_safe_branch("upstream branch", upstream),

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local strings = require("contract.strings")
@@ -53,7 +54,7 @@ function C.build_merge_gate_wait_comment_request(M, repo, merge_ready, reason, k
     repo = repo,
     number = merge_ready.pr_number,
   }, "github-devloop merge gate wait: " .. safe_reason
-    .. "\n\n" .. marker, M._dedup_key({
+    .. "\n\n" .. marker, base_ids.dedup_key({
     "merge",
     "wait",
     tostring(merge_ready.proposal_id),

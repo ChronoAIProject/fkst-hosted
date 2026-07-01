@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local shared = require("devloop.convergence.shared")
 local C = {}
@@ -63,7 +64,7 @@ function C.build_timeout_attempt_comment_request(M, target, proposal_id, state, 
     .. "\n"
     .. latest_marker
     .. "\n"
-    .. "⟦AI:FKST⟧", M._dedup_key({
+    .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "timeout-attempt",
     tostring(proposal_id),
     tostring(transition_version.strip_suffixes(state.version)),
@@ -87,7 +88,7 @@ function C.build_timeout_attempt_v2_comment_request(M, target, proposal_id, stat
     .. "\n"
     .. latest_marker
     .. "\n"
-    .. "⟦AI:FKST⟧", M._dedup_key({
+    .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "timeout-attempt:v2",
     tostring(proposal_id),
     tostring(row.from_state),
@@ -126,7 +127,7 @@ function C.build_decompose_exhausted_comment_request(M, target, proposal_id, sta
     .. "attempt=" .. tostring(attempt) .. "\n\n"
     .. marker
     .. "\n"
-    .. "⟦AI:FKST⟧", M._dedup_key({
+    .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "decompose-exhausted",
     tostring(proposal_id),
     tostring(transition_version.strip_suffixes(state.version)),

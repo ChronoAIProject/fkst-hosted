@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local conv_reconcile = require("devloop.convergence.reconcile")
@@ -62,7 +63,7 @@ function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
     repo,
     issue_number,
     "review-meta",
-    M._dedup_key({
+    base_ids.dedup_key({
       "fix",
       "label",
       "review-meta",
@@ -91,7 +92,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
   }, comment_strings.comment_string(M, "fix_escalated_to_review_meta_prefix") .. safe_reason
     .. "\n\n" .. text
     .. "\n\n" .. state_marker
-    .. "\n" .. m_builders.review_meta_marker(M, fix.proposal_id, fix.review_dedup_key), M._dedup_key({
+    .. "\n" .. m_builders.review_meta_marker(M, fix.proposal_id, fix.review_dedup_key), base_ids.dedup_key({
     "fix",
     "comment",
     "review-meta",
@@ -106,7 +107,7 @@ function M.build_review_meta_label_request(repo, issue_number, review_meta, acti
     repo,
     issue_number,
     review_meta_to_state(normalized),
-    M._dedup_key({
+    base_ids.dedup_key({
       "review-meta",
       "label",
       tostring(action),
@@ -131,7 +132,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
   }, prefix .. review_meta_action_text(review_meta, normalized == "spec-amendment" and action or normalized)
     .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
-    .. "\n" .. marker, M._dedup_key({
+    .. "\n" .. marker, base_ids.dedup_key({
     review_meta.mode == "fix-reflection" and "fix-reflection" or "review-meta",
     "comment",
     tostring(review_meta.dedup_key),
@@ -154,7 +155,7 @@ function M.build_review_reconcile_label_request(repo, issue_number, review_recon
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "review-reconcile",
       "label",
       tostring(review_reconcile.dedup_key),
@@ -168,7 +169,7 @@ function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "fix-reconcile",
       "label",
       tostring(fix_reconcile.dedup_key),
@@ -191,7 +192,7 @@ function M.build_fix_reconcile_comment_request(repo, _issue_number, fix_reconcil
     .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "fix-reconcile",
     "comment",
     tostring(fix_reconcile.dedup_key),
@@ -212,7 +213,7 @@ function M.build_review_reconcile_comment_request(repo, _issue_number, review_re
     .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
     .. "\n\n"
     .. state_marker .. "\n" .. marker
-    .. "\n" .. ai_sentinel, M._dedup_key({
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
     "review-reconcile",
     "comment",
     tostring(review_reconcile.dedup_key),

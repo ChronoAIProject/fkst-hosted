@@ -385,7 +385,7 @@ function C.proposal_dedup_key(M, proposal_id, updated_at)
 end
 
 function C.intake_dedup_key(M, proposal_id, updated_at)
-  return M._dedup_key({
+  return dedup_key({
     "intake",
     tostring(proposal_id),
     C.safe_updated_at(M, updated_at or "unknown"),
@@ -393,7 +393,7 @@ function C.intake_dedup_key(M, proposal_id, updated_at)
 end
 
 function C.intake_candidate_delivery_dedup_key(M, proposal_id, effect_id, delivery_version)
-  return M._dedup_key({
+  return dedup_key({
     "intake-candidate",
     tostring(proposal_id),
     tostring(effect_id),
@@ -416,7 +416,7 @@ function C.intake_decision_dedup_key(M, proposal_id, current, reintake_command)
   if reintake_command ~= nil then
     reintake_created_at = tostring(reintake_command.created_at or "unknown")
   end
-  return M._dedup_key({
+  return dedup_key({
     tostring(proposal_id),
     "intake",
     decimal_checksum(table.concat({
@@ -428,7 +428,7 @@ function C.intake_decision_dedup_key(M, proposal_id, current, reintake_command)
 end
 
 function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
-  return M._dedup_key({
+  return dedup_key({
     "github-devloop",
     "ci-selfheal",
     C.safe_repo(M, repo),
@@ -439,7 +439,7 @@ function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
 end
 
 function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
-  return M._dedup_key({
+  return dedup_key({
     "github-devloop",
     "ci-missing-status-observed",
     C.safe_repo(M, repo),
@@ -761,6 +761,5 @@ C._is_review_meta_action = is_review_meta_action
 C.fix_reflection_checkpoint_round = fix_reflection_checkpoint_round
 C._is_path_safe_key = is_path_safe_key
 C._is_positive_pr_number = forge_validators.is_positive_pr_number
-C._dedup_key = dedup_key
 
 return C

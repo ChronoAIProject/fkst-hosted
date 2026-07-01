@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local h = require("tests.devloop_helpers")
 local fixtures = require("tests.production_fixture_helpers")
@@ -194,7 +195,7 @@ return {
       review_proposal_id = review_proposal_id,
       review_dedup_key = "consensus:" .. review_proposal_id .. "/review/loop/3/review-meta",
       version = version,
-      dedup_key = core._dedup_key({
+      dedup_key = base_ids.dedup_key({
         "review-meta",
         "github-devloop/issue/owner/repo/42",
         version,

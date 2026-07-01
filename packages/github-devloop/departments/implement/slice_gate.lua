@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local core = require("core")
 
@@ -63,7 +64,7 @@ local function duplicate_comment(repo, issue_number, ready, entry_key, canonical
     kind = "issue",
     repo = repo,
     number = issue_number,
-  }, body, core._dedup_key({
+  }, body, base_ids.dedup_key({
     "implement",
     "duplicate-slice",
     tostring(entry_key),
@@ -78,7 +79,7 @@ local function duplicate_label(repo, issue_number, ready, entry_key, canonical_n
     issue_number,
     { "fkst:duplicate-slice" },
     {},
-    core._dedup_key({
+    base_ids.dedup_key({
       "implement",
       "duplicate-slice",
       "label",

@@ -1,3 +1,4 @@
+local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local C = {}
 
@@ -62,7 +63,7 @@ function C.build_intake_enabled_label_request(M, repo, issue_number, candidate)
     issue_number,
     add_labels,
     remove_labels,
-    M._dedup_key({
+    base_ids.dedup_key({
       "intake",
       "label",
       tostring(candidate.proposal_id),
@@ -80,7 +81,7 @@ function C.build_intake_tracking_label_request(M, repo, issue_number, candidate)
     issue_number,
     add_labels,
     remove_labels,
-    M._dedup_key({
+    base_ids.dedup_key({
       "intake",
       "label",
       "tracking",
@@ -96,7 +97,7 @@ function C.build_implementing_label_request(M, repo, issue_number, ready)
     repo,
     issue_number,
     "implementing",
-    M._dedup_key({
+    base_ids.dedup_key({
       "implement",
       "label",
       "implementing",
@@ -111,7 +112,7 @@ function C.build_impl_failed_label_request(M, repo, issue_number, ready, reason)
     repo,
     issue_number,
     "impl-failed",
-    M._dedup_key({
+    base_ids.dedup_key({
       "implement",
       "label",
       "impl-failed",
@@ -127,7 +128,7 @@ function C.build_reviewing_label_request(M, repo, issue_number, origin, pr_numbe
     repo,
     issue_number,
     "reviewing",
-    M._dedup_key({
+    base_ids.dedup_key({
       "observe-pr",
       "label",
       tostring(origin.proposal_id),
@@ -143,7 +144,7 @@ function C.build_pr_base_unmanaged_label_request(M, repo, issue_number, origin, 
     repo,
     issue_number,
     "blocked",
-    M._dedup_key({
+    base_ids.dedup_key({
       "observe-pr",
       "label",
       "pr-base-unmanaged",
@@ -165,7 +166,7 @@ function C.build_review_result_label_request(M, repo, issue_number, issue_propos
     repo,
     issue_number,
     to_state,
-    M._dedup_key({
+    base_ids.dedup_key({
       "review-result",
       "label",
       tostring(issue_proposal_id),
@@ -181,7 +182,7 @@ function C.build_fix_reviewing_label_request(M, repo, issue_number, fix, new_hea
     repo,
     issue_number,
     "reviewing",
-    M._dedup_key({
+    base_ids.dedup_key({
       "fix",
       "label",
       tostring(fix.proposal_id),
@@ -197,7 +198,7 @@ function C.build_merge_head_reviewing_label_request(M, repo, issue_number, merge
     repo,
     issue_number,
     "reviewing",
-    M._dedup_key({
+    base_ids.dedup_key({
       "merge",
       "label",
       "reviewing",
