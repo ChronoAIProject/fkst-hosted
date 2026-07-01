@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local Shared = {}
@@ -74,7 +75,7 @@ function Shared.install(M)
     return result
   end
 
-  function M.repo_ref_store_lock_key(repo)
+  function git_mechanics.repo_ref_store_lock_key(repo)
     local key = "github-devloop/git/"
       .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/fetch"
@@ -84,8 +85,8 @@ function Shared.install(M)
     return key
   end
 
-  function M.with_repo_ref_store_lock(repo, fn)
-    return with_lock(M.repo_ref_store_lock_key(repo), fn)
+  function git_mechanics.with_repo_ref_store_lock(repo, fn)
+    return with_lock(git_mechanics.repo_ref_store_lock_key(repo), fn)
   end
 
   helpers.require_safe_branch = require_safe_branch

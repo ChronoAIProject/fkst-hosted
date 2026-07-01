@@ -1,3 +1,4 @@
+local git_mechanics = require("devloop.git_mechanics")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
@@ -104,7 +105,7 @@ return {
       "github-devloop/branch-sync/owner/repo/dev/integration/dev"
     )
     t.eq(
-      core.repo_ref_store_lock_key("owner/repo"),
+      git_mechanics.repo_ref_store_lock_key("owner/repo"),
       "github-devloop/git/owner/repo/fetch"
     )
     t.eq(
@@ -139,7 +140,7 @@ return {
       core.branch_sync_lock_key("../repo", "dev", "integration/dev")
     end)
     t.raises(function()
-      core.repo_ref_store_lock_key("../repo")
+      git_mechanics.repo_ref_store_lock_key("../repo")
     end)
     t.raises(function()
       core.branch_sync_source_ref("owner/repo", "../dev", "integration/dev")

@@ -18,7 +18,7 @@ local forge_validators = require("devloop.forge_validators")
     return tostring(sha)
   end
 
-  local function require_safe_repo(M, repo)
+  local function require_safe_repo(repo)
     local value = tostring(repo or "")
     if value == "" or base_ids.safe_repo(value) ~= value then
       error("github-devloop: invalid branch sync repo")
@@ -61,18 +61,18 @@ local forge_validators = require("devloop.forge_validators")
     return result
   end
 
-  function C.repo_ref_store_lock_key(M, repo)
+  function C.repo_ref_store_lock_key(repo)
     local key = "github-devloop/git/"
-      .. base_ids.safe_repo(require_safe_repo(M, repo))
+      .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/fetch"
-    if not strings.is_path_safe_key(key, M._max_key_len) then
+    if not strings.is_path_safe_key(key, require("devloop.base")._max_key_len) then
       error("github-devloop: invalid git ref-store lock key")
     end
     return key
   end
 
-  function C.with_repo_ref_store_lock(M, repo, fn)
-    return with_lock(M.repo_ref_store_lock_key(repo), fn)
+  function C.with_repo_ref_store_lock(repo, fn)
+    return with_lock(C.repo_ref_store_lock_key(repo), fn)
   end
 
   local function trim_stdout(result)
@@ -91,7 +91,7 @@ local forge_validators = require("devloop.forge_validators")
   end
 
   function C.fetch_branches(M, repo, branches, error_class)
-    M.with_repo_ref_store_lock(repo, function()
+    C.with_repo_ref_store_lock(repo, function()
       for _, branch in ipairs(branches) do
         M.fetch_branch(branch, error_class)
       end
@@ -242,7 +242,7 @@ function C.helpers(M)
   return {
     require_safe_branch = require_safe_branch,
     require_safe_sha = require_safe_sha,
-    require_safe_repo = function(repo) return require_safe_repo(M, repo) end,
+    require_safe_repo = require_safe_repo,
     require_sync_result = require_sync_result,
     runtime_root_path = function(runtime_root) return runtime_root_path(M, runtime_root) end,
   }
