@@ -411,6 +411,7 @@ mod tests {
             llm_base_url: "https://llm.example/p".to_string(),
             llm_model: "gpt-5-codex".to_string(),
             llm_wire_api: "chat".to_string(),
+            dns_nameservers: vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()],
         }
     }
 

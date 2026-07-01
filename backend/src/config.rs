@@ -13,6 +13,7 @@
 use secrecy::SecretString;
 use serde::Deserialize;
 
+use crate::env_config::EnvConfig;
 use crate::error::AppError;
 
 /// Prefix shared by every HTTP/server configuration environment variable.
@@ -110,6 +111,18 @@ mod defaults {
         // failed. 1 hour — generous for a realistic engine run.
         3600
     }
+
+    pub(super) fn pod_dns_nameservers() -> Vec<String> {
+        // The isolated session/validation pod's external-only DNS. Public
+        // resolvers so the pod can reach GitHub/LLM without cluster DNS.
+        vec!["1.1.1.1".to_string(), "8.8.8.8".to_string()]
+    }
+
+    pub(super) fn pod_dns_nameservers_raw() -> String {
+        // Parsed as a single comma-separated String to sidestep envy's Vec
+        // handling; split into `dns_nameservers` in `from_vars`.
+        "1.1.1.1,8.8.8.8".to_string()
+    }
 }
 
 /// `FKST_HOSTED_*`-prefixed variables (HTTP/server settings).
@@ -162,6 +175,10 @@ struct PodVars {
     run_ttl_secs: i32,
     #[serde(default = "defaults::pod_active_deadline_secs")]
     active_deadline_secs: i64,
+    /// Comma-separated external DNS resolvers for the isolated pod. Parsed as a
+    /// String (not a Vec) to avoid envy's Vec quirks; split in `from_vars`.
+    #[serde(default = "defaults::pod_dns_nameservers_raw")]
+    dns_nameservers: String,
 }
 
 /// `FKST_LLM_*`-prefixed variables (static LLM-provider config). The session
@@ -213,6 +230,11 @@ pub struct PodConfig {
     /// codex `wire_api` injected into the session pod as `FKST_LLM_WIRE_API`.
     /// Env: `FKST_LLM_WIRE_API`. Default `chat`.
     pub llm_wire_api: String,
+    /// External DNS resolvers for the isolated session/validation pod's
+    /// `dnsConfig.nameservers`. Env: `FKST_POD_DNS_NAMESERVERS`, comma-separated.
+    /// Default `["1.1.1.1", "8.8.8.8"]`; a session with no DNS cannot resolve
+    /// GitHub/LLM, so a blank list is rejected.
+    pub dns_nameservers: Vec<String>,
 }
 
 impl Default for PodConfig {
@@ -227,6 +249,7 @@ impl Default for PodConfig {
             llm_base_url: defaults::llm_base_url(),
             llm_model: defaults::llm_model(),
             llm_wire_api: defaults::llm_wire_api(),
+            dns_nameservers: defaults::pod_dns_nameservers(),
         }
     }
 }
@@ -266,6 +289,9 @@ pub struct Config {
     /// Pod-per-session dispatch settings (milestone #9). `dispatch=false` by
     /// default: the control plane is Kubernetes-free until an operator opts in.
     pub pod: PodConfig,
+    /// Named-environment / install-validation knobs (`FKST_ENV_*`, issue #338
+    /// §6.1). Config surface only — no behaviour reads these yet.
+    pub env: EnvConfig,
 }
 
 impl Default for Config {
@@ -281,6 +307,7 @@ impl Default for Config {
             vault_entries_per_scope_cap: defaults::vault_entries_per_scope_cap(),
             llm_api_key: SecretString::from(String::new()),
             pod: PodConfig::default(),
+            env: EnvConfig::default(),
         }
     }
 }
@@ -400,6 +427,20 @@ impl Config {
                 ));
             }
         }
+        // Split the comma-separated DNS list, trimming and dropping empties. An
+        // empty result means the operator blanked the var: the isolated pod
+        // would have no resolver and could not reach GitHub/LLM, so fail closed.
+        let dns_nameservers: Vec<String> = pod
+            .dns_nameservers
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if dns_nameservers.is_empty() {
+            return Err(AppError::Config(
+                "FKST_POD_DNS_NAMESERVERS must list at least one resolver".to_string(),
+            ));
+        }
         let pod = PodConfig {
             dispatch: pod.dispatch,
             namespace: pod.namespace,
@@ -410,7 +451,12 @@ impl Config {
             llm_base_url: llm.base_url,
             llm_model: llm.model,
             llm_wire_api: llm.wire_api,
+            dns_nameservers,
         };
+
+        // Named-environment / install-validation knobs (FKST_ENV_*). Shares the
+        // same `vars` snapshot; fails closed on its own zero bounds internally.
+        let env = EnvConfig::from_vars(&vars)?;
 
         Ok(Config {
             port: http.port,
@@ -423,6 +469,7 @@ impl Config {
             webhook_trigger_label: webhook.webhook_trigger_label,
             github_api_base_url: webhook.github_api_base_url.trim().to_string(),
             pod,
+            env,
         })
     }
 
@@ -531,6 +578,29 @@ mod tests {
         ]))
         .expect_err("blank image must fail closed");
         assert!(err.to_string().contains("FKST_POD_IMAGE"));
+    }
+
+    // ---- pod DNS nameserver tests ---------------------------------------------
+
+    #[test]
+    fn pod_dns_nameservers_default() {
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(config.pod.dns_nameservers, vec!["1.1.1.1", "8.8.8.8"]);
+    }
+
+    #[test]
+    fn pod_dns_nameservers_override_is_split_and_trimmed() {
+        let config = Config::from_vars(vars(&[("FKST_POD_DNS_NAMESERVERS", "9.9.9.9, 1.0.0.1")]))
+            .expect("override");
+        assert_eq!(config.pod.dns_nameservers, vec!["9.9.9.9", "1.0.0.1"]);
+    }
+
+    #[test]
+    fn blank_pod_dns_nameservers_is_a_config_error_naming_the_var() {
+        let err = Config::from_vars(vars(&[("FKST_POD_DNS_NAMESERVERS", "   ")]))
+            .expect_err("blank nameservers must fail");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_POD_DNS_NAMESERVERS"));
     }
 
     #[test]
@@ -655,6 +725,23 @@ mod tests {
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
         }
+    }
+
+    // ---- named-environment (FKST_ENV_*) wiring tests ---------------------------
+
+    #[test]
+    fn env_config_defaults_are_wired_into_config() {
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(config.env.max_per_user, 20);
+        assert_eq!(config.env.validate_max_concurrent, 4);
+    }
+
+    #[test]
+    fn env_config_zero_bound_surfaces_through_config_from_vars() {
+        let err = Config::from_vars(vars(&[("FKST_ENV_MAX_PER_USER", "0")]))
+            .expect_err("zero env bound must fail closed through Config");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_ENV_MAX_PER_USER"));
     }
 
     // ---- static LLM provider configuration tests -------------------------------
