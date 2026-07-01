@@ -78,11 +78,8 @@ async fn paths_are_the_trimmed_v1_surface() {
 
     // Present: the v1 surface.
     for expected in [
-        // The per-user environment + secret store (PR4a).
+        // The per-user environment + secret store — ONE endpoint (GET + PATCH).
         "/api/v1/users/me/env",
-        "/api/v1/users/me/secrets",
-        "/api/v1/users/me/env/{key}",
-        "/api/v1/users/me/secrets/{key}",
         "/health",
         "/api/v1/health",
         "/metrics",
@@ -99,6 +96,10 @@ async fn paths_are_the_trimmed_v1_surface() {
     for gone in [
         "/api/v1/sessions/{owner}/{repo}/{issue}",
         "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
+        // The per-user store collapsed to one endpoint — these split paths went.
+        "/api/v1/users/me/secrets",
+        "/api/v1/users/me/env/{key}",
+        "/api/v1/users/me/secrets/{key}",
         "/api/v1/goals",
         "/api/v1/goals/{id}",
         "/api/v1/goals/submit",
@@ -120,11 +121,8 @@ async fn components_include_the_user_store_schemas_and_not_the_removed_ones() {
     let schemas = &spec["components"]["schemas"];
     for expected in [
         "ErrorEnvelope",
-        // PR4a user-store DTOs.
-        "PutEnvRequest",
-        "EnvVariablesResponse",
-        "PutSecretsRequest",
-        "SecretKeysResponse",
+        // The per-user store DTOs: one request body + one view.
+        "EnvPatchRequest",
         "UserEnvView",
     ] {
         assert!(
@@ -137,6 +135,11 @@ async fn components_include_the_user_store_schemas_and_not_the_removed_ones() {
         // The REST session DTOs went with the endpoints.
         "SessionView",
         "StopResponse",
+        // The split user-store DTOs collapsed into EnvPatchRequest/UserEnvView.
+        "PutEnvRequest",
+        "EnvVariablesResponse",
+        "PutSecretsRequest",
+        "SecretKeysResponse",
         "GoalView",
         "CatalogResponse",
         "AdminStateView",
@@ -158,10 +161,7 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
     // no `security` and no `NyxIdIdentity`.
     for (route, verb) in [
         ("/api/v1/users/me/env", "get"),
-        ("/api/v1/users/me/env", "put"),
-        ("/api/v1/users/me/secrets", "put"),
-        ("/api/v1/users/me/env/{key}", "delete"),
-        ("/api/v1/users/me/secrets/{key}", "delete"),
+        ("/api/v1/users/me/env", "patch"),
     ] {
         assert!(
             paths[route][verb].get("security").is_none(),
