@@ -78,8 +78,6 @@ async fn paths_are_the_trimmed_v1_surface() {
 
     // Present: the v1 surface.
     for expected in [
-        "/api/v1/sessions/{owner}/{repo}/{issue}",
-        "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
         // The per-user environment + secret store (PR4a).
         "/api/v1/users/me/env",
         "/api/v1/users/me/secrets",
@@ -96,8 +94,11 @@ async fn paths_are_the_trimmed_v1_surface() {
         );
     }
 
-    // Absent: the removed legacy API.
+    // Absent: the removed legacy API + the removed REST session query/stop
+    // (a session is controlled solely through its GitHub issue).
     for gone in [
+        "/api/v1/sessions/{owner}/{repo}/{issue}",
+        "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
         "/api/v1/goals",
         "/api/v1/goals/{id}",
         "/api/v1/goals/submit",
@@ -114,12 +115,10 @@ async fn paths_are_the_trimmed_v1_surface() {
 }
 
 #[tokio::test]
-async fn components_include_the_session_schemas_and_not_the_removed_ones() {
+async fn components_include_the_user_store_schemas_and_not_the_removed_ones() {
     let spec = fetch_spec(app(false)).await;
     let schemas = &spec["components"]["schemas"];
     for expected in [
-        "SessionView",
-        "StopResponse",
         "ErrorEnvelope",
         // PR4a user-store DTOs.
         "PutEnvRequest",
@@ -135,6 +134,9 @@ async fn components_include_the_session_schemas_and_not_the_removed_ones() {
         );
     }
     for gone in [
+        // The REST session DTOs went with the endpoints.
+        "SessionView",
+        "StopResponse",
         "GoalView",
         "CatalogResponse",
         "AdminStateView",
@@ -151,19 +153,6 @@ async fn components_include_the_session_schemas_and_not_the_removed_ones() {
 async fn no_operation_requires_security_the_whole_surface_is_open() {
     let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];
-    // The sessions GET/stop operations are now open (no NyxID identity).
-    assert!(
-        paths["/api/v1/sessions/{owner}/{repo}/{issue}"]["get"]
-            .get("security")
-            .is_none(),
-        "GET session must NOT require security (open read-only surface)"
-    );
-    assert!(
-        paths["/api/v1/sessions/{owner}/{repo}/{issue}/stop"]["post"]
-            .get("security")
-            .is_none(),
-        "stop session must NOT require security (open read-only surface)"
-    );
     // The user-store endpoints authenticate via the per-request GitHub token (the
     // `GithubUser` extractor), NOT a documented security scheme — so they carry
     // no `security` and no `NyxIdIdentity`.
