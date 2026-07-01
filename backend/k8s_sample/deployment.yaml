@@ -4,11 +4,12 @@
 #
 # One image (kustomization.yaml `images:`) carries the control-plane binary AND
 # the engine + codex + nyxid CLI: the control plane runs it as the API server,
-# and each session Job re-execs the SAME image in `run-session` mode. The control
-# plane never runs the engine in-process — it spawns one Kubernetes Job per
-# session (see rbac.yaml) and reads Job/pod status for the rich session view.
+# and each session Pod re-execs the SAME image in `run-substrate` mode. The
+# control plane never runs the engine in-process — its reconciler runs one
+# long-lived Kubernetes Pod per session (see rbac.yaml) and reads pod status for
+# the rich session view.
 #
-# Single replica + Recreate: the Job watcher is single-writer, so a surging
+# Single replica + Recreate: the reconciler is single-writer, so a surging
 # second pod would double-drive label/comment updates. Recreate terminates the
 # old pod before starting the new one.
 apiVersion: apps/v1

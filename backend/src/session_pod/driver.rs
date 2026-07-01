@@ -17,17 +17,16 @@ use std::path::Path;
 use std::process::{ExitCode, Stdio};
 
 use nix::sys::signal::Signal;
+use nix::unistd::Pid;
 use secrecy::{ExposeSecret, SecretString};
 use tokio::process::Command;
 use tokio::signal::unix::{signal, SignalKind};
 
-use crate::engine::materialize_helper_script;
-use crate::engine::process::signal_group;
-use crate::engine::{git_config_entries, GitConfigEntry};
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::creds::CredsLayout;
-use crate::sessions::codex_provider::render_codex_config;
 
+use super::codex::render_codex_config;
+use super::creds_helper::{git_config_entries, materialize_helper_script, GitConfigEntry};
 use super::plan::{
     build_supervise_args, exit_status_to_code, plan_clones, read_substrate_env,
     substrate_child_env, SubstrateEnv,
@@ -354,6 +353,12 @@ async fn exec_supervise(args: Vec<String>, env: Vec<(String, String)>) -> Result
     let code = exit_status_to_code(status.code());
     tracing::info!(code, "run-substrate: supervise exited");
     Ok(ExitCode::from(code))
+}
+
+/// Send `signal` to the whole process group `pgid` (relocated from the deleted
+/// `engine::process`).
+fn signal_group(pgid: i32, signal: Signal) -> Result<(), nix::Error> {
+    nix::sys::signal::killpg(Pid::from_raw(pgid), signal)
 }
 
 /// Forward `signal` to the supervise child's process GROUP (it is

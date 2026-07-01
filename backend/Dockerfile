@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 #
 # Session-capable image for the single fkst-control-plane crate. The SAME binary
-# is the API server (no args) and, inside a pod-per-session Job, the engine
-# runner (`run-session`, milestone #9) — so this image bundles the engine
+# is the API server (no args) and, inside a long-lived session Pod, the substrate
+# entrypoint (`run-substrate`, issue #359 §5) — so this image bundles the engine
 # toolchain: the codex CLI, the fkst-substrate engine (built at the pinned
 # engine ref), the nyxid CLI, and git + the runtime volume. The build context is
 # the repo root.

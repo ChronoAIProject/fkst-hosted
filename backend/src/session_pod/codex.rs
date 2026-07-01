@@ -1,22 +1,17 @@
-//! The per-session codex `config.toml` renderer.
+//! The per-session codex `config.toml` renderer (Model B, issue #359 §5).
 //!
-//! v1 runs every session against a single, operator-pinned LLM provider. The
-//! model, base URL, and wire_api are config-driven (`FKST_LLM_MODEL` /
-//! `FKST_LLM_BASE_URL` / `FKST_LLM_WIRE_API`), and the static LLM API key rides
-//! the `env_key` ([`crate::reserved_env::LLM_ENV_KEY`]) — never embedded in the
-//! config. (The old vault-driven Raw/Structured provider selection was removed
-//! with the in-memory vault; a custom-provider path can return as a typed layer
-//! if v1 needs it.)
-
-/// Default `wire_api` for the LLM provider.
-///
-/// MUST be `chat`: chrono-llm serves only `/chat/completions`; `responses`
-/// returns 502 (a verified bug). Never default to `responses`.
-pub const DEFAULT_WIRE_API: &str = "chat";
+//! Every session runs against a single, operator-pinned LLM provider. The model,
+//! base URL, and wire_api are config-driven (`FKST_LLM_MODEL` / `FKST_LLM_BASE_URL`
+//! / `FKST_LLM_WIRE_API`) and injected into the session pod; the static LLM API key
+//! rides the `env_key` ([`crate::reserved_env::LLM_ENV_KEY`]) — never embedded in
+//! the config. Relocated out of the deleted `sessions/codex_provider` so the
+//! `run-substrate` driver keeps its only caller.
 
 /// `model_provider` id + provider name. Neutral (no vendor coupling) so the same
-/// renderer serves any OpenAI-compatible backend.
-pub const LLM_PROVIDER_ID: &str = "llm";
+/// renderer serves any OpenAI-compatible backend. The `wire_api` default itself
+/// lives on the launch plan (`plan::DEFAULT_LLM_WIRE_API`), which is what the
+/// driver passes in.
+const LLM_PROVIDER_ID: &str = "llm";
 
 /// Render the codex `config.toml` body for the operator-pinned LLM provider.
 ///
@@ -45,12 +40,7 @@ mod tests {
 
     #[test]
     fn renders_pinned_model_with_neutral_provider_and_llm_env_key() {
-        let toml = render_codex_config(
-            "gpt-5-codex",
-            "https://nyx/p",
-            DEFAULT_WIRE_API,
-            LLM_ENV_KEY,
-        );
+        let toml = render_codex_config("gpt-5-codex", "https://nyx/p", "chat", LLM_ENV_KEY);
         assert!(toml.contains("model_provider = \"llm\""));
         assert!(toml.contains("[model_providers.llm]"));
         assert!(toml.contains("model = \"gpt-5-codex\""));

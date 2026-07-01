@@ -1,9 +1,9 @@
 //! Shared wire/domain types.
 //!
 //! v1 is datastore-free and session state lives in Kubernetes (a session IS a
-//! Job), so the only surviving model is [`RepoRef`] — the `owner/name` GitHub
-//! repository reference shared by the SessionSpec, the launcher, and the webhook
-//! trigger.
+//! Pod), so the only surviving model is [`RepoRef`] — the `owner/name` GitHub
+//! repository reference shared by the reconciler, the session-Pod launcher, and
+//! the webhook nudge.
 
 use serde::{Deserialize, Serialize};
 

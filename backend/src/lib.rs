@@ -5,11 +5,6 @@
 //! the application without a real TCP bind.
 
 pub mod config;
-// The engine integration was extracted to the `fkst-engine` crate (issue #151)
-// so both the control-plane and the worker can drive it. Re-exported here under
-// the same `engine` name so every existing `crate::engine::*` /
-// `fkst_control_plane::engine::*` path keeps resolving unchanged.
-pub mod engine;
 // Named-environment / install-validation config knobs (`FKST_ENV_*`, issue
 // #338 §6.1). Config surface only — no behaviour is wired to these yet.
 pub mod env_config;
@@ -26,7 +21,6 @@ pub mod goals;
 // and, later, the session's pre-agent install step.
 pub mod install;
 pub mod models;
-pub mod protocol;
 // Model B reconciler config knobs (`FKST_*`, issue #359 §4). Config surface only
 // — no behaviour is wired to these yet (PR5b wires the loop; PR6 flips it on).
 pub mod reconcile_config;
@@ -46,16 +40,10 @@ pub mod k8s;
 pub mod openapi;
 pub mod router;
 pub mod routes;
-// In-pod `run-session` subcommand (milestone #9): drives ONE substrate session
-// to completion in a Kubernetes Job, mapping the engine's terminal status onto
-// the process exit code. No ClaimMap/CAS, no `/internal/v1`, no heartbeat.
-pub mod runner;
 // In-pod `run-substrate` subcommand (Model B, issue #359 §5): the long-lived
 // substrate-session entrypoint that fetches packages + the target repo, wires the
 // rotating GitHub token into git + gh, renders the codex config, and execs
-// `fkst-framework supervise`. Additive — nothing dispatches it as the default path
-// yet; Model A (`runner`) is untouched.
+// `fkst-framework supervise`.
 pub mod session_pod;
 pub mod session_spec;
-pub mod sessions;
 pub mod state;

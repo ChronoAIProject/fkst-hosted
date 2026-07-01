@@ -1,10 +1,9 @@
 //! Shared `### `-heading section-splitting helpers for GitHub-issue bodies.
 //!
-//! Both the `fkst-goal` parser ([`crate::goals::issue_parse`]) and the
-//! `fkst-substrate-trigger` parser ([`crate::goals::trigger_parse`]) turn a
+//! The `fkst-substrate-trigger` parser ([`crate::goals::trigger_parse`]) turns a
 //! user-authored issue **body** into structured fields by splitting it at `### `
 //! headings and reading each section's non-empty lines. This module is the single
-//! home of that reusable machinery so neither parser depends on the other, and the
+//! home of that reusable machinery, and the
 //! section-splitting contract is defined once: a duplicate `### ` heading is a
 //! 422, intro text before the first heading is ignored, and `#### ` (or deeper) is
 //! body text — never a section boundary.

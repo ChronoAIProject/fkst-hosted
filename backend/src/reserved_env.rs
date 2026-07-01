@@ -1,23 +1,58 @@
-//! Reserved-env "keep-module": the two symbols the platform needs to decide which
+//! Reserved-env "keep-module": the symbols the platform needs to decide which
 //! env keys a user may never set, and which env key the engine reads the LLM
 //! credential from.
 //!
-//! These lived in `engine/config.rs` ([`is_reserved_env_key`]) and
-//! `sessions/codex_provider/mod.rs` ([`LLM_ENV_KEY`]) — both of which the Model B
-//! migration deletes. Relocating them here (PR0, issue #359 §7/§9) keeps them
-//! alive and callable after those modules are gone, so the deletion is a pure
-//! removal with no dangling references. Model A behaviour is unchanged: this is a
-//! verbatim relocation, not a rewrite.
-//!
-//! The reserved-key TABLES themselves ([`RESERVED_ENV_PREFIX`],
-//! [`RESERVED_ENV_NAME_PREFIXES`], [`RESERVED_ENV_KEYS`], [`ENGINE_ENV_ALLOWLIST`])
-//! still live in `engine::config` for PR0 and are imported below so the function
-//! body stays identical; a later Model B PR relocates those tables alongside this
-//! module when `engine/` is removed.
+//! [`is_reserved_env_key`] originally lived in `engine/config.rs` and
+//! [`LLM_ENV_KEY`] in `sessions/codex_provider/mod.rs` — both of which the Model B
+//! migration deletes. They (and the reserved-key TABLES they read —
+//! [`RESERVED_ENV_PREFIX`], [`RESERVED_ENV_NAME_PREFIXES`], [`RESERVED_ENV_KEYS`],
+//! [`ENGINE_ENV_ALLOWLIST`]) were relocated here (issue #359 §7/§9) so they stay
+//! alive and callable after `engine/` is gone. This module is now the single,
+//! self-contained source of truth for the reserved-env policy; behaviour is
+//! unchanged from Model A (a verbatim relocation, not a rewrite).
 
-use crate::engine::config::{
-    ENGINE_ENV_ALLOWLIST, RESERVED_ENV_KEYS, RESERVED_ENV_NAME_PREFIXES, RESERVED_ENV_PREFIX,
-};
+/// Host environment variables copied from the fkst-hosted parent process into
+/// every engine child *if present in the parent* (issue #101). After
+/// `Command::env_clear()` the child inherits nothing; these are the only host
+/// vars allowed back in, because `codex` and the toolchain genuinely need them
+/// (`HOME`/`CODEX_HOME` for codex config discovery, `PATH` to find binaries,
+/// the locale/TZ/TLS vars for correct runtime behaviour). Anything else in the
+/// pod environment (including any ambient secret) is deliberately dropped so a
+/// secret in the pod env can never leak into a session.
+pub const ENGINE_ENV_ALLOWLIST: &[&str] = &[
+    "PATH",
+    "HOME",
+    "CODEX_HOME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "TZ",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
+
+/// Exact keys that a user-supplied `env_profile` may never set because the
+/// platform owns them (the goal-session GitHub wiring + #107 git credential
+/// delivery). Combined with the [`RESERVED_ENV_PREFIX`],
+/// [`RESERVED_ENV_NAME_PREFIXES`] and [`ENGINE_ENV_ALLOWLIST`] in
+/// [`is_reserved_env_key`].
+pub const RESERVED_ENV_KEYS: &[&str] = &[
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "FKST_GITHUB_TOKEN_FILE",
+    "FKST_GOAL_FILE",
+    "GIT_CONFIG_COUNT",
+];
+
+/// Key-name PREFIXES the platform owns dynamically. `GIT_CONFIG_KEY_<n>` /
+/// `GIT_CONFIG_VALUE_<n>` are git's env-config protocol (#107): their count is
+/// not fixed, so the whole `GIT_CONFIG_` family is reserved by prefix rather
+/// than by exact name (a user value here could redirect the credential helper).
+pub const RESERVED_ENV_NAME_PREFIXES: &[&str] = &["GIT_CONFIG_"];
+
+/// Every platform-managed variable shares this prefix, so a user `env_profile`
+/// can never shadow one (e.g. `FKST_RUNTIME_ROOT`, `FKST_DURABLE_ROOT`).
+pub const RESERVED_ENV_PREFIX: &str = "FKST_";
 
 /// `env_key` the engine's codex reads the LLM API key from.
 ///

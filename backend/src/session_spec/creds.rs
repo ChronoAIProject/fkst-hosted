@@ -1,16 +1,16 @@
-//! The on-disk credential file layout the run-session pod reads.
+//! The on-disk credential file layout the run-substrate pod reads.
 //!
 //! The control plane creates a per-session Kubernetes Secret and mounts it into
 //! the pod as a 0400 file volume. Keeping the layout typed (rather than
-//! stringly-pathed at each call site) means the writer (the Job/Secret launcher)
-//! and the reader (the run-session subcommand) can never disagree on a filename.
+//! stringly-pathed at each call site) means the writer (the session-Pod/Secret
+//! launcher) and the reader (the run-substrate subcommand) can never disagree on
+//! a filename.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// The GitHub App installation token (`ghs_…`): clone + git ops + log commits.
-/// Matches the engine's runtime token filename so the pod copies it through
-/// verbatim (`crate::engine::goal_token::TOKEN_FILE_NAME`).
+/// The in-pod git credential helper + `gh` shim read this file on every op.
 pub const GITHUB_TOKEN_FILE: &str = "github-token";
 
 /// The static LLM API key the engine's codex provider authenticates with. The
@@ -35,12 +35,10 @@ pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
 /// the rotating [`GITHUB_TOKEN_FILE`], the static [`LLM_API_KEY_FILE`], and one
 /// [`USER_ENV_PREFIX`]`<KEY>` entry per injected per-user env var.
 ///
-/// Both launchers build their Secret on top of this map — the Model-A Job Secret
-/// additionally writes the serialized `SessionSpec`, the Model-B session-Pod
-/// Secret carries only these creds — so the credential layout lives in exactly
-/// one place and the two can never diverge. Callers expose their own secret
-/// values before calling, which keeps this module free of a `secrecy`
-/// dependency.
+/// The session-Pod Secret builder builds on top of this map — the Model-B
+/// session Secret carries only these creds — so the credential layout lives in
+/// exactly one place. Callers expose their own secret values before calling,
+/// which keeps this module free of a `secrecy` dependency.
 pub fn credential_secret_data<'a>(
     github_token: &str,
     llm_api_key: &str,
@@ -184,15 +182,5 @@ mod tests {
         assert_eq!(data.len(), 2);
         assert!(data.contains_key("github-token"));
         assert!(data.contains_key("llm-api-key"));
-    }
-
-    #[test]
-    fn github_token_filename_matches_the_engine_runtime_convention() {
-        // The pod copies this file through to the engine's runtime dir verbatim;
-        // keep the two filenames identical so the convention is one constant.
-        assert_eq!(
-            GITHUB_TOKEN_FILE,
-            crate::engine::goal_token::TOKEN_FILE_NAME
-        );
     }
 }

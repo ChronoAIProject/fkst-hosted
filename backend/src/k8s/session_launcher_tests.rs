@@ -26,8 +26,6 @@ fn config() -> PodConfig {
         namespace: "fkst-sessions".to_string(),
         image: Some("registry/fkst-control-plane:1.0".to_string()),
         service_account: "fkst-session-runner".to_string(),
-        run_ttl_secs: 600,
-        active_deadline_secs: 3600,
         llm_base_url: "https://llm.example/p".to_string(),
         llm_model: "gpt-5-codex".to_string(),
         llm_wire_api: "chat".to_string(),
