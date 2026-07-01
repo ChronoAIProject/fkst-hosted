@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
@@ -94,11 +95,11 @@ end
 function M.build_release_notes_prompt(repo, upstream, integration, head_sha, ahead)
   local prompt = require("prompts.release_notes")
   return M.render_template(prompt.template, {
-    repo = M.neutralize_untrusted_prompt_text(repo),
-    upstream_branch = M.neutralize_untrusted_prompt_text(upstream),
-    integration_branch = M.neutralize_untrusted_prompt_text(integration),
-    head_sha = M.neutralize_untrusted_prompt_text(head_sha),
-    ahead = M.neutralize_untrusted_prompt_text(ahead),
+    repo = devloop_base.neutralize_untrusted_prompt_text(repo),
+    upstream_branch = devloop_base.neutralize_untrusted_prompt_text(upstream),
+    integration_branch = devloop_base.neutralize_untrusted_prompt_text(integration),
+    head_sha = devloop_base.neutralize_untrusted_prompt_text(head_sha),
+    ahead = devloop_base.neutralize_untrusted_prompt_text(ahead),
     max_bytes = tostring(max_release_notes_len),
     ai_sentinel = ai_sentinel,
   })

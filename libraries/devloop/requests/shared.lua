@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local C = {}
 local comment_strings = require("devloop.strings")
@@ -19,7 +20,7 @@ function C.bounded_neutralized_text(M, value, limit)
   if #text > cap then
     text = base_ids.truncate_utf8(text, cap)
   end
-  text = M.neutralize_untrusted_comment_text(text)
+  text = devloop_base.neutralize_untrusted_comment_text(text)
   if #text > cap then
     text = base_ids.truncate_utf8(text, cap)
   end

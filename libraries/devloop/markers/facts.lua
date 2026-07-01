@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
@@ -193,7 +194,7 @@ function C.review_prior_round_ledger(M, comments, issue_proposal_id, issue_versi
   if #ledger > M._max_review_ledger_len then
     ledger = base_ids.truncate_utf8(ledger, M._max_review_ledger_len)
   end
-  return M.neutralize_untrusted_prompt_text(ledger)
+  return devloop_base.neutralize_untrusted_prompt_text(ledger)
 end
 
 function C.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)

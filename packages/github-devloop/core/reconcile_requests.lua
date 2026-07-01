@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
@@ -54,7 +55,7 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
   local version = state_version or conv_reconcile.reconcile_state_version(M, reconcile.base_version, reconcile.round)
   local marker = conv_reconcile.reconcile_marker(M, reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
   local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   return m_claims.attach_issue_claim(M, {
     schema = "github-proxy.v1",
     repo = repo,
@@ -77,7 +78,7 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
   local version = conv_reconcile.fix_reconcile_state_version(M, fix_reconcile.issue_version)
   local marker = conv_reconcile.fix_reconcile_marker(M, fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
   local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = M.parse_pr_source_ref(fix_reconcile.source_ref)
   return M.build_entity_comment_request({
     kind = "pr",
@@ -98,7 +99,7 @@ function M.build_review_reconcile_comment_request(repo, issue_number, review_rec
   local version = state_version or conv_reconcile.review_reconcile_state_version(M, review_reconcile.issue_version, review_reconcile.round)
   local marker = conv_reconcile.review_reconcile_marker(M, review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
   local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = M.parse_pr_source_ref(review_reconcile.source_ref)
   return M.build_entity_comment_request({
     kind = "pr",

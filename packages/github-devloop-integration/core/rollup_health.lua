@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local parsers_misc = require("devloop.parsers.misc")
@@ -93,7 +94,7 @@ local function failure_identity(failing_check)
   local identity = tostring(failing_check or "rollup-red")
   identity = identity:gsub(";.*$", "")
   identity = identity:gsub(":.*$", "")
-  identity = M.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(identity))
+  identity = devloop_base.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(identity))
   identity = error_facts.one_line(identity):gsub("^%s+", ""):gsub("%s+$", "")
   if identity == "" then
     identity = "rollup-red"

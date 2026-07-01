@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local C = {}
@@ -245,7 +246,7 @@ function C.build_operator_issue_reintake_comment_request(M, repo, issue_number, 
 end
 
 function C.build_operator_command_refusal_request(M, repo, pr_number, command, reason, source_ref)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "invalid command state")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "invalid command state")
   local marker = C.operator_command_marker(M, command, "refused", reason)
   return M.build_entity_comment_request({
     kind = "pr",
@@ -263,7 +264,7 @@ function C.build_operator_command_refusal_request(M, repo, pr_number, command, r
 end
 
 function C.build_operator_issue_command_refusal_request(M, repo, issue_number, command, reason, source_ref)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "invalid command state")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "invalid command state")
   local marker = C.operator_command_marker(M, command, "refused", reason)
   return M.build_entity_comment_request({
     kind = "issue",

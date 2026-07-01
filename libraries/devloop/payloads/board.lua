@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local C = {}
@@ -179,7 +180,7 @@ function C.append_board_digest_to_proposal(M, proposal, repo, tick)
   end
   local body = tostring(proposal.body or "")
   local prefix = "\n\n"
-  local neutralized = M.neutralize_untrusted_prompt_text(block)
+  local neutralized = devloop_base.neutralize_untrusted_prompt_text(block)
   local remaining = M._max_body_len - #body - #prefix
   if remaining <= 0 then
     M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {

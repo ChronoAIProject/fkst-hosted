@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local S = {}
 local strings = require("contract.strings")
@@ -77,7 +78,7 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\nParent PR: #" .. tostring(decompose.pr_number)
     .. "\nBlocked reason: fix loop reached " .. tostring(decompose.round) .. " rounds and was reconciled to blocked."
   local body = parent_summary
-    .. "\n\nSmaller scope / alternative approach:\n" .. M.neutralize_untrusted_comment_text(issue.body)
+    .. "\n\nSmaller scope / alternative approach:\n" .. devloop_base.neutralize_untrusted_comment_text(issue.body)
     .. "\n\nNon-goals:\n- Do not repeat the same high-round fix path without reducing scope or changing approach."
     .. "\n\nAcceptance:\n- The work is independently reviewable."
     .. "\n- The implementation can pass the normal intake, consensus, implementation, and review pipeline."

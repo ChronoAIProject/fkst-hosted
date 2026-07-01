@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local payloads_builders = require("devloop.payloads.builders")
@@ -191,14 +192,14 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     local _, pr_number, _, reviewed_head_sha = M.parse_pr_review_proposal_id(reached.proposal_id)
     merge_marker = "\n" .. m_builders.merge_ready_marker(M, issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
   end
-  local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
+  local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = shared.build_verdict_summary(M, reached.angle_results)
   local body = comment_strings.comment_string(M, "pr_review_decision_prefix") .. tostring(reached.decision)
   if verdict_summary ~= nil then
     body = body .. "\n" .. verdict_summary
   end
   if reached.decision == "reject" and blocking_gap ~= nil then
-    body = body .. "\n" .. comment_strings.comment_string(M, "blocking_gap_label") .. M.neutralize_untrusted_comment_text(blocking_gap)
+    body = body .. "\n" .. comment_strings.comment_string(M, "blocking_gap_label") .. devloop_base.neutralize_untrusted_comment_text(blocking_gap)
   end
   local _, pr_number = M.parse_pr_source_ref(source_ref)
   local request = M.build_entity_comment_request({
@@ -276,14 +277,14 @@ end
 
 function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set, handoff_fields)
   local safe_reason = M.merge_gate_reason_class(reason)
-  local display_reason = M.neutralize_untrusted_comment_text(reason or "gate-failed")
+  local display_reason = devloop_base.neutralize_untrusted_comment_text(reason or "gate-failed")
   if display_reason == "" then
     display_reason = "gate-failed"
   end
   if gate_baseline_sha ~= nil and not forge_validators.is_git_sha(gate_baseline_sha) then
     error("github-devloop: invalid merge-gate baseline sha")
   end
-  local test_command = M.neutralize_untrusted_comment_text(config.test_command(M))
+  local test_command = devloop_base.neutralize_untrusted_comment_text(config.test_command(M))
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
   local marker = m_builders.merge_gate_marker(M,
     merge_ready.proposal_id,
@@ -335,7 +336,7 @@ function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_h
   local marker = m_builders.fix_marker(M, fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
   local summary = ""
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
-    summary = "\n" .. comment_strings.comment_string(M, "fix_round_summary_label") .. M.neutralize_untrusted_comment_text(fix.fix_summary)
+    summary = "\n" .. comment_strings.comment_string(M, "fix_round_summary_label") .. devloop_base.neutralize_untrusted_comment_text(fix.fix_summary)
   end
   local request = M.build_entity_comment_request({
     kind = "pr",

@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local C = {}
@@ -32,7 +33,7 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
   local canonical_state = state_name or "ready"
   local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready" or "result-marker,ready-label,dependency-hold"
   local state_marker = M.state_marker(reached.proposal_id, canonical_state, tostring(reached.effect_version or reached.dedup_key), effects)
-  local body_text = M.neutralize_untrusted_comment_text(reached.body or "")
+  local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = shared.build_verdict_summary(M, reached.angle_results)
   local body = comment_strings.comment_string(M, "decision_prefix") .. tostring(reached.decision)
   if verdict_summary ~= nil then
@@ -91,7 +92,7 @@ function C.build_converge_round_comment_request(M, repo, issue_number, unresolve
 end
 
 function C.build_dependency_hold_comment_request(M, repo, issue_number, proposal_id, version, gate, marker, source_ref)
-  local reason = M.neutralize_untrusted_comment_text(gate and gate.reason or "")
+  local reason = devloop_base.neutralize_untrusted_comment_text(gate and gate.reason or "")
   if reason == "" then
     reason = gate and gate.kind or "dependency-hold"
   end
@@ -108,7 +109,7 @@ function C.build_dependency_hold_comment_request(M, repo, issue_number, proposal
 end
 
 function C.build_dependency_release_comment_request(M, repo, issue_number, proposal_id, version, gate, source_ref)
-  local reason = M.neutralize_untrusted_comment_text(gate and gate.reason or "satisfied")
+  local reason = devloop_base.neutralize_untrusted_comment_text(gate and gate.reason or "satisfied")
   if reason == "" then
     reason = "satisfied"
   end
@@ -135,7 +136,7 @@ function C.build_intake_decision_comment_request(M, repo, issue_number, candidat
   end
   local normalized_class = m_shared.normalize_intake_service_class(service_class)
   local marker = m_builders.intake_decision_marker(M, candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
     safe_reason = comment_strings.comment_string(M, "no_reason_provided")
   end
@@ -282,7 +283,7 @@ function C.build_impl_failure_comment_request(M, repo, issue_number, ready, reas
   if text == "" then
     text = comment_strings.comment_string(M, "no_implementation_output")
   end
-  text = M.neutralize_untrusted_comment_text(text)
+  text = devloop_base.neutralize_untrusted_comment_text(text)
 
   local marker = M.impl_failure_marker(ready.proposal_id, ready.dedup_key, safe_reason, attempt)
   local state_marker = M.state_marker(ready.proposal_id, "impl-failed", ready.dedup_key)

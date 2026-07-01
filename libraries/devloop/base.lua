@@ -584,7 +584,7 @@ function C.render_template(M, template, vars)
   end))
 end
 
-function C.neutralize_untrusted_prompt_text(M, text)
+function C.neutralize_untrusted_prompt_text(text)
   local value = tostring(text or "")
 
   local function neutralize_line(line)
@@ -642,7 +642,7 @@ function C.quote_untrusted_prompt_text(M, text)
   return table.concat(output)
 end
 
-function C.neutralize_untrusted_comment_text(M, text)
+function C.neutralize_untrusted_comment_text(text)
   local value = tostring(text or "")
 
   local function neutralize_line(line)

@@ -153,7 +153,7 @@ end
 local function compact_title(value)
   local title = tostring(value or ""):gsub("%c", " "):gsub("%s+", " ")
   title = title:gsub("^%s+", ""):gsub("%s+$", "")
-  title = core.neutralize_untrusted_comment_text(title)
+  title = devloop_base.neutralize_untrusted_comment_text(title)
   if title == "" then
     title = "(untitled)"
   end

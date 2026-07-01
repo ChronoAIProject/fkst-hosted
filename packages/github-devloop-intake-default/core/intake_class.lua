@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local parsers_issue = require("devloop.parsers.issue")
@@ -193,7 +194,7 @@ end
 function M.build_intake_class_followup_comment_request(repo, issue_number, candidate, carrier, outcome, reason)
   local carrier_number = carrier and carrier.number or "pending-create"
   local marker = M.intake_class_followup_marker(candidate.proposal_id, carrier_number, outcome, candidate.dedup_key)
-  local safe_reason = M.neutralize_untrusted_comment_text(reason or "")
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
     safe_reason = comment_strings.comment_string(M, "no_reason_provided")
   end
@@ -243,7 +244,7 @@ end
 function M.build_intake_class_issue_create_request(repo, issue_number, candidate, current, reason, class_key)
   local title = M.intake_class_issue_title(current, issue_number, class_key)
   local body = "Class escalation follow-through for instance issue #" .. tostring(issue_number or "unknown")
-    .. "\n\nReason:\n" .. M.neutralize_untrusted_comment_text(reason or "")
+    .. "\n\nReason:\n" .. devloop_base.neutralize_untrusted_comment_text(reason or "")
     .. "\n\nClass identity: " .. tostring(class_key or "")
     .. "\n\nRequired follow-through:\n"
     .. "- Locate or create the class-level fix intent-before-create.\n"

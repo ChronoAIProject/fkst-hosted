@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
@@ -162,7 +163,7 @@ local function claim_threshold(repo, fingerprint, window_key)
 end
 
 local function display_text(value, limit)
-  local text = M.neutralize_untrusted_comment_text(error_facts.one_line(value))
+  local text = devloop_base.neutralize_untrusted_comment_text(error_facts.one_line(value))
   text = text:gsub("`", "'"):gsub("^%s+", ""):gsub("%s+$", "")
   if text == "" then
     text = "unknown"
@@ -213,7 +214,7 @@ local function body(fact, count)
   if fact.message ~= "" then
     table.insert(lines, "")
     table.insert(lines, "Failure summary:")
-    table.insert(lines, M.neutralize_untrusted_comment_text(fact.message))
+    table.insert(lines, devloop_base.neutralize_untrusted_comment_text(fact.message))
   end
   local result = table.concat(lines, "\n")
   if #result > M._max_body_len then

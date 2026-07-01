@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local S = {}
 local strings = require("contract.strings")
@@ -100,7 +101,7 @@ function M.build_sync_conflict_escalation_request(conflict, fingerprint, attempt
   local body = table.concat({
     "The autonomous branch sync conflict resolver exhausted its bounded retry budget.",
     "",
-    "Reason: " .. M.neutralize_untrusted_comment_text(reason or "unresolved sync conflict"),
+    "Reason: " .. devloop_base.neutralize_untrusted_comment_text(reason or "unresolved sync conflict"),
     "Attempt: " .. tostring(attempt),
     "Max attempts: " .. tostring(M.max_sync_conflict_attempts()),
     "Fingerprint: " .. tostring(fingerprint),

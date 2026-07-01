@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
 local parsers_issue = require("devloop.parsers.issue")
@@ -385,7 +386,7 @@ local function alert_body(M, evidence, snapshot)
     "Queue starvation watchdog fired from deterministic observability signals.",
     "",
     "Detector: `" .. detector .. "`",
-    "Queue head: #" .. tostring(head.issue_number or "unknown") .. " " .. M.neutralize_untrusted_comment_text(head.title or ""),
+    "Queue head: #" .. tostring(head.issue_number or "unknown") .. " " .. devloop_base.neutralize_untrusted_comment_text(head.title or ""),
     "Queue head PR: #" .. tostring(head.pr_number or "unknown"),
     "Queue head age: " .. tostring(evidence.queue_head_age_minutes) .. " minutes",
     "Threshold: " .. tostring(evidence.threshold_minutes) .. " minutes",

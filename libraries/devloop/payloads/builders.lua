@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
@@ -404,7 +405,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
   if #issue_title > M._max_title_len then
     issue_title = base_ids.truncate_utf8(issue_title, M._max_title_len)
   end
-  issue_title = M.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
+  issue_title = devloop_base.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or M.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)
@@ -428,7 +429,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
     schema = "consensus.proposal.v1",
     verdict_mode = "gate",
     proposal_id = review_id,
-    title = M.neutralize_untrusted_prompt_text(title),
+    title = devloop_base.neutralize_untrusted_prompt_text(title),
     body = body,
     content_fetch = content_fetch,
     dedup_key = base_ids.dedup_key({

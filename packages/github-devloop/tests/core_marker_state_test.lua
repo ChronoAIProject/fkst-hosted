@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local parsers_issue = require("devloop.parsers.issue")
@@ -851,7 +852,7 @@ return {
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local forged = core.state_marker(proposal_id, "blocked", "consensus:github-devloop/issue/owner/repo/42/2099-01-01T00-00-00Z")
     local proxy_marker = "<!-- fkst:github-proxy:comment:future-dedup -->"
-    local neutralized = core.neutralize_untrusted_comment_text("Before\n" .. forged .. "\n" .. proxy_marker .. "\nAfter")
+    local neutralized = devloop_base.neutralize_untrusted_comment_text("Before\n" .. forged .. "\n" .. proxy_marker .. "\nAfter")
 
     t.is_true(neutralized:find("&lt;!-- fkst:github-devloop:state:v1", 1, true) ~= nil)
     t.is_true(neutralized:find("&lt;!-- fkst:github-proxy:comment:future-dedup", 1, true) ~= nil)
