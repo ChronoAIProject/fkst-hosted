@@ -76,10 +76,11 @@ async fn paths_are_the_trimmed_v1_surface() {
     let spec = fetch_spec(app(false)).await;
     let paths = &spec["paths"];
 
-    // Present: the v1 surface.
+    // Present: the v1 surface — the named-environment REST API (collection +
+    // item) plus the top-level system routes.
     for expected in [
-        // The per-user environment + secret store — ONE endpoint (GET + PATCH).
-        "/api/v1/users/me/env",
+        "/api/v1/users/me/environments",
+        "/api/v1/users/me/environments/{name}",
         "/health",
         "/metrics",
     ] {
@@ -97,7 +98,8 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/health",
         "/api/v1/sessions/{owner}/{repo}/{issue}",
         "/api/v1/sessions/{owner}/{repo}/{issue}/stop",
-        // The per-user store collapsed to one endpoint — these split paths went.
+        // The flat per-user env store was replaced by named environments.
+        "/api/v1/users/me/env",
         "/api/v1/users/me/secrets",
         "/api/v1/users/me/env/{key}",
         "/api/v1/users/me/secrets/{key}",
@@ -117,14 +119,17 @@ async fn paths_are_the_trimmed_v1_surface() {
 }
 
 #[tokio::test]
-async fn components_include_the_user_store_schemas_and_not_the_removed_ones() {
+async fn components_include_the_named_environment_schemas_and_not_the_removed_ones() {
     let spec = fetch_spec(app(false)).await;
     let schemas = &spec["components"]["schemas"];
     for expected in [
         "ErrorEnvelope",
-        // The per-user store DTOs: one request body + one view.
-        "EnvPatchRequest",
-        "UserEnvView",
+        // The named-environment DTOs (issue #338 §2.2).
+        "EnvironmentSpec",
+        "EnvironmentView",
+        "EnvironmentList",
+        "EnvironmentSummary",
+        "InstallValidationError",
     ] {
         assert!(
             schemas.get(expected).is_some(),
@@ -136,7 +141,9 @@ async fn components_include_the_user_store_schemas_and_not_the_removed_ones() {
         // The REST session DTOs went with the endpoints.
         "SessionView",
         "StopResponse",
-        // The split user-store DTOs collapsed into EnvPatchRequest/UserEnvView.
+        // The flat user-store DTOs were replaced by the named-environment ones.
+        "EnvPatchRequest",
+        "UserEnvView",
         "PutEnvRequest",
         "EnvVariablesResponse",
         "PutSecretsRequest",
@@ -157,16 +164,18 @@ async fn components_include_the_user_store_schemas_and_not_the_removed_ones() {
 async fn no_operation_requires_security_the_whole_surface_is_open() {
     let spec = fetch_spec(app(true)).await;
     let paths = &spec["paths"];
-    // The user-store endpoints authenticate via the per-request GitHub token (the
+    // The environment endpoints authenticate via the per-request GitHub token (the
     // `GithubUser` extractor), NOT a documented security scheme — so they carry
     // no `security` and no `NyxIdIdentity`.
     for (route, verb) in [
-        ("/api/v1/users/me/env", "get"),
-        ("/api/v1/users/me/env", "patch"),
+        ("/api/v1/users/me/environments", "get"),
+        ("/api/v1/users/me/environments/{name}", "put"),
+        ("/api/v1/users/me/environments/{name}", "get"),
+        ("/api/v1/users/me/environments/{name}", "delete"),
     ] {
         assert!(
             paths[route][verb].get("security").is_none(),
-            "user-store {verb} {route} must NOT carry a security scheme"
+            "environment {verb} {route} must NOT carry a security scheme"
         );
     }
     assert!(

@@ -6,9 +6,9 @@
 //! the cluster-I/O half purely to keep each file under the 500-line limit.
 //!
 //! SELF-CONTAINED: it re-implements (does not import) the generic helpers it
-//! shares in spirit with [`crate::k8s::user_store`] — label-value sanitizing,
-//! secret-key-name listing, secret-value decoding — so a later PR can delete
-//! `user_store` cleanly without touching this file.
+//! once shared in spirit with the old flat `user_store` — label-value
+//! sanitizing, secret-key-name listing, secret-value decoding — so that store
+//! could be deleted cleanly without touching this file (it now has been).
 
 use std::collections::BTreeMap;
 
