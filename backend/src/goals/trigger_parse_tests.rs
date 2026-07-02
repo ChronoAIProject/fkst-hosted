@@ -199,8 +199,8 @@ fn log_access_absent_defaults_empty() {
 fn log_access_parses_comma_whitespace_and_newline_separated_tokens() {
     // A mix of commas, spaces, and newlines all separate tokens; a leading `@` is
     // stripped; numeric ids are kept verbatim.
-    let spec =
-        parse_trigger_issue_body(&body_with_log_access("@alice, bob   carol\n12345")).expect("parses");
+    let spec = parse_trigger_issue_body(&body_with_log_access("@alice, bob   carol\n12345"))
+        .expect("parses");
     assert_eq!(
         spec.log_access,
         vec![

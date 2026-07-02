@@ -162,6 +162,9 @@ mod tests {
         reg.upsert("sess-1".to_string(), ctx(1, &["alice"]));
         let debug = format!("{reg:?}");
         assert!(debug.contains("sessions"), "{debug}");
-        assert!(!debug.contains("alice"), "entries must not be dumped: {debug}");
+        assert!(
+            !debug.contains("alice"),
+            "entries must not be dumped: {debug}"
+        );
     }
 }

@@ -909,8 +909,6 @@ mod tests {
         let err = Config::from_vars(vars(&[("FKST_GITHUB_OAUTH_CLIENT_ID", "Iv1.abc")]))
             .expect_err("half OAuth config must fail closed through Config");
         assert!(matches!(err, AppError::Config(_)));
-        assert!(err
-            .to_string()
-            .contains("FKST_GITHUB_OAUTH_CLIENT_SECRET"));
+        assert!(err.to_string().contains("FKST_GITHUB_OAUTH_CLIENT_SECRET"));
     }
 }

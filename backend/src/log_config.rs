@@ -144,8 +144,8 @@ impl LogConfig {
             _ => {}
         }
 
-        let oauth_base_url =
-            non_blank(raw.github_oauth_base_url).unwrap_or_else(|| DEFAULT_OAUTH_BASE_URL.to_string());
+        let oauth_base_url = non_blank(raw.github_oauth_base_url)
+            .unwrap_or_else(|| DEFAULT_OAUTH_BASE_URL.to_string());
 
         Ok(LogConfig {
             admins,
