@@ -170,6 +170,21 @@ pub trait GithubApi: Send + Sync {
         unimplemented!("close_issue is only implemented by the HTTP transport")
     }
 
+    /// `GET {base}/repos/{owner}/{repo}/issues/{number}` → the issue's current
+    /// label NAMES. Used by the session-health scrape to dedupe its degraded flag
+    /// (only post a comment on the FIRST transition). A 404 (issue gone) yields an
+    /// empty set. Default panics.
+    async fn get_issue_labels(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<String>, GithubAppError> {
+        let _ = (token, owner, repo, number);
+        unimplemented!("get_issue_labels is only implemented by the HTTP transport")
+    }
+
     /// `GET {base}/repos/{owner}/{repo}/contents/{path}` (optionally `?ref=…`)
     /// returning the file's blob SHA + base64 content. A 404 yields `Ok(None)`
     /// (missing file — installed template v0 / the CREATE path). Default panics.
@@ -665,6 +680,55 @@ impl GithubApi for HttpGithubApi {
             )));
         }
         Ok(())
+    }
+
+    async fn get_issue_labels(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<String>, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues/{number}", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("get_issue_labels: {e}")))?;
+        let status = response.status();
+        // A vanished issue carries no labels — treat it as an empty set so the
+        // caller neither flags nor clears a non-existent issue.
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "get_issue_labels status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("get_issue_labels body: {e}")))?;
+        let labels = body
+            .get("labels")
+            .and_then(|l| l.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|l| l.get("name").and_then(|n| n.as_str()))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(labels)
     }
 
     async fn content_file(

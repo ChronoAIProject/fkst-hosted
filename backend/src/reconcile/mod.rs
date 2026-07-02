@@ -65,6 +65,16 @@ pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 /// latch) — an acknowledged work issue stays acknowledged for its lifetime.
 pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
 
+/// The label the session-health scrape ([`crate::k8s::health_scrape`]) latches onto
+/// a trigger issue while its pod looks degraded. Unlike the parse-time invalid latch,
+/// this one is package-AGNOSTIC: it is derived only from the two signals every
+/// package shares (the K8s pod status and the framework's OWN structured log
+/// severity), and it is CLEARED (comment + label removal) the moment the pod reads
+/// healthy again — so the label's presence is the "already warned" dedupe signal
+/// that keeps the scrape from re-posting every cycle. Mirrors the clearable
+/// [`SUBSTRATE_INVALID_LABEL`] rather than the one-way announce/pick-up latches.
+pub const SUBSTRATE_DEGRADED_LABEL: &str = "fkst-degraded";
+
 /// The identity of one repository to reconcile: `(installation_id, repo)`. The
 /// installation id scopes the GitHub App token; the repo names the work.
 pub type RepoKey = (i64, RepoRef);
