@@ -54,6 +54,19 @@ pub const RESERVED_ENV_NAME_PREFIXES: &[&str] = &["GIT_CONFIG_"];
 /// can never shadow one (e.g. `FKST_RUNTIME_ROOT`, `FKST_DURABLE_ROOT`).
 pub const RESERVED_ENV_PREFIX: &str = "FKST_";
 
+/// Git / credential-helper trace toggles the platform force to `"0"` on every
+/// session child (Layer 0 log hardening). Git's `GIT_TRACE*` / `GIT_CURL_VERBOSE`
+/// and the Git Credential Manager's `GCM_TRACE` each, when enabled, echo request
+/// headers — including `Authorization:` and `password` — to stderr, which would land
+/// verbatim in the (streamed) pod log. Written LAST by [`crate::session_pod`]'s child
+/// env builder so a user `env_profile` can never turn tracing back on.
+pub const GIT_TRACE_SILENCING_ENV: &[(&str, &str)] = &[
+    ("GIT_TRACE", "0"),
+    ("GIT_TRACE_CURL", "0"),
+    ("GIT_CURL_VERBOSE", "0"),
+    ("GCM_TRACE", "0"),
+];
+
 /// `env_key` the engine's codex reads the LLM API key from.
 ///
 /// MUST be `LLM_API_KEY`, NOT `FKST_LLM_API_KEY`: the engine's

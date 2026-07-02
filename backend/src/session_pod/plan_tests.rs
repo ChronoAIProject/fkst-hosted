@@ -238,6 +238,45 @@ fn substrate_child_env_folds_user_env_but_drops_reserved_keys() {
 }
 
 #[test]
+fn substrate_child_env_silences_git_and_gcm_tracing() {
+    // Layer 0: every git/GCM trace toggle must be present and forced to "0" so a
+    // rotating token can never trace-leak into the streamed pod log.
+    let env = substrate_child_env(
+        vec![("PATH".to_string(), "/usr/bin".to_string())],
+        &BTreeMap::new(),
+        "sk-secret",
+        &[],
+        "/rt/codex",
+        "/d",
+        "/r",
+    );
+    for (key, value) in crate::reserved_env::GIT_TRACE_SILENCING_ENV {
+        assert_eq!(find(&env, key), Some(*value), "{key} must be silenced");
+    }
+}
+
+#[test]
+fn user_env_cannot_re_enable_git_tracing() {
+    // A user `env_profile` that tries to turn tracing back on is overridden by the
+    // platform's last-writer-wins write.
+    let user_env = BTreeMap::from([
+        ("GIT_TRACE".to_string(), "1".to_string()),
+        ("GIT_CURL_VERBOSE".to_string(), "1".to_string()),
+    ]);
+    let env = substrate_child_env(vec![], &user_env, "sk-x", &[], "/c", "/d", "/r");
+    assert_eq!(
+        find(&env, "GIT_TRACE"),
+        Some("0"),
+        "platform forces trace off"
+    );
+    assert_eq!(
+        find(&env, "GIT_CURL_VERBOSE"),
+        Some("0"),
+        "platform forces curl verbosity off"
+    );
+}
+
+#[test]
 fn exit_status_to_code_maps_dispositions() {
     assert_eq!(exit_status_to_code(Some(0)), 0);
     assert_eq!(exit_status_to_code(Some(1)), 1);
