@@ -243,6 +243,7 @@ fn registration() -> SessionRegistration {
         session_id: "sess-abc".to_string(),
         config_hash: "hash123".to_string(),
         auto_merge: false,
+        log_streaming: false,
     }
 }
 

@@ -48,6 +48,7 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
         session_id: session_id.to_string(),
         config_hash: config_hash.to_string(),
         auto_merge: false,
+        log_streaming: false,
     }
 }
 

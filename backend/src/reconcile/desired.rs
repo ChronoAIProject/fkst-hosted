@@ -64,6 +64,11 @@ pub struct SessionRegistration {
     /// of `config_hash` — a pod runs identically regardless, so toggling it never
     /// respawns the pod; it only gates the reconcile-side merge step.
     pub auto_merge: bool,
+    /// Per-session opt-in (from the trigger issue's `### Log Streaming`) for the
+    /// reconciler to fan out this session's redacted pod logs. Like `auto_merge` it
+    /// is NOT part of `config_hash` — a pod runs identically regardless, so toggling
+    /// it never respawns the pod; it only gates the reconcile-side log-stream step.
+    pub log_streaming: bool,
 }
 
 /// The lifecycle phase of a live session pod, as the reconciler observes it. This

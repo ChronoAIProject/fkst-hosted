@@ -35,6 +35,7 @@ const HEADING_PACKAGES: &str = "### Packages";
 const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
+const HEADING_LOG_STREAMING: &str = "### Log Streaming";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -101,6 +102,11 @@ pub struct TriggerSpec {
     /// anything else, blank, or the section is absent. Never a 422 (lenient) so a
     /// pre-v2 trigger issue without the section still parses.
     pub auto_merge: bool,
+    /// The OPTIONAL `### Log Streaming` opt-in: `true` when the section's value is
+    /// one of true/yes/on/enabled/1/`[x]` (case-insensitive); `false` when the value
+    /// is anything else, blank, or the section is absent. Never a 422 (lenient),
+    /// mirroring `auto_merge`, so a trigger issue predating the section still parses.
+    pub log_streaming: bool,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -129,6 +135,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     };
 
     let auto_merge = parse_auto_merge(&sections);
+    let log_streaming = parse_log_streaming(&sections);
 
     Ok(TriggerSpec {
         name,
@@ -136,6 +143,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         work_label,
         environment,
         auto_merge,
+        log_streaming,
     })
 }
 
@@ -158,6 +166,28 @@ fn parse_auto_merge(sections: &[(String, String)]) -> bool {
         matches!(
             v.to_ascii_lowercase().as_str(),
             "true" | "yes" | "on" | "enabled" | "1"
+        )
+    })
+}
+
+/// `### Log Streaming` — OPTIONAL, lenient. Mirrors [`parse_auto_merge`] exactly:
+/// `true` iff ANY non-empty line is a truthy token (so the flag still reads `true`
+/// when the user leaves the template's explanatory HTML comment above the value
+/// line), otherwise `false`. Additionally accepts a checked checkbox `[x]` because
+/// the Issue Form renders this opt-in as a checkbox. Absent/blank/any other value →
+/// `false`. Never errors: an opt-in flag, not a validated field.
+fn parse_log_streaming(sections: &[(String, String)]) -> bool {
+    let block = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_LOG_STREAMING)
+    {
+        Some((_, content)) => content.as_str(),
+        None => return false,
+    };
+    non_empty_lines(block).iter().any(|v| {
+        matches!(
+            v.to_ascii_lowercase().as_str(),
+            "true" | "yes" | "on" | "enabled" | "1" | "[x]"
         )
     })
 }

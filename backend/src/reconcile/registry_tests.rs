@@ -62,6 +62,10 @@ fn valid_body_yields_a_registration() {
     assert_eq!(reg.def.work_label, "fkst-demo");
     assert_eq!(reg.def.environment, None);
     assert!(!reg.auto_merge, "a body with no Auto-merge section is off");
+    assert!(
+        !reg.log_streaming,
+        "a body with no Log Streaming section is off"
+    );
 
     // The session id + config hash must match the canonical derivations.
     let want_id = derive_session_id(INSTALLATION_ID, "acme", "site", 7);
@@ -116,6 +120,23 @@ fn auto_merge_section_is_threaded() {
     assert!(
         reg.auto_merge,
         "the `### Auto-merge` opt-in threads onto the registration"
+    );
+}
+
+#[test]
+fn log_streaming_section_is_threaded() {
+    let body = "### Session Name\n\
+                demo\n\n\
+                ### Packages\n\
+                acme/tools@main:pkg/demo\n\n\
+                ### Work Label\n\
+                fkst-demo\n\n\
+                ### Log Streaming\n\
+                true\n";
+    let reg = parse_registration(INSTALLATION_ID, &repo(), &issue(17, body, 1)).expect("parses");
+    assert!(
+        reg.log_streaming,
+        "the `### Log Streaming` opt-in threads onto the registration"
     );
 }
 

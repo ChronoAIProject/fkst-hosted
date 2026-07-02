@@ -75,6 +75,7 @@ prod-env
             work_label: "fkst-cloud".to_string(),
             environment: Some("prod-env".to_string()),
             auto_merge: false,
+            log_streaming: false,
         }
     );
 }
@@ -128,6 +129,50 @@ fn auto_merge_absent_defaults_false() {
     // The minimal body carries no `### Auto-merge` section at all.
     let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
     assert!(!spec.auto_merge, "an absent section defaults off");
+}
+
+/// Build a body with the four required sections held valid plus a `### Log Streaming`
+/// section carrying `val`, so a parse's `log_streaming` reflects only that value.
+fn body_with_log_streaming(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Log Streaming\n{val}\n"
+    )
+}
+
+#[test]
+fn log_streaming_true_variants() {
+    // `[x]` is accepted on top of the auto-merge token set (checkbox render).
+    for val in ["true", "YES", "On", "enabled", "1", "[x]", "[X]"] {
+        let spec = parse_trigger_issue_body(&body_with_log_streaming(val)).expect("parses");
+        assert!(spec.log_streaming, "{val:?} must enable log streaming");
+    }
+}
+
+#[test]
+fn log_streaming_false_variants() {
+    for val in ["false", "no", "off", "", "[ ]", "maybe"] {
+        let spec = parse_trigger_issue_body(&body_with_log_streaming(val)).expect("parses");
+        assert!(!spec.log_streaming, "{val:?} must leave log streaming off");
+    }
+}
+
+#[test]
+fn log_streaming_absent_defaults_false() {
+    // The minimal body carries no `### Log Streaming` section at all.
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(!spec.log_streaming, "an absent section defaults off");
+}
+
+#[test]
+fn log_streaming_reads_true_below_a_kept_comment() {
+    // The author leaves the template's explanatory HTML comment above the value;
+    // scanning ALL non-empty lines still reads the opt-in as `true`.
+    let val = "<!-- tick to stream this session's redacted logs -->\ntrue";
+    let spec = parse_trigger_issue_body(&body_with_log_streaming(val)).expect("parses");
+    assert!(
+        spec.log_streaming,
+        "a truthy line below a kept comment still enables log streaming"
+    );
 }
 
 #[test]
