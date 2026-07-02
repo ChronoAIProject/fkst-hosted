@@ -15,6 +15,7 @@
 //! the webhook is NOT rewired to enqueue here yet — that is the PR6 flip. Model A
 //! (the Job launcher + webhook trigger) is untouched.
 
+pub mod announce;
 pub mod automerge;
 pub mod desired;
 pub mod execute;
@@ -44,6 +45,14 @@ pub use templates::ensure_issue_templates;
 /// is the "already flagged" signal the planner reads to avoid re-commenting; its
 /// removal ([`ReconcileAction::ClearInvalid`]) is how a fixed issue is un-flagged.
 pub const SUBSTRATE_INVALID_LABEL: &str = "fkst-substrate-invalid";
+
+/// The DURABLE label the reconciler latches onto a trigger issue once it has posted
+/// the one-time session-registration announcement ([`ReconcileAction::AnnounceSession`]).
+/// Because it lives on the issue (not in process memory), a control-plane restart
+/// re-reads it and never re-posts the announcement. Config changes to an already
+/// announced trigger do NOT re-announce in v1 (the label stays) — an accepted
+/// limitation; there is no clear/removal path (unlike [`SUBSTRATE_INVALID_LABEL`]).
+pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 
 /// The identity of one repository to reconcile: `(installation_id, repo)`. The
 /// installation id scopes the GitHub App token; the repo names the work.

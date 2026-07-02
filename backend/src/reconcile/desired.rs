@@ -19,6 +19,7 @@ use sha2::{Digest, Sha256};
 
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
+use crate::reconcile::reachability;
 use crate::reconcile_config::ReconcileConfig;
 
 /// The launch inputs one substrate session needs, distilled from a parsed trigger
@@ -134,6 +135,24 @@ pub enum ReconcileAction {
     FlagInvalid { trigger_issue: i64, detail: String },
     /// Clear the invalid flag from an issue that now parses.
     ClearInvalid { trigger_issue: i64 },
+    /// Announce a freshly-registered VALID session on its trigger issue (comment +
+    /// durable latch label), first observation only. Carries the pre-rendered public
+    /// metadata the comment shows so the executor renders a pure body. Independent of
+    /// Spawn/pending — a session is announced on registration whether or not it has
+    /// queued work yet.
+    AnnounceSession {
+        trigger_issue: i64,
+        /// The session name (`### Session Name`).
+        session_name: String,
+        /// The GitHub work label whose open issues queue this session's work.
+        work_label: String,
+        /// The package refs rendered back to `owner/repo@ref:path`, in author order.
+        packages: Vec<String>,
+        /// The named environment, or `None` for a no-environment session.
+        environment: Option<String>,
+        /// Whether this trigger opted into reconcile-side PR auto-merge.
+        auto_merge: bool,
+    },
 }
 
 /// A stable content hash over a session's launch inputs: its ordered package
@@ -204,12 +223,17 @@ fn config_drifted(pod: &LivePod, reg: &SessionRegistration) -> bool {
 ///
 /// Precedence for a live pod: a config-drift kill takes priority over an idle kill;
 /// a `Terminating` pod is always left alone; a `Terminal` pod is always cleaned up.
+// Each argument is one distinct axis of the desired/observed snapshot the planner
+// diffs; bundling them into a struct would only rename the same fields at every
+// call site (the tests drive this directly) without reducing the real input set.
+#[allow(clippy::too_many_arguments)]
 pub fn plan_repo(
     regs: &[SessionRegistration],
     invalid: &[(i64, String)],
     live: &[LivePod],
     pending: &HashMap<String, bool>,
     latched_invalid: &HashSet<i64>,
+    latched_announced: &HashSet<i64>,
     now: DateTime<Utc>,
     cfg: &ReconcileConfig,
 ) -> Vec<ReconcileAction> {
@@ -263,6 +287,29 @@ pub fn plan_repo(
                     session_id: reg.session_id.clone(),
                 });
             }
+        }
+    }
+
+    // --- 1b. Announce newly-registered valid sessions -> comment once ---------
+    // Emitted for every VALID registration whose trigger issue is not already
+    // latched-announced. Independent of the pod lifecycle above: a session is
+    // announced the moment it registers, whether or not it has a pod or queued work
+    // yet. Invalid/flagged triggers are never here (they are not in `regs`).
+    for reg in regs {
+        if !latched_announced.contains(&reg.trigger_issue) {
+            actions.push(ReconcileAction::AnnounceSession {
+                trigger_issue: reg.trigger_issue,
+                session_name: reg.def.name.clone(),
+                work_label: reg.def.work_label.clone(),
+                packages: reg
+                    .def
+                    .packages
+                    .iter()
+                    .map(reachability::render_ref)
+                    .collect(),
+                environment: reg.def.environment.clone(),
+                auto_merge: reg.auto_merge,
+            });
         }
     }
 
@@ -320,7 +367,11 @@ pub fn plan_repo(
 }
 
 // Tests are split across files to keep each under the 500-line limit: shared
-// fixtures, the `plan_repo` matrix, and the `config_hash` cases.
+// fixtures, the `plan_repo` matrix, the session-announcement + determinism cases,
+// and the `config_hash` cases.
+#[cfg(test)]
+#[path = "desired_announce_tests.rs"]
+mod desired_announce_tests;
 #[cfg(test)]
 #[path = "desired_hash_tests.rs"]
 mod desired_hash_tests;

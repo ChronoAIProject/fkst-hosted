@@ -1,8 +1,11 @@
 //! Exhaustive tests for the pure planner ([`super::plan_repo`]): one per
-//! event→action matrix row (issue #359 §4.3), plus the precedence, clock-gating,
-//! and determinism cases. Fixtures live in [`super::desired_test_fixtures`].
-
-use std::collections::HashSet;
+//! event→action matrix row (issue #359 §4.3), plus the precedence and clock-gating
+//! cases. Fixtures live in [`super::desired_test_fixtures`]; the session-announcement
+//! and determinism cases live in [`super::desired_announce_tests`].
+//!
+//! The pod-lifecycle rows pass a `latched_announced` set covering their valid
+//! registrations so the one-time [`ReconcileAction::AnnounceSession`] is suppressed
+//! and each assertion stays about the single lifecycle action under test.
 
 use super::desired_test_fixtures::*;
 use super::{plan_repo, KillReason, PodLiveness, ReconcileAction};
@@ -18,6 +21,7 @@ fn valid_absent_pending_spawns() {
         &[],
         &pending(&[("s1", true)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -33,6 +37,7 @@ fn valid_absent_not_pending_does_nothing() {
         &[],
         &pending(&[("s1", false)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -51,6 +56,7 @@ fn absent_liveness_pod_is_treated_as_absent_and_spawns() {
         &live,
         &pending(&[("s1", true)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -68,6 +74,7 @@ fn valid_live_pending_touches() {
             &live,
             &pending(&[("s1", true)]),
             &latched(&[]),
+            &latched(&[1]),
             now(),
             &cfg(300, 120),
         );
@@ -99,6 +106,7 @@ fn valid_live_idle_past_both_clocks_kills_idle() {
         &live,
         &pending(&[("s1", false)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -129,6 +137,7 @@ fn idle_not_killed_before_idle_grace() {
         &live,
         &pending(&[("s1", false)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -154,6 +163,7 @@ fn idle_not_killed_before_min_lifetime() {
         &live,
         &pending(&[("s1", false)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(60, 600),
     );
@@ -179,6 +189,7 @@ fn config_mismatch_kills_config_changed_regardless_of_pending() {
             &live,
             &pending(&[("s1", is_pending)]),
             &latched(&[]),
+            &latched(&[1]),
             now(),
             &cfg(300, 120),
         );
@@ -211,6 +222,7 @@ fn config_drift_kill_beats_idle() {
         &live,
         &pending(&[("s1", false)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -235,6 +247,7 @@ fn unknown_pod_config_hash_is_not_drift() {
         &live,
         &pending(&[("s1", true)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -263,6 +276,7 @@ fn valid_terminal_cleans_up() {
         &live,
         &pending(&[("s1", true)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -291,6 +305,7 @@ fn valid_terminating_does_nothing() {
         &live,
         &pending(&[("s1", false)]),
         &latched(&[]),
+        &latched(&[1]),
         now(),
         &cfg(300, 120),
     );
@@ -307,6 +322,7 @@ fn orphan_live_pod_is_killed_trigger_closed() {
             &[],
             &live,
             &pending(&[]),
+            &latched(&[]),
             &latched(&[]),
             now(),
             &cfg(300, 120),
@@ -330,6 +346,7 @@ fn orphan_terminal_pod_is_cleaned_up() {
         &[],
         &live,
         &pending(&[]),
+        &latched(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),
@@ -358,6 +375,7 @@ fn orphan_terminating_pod_does_nothing() {
         &live,
         &pending(&[]),
         &latched(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -372,6 +390,7 @@ fn invalid_issue_not_latched_is_flagged() {
         &invalid,
         &[],
         &pending(&[]),
+        &latched(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),
@@ -394,6 +413,7 @@ fn invalid_issue_already_latched_is_not_reflagged() {
         &[],
         &pending(&[]),
         &latched(&[5]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -405,13 +425,16 @@ fn invalid_issue_already_latched_is_not_reflagged() {
 
 #[test]
 fn latched_issue_that_reparses_is_cleared() {
-    // Issue 5 is latched-invalid but now appears as a valid registration.
+    // Issue 5 is latched-invalid but now appears as a valid registration. It is both
+    // ClearInvalid'd AND (being valid + not yet announced) announced; the announce is
+    // suppressed here via `latched_announced` to keep the assertion about the clear.
     let regs = vec![reg("s5", 5, "h")];
     let actions = plan_repo(
         &regs,
         &[],
         &[],
         &pending(&[("s5", false)]),
+        &latched(&[5]),
         &latched(&[5]),
         now(),
         &cfg(300, 120),
@@ -433,6 +456,7 @@ fn latched_issue_still_invalid_is_not_cleared() {
         &[],
         &pending(&[]),
         &latched(&[5]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -447,47 +471,9 @@ fn empty_inputs_produce_no_actions() {
         &[],
         &pending(&[]),
         &latched(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
     assert!(actions.is_empty());
-}
-
-// ---- determinism / order-independence --------------------------------------
-
-#[test]
-fn clear_invalid_output_is_order_independent_of_the_set() {
-    let regs = vec![reg("s3", 3, "h"), reg("s5", 5, "h"), reg("s8", 8, "h")];
-    // Two logically-equal sets built by inserting the ids in different orders.
-    let a: HashSet<i64> = [3, 5, 8].into_iter().collect();
-    let b: HashSet<i64> = [8, 3, 5].into_iter().collect();
-    let plan_a = plan_repo(&regs, &[], &[], &pending(&[]), &a, now(), &cfg(300, 120));
-    let plan_b = plan_repo(&regs, &[], &[], &pending(&[]), &b, now(), &cfg(300, 120));
-    assert_eq!(
-        plan_a, plan_b,
-        "set iteration order must not leak into output"
-    );
-    assert_eq!(
-        plan_a,
-        vec![
-            ReconcileAction::ClearInvalid { trigger_issue: 3 },
-            ReconcileAction::ClearInvalid { trigger_issue: 5 },
-            ReconcileAction::ClearInvalid { trigger_issue: 8 },
-        ],
-        "cleared issues are emitted in ascending order"
-    );
-}
-
-#[test]
-fn plan_output_is_order_independent_of_the_pending_map() {
-    let regs = vec![reg("s1", 1, "h"), reg("s2", 2, "h")];
-    let live = vec![
-        pod("s1", 1, PodLiveness::Live, ago(10), Some(ago(1)), Some("h")),
-        pod("s2", 2, PodLiveness::Live, ago(10), Some(ago(1)), Some("h")),
-    ];
-    let m1 = pending(&[("s1", true), ("s2", true)]);
-    let m2 = pending(&[("s2", true), ("s1", true)]);
-    let p1 = plan_repo(&regs, &[], &live, &m1, &latched(&[]), now(), &cfg(300, 120));
-    let p2 = plan_repo(&regs, &[], &live, &m2, &latched(&[]), now(), &cfg(300, 120));
-    assert_eq!(p1, p2);
 }

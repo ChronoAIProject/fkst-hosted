@@ -151,6 +151,28 @@ async fn flag_invalid_posts_a_comment_and_latches_the_label() {
 }
 
 #[tokio::test]
+async fn announce_session_posts_a_comment_and_latches_the_announced_label() {
+    let api = Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+
+    let body = announce_session_comment("demo", "fkst-run", &[], None, false);
+    announce_session(&github, "acme/site", 11, &body).await;
+
+    let comments = api.comments.lock().unwrap();
+    assert_eq!(comments.len(), 1, "exactly one comment");
+    assert_eq!(comments[0].2, 11);
+    assert!(
+        comments[0].3.contains("fkst session `demo` registered."),
+        "the posted body is the rendered announcement"
+    );
+
+    let added = api.labels_added.lock().unwrap();
+    assert_eq!(added.len(), 1, "exactly one label add");
+    assert_eq!(added[0].2, 11);
+    assert_eq!(added[0].3, vec![SUBSTRATE_ANNOUNCED_LABEL.to_string()]);
+}
+
+#[tokio::test]
 async fn clear_invalid_removes_the_label() {
     let api = Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
