@@ -151,12 +151,22 @@ PRs into `develop` run exactly five checks, all under `.github/workflows/`:
 
 Keep this set minimal — do not add new PR gates without good reason.
 
+## Authoring work issues for a substrate session
+
+A running session's devloop works the repo's open work-label issues **in parallel, each as an independent PR branched off `main`** — so an issue that depends on shared scaffolding another issue produces is coded against a `main` that does **not** yet contain it. Shape the backlog accordingly:
+
+- **Wave the backlog by dependency.** Land the foundational issues first (shared config, base modules, scaffolding), **merge them**, and only then file the issues that build on them. Do **not** file a large set of interdependent issues at once: a dependent issue worked before its foundation is merged can yield an empty diff (codex returns `no-changes`) or reference files not yet on `main`. In live testing, content clarity was never the failure mode — **dependency ordering** was.
+- **One feature/page per issue**, named in the title, with exact files + real content + checkable acceptance criteria. Each issue is coded in isolation (codex sees that one issue + the repo, not the sibling backlog), so cross-referencing every other issue in each body does not help — correct per-issue scoping does.
+- **An open work issue keeps its session's pod alive until it is closed or its PR merges.** A created-but-unmerged PR does NOT idle the session — the reconciler's pending gate counts open work-label issues, not un-PR'd ones. Merge/close finished work to let a session idle down.
+- **Never give two open trigger issues in one repo the same work label** — each spawns a competing pod over the same work queue (double-claim / duplicate PRs). One session = one distinct work label.
+
 ## Quick Rules Summary
 
 - Stay within the user-facing/public-interface scope; never touch the kernel engine.
 - The control plane serves a dynamic OpenAPI 3 spec at `/openapi.json` (no static file). New/changed public endpoints MUST be annotated with `#[utoipa::path]` + `ToSchema`/`IntoParams` and registered via `OpenApiRouter`/`routes!`; pin `utoipa-axum` to `0.1` (axum 0.7). See **API Contract (OpenAPI)**.
 - The fkst deployables run exclusively on Kubernetes (per-deployable `k8s_sample/` dirs); `docker-compose` is not used in this repo.
 - Treat the upstream engine and packages repos as read-only references.
+- When filing work issues for a substrate session, **wave the backlog by dependency** (merge foundation before dependent issues), one feature per issue; an open work issue keeps the session's pod alive until closed/merged; never share a work label between two trigger issues in one repo. See **Authoring work issues for a substrate session**.
 - Keep commits small and self-contained.
 - Never add `Co-Authored-By`; always act under the user's own GitHub identity (never a bot/AI identity).
 - All work goes through a pull request — no direct commits to shared branches.
