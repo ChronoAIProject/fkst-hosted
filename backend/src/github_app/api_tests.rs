@@ -423,6 +423,40 @@ async fn remove_issue_label_tolerates_404() {
         .expect("404 tolerated");
 }
 
+#[tokio::test]
+async fn get_issue_labels_maps_the_label_names() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues/7"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "number": 7,
+            "labels": [{"name": "fkst-degraded"}, {"name": "fkst-substrate-trigger"}]
+        })))
+        .mount(&server)
+        .await;
+    let labels = api(&server.uri())
+        .get_issue_labels(&SecretString::from("ghs_tok"), "acme", "site", 7)
+        .await
+        .expect("labels read");
+    assert_eq!(labels, vec!["fkst-degraded", "fkst-substrate-trigger"]);
+}
+
+#[tokio::test]
+async fn get_issue_labels_404_is_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues/7"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let labels = api(&server.uri())
+        .get_issue_labels(&SecretString::from("ghs_tok"), "acme", "site", 7)
+        .await
+        .expect("404 → empty");
+    assert!(labels.is_empty());
+}
+
 // ---- template-reconcile write transport ----------------------------------
 
 fn tok() -> SecretString {

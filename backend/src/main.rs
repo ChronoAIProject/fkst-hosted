@@ -302,8 +302,25 @@ async fn spawn_reconciler(
         fkst_control_plane::k8s::run_token_rotation_loop(rot_kube, rot_github, rot_cfg, rot_handle)
             .await
     });
+    // The package-agnostic session-health scrape loop (pod status + framework log
+    // severity → flag/clear the degraded label on the trigger issue).
+    let health_kube = ctx.kube.clone();
+    let health_github = ctx.github.clone();
+    let health_cfg = ctx.config.reconcile.clone();
+    let health_handle = handle.clone();
+    tokio::spawn(async move {
+        fkst_control_plane::k8s::run_health_scrape_loop(
+            health_kube,
+            health_github,
+            health_cfg,
+            health_handle,
+        )
+        .await
+    });
 
-    tracing::info!("model B reconciler spawned (reconcile + sweep + full-resync + token rotation)");
+    tracing::info!(
+        "model B reconciler spawned (reconcile + sweep + full-resync + token rotation + health scrape)"
+    );
     Some(handle)
 }
 
