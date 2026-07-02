@@ -255,7 +255,7 @@ function S.install(M)
     if value == "" or value:find("[\r\n]") ~= nil then
       error("github-devloop: invalid directory path")
     end
-    return "mkdir -p " .. M._shell_single_quote(value)
+    return "mkdir -p " .. devloop_base._shell_single_quote(value)
   end
 
   function M.path_is_directory_cmd(path)
@@ -263,7 +263,7 @@ function S.install(M)
     if value == "" or value:find("[\r\n]") ~= nil then
       error("github-devloop: invalid directory path")
     end
-    return "[ -d " .. M._shell_single_quote(value) .. " ]"
+    return "[ -d " .. devloop_base._shell_single_quote(value) .. " ]"
   end
 
   function M.find_worktrees_for_branch(stdout, branch)

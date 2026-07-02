@@ -1,3 +1,4 @@
+local devloop_base = require("devloop.base")
 local payloads_board = require("devloop.payloads.board")
 local C = {}
 local strings = require("contract.strings")
@@ -85,7 +86,7 @@ end
 
 local function write_file(M, path, content, exec)
   if exec ~= nil then
-    run_required("touch " .. M._shell_single_quote(path), 30, "write", exec)
+    run_required("touch " .. devloop_base._shell_single_quote(path), 30, "write", exec)
   end
   local value = tostring(content or "")
   local ok = pcall(file.write, path, value)
@@ -93,7 +94,7 @@ local function write_file(M, path, content, exec)
     return
   end
   run_required(
-    "printf %s " .. M._shell_single_quote(value) .. " > " .. M._shell_single_quote(path),
+    "printf %s " .. devloop_base._shell_single_quote(value) .. " > " .. devloop_base._shell_single_quote(path),
     30,
     "write",
     exec
@@ -128,14 +129,14 @@ local function files_are_readable(M, paths, exec)
   end
   local tests = {}
   for _, path in ipairs(paths) do
-    table.insert(tests, "test -r " .. M._shell_single_quote(path))
+    table.insert(tests, "test -r " .. devloop_base._shell_single_quote(path))
   end
   local result = run_optional(table.concat(tests, " && "), 30, exec)
   return type(result) == "table" and result.exit_code == 0
 end
 
 local function file_size(M, path, exec)
-  local result = run_optional("wc -c < " .. M._shell_single_quote(path), 30, exec)
+  local result = run_optional("wc -c < " .. devloop_base._shell_single_quote(path), 30, exec)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil
   end
@@ -190,18 +191,18 @@ end
 
 local function rename_dir_cmd(M, from_dir, to_dir)
   local script = "import os, sys\nos.rename(sys.argv[1], sys.argv[2])\n"
-  return "python3 -c " .. M._shell_single_quote(script)
-    .. " " .. M._shell_single_quote(from_dir)
-    .. " " .. M._shell_single_quote(to_dir)
+  return "python3 -c " .. devloop_base._shell_single_quote(script)
+    .. " " .. devloop_base._shell_single_quote(from_dir)
+    .. " " .. devloop_base._shell_single_quote(to_dir)
 end
 
 local function dir_exists(M, dir, exec)
-  local result = run_optional("test -d " .. M._shell_single_quote(dir), 30, exec)
+  local result = run_optional("test -d " .. devloop_base._shell_single_quote(dir), 30, exec)
   return type(result) == "table" and result.exit_code == 0
 end
 
 local function path_exists(M, path, exec)
-  local result = run_optional("test -e " .. M._shell_single_quote(path), 30, exec)
+  local result = run_optional("test -e " .. devloop_base._shell_single_quote(path), 30, exec)
   return type(result) == "table" and result.exit_code == 0
 end
 
@@ -224,7 +225,7 @@ local function publish_bundle(M, tmp_dir, target_bundle, exec)
 
   if dir_exists(M, target_dir, exec) then
     if validate_bundle(M, target_bundle, exec) then
-      run_optional("rm -rf " .. M._shell_single_quote(tmp_dir), 30, exec)
+      run_optional("rm -rf " .. devloop_base._shell_single_quote(tmp_dir), 30, exec)
       return target_bundle
     end
     local unique_bundle = bundle_paths(uniquified_publish_dir(M, target_dir, exec), target_bundle.pr_path ~= nil)
@@ -431,9 +432,9 @@ function C.build_context_bundle(M, args)
   end
 
   local parent = dir:gsub("/+$", ""):match("^(.*)/[^/]+$") or root
-  run_required("install -d -m 0755 " .. M._shell_single_quote(parent), 30, "parent directory setup", args.exec)
+  run_required("install -d -m 0755 " .. devloop_base._shell_single_quote(parent), 30, "parent directory setup", args.exec)
   local tmp_result = run_required(
-    "mktemp -d " .. M._shell_single_quote(parent .. "/.bundle-tmp.XXXXXX"),
+    "mktemp -d " .. devloop_base._shell_single_quote(parent .. "/.bundle-tmp.XXXXXX"),
     30,
     "temp directory setup",
     args.exec
