@@ -51,12 +51,17 @@ data:
   # FKST_POD_RUNTIME_CLASS: "kata"
 
   # --- chrono-storage log streaming (OPTIONAL) ---
-  # Stream session logs to chrono-storage (a MinIO/S3 front behind the NyxID
-  # proxy). OPTIONAL: leave ALL of these (+ the FKST_NYXID_CLIENT_SECRET Secret,
-  # see secret.example.yaml) unset and log streaming is disabled. Setting SOME
-  # but not all fails closed at startup, naming the missing vars. These four are
-  # non-secret; the client secret is a Secret.
+  # Stream every session's redacted logs to chrono-storage (a MinIO/S3 front
+  # behind the NyxID proxy) as a tar.gz bundle. OPTIONAL: leave ALL of these (+
+  # the FKST_NYXID_CLIENT_SECRET Secret, see secret.example.yaml) unset and no
+  # bundle is produced. Setting SOME but not all of the core five fails closed at
+  # startup, naming the missing vars. These four are non-secret; the client
+  # secret is a Secret.
   # FKST_STORAGE_BASE_URL: "https://storage.chrono-ai.fun"
   # FKST_STORAGE_BUCKET: "fkst-session-logs"
   # FKST_NYXID_TOKEN_URL: "https://nyx.chrono-ai.fun/oauth/token"
-  # FKST_NYXID_CLIENT_ID: "CHANGE_ME"
+  # FKST_NYXID_CLIENT_ID: "CHANGE_ME"        # the READ/responder SA client id
+  # The WRITE-ONLY SA client id handed to session pods for the in-pod uploader
+  # (non-secret; pairs with FKST_STORAGE_WRITER_CLIENT_SECRET in the Secret).
+  # Leave both unset to disable per-session bundle uploads.
+  # FKST_STORAGE_WRITER_CLIENT_ID: "CHANGE_ME"
