@@ -16,7 +16,7 @@ local branch = "devloop-owner-repo-42-01HY"
 local pr_proposal_id = "github-devloop/pr/owner/repo/7"
 
 local function pr_link()
-  return m_builders.pr_link_marker(core, proposal_id, 7, branch, impl_version, "dev")
+  return m_builders.pr_link_marker(proposal_id, 7, branch, impl_version, "dev")
 end
 
 local function mock_linked_pr(state, comments)
@@ -24,7 +24,7 @@ local function mock_linked_pr(state, comments)
     repo = "owner/repo",
     number = 7,
 	    comments = comments or {
-	      render_comment(m_builders.pr_origin_marker(core, proposal_id, 42, branch, impl_version, "dev")
+	      render_comment(m_builders.pr_origin_marker(proposal_id, 42, branch, impl_version, "dev")
 	        .. "\n" .. core.state_marker(proposal_id, "pr-open", impl_version)),
 	    },
     head = branch,

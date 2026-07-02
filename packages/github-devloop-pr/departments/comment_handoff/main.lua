@@ -96,7 +96,7 @@ end
 local maybe_raise_pr_label
 
 local function emit_merge_ready(payload, handoff)
-  local merge_ready = payloads_builders.build_devloop_merge_ready_payload(core, handoff.proposal_id, handoff.pr_number, handoff.version, {
+  local merge_ready = payloads_builders.build_devloop_merge_ready_payload(handoff.proposal_id, handoff.pr_number, handoff.version, {
     review_proposal_id = handoff.review_proposal_id,
     review_dedup_key = handoff.review_dedup_key,
     reviewed_head_sha = handoff.reviewed_head_sha,

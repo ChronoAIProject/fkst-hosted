@@ -78,7 +78,7 @@ function C.converge_base_version(consensus_dedup)
   return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
 end
 
-function C.converge_proposal_base_dedup(M, consensus_dedup)
+function C.converge_proposal_base_dedup(consensus_dedup)
   local base_version = C.converge_base_version(consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end

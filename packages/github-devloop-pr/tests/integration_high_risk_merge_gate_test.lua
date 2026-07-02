@@ -29,7 +29,7 @@ local high_risk_merge_gate = require("core.high_risk_merge_gate")
 local m_builders = require("devloop.markers.builders")
 
 local function origin_marker(event)
-  return m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+  return m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
 end
 
 local function comments_with_untrusted_evidence(event)

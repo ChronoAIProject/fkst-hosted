@@ -31,7 +31,7 @@ function C.liveness_scan_cursor_key(repo, prefix)
   return tostring(prefix or "github-devloop/liveness-scan/cursor/") .. base_ids.safe_repo(repo)
 end
 
-function C.liveness_scan_log_deferred(M, reason, fields)
+function C.liveness_scan_log_deferred(reason, fields)
   devloop_logging.log_line("info", "liveness_scan", "github-devloop/liveness-scan", "LIVENESS_DEFERRED", {
     "reason=" .. tostring(reason or "budget"),
     "listed_issues=" .. tostring(fields and fields.listed_issues or 0),
@@ -47,7 +47,7 @@ function C.liveness_scan_is_timeout_result(M, result)
     and (tonumber(result.exit_code) == 124 or M.error_fact_class({ message = result.stderr }) == "timeout")
 end
 
-function C.liveness_scan_update_cursor(M, cursor_key, cursor, total, processed)
+function C.liveness_scan_update_cursor(cursor_key, cursor, total, processed)
   if cursor_key == nil then
     return
   end
@@ -175,7 +175,7 @@ local function sort_by_number(items)
   return items
 end
 
-function C.liveness_scan_activation_slice(M, repo, kind, items, cursor_prefix)
+function C.liveness_scan_activation_slice(repo, kind, items, cursor_prefix)
   local activations = {}
   for _, entity in ipairs(sort_by_number(items or {})) do
     table.insert(activations, { kind = kind, entity = entity })

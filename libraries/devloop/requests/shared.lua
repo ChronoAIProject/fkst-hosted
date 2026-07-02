@@ -14,7 +14,7 @@ C.max_display_block_len = 5000
 C.max_verdict_summary_items = 8
 C.max_verdict_summary_len = 600
 
-function C.bounded_neutralized_text(M, value, limit)
+function C.bounded_neutralized_text(value, limit)
   local text = tostring(value or "")
   local cap = limit or C.max_display_digest_len
   if #text > cap then
@@ -31,13 +31,13 @@ function C.angle_display_text(M, item)
   if type(item) ~= "table" then
     return nil
   end
-  local angle = C.bounded_neutralized_text(M, item.angle or "unknown", C.max_display_attr_len)
-  local verdict = C.bounded_neutralized_text(M, item.verdict or "invalid", C.max_display_attr_len)
+  local angle = C.bounded_neutralized_text(item.angle or "unknown", C.max_display_attr_len)
+  local verdict = C.bounded_neutralized_text(item.verdict or "invalid", C.max_display_attr_len)
   local digest = item.digest
   if digest == nil or tostring(digest) == "" then
     digest = item.reply
   end
-  digest = C.bounded_neutralized_text(M, digest or "", C.max_display_digest_len)
+  digest = C.bounded_neutralized_text(digest or "", C.max_display_digest_len)
   if digest == "" then
     return "- " .. angle .. ": " .. verdict
   end
@@ -48,7 +48,7 @@ function C.build_convergence_display(M, header, unresolved, round)
   local lines = {
     header .. tostring(round) .. comment_strings.comment_string(M, "convergence_suffix"),
   }
-  local question = C.bounded_neutralized_text(M, unresolved and unresolved.narrowed_question or "", C.max_display_question_len)
+  local question = C.bounded_neutralized_text(unresolved and unresolved.narrowed_question or "", C.max_display_question_len)
   if question ~= "" then
     table.insert(lines, "")
     table.insert(lines, comment_strings.comment_string(M, "narrowed_question_label") .. question)
@@ -86,8 +86,8 @@ function C.build_verdict_summary(M, angle_results)
       break
     end
     if type(item) == "table" then
-      local angle = C.bounded_neutralized_text(M, item.angle or "unknown", C.max_display_attr_len)
-      local verdict = C.bounded_neutralized_text(M, item.verdict or "invalid", C.max_display_attr_len)
+      local angle = C.bounded_neutralized_text(item.angle or "unknown", C.max_display_attr_len)
+      local verdict = C.bounded_neutralized_text(item.verdict or "invalid", C.max_display_attr_len)
       table.insert(parts, angle .. "=" .. verdict)
     end
   end

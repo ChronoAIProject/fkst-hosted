@@ -115,18 +115,18 @@ local function act_liveness_scan(event)
   local deadline = sweep_bounds.sweep_deadline(now(), limits)
   local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
-    liveness_scan.liveness_scan_log_deferred(core, "deadline", { entity_cap = limits.entity_cap })
+    liveness_scan.liveness_scan_log_deferred("deadline", { entity_cap = limits.entity_cap })
     return
   end
   local issues = liveness_scan.liveness_scan_list_open_issues(core, repo, timeout, entity_list_cache.entity_list_poll_key(event))
-  local activations, deferred_by_cap, cursor_key, cursor, total = liveness_scan.liveness_scan_activation_slice(core, repo, "issue", issues, LIVENESS_SCAN_CURSOR_PREFIX)
+  local activations, deferred_by_cap, cursor_key, cursor, total = liveness_scan.liveness_scan_activation_slice(repo, "issue", issues, LIVENESS_SCAN_CURSOR_PREFIX)
   local processed = 0
   local attempted = 0
 
   for _, activation in ipairs(activations) do
     if not sweep_bounds.sweep_has_budget(deadline) then
-      liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
-      liveness_scan.liveness_scan_log_deferred(core, "deadline", {
+      liveness_scan.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
+      liveness_scan.liveness_scan_log_deferred("deadline", {
         listed_issues = #issues,
         processed = processed,
         deferred = (#activations - processed) + deferred_by_cap,
@@ -138,8 +138,8 @@ local function act_liveness_scan(event)
     attempted = attempted + 1
     local should_reinject, defer_reason = should_reinject_issue(repo, activation.entity, limits, deadline)
     if defer_reason == "deadline" then
-      liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
-      liveness_scan.liveness_scan_log_deferred(core, "deadline", {
+      liveness_scan.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
+      liveness_scan.liveness_scan_log_deferred("deadline", {
         listed_issues = #issues,
         processed = processed,
         deferred = (#activations - processed) + deferred_by_cap,
@@ -153,10 +153,10 @@ local function act_liveness_scan(event)
     end
   end
 
-  liveness_scan.liveness_scan_update_cursor(core, cursor_key, cursor, total, attempted)
+  liveness_scan.liveness_scan_update_cursor(cursor_key, cursor, total, attempted)
 
   if deferred_by_cap > 0 then
-    liveness_scan.liveness_scan_log_deferred(core, "cap", {
+    liveness_scan.liveness_scan_log_deferred("cap", {
       listed_issues = #issues,
       processed = processed,
       deferred = deferred_by_cap,

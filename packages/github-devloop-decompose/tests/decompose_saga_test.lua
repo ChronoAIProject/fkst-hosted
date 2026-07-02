@@ -14,7 +14,7 @@ local first_delivery_facts = nil
 
 local function blocked_comments(event, extra)
   local comments = {
-    m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     core.state_marker(event.proposal_id, "blocked", event.version),
     conv_reconcile.fix_reconcile_marker(core, event.proposal_id, event.version, "drop"),
   }
@@ -78,7 +78,7 @@ end
 
 local function mock_pr_view(event, comments)
   local selected = {
-    m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+    m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
   }
   for _, comment in ipairs(comments) do
     table.insert(selected, comment)

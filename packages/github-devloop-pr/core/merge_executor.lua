@@ -94,7 +94,7 @@ local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, re
     pr_number = merge_ready.pr_number,
     source_ref = source_ref,
   }, current_state.version)
-  local decompose = payloads_builders.build_devloop_decompose_payload(core, fix_reconcile)
+  local decompose = payloads_builders.build_devloop_decompose_payload(fix_reconcile)
   devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "blocked", "applied(fix-loop-max-rounds)", reason)
   devloop_logging.log_raise("merge", merge_ready.proposal_id, "devloop_fix_reconcile", fix_reconcile)
   devloop_logging.log_raise("merge", merge_ready.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
@@ -740,7 +740,7 @@ local function synthesize_merge_ready_from_queue_head(repo, head)
     or head.head_sha == nil then
     return nil
   end
-  return payloads_builders.build_devloop_merge_ready_payload(core, head.proposal_id, head.pr_number, head.version, {
+  return payloads_builders.build_devloop_merge_ready_payload(head.proposal_id, head.pr_number, head.version, {
     review_proposal_id = head.review_proposal_id,
     review_dedup_key = head.review_dedup_key,
     reviewed_head_sha = head.head_sha,

@@ -51,7 +51,7 @@ local function pr_event(updated_at)
 end
 
 local function mock_review_loop_state(impl_version)
-  local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+  local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
   mock_bot_env()
   mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
   mock_issue_review({ "fkst-dev:reviewing" }, {
@@ -201,7 +201,7 @@ return {
     t.eq(signal.resolver, "review-converge-round")
 
     local observed = run_observe_pr_with_comments({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", raw_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", raw_version, "dev"),
       { body = core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", raw_version), author_login = "fkst-test-bot", created_at = "2026-06-03T00:00:00Z" },
       { body = heartbeat.payload.body, author_login = "fkst-test-bot", created_at = os.date("!%Y-%m-%dT%H:%M:%SZ", now() - 60) },
     })
@@ -279,7 +279,7 @@ return {
       ref = "owner/repo#pr/7",
     })
     h.mock_pr_origin({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
       m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "reject", review_dedup_key, 1, "missing retry guard"),
     })
@@ -302,7 +302,7 @@ return {
     })
     local impl_version = reviewing().version
     h.mock_pr_origin({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     h.set_pr_phase_comments({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
@@ -314,7 +314,7 @@ return {
     t.is_true(original_fixing ~= nil)
 
     h.mock_pr_origin({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", original_fixing.payload.version),
       m_builders.review_result_marker(core, 
         original_fixing.payload.review_proposal_id,
@@ -347,7 +347,7 @@ return {
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)
     h.mock_pr_origin({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
     })
     mock_issue_result_view({ "fkst-dev:fixing" }, {
@@ -364,7 +364,7 @@ return {
     local fix_version = core.next_fix_version(impl_version)
     local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     h.mock_pr_origin({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
     }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result_view({ "fkst-dev:fixing" }, {
@@ -391,7 +391,7 @@ return {
     local impl_version = reviewing().version
     local fix_version = core.next_fix_version(impl_version)
     h.mock_pr_origin({
-      m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
     }, "devloop-owner-repo-42-01HY", "def456", "CLOSED")
     mock_issue_result_view({ "fkst-dev:fixing" }, {

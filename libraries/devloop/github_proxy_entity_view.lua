@@ -471,7 +471,7 @@ function C.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
 end
 
 -- Readable cache key for an opt-in scan read: github-devloop/ghread/<variant>/<repo>/<number>.
-function C.gh_read_cache_key(M, variant, repo, number)
+function C.gh_read_cache_key(variant, repo, number)
   return "github-devloop/ghread/"
     .. sanitize_cache_segment(variant, false)
     .. "/"

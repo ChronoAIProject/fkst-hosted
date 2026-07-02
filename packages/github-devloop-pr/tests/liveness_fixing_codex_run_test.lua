@@ -131,7 +131,7 @@ end
 
 local function fixing_comments(event, version)
   return {
-    trusted_comment(m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
+    trusted_comment(m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
     trusted_comment(core.state_marker(event.proposal_id, "fixing", version or event.version)),
     trusted_comment(m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
     trusted_comment(m_builders.merge_gate_marker(core, 
@@ -149,7 +149,7 @@ end
 
 local function review_meta_comments(event, version)
   return {
-    trusted_comment(m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
+    trusted_comment(m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
     trusted_comment(core.state_marker(event.proposal_id, "review-meta", version or event.version)),
     trusted_comment(m_builders.review_meta_marker(core, event.proposal_id, event.dedup_key)),
     trusted_comment(m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
@@ -333,7 +333,7 @@ local function mock_fix_dispatch_context(event, branch, rejection)
     core.state_marker(event.proposal_id, "fixing", event.version),
     rejection,
   }, branch, event.version)
-  mock_pr_fix({ m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev") }, branch, event.reviewed_head_sha)
+  mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, event.reviewed_head_sha)
 end
 
 local function run_liveness_scan(name, run_opts)
@@ -481,7 +481,7 @@ return {
     mock_write_env("1")
     mock_fix_dispatch_context(event, branch, rejection)
     mock_git_push(branch)
-    mock_pr_fix({ m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev") }, branch, "feedface")
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "feedface")
 
     local result = run_fix(event, run_opts)
     t.eq(result.exit_code, 0)

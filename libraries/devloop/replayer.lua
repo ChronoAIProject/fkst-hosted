@@ -387,7 +387,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   local stable_version = transition_version.strip_suffixes(state.version)
   local latest = M.latest_complete_converge_round(current.comments, proposal_id, stable_version, issue.source_ref)
   if latest ~= nil then
-    local base_version = conv_rounds.converge_proposal_base_dedup(M, latest.dedup)
+    local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
     local next_n = latest.round + 1
     local next_dedup = base_version .. "/loop/" .. tostring(next_n)
     local content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
@@ -695,7 +695,7 @@ local function replay_review_meta(M, tools, dept, issue, state, row, facts)
     payload = payloads_builders.build_devloop_fix_reflection_payload(M, fact, proposal_id, fields.version, fields.pr_number, fact.fix_round or fact.n, fields.source_ref)
     payload.blocking_gap = fact.blocking_gap
   else
-    payload = payloads_builders.build_devloop_review_meta_payload(M, fact, proposal_id, fields.version, fields.pr_number, fact.n, fields.source_ref)
+    payload = payloads_builders.build_devloop_review_meta_payload(fact, proposal_id, fields.version, fields.pr_number, fact.n, fields.source_ref)
   end
   devloop_logging.log_cas_decision(dept, proposal_id, state, "review-meta", "review-meta", "applied(replay)", "trusted review-meta fact is visible")
   return raise_effects(M, dept, proposal_id, "review-meta", state.version, { add = {}, remove = {} }, {
@@ -805,7 +805,7 @@ local function replay_merge_ready_like(M, tools, dept, issue, state, row, facts)
     ["merge-ready"] = fact,
     proposal_id = proposal_id,
   })
-  local payload = payloads_builders.build_devloop_merge_ready_payload(M, fields.proposal_id, fields.pr_number, fields.version, {
+  local payload = payloads_builders.build_devloop_merge_ready_payload(fields.proposal_id, fields.pr_number, fields.version, {
     review_proposal_id = fields.review_proposal_id,
     review_dedup_key = fields.review_dedup_key,
     reviewed_head_sha = fields.reviewed_head_sha,

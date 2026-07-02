@@ -53,7 +53,7 @@ end
 
 local function child_pr_comments(state)
   local child_state = state or "merged"
-  local body = m_builders.pr_origin_marker(core, parent, issue_number, child_branch, version, integration_branch)
+  local body = m_builders.pr_origin_marker(parent, issue_number, child_branch, version, integration_branch)
     .. "\n" .. core.state_marker(parent, child_state, version)
   if child_state == "merged" then
     body = body .. "\n" .. m_builders.merged_marker(core, parent, child_pr_number, version, child_head_sha)

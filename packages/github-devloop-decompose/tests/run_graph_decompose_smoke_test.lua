@@ -18,7 +18,7 @@ local function source_ref()
 end
 
 local function decompose_payload()
-  return payloads_builders.build_devloop_decompose_payload(core, {
+  return payloads_builders.build_devloop_decompose_payload({
     proposal_id = "github-devloop/issue/owner/repo/42",
     pr_number = 7,
     issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3",
@@ -80,7 +80,7 @@ local function mock_claim_and_reads(payload)
     repo = "owner/repo",
     number = 7,
     comments = {
-      m_builders.pr_origin_marker(core, payload.proposal_id, 7, "devloop-owner-repo-42-01HY", payload.version, "dev"),
+      m_builders.pr_origin_marker(payload.proposal_id, 7, "devloop-owner-repo-42-01HY", payload.version, "dev"),
       core.state_marker(payload.proposal_id, "blocked", payload.version),
       conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
     },

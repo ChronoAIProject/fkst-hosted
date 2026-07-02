@@ -118,7 +118,7 @@ end
 
 return {
   test_known_god_states_inventory_is_exact = function()
-    local inventory = m_rrc.known_god_states(core)
+    local inventory = m_rrc.known_god_states()
     local count = 0
     for _ in pairs(inventory) do
       count = count + 1
@@ -129,11 +129,11 @@ return {
   test_inventory_ratchet_keeps_main_conformance_green = function()
     t.eq(#core.liveness_contract_errors(), 0)
     local strict = m_rrc.strict_restart_responsibility_contract_errors(core)
-    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "ready", strict), false)
-    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "dependency_wait", strict), false)
-    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "blocked", strict), false)
-    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "implementing", strict), false)
-    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation(core, "awaiting-pr", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation("ready", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation("dependency_wait", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation("blocked", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation("implementing", strict), false)
+    t.eq(m_rrc.responsibility_contract_inventory_is_listed_violation("awaiting-pr", strict), false)
   end,
 
   test_clean_single_responsibility_rows_pass_strict_contract = function()

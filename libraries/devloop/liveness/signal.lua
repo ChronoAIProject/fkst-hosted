@@ -289,7 +289,7 @@ local function merge_gate_wait_identity(M, facts, state)
     pr_number = facts.link.pr_number
   end
   return (facts and facts.proposal_id) or (state and state.proposal_id),
-    m_mgw.merge_gate_wait_version_lineage(M, state and state.version),
+    m_mgw.merge_gate_wait_version_lineage(state and state.version),
     pr_number,
     head_sha,
     source_repo

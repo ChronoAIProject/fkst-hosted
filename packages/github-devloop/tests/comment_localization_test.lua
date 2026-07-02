@@ -129,7 +129,7 @@ return {
     local en = comment_strings.comment_strings(core, "en")
     local zh = comment_strings.comment_strings(core, "zh")
     local human = 0
-    for _, row in ipairs(comment_strings.comment_template_audit(core)) do
+    for _, row in ipairs(comment_strings.comment_template_audit()) do
       if row.classification == "human" then
         human = human + 1
         t.is_true(en[row.id] ~= nil)
@@ -188,7 +188,7 @@ return {
       {
         body = "more noise " .. cjk_probe .. "\n"
           .. m_builders.implementing_marker(issue_proposal_id, "impl:v1", "devloop-owner-repo-42", "abc123", "dev", "abc123")
-          .. "\n" .. m_builders.pr_link_marker(core, issue_proposal_id, 7, "devloop-owner-repo-42", "impl:v1", "dev")
+          .. "\n" .. m_builders.pr_link_marker(issue_proposal_id, 7, "devloop-owner-repo-42", "impl:v1", "dev")
           .. "\n" .. core.impl_failure_marker(issue_proposal_id, "impl:v1", "codex-failed"),
         author_login = devloop_base.trusted_bot_login(),
       },

@@ -118,7 +118,7 @@ function C.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_br
     .. '" -->'
 end
 
-function C.pr_link_marker(M, proposal_id, pr_number, branch, impl_version, base_branch)
+function C.pr_link_marker(proposal_id, pr_number, branch, impl_version, base_branch)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr number")
   end
@@ -169,7 +169,7 @@ function C.pr_delegation_marker(M, issue_proposal_id, pr_proposal_id, pr_number,
     .. '" -->'
 end
 
-function C.pr_origin_marker(M, proposal_id, issue_number, branch, impl_version, base_branch)
+function C.pr_origin_marker(proposal_id, issue_number, branch, impl_version, base_branch)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -292,7 +292,7 @@ function C.merged_marker(M, issue_proposal_id, pr_number, version, head_sha, aut
     .. '" head_sha="' .. tostring(head_sha) .. '"' .. autonomy_attrs .. ' -->'
 end
 
-function C.merging_marker(M, issue_proposal_id, pr_number, version, head_sha)
+function C.merging_marker(issue_proposal_id, pr_number, version, head_sha)
   if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merging marker")
   end

@@ -196,7 +196,7 @@ local function payload_for_queue(queue)
       head_sha = "def456",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }),
-    devloop_merge_ready = payloads_builders.build_devloop_merge_ready_payload(core, "github-devloop/issue/owner/repo/42", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", {
+    devloop_merge_ready = payloads_builders.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", {
       review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456"),
       review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", "def456") .. "/review",
       reviewed_head_sha = "def456",
@@ -220,7 +220,7 @@ local function payload_for_queue(queue)
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
       source_ref = { kind = "external", ref = "owner/repo#issue/42" },
     }, 3, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"),
-    devloop_review_meta = payloads_builders.build_devloop_review_meta_payload(core, {
+    devloop_review_meta = payloads_builders.build_devloop_review_meta_payload({
       schema = "consensus.consensus_converge.v1",
       proposal_id = review_proposal_id(),
       dedup_key = "consensus:" .. review_proposal_id() .. "/review/loop/2",

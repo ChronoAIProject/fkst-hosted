@@ -363,7 +363,7 @@ return {
       command = "reready",
       key = "operator-command/IC_reready_ready",
     }
-    local accepted = operator_commands.operator_command_marker(core, command, "applied", "ready")
+    local accepted = operator_commands.operator_command_marker(command, "applied", "ready")
     local raises = replay_ready_with_comments({
       trusted_comment("IC_ready_visible", marker),
       trusted_comment("IC_reready_response", accepted, "2026-06-03T01:01:00Z"),

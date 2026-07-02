@@ -29,8 +29,7 @@ local function pr_event()
 end
 
 local function origin_marker(version)
-  return m_builders.pr_origin_marker(core,
-    "github-devloop/issue/owner/repo/42",
+  return m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42",
     "42",
     "devloop-owner-repo-42-01HY",
     version,
@@ -47,8 +46,7 @@ local function pr_open_state_marker(version)
 end
 
 local function unmanaged_origin_marker(version, base_branch)
-  return m_builders.pr_origin_marker(core,
-    "github-devloop/issue/owner/repo/42",
+  return m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42",
     "42",
     "devloop-owner-repo-42-01HY",
     version,

@@ -438,8 +438,7 @@ function C.merge_ready_payload_from_queue_entry(M, entry, source_ref)
   if type(entry) ~= "table" then
     return nil
   end
-  return payloads_builders.build_devloop_merge_ready_payload(M,
-    entry.proposal_id,
+  return payloads_builders.build_devloop_merge_ready_payload(entry.proposal_id,
     entry.pr_number,
     entry.version,
     {

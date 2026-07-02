@@ -13,8 +13,7 @@ local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 
 local function origin_marker(version)
-  return m_builders.pr_origin_marker(core, 
-    "github-devloop/issue/owner/repo/42",
+  return m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42",
     "42",
     "devloop-owner-repo-42-01HY",
     version,

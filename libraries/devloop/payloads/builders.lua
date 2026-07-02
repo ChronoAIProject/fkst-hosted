@@ -207,7 +207,7 @@ function C.build_replayed_fixing_payload(M, origin, pr_number, feedback, source_
   return payload
 end
 
-function C.build_devloop_review_meta_payload(M, unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
+function C.build_devloop_review_meta_payload(unresolved, issue_proposal_id, issue_version, pr_number, n, source_ref)
   return {
     schema = "github-devloop.review-meta.v1",
     proposal_id = issue_proposal_id,
@@ -241,7 +241,7 @@ end
 
 function C.build_devloop_fix_reflection_payload(M, unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
   local review_dedup_key = unresolved.review_dedup_key or unresolved.dedup_key
-  local payload = C.build_devloop_review_meta_payload(M, {
+  local payload = C.build_devloop_review_meta_payload({
     proposal_id = unresolved.proposal_id,
     dedup_key = review_dedup_key,
     source_ref = unresolved.source_ref,
@@ -252,7 +252,7 @@ function C.build_devloop_fix_reflection_payload(M, unresolved, issue_proposal_id
   return payload
 end
 
-function C.build_devloop_merge_ready_payload(M, issue_proposal_id, pr_number, version, review_fact, source_ref)
+function C.build_devloop_merge_ready_payload(issue_proposal_id, pr_number, version, review_fact, source_ref)
   local current_head_sha = review_fact and review_fact.current_head_sha
   if current_head_sha == nil then
     current_head_sha = review_fact and review_fact.reviewed_head_sha
@@ -277,7 +277,7 @@ function C.build_devloop_merge_ready_payload(M, issue_proposal_id, pr_number, ve
   }
 end
 
-function C.build_devloop_decompose_payload(M, fix_reconcile)
+function C.build_devloop_decompose_payload(fix_reconcile)
   return {
     schema = "github-devloop.decompose.v1",
     proposal_id = fix_reconcile.proposal_id,

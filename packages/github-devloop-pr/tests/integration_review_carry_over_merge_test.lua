@@ -50,7 +50,7 @@ local function run_comment_handoff_from_request(request, comment_id, name)
 end
 
 local function origin_marker(event)
-  return m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+  return m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
 end
 
 local function mock_base_fetch(base_head)
@@ -119,7 +119,7 @@ return {
     local handoff = run_comment_handoff_from_request(comment_request, "IC_carry_over_1", "merge-carry-over-comment-handoff")
     t.eq(handoff.exit_code, 0)
     local merge_ready_raise = find_raise(handoff.raises, "devloop_merge_ready").payload
-    local expected = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
+    local expected = payloads_builders.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head),
       review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,

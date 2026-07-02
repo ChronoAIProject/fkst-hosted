@@ -63,7 +63,7 @@ end
 
 local function pr_open_comments()
   return {
-    m_builders.pr_origin_marker(core, issue_proposal_id, 42, branch, impl_version, "dev"),
+    m_builders.pr_origin_marker(issue_proposal_id, 42, branch, impl_version, "dev"),
     core.state_marker(issue_proposal_id, "pr-open", impl_version),
   }
 end

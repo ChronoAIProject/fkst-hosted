@@ -40,7 +40,7 @@ local function state_marker(state)
 end
 
 local function pr_origin_marker()
-  return m_builders.pr_origin_marker(core, issue_proposal_id, tostring(issue_number), "devloop-owner-repo-42-01HY", reviewed_version, "dev")
+  return m_builders.pr_origin_marker(issue_proposal_id, tostring(issue_number), "devloop-owner-repo-42-01HY", reviewed_version, "dev")
 end
 
 local function mock_env(times)

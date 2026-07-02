@@ -27,7 +27,7 @@ return {
     local result = run_loop(event, opts("loop-dedup-lineage"))
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, conv_rounds.converge_proposal_base_dedup(core, base_version) .. "/loop/1")
+    t.eq(proposal.dedup_key, conv_rounds.converge_proposal_base_dedup(base_version) .. "/loop/1")
     t.eq(proposal.round, 1)
     t.eq(proposal.convergence_question, event.narrowed_question)
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")

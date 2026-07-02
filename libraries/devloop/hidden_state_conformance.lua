@@ -376,7 +376,7 @@ local function base_entity(core, row, source_ref)
 end
 
 local function child_pr(core, state, child_state)
-  local body = m_builders.pr_origin_marker(core, ISSUE_PROPOSAL, ISSUE_NUMBER, BRANCH, state.version, BASE_BRANCH)
+  local body = m_builders.pr_origin_marker(ISSUE_PROPOSAL, ISSUE_NUMBER, BRANCH, state.version, BASE_BRANCH)
   if child_state ~= nil then
     body = body .. "\n" .. devloop_state.state_marker(PR_PROPOSAL, child_state, state.version)
   end
@@ -424,7 +424,7 @@ local function add_common_pr_facts(core, entity, state, facts, include_pr_link_m
   facts.current_pr = facts.current_pr or child_pr(core, state, nil)
   if include_pr_link_marker == true then
     facts["pr-link"] = link
-    table.insert(entity.comments, comment(core, m_builders.pr_link_marker(core, ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
+    table.insert(entity.comments, comment(core, m_builders.pr_link_marker(ISSUE_PROPOSAL, PR_NUMBER, BRANCH, state.version, BASE_BRANCH), "2026-06-03T01:03:03Z"))
   else
     facts._synthetic_pr_link = true
   end
@@ -655,7 +655,7 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "merging" then
     table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
     table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
-    table.insert(entity.comments, comment(core, m_builders.merging_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "converge-round" then
     if value.true_stall_fixture == true then
       for round = 1, value.round do

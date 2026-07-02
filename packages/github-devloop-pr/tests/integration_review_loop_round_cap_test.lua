@@ -27,7 +27,7 @@ return {
     })
     local impl_version = reviewing().version
     local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     mock_bot_env()
     mock_pr_origin({
       origin_marker,
@@ -40,7 +40,7 @@ return {
     local result = run_review_loop(event, opts("review-loop-dedup-lineage"))
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, conv_rounds.converge_proposal_base_dedup(core, event.dedup_key) .. "/loop/2")
+    t.eq(proposal.dedup_key, conv_rounds.converge_proposal_base_dedup(event.dedup_key) .. "/loop/2")
     t.eq(proposal.round, 2)
     t.eq(proposal.convergence_question, event.narrowed_question)
     t.eq(proposal.source_ref.ref, "owner/repo#pr/7")
@@ -62,7 +62,7 @@ return {
     })
     local impl_version = reviewing().version
     local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local function varying_digest(round)
       return {
@@ -107,7 +107,7 @@ return {
     local impl_version = reviewing().version
     local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
     local drift_version = review_version .. "-drift"
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local current_digest = convergence_shared.source_ref_digest(event.source_ref)
     local drift_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?drift=1" })
     mock_bot_env()

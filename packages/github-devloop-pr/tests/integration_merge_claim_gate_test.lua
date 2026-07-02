@@ -52,7 +52,7 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/" .. tostring(version_time)
   local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
   local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", pr_number, version, head_sha)
-  return payloads_builders.build_devloop_merge_ready_payload(core, proposal_id, pr_number, version, {
+  return payloads_builders.build_devloop_merge_ready_payload(proposal_id, pr_number, version, {
     review_proposal_id = review_proposal_id,
     review_dedup_key = "consensus:" .. review_proposal_id .. "/review",
     reviewed_head_sha = head_sha,
@@ -65,7 +65,7 @@ end
 local function comments_for(event, created_at, state, state_version)
   local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   local comments = {
-    m_builders.pr_origin_marker(core, event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
+    m_builders.pr_origin_marker(event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
     m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
     m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
@@ -128,12 +128,12 @@ end
 local function mock_merged_pr_view(event)
   local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   local comments = {
-    m_builders.pr_origin_marker(core, event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
+    m_builders.pr_origin_marker(event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
     m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
     m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
     core.state_marker(event.proposal_id, "merging", event.version),
-    m_builders.merging_marker(core, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha),
+    m_builders.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha),
   }
   local rendered = {}
   for _, comment in ipairs(comments) do
@@ -258,7 +258,7 @@ return {
 
   test_merge_direct_merge_ready_accepts_unassigned_self_authored_issue = function()
     local current = merge_ready()
-    local origin_marker = m_builders.pr_origin_marker(core, current.proposal_id, "42", "devloop-owner-repo-42-01HY", current.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(current.proposal_id, "42", "devloop-owner-repo-42-01HY", current.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_claim(42, {}, "fkst-test-bot")

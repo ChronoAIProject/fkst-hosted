@@ -199,7 +199,7 @@ return saga.department(spec, { done = function() return false end, act = functio
           pr_number = pr_number,
           source_ref = pr_source_ref,
         }, state.version)
-        local decompose = payloads_builders.build_devloop_decompose_payload(core, fix_reconcile)
+        local decompose = payloads_builders.build_devloop_decompose_payload(fix_reconcile)
         local reason = "fix-loop-max-rounds"
         devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "blocked", "applied(" .. reason .. ")", "review decision=reject")
         devloop_logging.log_raise("review_result", origin.proposal_id, "devloop_fix_reconcile", fix_reconcile)

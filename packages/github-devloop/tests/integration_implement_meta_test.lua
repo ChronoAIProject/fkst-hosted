@@ -576,7 +576,7 @@ return {
     local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:implementing" }, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, branch, event.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, branch, event.dedup_key, "dev"),
     })
 
     local result = run_implement(event, opts("implement-idempotent"))
@@ -591,7 +591,7 @@ return {
     local branch = deterministic_branch_for(event)
     mock_issue_implement({ "fkst-dev:implementing" }, {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, branch, event.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, branch, event.dedup_key, "dev"),
     })
 
     local result = run_implement(event, opts("implement-implementing-marker-replay"))

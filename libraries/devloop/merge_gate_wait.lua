@@ -12,7 +12,7 @@ local function wait_bucket(now_seconds)
   return tostring(math.floor(seconds / wait_bucket_seconds))
 end
 
-function C.merge_gate_wait_version_lineage(M, version)
+function C.merge_gate_wait_version_lineage(version)
   local text = tostring(version or "")
   local previous = nil
   while previous ~= text do
@@ -41,7 +41,7 @@ end
 
 function C.build_merge_gate_wait_comment_request(M, repo, merge_ready, reason, kind, source_ref)
   local safe_reason = tostring(strings.sanitize_key(reason or "ci-wait", false):gsub("/", "-"))
-  local wait_version = C.merge_gate_wait_version_lineage(M, merge_ready.version)
+  local wait_version = C.merge_gate_wait_version_lineage(merge_ready.version)
   local marker = C.merge_gate_wait_marker(merge_ready.proposal_id,
     merge_ready.pr_number,
     wait_version,
@@ -69,7 +69,7 @@ function C.merge_gate_wait_fact(M, comments, issue_proposal_id, issue_version, p
   if type(comments) ~= "table" then
     return nil
   end
-  local wait_version = C.merge_gate_wait_version_lineage(M, issue_version)
+  local wait_version = C.merge_gate_wait_version_lineage(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate%-wait:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do

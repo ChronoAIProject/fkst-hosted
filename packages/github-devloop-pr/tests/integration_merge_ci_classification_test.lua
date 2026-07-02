@@ -17,7 +17,7 @@ local find_causal_raise = h.find_causal_raise
 local check_runs_cmd = "gh api 'repos/owner/repo/commits/def456/check-runs'"
 
 local function origin_marker(event)
-  return m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+  return m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
 end
 
 local function mock_required_check_run(conclusion)

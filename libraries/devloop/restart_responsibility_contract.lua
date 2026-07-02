@@ -39,7 +39,7 @@ local function copy_table(map)
   return out
 end
 
-function C.known_god_states(M)
+function C.known_god_states()
   return copy_table(known_god_states)
 end
 
@@ -556,7 +556,7 @@ function C.restart_responsibility_inventory_errors(M, rows, inventory)
   return errors
 end
 
-function C.responsibility_contract_inventory_is_listed_violation(M, state, errors)
+function C.responsibility_contract_inventory_is_listed_violation(state, errors)
   for _, err in ipairs(errors or {}) do
     if error_state(err) == state then
       return true

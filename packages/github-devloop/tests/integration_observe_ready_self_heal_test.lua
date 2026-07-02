@@ -303,7 +303,7 @@ return {
       core.state_marker(event.proposal_id, "implementing", ready_payload.dedup_key),
       core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now()), exec_ref),
       m_builders.implementing_marker(event.proposal_id, ready_payload.dedup_key, branch, "abc123", "dev", "def456"),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, branch, ready_payload.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, branch, ready_payload.dedup_key, "dev"),
     })
     local implemented = run_implement(ready_payload, opts("implement-ready-self-heal-advanced"))
     t.eq(implemented.exit_code, 0)
@@ -315,7 +315,7 @@ return {
     local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     local comments = {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
     mock_linked_pr_state({}, nil, nil, 2)
@@ -351,7 +351,7 @@ return {
         body = core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
         created_at = "2026-06-03T01:00:00Z",
       },
-      m_builders.pr_link_marker(core, event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", comments)
     mock_linked_pr_state({}, nil, nil, 2)
@@ -390,7 +390,7 @@ return {
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/13"
     local link_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:reviewing" }, "OPEN", {
-      m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42-01HY", link_version, "dev"),
+      m_builders.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", link_version, "dev"),
       core.state_marker(proposal_id, "blocked", version),
     })
     mock_linked_pr_state({
@@ -436,7 +436,7 @@ return {
     local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     mock_issue_state({ "fkst-dev:enabled" }, "OPEN", {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
     })
     mock_linked_pr_state({
       core.state_marker(event.proposal_id, "reviewing", ready_payload.dedup_key),
@@ -454,7 +454,7 @@ return {
     local ready_payload = payloads_builders.build_devloop_ready_payload(core, event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:pr-open" }, "OPEN", {
       core.state_marker(event.proposal_id, "pr-open", ready_payload.dedup_key),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, "devloop-owner-repo-42-01HY", ready_payload.dedup_key, "dev"),
     })
     mock_linked_pr_state({}, "OPEN", 1)
 
@@ -466,7 +466,7 @@ return {
   test_observe_issue_blocked_decomposed_marker_reraises_missing_children = function()
     local event = decompose_event()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
-      m_builders.pr_link_marker(core, event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
       decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
@@ -491,7 +491,7 @@ return {
   test_observe_issue_blocked_decomposed_marker_skips_when_children_complete = function()
     local event = decompose_event()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
-      m_builders.pr_link_marker(core, event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
       decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
@@ -508,7 +508,7 @@ return {
   test_observe_issue_blocked_decomposed_marker_refuses_untrusted_marker = function()
     local event = decompose_event()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
-      m_builders.pr_link_marker(core, event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
       {

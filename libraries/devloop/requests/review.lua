@@ -15,7 +15,7 @@ local devloop_logging = require("devloop.logging")
 
 local ai_sentinel = shared.ai_sentinel
 
-function C.attach_reviewing_handoff(M, request, proposal_id, pr_number, version, source_ref)
+function C.attach_reviewing_handoff(request, proposal_id, pr_number, version, source_ref)
   request.handoff = {
     kind = "github-devloop.reviewing",
     proposal_id = proposal_id,
@@ -121,12 +121,12 @@ function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_num
     tostring(origin.impl_version),
     tostring(pr_number),
   }), source_ref)
-  return C.attach_reviewing_handoff(M, request, origin.proposal_id, pr_number, origin.impl_version, source_ref)
+  return C.attach_reviewing_handoff(request, origin.proposal_id, pr_number, origin.impl_version, source_ref)
 end
 
 function C.build_operator_rereview_comment_request(M, repo, pr_number, proposal_id, new_version, command, source_ref)
   local state_marker = M.state_marker(proposal_id, "reviewing", new_version)
-  local marker = operator_commands.operator_command_marker(M, command, "applied", "rereview")
+  local marker = operator_commands.operator_command_marker(command, "applied", "rereview")
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -141,7 +141,7 @@ function C.build_operator_rereview_comment_request(M, repo, pr_number, proposal_
     "applied",
     tostring(new_version),
   }), source_ref)
-  return C.attach_reviewing_handoff(M, request, proposal_id, pr_number, new_version, source_ref)
+  return C.attach_reviewing_handoff(request, proposal_id, pr_number, new_version, source_ref)
 end
 
 function C.pr_base_unmanaged_blocked_version(version)
@@ -356,7 +356,7 @@ function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_h
     tostring(fix.review_dedup_key),
     tostring(new_head_sha),
   }), fix.source_ref)
-  return C.attach_reviewing_handoff(M, request, fix.proposal_id, fix.pr_number, new_version or fix.version, fix.source_ref)
+  return C.attach_reviewing_handoff(request, fix.proposal_id, fix.pr_number, new_version or fix.version, fix.source_ref)
 end
 
 function C.raise_fix_reviewing(M, opts)
@@ -408,7 +408,7 @@ function C.build_merge_head_reviewing_comment_request(M, repo, issue_number, mer
     tostring(new_version),
     tostring(new_head_sha),
   }), source_ref)
-  return C.attach_reviewing_handoff(M, request, merge_ready.proposal_id, merge_ready.pr_number, new_version, source_ref)
+  return C.attach_reviewing_handoff(request, merge_ready.proposal_id, merge_ready.pr_number, new_version, source_ref)
 end
 
 function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_proposal_id, version, carry, source_ref)

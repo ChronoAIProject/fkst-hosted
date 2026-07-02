@@ -197,7 +197,7 @@ local function replay_review_result(dept, issue, state, facts, tools, link, curr
     if merge_ready == nil then
       return tools.log_skip(dept, proposal_id, state, "reviewing", "merge-ready", "skip-foreign(merge-ready)", "approve review result is not paired with merge-ready marker")
     end
-    local payload = payloads_builders.build_devloop_merge_ready_payload(M, proposal_id, link.pr_number, state.version, {
+    local payload = payloads_builders.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
       review_proposal_id = merge_ready.review_proposal_id,
       review_dedup_key = merge_ready.review_dedup_key,
       reviewed_head_sha = merge_ready.head_sha,
@@ -271,7 +271,7 @@ local function replay_review_converge(dept, issue, state, facts, tools, link, cu
     })
   end
   if review_truth_table_unapproved(latest) then
-    local payload = payloads_builders.build_devloop_review_meta_payload(M, latest, facts.proposal_id, state.version, link.pr_number, round, latest.source_ref)
+    local payload = payloads_builders.build_devloop_review_meta_payload(latest, facts.proposal_id, state.version, link.pr_number, round, latest.source_ref)
     devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "review-meta", "applied(replay)", "trusted review-converge-round fact requires review-meta")
     return tools.raise_effects(dept, facts.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = { "fkst-dev:reviewing" } }, {
       { queue = M.pr_package_queue("devloop_review_meta"), payload = payload },
@@ -452,7 +452,7 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
     devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "blocked", "applied(replay)", "merge-ready marker lacks trusted approve review-result")
     return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merge-ready" } }, {})
   end
-  local payload = payloads_builders.build_devloop_merge_ready_payload(M, proposal_id, link.pr_number, state.version, {
+  local payload = payloads_builders.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
     review_proposal_id = fact.review_proposal_id,
     review_dedup_key = fact.review_dedup_key,
     reviewed_head_sha = fact.head_sha,
@@ -536,7 +536,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
   end
   local mergeable, mergeable_reason = check_runs.pr_mergeable(current_pr)
   if merging == nil then
-    local payload = payloads_builders.build_devloop_merge_ready_payload(M, proposal_id, link.pr_number, state.version, {
+    local payload = payloads_builders.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
       review_proposal_id = merge_ready.review_proposal_id,
       review_dedup_key = merge_ready.review_dedup_key,
       reviewed_head_sha = merge_ready.head_sha,
@@ -567,7 +567,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
   end
   local ci_green, ci_reason = M.evaluate_ci_status_gate(current_pr, { repo = issue.repo, dept = dept, proposal_id = proposal_id })
   if ci_green then
-    local payload = payloads_builders.build_devloop_merge_ready_payload(M, proposal_id, link.pr_number, state.version, {
+    local payload = payloads_builders.build_devloop_merge_ready_payload(proposal_id, link.pr_number, state.version, {
       review_proposal_id = merge_ready.review_proposal_id,
       review_dedup_key = merge_ready.review_dedup_key,
       reviewed_head_sha = merge_ready.head_sha,

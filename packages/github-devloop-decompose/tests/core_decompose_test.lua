@@ -59,7 +59,7 @@ return {
   test_decompose_child_fact_indexes_keep_proxy_marker_legacy_but_completion_uses_live_open_children = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "2026-06-03T01-02-03Z"
-    local decompose = payloads_builders.build_devloop_decompose_payload(core, {
+    local decompose = payloads_builders.build_devloop_decompose_payload({
       proposal_id = proposal_id,
       pr_number = 7,
       issue_version = version,

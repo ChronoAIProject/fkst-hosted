@@ -191,7 +191,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if review_truth_table_unapproved(unresolved) then
       marker_body = marker_body .. "\n" .. devloop_state.state_marker(origin.proposal_id, "review-meta", state.version)
       local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
-      local review_meta = payloads_builders.build_devloop_review_meta_payload(core, unresolved, origin.proposal_id, state.version, pr_number, round, pr_source_ref)
+      local review_meta = payloads_builders.build_devloop_review_meta_payload(unresolved, origin.proposal_id, state.version, pr_number, round, pr_source_ref)
       local label_request = nil
       if origin.issue_number ~= nil then
         label_request = requests_labels.build_state_label_request(core, origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
@@ -224,7 +224,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       current_issue = parsers_issue.parse_issue_view_review_loop(core, issue_view.stdout)
     end
     local next_n = round + 1
-    local next_dedup = conv_rounds.converge_proposal_base_dedup(core, unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
+    local next_dedup = conv_rounds.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
     local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_loop",
       repo = repo,

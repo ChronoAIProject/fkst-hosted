@@ -126,7 +126,7 @@ return {
     local comments = {
       core.state_marker(event.proposal_id, "implementing", event.dedup_key),
       core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, stale_attempt_started_at()),
-      m_builders.pr_link_marker(core, event.proposal_id, 7, branch, event.dedup_key, "dev"),
+      m_builders.pr_link_marker(event.proposal_id, 7, branch, event.dedup_key, "dev"),
     }
     mock_issue_implement({ "fkst-dev:implementing" }, comments)
 

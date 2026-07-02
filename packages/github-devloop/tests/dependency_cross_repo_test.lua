@@ -128,13 +128,13 @@ return {
     mock_repo_blocker_issue(sibling_repo, 62, {
       state_comment(sibling_repo, 62, "pr-open"),
       {
-        body = m_builders.pr_link_marker(core, link.proposal_id, link.pr_number, link.branch, link.impl_version, link.base_branch),
+        body = m_builders.pr_link_marker(link.proposal_id, link.pr_number, link.branch, link.impl_version, link.base_branch),
         author_login = "fkst-test-bot",
       },
     })
     mock_repo_blocker_pr(sibling_repo, 63, link, {
       {
-        body = m_builders.pr_origin_marker(core, link.proposal_id, 62, link.branch, link.impl_version, link.base_branch),
+        body = m_builders.pr_origin_marker(link.proposal_id, 62, link.branch, link.impl_version, link.base_branch),
         author_login = "fkst-test-bot",
       },
       {

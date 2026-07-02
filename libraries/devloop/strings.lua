@@ -202,7 +202,7 @@ function C.comment_strings(M, lang)
   return strings[normalized] or strings.en
 end
 
-function C.comment_template_audit(M)
+function C.comment_template_audit()
   local copy = {}
   for _, row in ipairs(template_audit) do
     table.insert(copy, {

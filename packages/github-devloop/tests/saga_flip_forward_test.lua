@@ -65,7 +65,7 @@ end
 
 local function visible_child_comments(event, branch)
   return {
-    m_builders.pr_origin_marker(core, event.proposal_id, 42, branch, event.dedup_key, "dev")
+    m_builders.pr_origin_marker(event.proposal_id, 42, branch, event.dedup_key, "dev")
       .. "\n" .. core.state_marker(event.proposal_id, "pr-open", event.dedup_key),
   }
 end

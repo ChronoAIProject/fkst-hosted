@@ -137,7 +137,7 @@ return {
     local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
     local comments = {
-      m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
       m_builders.review_meta_marker(core, event.proposal_id, review_dedup_key, "fix", event.version, "missing retry guard"),
     }

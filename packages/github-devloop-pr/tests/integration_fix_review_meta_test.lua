@@ -108,7 +108,7 @@ return {
       },
       event.source_ref
     ).body
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -154,7 +154,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       comment_raise.payload.body,
     })
-    local origin_marker_for_review = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, expected_version, "dev")
+    local origin_marker_for_review = m_builders.pr_origin_marker(event.proposal_id, "42", branch, expected_version, "dev")
     mock_pr_origin({ origin_marker_for_review }, branch, "feedface")
 
     local review_result = run_review_pr(reviewing_raise.payload, opts("fix-write-rereview"))
@@ -188,7 +188,7 @@ return {
     t.eq(#pending.raises, 0)
     t.eq(count_calls("codex exec"), 0)
 
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -285,7 +285,7 @@ return {
       core.state_marker(event.proposal_id, "fixing", event.version),
       reject_comment,
     }, branch, event.version)
-    mock_pr_fix({ m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
 
     local result = run_fix(event, opts("fix-missing-write"))
     t.eq(result.exit_code, 0)
@@ -305,7 +305,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     mock_bot_env()
     mock_write_env("")
@@ -376,7 +376,7 @@ return {
       },
       second_event.source_ref
     ).body
-    local origin_marker = m_builders.pr_origin_marker(core, second_event.proposal_id, "42", first_branch, first_event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(second_event.proposal_id, "42", first_branch, first_event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(second_event, { "fkst-dev:fixing" }, {
@@ -418,7 +418,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     mock_bot_env()
     mock_write_env("1")
@@ -455,7 +455,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     mock_bot_env()
     mock_write_env("1")
@@ -496,7 +496,7 @@ return {
       reject_comment,
     }, branch, event.version)
     mock_write_env("1")
-    mock_pr_fix({ m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
     mock_existing_fix_worktree(branch, "def456")
     mock_implement_codex(0, "No viable fix.")
@@ -506,7 +506,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    mock_pr_fix({ m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "def456")
 
     local result = run_fix(event, opts("fix-no-changes-review-meta", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
@@ -530,7 +530,7 @@ return {
       { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } },
       event.source_ref
     ).body
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -577,7 +577,7 @@ return {
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local review = { proposal_id = event.review_proposal_id, decision = "reject", body = "Reject.", blocking_gap = "missing regression guard", dedup_key = event.review_dedup_key, source_ref = { kind = "external", ref = "owner/repo#pr/7" } }
     local reject_comment = requests_review.build_review_result_comment_request(core, "owner/repo", "42", event.proposal_id, event.version, review, event.source_ref).body
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     local comments = { core.state_marker(event.proposal_id, "fixing", event.version), reject_comment }
@@ -605,7 +605,7 @@ return {
   test_review_loop_unresolved_under_budget_reraises_review_proposal = function()
     local event = review_unresolved()
     local impl_version = reviewing().version
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:reviewing" }, {
@@ -633,7 +633,7 @@ return {
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
     local _, _, review_version = devloop_base.parse_pr_review_proposal_id(proposal_id)
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
     t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
     t.eq(review_version, transition_version.safe_version_segment(full_version))
 
@@ -662,7 +662,7 @@ return {
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
     t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
 
     mock_bot_env()
@@ -687,7 +687,7 @@ return {
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
     t.is_true(core.stage_rank("merge-ready") > core.stage_rank("reviewing"))
 
     mock_bot_env()
@@ -712,7 +712,7 @@ return {
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
 
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
@@ -736,7 +736,7 @@ return {
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
     local _, _, review_version = devloop_base.parse_pr_review_proposal_id(proposal_id)
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", issue_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", issue_version, "dev")
     t.is_true(transition_version.safe_version_segment(issue_version) ~= review_version)
 
     mock_bot_env()
@@ -761,7 +761,7 @@ return {
       proposal_id = proposal_id,
       dedup_key = "consensus:" .. proposal_id .. "/review",
     })
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", full_version, "dev")
     t.is_true(transition_version.safe_version_segment(full_version) ~= full_version)
 
     mock_bot_env()
@@ -780,7 +780,7 @@ return {
     local review_version = reviewing().version
     local event = review_unresolved()
     local fix_version = core.fix_version_from_review_version(review_version)
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", review_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", review_version, "dev")
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
     mock_issue_review({ "fkst-dev:fixing" }, {
@@ -804,7 +804,7 @@ return {
     })
     local impl_version = reviewing().version
     local _, _, review_version = devloop_base.parse_pr_review_proposal_id(event.proposal_id)
-    local origin_marker = m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
+    local origin_marker = m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev")
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_bot_env()
     mock_pr_origin({ origin_marker }, "devloop-owner-repo-42-01HY", "def456")
@@ -961,7 +961,7 @@ return {
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local recomputed_branch = devloop_base.implement_branch("owner/repo", "42", meta_exit_version)
     t.eq(branch ~= recomputed_branch, true)
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(fix_event, { "fkst-dev:fixing" }, {

@@ -46,7 +46,7 @@ local function event_for_pr(pr_number, issue_number, version_time, head_sha)
   local version = "ready/consensus-github-devloop/issue/owner/repo/" .. tostring(issue_number) .. "/" .. tostring(version_time)
   local proposal_id = "github-devloop/issue/owner/repo/" .. tostring(issue_number)
   local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", pr_number, version, head_sha)
-  return payloads_builders.build_devloop_merge_ready_payload(core, proposal_id, pr_number, version, {
+  return payloads_builders.build_devloop_merge_ready_payload(proposal_id, pr_number, version, {
     review_proposal_id = review_proposal_id,
     review_dedup_key = "consensus:" .. review_proposal_id .. "/review",
     reviewed_head_sha = head_sha,
@@ -59,8 +59,7 @@ end
 local function merge_comments_for_event(event)
   local entity = entity_lib.parse_entity_proposal_id(event.proposal_id)
   return {
-    m_builders.pr_origin_marker(core, 
-      event.proposal_id,
+    m_builders.pr_origin_marker(event.proposal_id,
       tostring(entity.issue_number),
       branch_for_pr(event.pr_number),
       event.version,
@@ -155,7 +154,7 @@ end
 local function merged_comments_for_event(event)
   local comments = merge_comments_for_event(event)
   table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
-  table.insert(comments, m_builders.merging_marker(core, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
+  table.insert(comments, m_builders.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
   return comments
 end
 

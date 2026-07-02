@@ -108,8 +108,8 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
     error("github-devloop: invalid pr-delegation head sha")
   end
   local body = "github-devloop PR child open"
-    .. "\n\n" .. m_builders.pr_origin_marker(M, issue_proposal_id, issue_number, branch, impl_version, base_branch)
-    .. "\n" .. m_builders.pr_link_marker(M, issue_proposal_id, pr_number, branch, impl_version, base_branch)
+    .. "\n\n" .. m_builders.pr_origin_marker(issue_proposal_id, issue_number, branch, impl_version, base_branch)
+    .. "\n" .. m_builders.pr_link_marker(issue_proposal_id, pr_number, branch, impl_version, base_branch)
     .. "\n" .. devloop_state.state_marker(issue_proposal_id, "pr-open", impl_version)
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",

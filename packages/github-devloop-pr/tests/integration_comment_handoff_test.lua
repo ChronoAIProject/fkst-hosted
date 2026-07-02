@@ -285,7 +285,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local merge_ready = find_raise(result.raises, "devloop_merge_ready").payload
-    local expected = payloads_builders.build_devloop_merge_ready_payload(core, "github-devloop/issue/owner/repo/42", 7, version, {
+    local expected = payloads_builders.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42", 7, version, {
       review_proposal_id = review_proposal_id,
       review_dedup_key = review_dedup_key,
       reviewed_head_sha = "def456",

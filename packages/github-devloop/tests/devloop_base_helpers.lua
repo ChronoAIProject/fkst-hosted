@@ -209,14 +209,14 @@ local function fixing(extra)
 end
 
 local function pr_link_marker_for_fix(fix, branch, impl_version)
-  return m_builders.pr_link_marker(core, fix.proposal_id, fix.pr_number, branch, impl_version or fix.version, "dev")
+  return m_builders.pr_link_marker(fix.proposal_id, fix.pr_number, branch, impl_version or fix.version, "dev")
 end
 
 local function review_meta_event(extra)
   local unresolved_event = review_unresolved({
     dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/2",
   })
-  local value = payloads_builders.build_devloop_review_meta_payload(core, unresolved_event, "github-devloop/issue/owner/repo/42", reviewing().version, 7, 3)
+  local value = payloads_builders.build_devloop_review_meta_payload(unresolved_event, "github-devloop/issue/owner/repo/42", reviewing().version, 7, 3)
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
@@ -252,7 +252,7 @@ local function fix_reconcile(extra)
 end
 
 local function decompose_event(extra)
-  local value = payloads_builders.build_devloop_decompose_payload(core, fix_reconcile())
+  local value = payloads_builders.build_devloop_decompose_payload(fix_reconcile())
   for key, field in pairs(extra or {}) do
     value[key] = field
   end
@@ -261,8 +261,7 @@ end
 
 local function merge_ready(extra)
   local event = review_reached()
-  local value = payloads_builders.build_devloop_merge_ready_payload(core,
-    "github-devloop/issue/owner/repo/42",
+  local value = payloads_builders.build_devloop_merge_ready_payload("github-devloop/issue/owner/repo/42",
     7,
     reviewing().version,
     {
@@ -369,7 +368,7 @@ end
 local function run_review_reconcile(payload, run_opts)
   local cached = take_pr_phase_comments()
   if cached ~= nil then
-    local comments = { m_builders.pr_origin_marker(core, payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
+    local comments = { m_builders.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
     for _, comment in ipairs(cached) do
       table.insert(comments, comment)
     end
@@ -384,7 +383,7 @@ end
 local function run_fix_reconcile(payload, run_opts)
   local cached = take_pr_phase_comments()
   if cached ~= nil then
-    local comments = { m_builders.pr_origin_marker(core, payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
+    local comments = { m_builders.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.issue_version, "dev") }
     for _, comment in ipairs(cached) do
       table.insert(comments, comment)
     end
@@ -461,7 +460,7 @@ local function run_fix(payload, run_opts)
     local head = pending and pending.head or "devloop-owner-repo-42-01HY"
     local base_branch = pending and pending.base_branch or "dev"
     local state = pending and pending.state or "OPEN"
-    for _, comment in ipairs(pending and pending.comments or { m_builders.pr_origin_marker(core, payload.proposal_id, "42", head, payload.version, base_branch) }) do
+    for _, comment in ipairs(pending and pending.comments or { m_builders.pr_origin_marker(payload.proposal_id, "42", head, payload.version, base_branch) }) do
       table.insert(comments, comment)
     end
     for _, comment in ipairs(cached or {}) do
@@ -709,7 +708,7 @@ mock_pr_origin_from_cached = function(payload, head_sha)
       table.insert(comments, comment)
     end
   elseif cached ~= nil then
-    table.insert(comments, m_builders.pr_origin_marker(core, payload.proposal_id, "42", head, payload.version or reviewing().version, base_branch))
+    table.insert(comments, m_builders.pr_origin_marker(payload.proposal_id, "42", head, payload.version or reviewing().version, base_branch))
   end
   for _, comment in ipairs(cached or {}) do
     table.insert(comments, comment)

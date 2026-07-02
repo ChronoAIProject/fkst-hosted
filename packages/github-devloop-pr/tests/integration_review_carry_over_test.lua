@@ -99,7 +99,7 @@ return {
     local new_head = "feedface"
     local base_head = "ba5e1234"
     mock_pr_origin({
-      m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     }, "devloop-owner-repo-42-01HY", new_head)
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_base_fetch(base_head)
@@ -132,7 +132,7 @@ return {
     local merge_raise = find_raise(handoff.raises, "devloop_merge_ready", function(payload)
       return payload.reviewed_head_sha == new_head
     end)
-    local expected = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
+    local expected = payloads_builders.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head),
       review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head) .. "/review",
       reviewed_head_sha = new_head,
@@ -156,7 +156,7 @@ return {
     local old_head = event.reviewed_head_sha
     local advanced_head = "feedface"
     mock_pr_origin({
-      m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     }, "devloop-owner-repo-42-01HY", old_head)
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(event))
 
@@ -166,7 +166,7 @@ return {
     t.eq(unchanged_merge.payload.dedup_key, event.dedup_key)
 
     mock_pr_origin({
-      m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     }, "devloop-owner-repo-42-01HY", advanced_head)
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_base_fetch("ba5e1234")
@@ -177,7 +177,7 @@ return {
     local replayed_merge = find_raise(advanced.raises, "devloop_merge_ready")
     t.is_true(replayed_merge ~= nil)
     t.eq(find_raise(advanced.raises, "devloop_reviewing"), nil)
-    local replay_payload = payloads_builders.build_devloop_merge_ready_payload(core, event.proposal_id, event.pr_number, event.version, {
+    local replay_payload = payloads_builders.build_devloop_merge_ready_payload(event.proposal_id, event.pr_number, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,
       reviewed_head_sha = old_head,
@@ -191,7 +191,7 @@ return {
     local event = h.merge_ready()
     local new_head = "feedface"
     mock_pr_origin({
-      m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     }, "devloop-owner-repo-42-01HY", new_head)
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, merge_comments(event))
     mock_base_fetch("ba5e1234")
@@ -214,7 +214,7 @@ return {
     table.insert(comments, m_builders.review_result_marker(core, new_review, event.proposal_id, "approve", "consensus:" .. new_review .. "/review"))
     table.insert(comments, m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, new_review, "consensus:" .. new_review .. "/review", new_head))
     mock_pr_origin({
-      m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
+      m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     }, "devloop-owner-repo-42-01HY", new_head)
     mock_issue_reviewing({ "fkst-dev:merge-ready" }, comments)
     mock_base_fetch("ba5e1234")

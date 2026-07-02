@@ -51,14 +51,14 @@ local function append_merged_pr_merging_fact(comments, pr_state)
     table.insert(merged, comment)
   end
   table.insert(merged, core.state_marker(proposal_id, "merging", version))
-  table.insert(merged, m_builders.merging_marker(core, proposal_id, 7, version, head_sha or "def456"))
+  table.insert(merged, m_builders.merging_marker(proposal_id, 7, version, head_sha or "def456"))
   return merged
 end
 
 local function merge_comments(event, branch, impl_version, include_review_result)
   local version = event.version
   local comments = {
-    m_builders.pr_origin_marker(core, event.proposal_id, 42, branch or "devloop-owner-repo-42-01HY", impl_version or version, "dev"),
+    m_builders.pr_origin_marker(event.proposal_id, 42, branch or "devloop-owner-repo-42-01HY", impl_version or version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", version),
     m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
   }
@@ -436,14 +436,14 @@ end
 local function merge_comments_with_merging(event, branch, impl_version)
   local comments = merge_comments(event, branch, impl_version)
   table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
-  table.insert(comments, m_builders.merging_marker(core, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
+  table.insert(comments, m_builders.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
   return comments
 end
 
 local function mock_pr_fix(comments, head, head_sha, state, head_repo, cross_repo, times)
   local cached = base.take_pr_phase_comments()
   local with_origin = {
-    m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", 42, head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
+    m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
   }
   local input_comments = comments
   if input_comments == nil or #input_comments == 0 then
@@ -532,7 +532,7 @@ local function mock_pr_origin_sequence(entries)
     local comments = entry.comments
     if comments == nil then
       comments = {
-        m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", entry.head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
+        m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", entry.head or "devloop-owner-repo-42-01HY", base.reviewing().version, "dev"),
       }
     end
     if cached ~= nil then

@@ -600,7 +600,7 @@ return {
     t.eq(current.version, ready.dedup_key)
 
     local origin = m_facts.pr_origin_fact(core, {
-      m_builders.pr_origin_marker(core, ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
+      m_builders.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     })
     t.eq(origin.proposal_id, ready.proposal_id)
     t.eq(origin.issue_number, "42")
@@ -611,7 +611,7 @@ return {
     }))
 
     local link = m_facts.pr_link_fact(core, {
-      m_builders.pr_link_marker(core, ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
+      m_builders.pr_link_marker(ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     }, ready.proposal_id)
     t.eq(link.pr_number, 7)
     t.eq(link.base_branch, "dev")

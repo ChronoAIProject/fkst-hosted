@@ -45,7 +45,7 @@ end
 return {
   test_merge_conflict_churn_at_max_fix_rounds_decomposes_without_another_fix = function()
     local event = max_fix_round_merge_ready()
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")

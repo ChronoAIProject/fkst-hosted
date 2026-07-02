@@ -40,7 +40,7 @@ end
 return {
   test_merge_ci_red_without_rollup_sha_uses_pr_base_baseline = function()
     local event = merge_ready()
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -182,7 +182,7 @@ return {
         event.gate_baseline_sha,
         "mergeable-conflicting"
       )
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_issue_fix_for_event(event, { "fkst-dev:fixing" }, {
@@ -259,7 +259,7 @@ return {
         event.gate_baseline_sha,
         "mergeable-conflicting"
       )
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", branch, event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev")
 
     t.is_true(defective.dedup_key ~= corrected.dedup_key)
     t.is_true(defective.dedup_key:find("/nobase/nopred/" .. event.reviewed_head_sha, 1, true) ~= nil)
@@ -305,7 +305,7 @@ return {
 
   test_synthetic_rollup_sha_no_longer_drives_pr_fixing = function()
     local event = merge_ready()
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")
@@ -328,7 +328,7 @@ return {
 
   test_merge_ci_red_ignores_rollup_sha_that_is_not_pr_head = function()
     local event = merge_ready()
-    local origin_marker = m_builders.pr_origin_marker(core, event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
+    local origin_marker = m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")
     mock_bot_env()
     mock_write_env("1")
     mock_write_env("1")

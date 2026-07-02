@@ -181,7 +181,7 @@ return {
     local review_proposal = devloop_base.pr_review_proposal_id(repo, 7, version, "def456")
     local comments = {
       state_comment("blocked", version, "2026-06-01T00:00:00Z"),
-      m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+      m_builders.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
       decompose_lib.decomposed_marker(proposal_id, version, 7, 1),
       m_builders.review_result_marker(core, review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
       issue_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, version .. "/timeout-reconcile/blocked/1", "blocked", 1, entity_lib.issue_source_ref(repo, 42))),
@@ -248,7 +248,7 @@ return {
   test_blocked_missing_decomposed_replay_decline_climbs_to_decompose_exhausted_without_seeded_timeout_markers = function()
     local comments = {
       state_comment("blocked", version, "2026-06-01T00:00:00Z"),
-      m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
+      m_builders.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
     }
 
     for sweep = 1, 3 do

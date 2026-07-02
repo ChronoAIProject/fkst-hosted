@@ -59,7 +59,7 @@ return {
 
   test_read_cache_key_encodes_variant_and_keeps_repo_path = function()
     t.eq(
-      require("devloop.github_proxy_entity_view").gh_read_cache_key(core, "intake-scan", "owner/repo", 42),
+      require("devloop.github_proxy_entity_view").gh_read_cache_key("intake-scan", "owner/repo", 42),
       "github-devloop/ghread/intake-scan/owner/repo/42"
     )
   end,

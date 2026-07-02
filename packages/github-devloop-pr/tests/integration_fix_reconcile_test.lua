@@ -21,7 +21,7 @@ local config = require("devloop.config")
 local m_builders = require("devloop.markers.builders")
 
 local function origin_marker(version)
-  return m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", version, "dev")
+  return m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", version, "dev")
 end
 
 local function fix_round_version(round)

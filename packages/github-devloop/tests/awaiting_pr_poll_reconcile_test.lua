@@ -97,7 +97,7 @@ local function child_comments(state, child_version, opts)
   local options = opts or {}
   local effective_version = child_version or version
   local base_branch = options.base_branch or integration_branch
-  local body = m_builders.pr_origin_marker(core, parent, issue_number, "devloop-owner-repo-42-01HY", effective_version, base_branch)
+  local body = m_builders.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", effective_version, base_branch)
     .. "\n" .. core.state_marker(parent, state, effective_version)
   if state == "merged" then
     body = body .. "\n" .. m_builders.merged_marker(core, parent, pr_number, effective_version, head_sha)
@@ -109,13 +109,13 @@ end
 
 local function child_origin_only_comments()
   return {
-    comment(m_builders.pr_origin_marker(core, parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch), core._test_bot_login, "2026-06-03T01:04:03Z"),
+    comment(m_builders.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch), core._test_bot_login, "2026-06-03T01:04:03Z"),
   }
 end
 
 local function child_merged_comments_with_kept_promotion()
   return {
-    comment(m_builders.pr_origin_marker(core, parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch)
+    comment(m_builders.pr_origin_marker(parent, issue_number, "devloop-owner-repo-42-01HY", version, integration_branch)
       .. "\n" .. core.state_marker(parent, "merged", version)
       .. "\n" .. m_builders.merged_marker(core, parent, pr_number, version, head_sha), core._test_bot_login, "2026-06-03T01:04:03Z"),
   }

@@ -78,7 +78,7 @@ local function mock_merged_child_pr()
     head_sha = child_head_sha,
     base_branch = "dev",
     comments = {
-      m_builders.pr_origin_marker(core, blocker_proposal, blocker_number, "devloop-owner-repo-61-01HY", blocker_version, "dev"),
+      m_builders.pr_origin_marker(blocker_proposal, blocker_number, "devloop-owner-repo-61-01HY", blocker_version, "dev"),
       core.state_marker(blocker_proposal, "merged", blocker_version),
       m_builders.merged_marker(core, blocker_proposal, child_pr_number, blocker_version, child_head_sha),
     },

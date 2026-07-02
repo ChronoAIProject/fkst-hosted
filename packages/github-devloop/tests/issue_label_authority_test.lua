@@ -55,11 +55,11 @@ return {
     local impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:implementing" }, "OPEN", {
       core.state_marker(proposal_id, "pr-open", impl_version),
-      m_builders.pr_link_marker(core, proposal_id, 7, "devloop-owner-repo-42-01HY", impl_version, "dev"),
+      m_builders.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", impl_version, "dev"),
     })
     mock_pr_origin_for({
       comments = {
-        m_builders.pr_origin_marker(core, proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+        m_builders.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       },
       times = 2,
     })

@@ -111,7 +111,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
 
     local next_n = round + 1
-    local next_dedup = conv_rounds.converge_proposal_base_dedup(core, unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
+    local next_dedup = conv_rounds.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
     local content_fetch = context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "loop",
       repo = repo,
