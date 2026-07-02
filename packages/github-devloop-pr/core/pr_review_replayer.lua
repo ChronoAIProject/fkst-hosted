@@ -266,7 +266,7 @@ local function replay_review_converge(dept, issue, state, facts, tools, link, cu
   if conv_rounds.is_true_stall(records, round) or round >= config.max_converge_rounds() then
     local payload = conv_reconcile.build_devloop_review_reconcile_payload(latest, round, facts.proposal_id, state.version, current_pr.head_sha)
     devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "blocked", "applied(replay)", "trusted review-converge-round fact reached terminal reconcile")
-    return tools.raise_effects(dept, facts.proposal_id, "blocked", conv_reconcile.review_reconcile_terminal_state_version(M, state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {
+    return tools.raise_effects(dept, facts.proposal_id, "blocked", conv_reconcile.review_reconcile_terminal_state_version(state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {
       { queue = "devloop_review_reconcile", payload = payload },
     })
   end
@@ -431,7 +431,7 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
       return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merge-ready" } }, {})
     end
     if carry ~= nil then
-      local request = requests_review.build_review_carry_over_comment_request(M, issue.repo, link.pr_number, proposal_id, state.version, carry, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+      local request = requests_review.build_review_carry_over_comment_request(issue.repo, link.pr_number, proposal_id, state.version, carry, entity_lib.pr_source_ref(issue.repo, link.pr_number))
       devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "approved head is ancestor and resolution delta is empty")
       return tools.raise_effects(dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
         { queue = "github-proxy.github_pr_comment_request", payload = request },

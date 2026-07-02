@@ -246,8 +246,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
 
   local new_version = operator_commands.operator_rereview_version(state.version, current_pr.head_sha)
-  local comment_request = requests_review.build_operator_rereview_comment_request(core,
-    origin.repo,
+  local comment_request = requests_review.build_operator_rereview_comment_request(origin.repo,
     pr_number,
     origin.proposal_id,
     new_version,
@@ -423,7 +422,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
       version = blocked_version,
       proposal_id = origin.proposal_id,
     }
-    local comment_request = requests_review.build_pr_base_unmanaged_comment_request(core, origin.repo, pr.number, origin, branches.integration, source_ref)
+    local comment_request = requests_review.build_pr_base_unmanaged_comment_request(origin.repo, pr.number, origin, branches.integration, source_ref)
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "applied(pr-base-unmanaged)", "self-claimed PR base is not managed by this instance")
     devloop_logging.log_apply("observe_pr", origin.proposal_id, "blocked", blocked_version, { add = { "fkst-dev:blocked" }, remove = {} }, {
       "github-proxy.github_pr_comment_request",

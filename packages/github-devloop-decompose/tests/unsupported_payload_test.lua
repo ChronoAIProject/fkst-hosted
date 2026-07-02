@@ -9,7 +9,7 @@ local decompose_lib = require("devloop.decompose")
 local m_builders = require("devloop.markers.builders")
 
 local function production_decompose_payload()
-  return payloads_builders.build_devloop_decompose_payload(conv_reconcile.build_devloop_fix_reconcile_payload(core, {
+  return payloads_builders.build_devloop_decompose_payload(conv_reconcile.build_devloop_fix_reconcile_payload({
     proposal_id = "github-devloop/issue/owner/repo/42",
     review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
     review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",
@@ -35,7 +35,7 @@ return {
       comments = {
         m_builders.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
         core.state_marker(payload.proposal_id, "blocked", payload.version),
-        conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
+        conv_reconcile.fix_reconcile_marker(payload.proposal_id, payload.version, "drop"),
       },
       head = "devloop-owner-repo-42-01HY",
       head_sha = "def456",

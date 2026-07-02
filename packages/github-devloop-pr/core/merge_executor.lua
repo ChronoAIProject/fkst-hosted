@@ -86,7 +86,7 @@ local function should_wait_for_stale_mergeability(pr, branches, mergeable_reason
 end
 
 local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
-  local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
+  local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
     proposal_id = merge_ready.proposal_id,
     review_proposal_id = merge_ready.review_proposal_id,
     review_dedup_key = merge_ready.review_dedup_key,

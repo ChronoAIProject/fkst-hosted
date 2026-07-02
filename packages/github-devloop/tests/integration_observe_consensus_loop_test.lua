@@ -729,7 +729,7 @@ return {
     t.eq(#result.raises, 2)
     local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request").payload
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
-    local version = conv_reconcile.reconcile_terminal_state_version(core, default_marker_version, event.round)
+    local version = conv_reconcile.reconcile_terminal_state_version(default_marker_version, event.round)
     t.is_true(comment.body:find("github-devloop reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("no-actionable-framing-after-3-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
@@ -743,7 +743,7 @@ return {
     local event = reconcile()
     local state_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
     mock_issue_reconcile({ "fkst-dev:blocked" }, {
-      core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", conv_reconcile.reconcile_terminal_state_version(core, state_version, event.round)).body,
+      core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "already done", conv_reconcile.reconcile_terminal_state_version(state_version, event.round)).body,
     })
 
     local result = run_reconcile(event, opts("reconcile-idempotent"))

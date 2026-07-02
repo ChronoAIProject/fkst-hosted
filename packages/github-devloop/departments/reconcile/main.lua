@@ -142,7 +142,7 @@ local function pipeline_thinking(event)
       return
     end
 
-    local version = conv_reconcile.reconcile_terminal_state_version(core, state.version, reconcile.round)
+    local version = conv_reconcile.reconcile_terminal_state_version(state.version, reconcile.round)
     local transition = devloop_state.versioned_transition_status(state, { "thinking" }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", devloop_state.cas_outcome(state, transition, version), "thinking state marker not yet visible")
@@ -287,7 +287,7 @@ local function pipeline_timeout(event)
       reason_class = "state-output-obligation-timeout",
       source_ref = base_ids.normalize_source_ref(reconcile.source_ref),
     }
-    local comment_request = conv_reconcile.build_timeout_reconcile_comment_request(core, repo, issue_number, reconcile, action, reason, version, why_fields)
+    local comment_request = conv_reconcile.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
     local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",

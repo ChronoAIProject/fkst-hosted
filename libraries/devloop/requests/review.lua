@@ -1,4 +1,5 @@
 local entity_lib = require("devloop.entity")
+local devloop_state = require("devloop.state")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -108,7 +109,7 @@ function C.build_issue_review_converge_round_comment_request(M, repo, issue_numb
 end
 
 function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_number, source_ref)
-  local state_marker = M.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
+  local state_marker = devloop_state.state_marker(origin.proposal_id, "reviewing", origin.impl_version)
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -124,8 +125,8 @@ function C.build_reviewing_comment_request(M, repo, issue_number, origin, pr_num
   return C.attach_reviewing_handoff(request, origin.proposal_id, pr_number, origin.impl_version, source_ref)
 end
 
-function C.build_operator_rereview_comment_request(M, repo, pr_number, proposal_id, new_version, command, source_ref)
-  local state_marker = M.state_marker(proposal_id, "reviewing", new_version)
+function C.build_operator_rereview_comment_request(repo, pr_number, proposal_id, new_version, command, source_ref)
+  local state_marker = devloop_state.state_marker(proposal_id, "reviewing", new_version)
   local marker = operator_commands.operator_command_marker(command, "applied", "rereview")
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
@@ -148,9 +149,9 @@ function C.pr_base_unmanaged_blocked_version(version)
   return tostring(version or "") .. "/blocked/pr-base-unmanaged"
 end
 
-function C.build_pr_base_unmanaged_comment_request(M, repo, pr_number, origin, integration_branch, source_ref)
+function C.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, integration_branch, source_ref)
   local blocked_version = C.pr_base_unmanaged_blocked_version(origin.impl_version)
-  local state_marker = M.state_marker(origin.proposal_id, "blocked", blocked_version)
+  local state_marker = devloop_state.state_marker(origin.proposal_id, "blocked", blocked_version)
   local reason_marker = m_builders.pr_base_unmanaged_marker(origin.proposal_id, pr_number, origin.base_branch, integration_branch)
   return C.attach_blocked_handoff(entity_lib.build_entity_comment_request({
     kind = "pr",
@@ -178,7 +179,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   local to_state = reached.reflection_checkpoint and "review-meta"
     or reached.decision == "approve" and "merge-ready"
     or "fixing"
-  local state_marker = M.state_marker(issue_proposal_id, to_state, issue_version)
+  local state_marker = devloop_state.state_marker(issue_proposal_id, to_state, issue_version)
   local fix_round = nil
   if reached.decision == "reject" then
     fix_round = M.version_fix_round(issue_version)
@@ -286,7 +287,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
     error("github-devloop: invalid merge-gate baseline sha")
   end
   local test_command = devloop_base.neutralize_untrusted_comment_text(config.test_command())
-  local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
+  local state_marker = devloop_state.state_marker(merge_ready.proposal_id, "fixing", fix_version)
   local marker = m_builders.merge_gate_marker(merge_ready.proposal_id,
     merge_ready.pr_number,
     fix_version,
@@ -332,7 +333,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
 end
 
 function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local state_marker = M.state_marker(fix.proposal_id, "reviewing", new_version or fix.version)
+  local state_marker = devloop_state.state_marker(fix.proposal_id, "reviewing", new_version or fix.version)
   local marker = m_builders.fix_marker(fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
   local summary = ""
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
@@ -390,7 +391,7 @@ function C.raise_fix_reviewing(M, opts)
 end
 
 function C.build_merge_head_reviewing_comment_request(M, repo, issue_number, merge_ready, old_head_sha, new_head_sha, new_version, source_ref)
-  local state_marker = M.state_marker(merge_ready.proposal_id, "reviewing", new_version)
+  local state_marker = devloop_state.state_marker(merge_ready.proposal_id, "reviewing", new_version)
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -409,8 +410,8 @@ function C.build_merge_head_reviewing_comment_request(M, repo, issue_number, mer
   return C.attach_reviewing_handoff(request, merge_ready.proposal_id, merge_ready.pr_number, new_version, source_ref)
 end
 
-function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_proposal_id, version, carry, source_ref)
-  local state_marker = M.state_marker(issue_proposal_id, "merge-ready", version)
+function C.build_review_carry_over_comment_request(repo, pr_number, issue_proposal_id, version, carry, source_ref)
+  local state_marker = devloop_state.state_marker(issue_proposal_id, "merge-ready", version)
   local review_marker = m_builders.review_result_marker(carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)
   local merge_marker = m_builders.merge_ready_marker(issue_proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
   local carry_marker = m_builders.review_carry_over_marker(issue_proposal_id,

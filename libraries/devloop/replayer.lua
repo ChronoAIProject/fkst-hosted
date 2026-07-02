@@ -769,7 +769,7 @@ local function maybe_replay_review_carry_over(M, dept, issue, state, row, facts,
     return false
   end
   local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
-  local comment_request = requests_review.build_review_carry_over_comment_request(M, issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
+  local comment_request = requests_review.build_review_carry_over_comment_request(issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
   devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
   return raise_effects(M, dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
     { queue = "github-proxy.github_pr_comment_request", payload = comment_request },

@@ -237,7 +237,7 @@ end
 
 local function fix_reconcile(extra)
   local issue_version = core.next_fix_version(core.next_fix_version(core.next_fix_version(reviewing().version)))
-  local value = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
+  local value = conv_reconcile.build_devloop_fix_reconcile_payload({
     proposal_id = "github-devloop/issue/owner/repo/42",
     review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456"),
     review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456") .. "/review",

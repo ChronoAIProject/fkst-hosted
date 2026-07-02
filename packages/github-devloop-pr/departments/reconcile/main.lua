@@ -189,7 +189,7 @@ local function pipeline_review(event)
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-stale(state-advanced)", "current marker advanced beyond reviewing")
       return
     end
-    local version = conv_reconcile.review_reconcile_terminal_state_version(core, state.version, reconcile.round)
+    local version = conv_reconcile.review_reconcile_terminal_state_version(state.version, reconcile.round)
     local transition = devloop_state.versioned_transition_status(state, { "reviewing" }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
@@ -210,7 +210,7 @@ end
 
 local function pipeline_fix(event)
   local reconcile = event.payload or {}
-  if not conv_reconcile.is_supported_fix_reconcile(core, reconcile) then
+  if not conv_reconcile.is_supported_fix_reconcile(reconcile) then
     devloop_logging.log_entry("reconcile", event, "unknown", devloop_logging.payload_field(reconcile, "dedup_key"))
     devloop_logging.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
@@ -431,7 +431,7 @@ local function pipeline_timeout(event)
     }
     local comment_request = target_pr_number ~= nil
       and build_timeout_reconcile_pr_comment_request(repo, target_pr_number, reconcile, action, reason, version, why_fields)
-      or conv_reconcile.build_timeout_reconcile_comment_request(core, repo, issue_number, reconcile, action, reason, version, why_fields)
+      or conv_reconcile.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
     local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",

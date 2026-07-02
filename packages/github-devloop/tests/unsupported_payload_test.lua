@@ -165,7 +165,7 @@ local function payload_for_queue(queue)
       },
       service_class = "standard",
     }),
-    devloop_fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
+    devloop_fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456"),
       review_dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/3", "def456") .. "/review",

@@ -39,7 +39,7 @@ function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_
     if conv_reconcile.has_reconcile_marker(M, current.comments, proposal_id, reconcile.base_version, reconcile.round) then
       return log_skip(dept, proposal_id, state, "thinking", "blocked", "skip-idempotent(reconcile marker already visible)", "reconcile result marker for visible true-stall round is already visible")
     end
-    local version = conv_reconcile.reconcile_terminal_state_version(M, state.version, reconcile.round)
+    local version = conv_reconcile.reconcile_terminal_state_version(state.version, reconcile.round)
     local transition = M.versioned_transition_status(state, { "thinking" }, "blocked", version)
     if transition == "idempotent" or transition == "stale" then
       return log_skip(dept, proposal_id, state, "thinking", "blocked", M.cas_outcome(state, transition, version), "current marker cannot be reconciled from thinking")

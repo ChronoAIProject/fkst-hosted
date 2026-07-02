@@ -186,11 +186,11 @@ return {
     t.eq(conv_reconcile.has_reconcile_marker(core, { reconcile_marker }, proposal_id, base_version, 3), true)
     t.eq(conv_reconcile.reconcile_state_version(base_version, 3), base_version .. "/loop/3")
     local live_thinking_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
-    local terminal_version = conv_reconcile.reconcile_terminal_state_version(core, live_thinking_version, 3)
+    local terminal_version = conv_reconcile.reconcile_terminal_state_version(live_thinking_version, 3)
     t.eq(terminal_version, live_thinking_version .. "/loop/3")
     t.eq(core.versioned_transition_status({ state = "thinking", version = live_thinking_version }, { "thinking" }, "blocked", terminal_version), "apply")
     local live_higher_loop = live_thinking_version .. "/loop/8"
-    local higher_terminal = conv_reconcile.reconcile_terminal_state_version(core, live_higher_loop, 3)
+    local higher_terminal = conv_reconcile.reconcile_terminal_state_version(live_higher_loop, 3)
     t.eq(higher_terminal, live_higher_loop .. "/loop/9")
     t.eq(core.versioned_transition_status({ state = "thinking", version = live_higher_loop }, { "thinking" }, "blocked", higher_terminal), "apply")
 
@@ -236,7 +236,7 @@ return {
     t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
     t.eq(conv_reconcile.review_reconcile_state_version(issue_version, 3), issue_version .. "/review-loop/3")
     local live_reviewing_version = issue_version .. "/review-loop/9"
-    local terminal_version = conv_reconcile.review_reconcile_terminal_state_version(core, live_reviewing_version, 3)
+    local terminal_version = conv_reconcile.review_reconcile_terminal_state_version(live_reviewing_version, 3)
     t.eq(terminal_version, live_reviewing_version .. "/review-loop/10")
     t.eq(core.versioned_transition_status({ state = "reviewing", version = live_reviewing_version }, { "reviewing" }, "blocked", terminal_version), "apply")
 
@@ -262,7 +262,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/fix/4"
     local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
-    local reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
+    local reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
       proposal_id = issue_proposal_id,
       review_proposal_id = review_id,
       review_dedup_key = "consensus:" .. review_id .. "/review",
@@ -281,13 +281,13 @@ return {
     t.eq(reconcile.pr_number, 7)
     t.eq(reconcile.dedup_key, "fix-reconcile:" .. issue_version)
     t.eq(conv_reconcile.fix_reconcile_state_version(issue_version), issue_version)
-    t.eq(conv_reconcile.is_supported_fix_reconcile(core, reconcile), true)
-    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { dedup_key = "fix-reconcile:" .. issue_version .. "/other" })), false)
-    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { round = 3 })), false)
-    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { head_sha = "not-a-sha" })), false)
-    t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(reconcile), true)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(copy_table(reconcile, { dedup_key = "fix-reconcile:" .. issue_version .. "/other" })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(copy_table(reconcile, { round = 3 })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(copy_table(reconcile, { head_sha = "not-a-sha" })), false)
+    t.eq(conv_reconcile.is_supported_fix_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
 
-    local marker = conv_reconcile.fix_reconcile_marker(core, issue_proposal_id, issue_version, "drop")
+    local marker = conv_reconcile.fix_reconcile_marker(issue_proposal_id, issue_version, "drop")
     t.eq(conv_reconcile.has_fix_reconcile_marker(core, { marker }, issue_proposal_id, issue_version), true)
     t.is_true(marker:find('action="drop"', 1, true) ~= nil)
     t.is_true(marker:find('round="4"', 1, true) ~= nil)

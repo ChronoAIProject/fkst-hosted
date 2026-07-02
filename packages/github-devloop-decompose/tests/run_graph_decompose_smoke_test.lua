@@ -71,7 +71,7 @@ local function mock_claim_and_reads(payload)
     labels = { "fkst-dev:blocked" },
     comments = {
       core.state_marker(payload.proposal_id, "blocked", payload.version),
-      conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
+      conv_reconcile.fix_reconcile_marker(payload.proposal_id, payload.version, "drop"),
     },
     state = "OPEN",
     updated_at = "2026-06-03T01:02:03Z",
@@ -82,7 +82,7 @@ local function mock_claim_and_reads(payload)
     comments = {
       m_builders.pr_origin_marker(payload.proposal_id, 7, "devloop-owner-repo-42-01HY", payload.version, "dev"),
       core.state_marker(payload.proposal_id, "blocked", payload.version),
-      conv_reconcile.fix_reconcile_marker(core, payload.proposal_id, payload.version, "drop"),
+      conv_reconcile.fix_reconcile_marker(payload.proposal_id, payload.version, "drop"),
     },
     head = "devloop-owner-repo-42-01HY",
     head_sha = "def456",

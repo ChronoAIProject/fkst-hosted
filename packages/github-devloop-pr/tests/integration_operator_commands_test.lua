@@ -249,8 +249,7 @@ return {
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_duplicate")
     local command_fact = operator_commands.operator_command_fact(core, { command }, "rereview")
-    local response = requests_review.build_operator_rereview_comment_request(core,
-      "owner/repo",
+    local response = requests_review.build_operator_rereview_comment_request("owner/repo",
       7,
       "github-devloop/issue/owner/repo/42",
       impl_version .. "/review-loop/4/rereview/4/feedface",

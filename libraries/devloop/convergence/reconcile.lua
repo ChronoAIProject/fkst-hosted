@@ -1,4 +1,5 @@
 local base_ids = require("devloop.base_ids")
+local devloop_state = require("devloop.state")
 local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
@@ -68,7 +69,7 @@ function C.build_devloop_review_reconcile_payload(unresolved, round, issue_propo
   }
 end
 
-function C.build_devloop_fix_reconcile_payload(M, reject_ctx, issue_version)
+function C.build_devloop_fix_reconcile_payload(reject_ctx, issue_version)
   return {
     schema = "github-devloop.fix-reconcile.v1",
     proposal_id = reject_ctx.proposal_id,
@@ -76,7 +77,7 @@ function C.build_devloop_fix_reconcile_payload(M, reject_ctx, issue_version)
     review_dedup_key = reject_ctx.review_dedup_key,
     issue_version = issue_version,
     head_sha = reject_ctx.reviewed_head_sha,
-    round = M.version_fix_round(issue_version),
+    round = devloop_state.version_fix_round(issue_version),
     pr_number = reject_ctx.pr_number,
     dedup_key = "fix-reconcile:" .. tostring(issue_version),
     source_ref = {
@@ -115,9 +116,9 @@ function C.timeout_reconcile_reason_body(fields)
     .. "\nsource_ref.ref=" .. tostring(source_ref.ref or "")
 end
 
-function C.build_timeout_reconcile_comment_request(M, repo, issue_number, reconcile, action, reason, version, fields)
+function C.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, fields)
   local marker = C.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
-  local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(reconcile.proposal_id, "blocked", version)
   return {
     schema = "github-proxy.v1",
     repo = repo,
@@ -140,24 +141,24 @@ function C.review_reconcile_state_version(issue_version, round)
   return tostring(issue_version) .. "/review-loop/" .. tostring(round)
 end
 
-function C.reconcile_terminal_state_version(M, current_version, round)
+function C.reconcile_terminal_state_version(current_version, round)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid reconcile round")
   end
-  local next_n = M.version_loop_round(current_version) + 1
+  local next_n = devloop_state.version_loop_round(current_version) + 1
   if n > next_n then
     next_n = n
   end
   return tostring(current_version) .. "/loop/" .. tostring(next_n)
 end
 
-function C.review_reconcile_terminal_state_version(M, current_version, round)
+function C.review_reconcile_terminal_state_version(current_version, round)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review reconcile round")
   end
-  local next_n = M.version_review_loop_round(current_version) + 1
+  local next_n = devloop_state.version_review_loop_round(current_version) + 1
   if n > next_n then
     next_n = n
   end
@@ -190,7 +191,7 @@ function C.is_supported_review_reconcile(payload)
     and source_refs.has_bounded_source_ref(payload.source_ref, devloop_base._max_key_len)
 end
 
-function C.is_supported_fix_reconcile(M, payload)
+function C.is_supported_fix_reconcile(payload)
   if type(payload) ~= "table" then
     return false
   end
@@ -204,7 +205,7 @@ function C.is_supported_fix_reconcile(M, payload)
     and strings.is_bounded_string(payload.issue_version, devloop_base._max_dedup_len)
     and forge_validators.is_git_sha(payload.head_sha)
     and valid_round(payload.round) ~= nil
-    and tonumber(payload.round) == M.version_fix_round(payload.issue_version)
+    and tonumber(payload.round) == devloop_state.version_fix_round(payload.issue_version)
     and forge_validators.is_positive_pr_number(payload.pr_number)
     and strings.is_bounded_string(payload.dedup_key, devloop_base._max_dedup_len)
     and tostring(payload.dedup_key) == "fix-reconcile:" .. tostring(payload.issue_version)
@@ -266,8 +267,8 @@ function C.review_reconcile_marker(issue_proposal_id, issue_version, round, acti
     .. '" -->'
 end
 
-function C.fix_reconcile_marker(M, proposal_id, issue_version, action)
-  local n = valid_round(M.version_fix_round(issue_version))
+function C.fix_reconcile_marker(proposal_id, issue_version, action)
+  local n = valid_round(devloop_state.version_fix_round(issue_version))
   if n == nil then
     error("github-devloop: invalid fix reconcile round")
   end
@@ -350,7 +351,7 @@ function C.has_review_reconcile_marker(M, comments, issue_proposal_id, issue_ver
 end
 
 function C.has_fix_reconcile_marker(M, comments, proposal_id, issue_version)
-  local n = valid_round(M.version_fix_round(issue_version))
+  local n = valid_round(devloop_state.version_fix_round(issue_version))
   if n == nil or type(comments) ~= "table" then
     return false
   end
