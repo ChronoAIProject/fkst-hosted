@@ -8,6 +8,7 @@ local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local liveness_scan = require("devloop.liveness_scan")
 local entity_list_cache = require("devloop.entity_list_cache")
 local saga = require("workflow.saga")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop/liveness-scan/issue-cursor/"
 
@@ -61,7 +62,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
   local delegation = state.state == "awaiting-pr" and m_facts.pr_delegation_fact(core, current.comments, proposal_id, state.version) or nil
   local current_pr = nil
   if delegation ~= nil then
-    local pr_view = core.fetch_pr_view_origin(repo, delegation.pr_number, nil, {
+    local pr_view = devloop_entity_view.fetch_pr_view_origin(repo, delegation.pr_number, nil, {
       force_fresh = true,
       consumer = "liveness_scan",
     })

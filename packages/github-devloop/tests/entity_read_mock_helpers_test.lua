@@ -80,7 +80,7 @@ return {
       register_all_views = true,
     })
 
-    local view = decode(require("devloop.github_proxy_entity_view").fetch_pr_view(core, "owner/repo", 7, "2026-06-14T11:11:12Z", { consumer = "view" }).stdout)
+    local view = decode(require("devloop.github_proxy_entity_view").fetch_pr_view("owner/repo", 7, "2026-06-14T11:11:12Z", { consumer = "view" }).stdout)
     local rest = decode(github().pr_rest_view("owner/repo", 7, 30).stdout)
     local probe = github().entity_updated_at("owner/repo", "pr", 7, 30)
     local comments = decode(github().issue_comments("owner/repo", 7, 30).stdout)

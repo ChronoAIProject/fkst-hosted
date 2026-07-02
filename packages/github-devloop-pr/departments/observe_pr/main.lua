@@ -18,6 +18,7 @@ local replayer = require("devloop.replayer")
 local config = require("devloop.config")
 local conv_rounds = require("devloop.convergence.rounds")
 local v_pr = require("devloop.validators.pr")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local M = {}
 
@@ -442,7 +443,7 @@ local function process_pr_event(event)
   core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config(core)
-  local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
+  local pr_view = devloop_entity_view.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end

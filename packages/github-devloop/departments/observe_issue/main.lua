@@ -21,6 +21,7 @@ local v_issue = require("devloop.validators.issue")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local v_pr = require("devloop.validators.pr")
 local m_builders = require("devloop.markers.builders")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local M = {}
 
 local spec = {
@@ -724,7 +725,7 @@ local function process_pr_event(event)
     return
   end
 
-  local pr_view = core.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at, {
+  local pr_view = devloop_entity_view.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at, {
     force_fresh = true,
     consumer = "observe_issue",
   })

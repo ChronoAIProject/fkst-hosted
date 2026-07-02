@@ -103,7 +103,7 @@ M.loop_lock_key = function(...) return entity.loop_lock_key(M, ...) end
 M.implement_lock_key = function(...) return entity.implement_lock_key(M, ...) end
 local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
 M.cached_entity_view = function(...) return github_proxy_entity_view.cached_entity_view(M, ...) end
-M.fetch_pr_view_origin = function(...) return github_proxy_entity_view.fetch_pr_view_origin(M, ...) end
+M.fetch_pr_view_origin = github_proxy_entity_view.fetch_pr_view_origin
 M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_after_write
 require("core.substrate_ref").install(M)
 

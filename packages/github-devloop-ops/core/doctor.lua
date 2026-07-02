@@ -8,6 +8,7 @@ local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 local decompose_lib = require("devloop.decompose")
 local entity_list_cache = require("devloop.entity_list_cache")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 function S.install(M)
 local verdict_rank = {
@@ -203,7 +204,7 @@ local function fetch_issue_entity(repo, issue)
 end
 
 local function fetch_pr_entity(repo, pr)
-  local view = M.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
+  local view = devloop_entity_view.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
     consumer = "saga_doctor",
   })
   if view.exit_code ~= 0 then

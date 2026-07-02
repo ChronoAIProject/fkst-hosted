@@ -387,7 +387,7 @@ function C.fetch_issue_view(M, repo, issue_number, updated_at, opts)
   return fetch_entity_view(repo, "issue", issue_number, updated_at, opts)
 end
 
-function C.fetch_pr_view(M, repo, pr_number, updated_at, opts)
+function C.fetch_pr_view(repo, pr_number, updated_at, opts)
   return fetch_entity_view(repo, "pr", pr_number, updated_at, opts)
 end
 
@@ -397,10 +397,10 @@ function C.fetch_marker_issue_view(M, repo, issue_number, updated_at, opts)
   return C.fetch_issue_view(M, repo, issue_number, updated_at, options)
 end
 
-function C.fetch_marker_pr_view(M, repo, pr_number, updated_at, opts)
+function C.fetch_marker_pr_view(repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "marker-reader"
-  return C.fetch_pr_view(M, repo, pr_number, updated_at, options)
+  return C.fetch_pr_view(repo, pr_number, updated_at, options)
 end
 
 function C.fetch_issue_view_state(M, repo, issue_number, updated_at, opts)
@@ -432,10 +432,10 @@ function C.commit_issue_subject_snapshot(M, repo, issue_number)
   }
 end
 
-function C.fetch_pr_view_origin(M, repo, pr_number, updated_at, opts)
+function C.fetch_pr_view_origin(repo, pr_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_pr"
-  return C.fetch_marker_pr_view(M, repo, pr_number, updated_at, options)
+  return C.fetch_marker_pr_view(repo, pr_number, updated_at, options)
 end
 
 -- Opt-in cross-process stale-tolerant read cache (manual TTL). For OBSERVATION

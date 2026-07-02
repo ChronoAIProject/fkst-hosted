@@ -65,7 +65,7 @@ local function parent_state_for_child_terminal(state, child_state)
 end
 
 local function read_delegated_child_pr(dept, issue, delegation)
-  local pr_view = M.fetch_pr_view_origin(issue.repo, delegation.pr_number, nil, {
+  local pr_view = devloop_entity_view.fetch_pr_view_origin(issue.repo, delegation.pr_number, nil, {
     force_fresh = true,
     consumer = dept,
   })

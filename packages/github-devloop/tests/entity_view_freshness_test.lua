@@ -249,7 +249,7 @@ return {
     local view_calls = 0
     local probe_calls = 0
     local ok, probed = pcall(function()
-      return core.fetch_pr_view_origin(repo, pr_number, nil, {
+      return devloop_entity_view.fetch_pr_view_origin(repo, pr_number, nil, {
         consumer = "probe-reader",
       })
     end)
@@ -297,7 +297,7 @@ return {
       times = 1,
     })
 
-    local probed = core.fetch_pr_view_origin(repo, pr_number, nil, {
+    local probed = devloop_entity_view.fetch_pr_view_origin(repo, pr_number, nil, {
       consumer = "probe-reader",
     })
 
@@ -330,7 +330,7 @@ return {
       times = 1,
     })
 
-    local result = core.fetch_pr_view_origin(repo, pr_number, "2026-06-03T01:02:04Z", {
+    local result = devloop_entity_view.fetch_pr_view_origin(repo, pr_number, "2026-06-03T01:02:04Z", {
       consumer = "observe_pr",
     })
     local decoded = decode(result.stdout)

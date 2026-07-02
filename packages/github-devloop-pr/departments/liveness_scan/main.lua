@@ -8,6 +8,7 @@ local liveness_scan = require("devloop.liveness_scan")
 local entity_list_cache = require("devloop.entity_list_cache")
 local saga = require("workflow.saga")
 local forge_validators = require("devloop.forge_validators")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
 
@@ -37,7 +38,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   if not sweep_bounds.sweep_has_budget(deadline) then
     return nil, "deadline"
   end
-  local state_view = core.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
+  local state_view = devloop_entity_view.fetch_pr_view_origin(repo, pr.number, pr.updated_at, {
     consumer = "liveness_scan",
     timeout = sweep_bounds.sweep_call_timeout(limits, deadline),
   })
