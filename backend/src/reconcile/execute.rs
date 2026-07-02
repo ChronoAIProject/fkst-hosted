@@ -34,6 +34,7 @@ use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
 use crate::reconcile::reachability;
+use crate::reconcile::retire::retire_work_issues;
 
 use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
 
@@ -80,6 +81,9 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         ReconcileAction::TouchPending { session_id } => touch_pending(&session_id, ctx).await,
         ReconcileAction::Kill { session_id, reason } => kill(&session_id, reason, ctx).await,
         ReconcileAction::CleanupTerminal { session_id } => cleanup_terminal(&session_id, ctx).await,
+        ReconcileAction::RetireWorkIssues { work_label } => {
+            retire_work_issues(&ctx.github, ctx.listing.as_ref(), repo, &work_label).await
+        }
         ReconcileAction::FlagInvalid {
             trigger_issue,
             detail,

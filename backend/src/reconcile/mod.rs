@@ -24,6 +24,7 @@ pub mod pending;
 pub mod reachability;
 pub mod registry;
 pub mod repo;
+pub mod retire;
 pub mod templates;
 pub mod work_ack;
 
@@ -64,6 +65,18 @@ pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
 /// re-reads it and never re-acks. There is no clear/removal path (like the announce
 /// latch) — an acknowledged work issue stays acknowledged for its lifetime.
 pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
+
+/// The DURABLE latch label the reconciler adds to a WORK issue when its session is
+/// RETIRED — i.e. the session's trigger issue was closed, so the orphan pod is killed
+/// ([`desired::plan_repo`]'s orphan branch emits [`ReconcileAction::RetireWorkIssues`]).
+/// The still-open work issue is left OPEN but is no longer worked, so the executor
+/// comments "session retired, no longer worked", latches THIS label, and drops the now
+/// stale [`WORK_PICKED_UP_LABEL`]. Because the latch lives on the issue (not process
+/// memory) it is read back each reconcile: an already-retired issue is skipped, so the
+/// ~60s the orphan pod lingers before deletion never re-notifies. Mirrors the one-way
+/// [`SUBSTRATE_ANNOUNCED_LABEL`]/[`WORK_PICKED_UP_LABEL`] latches — there is no
+/// clear/removal path (unlike [`SUBSTRATE_INVALID_LABEL`]).
+pub const SUBSTRATE_RETIRED_LABEL: &str = "fkst-session-retired";
 
 /// The label the session-health scrape ([`crate::k8s::health_scrape`]) latches onto
 /// a trigger issue while its pod looks degraded. Unlike the parse-time invalid latch,
