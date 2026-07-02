@@ -66,8 +66,7 @@ local function thinking_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, conv_rounds.converge_round_marker(core,
-      proposal_id,
+    table.insert(comments, conv_rounds.converge_round_marker(proposal_id,
       base_version,
       sr_digest,
       n,
@@ -90,8 +89,7 @@ local function thinking_changing_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, conv_rounds.converge_round_marker(core,
-      proposal_id,
+    table.insert(comments, conv_rounds.converge_round_marker(proposal_id,
       base_version,
       sr_digest,
       n,
@@ -259,7 +257,7 @@ return {
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
       core.state_marker(proposal_id, "ready", ready_version, "result-marker,ready-label,devloop-ready"),
       core.state_marker(proposal_id, "blocked", blocked_version),
-      conv_reconcile.timeout_reconcile_marker(core, proposal_id, ready_version, "ready", 3, "drop", {
+      conv_reconcile.timeout_reconcile_marker(proposal_id, ready_version, "ready", 3, "drop", {
         terminal_version = blocked_version,
         from_state = "ready",
         from_version = ready_version,
@@ -305,7 +303,7 @@ return {
       core.state_marker(proposal_id, "ready", ready_version, "result-marker,ready-label,devloop-ready"),
       core.state_marker(proposal_id, "blocked", blocked_version),
       m_builders.pr_link_marker(proposal_id, "7", "devloop-owner-repo-42-01HY", ready_version, "dev"),
-      conv_reconcile.timeout_reconcile_marker(core, proposal_id, ready_version, "ready", 3, "drop", {
+      conv_reconcile.timeout_reconcile_marker(proposal_id, ready_version, "ready", 3, "drop", {
         terminal_version = blocked_version,
         from_state = "ready",
         from_version = ready_version,

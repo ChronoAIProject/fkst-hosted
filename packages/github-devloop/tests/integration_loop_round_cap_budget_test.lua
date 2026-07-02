@@ -44,7 +44,7 @@ return {
     local current_digest = convergence_shared.source_ref_digest(event.source_ref)
     local drift_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?drift=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      conv_rounds.converge_round_marker(core, event.proposal_id, drift_version, drift_digest, cap, drift_version .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
+      conv_rounds.converge_round_marker(event.proposal_id, drift_version, drift_digest, cap, drift_version .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
     })
 
     local result = run_loop(event, opts("loop-budget-drift-cap"))
@@ -74,7 +74,7 @@ return {
     })
     local old_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      conv_rounds.converge_round_marker(core, event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
+      conv_rounds.converge_round_marker(event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), event.narrowed_question, event.angle_digests),
     })
 
     local result = run_loop(event, opts("loop-stable-proposal-facts-cap"))
@@ -150,7 +150,7 @@ return {
     })
     local old_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      conv_rounds.converge_round_marker(core, event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), "Unrelated old question", {
+      conv_rounds.converge_round_marker(event.proposal_id, old_base, old_digest, cap, old_base .. "/loop/" .. tostring(cap), "Unrelated old question", {
         { angle = "minimal", verdict = "approve", digest = "old-digest" },
       }),
     })

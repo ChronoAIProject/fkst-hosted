@@ -116,7 +116,7 @@ function C.timeout_reconcile_reason_body(fields)
 end
 
 function C.build_timeout_reconcile_comment_request(M, repo, issue_number, reconcile, action, reason, version, fields)
-  local marker = C.timeout_reconcile_marker(M, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
+  local marker = C.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
   local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
   return {
     schema = "github-proxy.v1",
@@ -198,17 +198,17 @@ function C.is_supported_fix_reconcile(M, payload)
   return payload.schema == "github-devloop.fix-reconcile.v1"
     and repo ~= nil
     and issue_number ~= nil
-    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and strings.is_path_safe_key(payload.review_proposal_id, M._max_key_len)
-    and strings.is_bounded_string(payload.review_dedup_key, M._max_dedup_len)
-    and strings.is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, devloop_base._max_key_len)
+    and strings.is_path_safe_key(payload.review_proposal_id, devloop_base._max_key_len)
+    and strings.is_bounded_string(payload.review_dedup_key, devloop_base._max_dedup_len)
+    and strings.is_bounded_string(payload.issue_version, devloop_base._max_dedup_len)
     and forge_validators.is_git_sha(payload.head_sha)
     and valid_round(payload.round) ~= nil
     and tonumber(payload.round) == M.version_fix_round(payload.issue_version)
     and forge_validators.is_positive_pr_number(payload.pr_number)
-    and strings.is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and strings.is_bounded_string(payload.dedup_key, devloop_base._max_dedup_len)
     and tostring(payload.dedup_key) == "fix-reconcile:" .. tostring(payload.issue_version)
-    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
+    and source_refs.has_bounded_source_ref(payload.source_ref, devloop_base._max_key_len)
 end
 
 function C.is_supported_timeout_reconcile(M, payload)
@@ -222,12 +222,12 @@ function C.is_supported_timeout_reconcile(M, payload)
     and issue_number ~= nil
     and row ~= nil
     and row.terminal == false
-    and strings.is_path_safe_key(payload.proposal_id, M._max_key_len)
-    and strings.is_bounded_string(payload.issue_version, M._max_dedup_len)
+    and strings.is_path_safe_key(payload.proposal_id, devloop_base._max_key_len)
+    and strings.is_bounded_string(payload.issue_version, devloop_base._max_dedup_len)
     and valid_round(payload.round) ~= nil
-    and strings.is_bounded_string(payload.dedup_key, M._max_dedup_len)
+    and strings.is_bounded_string(payload.dedup_key, devloop_base._max_dedup_len)
     and tostring(payload.dedup_key) == "timeout-reconcile:" .. tostring(payload.issue_version) .. "/timeout-reconcile/" .. tostring(payload.state) .. "/" .. tostring(payload.round)
-    and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
+    and source_refs.has_bounded_source_ref(payload.source_ref, devloop_base._max_key_len)
 end
 
 function C.reconcile_state_version(base_version, round)
@@ -274,15 +274,15 @@ function C.fix_reconcile_marker(M, proposal_id, issue_version, action)
   if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
     error("github-devloop: invalid fix reconcile action")
   end
-  return '<!-- fkst:github-devloop:fix-reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(issue_version, M._max_dedup_len)
+  return '<!-- fkst:github-devloop:fix-reconcile:v1 proposal="' .. safe_attr(proposal_id, devloop_base._max_key_len)
+    .. '" version="' .. safe_attr(issue_version, devloop_base._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
-    .. '" dedup="' .. safe_attr("fix-reconcile:" .. tostring(issue_version), M._max_dedup_len)
+    .. '" dedup="' .. safe_attr("fix-reconcile:" .. tostring(issue_version), devloop_base._max_dedup_len)
     .. '" -->'
 end
 
-function C.timeout_reconcile_marker(M, proposal_id, issue_version, state_name, round, action, fields)
+function C.timeout_reconcile_marker(proposal_id, issue_version, state_name, round, action, fields)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid timeout reconcile round")
@@ -293,14 +293,14 @@ function C.timeout_reconcile_marker(M, proposal_id, issue_version, state_name, r
   local why = fields or {}
   local source_ref = type(why.source_ref) == "table" and why.source_ref or {}
   local marker_version = why.terminal_version or C.timeout_reconcile_state_version(issue_version, state_name, n)
-  return '<!-- fkst:github-devloop:timeout-reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(marker_version, M._max_dedup_len)
+  return '<!-- fkst:github-devloop:timeout-reconcile:v1 proposal="' .. safe_attr(proposal_id, devloop_base._max_key_len)
+    .. '" version="' .. safe_attr(marker_version, devloop_base._max_dedup_len)
     .. '" state="' .. safe_attr(state_name, max_attr_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
-    .. '" dedup="' .. safe_attr("timeout-reconcile:" .. tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(n), M._max_dedup_len)
+    .. '" dedup="' .. safe_attr("timeout-reconcile:" .. tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(n), devloop_base._max_dedup_len)
     .. '" from_state="' .. safe_attr(why.from_state or state_name, max_attr_len)
-    .. '" from_version="' .. safe_attr(why.from_version or issue_version, M._max_dedup_len)
+    .. '" from_version="' .. safe_attr(why.from_version or issue_version, devloop_base._max_dedup_len)
     .. '" age_minutes="' .. safe_attr(why.age_minutes or "", max_attr_len)
     .. '" budget_minutes="' .. safe_attr(why.budget_minutes or "", max_attr_len)
     .. '" attempt="' .. safe_attr(why.attempt or n, max_attr_len)
@@ -308,7 +308,7 @@ function C.timeout_reconcile_marker(M, proposal_id, issue_version, state_name, r
     .. '" driving_queue="' .. safe_attr(why.driving_queue or "", max_attr_len)
     .. '" reason_class="' .. safe_attr(why.reason_class or "state-output-obligation-timeout", max_attr_len)
     .. '" source_ref_kind="' .. safe_attr(source_ref.kind or "", max_attr_len)
-    .. '" source_ref="' .. safe_attr(source_ref.ref or "", M._max_key_len)
+    .. '" source_ref="' .. safe_attr(source_ref.ref or "", devloop_base._max_key_len)
     .. '" -->'
 end
 function C.has_reconcile_marker(M, comments, proposal_id, base_version, round)
@@ -412,7 +412,7 @@ function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id,
         and from_state == state_name
         and replay_fields.restart_transition_row(M.restart_transition_table(), from_state) ~= nil
         and replay_fields.restart_transition_row(M.restart_transition_table(), from_state).terminal == false
-        and strings.is_bounded_string(from_version, M._max_dedup_len)
+        and strings.is_bounded_string(from_version, devloop_base._max_dedup_len)
         and dedup == expected_dedup then
         return {
           proposal_id = marker_proposal,

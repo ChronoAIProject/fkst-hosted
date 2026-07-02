@@ -49,8 +49,7 @@ end
 return {
   test_converge_round_facts_ignore_non_bot_marker = function()
     local source_digest = convergence_shared.source_ref_digest(source_ref)
-    local marker = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local marker = conv_rounds.converge_round_marker(proposal_id,
       base_version,
       source_digest,
       1,
@@ -101,8 +100,7 @@ return {
     local consensus_dedup = base_version .. "/loop/3"
     local question = "  Which boundary\n\nshould   narrow?  "
     local angle_digests = angles()
-    local first = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local first = conv_rounds.converge_round_marker(proposal_id,
       conv_rounds.converge_base_version(consensus_dedup),
       source_digest,
       3,
@@ -110,8 +108,7 @@ return {
       question,
       angle_digests
     )
-    local second = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local second = conv_rounds.converge_round_marker(proposal_id,
       conv_rounds.converge_base_version(consensus_dedup),
       source_digest,
       3,
@@ -135,8 +132,7 @@ return {
 
   test_converge_marker_replay_fields_escape_delimiters = function()
     local source_digest = convergence_shared.source_ref_digest(source_ref)
-    local marker = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local marker = conv_rounds.converge_round_marker(proposal_id,
       base_version,
       source_digest,
       1,
@@ -156,8 +152,7 @@ return {
     local source_digest = convergence_shared.source_ref_digest(source_ref)
     local first_question = "Which boundary should narrow first?"
     local last_question = "Which boundary should narrow last?"
-    local first = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local first = conv_rounds.converge_round_marker(proposal_id,
       base_version,
       source_digest,
       2,
@@ -165,8 +160,7 @@ return {
       first_question,
       angles()
     )
-    local last = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local last = conv_rounds.converge_round_marker(proposal_id,
       base_version,
       source_digest,
       2,
@@ -209,9 +203,9 @@ return {
     local boundary_question = "Same boundary"
     local boundary_angles = angles()
     local comments = {
-      trusted(conv_rounds.converge_round_marker(core, proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
-      trusted(conv_rounds.converge_round_marker(core, proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", boundary_question, boundary_angles)),
-      trusted(conv_rounds.converge_round_marker(core, "github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
+      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
+      trusted(conv_rounds.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", boundary_question, boundary_angles)),
+      trusted(conv_rounds.converge_round_marker("github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
     }
     local filtered = conv_rounds.converge_round_facts(core, comments, proposal_id, base_version, source_a)
     t.eq(conv_rounds.max_converge_round(filtered), 6)
@@ -226,8 +220,8 @@ return {
     local boundary_question = "Current boundary"
     local boundary_angles = angles()
     local comments = {
-      trusted(conv_rounds.converge_round_marker(core, proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
-      trusted(conv_rounds.converge_round_marker(core, proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Different boundary", {
+      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
+      trusted(conv_rounds.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Different boundary", {
         { angle = "minimal", verdict = "approve", digest = "different" },
       })),
     }

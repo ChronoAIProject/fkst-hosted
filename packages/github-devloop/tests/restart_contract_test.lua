@@ -528,7 +528,7 @@ return {
         current = {
           comments = {
             {
-              body = conv_rounds.converge_round_marker(core, "github-devloop/issue/owner/repo/42", version, convergence_shared.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
+              body = conv_rounds.converge_round_marker("github-devloop/issue/owner/repo/42", version, convergence_shared.source_ref_digest(source_ref), 1, "consensus:github-devloop/issue/owner/repo/42/loop/1", "Stale convergence", {
                 { angle = "minimal", verdict = "continue", digest = "stale" },
               }),
               author_login = "fkst-test-bot",

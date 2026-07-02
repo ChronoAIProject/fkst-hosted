@@ -411,17 +411,17 @@ function C.merge_queue_starvation_tick_payload(repo, incident_identity, head_ent
   }
 end
 
-function C.queue_starvation_reconcile_marker(M, issue_proposal_id, pr_number, version, head_sha, incident_identity, attempt_key, outcome)
+function C.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, version, head_sha, incident_identity, attempt_key, outcome)
   if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid queue-starvation reconcile marker")
   end
   local incident = strings.sanitize_key(tostring(incident_identity or "merge-ready"), false)
   local attempt = strings.sanitize_key(tostring(attempt_key or "attempt"), false)
   local proof = strings.sanitize_key(tostring(outcome or "head-redriven"), false):gsub("/", "-")
-  if not strings.is_bounded_string(version, M._max_dedup_len)
-    or not strings.is_path_safe_key(incident, M._max_dedup_len)
-    or not strings.is_path_safe_key(attempt, M._max_dedup_len)
-    or not strings.is_bounded_string(proof, M._max_key_len) then
+  if not strings.is_bounded_string(version, devloop_base._max_dedup_len)
+    or not strings.is_path_safe_key(incident, devloop_base._max_dedup_len)
+    or not strings.is_path_safe_key(attempt, devloop_base._max_dedup_len)
+    or not strings.is_bounded_string(proof, devloop_base._max_key_len) then
     error("github-devloop: invalid queue-starvation reconcile marker")
   end
   return '<!-- fkst:github-devloop:queue-starvation-reconcile:v1 proposal="' .. tostring(issue_proposal_id)

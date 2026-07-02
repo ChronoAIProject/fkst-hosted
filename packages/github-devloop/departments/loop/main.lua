@@ -79,8 +79,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
 
-    local marker_body = conv_rounds.converge_round_marker(core,
-      unresolved.proposal_id,
+    local marker_body = conv_rounds.converge_round_marker(unresolved.proposal_id,
       base_version,
       sr_digest,
       round,

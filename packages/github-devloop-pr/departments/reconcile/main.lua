@@ -45,7 +45,7 @@ local function emit_blocked_reconcile(kind, proposal_id, state, version, action,
 end
 
 local function build_timeout_reconcile_pr_comment_request(repo, pr_number, reconcile, action, reason, version, fields)
-  local marker = conv_reconcile.timeout_reconcile_marker(core, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
+  local marker = conv_reconcile.timeout_reconcile_marker(reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
   local state_marker = devloop_state.state_marker(reconcile.proposal_id, "blocked", version)
   return entity_lib.build_entity_comment_request({
     kind = "pr",

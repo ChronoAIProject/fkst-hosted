@@ -69,8 +69,7 @@ local function thinking_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, conv_rounds.converge_round_marker(core,
-      proposal_id,
+    table.insert(comments, conv_rounds.converge_round_marker(proposal_id,
       base_version,
       sr_digest,
       n,
@@ -93,8 +92,7 @@ local function thinking_changing_converge_comments(event, rounds, command)
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),
   }
   for n = 1, rounds do
-    table.insert(comments, conv_rounds.converge_round_marker(core,
-      proposal_id,
+    table.insert(comments, conv_rounds.converge_round_marker(proposal_id,
       base_version,
       sr_digest,
       n,

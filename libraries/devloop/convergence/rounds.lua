@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local devloop_base = require("devloop.base")
 local shared = require("devloop.convergence.shared")
 local C = {}
 
@@ -37,7 +38,7 @@ local function converge_record_map(M, comments, kind, matches)
         and matches(marker)
         and is_digest(question)
         and is_digest(verdicts)
-        and is_bounded_attr(M, dedup, M._max_dedup_len) then
+        and is_bounded_attr(M, dedup, devloop_base._max_dedup_len) then
         records_by_round[round] = {
           round = round,
           question = question,
@@ -82,16 +83,16 @@ function C.converge_proposal_base_dedup(consensus_dedup)
   local base_version = C.converge_base_version(consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end
-function C.converge_round_marker(M, proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
+function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid converge round")
   end
-  return '<!-- fkst:github-devloop:converge-round:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(base_version, M._max_dedup_len)
+  return '<!-- fkst:github-devloop:converge-round:v1 proposal="' .. safe_attr(proposal_id, devloop_base._max_key_len)
+    .. '" version="' .. safe_attr(base_version, devloop_base._max_dedup_len)
     .. '" source_ref="' .. safe_attr(source_ref_digest, max_digest_len)
     .. '" round="' .. tostring(n)
-    .. '" dedup="' .. safe_attr(consensus_dedup, M._max_dedup_len)
+    .. '" dedup="' .. safe_attr(consensus_dedup, devloop_base._max_dedup_len)
     .. '" question="' .. converge_question_digest(narrowed_question)
     .. '" verdicts="' .. converge_verdicts_digest(angle_digests)
     .. '" angles="' .. converge_angles_digest(angle_digests)
@@ -105,13 +106,13 @@ function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id
     error("github-devloop: invalid review converge round")
   end
   local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
-  return '<!-- fkst:github-devloop:review-converge-round:v1 proposal="' .. safe_attr(review_proposal_id, M._max_key_len)
-    .. '" issue_proposal="' .. safe_attr(issue_proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(heartbeat_version, M._max_dedup_len)
+  return '<!-- fkst:github-devloop:review-converge-round:v1 proposal="' .. safe_attr(review_proposal_id, devloop_base._max_key_len)
+    .. '" issue_proposal="' .. safe_attr(issue_proposal_id, devloop_base._max_key_len)
+    .. '" version="' .. safe_attr(heartbeat_version, devloop_base._max_dedup_len)
     .. '" head_sha="' .. safe_attr(head_sha, max_attr_len)
     .. '" source_ref="' .. safe_attr(source_ref_digest, max_digest_len)
     .. '" round="' .. tostring(n)
-    .. '" dedup="' .. safe_attr(consensus_dedup, M._max_dedup_len)
+    .. '" dedup="' .. safe_attr(consensus_dedup, devloop_base._max_dedup_len)
     .. '" question="' .. converge_question_digest(narrowed_question)
     .. '" verdicts="' .. converge_verdicts_digest(angle_digests)
     .. '" angles="' .. converge_angles_digest(angle_digests)

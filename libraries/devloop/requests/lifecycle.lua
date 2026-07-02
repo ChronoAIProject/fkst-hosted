@@ -310,8 +310,7 @@ end
 
 function C.build_queue_starvation_reconcile_comment_request(M, repo, merge_ready, cause)
   local attempt_key = cause and cause.attempt_key or "attempt"
-  local marker = m_mq.queue_starvation_reconcile_marker(M,
-    merge_ready.proposal_id,
+  local marker = m_mq.queue_starvation_reconcile_marker(merge_ready.proposal_id,
     merge_ready.pr_number,
     merge_ready.version,
     merge_ready.reviewed_head_sha,

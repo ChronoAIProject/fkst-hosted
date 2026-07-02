@@ -56,8 +56,7 @@ local function comment_cases()
       { angle = "delete", verdict = "approve" },
     },
   })
-  local converge_marker = conv_rounds.converge_round_marker(core,
-    issue_proposal_id,
+  local converge_marker = conv_rounds.converge_round_marker(issue_proposal_id,
     reached_with_angles.dedup_key,
     convergence_shared.source_ref_digest(source_ref()),
     2,

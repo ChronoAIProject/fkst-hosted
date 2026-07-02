@@ -42,8 +42,7 @@ end
 
 local function converge_round_comment(created_at)
   local source_ref = entity_lib.issue_source_ref(repo, 42)
-  return trusted_comment(conv_rounds.converge_round_marker(core,
-    proposal_id,
+  return trusted_comment(conv_rounds.converge_round_marker(proposal_id,
     version,
     convergence_shared.source_ref_digest(source_ref),
     1,

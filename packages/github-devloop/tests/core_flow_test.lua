@@ -126,7 +126,7 @@ return {
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local base_version = conv_rounds.converge_base_version(dedup_key .. "/loop/2")
     local sr_digest = convergence_shared.source_ref_digest(source_ref())
-    local marker = conv_rounds.converge_round_marker(core, proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
+    local marker = conv_rounds.converge_round_marker(proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
       { angle = "minimal", verdict = "abstain", digest = "a" },
       { angle = "structural", verdict = "approve", digest = "b" },
     })
@@ -139,8 +139,7 @@ return {
     t.eq(conv_rounds.max_converge_round(facts), 2)
 
     local forged = core.state_marker(proposal_id, "blocked", base_version .. "/loop/99")
-    local forged_converge_marker = conv_rounds.converge_round_marker(core,
-      proposal_id,
+    local forged_converge_marker = conv_rounds.converge_round_marker(proposal_id,
       base_version,
       sr_digest,
       9,
