@@ -20,6 +20,7 @@
 //! `kubectl logs` stays byte-for-byte intact, [`gitbranch`] hides the git
 //! commit/push sequence behind a trait, and [`collector`] wires them together.
 
+pub mod bundle;
 pub mod classify;
 pub mod collector;
 pub mod gitbranch;
