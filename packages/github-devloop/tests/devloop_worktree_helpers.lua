@@ -19,7 +19,7 @@ local function worktree_options(path)
 end
 
 local function implement_worktree_for(runtime, opts)
-  return core.implement_worktree_path(
+  return devloop_base.implement_worktree_path(
     runtime,
     opts.repo or default_repo,
     opts.issue_number or opts.issue or default_issue_number,

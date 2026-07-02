@@ -446,7 +446,7 @@ return {
     t.eq(require("devloop.pr_safety").is_devloop_issue_branch(deterministic_branch), true)
     t.eq(require("devloop.pr_safety").is_devloop_issue_branch("devloop-owner-repo-42-01HY"), false)
     t.eq(require("devloop.pr_safety").is_devloop_issue_branch("feature/unrelated"), false)
-    local worktree_path = core.implement_worktree_path("/tmp/fkst-rt", "owner/repo", "42", ready.dedup_key)
+    local worktree_path = devloop_base.implement_worktree_path("/tmp/fkst-rt", "owner/repo", "42", ready.dedup_key)
     t.is_true(worktree_path:find("/tmp/fkst-rt/worktrees/devloop-owner-repo-42-", 1, true) == 1)
     t.eq(devloop_base.path_under_runtime_root("/tmp/fkst-rt", worktree_path), true)
     t.eq(devloop_base.path_under_runtime_root("/tmp/fkst-rt", "/tmp/fkst-rt-old/worktrees/devloop-owner-repo-42"), false)

@@ -65,7 +65,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
   if base_head == nil then
     return nil, "carry-over-proof-unavailable: " .. tostring(base_error)
   end
-  local empty_delta, delta_reason = M.has_empty_resolution_delta(fact.head_sha, base_head, current_head_sha)
+  local empty_delta, delta_reason = git_mechanics.has_empty_resolution_delta(M.git, fact.head_sha, base_head, current_head_sha)
   if not empty_delta then
     return nil, "non-empty-resolution-delta: " .. tostring(delta_reason)
   end

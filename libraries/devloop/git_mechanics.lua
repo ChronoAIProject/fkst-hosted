@@ -180,16 +180,16 @@ local forge_validators = require("devloop.forge_validators")
     return base_head
   end
 
-  function C.has_empty_resolution_delta(M, approved_head_sha, base_head_sha, new_head_sha)
+  function C.has_empty_resolution_delta(git, approved_head_sha, base_head_sha, new_head_sha)
     local approved = require_safe_sha("approved head sha", approved_head_sha)
     local base = require_safe_sha("base head sha", base_head_sha)
     local new_head = require_safe_sha("new head sha", new_head_sha)
-    local merge_tree = M.git.merge_tree(approved, base, 120)
+    local merge_tree = git.merge_tree(approved, base, 120)
     local tree = tostring(merge_tree.stdout or ""):gsub("%s+$", "")
     if tree == "" then
       return false, "merge-tree produced no tree"
     end
-    local result = M.git.trees_equal_quiet(tree, new_head, 30)
+    local result = git.trees_equal_quiet(tree, new_head, 30)
     if result.exit_code == 0 then
       return true, "empty"
     end
@@ -235,8 +235,8 @@ local forge_validators = require("devloop.forge_validators")
     return git.diff_check(worktree, false, timeout)
   end
 
-  function C.git_diff_cached_check(M, worktree, timeout)
-    return M.git.diff_check(worktree, true, timeout)
+  function C.git_diff_cached_check(git, worktree, timeout)
+    return git.diff_check(worktree, true, timeout)
   end
 
 

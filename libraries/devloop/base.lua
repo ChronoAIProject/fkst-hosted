@@ -504,7 +504,7 @@ function C.implement_branch(repo, issue_number, impl_version)
   return branch
 end
 
-function C.implement_worktree_path(M, runtime_root, repo, issue_number, impl_version)
+function C.implement_worktree_path(runtime_root, repo, issue_number, impl_version)
   local root = trim(runtime_root)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")

@@ -58,7 +58,7 @@ local function require_clean_resolution(worktree)
     return false, tostring(unmerged.stdout or "")
   end
   git_mechanics.run_required(git_mechanics.git_diff_check(core.git, worktree, 30), "diff check")
-  git_mechanics.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check")
+  git_mechanics.run_required(git_mechanics.git_diff_cached_check(core.git, worktree, 30), "cached diff check")
   return true, ""
 end
 
@@ -84,7 +84,7 @@ local function commit_resolution(worktree, runtime, conflict)
   if tostring(unmerged.stdout or "") ~= "" then
     error("github-devloop: sync conflict remains unresolved before commit")
   end
-  git_mechanics.run_required(core.git_diff_cached_check(worktree, 30), "cached diff check before commit")
+  git_mechanics.run_required(git_mechanics.git_diff_cached_check(core.git, worktree, 30), "cached diff check before commit")
   local message_file = core.branch_sync_message_file(
     runtime,
     conflict.repo,

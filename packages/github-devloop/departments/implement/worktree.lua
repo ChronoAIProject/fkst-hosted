@@ -60,7 +60,7 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
   if runtime_result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
-  local worktree = core.implement_worktree_path(runtime_result.stdout, repo, issue_number, ready.dedup_key)
+  local worktree = devloop_base.implement_worktree_path(runtime_result.stdout, repo, issue_number, ready.dedup_key)
   if branch_exists then
     local list_result = core.git_worktree_list(30)
     if list_result.exit_code ~= 0 then

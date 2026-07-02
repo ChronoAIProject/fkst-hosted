@@ -40,7 +40,7 @@ local function branch_worktree(repo, issue_number, version, branch)
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
   local runtime_root = runtime_result.stdout
-  local worktree = core.implement_worktree_path(runtime_root, repo, issue_number, version)
+  local worktree = devloop_base.implement_worktree_path(runtime_root, repo, issue_number, version)
   local list_result = core.git_worktree_list(30)
   if list_result.exit_code ~= 0 then
     error("github-devloop: git worktree list failed: " .. tostring(list_result.stderr))

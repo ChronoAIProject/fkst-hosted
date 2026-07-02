@@ -37,7 +37,6 @@ M.review_result_lock_key = function(...) return base.review_result_lock_key(M, .
 M.review_lock_key = function(...) return base.review_lock_key(M, ...) end
 M.loop_lock_key = function(...) return base.loop_lock_key(M, ...) end
 M.implement_lock_key = function(...) return base.implement_lock_key(M, ...) end
-M.implement_worktree_path = function(...) return base.implement_worktree_path(M, ...) end
 M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, ...) end
 M.max_body_len = function(...) return base.max_body_len(M, ...) end
 M.quote_untrusted_prompt_text = function(...) return base.quote_untrusted_prompt_text(M, ...) end
@@ -96,8 +95,6 @@ M.invalidate_entity_after_write = function(...) return github_proxy_entity_view.
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
-M.has_empty_resolution_delta = function(...) return git_mechanics.has_empty_resolution_delta(M, ...) end
-M.git_diff_cached_check = function(...) return git_mechanics.git_diff_cached_check(M, ...) end
 M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end
 require("forge.merge").install(M)
 require("core.review_carry_over").install(M)

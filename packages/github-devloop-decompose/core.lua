@@ -30,7 +30,6 @@ M.review_result_lock_key = function(...) return base.review_result_lock_key(M, .
 M.review_lock_key = function(...) return base.review_lock_key(M, ...) end
 M.loop_lock_key = function(...) return base.loop_lock_key(M, ...) end
 M.implement_lock_key = function(...) return base.implement_lock_key(M, ...) end
-M.implement_worktree_path = function(...) return base.implement_worktree_path(M, ...) end
 M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, ...) end
 M.max_body_len = function(...) return base.max_body_len(M, ...) end
 M.quote_untrusted_prompt_text = function(...) return base.quote_untrusted_prompt_text(M, ...) end
