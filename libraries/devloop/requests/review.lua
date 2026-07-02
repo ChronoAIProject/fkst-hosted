@@ -184,7 +184,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   if reached.decision == "reject" then
     fix_round = M.version_fix_round(issue_version)
   end
-  local blocking_gap = shared.bounded_blocking_gap(M, reached)
+  local blocking_gap = shared.bounded_blocking_gap(reached)
   local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
   local reflection_marker = ""
   if reached.reflection_checkpoint then

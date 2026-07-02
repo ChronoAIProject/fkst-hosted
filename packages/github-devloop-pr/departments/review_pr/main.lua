@@ -172,4 +172,4 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_apply("review_pr", reviewing.proposal_id, nil, nil, { add = {}, remove = {} }, raised)
     devloop_logging.log_raise("review_pr", reviewing.proposal_id, "consensus.proposal", proposal)
   end)
-end, wrap = core.wrap_pipeline_failure, name = "review_pr" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "review_pr" })

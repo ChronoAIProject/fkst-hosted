@@ -251,4 +251,4 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_raise("review_loop", origin.proposal_id, "consensus.proposal", proposal)
     devloop_logging.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   end)
-end, wrap = core.wrap_pipeline_failure, name = "review_loop" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "review_loop" })

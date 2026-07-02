@@ -101,7 +101,7 @@ function C.build_verdict_summary(M, angle_results)
   return summary
 end
 
-function C.bounded_blocking_gap(M, reached)
+function C.bounded_blocking_gap(reached)
   local gap = reached and reached.blocking_gap
   if gap == nil and type(reached and reached.blocking_gaps) == "table" then
     gap = reached.blocking_gaps[1]
@@ -111,8 +111,8 @@ function C.bounded_blocking_gap(M, reached)
   if text == "" then
     return nil
   end
-  if #text > M._max_blocking_gap_len then
-    text = base_ids.truncate_utf8(text, M._max_blocking_gap_len)
+  if #text > devloop_base._max_blocking_gap_len then
+    text = base_ids.truncate_utf8(text, devloop_base._max_blocking_gap_len)
   end
   return text
 end

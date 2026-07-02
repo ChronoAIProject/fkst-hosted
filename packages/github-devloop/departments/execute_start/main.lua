@@ -98,6 +98,6 @@ end
 return saga.department(spec, {
   done = execute_start_done,
   act = act_execute_start,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "execute_start",
 })
