@@ -1,4 +1,4 @@
-local core = require("core")
+local failure_triage_cap = require("failure_triage_cap")
 
 local dead_letter = require("workflow.dead_letter")
 local error_facts = require("contract.error_facts")
@@ -29,7 +29,7 @@ local function act_dead_letter(event)
       .. " error=" .. error_facts.one_line(payload.error)
   )
 
-  local decision = core.failure_triage_decision(payload)
+  local decision = failure_triage_cap.decide(payload)
   if decision.action == "raise" then
     devloop_logging.log_raise("failure_triage", decision.fact.fingerprint, "github-proxy.github_issue_create_request", decision.request)
   else
