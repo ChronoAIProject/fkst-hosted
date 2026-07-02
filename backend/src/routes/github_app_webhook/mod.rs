@@ -660,6 +660,8 @@ mod tests {
             github_app: None,
             github_app_webhook_secret: None,
             reconciler: Some(handle),
+            storage: None,
+            log_registry: Default::default(),
         };
         (state, rx)
     }
@@ -738,6 +740,8 @@ mod tests {
             github_app: None,
             github_app_webhook_secret: None,
             reconciler: None,
+            storage: None,
+            log_registry: Default::default(),
         };
         let handled = handle_installation(&state, body).await.expect("dispatch");
         assert_eq!(handled.as_str(), "cache_busted");

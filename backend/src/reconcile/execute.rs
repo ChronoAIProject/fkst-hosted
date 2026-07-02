@@ -68,6 +68,10 @@ pub struct ReconcileCtx {
     /// version-aware template reconcile to one GitHub round-trip per repo per
     /// (version, TTL) so it is a cheap no-op on the vast majority of reconciles.
     pub ensured_templates: crate::reconcile::EnsuredTemplates,
+    /// The shared `session_id -> log-access context` registry the reconciler upserts
+    /// each sweep so the identity-gated log-download endpoint can reverse a
+    /// `session_id` to its authorization context. A cheap `Arc`-backed handle.
+    pub log_registry: crate::log_access::LogAccessRegistry,
 }
 
 /// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows

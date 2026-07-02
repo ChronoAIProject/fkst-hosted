@@ -97,6 +97,14 @@ fn build_http_client() -> reqwest::Client {
         .expect("build chrono-storage http client")
 }
 
+/// Build a [`ChronoStorageClient`] from an already-parsed [`ChronoStorageConfig`]
+/// (typically `Config::storage`), reusing the shared pooled HTTP client. Prefer this
+/// over [`try_from_env`] once the config has been loaded + fail-closed-validated at
+/// startup, so the client is built from the SAME parsed values (no second env pass).
+pub fn client_from_config(config: ChronoStorageConfig) -> ChronoStorageClient {
+    ChronoStorageClient::new(build_http_client(), config)
+}
+
 /// Build a [`ChronoStorageClient`] from the process environment, or `None` when
 /// the feature is not configured.
 ///
