@@ -3,7 +3,7 @@ local error_facts = require("contract.error_facts")
 local devloop_logging = require("devloop.logging")
 local C = {}
 
-function C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
+function C.dispatch_live_run_exec_ref(role, proposal_id, dedup_key)
   if tostring(role or "") == "implement" then
     return base_ids.dedup_key({
       "implement-exec",
@@ -20,7 +20,7 @@ function C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
   })
 end
 
-local function codex_runs_status(M, role)
+local function codex_runs_status(role)
   local function one_line(value)
     return error_facts.one_line(value)
   end
@@ -48,24 +48,24 @@ local function codex_runs_status(M, role)
   return status
 end
 
-function C.dispatch_live_run_dedup(M, role, proposal_id, dedup_key, status)
+function C.dispatch_live_run_dedup(role, proposal_id, dedup_key, status)
   if type(role) ~= "string" or role == "" then
     return false
   end
-  local exec_ref = C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
-  return C.dispatch_live_run_exec_ref_running(M, role, exec_ref, status)
+  local exec_ref = C.dispatch_live_run_exec_ref(role, proposal_id, dedup_key)
+  return C.dispatch_live_run_exec_ref_running(role, exec_ref, status)
 end
 
-function C.dispatch_live_run_exec_ref_running(M, role, exec_ref, status)
+function C.dispatch_live_run_exec_ref_running(role, exec_ref, status)
   if type(role) ~= "string" or role == "" or type(exec_ref) ~= "string" or exec_ref == "" then
     return false
   end
-  local runs = status or codex_runs_status(M, role)
+  local runs = status or codex_runs_status(role)
   for _, run in ipairs(runs.running or {}) do
     if type(run) == "table"
       and tostring(run.status or "running") == "running"
       and tostring(run.role or "") == role
-      and C.dispatch_live_run_exec_ref(M, run.role, run.proposal_id, run.dedup_key) == exec_ref then
+      and C.dispatch_live_run_exec_ref(run.role, run.proposal_id, run.dedup_key) == exec_ref then
       return true
     end
   end

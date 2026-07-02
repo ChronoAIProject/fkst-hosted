@@ -6,11 +6,11 @@ local dispatch_live_run = require("devloop.dispatch_live_run")
 function S.install(M)
 
 function M.implement_exec_ref(proposal_id, dedup_key)
-  return dispatch_live_run.dispatch_live_run_exec_ref(M, "implement", proposal_id, dedup_key)
+  return dispatch_live_run.dispatch_live_run_exec_ref("implement", proposal_id, dedup_key)
 end
 
 function M.implement_exec_ref_running(exec_ref, status)
-  return dispatch_live_run.dispatch_live_run_exec_ref_running(M, "implement", exec_ref, status)
+  return dispatch_live_run.dispatch_live_run_exec_ref_running("implement", exec_ref, status)
 end
 
 function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at, exec_ref)
