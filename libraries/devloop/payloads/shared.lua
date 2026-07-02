@@ -1,4 +1,5 @@
 local base_ids = require("devloop.base_ids")
+local devloop_base = require("devloop.base")
 local C = {}
 local github_view = require("forge.github_view")
 local github_handle = nil
@@ -18,18 +19,18 @@ function C.label_names(_M, labels)
   return github_view.label_names(labels)
 end
 
-function C.bounded_framing(M, framing)
+function C.bounded_framing(framing)
   if framing == nil then
     return nil
   end
   local value = tostring(framing)
-  if #value > M._max_framing_len then
-    value = base_ids.truncate_utf8(value, M._max_framing_len)
+  if #value > devloop_base._max_framing_len then
+    value = base_ids.truncate_utf8(value, devloop_base._max_framing_len)
   end
   return value
 end
 
-function C.bounded_control_text(M, value, limit)
+function C.bounded_control_text(value, limit)
   if value == nil then
     return nil
   end
@@ -38,7 +39,7 @@ function C.bounded_control_text(M, value, limit)
   if text == "" then
     return nil
   end
-  local cap = limit or M._max_blocking_gap_len
+  local cap = limit or devloop_base._max_blocking_gap_len
   if #text > cap then
     text = base_ids.truncate_utf8(text, cap)
   end

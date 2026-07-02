@@ -68,7 +68,7 @@ function C.build_devloop_ready_payload(M, source)
       comment_id = source.ready_comment_id,
     }
   end
-  local framing = shared.bounded_framing(M, source.framing)
+  local framing = shared.bounded_framing(source.framing)
   if framing ~= nil then
     payload.framing = framing
   end
@@ -147,11 +147,11 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
     }),
     source_ref = base_ids.normalize_source_ref(source_ref),
   }
-  local framing = shared.bounded_framing(M, review_fact.framing or origin.framing)
+  local framing = shared.bounded_framing(review_fact.framing or origin.framing)
   if framing ~= nil then
     payload.framing = framing
   end
-  local blocking_gap = shared.bounded_control_text(M, review_fact.blocking_gap, M._max_blocking_gap_len)
+  local blocking_gap = shared.bounded_control_text(review_fact.blocking_gap, M._max_blocking_gap_len)
   if blocking_gap ~= nil then
     payload.blocking_gap = blocking_gap
   end
@@ -167,7 +167,7 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
     end
     payload.predecessor_set = tostring(review_fact.predecessor_set)
   end
-  local gate_failure_excerpt = shared.bounded_control_text(M, review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
+  local gate_failure_excerpt = shared.bounded_control_text(review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
   if gate_failure_excerpt ~= nil then
     payload.gate_failure_excerpt = gate_failure_excerpt
   end
