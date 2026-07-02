@@ -222,14 +222,17 @@ pub fn issue_templates_permissions() -> TokenPermissions {
 }
 
 /// Least-privilege permissions for the reconciler's bot-PR auto-merge:
-/// `pull_requests:write` (merge) + `contents:write` (the merge commit) ONLY —
-/// deliberately withholding `administration` so a repo that never granted it can
-/// still auto-merge. The two read calls (list/mergeable) ride this superset token.
+/// `pull_requests:write` (merge) + `contents:write` (the merge commit) +
+/// `issues:write` (close the merged PR's linked work issue) ONLY — deliberately
+/// withholding `administration` so a repo that never granted it can still
+/// auto-merge. The read calls (list/mergeable) and the post-merge issue close ride
+/// this one superset token. The App already declares Issues: Read & write, so
+/// adding `issues:write` here never introduces a new grant requirement.
 pub fn auto_merge_permissions() -> TokenPermissions {
     TokenPermissions {
         contents: Some("write".to_string()),
         pull_requests: Some("write".to_string()),
-        issues: None,
+        issues: Some("write".to_string()),
         administration: None,
         metadata: None,
     }
@@ -534,6 +537,23 @@ impl GithubAppTokens {
         self.inner
             .api
             .merge_pull_request(&token, owner, repo, number, commit_title)
+            .await
+    }
+
+    /// Close `owner/repo`'s issue `number` as the App (auto-merge completion: the
+    /// merged bot PR's linked work issue). Minted with the least-privilege
+    /// [`auto_merge_permissions`] set (never logged), which carries `issues:write`
+    /// so the same cached auto-merge token also authorizes the close.
+    pub async fn close_issue(&self, owner_repo: &str, number: u64) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner
+            .api
+            .close_issue(&token, owner, repo, number)
             .await
     }
 

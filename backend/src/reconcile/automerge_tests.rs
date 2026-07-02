@@ -18,16 +18,19 @@ use crate::github_app::config::GithubAppConfig;
 use crate::github_app::{GithubAppError, GithubAppTokens};
 
 /// A recording fake GitHub transport for the auto-merge flow. Returns a fixed set
-/// of open PRs, a per-PR `mergeable` verdict, and records the numbers merged.
+/// of open PRs, a per-PR `mergeable` verdict, and records the numbers merged and
+/// the issue numbers closed.
 #[derive(Default)]
 struct FakePrApi {
     pulls: Vec<PullRequestSummary>,
     mergeable: HashMap<u64, Option<bool>>,
     merged: Mutex<Vec<u64>>,
+    closed_issues: Mutex<Vec<u64>>,
     list_calls: AtomicUsize,
     mergeable_queried: Mutex<Vec<u64>>,
     fail_list: bool,
     fail_merge: bool,
+    fail_close: bool,
 }
 
 #[async_trait]
@@ -91,6 +94,20 @@ impl GithubApi for FakePrApi {
         self.merged.lock().unwrap().push(number);
         Ok(())
     }
+
+    async fn close_issue(
+        &self,
+        _token: &SecretString,
+        _owner: &str,
+        _repo: &str,
+        number: u64,
+    ) -> Result<(), GithubAppError> {
+        if self.fail_close {
+            return Err(GithubAppError::Http("close boom".to_string()));
+        }
+        self.closed_issues.lock().unwrap().push(number);
+        Ok(())
+    }
 }
 
 fn test_config() -> GithubAppConfig {
@@ -113,12 +130,25 @@ fn tokens(api: Arc<FakePrApi>) -> GithubAppTokens {
     GithubAppTokens::with_api(&test_config(), api).expect("tokens")
 }
 
-fn pr(number: u64, author: &str) -> PullRequestSummary {
+fn pr_with(number: u64, author: &str, head_ref: &str, title: &str) -> PullRequestSummary {
     PullRequestSummary {
         number,
         author_login: author.to_string(),
         head_sha: format!("sha{number}"),
+        head_ref: head_ref.to_string(),
+        title: title.to_string(),
     }
+}
+
+/// A realistic bot PR whose branch encodes issue `number` (so the default merge
+/// path also exercises the post-merge close).
+fn pr(number: u64, author: &str) -> PullRequestSummary {
+    pr_with(
+        number,
+        author,
+        &format!("devloop/issue/acme/site/{number}/ready-1720000000"),
+        &format!("github-devloop implementation for #{number}"),
+    )
 }
 
 #[tokio::test]
@@ -227,5 +257,140 @@ async fn list_failure_is_swallowed() {
     assert!(
         api.merged.lock().unwrap().is_empty(),
         "no merges after list failure"
+    );
+}
+
+#[tokio::test]
+async fn merged_pr_closes_the_linked_issue() {
+    // The PR's branch encodes work-issue 42 (distinct from the PR number 1) so the
+    // assertion proves the number came from parsing, not from the PR number.
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr_with(
+            1,
+            "fkst-bot",
+            "devloop/issue/acme/site/42/ready-x",
+            "github-devloop implementation for #99",
+        )],
+        mergeable: HashMap::from([(1, Some(true))]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert_eq!(*api.merged.lock().unwrap(), vec![1], "the bot PR merges");
+    assert_eq!(
+        *api.closed_issues.lock().unwrap(),
+        vec![42],
+        "branch-derived issue 42 is closed (branch beats the title's #99)"
+    );
+}
+
+#[tokio::test]
+async fn unparseable_pr_merges_without_closing() {
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr_with(
+            1,
+            "fkst-bot",
+            "feature/no-issue-here",
+            "just a title",
+        )],
+        mergeable: HashMap::from([(1, Some(true))]),
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    // No panic, the PR still merges, and no close is attempted for an unknown issue.
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert_eq!(
+        *api.merged.lock().unwrap(),
+        vec![1],
+        "the bot PR still merges"
+    );
+    assert!(
+        api.closed_issues.lock().unwrap().is_empty(),
+        "no issue number parsed => no close call"
+    );
+}
+
+#[tokio::test]
+async fn close_failure_is_swallowed() {
+    let api = Arc::new(FakePrApi {
+        pulls: vec![pr(1, "fkst-bot")],
+        mergeable: HashMap::from([(1, Some(true))]),
+        fail_close: true,
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+
+    // The close errors, but the merge already succeeded and nothing propagates.
+    auto_merge_bot_pull_requests(&github, "acme/site", Some("fkst-bot"), true).await;
+
+    assert_eq!(*api.merged.lock().unwrap(), vec![1], "merge still recorded");
+    assert!(
+        api.closed_issues.lock().unwrap().is_empty(),
+        "close failed, nothing recorded"
+    );
+}
+
+#[test]
+fn linked_issue_number_parses_branch_ready_form() {
+    assert_eq!(
+        linked_issue_number("devloop/issue/acme/site/42/ready-1720000000", ""),
+        Some(42),
+        "the segment three after `issue` is the work-issue number"
+    );
+}
+
+#[test]
+fn linked_issue_number_handles_hyphenated_owner_and_dotted_repo() {
+    assert_eq!(
+        linked_issue_number("devloop/issue/my-org/my.repo/7/ready-abc", "irrelevant"),
+        Some(7)
+    );
+}
+
+#[test]
+fn linked_issue_number_branch_beats_title() {
+    assert_eq!(
+        linked_issue_number(
+            "devloop/issue/acme/site/55/ready-x",
+            "github-devloop implementation for #77",
+        ),
+        Some(55),
+        "the branch is the preferred source"
+    );
+}
+
+#[test]
+fn linked_issue_number_falls_back_to_title_for_hash_form() {
+    assert_eq!(
+        linked_issue_number("main", "github-devloop implementation for #99"),
+        Some(99),
+    );
+}
+
+#[test]
+fn linked_issue_number_falls_back_to_title_for_issue_hash_form() {
+    assert_eq!(
+        linked_issue_number(
+            "feature/x",
+            "github-devloop implementation PR for issue #123",
+        ),
+        Some(123),
+    );
+}
+
+#[test]
+fn linked_issue_number_is_none_for_garbage() {
+    assert_eq!(linked_issue_number("feature/foo", "no number at all"), None);
+    assert_eq!(linked_issue_number("", ""), None);
+    // A `#` with no trailing digits yields nothing rather than a wrong guess.
+    assert_eq!(linked_issue_number("main", "closes #"), None);
+    // The `issue` marker present but no numeric segment after owner/repo.
+    assert_eq!(
+        linked_issue_number("devloop/issue/acme/site", "title"),
+        None
     );
 }

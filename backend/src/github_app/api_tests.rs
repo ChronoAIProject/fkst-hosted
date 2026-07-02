@@ -687,12 +687,17 @@ async fn delete_ref_tolerates_404() {
 }
 
 #[tokio::test]
-async fn list_open_pulls_projects_number_author_and_head() {
+async fn list_open_pulls_projects_number_author_head_ref_and_title() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/repos/acme/site/pulls"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
-            { "number": 1, "user": { "login": "fkst-bot" }, "head": { "sha": "abc" } },
+            {
+                "number": 1,
+                "user": { "login": "fkst-bot" },
+                "head": { "sha": "abc", "ref": "devloop/issue/acme/site/42/ready-x" },
+                "title": "github-devloop implementation for #42",
+            },
             { "number": 2, "user": { "login": "carol" }, "head": { "sha": "def" } },
         ])))
         .mount(&server)
@@ -705,7 +710,43 @@ async fn list_open_pulls_projects_number_author_and_head() {
     assert_eq!(pulls[0].number, 1);
     assert_eq!(pulls[0].author_login, "fkst-bot");
     assert_eq!(pulls[0].head_sha, "abc");
+    assert_eq!(pulls[0].head_ref, "devloop/issue/acme/site/42/ready-x");
+    assert_eq!(pulls[0].title, "github-devloop implementation for #42");
     assert_eq!(pulls[1].author_login, "carol");
+    // A PR missing `head.ref` / `title` projects to empty strings, not a panic.
+    assert_eq!(pulls[1].head_ref, "");
+    assert_eq!(pulls[1].title, "");
+}
+
+#[tokio::test]
+async fn close_issue_patches_state_closed() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/repos/acme/site/issues/42"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .and(body_partial_json(serde_json::json!({ "state": "closed" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "number": 42 })))
+        .mount(&server)
+        .await;
+    api(&server.uri())
+        .close_issue(&SecretString::from("ghs_tok"), "acme", "site", 42)
+        .await
+        .expect("issue closes");
+}
+
+#[tokio::test]
+async fn close_issue_surfaces_non_success() {
+    let server = MockServer::start().await;
+    Mock::given(method("PATCH"))
+        .and(path("/repos/acme/site/issues/42"))
+        .respond_with(ResponseTemplate::new(410).set_body_string("gone"))
+        .mount(&server)
+        .await;
+    let err = api(&server.uri())
+        .close_issue(&tok(), "acme", "site", 42)
+        .await
+        .expect_err("410 is an error");
+    assert!(matches!(err, GithubAppError::Http(_)));
 }
 
 #[tokio::test]
