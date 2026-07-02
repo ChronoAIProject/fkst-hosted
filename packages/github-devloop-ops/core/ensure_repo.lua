@@ -3,6 +3,7 @@ local devloop_base = require("devloop.base")
 local error_facts = require("contract.error_facts")
 local m_claims = require("devloop.claims")
 local parsers_misc = require("devloop.parsers.misc")
+local devloop_commands = require("devloop.commands")
 local S = {}
 local config = require("devloop.config")
 
@@ -299,7 +300,7 @@ local function ensure_topology(branches)
   end
 
   local fetched, fetch_error = run_result(function(timeout)
-    return M.git_fetch_branch("origin", branches.integration, timeout)
+    return devloop_commands.git_fetch_branch("origin", branches.integration, timeout)
   end, 60, "integration branch fetch")
   if fetched == nil then
     log_ensure("topology", "hold", {
@@ -311,7 +312,7 @@ local function ensure_topology(branches)
   end
 
   local head, head_error = run_result(function(timeout)
-    return M.git_remote_branch_head("origin", branches.integration, timeout)
+    return devloop_commands.git_remote_branch_head("origin", branches.integration, timeout)
   end, 30, "integration branch head")
   if head == nil then
     log_ensure("topology", "hold", {

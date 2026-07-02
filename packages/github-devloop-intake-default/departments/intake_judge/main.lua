@@ -16,6 +16,7 @@ local entity_lib = require("devloop.entity")
 local workflow_codex = require("workflow.codex")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -106,7 +107,7 @@ local function copy_table(value)
 end
 
 local function read_current_for_candidate(repo, issue_number, candidate, event_ts, expected_decision_dedup_key)
-  local view = core.gh_issue_view_intake_judge(repo, issue_number, 30)
+  local view = devloop_commands.gh_issue_view_intake_judge(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
   end

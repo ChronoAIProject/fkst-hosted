@@ -21,6 +21,7 @@ local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -100,7 +101,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config(core)
-  local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
+  local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review loop: " .. tostring(pr_view.stderr))
   end
@@ -216,7 +217,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       comments = current_pr.comments,
     }
     if origin.issue_number ~= nil then
-      local issue_view = core.gh_issue_view_review_loop(origin.repo, origin.issue_number, 30)
+      local issue_view = devloop_commands.gh_issue_view_review_loop(origin.repo, origin.issue_number, 30)
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
       end

@@ -4,6 +4,7 @@ local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local core = require("core")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local M = {}
 
@@ -39,7 +40,7 @@ end
 
 local function read_ledger(entry_key)
   local ref = core.ratchet_slice_ledger_ref(entry_key)
-  local listed = core.git_ls_remote_ref("origin", ref, 30)
+  local listed = devloop_commands.git_ls_remote_ref("origin", ref, 30)
   if type(listed) ~= "table" or listed.exit_code ~= 0 then
     error("github-devloop: ratchet slice ledger ls-remote failed: " .. tostring(listed and listed.stderr or "missing result"))
   end
@@ -47,11 +48,11 @@ local function read_ledger(entry_key)
   if sha == nil then
     return nil
   end
-  local fetched = core.git_fetch_ref("origin", ref, 30)
+  local fetched = devloop_commands.git_fetch_ref("origin", ref, 30)
   if type(fetched) ~= "table" or fetched.exit_code ~= 0 then
     error("github-devloop: ratchet slice ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
   end
-  local commit = core.git_cat_file_pretty(sha, 30)
+  local commit = devloop_commands.git_cat_file_pretty(sha, 30)
   if type(commit) ~= "table" or commit.exit_code ~= 0 then
     error("github-devloop: ratchet slice ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
   end
@@ -116,7 +117,7 @@ function M.check(repo, issue_number, ready, current)
   devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request",
     duplicate_label(repo, issue_number, ready, entry_key, canonical))
   if devloop_base.read_env("FKST_GITHUB_WRITE") == "1" then
-    local closed = core.gh_issue_close(repo, issue_number, 30)
+    local closed = devloop_commands.gh_issue_close(repo, issue_number, 30)
     if type(closed) ~= "table" or closed.exit_code ~= 0 then
       error("github-devloop: duplicate slice close failed: " .. tostring(closed and closed.stderr or "missing result"))
     end

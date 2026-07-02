@@ -21,6 +21,7 @@ local v_pr = require("devloop.validators.pr")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 
 local M = {}
 
@@ -119,7 +120,7 @@ local function issue_reviewing_for_origin(origin)
   if origin.issue_number == nil then
     return nil
   end
-  local issue_view = core.gh_issue_view_reviewing(origin.repo, origin.issue_number, 30)
+  local issue_view = devloop_commands.gh_issue_view_reviewing(origin.repo, origin.issue_number, 30)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue reviewing view failed: " .. tostring(issue_view.stderr))
   end

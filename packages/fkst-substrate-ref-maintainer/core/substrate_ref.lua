@@ -3,6 +3,7 @@ local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
+local devloop_commands = require("devloop.commands")
 local S = {}
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
@@ -347,7 +348,7 @@ local function remove_existing_branch_worktree(branch)
       .. " stderr="
       .. tostring(list.stderr))
   end
-  local existing = M.find_worktree_for_branch(list.stdout, branch)
+  local existing = devloop_commands.find_worktree_for_branch(list.stdout, branch)
   if existing ~= nil then
     local remove = M.git.worktree_remove(existing, 60)
     if remove.exit_code ~= 0 then

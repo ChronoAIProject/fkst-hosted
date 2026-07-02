@@ -10,6 +10,7 @@ local v_review_meta = require("devloop.validators.review_meta")
 local workflow_codex = require("workflow.codex")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -52,7 +53,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = core.gh_pr_view_origin(repo, review_meta.pr_number, 30)
+    local view = devloop_commands.gh_pr_view_origin(repo, review_meta.pr_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
@@ -63,7 +64,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       comments = current_pr.comments,
     }
     if issue_number ~= nil then
-      local issue_view = core.gh_issue_view_fix(repo, issue_number, 30)
+      local issue_view = devloop_commands.gh_issue_view_fix(repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
         error("github-devloop: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
       end

@@ -6,6 +6,7 @@ local parsers_pr = require("devloop.parsers.pr")
 local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
@@ -208,7 +209,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     { queue = "github-proxy.github_issue_label_request", payload = label_request },
   }
   if next_state.to_state == "merged" and config.write_mode(M) == "real" then
-    local close_result = M.gh_issue_close(issue.repo, issue.number, 60)
+    local close_result = devloop_commands.gh_issue_close(issue.repo, issue.number, 60)
     if close_result.exit_code ~= 0 then
       error("github-devloop: awaiting-pr-issue-close-failed: " .. tostring(close_result.stderr))
     end

@@ -8,6 +8,7 @@ local v_execution_request = require("devloop.validators.execution_request")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_execute_request" },
@@ -25,7 +26,7 @@ local function execute_start_done(_event)
 end
 
 local function read_current(repo, issue_number, request)
-  local view = core.gh_issue_view_intake_judge(repo, issue_number, 30)
+  local view = devloop_commands.gh_issue_view_intake_judge(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh-issue-execute-start-view-failed: " .. tostring(view.stderr))
   end

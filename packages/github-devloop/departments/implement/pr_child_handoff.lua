@@ -4,6 +4,7 @@ local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 
 local H = {}
 
@@ -33,7 +34,7 @@ local function find_linked_pr(repo, pr_number)
   if pr_number == nil then
     return nil
   end
-  local view = core.gh_pr_view_observe(repo, pr_number, 30)
+  local view = devloop_commands.gh_pr_view_observe(repo, pr_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: pr-child handoff PR view failed: " .. tostring(view.stderr))
   end

@@ -2,6 +2,7 @@ local core = require("core")
 local git_adapter = require("forge.git")
 local forge_validators = require("devloop.forge_validators")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local M = {}
 
@@ -88,11 +89,11 @@ function M.refresh(worktree, branch, base_head, merge_clean, opts)
     return
   end
 
-  local add = core.git_add_all(worktree, 30)
+  local add = devloop_commands.git_add_all(worktree, 30)
   if add.exit_code ~= 0 then
     error("github-devloop: implement-substrate-pin-add-failed: " .. tostring(add.stderr))
   end
-  local commit = core.git_commit(worktree, "chore: refresh fkst-substrate pin", 60)
+  local commit = devloop_commands.git_commit(worktree, "chore: refresh fkst-substrate pin", 60)
   if commit.exit_code ~= 0 then
     error("github-devloop: implement-substrate-pin-commit-failed: " .. tostring(commit.stderr))
   end

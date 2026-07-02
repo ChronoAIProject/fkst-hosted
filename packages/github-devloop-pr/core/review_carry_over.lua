@@ -3,13 +3,14 @@ local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local requests_review = require("devloop.requests.review")
 local m_facts = require("devloop.markers.facts")
+local devloop_commands = require("devloop.commands")
 local S = {}
 local github_risk = require("devloop.github_risk")
 local devloop_logging = require("devloop.logging")
 
 function S.install(M)
 local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version, comments, current_head_sha)
-  local name_result = M.gh_pr_diff_name_only(repo, pr_number, 30)
+  local name_result = devloop_commands.gh_pr_diff_name_only(repo, pr_number, 30)
   local risk = github_risk.github_diff_name_risk(name_result)
   if risk.known == false then
     return nil, "carry-over-risk-unknown: " .. tostring(risk.reason or "unknown")

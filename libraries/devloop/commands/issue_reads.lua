@@ -1,5 +1,6 @@
 local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
+local C = {}
 local support = require("devloop.commands.support")
 local validators = require("devloop.commands.validators")
 
@@ -26,8 +27,7 @@ local function issue_fields(fields_key_or_fields)
   return issue_view_fields[tostring(fields_key_or_fields or "")] or validators.validate_fields(fields_key_or_fields, "github-devloop: invalid issue view fields")
 end
 
-function S.install(M)
-  function M.gh_issue_list_intake(repo, limit, timeout)
+  function C.gh_issue_list_intake(repo, limit, timeout)
     return support.gh_result(function()
       return support.github().issue_list_intake(
         repo,
@@ -37,7 +37,7 @@ function S.install(M)
     end)
   end
 
-  function M.gh_issue_list_decompose_children(repo, proposal_id, timeout)
+  function C.gh_issue_list_decompose_children(repo, proposal_id, timeout)
     return support.gh_result(function()
       return support.github().issue_search(
         repo,
@@ -48,7 +48,7 @@ function S.install(M)
     end)
   end
 
-  function M.gh_issue_list_recent_closed(repo, limit, timeout)
+  function C.gh_issue_list_recent_closed(repo, limit, timeout)
     return support.gh_result(function()
       return support.github().issue_list_recent_closed(
         repo,
@@ -58,90 +58,90 @@ function S.install(M)
     end)
   end
 
-  function M.gh_issue_list_board_digest(repo, timeout)
+  function C.gh_issue_list_board_digest(repo, timeout)
     return support.gh_result(function()
       return support.github().issue_list_board_digest(repo, timeout)
     end)
   end
 
-  function M.gh_issue_list_wip(repo, timeout)
+  function C.gh_issue_list_wip(repo, timeout)
     return support.gh_result(function()
       return support.github().issue_list_cli(repo, "open", 100, "number", timeout)
     end)
   end
 
-  function M.gh_issue_view(repo, issue_number, fields_key_or_fields, timeout, run)
+  function C.gh_issue_view(repo, issue_number, fields_key_or_fields, timeout, run)
     return support.gh_result(function()
       return support.github(run).issue_view(repo, issue_number, issue_fields(fields_key_or_fields), timeout)
     end)
   end
 
-  function M.gh_issue_view_intake_judge(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "intake_judge", timeout)
+  function C.gh_issue_view_intake_judge(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "intake_judge", timeout)
   end
 
-  function M.gh_issue_view_state(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "view_state", timeout)
+  function C.gh_issue_view_state(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "view_state", timeout)
   end
 
-  function M.gh_issue_view_claim(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "claim", timeout)
+  function C.gh_issue_view_claim(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "claim", timeout)
   end
 
-  function M.gh_issue_view_result(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "result", timeout)
+  function C.gh_issue_view_result(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "result", timeout)
   end
 
-  function M.gh_issue_view_loop(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "loop", timeout)
+  function C.gh_issue_view_loop(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "loop", timeout)
   end
 
-  function M.gh_issue_view_meta(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "meta", timeout)
+  function C.gh_issue_view_meta(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "meta", timeout)
   end
 
-  function M.gh_issue_view_implement(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "implement", timeout)
+  function C.gh_issue_view_implement(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "implement", timeout)
   end
 
-  function M.gh_issue_view_open_pr(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "open_pr", timeout)
+  function C.gh_issue_view_open_pr(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "open_pr", timeout)
   end
 
-  function M.gh_issue_view_reviewing(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "reviewing", timeout)
+  function C.gh_issue_view_reviewing(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "reviewing", timeout)
   end
 
-  function M.gh_issue_view_review(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "review", timeout)
+  function C.gh_issue_view_review(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "review", timeout)
   end
 
-  function M.gh_issue_view_decompose(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "decompose", timeout)
+  function C.gh_issue_view_decompose(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "decompose", timeout)
   end
 
-  function M.gh_issue_view_fix(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "fix", timeout)
+  function C.gh_issue_view_fix(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "fix", timeout)
   end
 
-  function M.gh_issue_view_commit_subject(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "commit_subject", timeout)
+  function C.gh_issue_view_commit_subject(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "commit_subject", timeout)
   end
 
-  function M.gh_issue_view_review_loop(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "review_loop", timeout)
+  function C.gh_issue_view_review_loop(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "review_loop", timeout)
   end
 
-  function M.gh_issue_view_merge(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "merge", timeout)
+  function C.gh_issue_view_merge(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "merge", timeout)
   end
 
-  function M.gh_issue_view_observe(repo, issue_number, timeout)
-    return M.gh_issue_view(repo, issue_number, "observe", timeout)
+  function C.gh_issue_view_observe(repo, issue_number, timeout)
+    return C.gh_issue_view(repo, issue_number, "observe", timeout)
   end
 
-  function M.gh_issue_comment_get(repo, comment_id, timeout)
-    if not payloads_predicates.is_safe_comment_id(M, comment_id) then
+  function C.gh_issue_comment_get(repo, comment_id, timeout)
+    if not payloads_predicates.is_safe_comment_id(nil, comment_id) then
       error("github-devloop: invalid comment id")
     end
     return support.gh_result(function()
@@ -149,11 +149,16 @@ function S.install(M)
     end)
   end
 
-  function M.gh_issue_close(repo, issue_number, timeout)
+  function C.gh_issue_close(repo, issue_number, timeout)
     return support.gh_result(function()
       return support.github().issue_close(repo, issue_number, timeout)
     end)
   end
-end
 
-return S
+function S.install(M)
+  for _, n in ipairs({"gh_issue_close", "gh_issue_comment_get", "gh_issue_list_board_digest", "gh_issue_list_decompose_children", "gh_issue_list_intake", "gh_issue_list_recent_closed", "gh_issue_list_wip", "gh_issue_view", "gh_issue_view_claim", "gh_issue_view_commit_subject", "gh_issue_view_decompose", "gh_issue_view_fix", "gh_issue_view_implement", "gh_issue_view_intake_judge", "gh_issue_view_loop", "gh_issue_view_merge", "gh_issue_view_meta", "gh_issue_view_observe", "gh_issue_view_open_pr", "gh_issue_view_result", "gh_issue_view_review", "gh_issue_view_review_loop", "gh_issue_view_reviewing", "gh_issue_view_state"}) do M[n] = C[n] end
+end
+C.install = S.install
+
+for k, v in pairs(S) do if C[k] == nil then C[k] = v end end
+return C

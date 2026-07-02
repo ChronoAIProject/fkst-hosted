@@ -1,27 +1,27 @@
 local S = {}
+local C = {}
 local support = require("devloop.commands.support")
 local validators = require("devloop.commands.validators")
 
-function S.install(M)
-  function M.gh_pr_list_board_digest(repo, timeout)
+  function C.gh_pr_list_board_digest(repo, timeout)
     return support.gh_result(function()
       return support.github().pr_list_board_digest(repo, timeout)
     end)
   end
 
-  function M.gh_pr_list_freshness(repo, timeout)
+  function C.gh_pr_list_freshness(repo, timeout)
     return support.gh_result(function()
       return support.github().pr_list(repo, timeout)
     end)
   end
 
-  function M.gh_pr_list_merge_queue(repo, base, timeout)
+  function C.gh_pr_list_merge_queue(repo, base, timeout)
     return support.gh_result(function()
-      return support.github().pr_list_merge_queue(repo, validators.require_safe_branch(M, "merge queue base branch", base), timeout)
+      return support.github().pr_list_merge_queue(repo, validators.require_safe_branch(nil, "merge queue base branch", base), timeout)
     end)
   end
 
-  function M.gh_pr_list_recent_merged(repo, limit, timeout)
+  function C.gh_pr_list_recent_merged(repo, limit, timeout)
     return support.gh_result(function()
       return support.github().pr_list_recent_merged(
         repo,
@@ -31,7 +31,7 @@ function S.install(M)
     end)
   end
 
-  function M.gh_pr_view_origin(repo, pr_number, timeout)
+  function C.gh_pr_view_origin(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(
         repo,
@@ -42,51 +42,51 @@ function S.install(M)
     end)
   end
 
-  function M.gh_pr_view_observe(repo, pr_number, timeout)
-    return M.gh_pr_view_origin(repo, pr_number, timeout)
+  function C.gh_pr_view_observe(repo, pr_number, timeout)
+    return C.gh_pr_view_origin(repo, pr_number, timeout)
   end
 
-  function M.gh_pr_view_fix(repo, pr_number, timeout)
+  function C.gh_pr_view_fix(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository", timeout)
     end)
   end
 
-  function M.gh_pr_view_fix_precheck(repo, pr_number, timeout)
+  function C.gh_pr_view_fix_precheck(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,state,updatedAt,comments,headRepository,headRepositoryOwner,isCrossRepository", timeout)
     end)
   end
 
-  function M.gh_pr_view_freshness(repo, pr_number, timeout)
+  function C.gh_pr_view_freshness(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(repo, pr_number, "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup", timeout)
     end)
   end
 
-  function M.gh_pr_list_head_base(repo, head, base, timeout)
+  function C.gh_pr_list_head_base(repo, head, base, timeout)
     return support.gh_result(function()
       return support.github().pr_list_head(
         repo,
-        validators.require_safe_branch(M, "PR head branch", head),
-        validators.require_safe_branch(M, "PR base branch", base),
+        validators.require_safe_branch(nil, "PR head branch", head),
+        validators.require_safe_branch(nil, "PR base branch", base),
         timeout
       )
     end)
   end
 
-  function M.gh_pr_list_head(repo, head, timeout)
+  function C.gh_pr_list_head(repo, head, timeout)
     return support.gh_result(function()
-      return support.github().pr_list_head(repo, validators.require_safe_branch(M, "PR head branch", head), nil, timeout)
+      return support.github().pr_list_head(repo, validators.require_safe_branch(nil, "PR head branch", head), nil, timeout)
     end)
   end
 
-  function M.gh_pr_create(repo, head, base, title, body_file, timeout)
+  function C.gh_pr_create(repo, head, base, title, body_file, timeout)
     return support.gh_result(function()
       return support.github().pr_create(
         repo,
-        validators.require_safe_branch(M, "PR head branch", head),
-        validators.require_safe_branch(M, "PR base branch", base),
+        validators.require_safe_branch(nil, "PR head branch", head),
+        validators.require_safe_branch(nil, "PR base branch", base),
         title,
         body_file,
         timeout
@@ -94,12 +94,12 @@ function S.install(M)
     end)
   end
 
-  function M.gh_pr_create_body(repo, head, base, title, body, timeout)
+  function C.gh_pr_create_body(repo, head, base, title, body, timeout)
     return support.gh_result(function()
       return support.github().pr_create_body(
         repo,
-        validators.require_safe_branch(M, "PR head branch", head),
-        validators.require_safe_branch(M, "PR base branch", base),
+        validators.require_safe_branch(nil, "PR head branch", head),
+        validators.require_safe_branch(nil, "PR base branch", base),
         title,
         body,
         timeout
@@ -107,53 +107,58 @@ function S.install(M)
     end)
   end
 
-  function M.gh_pr_ready(repo, pr_number, timeout)
+  function C.gh_pr_ready(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_ready(repo, pr_number, timeout)
     end)
   end
 
-  function M.gh_issue_comment(repo, issue_number, body_file, timeout)
+  function C.gh_issue_comment(repo, issue_number, body_file, timeout)
     return support.gh_result(function()
       return support.github().issue_comment(repo, issue_number, body_file, timeout)
     end)
   end
 
-  function M.gh_pr_comment(repo, pr_number, body_file, timeout)
+  function C.gh_pr_comment(repo, pr_number, body_file, timeout)
     return support.gh_result(function()
       return support.github().pr_comment(repo, pr_number, body_file, timeout)
     end)
   end
 
-  function M.gh_pr_close(repo, pr_number, timeout)
+  function C.gh_pr_close(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_close(repo, pr_number, timeout)
     end)
   end
 
-  function M.gh_pr_diff(repo, pr_number, timeout, run)
+  function C.gh_pr_diff(repo, pr_number, timeout, run)
     return support.gh_result(function()
       return support.github(run).pr_diff(repo, pr_number, timeout)
     end)
   end
 
-  function M.gh_pr_diff_name_only(repo, pr_number, timeout, run)
+  function C.gh_pr_diff_name_only(repo, pr_number, timeout, run)
     return support.gh_result(function()
       return support.github(run).pr_diff_name_only(repo, pr_number, timeout)
     end)
   end
 
-  function M.gh_pr_view_head(repo, pr_number, timeout)
+  function C.gh_pr_view_head(repo, pr_number, timeout)
     return support.gh_result(function()
       return support.github().pr_cli_view(repo, pr_number, "headRefName,baseRefName,state", timeout)
     end)
   end
 
-  function M.gh_pr_view_context(repo, pr_number, timeout, run)
+  function C.gh_pr_view_context(repo, pr_number, timeout, run)
     return support.gh_result(function()
       return support.github(run).pr_cli_view(repo, pr_number, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", timeout)
     end)
   end
-end
 
-return S
+function S.install(M)
+  for _, n in ipairs({"gh_issue_comment", "gh_pr_close", "gh_pr_comment", "gh_pr_create", "gh_pr_create_body", "gh_pr_diff", "gh_pr_diff_name_only", "gh_pr_list_board_digest", "gh_pr_list_freshness", "gh_pr_list_head", "gh_pr_list_head_base", "gh_pr_list_merge_queue", "gh_pr_list_recent_merged", "gh_pr_ready", "gh_pr_view_context", "gh_pr_view_fix", "gh_pr_view_fix_precheck", "gh_pr_view_freshness", "gh_pr_view_head", "gh_pr_view_observe", "gh_pr_view_origin"}) do M[n] = C[n] end
+end
+C.install = S.install
+
+for k, v in pairs(S) do if C[k] == nil then C[k] = v end end
+return C

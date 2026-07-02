@@ -6,6 +6,7 @@ local config = require("devloop.config")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_sync_conflict" },
@@ -80,7 +81,7 @@ local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, re
 end
 
 local function commit_resolution(worktree, runtime, conflict)
-  git_mechanics.run_required(core.git_add_all(worktree, 30), "stage conflict resolution")
+  git_mechanics.run_required(devloop_commands.git_add_all(worktree, 30), "stage conflict resolution")
   local unmerged = git_mechanics.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check before commit")
   if tostring(unmerged.stdout or "") ~= "" then
     error("github-devloop: sync conflict remains unresolved before commit")

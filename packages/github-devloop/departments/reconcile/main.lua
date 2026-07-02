@@ -11,6 +11,7 @@ local conv_attempts = require("devloop.convergence.attempts")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_reconcile", "devloop_timeout_reconcile" },
@@ -116,7 +117,7 @@ local function pipeline_thinking(event)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = core.gh_issue_view_loop(repo, issue_number, 30)
+    local view = devloop_commands.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue reconcile view failed: " .. tostring(view.stderr))
     end
@@ -180,7 +181,7 @@ local function pipeline_timeout(event)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = core.gh_issue_view_loop(repo, issue_number, 30)
+    local view = devloop_commands.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
     end

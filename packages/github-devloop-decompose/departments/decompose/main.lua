@@ -15,6 +15,7 @@ local conv_attempts = require("devloop.convergence.attempts")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local workflow_codex = require("workflow.codex")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -68,7 +69,7 @@ local function decompose_plan(decompose, current_issue, content_fetch)
 end
 
 local function read_current_pr(repo, pr_number)
-  local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
+  local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr decompose view failed: " .. tostring(pr_view.stderr))
   end
@@ -76,7 +77,7 @@ local function read_current_pr(repo, pr_number)
 end
 
 local function read_decompose_issue(repo, issue_number)
-  local issue_view = core.gh_issue_view_decompose(repo, issue_number, 30)
+  local issue_view = devloop_commands.gh_issue_view_decompose(repo, issue_number, 30)
   if issue_view.exit_code ~= 0 then
     error("github-devloop: gh issue decompose view failed: " .. tostring(issue_view.stderr))
   end
@@ -84,7 +85,7 @@ local function read_decompose_issue(repo, issue_number)
 end
 
 local function read_decompose_child_issues(repo, proposal_id)
-  local child_list = core.gh_issue_list_decompose_children(repo, proposal_id, 30)
+  local child_list = devloop_commands.gh_issue_list_decompose_children(repo, proposal_id, 30)
   if child_list.exit_code ~= 0 then
     error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
   end
@@ -221,7 +222,7 @@ local function write_decomposed_marker(repo, decompose, count)
     context = decompose.proposal_id,
   })
   file.write(path, body)
-  local result = core.gh_pr_comment(repo, decompose.pr_number, path, 30)
+  local result = devloop_commands.gh_pr_comment(repo, decompose.pr_number, path, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr decomposed marker comment failed: " .. tostring(result.stderr))
   end

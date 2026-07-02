@@ -17,6 +17,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local v_review_result = require("devloop.validators.review_result")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -55,7 +56,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config(core)
-  local pr_view = core.gh_pr_view_origin(repo, pr_number, 30)
+  local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
   end
@@ -122,7 +123,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local angle_digest = nil
     local high_risk_angle_not_approved = false
     if effective_decision == "approve" then
-      local name_result = core.gh_pr_diff_name_only(repo, pr_number, 30)
+      local name_result = devloop_commands.gh_pr_diff_name_only(repo, pr_number, 30)
       local risk = github_risk.github_diff_name_risk(name_result)
       high_risk_paths = risk.high_risk_paths or {}
       if risk.known == false then

@@ -7,6 +7,7 @@ local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 local M = {}
 local root_ref = nil
 local strings = require("forge.strings")
@@ -197,7 +198,7 @@ end
 local function blocker_merged(repo, blocker_number)
   local core = root()
   local blocker_proposal_id = base_ids.proposal_id(repo, blocker_number)
-  local result = core.gh_issue_view_observe(repo, blocker_number, 30)
+  local result = devloop_commands.gh_issue_view_observe(repo, blocker_number, 30)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil, "gh-failed"
   end
@@ -217,7 +218,7 @@ local function blocker_merged(repo, blocker_number)
     return core.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)
   end
 
-  local pr_result = core.gh_pr_view_observe(repo, link.pr_number, 30)
+  local pr_result = devloop_commands.gh_pr_view_observe(repo, link.pr_number, 30)
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end
@@ -674,7 +675,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
     return nil, "pr-delegation-mismatch"
   end
 
-  local pr_result = core.gh_pr_view_observe(repo, delegation.pr_number, 30)
+  local pr_result = devloop_commands.gh_pr_view_observe(repo, delegation.pr_number, 30)
   if type(pr_result) ~= "table" or pr_result.exit_code ~= 0 then
     return nil, "gh-pr-failed"
   end

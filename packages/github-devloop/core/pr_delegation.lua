@@ -7,6 +7,7 @@ local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 local S = {}
 local config = require("devloop.config")
 
@@ -65,7 +66,7 @@ local function parse_open_prs_for_branch(stdout, branch, base_branch)
 end
 
 local function find_pr(repo, branch, base_branch)
-  local listed = M.gh_pr_list_head_base(repo, branch, base_branch, 30)
+  local listed = devloop_commands.gh_pr_list_head_base(repo, branch, base_branch, 30)
   if listed.exit_code ~= 0 then
     error("github-devloop: pr-delegation PR list failed: " .. tostring(listed.stderr))
   end
@@ -84,7 +85,7 @@ local function create_pr(repo, issue_number, branch, base_branch, title, body)
   if #effective_title > M._max_pr_title_len then
     effective_title = base_ids.truncate_utf8(effective_title, M._max_pr_title_len)
   end
-  local created = M.gh_pr_create_body(repo, branch, base_branch, effective_title, body, 60)
+  local created = devloop_commands.gh_pr_create_body(repo, branch, base_branch, effective_title, body, 60)
   if created.exit_code ~= 0 then
     error("github-devloop: pr-delegation PR create failed: " .. tostring(created.stderr))
   end

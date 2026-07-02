@@ -6,6 +6,7 @@ local saga = require("workflow.saga")
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -31,7 +32,7 @@ local function trim_stdout(result)
 end
 
 local function ahead_count(upstream, integration)
-  local result = git_mechanics.run_required(core.git_ahead_count(upstream, integration, 30), "rollup ahead count")
+  local result = git_mechanics.run_required(devloop_commands.git_ahead_count(upstream, integration, 30), "rollup ahead count")
   local text = trim_stdout(result)
   local count = tonumber(text)
   if count == nil or count < 0 then
@@ -52,7 +53,7 @@ local function has_content_diff(upstream, integration)
 end
 
 local function list_open_pr(repo, integration, upstream)
-  local listed = git_mechanics.run_required(core.gh_pr_list_head_base(repo, integration, upstream, 30), "rollup PR list")
+  local listed = git_mechanics.run_required(devloop_commands.gh_pr_list_head_base(repo, integration, upstream, 30), "rollup PR list")
   local prs = parsers_pr.parse_pr_list_head_base(core, listed.stdout)
   if #prs == 0 then
     return nil
@@ -83,7 +84,7 @@ local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, pu
     publish_policy = publish_policy,
   })
   local title = "Roll up " .. tostring(integration) .. " into " .. tostring(upstream)
-  local result = core.gh_pr_create_body(repo, integration, upstream, title, notes, 60)
+  local result = devloop_commands.gh_pr_create_body(repo, integration, upstream, title, notes, 60)
   if result.exit_code == 0 then
     return true
   end

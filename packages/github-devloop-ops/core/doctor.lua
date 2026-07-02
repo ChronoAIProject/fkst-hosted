@@ -4,6 +4,7 @@ local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
+local devloop_commands = require("devloop.commands")
 local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 local decompose_lib = require("devloop.decompose")
@@ -263,7 +264,7 @@ local function maybe_decompose_children(repo, entity)
   if decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id) == nil then
     return nil
   end
-  local result = M.gh_issue_list_decompose_children(repo, entity.proposal_id, 30)
+  local result = devloop_commands.gh_issue_list_decompose_children(repo, entity.proposal_id, 30)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-decompose-child-list-failed: " .. tostring(result.stderr))
   end

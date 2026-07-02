@@ -6,6 +6,7 @@ local requests_labels = require("devloop.requests.labels")
 local core = require("core")
 local forks = require("devloop.forks")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local M = {}
 
@@ -76,7 +77,7 @@ function M.check(repo, issue_number, ready, origin, original, managed)
   devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request",
     duplicate_label(repo, issue_number, ready, origin, canonical))
   if devloop_base.read_env("FKST_GITHUB_WRITE") == "1" then
-    local closed = core.gh_issue_close(repo, issue_number, 30)
+    local closed = devloop_commands.gh_issue_close(repo, issue_number, 30)
     if type(closed) ~= "table" or closed.exit_code ~= 0 then
       error("github-devloop: duplicate-fork-close-failed: duplicate fork close failed: " .. tostring(closed and closed.stderr or "missing result"))
     end

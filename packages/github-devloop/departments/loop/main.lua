@@ -16,6 +16,7 @@ local v_validate_proposal = require("devloop.validators.validate_proposal")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -51,7 +52,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = core.gh_issue_view_loop(repo, issue_number, 30)
+    local view = devloop_commands.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue loop view failed: " .. tostring(view.stderr))
     end

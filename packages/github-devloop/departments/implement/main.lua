@@ -28,6 +28,7 @@ local m_facts = require("devloop.markers.facts")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
+local devloop_commands = require("devloop.commands")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -103,11 +104,11 @@ local function publish_implementation_branch(repo, issue_number, ready, worktree
 end
 
 local function remote_branch_fact(branch, base_branch, source_fact)
-  local fetch_result = core.git_fetch_branch("origin", branch, 60)
+  local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
   if fetch_result.exit_code ~= 0 then
     return nil
   end
-  local head_result = core.git_remote_branch_head("origin", branch, 30)
+  local head_result = devloop_commands.git_remote_branch_head("origin", branch, 30)
   if head_result.exit_code ~= 0 then
     if head_result.exit_code == 1 then
       return nil
@@ -135,7 +136,7 @@ local function remote_branch_fact(branch, base_branch, source_fact)
 end
 
 local function local_branch_fact(base_head, branch, base_branch, dedup_key)
-  local branch_ref = core.git_show_ref_branch(branch, 30)
+  local branch_ref = devloop_commands.git_show_ref_branch(branch, 30)
   if branch_ref.exit_code ~= 0 then
     if branch_ref.exit_code == 1 then
       return nil
@@ -232,7 +233,7 @@ local function live_implement_attempt_visible(comments, proposal_id, version)
 end
 
 implemented_branch_head = function(base_head, branch)
-  local ahead_result = core.git_branch_ahead_count(base_head, branch, 30)
+  local ahead_result = devloop_commands.git_branch_ahead_count(base_head, branch, 30)
   if ahead_result.exit_code ~= 0 then
     error("github-devloop: git branch ahead check failed: " .. tostring(ahead_result.stderr))
   end
@@ -241,7 +242,7 @@ implemented_branch_head = function(base_head, branch)
     return nil
   end
 
-  local head_result = core.git_branch_head(branch, 30)
+  local head_result = devloop_commands.git_branch_head(branch, 30)
   if head_result.exit_code ~= 0 then
     error("github-devloop: git branch head failed: " .. tostring(head_result.stderr))
   end
@@ -253,7 +254,7 @@ implemented_branch_head = function(base_head, branch)
 end
 
 local function merge_integration_for_implementation(worktree, integration_branch, base_head)
-  local merge_result = core.git_worktree_merge_no_edit(worktree, base_head, 120)
+  local merge_result = devloop_commands.git_worktree_merge_no_edit(worktree, base_head, 120)
   if merge_result.exit_code == 0 then return true end
   local unmerged_result = core.git.unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
@@ -318,7 +319,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   end
   devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
 
-  local status = core.git_status(worktree, 30)
+  local status = devloop_commands.git_status(worktree, 30)
   if status.exit_code ~= 0 then
     error("github-devloop: git status failed: " .. tostring(status.stderr))
   end
@@ -370,12 +371,12 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     }
   end
 
-  local add_result = core.git_add_all(worktree, 30)
+  local add_result = devloop_commands.git_add_all(worktree, 30)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git add failed: " .. tostring(add_result.stderr))
   end
 
-  local commit_result = core.git_commit(worktree, payloads_builders.implement_commit_subject(core,
+  local commit_result = devloop_commands.git_commit(worktree, payloads_builders.implement_commit_subject(core,
       issue_number,
       require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(core, repo, issue_number)
     ), 60)
@@ -383,7 +384,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
   end
 
-  local branch_result = core.git_current_branch(worktree, 30)
+  local branch_result = devloop_commands.git_current_branch(worktree, 30)
   if branch_result.exit_code ~= 0 then
     error("github-devloop: git branch fact failed: " .. tostring(branch_result.stderr))
   end
@@ -463,7 +464,7 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
 end
 
 local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off, allow_same_version_implementing)
-  local view = core.gh_issue_view_implement(repo, issue_number, 30)
+  local view = devloop_commands.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
@@ -514,7 +515,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
 end
 
 local function precheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
-  local view = core.gh_issue_view_implement(repo, issue_number, 30)
+  local view = devloop_commands.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
@@ -607,7 +608,7 @@ local function process_ready_event(event)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local view = core.gh_issue_view_implement(repo, issue_number, 30)
+    local view = devloop_commands.gh_issue_view_implement(repo, issue_number, 30)
     if view.exit_code ~= 0 then
       error("github-devloop: gh issue implement view failed: " .. tostring(view.stderr))
     end

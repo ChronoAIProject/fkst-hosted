@@ -8,6 +8,7 @@ local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed" },
@@ -80,7 +81,7 @@ local function admit_issue_event(event, entity)
   local proposal_id = base_ids.proposal_id(repo, issue_number)
   devloop_base.assert_trusted_bot_configured()
 
-  local view = core.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)
+  local view = devloop_commands.gh_issue_view(repo, issue_number, "title,body,createdAt,updatedAt,labels,comments,state,assignees,author", 30)
   if view.exit_code ~= 0 then
     error("github-devloop-intake: gh-issue-admission-view-failed: gh issue admission view failed: " .. tostring(view.stderr))
   end

@@ -14,6 +14,7 @@ local config = require("devloop.config")
 local saga = require("workflow.saga")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -101,7 +102,7 @@ local function issue_state(repo, issue_number)
   if issue_number == nil then
     return { labels = {}, comments = {} }
   end
-  local viewed = git_mechanics.run_required(core.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
+  local viewed = git_mechanics.run_required(devloop_commands.gh_issue_view_result(repo, issue_number, 30), "PR freshness issue view")
   return parsers_issue.parse_issue_view_result(core, viewed.stdout)
 end
 
@@ -138,12 +139,12 @@ local function candidate_reason(pr, origin, issue, state)
 end
 
 local function load_current_pr(repo, pr_number)
-  local viewed = git_mechanics.run_required(core.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
+  local viewed = git_mechanics.run_required(devloop_commands.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
   return parsers_pr.parse_pr_view_merge(core, viewed.stdout)
 end
 
 local function list_open_prs(repo)
-  local listed = git_mechanics.run_required(core.gh_pr_list_freshness(repo, 30), "PR freshness list")
+  local listed = git_mechanics.run_required(devloop_commands.gh_pr_list_freshness(repo, 30), "PR freshness list")
   return parsers_pr.parse_pr_list_freshness(core, listed.stdout)
 end
 
