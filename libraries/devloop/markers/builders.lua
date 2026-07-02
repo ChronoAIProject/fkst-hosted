@@ -20,7 +20,7 @@ function C.review_meta_marker(M, issue_proposal_id, dedup_key, action, version, 
     fields = fields .. '" version="' .. tostring(version)
   end
   if action == "fix" then
-    local gap = safe_marker_attr(M, blocking_gap, M._max_blocking_gap_len)
+    local gap = safe_marker_attr(blocking_gap, M._max_blocking_gap_len)
     if gap == "" or not strings.is_bounded_string(gap, M._max_blocking_gap_len) then
       error("github-devloop: invalid review-meta gap")
     end
@@ -198,7 +198,7 @@ function C.review_result_marker(M, review_proposal_id, issue_proposal_id, decisi
       end
       fix_round_field = '" fix_round="' .. tostring(n)
     end
-    local gap = safe_marker_attr(M, blocking_gap, M._max_blocking_gap_len)
+    local gap = safe_marker_attr(blocking_gap, M._max_blocking_gap_len)
     if gap == "" or not strings.is_bounded_string(gap, M._max_blocking_gap_len) then
       error("github-devloop: invalid review reject gap")
     end
