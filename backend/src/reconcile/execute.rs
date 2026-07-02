@@ -62,6 +62,10 @@ pub struct ReconcileCtx {
     /// the sweep re-enqueues each member, so a first-spawn repo (registration but no
     /// pod) is reconciled every sweep instead of only by the slow full-resync.
     pub active_repos: crate::reconcile::ActiveRepos,
+    /// Per-repo issue-template ensure gate (mirrors `active_repos`): bounds the
+    /// version-aware template reconcile to one GitHub round-trip per repo per
+    /// (version, TTL) so it is a cheap no-op on the vast majority of reconciles.
+    pub ensured_templates: crate::reconcile::EnsuredTemplates,
 }
 
 /// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows

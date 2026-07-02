@@ -277,6 +277,7 @@ async fn spawn_reconciler(
         http,
         config: config.clone(),
         active_repos: fkst_control_plane::reconcile::new_active_repos(),
+        ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
     };
 
     let (handle, rx) = reconcile_channel(1024);
