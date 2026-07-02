@@ -457,6 +457,46 @@ async fn get_issue_labels_404_is_empty() {
     assert!(labels.is_empty());
 }
 
+#[tokio::test]
+async fn list_issue_comments_maps_the_bodies() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues/7/comments"))
+        .and(header("authorization", "Bearer ghs_tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"body": "first comment"},
+            {"body": "second\n\n<!-- fkst-config-hash: abc123 -->"}
+        ])))
+        .mount(&server)
+        .await;
+    let bodies = api(&server.uri())
+        .list_issue_comments(&SecretString::from("ghs_tok"), "acme", "site", 7)
+        .await
+        .expect("comments read");
+    assert_eq!(
+        bodies,
+        vec![
+            "first comment".to_string(),
+            "second\n\n<!-- fkst-config-hash: abc123 -->".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn list_issue_comments_404_is_empty() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/issues/7/comments"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let bodies = api(&server.uri())
+        .list_issue_comments(&SecretString::from("ghs_tok"), "acme", "site", 7)
+        .await
+        .expect("404 → empty");
+    assert!(bodies.is_empty());
+}
+
 // ---- template-reconcile write transport ----------------------------------
 
 fn tok() -> SecretString {

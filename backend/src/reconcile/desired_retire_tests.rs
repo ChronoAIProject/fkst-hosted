@@ -29,6 +29,8 @@ fn orphan_live_pod_with_work_label_also_retires_its_work_issues() {
             &pending(&[]),
             &latched(&[]),
             &latched(&[]),
+            &config_hashes(&[]),
+            &latched(&[]),
             now(),
             &cfg(300, 120),
         );
@@ -67,6 +69,8 @@ fn orphan_live_pod_without_work_label_only_kills() {
         &pending(&[]),
         &latched(&[]),
         &latched(&[]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -99,6 +103,8 @@ fn orphan_terminal_pod_with_work_label_only_cleans_up() {
         &live,
         &pending(&[]),
         &latched(&[]),
+        &latched(&[]),
+        &config_hashes(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),

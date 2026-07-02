@@ -33,11 +33,15 @@ use crate::k8s::{
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
+use crate::reconcile::execute_comments::{
+    config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
+    flag_invalid_comment, invalid_refs_comment,
+};
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
 use crate::session_spec::creds::StorageWriterCreds;
 
-use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
+use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
 
 /// The `validation-status` annotation value a fully-written environment carries;
 /// only a `ready` environment is injected into a session (mirrors Model A).
@@ -112,6 +116,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             packages,
             environment,
             auto_merge,
+            full_config_hash,
         } => {
             // Build the identity-gated log-download link from the configured public
             // base URL; `None` (unset) omits the log line. The endpoint authorizes
@@ -127,8 +132,12 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 environment.as_deref(),
                 auto_merge,
                 log_url.as_deref(),
+                &full_config_hash,
             );
             announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
+        }
+        ReconcileAction::RejectConfigChange { trigger_issue } => {
+            reject_config_change(&ctx.github, &owner_repo, trigger_issue).await
         }
     }
 }
@@ -390,6 +399,25 @@ async fn announce_session(github: &GithubAppTokens, owner_repo: &str, issue: i64
     }
 }
 
+/// Reject a config edit on an already-triggered issue: post the "config is immutable"
+/// feedback, then latch the durable rejected label. Both are best-effort + idempotent
+/// (the label add is additive; the planner emits this only on the change TRANSITION).
+/// Mirrors [`flag_invalid`]/[`announce_session`], minus any clear path — the only way
+/// to change config is to close the session and open a new one.
+async fn reject_config_change(github: &GithubAppTokens, owner_repo: &str, issue: i64) {
+    post_comment_best_effort(github, owner_repo, issue, &config_rejected_comment()).await;
+    if let Err(error) = github
+        .add_issue_labels(
+            owner_repo,
+            issue as u64,
+            &[SUBSTRATE_CONFIG_REJECTED_LABEL.to_string()],
+        )
+        .await
+    {
+        tracing::warn!(owner_repo = %owner_repo, issue, error = %error, "reconcile: latch config-rejected label failed");
+    }
+}
+
 /// Clear the invalid label from an issue that now parses (404-tolerant: the label
 /// may already be gone).
 async fn clear_invalid(github: &GithubAppTokens, owner_repo: &str, issue: i64) {
@@ -485,47 +513,6 @@ async fn resolve_environment(
             }
         }
     }
-}
-
-// --- Feedback comment bodies (pure) ------------------------------------------
-
-fn env_not_ready_comment(name: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't start this session: environment `{name}` was not found in your account \
-         (or isn't ready). Create it first with `PUT /api/v1/users/me/environments/{name}`, then \
-         re-trigger. Omit the `### Environment` section to run with no environment."
-    )
-}
-
-fn env_verify_failed_comment(name: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't verify environment `{name}` right now (a transient error reading your \
-         environments). Please re-trigger in a moment."
-    )
-}
-
-fn invalid_refs_comment(failures: &[(String, String)]) -> String {
-    let mut body = String::from(
-        "⚠️ fkst couldn't start this session: one or more `### Packages` refs are not reachable \
-         on public GitHub.\n\n",
-    );
-    for (r, reason) in failures {
-        body.push_str(&format!("- `{r}` — {reason}\n"));
-    }
-    body.push_str(
-        "\nEach ref must be `owner/repo@ref:path/to/package` in a PUBLIC repo with an `fkst.toml` \
-         at that path. Fix the refs and re-trigger.",
-    );
-    body
-}
-
-fn flag_invalid_comment(detail: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't parse this trigger issue: {detail}\n\nExpected the \
-         `fkst-substrate-trigger` body with `### Session Name`, `### Packages` (one \
-         `owner/repo@ref:path` per line), `### Work Label`, and an optional `### Environment`. \
-         Fix the issue body and the reconciler will retry."
-    )
 }
 
 #[cfg(test)]
