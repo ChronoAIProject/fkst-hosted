@@ -14,7 +14,7 @@ function C.is_supported_review_meta(M, payload)
     and entity_lib.parse_entity_proposal_id(payload.proposal_id) ~= nil
     and strings.is_path_safe_key(payload.dedup_key, M._max_dedup_len)
   if payload.mode ~= "fix-reflection" then
-    has_valid_identity = M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
+    has_valid_identity = entity_lib.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
   end
   return has_valid_identity
     and strings.is_bounded_string(payload.version, M._max_dedup_len)

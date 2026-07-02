@@ -94,7 +94,7 @@ local function failure_identity(failing_check)
   local identity = tostring(failing_check or "rollup-red")
   identity = identity:gsub(";.*$", "")
   identity = identity:gsub(":.*$", "")
-  identity = devloop_base.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(identity))
+  identity = devloop_base.neutralize_untrusted_comment_text(devloop_base._neutralize_fkst_markers(identity))
   identity = error_facts.one_line(identity):gsub("^%s+", ""):gsub("%s+$", "")
   if identity == "" then
     identity = "rollup-red"

@@ -25,7 +25,7 @@ local spec = {
 }
 
 local function valid_base_pr_handoff(handoff)
-  return core.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
+  return entity_lib.is_safe_entity_proposal_ref(handoff.proposal_id, handoff.version)
     and require("devloop.pr_safety").is_safe_pr_number(handoff.pr_number)
     and strings.is_bounded_string(handoff.version, core._max_dedup_len)
     and source_refs.has_bounded_source_ref(handoff.source_ref, core._max_key_len)

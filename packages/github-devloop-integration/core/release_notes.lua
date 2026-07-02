@@ -78,7 +78,7 @@ function M.release_notes_fallback_body(upstream, integration, ahead)
 end
 
 function M.normalize_release_notes(stdout)
-  local body = normalize_lines(strip_sentinel(M._neutralize_fkst_markers(stdout)))
+  local body = normalize_lines(strip_sentinel(devloop_base._neutralize_fkst_markers(stdout)))
   if body == "" then
     error("github-devloop: release notes body is empty")
   end

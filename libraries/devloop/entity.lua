@@ -181,7 +181,7 @@ function C.parse_entity_proposal_id(proposal_id)
   return nil
 end
 
-function C.is_safe_entity_proposal_ref(M, proposal_id, dedup_key)
+function C.is_safe_entity_proposal_ref(proposal_id, dedup_key)
   local entity = C.parse_entity_proposal_id(proposal_id)
   if entity == nil then
     return false
@@ -189,8 +189,8 @@ function C.is_safe_entity_proposal_ref(M, proposal_id, dedup_key)
   if entity.kind == "issue" then
     return devloop_base.is_safe_proposal_ref(proposal_id, dedup_key)
   end
-  return strings.is_path_safe_key(proposal_id, M._max_key_len)
-    and strings.is_path_safe_key(dedup_key, M._max_dedup_len)
+  return strings.is_path_safe_key(proposal_id, devloop_base._max_key_len)
+    and strings.is_path_safe_key(dedup_key, devloop_base._max_dedup_len)
 end
 
 function C.transition_lock_key(M, proposal_id)

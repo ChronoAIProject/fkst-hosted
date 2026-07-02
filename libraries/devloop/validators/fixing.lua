@@ -4,6 +4,7 @@ local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local source_refs = require("contract.source_ref")
 local forge_validators = require("devloop.forge_validators")
+local entity_lib = require("devloop.entity")
 
 local C = {}
 function C.is_supported_fixing(M, payload)
@@ -22,7 +23,7 @@ function C.is_supported_fixing(M, payload)
     return false
   end
 
-  if not M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key) then
+  if not entity_lib.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key) then
     return false
   end
   if tostring(payload.dedup_key):sub(1, #"fixing/replay/") ~= "fixing/replay/" then

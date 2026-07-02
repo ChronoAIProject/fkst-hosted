@@ -159,7 +159,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local reflection_checkpoint = false
     if effective_decision == "reject" and core.version_fix_round(state.version) < config.max_fix_rounds(core) then
       issue_version = core.fix_version_from_review_version(state.version)
-      reflection_checkpoint = core.version_fix_round(issue_version) == core.fix_reflection_checkpoint_round()
+      reflection_checkpoint = core.version_fix_round(issue_version) == devloop_base.fix_reflection_checkpoint_round()
     end
     local to_state = effective_decision == "approve" and "merge-ready"
       or reflection_checkpoint and "review-meta"

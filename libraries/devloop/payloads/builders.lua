@@ -21,7 +21,7 @@ local function commit_subject_title(M, current)
   if title == "" then
     return nil
   end
-  title = M._neutralize_fkst_markers(title)
+  title = devloop_base._neutralize_fkst_markers(title)
   return title
 end
 
@@ -406,7 +406,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
   if #issue_title > M._max_title_len then
     issue_title = base_ids.truncate_utf8(issue_title, M._max_title_len)
   end
-  issue_title = devloop_base.neutralize_untrusted_prompt_text(M._neutralize_fkst_markers(issue_title))
+  issue_title = devloop_base.neutralize_untrusted_prompt_text(devloop_base._neutralize_fkst_markers(issue_title))
   local body = "Review the PR diff and decide whether it should advance to merge-ready."
     .. "\nEntity proposal: " .. tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
     .. "\nReviewed PR head: " .. tostring(head_sha)

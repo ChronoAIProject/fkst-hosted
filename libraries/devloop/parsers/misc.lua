@@ -194,7 +194,7 @@ local function safe_rollup_check_name(M, entry)
       name = "unknown"
     end
   end
-  name = devloop_base.neutralize_untrusted_comment_text(M._neutralize_fkst_markers(name))
+  name = devloop_base.neutralize_untrusted_comment_text(devloop_base._neutralize_fkst_markers(name))
   name = error_facts.one_line(name):gsub("[%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")
   if name == "" then
     name = "unknown"

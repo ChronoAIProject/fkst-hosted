@@ -624,7 +624,7 @@ function C.neutralize_untrusted_prompt_text(text)
 end
 
 function C.quote_untrusted_prompt_text(M, text)
-  local value = M._neutralize_fkst_markers(text)
+  local value = neutralize_fkst_markers(text)
   local output = {}
   local start = 1
   while true do

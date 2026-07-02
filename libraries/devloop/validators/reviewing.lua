@@ -2,11 +2,12 @@ local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 
 local payloads_predicates = require("devloop.payloads.predicates")
+local entity_lib = require("devloop.entity")
 local C = {}
 function C.is_supported_reviewing(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.reviewing.v1"
-    and M.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
+    and entity_lib.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key)
     and require("devloop.pr_safety").is_safe_pr_number(payload.pr_number)
     and strings.is_bounded_string(payload.version, M._max_dedup_len)
     and (payload.reviewing_hand_off == nil
