@@ -121,6 +121,7 @@ impl From<crate::github_app::GithubAppError> for AppError {
             GithubAppError::InvalidRepoRef => {
                 AppError::Validation("invalid repository reference".to_string())
             }
+            GithubAppError::RefExists => AppError::Conflict("git ref already exists".to_string()),
             GithubAppError::Http(context) => {
                 AppError::Internal(anyhow::anyhow!("github http error: {context}"))
             }
@@ -483,6 +484,7 @@ mod tests {
             GithubAppError::TokenRequestRejected(format!("permission denied for {secret_token}")),
             GithubAppError::InvalidKey,
             GithubAppError::InvalidRepoRef,
+            GithubAppError::RefExists,
             GithubAppError::Http(format!("request failed with {secret_pem}")),
         ];
         for err in &errors {

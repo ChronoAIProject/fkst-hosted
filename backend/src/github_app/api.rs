@@ -58,6 +58,15 @@ pub struct InstallationToken {
     pub expires_at: SystemTime,
 }
 
+/// A single file read from the Contents API: its blob SHA (required to UPDATE it
+/// via `PUT /contents`) and its raw base64 `content` (GitHub returns base64 with
+/// embedded newlines — decode after stripping whitespace).
+#[derive(Debug, Clone)]
+pub struct RemoteFile {
+    pub sha: String,
+    pub content_base64: String,
+}
+
 // Hand-written: the token must never appear in Debug.
 impl fmt::Debug for InstallationToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -130,6 +139,132 @@ pub trait GithubApi: Send + Sync {
         let _ = (token, owner, repo, number, label);
         unimplemented!("remove_issue_label is only implemented by the HTTP transport")
     }
+
+    /// `GET {base}/repos/{owner}/{repo}/contents/{path}` (optionally `?ref=…`)
+    /// returning the file's blob SHA + base64 content. A 404 yields `Ok(None)`
+    /// (missing file — installed template v0 / the CREATE path). Default panics.
+    async fn content_file(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        git_ref: Option<&str>,
+    ) -> Result<Option<RemoteFile>, GithubAppError> {
+        let _ = (token, owner, repo, path, git_ref);
+        unimplemented!("content_file is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}` -> the repo's `default_branch`. Default panics.
+    async fn repo_default_branch(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<String, GithubAppError> {
+        let _ = (token, owner, repo);
+        unimplemented!("repo_default_branch is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/git/ref/heads/{branch}` -> the branch
+    /// head commit SHA. Default panics.
+    async fn branch_head_sha(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<String, GithubAppError> {
+        let _ = (token, owner, repo, branch);
+        unimplemented!("branch_head_sha is only implemented by the HTTP transport")
+    }
+
+    /// `POST {base}/repos/{owner}/{repo}/git/refs` creating `refs/heads/{branch}`
+    /// at `sha`. A 422 (ref already exists) maps to
+    /// [`GithubAppError::RefExists`]. Default panics.
+    async fn create_ref(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        sha: &str,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, branch, sha);
+        unimplemented!("create_ref is only implemented by the HTTP transport")
+    }
+
+    /// `PUT {base}/repos/{owner}/{repo}/contents/{path}` creating or updating a
+    /// file on `branch`. `sha` is the existing blob SHA for an UPDATE and is
+    /// omitted for a CREATE. Default panics.
+    #[allow(clippy::too_many_arguments)]
+    async fn put_file(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        message: &str,
+        content_base64: &str,
+        branch: &str,
+        sha: Option<&str>,
+    ) -> Result<(), GithubAppError> {
+        let _ = (
+            token,
+            owner,
+            repo,
+            path,
+            message,
+            content_base64,
+            branch,
+            sha,
+        );
+        unimplemented!("put_file is only implemented by the HTTP transport")
+    }
+
+    /// `POST {base}/repos/{owner}/{repo}/pulls` opening a PR, returning its
+    /// number. Default panics.
+    #[allow(clippy::too_many_arguments)]
+    async fn create_pull_request(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        head: &str,
+        base: &str,
+        body: &str,
+    ) -> Result<u64, GithubAppError> {
+        let _ = (token, owner, repo, title, head, base, body);
+        unimplemented!("create_pull_request is only implemented by the HTTP transport")
+    }
+
+    /// `PUT {base}/repos/{owner}/{repo}/pulls/{number}/merge` merging a PR.
+    /// Default panics.
+    async fn merge_pull_request(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_title: &str,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number, commit_title);
+        unimplemented!("merge_pull_request is only implemented by the HTTP transport")
+    }
+
+    /// `DELETE {base}/repos/{owner}/{repo}/git/refs/heads/{branch}` deleting a
+    /// branch (404/422 tolerated). Default panics.
+    async fn delete_ref(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, branch);
+        unimplemented!("delete_ref is only implemented by the HTTP transport")
+    }
 }
 
 /// Production HTTP transport backed by reqwest.
@@ -198,6 +333,27 @@ pub(super) fn is_rate_limited(headers: &reqwest::header::HeaderMap) -> bool {
         .map(|v| v.trim() == "0")
         .unwrap_or(false);
     remaining_zero || headers.contains_key("retry-after")
+}
+
+/// Classify a 401/403 into the shared auth/rate-limit error, mirroring the
+/// disambiguation the token/installation transport uses. Returns `Some(err)` for
+/// 401 (auth) and 403 (rate-limit when the headers say so, else auth); `None`
+/// otherwise so the caller can continue its own status handling. Used by the
+/// template-reconcile write methods so they share ONE classification.
+fn classify_auth_status(
+    status: reqwest::StatusCode,
+    headers: &reqwest::header::HeaderMap,
+) -> Option<GithubAppError> {
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Some(GithubAppError::AppAuth);
+    }
+    if status == reqwest::StatusCode::FORBIDDEN {
+        if is_rate_limited(headers) {
+            return Some(GithubAppError::RateLimited(reset_seconds(headers)));
+        }
+        return Some(GithubAppError::AppAuth);
+    }
+    None
 }
 
 #[async_trait]
@@ -423,431 +579,347 @@ impl GithubApi for HttpGithubApi {
         }
         Ok(())
     }
+
+    async fn content_file(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        git_ref: Option<&str>,
+    ) -> Result<Option<RemoteFile>, GithubAppError> {
+        let mut url = format!(
+            "{}/repos/{owner}/{repo}/contents/{}",
+            self.api_base,
+            path.trim_start_matches('/')
+        );
+        if let Some(git_ref) = git_ref {
+            url.push_str(&format!("?ref={git_ref}"));
+        }
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("content_file: {e}")))?;
+        let status = response.status();
+        // A missing file is the create-path / installed-v0 signal, not an error.
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "content_file status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("content_file body: {e}")))?;
+        let sha = body["sha"]
+            .as_str()
+            .ok_or_else(|| GithubAppError::Http("content_file: missing sha".to_string()))?
+            .to_string();
+        // A file object always carries `content`; a directory (array) would not
+        // deserialize here — the caller only ever requests concrete file paths.
+        let content_base64 = body["content"].as_str().unwrap_or_default().to_string();
+        Ok(Some(RemoteFile {
+            sha,
+            content_base64,
+        }))
+    }
+
+    async fn repo_default_branch(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<String, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("repo_default_branch: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "repo_default_branch status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("repo_default_branch body: {e}")))?;
+        body["default_branch"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                GithubAppError::Http("repo_default_branch: missing default_branch".to_string())
+            })
+    }
+
+    async fn branch_head_sha(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<String, GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/ref/heads/{branch}",
+            self.api_base
+        );
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("branch_head_sha: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "branch_head_sha status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("branch_head_sha body: {e}")))?;
+        body["object"]["sha"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| GithubAppError::Http("branch_head_sha: missing object.sha".to_string()))
+    }
+
+    async fn create_ref(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+        sha: &str,
+    ) -> Result<(), GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/git/refs", self.api_base);
+        let response = self
+            .client
+            .post(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({
+                "ref": format!("refs/heads/{branch}"),
+                "sha": sha,
+            }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("create_ref: {e}")))?;
+        let status = response.status();
+        // 422 => the ref already exists (a stale branch from a prior failed run).
+        if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+            return Err(GithubAppError::RefExists);
+        }
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "create_ref status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn put_file(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        message: &str,
+        content_base64: &str,
+        branch: &str,
+        sha: Option<&str>,
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/contents/{}",
+            self.api_base,
+            path.trim_start_matches('/')
+        );
+        // The create-vs-update distinction is exactly the presence of `sha`: a
+        // CREATE omits it, an UPDATE carries the existing blob SHA.
+        let mut body = serde_json::Map::new();
+        body.insert("message".to_string(), serde_json::json!(message));
+        body.insert("content".to_string(), serde_json::json!(content_base64));
+        body.insert("branch".to_string(), serde_json::json!(branch));
+        if let Some(sha) = sha {
+            body.insert("sha".to_string(), serde_json::json!(sha));
+        }
+        let response = self
+            .client
+            .put(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::Value::Object(body))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("put_file: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "put_file status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn create_pull_request(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        title: &str,
+        head: &str,
+        base: &str,
+        body: &str,
+    ) -> Result<u64, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls", self.api_base);
+        let response = self
+            .client
+            .post(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({
+                "title": title,
+                "head": head,
+                "base": base,
+                "body": body,
+            }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("create_pull_request: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "create_pull_request status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("create_pull_request body: {e}")))?;
+        body["number"]
+            .as_u64()
+            .ok_or_else(|| GithubAppError::Http("create_pull_request: missing number".to_string()))
+    }
+
+    async fn merge_pull_request(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        commit_title: &str,
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/pulls/{number}/merge",
+            self.api_base
+        );
+        let response = self
+            .client
+            .put(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({
+                "merge_method": "merge",
+                "commit_title": commit_title,
+            }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("merge_pull_request: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "merge_pull_request status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn delete_ref(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<(), GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/git/refs/heads/{branch}",
+            self.api_base
+        );
+        let response = self
+            .client
+            .delete(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("delete_ref: {e}")))?;
+        let status = response.status();
+        // Best-effort cleanup: a already-gone branch (404) or a 422 (ref does not
+        // exist) is tolerated so a partial prior run never wedges the next.
+        if !status.is_success()
+            && status != reqwest::StatusCode::NOT_FOUND
+            && status != reqwest::StatusCode::UNPROCESSABLE_ENTITY
+        {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "delete_ref status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    use wiremock::matchers::{body_partial_json, header, method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    use super::*;
-
-    const APP_JWT: &str = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test.payload";
-
-    fn api(server_uri: &str) -> HttpGithubApi {
-        HttpGithubApi::new(server_uri).expect("api client")
-    }
-
-    fn jwt() -> SecretString {
-        SecretString::from(APP_JWT.to_string())
-    }
-
-    // ---- installation_for_repo -----------------------------------------------
-
-    #[tokio::test]
-    async fn installation_lookup_sends_bearer_on_correct_path() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/repos/acme/site/installation"))
-            .and(header(
-                "authorization",
-                format!("Bearer {APP_JWT}").as_str(),
-            ))
-            .and(header("accept", "application/vnd.github+json"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": 99999 })),
-            )
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let id = api(&server.uri())
-            .installation_for_repo(&jwt(), "acme", "site")
-            .await
-            .expect("ok");
-        assert_eq!(id, InstallationId(99999));
-    }
-
-    #[tokio::test]
-    async fn installation_404_is_not_installed() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(404))
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .installation_for_repo(&jwt(), "acme", "site")
-            .await
-            .expect_err("must fail");
-        match err {
-            GithubAppError::NotInstalled { owner_repo, .. } => {
-                assert_eq!(owner_repo, "acme/site");
-            }
-            other => panic!("expected NotInstalled, got {other:?}"),
-        }
-    }
-
-    // ---- create_installation_token -------------------------------------------
-
-    #[tokio::test]
-    async fn token_mint_posts_bare_repo_names_and_permissions() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/app/installations/42/access_tokens"))
-            .and(header(
-                "authorization",
-                format!("Bearer {APP_JWT}").as_str(),
-            ))
-            .and(body_partial_json(serde_json::json!({
-                "repositories": ["site"],
-                "permissions": { "contents": "write", "issues": "read" }
-            })))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "token": "ghs_testtoken123",
-                "expires_at": "2026-06-12T12:00:00Z"
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let result = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(42),
-                &InstallationTokenRequest {
-                    repositories: vec!["site".to_string()],
-                    permissions: Some(TokenPermissions {
-                        contents: Some("write".to_string()),
-                        issues: Some("read".to_string()),
-                        ..TokenPermissions::default()
-                    }),
-                },
-            )
-            .await
-            .expect("ok");
-
-        assert_eq!(result.token.expose_secret(), "ghs_testtoken123");
-    }
-
-    #[tokio::test]
-    async fn token_mint_serializes_admin_and_pull_requests() {
-        // Issue #110: the elevated session permission set must reach GitHub in
-        // the request body. Assert the serialized `permissions` object carries
-        // `administration:write` and `pull_requests:write` (alongside the
-        // existing contents/issues writes).
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/app/installations/7/access_tokens"))
-            .and(body_partial_json(serde_json::json!({
-                "permissions": {
-                    "contents": "write",
-                    "pull_requests": "write",
-                    "issues": "write",
-                    "administration": "write"
-                }
-            })))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "token": "ghs_admintoken",
-                "expires_at": "2026-06-12T12:00:00Z"
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let result = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(7),
-                &InstallationTokenRequest {
-                    repositories: vec!["site".to_string()],
-                    permissions: Some(TokenPermissions {
-                        contents: Some("write".to_string()),
-                        pull_requests: Some("write".to_string()),
-                        issues: Some("write".to_string()),
-                        administration: Some("write".to_string()),
-                        metadata: None,
-                    }),
-                },
-            )
-            .await
-            .expect("ok");
-
-        assert_eq!(result.token.expose_secret(), "ghs_admintoken");
-    }
-
-    #[tokio::test]
-    async fn token_mint_parses_expires_at() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "token": "ghs_xyz",
-                "expires_at": "2026-06-12T13:00:00Z"
-            })))
-            .mount(&server)
-            .await;
-
-        let result = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(1),
-                &InstallationTokenRequest {
-                    repositories: vec![],
-                    permissions: None,
-                },
-            )
-            .await
-            .expect("ok");
-
-        // Verify that expires_at was parsed (non-zero SystemTime).
-        assert!(result.expires_at > SystemTime::UNIX_EPOCH);
-    }
-
-    #[tokio::test]
-    async fn token_mint_404_is_installation_gone() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(404))
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(1),
-                &InstallationTokenRequest {
-                    repositories: vec![],
-                    permissions: None,
-                },
-            )
-            .await
-            .expect_err("must fail");
-        assert!(
-            matches!(err, GithubAppError::InstallationGone { .. }),
-            "got {err:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn token_mint_422_is_token_request_rejected() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(422)
-                    .set_body_json(serde_json::json!({ "message": "permission not granted" })),
-            )
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(1),
-                &InstallationTokenRequest {
-                    repositories: vec![],
-                    permissions: None,
-                },
-            )
-            .await
-            .expect_err("must fail");
-        match err {
-            GithubAppError::TokenRequestRejected(detail) => {
-                assert!(detail.contains("permission not granted"), "got {detail}");
-            }
-            other => panic!("expected TokenRequestRejected, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn token_mint_401_is_app_auth() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(401))
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(1),
-                &InstallationTokenRequest {
-                    repositories: vec![],
-                    permissions: None,
-                },
-            )
-            .await
-            .expect_err("must fail");
-        assert!(matches!(err, GithubAppError::AppAuth), "got {err:?}");
-    }
-
-    #[tokio::test]
-    async fn token_mint_plain_403_is_app_auth() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(ResponseTemplate::new(403))
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(1),
-                &InstallationTokenRequest {
-                    repositories: vec![],
-                    permissions: None,
-                },
-            )
-            .await
-            .expect_err("must fail");
-        assert!(matches!(err, GithubAppError::AppAuth), "got {err:?}");
-    }
-
-    #[tokio::test]
-    async fn token_mint_403_with_rate_headers_is_rate_limited() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(
-                ResponseTemplate::new(403)
-                    .insert_header("x-ratelimit-remaining", "0")
-                    .insert_header("retry-after", "45"),
-            )
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .create_installation_token(
-                &jwt(),
-                InstallationId(1),
-                &InstallationTokenRequest {
-                    repositories: vec![],
-                    permissions: None,
-                },
-            )
-            .await
-            .expect_err("must fail");
-        match err {
-            GithubAppError::RateLimited(secs) => assert_eq!(secs, 45),
-            other => panic!("expected RateLimited, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn installation_401_is_app_auth() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(401))
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .installation_for_repo(&jwt(), "a", "b")
-            .await
-            .expect_err("must fail");
-        assert!(matches!(err, GithubAppError::AppAuth), "got {err:?}");
-    }
-
-    #[tokio::test]
-    async fn installation_plain_403_is_app_auth() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(403))
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .installation_for_repo(&jwt(), "a", "b")
-            .await
-            .expect_err("must fail");
-        assert!(matches!(err, GithubAppError::AppAuth), "got {err:?}");
-    }
-
-    #[tokio::test]
-    async fn installation_403_with_rate_headers_is_rate_limited() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(403)
-                    .insert_header("x-ratelimit-remaining", "0")
-                    .insert_header("x-ratelimit-reset", "9999999999"),
-            )
-            .mount(&server)
-            .await;
-
-        let err = api(&server.uri())
-            .installation_for_repo(&jwt(), "a", "b")
-            .await
-            .expect_err("must fail");
-        assert!(matches!(err, GithubAppError::RateLimited(_)), "got {err:?}");
-    }
-
-    #[tokio::test]
-    async fn installation_token_debug_never_shows_token() {
-        let token = InstallationToken {
-            token: SecretString::from("ghs_supersecret".to_string()),
-            expires_at: SystemTime::UNIX_EPOCH,
-        };
-        let debug = format!("{token:?}");
-        assert!(!debug.contains("ghs_supersecret"), "token leaked");
-        assert!(debug.contains("<redacted>"));
-    }
-
-    #[tokio::test]
-    async fn create_issue_comment_posts_to_the_issue() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/repos/acme/site/issues/7/comments"))
-            .and(header("authorization", "Bearer ghs_tok"))
-            .and(body_partial_json(serde_json::json!({"body": "done"})))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"id": 1})))
-            .mount(&server)
-            .await;
-        api(&server.uri())
-            .create_issue_comment(&SecretString::from("ghs_tok"), "acme", "site", 7, "done")
-            .await
-            .expect("comment posts");
-    }
-
-    #[tokio::test]
-    async fn add_issue_labels_posts_additively() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/repos/acme/site/issues/7/labels"))
-            .and(header("authorization", "Bearer ghs_tok"))
-            .and(body_partial_json(
-                serde_json::json!({"labels": ["fkst-completed"]}),
-            ))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
-            .mount(&server)
-            .await;
-        api(&server.uri())
-            .add_issue_labels(
-                &SecretString::from("ghs_tok"),
-                "acme",
-                "site",
-                7,
-                &["fkst-completed".to_string()],
-            )
-            .await
-            .expect("labels added");
-    }
-
-    #[tokio::test]
-    async fn remove_issue_label_tolerates_404() {
-        let server = MockServer::start().await;
-        Mock::given(method("DELETE"))
-            .and(path("/repos/acme/site/issues/7/labels/fkst-running"))
-            .respond_with(ResponseTemplate::new(404))
-            .mount(&server)
-            .await;
-        api(&server.uri())
-            .remove_issue_label(
-                &SecretString::from("ghs_tok"),
-                "acme",
-                "site",
-                7,
-                "fkst-running",
-            )
-            .await
-            .expect("404 tolerated");
-    }
-}
+#[path = "api_tests.rs"]
+mod tests;

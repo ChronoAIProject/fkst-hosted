@@ -21,6 +21,7 @@ pub mod config;
 pub mod contents;
 pub mod jwt;
 pub mod listing;
+pub mod templates;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -47,6 +48,10 @@ pub use contents::{ContentsEntry, ContentsListing, ContentsReader};
 /// `GithubListing` abstraction + its HTTP impl and result shapes the reconciler
 /// enumerates work with.
 pub use listing::{GithubListing, HttpGithubListing, InstallationSummary, IssueSummary};
+
+/// Re-export the issue-template reconcile surface: the compile-time version
+/// constant + the injectable `IssueTemplateGithub` abstraction its ensure uses.
+pub use templates::{IssueTemplateGithub, FKST_ISSUE_TEMPLATES_VERSION};
 
 // `InstallationProbe` is defined in this module; it is `pub` already and needs
 // no re-export.
@@ -107,6 +112,8 @@ pub enum GithubAppError {
     InvalidKey,
     #[error("invalid repository reference")]
     InvalidRepoRef,
+    #[error("git ref already exists")]
+    RefExists,
     #[error("github http error")]
     Http(String),
 }
@@ -138,6 +145,7 @@ impl std::fmt::Debug for GithubAppError {
             Self::TokenRequestRejected(_) => write!(f, "TokenRequestRejected(<redacted>)"),
             Self::InvalidKey => write!(f, "InvalidKey"),
             Self::InvalidRepoRef => write!(f, "InvalidRepoRef"),
+            Self::RefExists => write!(f, "RefExists"),
             // Redact the HTTP context from Debug as well: it may contain
             // response bodies with sensitive data.
             Self::Http(_) => write!(f, "Http(<redacted>)"),
@@ -190,6 +198,24 @@ pub fn session_permissions() -> TokenPermissions {
         contents: Some("write".to_string()),
         issues: Some("write".to_string()),
         pull_requests: Some("write".to_string()),
+        administration: None,
+        metadata: None,
+    }
+}
+
+/// Least-privilege permissions for the issue-template reconcile PR: `contents:
+/// write` (write the template files + create the branch) and `pull_requests:
+/// write` (open + merge the PR) ONLY. It deliberately withholds `administration`
+/// (and `issues`), so the mint does NOT require the admin grant
+/// [`default_permissions`] needs — otherwise a repo that never granted
+/// `administration` would 422 on this mint and never receive its templates.
+/// `metadata` is omitted because installation tokens always include
+/// `metadata: read` implicitly.
+pub fn issue_templates_permissions() -> TokenPermissions {
+    TokenPermissions {
+        contents: Some("write".to_string()),
+        pull_requests: Some("write".to_string()),
+        issues: None,
         administration: None,
         metadata: None,
     }
@@ -570,6 +596,14 @@ impl GithubAppTokens {
     /// Contents READ helper (#179) to build its transport against the same base.
     pub(crate) fn api_base(&self) -> String {
         self.inner.api_base.clone()
+    }
+
+    /// The shared GitHub API transport. `pub(super)` so the sibling
+    /// [`templates`] module can drive the template-reconcile reads/writes through
+    /// the same (injectable) transport the token service uses — keeping that
+    /// orchestration fakeable in tests without exposing `inner` more widely.
+    pub(super) fn api(&self) -> &std::sync::Arc<dyn GithubApi> {
+        &self.inner.api
     }
 
     /// Mint a short-lived App JWT (Bearer credential for the `/app/*` endpoints).
