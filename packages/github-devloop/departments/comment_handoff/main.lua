@@ -51,7 +51,7 @@ local function handoff_done(_event)
   return false
 end
 
-local log_unsupported_handoff = function(event) return handoff_helpers.log_unsupported(core, supported_handoff, event) end
+local log_unsupported_handoff = function(event) return handoff_helpers.log_unsupported(supported_handoff, event) end
 
 local function act_handoff(event)
   local payload = event.payload or {}

@@ -244,7 +244,7 @@ local function handoff_done(_event)
   return false
 end
 
-local log_pr_unsupported_handoff = function(event) return handoff_helpers.log_unsupported(core, supported_handoff, event) end
+local log_pr_unsupported_handoff = function(event) return handoff_helpers.log_unsupported(supported_handoff, event) end
 
 local function handoff_state(handoff)
   local strategy = handoff_strategies[handoff.kind]

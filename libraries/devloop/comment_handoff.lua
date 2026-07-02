@@ -7,12 +7,12 @@ function S.acceptor(supported_handoff)
   end
 end
 
-function S.log_unsupported(M, supported_handoff, event)
+function S.log_unsupported(supported_handoff, event)
   local payload = event.payload or {}
   local handoff = supported_handoff(payload)
   if handoff == nil then
     local proposal_id = type(payload.handoff) == "table" and tostring(payload.handoff.proposal_id or "unknown") or "unknown"
-    M.log_entry("comment_handoff", event, proposal_id, M.payload_field(payload, "dedup_key"))
+    devloop_logging.log_entry("comment_handoff", event, proposal_id, devloop_logging.payload_field(payload, "dedup_key"))
     devloop_logging.log_cas_decision("comment_handoff", proposal_id, { state = nil, version = nil }, "comment-written", "handoff", "skip-foreign(payload)", "unsupported comment-written handoff")
     return
   end
