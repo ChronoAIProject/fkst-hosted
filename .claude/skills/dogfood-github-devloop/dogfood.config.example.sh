@@ -40,9 +40,10 @@
 # DOGFOOD_REPOS="packages substrate website"
 
 # The github-devloop PLATFORM packages each supervise loads + runs from PKGSRC/packages/. The DEFAULT
-# (auto-audit DISABLED) lives in dogfood.platform-packages so every host stays consistent — you do NOT
-# set it here unless THIS host genuinely differs. Precedence: env DEVLOOP_PKGS > this file >
-# dogfood.platform-packages.
+# (auto-audit DISABLED) lives in dogfood.platform-packages; least-privilege host defaults may live in
+# dogfood.platform-packages.<target> (for example, website excludes substrate-only agents). You do NOT
+# set it here unless THIS machine genuinely differs. Precedence: env DEVLOOP_PKGS > this file >
+# dogfood.platform-packages.<target> > dogfood.platform-packages.
 #   WHERE TO LOOK (what packages exist + each one's role): PKGSRC/packages/<pkg>/ — `fkst.toml` gives
 #     its `kind` (package | package.composed) and `[event_deps]`; `departments/<d>/main.lua` gives each
 #     dept's `consumes`/`produces` (its event contract). That is the source of truth, not this list.

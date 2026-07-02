@@ -1,6 +1,6 @@
-# Default dogfood platform package set.
-# Host-specific files named dogfood.platform-packages.<target> may narrow this
-# set for least-privilege scheduler composition.
+# Least-privilege dogfood platform package set for the website host.
+# Keep this list in sync with website fkst.workspace.toml
+# external_sources(id=fkst-packages-platform).packages.
 github-devloop
 github-devloop-pr
 github-devloop-integration
@@ -12,6 +12,4 @@ github-proxy
 consensus
 github-external-pr-intake
 github-ratchet-migration-slicer
-fkst-substrate-ref-maintainer
-integration-coverage-producer
 idle-detector

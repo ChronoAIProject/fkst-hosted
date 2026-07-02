@@ -23,6 +23,14 @@ PLATFORM_PACKAGES = " ".join(
     for line in PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8").splitlines()
     if line.split("#", 1)[0].strip()
 )
+WEBSITE_PLATFORM_PACKAGES_PATH = (
+    REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.platform-packages.website"
+)
+WEBSITE_PLATFORM_PACKAGES = " ".join(
+    line.split("#", 1)[0].strip()
+    for line in WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8").splitlines()
+    if line.split("#", 1)[0].strip()
+)
 STALE_WEBSITE_PACKAGES = "github-devloop github-devloop-pr github-devloop-integration"
 FIXED_TS = "1760000000"
 
@@ -118,6 +126,7 @@ class DogfoodLayout:
         root: Path,
         dogfood_script: str,
         platform_package_list: str,
+        website_platform_package_list: str,
         *,
         stale_website_manifest: bool = False,
     ) -> None:
@@ -138,6 +147,10 @@ class DogfoodLayout:
         make_fake_bin(self.fake_bin)
         write_executable(self.script, dogfood_script)
         (self.skill_dir / "dogfood.platform-packages").write_text(platform_package_list, encoding="utf-8")
+        (self.skill_dir / "dogfood.platform-packages.website").write_text(
+            website_platform_package_list,
+            encoding="utf-8",
+        )
         self.stale_website_manifest = stale_website_manifest
         self.platform_revs: dict[Path, str] = {}
         self._populate_repos()
@@ -202,8 +215,10 @@ class DogfoodLayout:
             return
 
         packages = PLATFORM_PACKAGES.split()
-        if self.stale_website_manifest and host == self.dogfood_root / "website-dogfood" / "site":
-            packages = STALE_WEBSITE_PACKAGES.split()
+        if host == self.dogfood_root / "website-dogfood" / "site":
+            packages = WEBSITE_PLATFORM_PACKAGES.split()
+            if self.stale_website_manifest:
+                packages = STALE_WEBSITE_PACKAGES.split()
         (host / "fkst.workspace.toml").write_text(
             textwrap.dedent(
                 f"""\
@@ -281,7 +296,6 @@ class DogfoodLayout:
             "DOGFOOD_CONFIG": str(self.root / "missing-config.sh"),
             "SUBSTRATE_SRC": str(self.substrate_src),
             "BIN": str(self.fake_bin),
-            "DEVLOOP_PKGS": PLATFORM_PACKAGES,
             "BOT": "test-bot",
             "GH_ORG": "ExampleOrg",
             "UPSTREAM_BRANCH": "dev",
@@ -383,6 +397,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                 tmp_root / "new",
                 new_script,
                 PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
             )
 
             for target in TARGETS:
@@ -421,6 +436,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                 Path(tmp) / "stale-website",
                 new_script,
                 PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
                 stale_website_manifest=True,
             )
 
@@ -429,7 +445,12 @@ class HostRunEquivalenceTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertTrue(layout.capture.exists())
             workspace = layout.dogfood_root / "website-dogfood" / "site" / "fkst.workspace.toml"
-            self.assertIn(f"packages = {json.dumps(PLATFORM_PACKAGES.split())}", workspace.read_text(encoding="utf-8"))
+            self.assertIn(
+                f"packages = {json.dumps(WEBSITE_PLATFORM_PACKAGES.split())}",
+                workspace.read_text(encoding="utf-8"),
+            )
+            self.assertNotIn("fkst-substrate-ref-maintainer", workspace.read_text(encoding="utf-8"))
+            self.assertNotIn("integration-coverage-producer", workspace.read_text(encoding="utf-8"))
 
     def test_dogfood_start_fails_when_supervise_exits_before_readiness(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
@@ -440,6 +461,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                 Path(tmp) / "failed",
                 new_script,
                 PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
             )
             write_executable(
                 layout.fake_bin,
@@ -471,6 +493,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                 Path(tmp) / "sync-failed",
                 new_script,
                 PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
             )
             (layout.dogfood_root / "stable-durable-packages").mkdir(parents=True, exist_ok=True)
             (layout.dogfood_root / "stable-durable-packages" / ".fkst-supervise.pid").write_text(
