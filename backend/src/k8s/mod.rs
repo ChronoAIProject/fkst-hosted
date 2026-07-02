@@ -8,7 +8,13 @@
 pub mod client;
 pub mod env_store;
 pub mod env_validator;
+// Package-AGNOSTIC session-health signal: the pure evaluator ([`health_eval`]), the
+// best-effort recent-log reader ([`pod_logs`]), and the scrape loop ([`health_scrape`])
+// that flags/clears a degraded session on its trigger issue. Gated on pod dispatch.
+pub mod health_eval;
+pub mod health_scrape;
 pub(crate) mod isolation;
+pub mod pod_logs;
 pub mod session_launcher;
 // Model B (issue #359 §5.4, PR5b): the in-place per-session installation-token
 // rotation loop that keeps a long-lived session pod's mounted `github-token`
@@ -16,6 +22,7 @@ pub mod session_launcher;
 pub mod token_rotation;
 
 pub use client::{KubeClient, KubeError};
+pub use health_scrape::run_health_scrape_loop;
 pub use session_launcher::{
     build_session_pod, build_session_secret, create_session_pod, session_github_token_json,
     session_object_name, LaunchError, SessionPodOutcome, SessionPodSpec,

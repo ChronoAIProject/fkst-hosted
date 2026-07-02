@@ -79,6 +79,16 @@ mod defaults {
         // (a session runs until it goes idle or its trigger closes).
         0
     }
+
+    pub(super) fn health_scrape_secs() -> u64 {
+        // How often the package-agnostic session-health scrape reads each live
+        // pod's status + recent framework logs to flag/clear a degraded session.
+        // Deliberately slower than the reconcile sweep: it only relays a signal
+        // (no lifecycle effect), and the recurring-warn threshold needs a few log
+        // cycles to accrue, so a ~2.5-minute cadence keeps the GitHub read/comment
+        // budget low while still catching a green-but-idle pod within minutes.
+        150
+    }
 }
 
 /// Bare `FKST_*`-prefixed variables (Model B reconciler).
@@ -104,6 +114,8 @@ struct ReconcileVars {
     pod_token_refresh_secs: u64,
     #[serde(default = "defaults::pod_session_max_lifetime_secs")]
     pod_session_max_lifetime_secs: u64,
+    #[serde(default = "defaults::health_scrape_secs")]
+    health_scrape_secs: u64,
 }
 
 /// Model B reconciler configuration (issue #359 §4). Config surface only — no
@@ -138,6 +150,11 @@ pub struct ReconcileConfig {
     /// Hard ceiling on one session pod's wall-clock lifetime, seconds. Env:
     /// `FKST_POD_SESSION_MAX_LIFETIME_SECS`. Default 0 = unbounded.
     pub pod_session_max_lifetime_secs: u64,
+    /// Session-health scrape cadence, seconds. Env: `FKST_HEALTH_SCRAPE_SECS`.
+    /// Default 150; must be >= 1. How often the package-agnostic health scrape
+    /// reads each live pod's status + recent framework logs to flag/clear a
+    /// degraded session on its trigger issue.
+    pub health_scrape_secs: u64,
 }
 
 impl Default for ReconcileConfig {
@@ -152,6 +169,7 @@ impl Default for ReconcileConfig {
             pod_termination_grace_secs: defaults::pod_termination_grace_secs(),
             pod_token_refresh_secs: defaults::pod_token_refresh_secs(),
             pod_session_max_lifetime_secs: defaults::pod_session_max_lifetime_secs(),
+            health_scrape_secs: defaults::health_scrape_secs(),
         }
     }
 }
@@ -188,6 +206,11 @@ impl ReconcileConfig {
                 "FKST_SESSION_IDLE_GRACE_SECS must be at least 1".to_string(),
             ));
         }
+        if env.health_scrape_secs == 0 {
+            return Err(AppError::Config(
+                "FKST_HEALTH_SCRAPE_SECS must be at least 1".to_string(),
+            ));
+        }
         // The token refresh must fire strictly inside the 1-hour installation-token
         // TTL, or a long-lived pod would carry an expired credential. Reject both a
         // zero cadence and one at/over the TTL.
@@ -220,6 +243,7 @@ impl ReconcileConfig {
             pod_termination_grace_secs: env.pod_termination_grace_secs,
             pod_token_refresh_secs: env.pod_token_refresh_secs,
             pod_session_max_lifetime_secs: env.pod_session_max_lifetime_secs,
+            health_scrape_secs: env.health_scrape_secs,
         })
     }
 }
@@ -247,6 +271,7 @@ mod tests {
         assert_eq!(config.pod_termination_grace_secs, 60);
         assert_eq!(config.pod_token_refresh_secs, 2700);
         assert_eq!(config.pod_session_max_lifetime_secs, 0);
+        assert_eq!(config.health_scrape_secs, 150);
     }
 
     #[test]
@@ -286,6 +311,7 @@ mod tests {
             from_default.pod_session_max_lifetime_secs,
             from_env.pod_session_max_lifetime_secs
         );
+        assert_eq!(from_default.health_scrape_secs, from_env.health_scrape_secs);
     }
 
     #[test]
@@ -300,6 +326,7 @@ mod tests {
             ("FKST_POD_TERMINATION_GRACE_SECS", "90"),
             ("FKST_POD_TOKEN_REFRESH_SECS", "1800"),
             ("FKST_POD_SESSION_MAX_LIFETIME_SECS", "86400"),
+            ("FKST_HEALTH_SCRAPE_SECS", "90"),
         ]))
         .expect("overrides should deserialize");
         assert_eq!(config.substrate_trigger_label, "fkst-run");
@@ -311,6 +338,7 @@ mod tests {
         assert_eq!(config.pod_termination_grace_secs, 90);
         assert_eq!(config.pod_token_refresh_secs, 1800);
         assert_eq!(config.pod_session_max_lifetime_secs, 86400);
+        assert_eq!(config.health_scrape_secs, 90);
     }
 
     #[test]
@@ -327,6 +355,7 @@ mod tests {
             "FKST_POD_FULL_RESYNC_INTERVAL_SECS",
             "FKST_SESSION_IDLE_GRACE_SECS",
             "FKST_POD_TOKEN_REFRESH_SECS",
+            "FKST_HEALTH_SCRAPE_SECS",
         ] {
             let err = ReconcileConfig::from_vars(&vars(&[(var, "0")])).expect_err("zero must fail");
             assert!(matches!(err, AppError::Config(_)));
