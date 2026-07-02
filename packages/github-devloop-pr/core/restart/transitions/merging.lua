@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -44,7 +45,7 @@ return function(M, h)
       input_fact_family = "head-bound-merge-authorization",
       output_postcondition_family = "merge_execution_result",
       decision_type = "MergeExecutionResult",
-      phase_rank = M.stage_rank("merging"),
+      phase_rank = devloop_state.stage_rank("merging"),
       lineage_keys = { "merge-ready.version", "merge-ready.head_sha", "source_ref" },
       successors = {
         {

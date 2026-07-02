@@ -1,4 +1,5 @@
 local core = require("core")
+local devloop_state = require("devloop.state")
 
 local M = {}
 
@@ -50,9 +51,9 @@ end
 function M.implementation_transition_status(state, expected_states, marker_version)
   local source_version, target_version = expected_transition_versions(expected_states, marker_version)
   if target_version ~= nil then
-    return core.cyclic_transition_status(state, expected_state_names(expected_states), "implementing", source_version, target_version)
+    return devloop_state.cyclic_transition_status(state, expected_state_names(expected_states), "implementing", source_version, target_version)
   end
-  return core.versioned_transition_status(state, expected_state_names(expected_states or { "ready" }), "implementing", marker_version)
+  return devloop_state.versioned_transition_status(state, expected_state_names(expected_states or { "ready" }), "implementing", marker_version)
 end
 
 function M.expected_states_include(expected_states, state_name)

@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -54,7 +55,7 @@ return function(M, h)
       input_fact_family = "review-convergence-gap",
       output_postcondition_family = "review-meta-decision",
       decision_type = "review-meta-decision",
-      phase_rank = M.stage_rank("review-meta"),
+      phase_rank = devloop_state.stage_rank("review-meta"),
       lineage_keys = { "state.version", "review-converge-round.proposal", "review-converge-round.dedup", "source_ref" },
       successors = {
         {

@@ -2,6 +2,7 @@ local base_ids = require("devloop.base_ids")
 local common = require("departments.observability.common")
 local contract_time = require("contract.time")
 local m_facts = require("devloop.markers.facts")
+local devloop_state = require("devloop.state")
 
 local M = {}
 
@@ -18,7 +19,7 @@ end
 
 local function put_issue_entity(entities, repo, issue_number, issue)
   local proposal_id = base_ids.proposal_id(repo, issue_number)
-  local issue_state = core.current_state(issue.comments, proposal_id)
+  local issue_state = devloop_state.current_state(issue.comments, proposal_id)
   local link = m_facts.pr_link_fact(core, issue.comments, proposal_id)
   local dependency_wait = core.dependency_wait_fact(issue.comments, proposal_id)
   local entity = entities[proposal_id] or {
@@ -160,7 +161,7 @@ local function log_entity(entity)
 end
 
 function core.stall_suspect_age_minutes(version, now_seconds)
-  local marker_updated_at = core.version_updated_at(version)
+  local marker_updated_at = devloop_state.version_updated_at(version)
   if marker_updated_at == "" then
     return nil
   end
@@ -221,7 +222,7 @@ local function log_summary(counts, total)
     "tag=OBSERVE_SUMMARY",
     "total=" .. tostring(total or 0),
   }
-  for _, state in ipairs(core.issue_state_order()) do
+  for _, state in ipairs(devloop_state.issue_state_order()) do
     table.insert(fields, state .. "=" .. tostring(counts[state] or 0))
   end
   if counts.unmanaged ~= nil then
@@ -246,8 +247,8 @@ end
 
 function core.collect_observability_entities(event, repo, limits, deadline)
   local labels = { core._enabled_label }
-  for _, state in ipairs(core.issue_state_order()) do
-    table.insert(labels, core.state_label(state))
+  for _, state in ipairs(devloop_state.issue_state_order()) do
+    table.insert(labels, devloop_state.state_label(state))
   end
   local rotation_seed = core.observability_rotation_seed(event)
   local issue_items, deferred_issue_pages = core.observability_list_issue_candidates(repo, labels, limits, deadline, rotation_seed)

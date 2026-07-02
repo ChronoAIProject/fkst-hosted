@@ -10,6 +10,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local spec = {
   consumes = { "devloop_reconcile", "devloop_timeout_reconcile" },
@@ -28,7 +29,7 @@ local function emit_effects(proposal_id, effects)
 end
 
 local function emit_blocked_reconcile(proposal_id, state, version, action, reason, comment_request, label_request)
-  local add_labels, remove_labels = core.state_label_changes("blocked")
+  local add_labels, remove_labels = devloop_state.state_label_changes("blocked")
   devloop_logging.log_cas_decision("reconcile", proposal_id, state, "thinking", "blocked", "applied", reason)
   devloop_logging.log_apply("reconcile", proposal_id, "blocked", version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
@@ -78,7 +79,7 @@ local function maybe_adopt_open_implementation_pr(repo, issue_number, reconcile,
   end
   local comment_request = core.build_parent_awaiting_pr_comment_request(repo, issue_number, ready, child)
   local label_request = core.build_parent_awaiting_pr_label_request(repo, issue_number, ready, child)
-  local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
+  local add_labels, remove_labels = devloop_state.state_label_changes("awaiting-pr")
   devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "implementing", "awaiting-pr", "applied(open-pr-ground-truth)", "timeout reconcile found an open implementation PR before terminal write")
   devloop_logging.log_apply("reconcile", reconcile.proposal_id, "awaiting-pr", impl_version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_pr_comment_request",
@@ -122,12 +123,12 @@ local function pipeline_thinking(event)
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
-    local state = core.current_state(current.comments, reconcile.proposal_id)
+    local state = devloop_state.current_state(current.comments, reconcile.proposal_id)
     if conv_reconcile.has_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.base_version, reconcile.round) then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-idempotent(reconcile marker already visible)", "reconcile result marker for incoming version is already visible")
       return
     end
-    if state.state ~= nil and core.stage_rank(state.state) >= core.stage_rank("blocked") then
+    if state.state ~= nil and devloop_state.stage_rank(state.state) >= devloop_state.stage_rank("blocked") then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
       return
     end
@@ -141,13 +142,13 @@ local function pipeline_thinking(event)
     end
 
     local version = conv_reconcile.reconcile_terminal_state_version(core, state.version, reconcile.round)
-    local transition = core.versioned_transition_status(state, { "thinking" }, "blocked", version)
+    local transition = devloop_state.versioned_transition_status(state, { "thinking" }, "blocked", version)
     if transition == "pending" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", core.cas_outcome(state, transition, version), "thinking state marker not yet visible")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", devloop_state.cas_outcome(state, transition, version), "thinking state marker not yet visible")
       error("github-devloop: thinking state marker not yet visible for reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", core.cas_outcome(state, transition, version), "current marker cannot be reconciled from thinking")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be reconciled from thinking")
       return
     end
 
@@ -259,13 +260,13 @@ local function pipeline_timeout(event)
     end
 
     local version = conv_reconcile.timeout_reconcile_state_version(core, state.version, reconcile.state, decision.attempt)
-    local transition = core.versioned_transition_status(state, { reconcile.state }, "blocked", version)
+    local transition = devloop_state.versioned_transition_status(state, { reconcile.state }, "blocked", version)
     if transition == "pending" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", core.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
       error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", core.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")
       return
     end
 

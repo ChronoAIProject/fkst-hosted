@@ -20,6 +20,7 @@ local conv_rounds = require("devloop.convergence.rounds")
 local v_pr = require("devloop.validators.pr")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local M = {}
 
@@ -99,7 +100,7 @@ local function maybe_pr_label_hint(origin, pr_number, current_pr, state, source_
   if state.state == nil then
     return
   end
-  local add_labels, remove_labels = core.state_label_reconcile_changes(current_pr.labels, state.state)
+  local add_labels, remove_labels = devloop_state.state_label_reconcile_changes(current_pr.labels, state.state)
   local label_request = core.build_reconcile_pr_state_label_request(origin.repo, origin.issue_number, pr_number, origin.proposal_id, state.state, state.version, source_ref, current_pr.labels)
   if (#add_labels == 0 and #remove_labels == 0) or not core.pr_state_label_request_guard_visible(current_pr.comments, label_request) then
     return
@@ -319,11 +320,11 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
   if mergeable or not check_runs.is_not_mergeable_reason(reason) then
     return false
   end
-  if core.version_fix_round(state.version) >= config.max_fix_rounds(core) then
+  if devloop_state.version_fix_round(state.version) >= config.max_fix_rounds(core) then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "skip-idempotent(fix-loop-max-rounds)", reason)
     return false
   end
-  local fix_version = core.next_fix_version(state.version)
+  local fix_version = devloop_state.next_fix_version(state.version)
   local visible_state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
   if visible_state.state == "fixing" and tostring(visible_state.version or "") == tostring(fix_version) then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "skip-idempotent(already at to_state)", reason)
@@ -484,7 +485,7 @@ local function process_pr_event(event)
     end
     local merge_gate_feedback = nil
     if state.state == "reviewing" and origin.issue_number ~= nil then
-      merge_gate_feedback = m_facts.merge_gate_fix_fact(core, current_pr.comments, origin.proposal_id, core.next_fix_version(state.version))
+      merge_gate_feedback = m_facts.merge_gate_fix_fact(core, current_pr.comments, origin.proposal_id, devloop_state.next_fix_version(state.version))
     end
     if merge_gate_feedback ~= nil then
       if issue_current == nil or issue_current.comments == nil then
@@ -521,9 +522,9 @@ local function process_pr_event(event)
       return
     end
 
-    local transition = core.versioned_transition_status(state, { "pr-open", "unmanaged" }, "reviewing", origin.impl_version)
+    local transition = devloop_state.versioned_transition_status(state, { "pr-open", "unmanaged" }, "reviewing", origin.impl_version)
     if has_issue_origin and transition == "pending" then
-      devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "reviewing PR marker not yet visible")
+      devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", devloop_state.cas_outcome(state, transition, origin.impl_version), "reviewing PR marker not yet visible")
       return
     end
     if state.state == "pr-open" and tostring(state.version or "") ~= tostring(origin.impl_version or "") then
@@ -535,7 +536,7 @@ local function process_pr_event(event)
       return
     end
     if transition ~= "apply" and transition ~= "idempotent" then
-      devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", core.cas_outcome(state, transition, origin.impl_version), "current PR state cannot advance to reviewing")
+      devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", devloop_state.cas_outcome(state, transition, origin.impl_version), "current PR state cannot advance to reviewing")
       return
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then

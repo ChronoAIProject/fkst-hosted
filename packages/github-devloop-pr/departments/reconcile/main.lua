@@ -17,6 +17,7 @@ local forge_validators = require("devloop.forge_validators")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local spec = {
   consumes = { "devloop_review_reconcile", "devloop_fix_reconcile", "devloop_timeout_reconcile" },
@@ -29,7 +30,7 @@ local spec = {
 }
 
 local function emit_blocked_reconcile(kind, proposal_id, state, version, action, reason, comment_request, label_request, comment_queue)
-  local add_labels, remove_labels = core.state_label_changes("blocked")
+  local add_labels, remove_labels = devloop_state.state_label_changes("blocked")
   local queue = comment_queue or "github-proxy.github_issue_comment_request"
   devloop_logging.log_cas_decision("reconcile", proposal_id, state, kind, "blocked", "applied", reason)
   devloop_logging.log_apply("reconcile", proposal_id, "blocked", version, { add = add_labels, remove = remove_labels }, {
@@ -44,7 +45,7 @@ end
 
 local function build_timeout_reconcile_pr_comment_request(repo, pr_number, reconcile, action, reason, version, fields)
   local marker = conv_reconcile.timeout_reconcile_marker(core, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round, action, fields)
-  local state_marker = core.state_marker(reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(reconcile.proposal_id, "blocked", version)
   return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -175,7 +176,7 @@ local function pipeline_review(event)
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(review reconcile marker already visible)", "review reconcile result marker for incoming version is already visible")
       return
     end
-    if state.state ~= nil and core.stage_rank(state.state) >= core.stage_rank("blocked") then
+    if state.state ~= nil and devloop_state.stage_rank(state.state) >= devloop_state.stage_rank("blocked") then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
       return
     end
@@ -188,13 +189,13 @@ local function pipeline_review(event)
       return
     end
     local version = conv_reconcile.review_reconcile_terminal_state_version(core, state.version, reconcile.round)
-    local transition = core.versioned_transition_status(state, { "reviewing" }, "blocked", version)
+    local transition = devloop_state.versioned_transition_status(state, { "reviewing" }, "blocked", version)
     if transition == "pending" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
       error("github-devloop: reviewing state marker not yet visible for review reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
       return
     end
 
@@ -252,14 +253,14 @@ local function pipeline_fix(event)
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(fix reconcile marker already visible)", "fix reconcile result marker for incoming version is already visible")
       return
     end
-    if state.state ~= nil and core.stage_rank(state.state) >= core.stage_rank("blocked") then
+    if state.state ~= nil and devloop_state.stage_rank(state.state) >= devloop_state.stage_rank("blocked") then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(already terminal)", "current marker is already terminal at or beyond blocked")
       return
     end
 
-    local transition = core.versioned_transition_status(state, { "reviewing" }, "blocked", version)
+    local transition = devloop_state.versioned_transition_status(state, { "reviewing" }, "blocked", version)
     if state.state == nil or transition == "pending" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
       error("github-devloop: reviewing state marker not yet visible for fix reconcile; retrying")
     end
     if state.state ~= "reviewing"
@@ -268,7 +269,7 @@ local function pipeline_fix(event)
       return
     end
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", core.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
       return
     end
 
@@ -400,13 +401,13 @@ local function pipeline_timeout(event)
     end
 
     local version = conv_reconcile.timeout_reconcile_state_version(core, state.version, reconcile.state, decision.attempt)
-    local transition = core.versioned_transition_status(state, { reconcile.state }, "blocked", version)
+    local transition = devloop_state.versioned_transition_status(state, { reconcile.state }, "blocked", version)
     if transition == "pending" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", core.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
       error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", core.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")
+      devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")
       return
     end
 

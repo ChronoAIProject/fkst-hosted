@@ -7,6 +7,7 @@ local saga = require("workflow.saga")
 local v_execution_request = require("devloop.validators.execution_request")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local spec = {
   consumes = { "devloop_execute_request" },
@@ -52,7 +53,7 @@ local function raise_execution_start(repo, issue_number, request, current, event
     return false
   end
   local proposal = effects.proposal
-  local add_labels, remove_labels = core.state_label_changes("thinking")
+  local add_labels, remove_labels = devloop_state.state_label_changes("thinking")
   devloop_logging.log_apply("execute_start", request.proposal_id, "thinking", proposal.effect_version, {
     add = add_labels,
     remove = remove_labels,

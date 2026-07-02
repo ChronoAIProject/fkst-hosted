@@ -6,6 +6,7 @@ local strings = require("contract.strings")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
+local devloop_state = require("devloop.state")
 local S = {}
 local config = require("devloop.config")
 
@@ -108,7 +109,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
   local body = "github-devloop PR child open"
     .. "\n\n" .. m_builders.pr_origin_marker(M, issue_proposal_id, issue_number, branch, impl_version, base_branch)
     .. "\n" .. m_builders.pr_link_marker(M, issue_proposal_id, pr_number, branch, impl_version, base_branch)
-    .. "\n" .. M.state_marker(issue_proposal_id, "pr-open", impl_version)
+    .. "\n" .. devloop_state.state_marker(issue_proposal_id, "pr-open", impl_version)
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -148,7 +149,7 @@ end
 
 local function build_parent_awaiting_comment(repo, issue_number, ready, child)
   local body = "github-devloop delegated implementation to PR #" .. tostring(child.pr_number)
-    .. "\n\n" .. M.state_marker(ready.proposal_id, "awaiting-pr", ready.dedup_key)
+    .. "\n\n" .. devloop_state.state_marker(ready.proposal_id, "awaiting-pr", ready.dedup_key)
     .. "\n" .. m_builders.pr_delegation_marker(M, 
       ready.proposal_id,
       child.pr_proposal_id,
@@ -208,7 +209,7 @@ local function child_start_facts(comments)
       branch = origin.branch,
       base_branch = origin.base_branch,
     }
-    pr_open_reached = M.reached(comments, origin.proposal_id, "pr-open", { domain = "github-devloop-pr" })
+    pr_open_reached = devloop_state.reached(comments, origin.proposal_id, "pr-open", { domain = "github-devloop-pr" })
   end
   return gate.facts({
     reached = function(milestone, opts)

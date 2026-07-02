@@ -5,6 +5,7 @@ local requests_labels = require("devloop.requests.labels")
 local requests_lifecycle = require("devloop.requests.lifecycle")
 local payloads_builders = require("devloop.payloads.builders")
 local conv_attempts = require("devloop.convergence.attempts")
+local devloop_state = require("devloop.state")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
 local replay_fields_resolver = require("devloop.replay_fields")
@@ -18,7 +19,7 @@ local dependency_gate_rederive = true
 function M.build_ready_split_canonicalized_comment_request(repo, issue_number, proposal_id, from_version, to_state, to_version, gate, source_ref)
   local state_effects = to_state == "ready" and "result-marker,ready-label,devloop-ready" or "ready-split-canonicalized"
   local markers = M.ready_split_canonicalized_marker(proposal_id, from_version, to_version, to_state, gate and gate.reason or "ready_split_rederive")
-    .. "\n" .. M.state_marker(proposal_id, to_state, to_version, state_effects)
+    .. "\n" .. devloop_state.state_marker(proposal_id, to_state, to_version, state_effects)
   if to_state == "dependency_wait" then
     markers = markers .. "\n" .. M.dependency_wait_marker(proposal_id, to_version, gate and gate.unmet or {}, gate and gate.kind or "waiting", gate and gate.reason or "waiting-on-dependency")
   end
@@ -219,7 +220,7 @@ local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, cu
 end
 
 local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state, gate)
-  local add_labels, remove_labels = M.state_label_changes("blocked")
+  local add_labels, remove_labels = devloop_state.state_label_changes("blocked")
   table.insert(remove_labels, M._blocked_on_dependency_label)
   local comment_request = m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
@@ -227,7 +228,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     issue_number = issue.number,
     body = "github-devloop dependency gate blocked"
       .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. tostring(gate.reason or "dependency-gate-unresolvable")
-      .. "\n\n" .. M.state_marker(proposal_id, "blocked", state.version),
+      .. "\n\n" .. devloop_state.state_marker(proposal_id, "blocked", state.version),
     dedup_key = base_ids.dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
     source_ref = base_ids.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
@@ -303,7 +304,7 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     ))
     return true
   end
-  local ready_comment_id = M.ready_hand_off_comment_id(
+  local ready_comment_id = devloop_state.ready_hand_off_comment_id(
     facts.current.comments,
     proposal_id,
     state.version

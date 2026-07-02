@@ -89,6 +89,15 @@ class InstallerRatchetTest(unittest.TestCase):
         )
         self.assertEqual(n, 1)
 
+    def test_loop_binding_install_names_count(self):
+        # a self-contained module that loop-binds its C fns onto M installs those names
+        n = self._count(
+            mod_files={"devloop/state.lua": 'function C.current_state(a) end\nfunction S.install(M)\n  for _, k in ipairs({"current_state"}) do M[k] = C[k] end\nend\nreturn C\n'},
+            core='require("devloop.state").install(M)\n',
+            readers={"main.lua": "core.current_state(x)\n"},
+        )
+        self.assertEqual(n, 1)
+
     def test_core_and_test_readers_excluded(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

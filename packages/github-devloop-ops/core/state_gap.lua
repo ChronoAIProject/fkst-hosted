@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local devloop_state = require("devloop.state")
 local S = {}
 local contract_time = require("contract.time")
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
@@ -15,7 +16,7 @@ end
 
 local function state_marker_stage_rank(marker, state)
   local explicit_rank = tonumber(marker:match('stage_rank="(%d+)"'))
-  return explicit_rank or M.stage_rank(state)
+  return explicit_rank or devloop_state.stage_rank(state)
 end
 
 local function parse_marker_time(comment)
@@ -36,7 +37,7 @@ local function append_state_markers(markers, comments, proposal_id)
         local marker_proposal = marker:match('proposal="([^"]+)"')
         local state = marker:match('state="([^"]+)"')
         local version = marker:match('version="([^"]*)"')
-        if marker_proposal == proposal_id and M.is_state(state) then
+        if marker_proposal == proposal_id and devloop_state.is_state(state) then
           table.insert(markers, {
             proposal_id = proposal_id,
             state = state,

@@ -9,6 +9,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local m_facts = require("devloop.markers.facts")
+local devloop_state = require("devloop.state")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local check_runs = require("forge.github.check_runs")
@@ -302,7 +303,7 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
     if intended_head_sha ~= nil and tostring(current_pr.head_sha or "") ~= intended_head_sha then
       return tools.log_skip(dept, proposal_id, state, "fixing", "fixing", "skip-stale(head-advanced)", "PR head advanced since rejected review")
     end
-    local new_version = M.next_fix_version(state.version)
+    local new_version = devloop_state.next_fix_version(state.version)
     local fix = {
       proposal_id = proposal_id,
       pr_number = link.pr_number,
@@ -547,7 +548,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
     })
   end
   if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
-    local fix_version = M.fix_version_from_review_version(state.version)
+    local fix_version = devloop_state.fix_version_from_review_version(state.version)
     local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
     local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, mergeable_reason, current_pr.base_ref_oid, source_ref)
     local effects = {
@@ -578,7 +579,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
     })
   end
   if parsers_misc.is_ci_red_reason(M, ci_reason) then
-    local fix_version = M.fix_version_from_review_version(state.version)
+    local fix_version = devloop_state.fix_version_from_review_version(state.version)
     local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
     local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, ci_reason, current_pr.base_ref_oid, source_ref)
     local effects = {
@@ -609,7 +610,7 @@ mark_child_closed_unmerged = function(dept, issue, state, proposal_id, link, too
     number = pr_number,
   }, "github-devloop marked delegated PR child closed without merge"
     .. "\n\nReason: " .. tostring(reason or "closed without merge")
-    .. "\n\n" .. M.state_marker(proposal_id, "closed-unmerged", version)
+    .. "\n\n" .. devloop_state.state_marker(proposal_id, "closed-unmerged", version)
     .. "\n" .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "child-pr",
     "closed-unmerged",
@@ -625,7 +626,7 @@ mark_child_closed_unmerged = function(dept, issue, state, proposal_id, link, too
     source_ref = source_ref,
   }
   devloop_logging.log_cas_decision(dept, proposal_id, state, state and state.state or "pr-open", "closed-unmerged", outcome, reason)
-  local add_labels, remove_labels = M.state_label_changes("closed-unmerged")
+  local add_labels, remove_labels = devloop_state.state_label_changes("closed-unmerged")
   return tools.raise_effects(dept, proposal_id, "closed-unmerged", version, { add = add_labels, remove = remove_labels }, {
     { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
   })
@@ -637,7 +638,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
     return tools.log_skip(dept, proposal_id, state, state.state, "merged", "skip-foreign(head)", "merged linked PR head sha is missing")
   end
   local merged_body = comment_strings.comment_string(M, "merged_pr_prefix") .. tostring(link.pr_number)
-    .. "\n\n" .. M.state_marker(proposal_id, "merged", state.version)
+    .. "\n\n" .. devloop_state.state_marker(proposal_id, "merged", state.version)
     .. "\n" .. m_builders.merged_marker(M, proposal_id, link.pr_number, state.version, head_sha)
   local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
   local comment_request = entity_lib.build_entity_comment_request({
@@ -667,7 +668,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
     }),
     issue.source_ref
   )
-  local add_labels, remove_labels = M.state_label_changes("merged")
+  local add_labels, remove_labels = devloop_state.state_label_changes("merged")
   devloop_logging.log_cas_decision(dept, proposal_id, state, state.state, "merged", "applied(linked-pr-merged)", "linked PR is merged; marking issue complete")
   return tools.raise_effects(dept, proposal_id, "merged", state.version, { add = add_labels, remove = remove_labels }, {
     { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
@@ -718,7 +719,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
       end
       local mergeable, mergeable_reason = check_runs.pr_mergeable(pr)
       if not mergeable and check_runs.is_not_mergeable_reason(mergeable_reason) then
-        local fix_version = M.next_fix_version(state.version)
+        local fix_version = devloop_state.next_fix_version(state.version)
         local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
         local review_fact = {
           proposal_id = proposal_id,

@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -69,7 +70,7 @@ return function(M, h)
       input_fact_family = "pr-revision-review-request",
       output_postcondition_family = "review_decision_recorded",
       decision_type = "ReviewDecision",
-      phase_rank = M.stage_rank("reviewing"),
+      phase_rank = devloop_state.stage_rank("reviewing"),
       lineage_keys = { "state.version", "pr-link.pr", "pr-head.sha", "source_ref" },
       successors = {
         {

@@ -18,6 +18,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local v_fixing = require("devloop.validators.fixing")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local spec = {
   consumes = { "devloop_fixing" },
   produces = {
@@ -269,7 +270,7 @@ end
 local function raise_review_meta(repo, issue_number, fix, reason, detail)
   local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
   local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
-  local add_labels, remove_labels = core.state_label_changes("review-meta")
+  local add_labels, remove_labels = devloop_state.state_label_changes("review-meta")
   devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_pr_comment_request",
     "github-proxy.github_issue_label_request",
@@ -307,11 +308,11 @@ local function raise_reviewing(repo, issue_number, fix, old_head_sha, new_head_s
 end
 
 local function raise_stale_speculation_refix(repo, issue_number, fix, current_state, current_predecessor_set, reason)
-  local next_version = core.next_fix_version(fix.version)
+  local next_version = devloop_state.next_fix_version(fix.version)
   local merge_ready = {
     proposal_id = fix.proposal_id,
     pr_number = fix.pr_number,
-    version = core._strip_latest_fix_version_suffix(fix.version),
+    version = devloop_state._strip_latest_fix_version_suffix(fix.version),
     review_proposal_id = fix.review_proposal_id,
     review_dedup_key = fix.review_dedup_key,
     reviewed_head_sha = fix.reviewed_head_sha,
@@ -336,10 +337,10 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
     repo,
     issue_number,
     "fixing",
-    fix.dedup_key .. "/label/refix/" .. tostring(core.version_fix_round(next_version)),
+    fix.dedup_key .. "/label/refix/" .. tostring(devloop_state.version_fix_round(next_version)),
     entity_lib.issue_source_ref(repo, issue_number)
   ) or nil
-  local add_labels, remove_labels = core.state_label_changes("fixing")
+  local add_labels, remove_labels = devloop_state.state_label_changes("fixing")
   devloop_logging.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
   local raised = {
     "github-proxy.github_pr_comment_request",
@@ -662,23 +663,23 @@ local function act_fix(event)
     end
     local current_pr = parsers_pr.parse_pr_view_fix(core, pr_view.stdout)
     core.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
-    local reviewing_version = core.next_fix_version(fix.version)
-    if core.has_state_marker(current_pr.comments, fix.proposal_id, "reviewing", reviewing_version) then
+    local reviewing_version = devloop_state.next_fix_version(fix.version)
+    if devloop_state.has_state_marker(current_pr.comments, fix.proposal_id, "reviewing", reviewing_version) then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, { state = "reviewing", version = reviewing_version }, "fixing", "reviewing", "skip-idempotent(already at to_state)", "reviewing state marker for fix already visible")
       return
     end
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, fix.proposal_id)
-    local transition = core.cyclic_transition_status(state, { "fixing" }, "reviewing", fix.version, reviewing_version)
+    local transition = devloop_state.cyclic_transition_status(state, { "fixing" }, "reviewing", fix.version, reviewing_version)
     if transition == "pending" then
-      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", devloop_state.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")
       error("github-devloop: fixing state marker not yet visible for fix; retrying")
     end
     if transition == "idempotent" then
-      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "reviewing state marker for fix already visible")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", devloop_state.cas_outcome(state, transition, fix.version), "reviewing state marker for fix already visible")
       return
     end
     if state.state ~= "fixing" or transition == "stale" then
-      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "issue is not currently fixing")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", devloop_state.cas_outcome(state, transition, fix.version), "issue is not currently fixing")
       return
     end
     if tostring(state.version or "") ~= tostring(fix.version) then
@@ -823,7 +824,7 @@ local function act_fix(event)
       devloop_logging.log_cas_decision(
         "fix",
         fix.proposal_id,
-        { state = "fixing", version = fix.version, stage_rank = core.stage_rank("fixing") },
+        { state = "fixing", version = fix.version, stage_rank = devloop_state.stage_rank("fixing") },
         "fixing",
         "reviewing|review-meta",
         "skip-idempotent(live-exec-ref)",

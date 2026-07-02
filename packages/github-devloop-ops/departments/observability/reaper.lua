@@ -10,6 +10,7 @@ local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
 local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local devloop_state = require("devloop.state")
 
 local M = {}
 
@@ -148,7 +149,7 @@ local function reap_orphan_pr(repo, entity)
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline-parent-fetch"))
     return
   end
-  local parent_state = core.current_state(parent.comments, proposal_id)
+  local parent_state = devloop_state.current_state(parent.comments, proposal_id)
   local reason = terminal_parent_reason(parent, entity)
   if reason == nil then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip", "parent-active"))

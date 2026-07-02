@@ -3,6 +3,8 @@ local requests_labels = require("devloop.requests.labels")
 local parsers_misc = require("devloop.parsers.misc")
 local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
+local C = {}
+local devloop_base = require("devloop.base")
 local source_ref = require("contract.source_ref")
 local transition_version = require("contract.transition_version")
 local m_builders = require("devloop.markers.builders")
@@ -29,8 +31,7 @@ local function padded_order_number(value)
   return string.format("%0" .. tostring(order_number_width) .. "d", tonumber(value) or 0)
 end
 
-function S.install(M)
-function M.has_label(labels, expected)
+function C.has_label(labels, expected)
   if type(labels) ~= "table" then
     return false
   end
@@ -42,13 +43,13 @@ function M.has_label(labels, expected)
   return false
 end
 
-function M.is_state(state) return label_by_state[state] ~= nil end
-function M.is_state_label(label) return state_labels[tostring(label)] == true end
-function M.state_label(state) return label_by_state[state] end
-function M.state_order() return copy_array(state_order) end
-function M.issue_state_order() return copy_array(issue_state_order) end
-function M.state_successors(state) return copy_array(state_graph[state]) end
-function M.lifecycle_state_set()
+function C.is_state(state) return label_by_state[state] ~= nil end
+function C.is_state_label(label) return state_labels[tostring(label)] == true end
+function C.state_label(state) return label_by_state[state] end
+function C.state_order() return copy_array(state_order) end
+function C.issue_state_order() return copy_array(issue_state_order) end
+function C.state_successors(state) return copy_array(state_graph[state]) end
+function C.lifecycle_state_set()
   local out = {}
   for state, _ in pairs(label_by_state) do out[state] = true end
   for state, next_states in pairs(state_graph) do
@@ -60,8 +61,8 @@ function M.lifecycle_state_set()
   return out
 end
 
-function M.state_marker(proposal_id, state, version, effects)
-  if not M.is_state(state) then
+function C.state_marker(proposal_id, state, version, effects)
+  if not C.is_state(state) then
     error("github-devloop: invalid state")
   end
   local effects_field = ""
@@ -71,22 +72,22 @@ function M.state_marker(proposal_id, state, version, effects)
   return '<!-- fkst:github-devloop:state:v1 proposal="' .. tostring(proposal_id)
     .. '" state="' .. tostring(state)
     .. '" version="' .. tostring(version)
-    .. '" stage_rank="' .. tostring(M.stage_rank(state))
-    .. '" marker_order_key="' .. M.marker_order_key(version, state)
+    .. '" stage_rank="' .. tostring(C.stage_rank(state))
+    .. '" marker_order_key="' .. C.marker_order_key(version, state)
     .. '"'
     .. effects_field
     .. ' -->'
 end
 
-function M.version_order_key(version)
+function C.version_order_key(version)
   return source_ref.version_order_key(version)
 end
 
-function M.stage_rank(state)
+function C.stage_rank(state)
   return state_stage_rank[state] or 0
 end
 
-function M.version_updated_at(version)
+function C.version_updated_at(version)
   local text = tostring(version or "")
   local updated_at = ""
   for found in text:gmatch("(%d%d%d%d%-%d%d%-%d%dT%d%d[%-:]%d%d[%-:]%d%dZ)") do
@@ -95,7 +96,7 @@ function M.version_updated_at(version)
   return updated_at
 end
 
-function M.version_loop_round(version)
+function C.version_loop_round(version)
   -- Extract the no-consensus loop round wherever it appears, not only at the
   -- end of the version string. A reviewing version like ".../loop/2" is later
   -- extended to a fixing version ".../loop/2/fix/1"; an end-anchored match
@@ -112,7 +113,7 @@ function M.version_loop_round(version)
   return max_n
 end
 
-function M.version_fix_round(version)
+function C.version_fix_round(version)
   local max_n = 0
   for n in tostring(version or ""):gmatch("[/-]fix[/-](%d+)") do
     local parsed = tonumber(n) or 0
@@ -123,7 +124,7 @@ function M.version_fix_round(version)
   return max_n
 end
 
-function M.version_review_meta_action_round(version)
+function C.version_review_meta_action_round(version)
   local max_n = 0
   for n in tostring(version or ""):gmatch("[/-]review%-meta%-action[/-](%d+)") do
     local parsed = tonumber(n) or 0
@@ -134,7 +135,7 @@ function M.version_review_meta_action_round(version)
   return max_n
 end
 
-function M.version_review_loop_round(version)
+function C.version_review_loop_round(version)
   local max_n = 0
   for n in tostring(version or ""):gmatch("[/-]review%-loop[/-](%d+)") do
     local parsed = tonumber(n) or 0
@@ -145,7 +146,7 @@ function M.version_review_loop_round(version)
   return max_n
 end
 
-function M.version_timeout_round(version, state_name)
+function C.version_timeout_round(version, state_name)
   local max_n = 0
   local state = tostring(state_name or "")
   if state == "" then
@@ -167,7 +168,7 @@ function M.version_timeout_round(version, state_name)
   return max_n
 end
 
-function M.version_reimplement_round(version)
+function C.version_reimplement_round(version)
   local max_n = 0
   for n in tostring(version or ""):gmatch("[/-]reimplement[/-](%d+)") do
     local parsed = tonumber(n) or 0
@@ -178,7 +179,7 @@ function M.version_reimplement_round(version)
   return max_n
 end
 
-function M.version_ready_split_round(version)
+function C.version_ready_split_round(version)
   local max_n = 0
   for n in tostring(version or ""):gmatch("[/-]ready%-split[/-](%d+)") do
     local parsed = tonumber(n) or 0
@@ -207,30 +208,30 @@ local timeout_order_states = {
 local function version_max_timeout_round(version)
   local max_n = 0
   for _, state_name in ipairs(timeout_order_states) do
-    max_n = math.max(max_n, M.version_timeout_round(version, state_name))
+    max_n = math.max(max_n, C.version_timeout_round(version, state_name))
   end
   return max_n
 end
 
-function M.next_fix_version(version)
+function C.next_fix_version(version)
   local base = tostring(version or "")
-  local next_n = M.version_fix_round(base) + 1
+  local next_n = C.version_fix_round(base) + 1
   return base .. "/fix/" .. tostring(next_n)
 end
 
-function M.fix_version_from_review_version(version)
-  return M.next_fix_version(version)
+function C.fix_version_from_review_version(version)
+  return C.next_fix_version(version)
 end
 
-function M.next_review_meta_action_version(version)
+function C.next_review_meta_action_version(version)
   local base = tostring(version or "")
-  local next_n = M.version_review_meta_action_round(base) + 1
+  local next_n = C.version_review_meta_action_round(base) + 1
   return base .. "/review-meta-action/" .. tostring(next_n)
 end
 
-function M.next_review_loop_version(version)
+function C.next_review_loop_version(version)
   local base = tostring(version or "")
-  local next_n = M.version_review_loop_round(base) + 1
+  local next_n = C.version_review_loop_round(base) + 1
   return base .. "/review-loop/" .. tostring(next_n)
 end
 
@@ -241,7 +242,7 @@ local function version_primary_key(version)
     return 0, ""
   end
   local base = comparable_transition_base(version)
-  local updated_at = M.version_updated_at(base)
+  local updated_at = C.version_updated_at(base)
   if updated_at ~= "" then
     return 1, updated_at
   end
@@ -253,21 +254,21 @@ local function version_sort_key(version, stage_rank)
   return {
     primary_rank = primary_rank,
     primary = primary,
-    loop_n = M.version_loop_round(version),
-    fix_n = M.version_fix_round(version),
-    reimplement_n = M.version_reimplement_round(version),
+    loop_n = C.version_loop_round(version),
+    fix_n = C.version_fix_round(version),
+    reimplement_n = C.version_reimplement_round(version),
     timeout_n = version_max_timeout_round(version),
-    review_loop_n = M.version_review_loop_round(version),
-    review_meta_action_n = M.version_review_meta_action_round(version),
-    ready_split_n = M.version_ready_split_round(version),
+    review_loop_n = C.version_review_loop_round(version),
+    review_meta_action_n = C.version_review_meta_action_round(version),
+    ready_split_n = C.version_ready_split_round(version),
     stage_rank = tonumber(stage_rank) or 0,
   }
 end
 
-function M.marker_order_key(version, state_or_stage_rank)
+function C.marker_order_key(version, state_or_stage_rank)
   local stage_rank = tonumber(state_or_stage_rank)
   if stage_rank == nil then
-    stage_rank = M.stage_rank(state_or_stage_rank)
+    stage_rank = C.stage_rank(state_or_stage_rank)
   end
   local key = version_sort_key(version, stage_rank)
   return table.concat({
@@ -285,7 +286,7 @@ end
 
 local function marker_stage_rank(marker, state)
   local explicit_rank = tonumber(marker:match('stage_rank="(%d+)"'))
-  return explicit_rank or M.stage_rank(state)
+  return explicit_rank or C.stage_rank(state)
 end
 
 local function state_marker_fact(marker, comment)
@@ -293,7 +294,7 @@ local function state_marker_fact(marker, comment)
   local marker_proposal = attrs.proposal
   local marker_state = attrs.state
   local marker_version = attrs.version
-  if marker_proposal == nil or not M.is_state(marker_state) then
+  if marker_proposal == nil or not C.is_state(marker_state) then
     return nil
   end
   return {
@@ -301,7 +302,7 @@ local function state_marker_fact(marker, comment)
     state = marker_state,
     version = marker_version,
     stage_rank = marker_stage_rank(marker, marker_state),
-    marker_created_at = parsers_misc._comment_created_at(M, comment),
+    marker_created_at = parsers_misc._comment_created_at(devloop_base, comment),
   }
 end
 
@@ -415,7 +416,7 @@ local function sign_order(value)
   return 0
 end
 
-function M.compare_state_marker_order(current, target_state, target_version)
+function C.compare_state_marker_order(current, target_state, target_version)
   if current == nil or current.version == nil then
     return -1
   end
@@ -423,10 +424,10 @@ function M.compare_state_marker_order(current, target_state, target_version)
   if version_order ~= 0 then
     return sign_order(version_order)
   end
-  return sign_order(M.stage_rank(current.state) - M.stage_rank(target_state))
+  return sign_order(C.stage_rank(current.state) - C.stage_rank(target_state))
 end
 
-function M.timeout_lineage_matches_current(scheduled, current)
+function C.timeout_lineage_matches_current(scheduled, current)
   if type(scheduled) ~= "table" or type(current) ~= "table" then
     return true
   end
@@ -447,8 +448,8 @@ local function compare_state_marker(a, b)
   if version_order ~= 0 then
     return version_order > 0
   end
-  local a_stage_rank = tonumber(a.stage_rank) or M.stage_rank(a.state)
-  local b_stage_rank = tonumber(b.stage_rank) or M.stage_rank(b.state)
+  local a_stage_rank = tonumber(a.stage_rank) or C.stage_rank(a.state)
+  local b_stage_rank = tonumber(b.stage_rank) or C.stage_rank(b.state)
   if a_stage_rank ~= b_stage_rank then
     return b_stage_rank > a_stage_rank
   end
@@ -488,7 +489,7 @@ local function domain_allows_state(domain, state)
   end
   local allowed = milestone_domains[domain]
   if allowed == nil then
-    return domain == "github-devloop" and M.is_state(state)
+    return domain == "github-devloop" and C.is_state(state)
   end
   return allowed[state] == true
 end
@@ -515,23 +516,23 @@ local function lineage_matches(version, opts)
   return versions_equivalent(actual, expected)
 end
 
-function M.comment_bodies(comments)
+function C.comment_bodies(comments)
   local bodies = {}
   for _, comment in ipairs(comments or {}) do
-    table.insert(bodies, parsers_misc._comment_body(M, comment))
+    table.insert(bodies, parsers_misc._comment_body(devloop_base, comment))
   end
   return bodies
 end
 
-function M.current_state(comments, proposal_id)
+function C.current_state(comments, proposal_id)
   if type(comments) ~= "table" then
     return nil
   end
 
   local current = nil
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
+    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       if candidate ~= nil and candidate.proposal_id == proposal_id then
         candidate = {
@@ -553,49 +554,49 @@ function M.current_state(comments, proposal_id)
   }
 end
 
-function M.compare_phase(left, right, opts)
+function C.compare_phase(left, right, opts)
   local options = opts or {}
   local left_state = type(left) == "table" and left.state or left
   local right_state = type(right) == "table" and right.state or right
-  local right_rank = M.stage_rank(right_state)
-  if not M.is_state(right_state) then
+  local right_rank = C.stage_rank(right_state)
+  if not C.is_state(right_state) then
     error("github-devloop: invalid milestone")
   end
   validate_milestone_domain(options.domain or options.milestone_domain, right_state)
   local left_rank = type(left) == "table" and tonumber(left.stage_rank) or nil
   if left_rank == nil then
-    if not M.is_state(left_state) then
+    if not C.is_state(left_state) then
       return nil
     end
-    left_rank = M.stage_rank(left_state)
+    left_rank = C.stage_rank(left_state)
   end
   return sign_order(left_rank - right_rank)
 end
 
-function M.is_at_or_after(state_or_marker, milestone, opts)
-  return (M.compare_phase(state_or_marker, milestone, opts) or -1) >= 0
+function C.is_at_or_after(state_or_marker, milestone, opts)
+  return (C.compare_phase(state_or_marker, milestone, opts) or -1) >= 0
 end
 
-function M.reached(comments, proposal_id, milestone, opts)
+function C.reached(comments, proposal_id, milestone, opts)
   if type(comments) ~= "table" then
     return false
   end
   local options = opts or {}
-  if not M.is_state(milestone) then
+  if not C.is_state(milestone) then
     error("github-devloop: invalid milestone")
   end
   local domain = options.domain or options.milestone_domain
   validate_milestone_domain(domain, milestone)
 
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
+    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       if candidate ~= nil
         and candidate.proposal_id == proposal_id
         and domain_allows_state(domain, candidate.state)
         and lineage_matches(candidate.version, options)
-        and M.is_at_or_after(candidate, milestone, options) then
+        and C.is_at_or_after(candidate, milestone, options) then
         return true
       end
     end
@@ -603,13 +604,13 @@ function M.reached(comments, proposal_id, milestone, opts)
   return false
 end
 
-function M.has_state_marker(comments, proposal_id, state, version)
+function C.has_state_marker(comments, proposal_id, state, version)
   if type(comments) ~= "table" then
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
+    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       if candidate ~= nil
         and candidate.proposal_id == proposal_id
@@ -622,13 +623,13 @@ function M.has_state_marker(comments, proposal_id, state, version)
   return false
 end
 
-function M.state_marker_comment_id(comments, proposal_id, state, version, effects)
+function C.state_marker_comment_id(comments, proposal_id, state, version, effects)
   if type(comments) ~= "table" then
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
+    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       local attrs = marker_attrs(marker)
       if candidate ~= nil
@@ -636,7 +637,7 @@ function M.state_marker_comment_id(comments, proposal_id, state, version, effect
         and candidate.state == state
         and candidate.version == version
         and tostring(attrs.effects or "") == tostring(effects or "")
-        and payloads_predicates.is_safe_comment_id(M, comment.id) then
+        and payloads_predicates.is_safe_comment_id(devloop_base, comment.id) then
         return tostring(comment.id)
       end
     end
@@ -644,8 +645,8 @@ function M.state_marker_comment_id(comments, proposal_id, state, version, effect
   return nil
 end
 
-function M.ready_hand_off_comment_id(comments, proposal_id, marker_version)
-  return M.state_marker_comment_id(
+function C.ready_hand_off_comment_id(comments, proposal_id, marker_version)
+  return C.state_marker_comment_id(
     comments,
     proposal_id,
     "ready",
@@ -683,7 +684,7 @@ local function can_reach(from_state, to_state, seen)
   return false
 end
 
-function M.transition_status(current, from_states, to_state)
+function C.transition_status(current, from_states, to_state)
   local current_state = current
   if type(current) == "table" then
     current_state = current.state
@@ -705,18 +706,18 @@ function M.transition_status(current, from_states, to_state)
   return "stale"
 end
 
-function M.versioned_transition_status(current, from_states, to_state, incoming_version)
+function C.versioned_transition_status(current, from_states, to_state, incoming_version)
   if type(current) == "table"
     and current.version ~= nil
     and incoming_version ~= nil
     and compare_transition_versions(incoming_version, current.version) < 0 then
     return "stale"
   end
-  local status = M.transition_status(current, from_states, to_state)
+  local status = C.transition_status(current, from_states, to_state)
   return status
 end
 
-function M.cyclic_transition_status(current, from_states, to_state, incoming_version, target_version)
+function C.cyclic_transition_status(current, from_states, to_state, incoming_version, target_version)
   local current_state = current
   local current_version = nil
   if type(current) == "table" then
@@ -724,7 +725,7 @@ function M.cyclic_transition_status(current, from_states, to_state, incoming_ver
     current_version = current.version
   end
   if incoming_version == nil then
-    return M.transition_status(current, from_states, to_state)
+    return C.transition_status(current, from_states, to_state)
   end
   if target_version ~= nil and current_state == to_state and versions_equivalent(current_version, target_version) then
     return "idempotent"
@@ -747,13 +748,13 @@ function M.cyclic_transition_status(current, from_states, to_state, incoming_ver
       return "apply"
     end
   end
-  if M.stage_rank(to_state) > M.stage_rank(current_state) then
+  if C.stage_rank(to_state) > C.stage_rank(current_state) then
     return "apply"
   end
   return "stale"
 end
 
-function M.cas_outcome(current, transition, incoming_version)
+function C.cas_outcome(current, transition, incoming_version)
   if transition == "apply" then
     return "applied"
   end
@@ -775,8 +776,8 @@ function M.cas_outcome(current, transition, incoming_version)
   return tostring(transition or "unknown")
 end
 
-function M.state_label_changes(to_state)
-  local add_label = M.state_label(to_state)
+function C.state_label_changes(to_state)
+  local add_label = C.state_label(to_state)
   if add_label == nil then
     error("github-devloop: invalid state")
   end
@@ -793,8 +794,8 @@ function M.state_label_changes(to_state)
   return { add_label }, remove_labels
 end
 
-function M.state_label_reconcile_changes(labels, to_state)
-  local expected_label = M.state_label(to_state)
+function C.state_label_reconcile_changes(labels, to_state)
+  local expected_label = C.state_label(to_state)
   if expected_label == nil then
     error("github-devloop: invalid state")
   end
@@ -806,7 +807,7 @@ function M.state_label_reconcile_changes(labels, to_state)
     local label_text = tostring(label)
     if label_text == expected_label then
       has_expected = true
-    elseif M.is_state_label(label_text) then
+    elseif C.is_state_label(label_text) then
       table.insert(remove_labels, label_text)
     end
   end
@@ -816,8 +817,8 @@ function M.state_label_reconcile_changes(labels, to_state)
   return add_labels, remove_labels
 end
 
-function M.state_label_hint_matches(labels, state)
-  local expected_label = M.state_label(state)
+function C.state_label_hint_matches(labels, state)
+  local expected_label = C.state_label(state)
   if expected_label == nil then
     return false
   end
@@ -827,21 +828,21 @@ function M.state_label_hint_matches(labels, state)
     local label_text = tostring(label)
     if label_text == expected_label then
       has_expected = true
-    elseif M.is_state_label(label_text) then
+    elseif C.is_state_label(label_text) then
       return false
     end
   end
   return has_expected
 end
 
-function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, state, version, source_ref, current_labels)
+function C.build_reconcile_state_label_request(repo, issue_number, proposal_id, state, version, source_ref, current_labels)
   local add_labels, remove_labels
   if current_labels ~= nil then
-    add_labels, remove_labels = M.state_label_reconcile_changes(current_labels, state)
+    add_labels, remove_labels = C.state_label_reconcile_changes(current_labels, state)
   else
-    add_labels, remove_labels = M.state_label_changes(state)
+    add_labels, remove_labels = C.state_label_changes(state)
   end
-  return requests_labels.build_label_request(M,
+  return requests_labels.build_label_request(devloop_base,
     repo,
     issue_number,
     add_labels,
@@ -857,105 +858,105 @@ function M.build_reconcile_state_label_request(repo, issue_number, proposal_id, 
   )
 end
 
-function M.has_terminal_label(labels)
-  return M.has_label(labels, M._ready_label)
-    or M.has_label(labels, M._implementing_label)
-    or M.has_label(labels, M._pr_open_label)
-    or M.has_label(labels, M._reviewing_label)
-    or M.has_label(labels, M._review_meta_label)
-    or M.has_label(labels, M._merge_ready_label)
-    or M.has_label(labels, M._merging_label)
-    or M.has_label(labels, M._merged_label)
-    or M.has_label(labels, M._fixing_label)
-    or M.has_label(labels, M._impl_failed_label)
-    or M.has_label(labels, M._blocked_label)
+function C.has_terminal_label(labels)
+  return C.has_label(labels, devloop_base._ready_label)
+    or C.has_label(labels, devloop_base._implementing_label)
+    or C.has_label(labels, devloop_base._pr_open_label)
+    or C.has_label(labels, devloop_base._reviewing_label)
+    or C.has_label(labels, devloop_base._review_meta_label)
+    or C.has_label(labels, devloop_base._merge_ready_label)
+    or C.has_label(labels, devloop_base._merging_label)
+    or C.has_label(labels, devloop_base._merged_label)
+    or C.has_label(labels, devloop_base._fixing_label)
+    or C.has_label(labels, devloop_base._impl_failed_label)
+    or C.has_label(labels, devloop_base._blocked_label)
 end
 
-function M.has_thinking_label(labels)
-  return M.has_label(labels, M._thinking_label)
+function C.has_thinking_label(labels)
+  return C.has_label(labels, devloop_base._thinking_label)
 end
 
-function M.has_blocked_label(labels)
-  return M.has_label(labels, M._blocked_label)
+function C.has_blocked_label(labels)
+  return C.has_label(labels, devloop_base._blocked_label)
 end
 
-function M.has_ready_label(labels)
-  return M.has_label(labels, M._ready_label)
+function C.has_ready_label(labels)
+  return C.has_label(labels, devloop_base._ready_label)
 end
 
-function M.has_implementing_label(labels)
-  return M.has_label(labels, M._implementing_label)
+function C.has_implementing_label(labels)
+  return C.has_label(labels, devloop_base._implementing_label)
 end
 
-function M.has_pr_open_label(labels)
-  return M.has_label(labels, M._pr_open_label)
+function C.has_pr_open_label(labels)
+  return C.has_label(labels, devloop_base._pr_open_label)
 end
 
-function M.has_reviewing_label(labels)
-  return M.has_label(labels, M._reviewing_label)
+function C.has_reviewing_label(labels)
+  return C.has_label(labels, devloop_base._reviewing_label)
 end
 
-function M.has_merge_ready_label(labels)
-  return M.has_label(labels, M._merge_ready_label)
+function C.has_merge_ready_label(labels)
+  return C.has_label(labels, devloop_base._merge_ready_label)
 end
 
-function M.has_merging_label(labels)
-  return M.has_label(labels, M._merging_label)
+function C.has_merging_label(labels)
+  return C.has_label(labels, devloop_base._merging_label)
 end
 
-function M.has_merged_label(labels)
-  return M.has_label(labels, M._merged_label)
+function C.has_merged_label(labels)
+  return C.has_label(labels, devloop_base._merged_label)
 end
 
-function M.has_fixing_label(labels)
-  return M.has_label(labels, M._fixing_label)
+function C.has_fixing_label(labels)
+  return C.has_label(labels, devloop_base._fixing_label)
 end
 
-function M.has_review_meta_label(labels)
-  return M.has_label(labels, M._review_meta_label)
+function C.has_review_meta_label(labels)
+  return C.has_label(labels, devloop_base._review_meta_label)
 end
 
-function M.has_impl_failed_label(labels)
-  return M.has_label(labels, M._impl_failed_label)
+function C.has_impl_failed_label(labels)
+  return C.has_label(labels, devloop_base._impl_failed_label)
 end
 
-function M.has_decision_terminal_label(labels)
-  return M.has_label(labels, M._ready_label)
-    or M.has_label(labels, M._implementing_label)
-    or M.has_label(labels, M._pr_open_label)
-    or M.has_label(labels, M._reviewing_label)
-    or M.has_label(labels, M._review_meta_label)
-    or M.has_label(labels, M._merge_ready_label)
-    or M.has_label(labels, M._merging_label)
-    or M.has_label(labels, M._merged_label)
-    or M.has_label(labels, M._fixing_label)
-    or M.has_label(labels, M._impl_failed_label)
-    or M.has_label(labels, M._blocked_label)
+function C.has_decision_terminal_label(labels)
+  return C.has_label(labels, devloop_base._ready_label)
+    or C.has_label(labels, devloop_base._implementing_label)
+    or C.has_label(labels, devloop_base._pr_open_label)
+    or C.has_label(labels, devloop_base._reviewing_label)
+    or C.has_label(labels, devloop_base._review_meta_label)
+    or C.has_label(labels, devloop_base._merge_ready_label)
+    or C.has_label(labels, devloop_base._merging_label)
+    or C.has_label(labels, devloop_base._merged_label)
+    or C.has_label(labels, devloop_base._fixing_label)
+    or C.has_label(labels, devloop_base._impl_failed_label)
+    or C.has_label(labels, devloop_base._blocked_label)
 end
 
-function M.is_loop_terminal(labels)
-  return M.has_label(labels, M._ready_label)
-    or M.has_label(labels, M._implementing_label)
-    or M.has_label(labels, M._pr_open_label)
-    or M.has_label(labels, M._reviewing_label)
-    or M.has_label(labels, M._review_meta_label)
-    or M.has_label(labels, M._merge_ready_label)
-    or M.has_label(labels, M._merging_label)
-    or M.has_label(labels, M._merged_label)
-    or M.has_label(labels, M._fixing_label)
-    or M.has_label(labels, M._impl_failed_label)
-    or M.has_label(labels, M._blocked_label)
+function C.is_loop_terminal(labels)
+  return C.has_label(labels, devloop_base._ready_label)
+    or C.has_label(labels, devloop_base._implementing_label)
+    or C.has_label(labels, devloop_base._pr_open_label)
+    or C.has_label(labels, devloop_base._reviewing_label)
+    or C.has_label(labels, devloop_base._review_meta_label)
+    or C.has_label(labels, devloop_base._merge_ready_label)
+    or C.has_label(labels, devloop_base._merging_label)
+    or C.has_label(labels, devloop_base._merged_label)
+    or C.has_label(labels, devloop_base._fixing_label)
+    or C.has_label(labels, devloop_base._impl_failed_label)
+    or C.has_label(labels, devloop_base._blocked_label)
 end
 
-function M.has_result_marker(comments, proposal_id, decision, dedup_key)
+function C.has_result_marker(comments, proposal_id, decision, dedup_key)
   if type(comments) ~= "table" then
     return false
   end
   -- Match the FULL marker (proposal + decision + dedup) so a stale opposite/older-version marker
   -- does not suppress writing the current decision's result marker.
-  local needle = m_builders.result_marker(M, proposal_id, decision, dedup_key)
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    if parsers_misc._comment_body(M, comment):find(needle, 1, true) ~= nil then
+  local needle = m_builders.result_marker(devloop_base, proposal_id, decision, dedup_key)
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
+    if parsers_misc._comment_body(devloop_base, comment):find(needle, 1, true) ~= nil then
       return true
     end
   end
@@ -963,8 +964,12 @@ function M.has_result_marker(comments, proposal_id, decision, dedup_key)
 end
 
 
-M._strip_latest_fix_version_suffix = strip_latest_fix_version_suffix
-M._compare_transition_versions = compare_transition_versions
-end
+C._strip_latest_fix_version_suffix = strip_latest_fix_version_suffix
+C._compare_transition_versions = compare_transition_versions
 
-return S
+function S.install(M)
+  for _, n in ipairs({"_compare_transition_versions", "_strip_latest_fix_version_suffix", "build_reconcile_state_label_request", "cas_outcome", "comment_bodies", "compare_phase", "compare_state_marker_order", "current_state", "cyclic_transition_status", "fix_version_from_review_version", "has_blocked_label", "has_decision_terminal_label", "has_fixing_label", "has_impl_failed_label", "has_implementing_label", "has_label", "has_merge_ready_label", "has_merged_label", "has_merging_label", "has_pr_open_label", "has_ready_label", "has_result_marker", "has_review_meta_label", "has_reviewing_label", "has_state_marker", "has_terminal_label", "has_thinking_label", "is_at_or_after", "is_loop_terminal", "is_state", "is_state_label", "issue_state_order", "lifecycle_state_set", "marker_order_key", "next_fix_version", "next_review_loop_version", "next_review_meta_action_version", "reached", "ready_hand_off_comment_id", "stage_rank", "state_label", "state_label_changes", "state_label_hint_matches", "state_label_reconcile_changes", "state_marker", "state_marker_comment_id", "state_order", "state_successors", "timeout_lineage_matches_current", "transition_status", "version_fix_round", "version_loop_round", "version_order_key", "version_ready_split_round", "version_reimplement_round", "version_review_loop_round", "version_review_meta_action_round", "version_timeout_round", "version_updated_at", "versioned_transition_status"}) do M[n] = C[n] end
+end
+C.install = S.install
+
+return C

@@ -4,6 +4,7 @@ local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local devloop_state = require("devloop.state")
 local S = {}
 local comment_strings = require("devloop.strings")
 
@@ -55,7 +56,7 @@ end
 function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, state_version)
   local version = state_version or conv_reconcile.reconcile_state_version(M, reconcile.base_version, reconcile.round)
   local marker = conv_reconcile.reconcile_marker(M, reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
-  local state_marker = M.state_marker(reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   return m_claims.attach_issue_claim({
     schema = "github-proxy.v1",
@@ -78,7 +79,7 @@ end
 function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile, action, reason)
   local version = conv_reconcile.fix_reconcile_state_version(M, fix_reconcile.issue_version)
   local marker = conv_reconcile.fix_reconcile_marker(M, fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
-  local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(fix_reconcile.source_ref)
   return entity_lib.build_entity_comment_request({
@@ -99,7 +100,7 @@ end
 function M.build_review_reconcile_comment_request(repo, issue_number, review_reconcile, action, reason, state_version)
   local version = state_version or conv_reconcile.review_reconcile_state_version(M, review_reconcile.issue_version, review_reconcile.round)
   local marker = conv_reconcile.review_reconcile_marker(M, review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
-  local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(review_reconcile.source_ref)
   return entity_lib.build_entity_comment_request({

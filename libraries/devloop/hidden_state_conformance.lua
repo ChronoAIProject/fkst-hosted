@@ -6,6 +6,7 @@ local replayer = require("devloop.replayer")
 local conv_rounds = require("devloop.convergence.rounds")
 local m_builders = require("devloop.markers.builders")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local C = {}
 
@@ -357,8 +358,8 @@ end
 
 local function base_entity(core, row, source_ref)
   local state = state_for(row)
-  local body = core.state_marker(ISSUE_PROPOSAL, row.from_state, state.version, "result-marker,ready-label,devloop-ready")
-  local labels = { "fkst-dev:enabled", core.state_label(row.from_state) }
+  local body = devloop_state.state_marker(ISSUE_PROPOSAL, row.from_state, state.version, "result-marker,ready-label,devloop-ready")
+  local labels = { "fkst-dev:enabled", devloop_state.state_label(row.from_state) }
   return {
     schema = "github-proxy.v1",
     type = "issue",
@@ -377,7 +378,7 @@ end
 local function child_pr(core, state, child_state)
   local body = m_builders.pr_origin_marker(core, ISSUE_PROPOSAL, ISSUE_NUMBER, BRANCH, state.version, BASE_BRANCH)
   if child_state ~= nil then
-    body = body .. "\n" .. core.state_marker(PR_PROPOSAL, child_state, state.version)
+    body = body .. "\n" .. devloop_state.state_marker(PR_PROPOSAL, child_state, state.version)
   end
   if child_state == "merged" then
     body = body .. "\n" .. m_builders.merged_marker(core, PR_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA)
@@ -625,7 +626,7 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "fix-feedback" then
     table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then
-    table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, core.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, devloop_state.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     if value.decision == "approve" then
       table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
     else

@@ -27,6 +27,7 @@ local v_ready = require("devloop.validators.ready")
 local m_facts = require("devloop.markers.facts")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -50,7 +51,7 @@ end
 local function raise_impl_failed(repo, issue_number, ready, reason, detail, attempt)
   local comment_request = requests_lifecycle.build_impl_failure_comment_request(core, repo, issue_number, ready, reason, detail, attempt)
   local label_request = requests_labels.build_impl_failed_label_request(core, repo, issue_number, ready, reason)
-  local add_labels, remove_labels = core.state_label_changes("impl-failed")
+  local add_labels, remove_labels = devloop_state.state_label_changes("impl-failed")
   devloop_logging.log_apply("implement", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
@@ -62,7 +63,7 @@ end
 local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   local comment_request = requests_lifecycle.build_implementing_state_comment_request(core, repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   local label_request = requests_labels.build_implementing_label_request(core, repo, issue_number, ready)
-  local add_labels, remove_labels = core.state_label_changes("implementing")
+  local add_labels, remove_labels = devloop_state.state_label_changes("implementing")
   devloop_logging.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
@@ -468,7 +469,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   end
   local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
   core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
-  local state = core.current_state(current.comments, marker_ready.proposal_id)
+  local state = devloop_state.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
     local link = m_facts.pr_link_fact(core, current.comments, marker_ready.proposal_id)
@@ -502,11 +503,11 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
       devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
-        stage_rank = core.stage_rank("ready"),
+        stage_rank = devloop_state.stage_rank("ready"),
       }, "ready", "implementing", "apply(own-ready-hand-off)", "write-time ready hand-off still matches this generation")
       return true
     end
-    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "write-time issue state changed")
+    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, marker_ready.dedup_key), "write-time issue state changed")
     return false
   end
   return true
@@ -519,7 +520,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   end
   local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
   core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
-  local state = core.current_state(current.comments, marker_ready.proposal_id)
+  local state = devloop_state.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
     local link = m_facts.pr_link_fact(core, current.comments, marker_ready.proposal_id)
@@ -548,11 +549,11 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
       devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
-        stage_rank = core.stage_rank("ready"),
+        stage_rank = devloop_state.stage_rank("ready"),
       }, "ready", "implementing", "apply(own-ready-hand-off)", "pre-spawn ready hand-off still matches this generation")
       return true
     end
-    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "pre-spawn issue state changed")
+    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, marker_ready.dedup_key), "pre-spawn issue state changed")
     return false
   end
   return true
@@ -631,7 +632,7 @@ local function process_ready_event(event)
     if fork_gate.check(repo, issue_number, ready, origin, original, managed) then
       return
     end
-    local state = core.current_state(current.comments, ready.proposal_id)
+    local state = devloop_state.current_state(current.comments, ready.proposal_id)
     local gate = core.dependency_gate(repo, issue_number, {
       proposal_id = ready.proposal_id,
       version = core.ready_payload_inner_version(ready.dedup_key),
@@ -751,7 +752,7 @@ local function process_ready_event(event)
       or (retry_failure ~= nil and { "impl-failed" } or { "ready" })
     local transition = transitions.implementation_transition_status(state, expected_states, ready.dedup_key)
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
     end
     local accepted_ready_hand_off = nil
@@ -771,7 +772,7 @@ local function process_ready_event(event)
         accepted_ready_hand_off = ready.ready_hand_off
         devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "apply(verified-own-ready-hand-off)", "ready marker comment verified by direct id lookup")
       else
-        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
+        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
         if ready.ready_hand_off ~= nil then
           devloop_logging.log_line("info", "implement", ready.proposal_id, "HANDOFF", {
             "state=ready",
@@ -782,7 +783,7 @@ local function process_ready_event(event)
         error("github-devloop: ready state marker not yet visible for implement; retrying")
       end
     else
-      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
     end
 
     local wip_ok, wip_reason, wip_count, wip_max = m_mq.wip_capacity_allows_start(core, repo, issue_number)
@@ -825,7 +826,7 @@ local function process_ready_event(event)
         devloop_logging.log_cas_decision(
           "implement",
           attempt_plan.marker_ready.proposal_id,
-          { state = "ready", version = attempt_plan.marker_ready.dedup_key, stage_rank = core.stage_rank("ready") },
+          { state = "ready", version = attempt_plan.marker_ready.dedup_key, stage_rank = devloop_state.stage_rank("ready") },
           "ready",
           "implementing",
           "skip-idempotent(live-exec-ref)",

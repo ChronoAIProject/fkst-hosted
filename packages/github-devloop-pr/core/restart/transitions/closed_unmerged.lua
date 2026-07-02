@@ -1,3 +1,4 @@
+local devloop_state = require("devloop.state")
 return function(M, h)
   local responsibility_signature = h.responsibility_signature
   return {
@@ -11,7 +12,7 @@ return function(M, h)
       liveness_class = "terminal",
       input_fact_family = "closed-unmerged-fact",
       output_postcondition_family = "terminal-closed-unmerged",
-      phase_rank = M.stage_rank("closed-unmerged"),
+      phase_rank = devloop_state.stage_rank("closed-unmerged"),
       lineage_keys = { "state.version", "pr-origin.pr" },
       successors = {},
     }),

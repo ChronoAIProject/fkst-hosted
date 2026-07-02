@@ -1,6 +1,7 @@
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
+local devloop_state = require("devloop.state")
 local S = {}
 
 function S.install(M)
@@ -40,9 +41,9 @@ function S.install(M)
 function M.build_pr_state_label_request(repo, issue_number, pr_number, proposal_id, to_state, version, dedup_key_value, source_ref, current_labels)
   local add_labels, remove_labels
   if current_labels ~= nil then
-    add_labels, remove_labels = M.state_label_reconcile_changes(current_labels, to_state)
+    add_labels, remove_labels = devloop_state.state_label_reconcile_changes(current_labels, to_state)
   else
-    add_labels, remove_labels = M.state_label_changes(to_state)
+    add_labels, remove_labels = devloop_state.state_label_changes(to_state)
   end
   return m_claims.attach_issue_claim({
     schema = "github-proxy.label.v1",
@@ -97,7 +98,7 @@ function M.pr_state_label_request_guard_visible(comments, label_request)
     or label_request.expected_version == nil then
     return false
   end
-  return M.has_state_marker(
+  return devloop_state.has_state_marker(
     comments,
     label_request.expected_proposal_id,
     label_request.expected_state,

@@ -9,6 +9,7 @@ local core, saga, context_bundle = require("core"), require("workflow.saga"), re
 local v_review_meta = require("devloop.validators.review_meta")
 local workflow_codex = require("workflow.codex")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -74,13 +75,13 @@ return saga.department(spec, { done = function() return false end, act = functio
     core.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
 
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, review_meta.proposal_id)
-    local transition = core.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
+    local transition = devloop_state.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
       error("github-devloop: review-meta state marker not yet visible; retrying")
     end
     if state.state ~= "review-meta" or transition == "stale" then
-      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", core.cas_outcome(state, transition, review_meta.version), "current marker is no longer review-meta")
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", devloop_state.cas_outcome(state, transition, review_meta.version), "current marker is no longer review-meta")
       return
     end
     if tostring(state.version or "") ~= tostring(review_meta.version) then
@@ -158,13 +159,13 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
 
     local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
-    local exit_version = core.next_review_meta_action_version(review_meta.version)
+    local exit_version = devloop_state.next_review_meta_action_version(review_meta.version)
     local comment_request = core.build_review_meta_comment_request(repo, issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
     local label_request = nil
     if issue_number ~= nil then
       label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
     end
-    local add_labels, remove_labels = core.state_label_changes(to_state)
+    local add_labels, remove_labels = devloop_state.state_label_changes(to_state)
     local raised = {
       "github-proxy.github_pr_comment_request",
     }

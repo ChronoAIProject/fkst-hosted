@@ -3,6 +3,7 @@ local core = require("core")
 local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local H = {}
 
@@ -95,7 +96,7 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
 
   local comment_request = core.build_parent_awaiting_pr_comment_request(repo, issue_number, ready, child)
   local label_request = core.build_parent_awaiting_pr_label_request(repo, issue_number, ready, child)
-  local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
+  local add_labels, remove_labels = devloop_state.state_label_changes("awaiting-pr")
   devloop_logging.log_apply(dept, ready.proposal_id, "awaiting-pr", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",

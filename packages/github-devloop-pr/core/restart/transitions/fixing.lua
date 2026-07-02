@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -55,7 +56,7 @@ return function(M, h)
       liveness_class = "fixing.actionable",
       input_fact_family = "fix-feedback",
       output_postcondition_family = "revision_published",
-      phase_rank = M.stage_rank("fixing"),
+      phase_rank = devloop_state.stage_rank("fixing"),
       lineage_keys = { "state.version", "review-result.dedup", "review-result.head_sha", "source_ref" },
       successors = {
         {

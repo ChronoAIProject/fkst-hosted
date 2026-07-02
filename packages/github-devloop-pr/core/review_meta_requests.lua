@@ -4,6 +4,7 @@ local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
 local requests_review = require("devloop.requests.review")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local devloop_state = require("devloop.state")
 local S = {}
 local comment_strings = require("devloop.strings")
 
@@ -45,7 +46,7 @@ local function review_meta_result_marker(review_meta, action, reason, state_vers
     review_meta.dedup_key,
     action,
     state_version,
-    review_meta.fix_round or review_meta.n or M.version_fix_round(review_meta.version)
+    review_meta.fix_round or review_meta.n or devloop_state.version_fix_round(review_meta.version)
   )
   if action == "continue" then
     marker = marker .. "\n" .. m_builders.review_meta_marker(M, 
@@ -86,7 +87,7 @@ function M.build_fix_review_meta_comment_request(repo, issue_number, fix, reason
     text = comment_strings.comment_string(M, "no_fix_output")
   end
   text = devloop_base.neutralize_untrusted_comment_text(text)
-  local state_marker = M.state_marker(fix.proposal_id, "review-meta", fix.version)
+  local state_marker = devloop_state.state_marker(fix.proposal_id, "review-meta", fix.version)
   return entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,
@@ -133,7 +134,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
     number = review_meta.pr_number,
   }, prefix .. review_meta_action_text(review_meta, normalized == "spec-amendment" and action or normalized)
     .. "\n\n" .. comment_strings.comment_string(M, "reason_block_label") .. "\n" .. safe_reason
-    .. "\n\n" .. M.state_marker(review_meta.proposal_id, to_state, state_version)
+    .. "\n\n" .. devloop_state.state_marker(review_meta.proposal_id, to_state, state_version)
     .. "\n" .. marker, base_ids.dedup_key({
     review_meta.mode == "fix-reflection" and "fix-reflection" or "review-meta",
     "comment",
@@ -183,7 +184,7 @@ end
 function M.build_fix_reconcile_comment_request(repo, _issue_number, fix_reconcile, action, reason)
   local version = conv_reconcile.fix_reconcile_state_version(M, fix_reconcile.issue_version)
   local marker = conv_reconcile.fix_reconcile_marker(M, fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
-  local state_marker = M.state_marker(fix_reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(fix_reconcile.source_ref)
   return entity_lib.build_entity_comment_request({
@@ -204,7 +205,7 @@ end
 function M.build_review_reconcile_comment_request(repo, _issue_number, review_reconcile, action, reason, state_version)
   local version = state_version or conv_reconcile.review_reconcile_state_version(M, review_reconcile.issue_version, review_reconcile.round)
   local marker = conv_reconcile.review_reconcile_marker(M, review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
-  local state_marker = M.state_marker(review_reconcile.proposal_id, "blocked", version)
+  local state_marker = devloop_state.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   local _, pr_number = devloop_base.parse_pr_source_ref(review_reconcile.source_ref)
   return entity_lib.build_entity_comment_request({

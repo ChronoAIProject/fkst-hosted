@@ -1,5 +1,6 @@
 local S = {}
 local contract_time = require("contract.time")
+local devloop_state = require("devloop.state")
 
 function S.install(M)
 local stall_suspect_threshold_minutes = {
@@ -13,7 +14,7 @@ local stall_suspect_threshold_minutes = {
 }
 
 function M.stall_suspect_age_minutes(version, now_seconds)
-  local marker_updated_at = M.version_updated_at(version)
+  local marker_updated_at = devloop_state.version_updated_at(version)
   if marker_updated_at == "" then
     return nil
   end

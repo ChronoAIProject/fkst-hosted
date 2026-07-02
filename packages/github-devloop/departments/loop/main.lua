@@ -15,6 +15,7 @@ local v_unresolved = require("devloop.validators.unresolved")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -57,14 +58,14 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     core.log_forged_markers("loop", unresolved.proposal_id, current.comments)
-    local state = core.current_state(current.comments, unresolved.proposal_id)
-    local transition = core.transition_status(state, { "thinking" }, "blocked")
+    local state = devloop_state.current_state(current.comments, unresolved.proposal_id)
+    local transition = devloop_state.transition_status(state, { "thinking" }, "blocked")
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), "unresolved event cannot advance current marker")
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "unresolved event cannot advance current marker")
       return
     end
     if transition == "pending" then
-      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), "thinking state marker not yet visible")
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "thinking state marker not yet visible")
       error("github-devloop: thinking state marker not yet visible for unresolved; retrying")
     end
 
@@ -100,7 +101,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       local reason = hit_round_cap
         and ("convergence budget reached at round " .. tostring(budget_round))
         or ("true convergence stall at round " .. tostring(round))
-      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), reason)
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), reason)
       devloop_logging.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_issue_comment_request",
       })
@@ -128,7 +129,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body)
 
-    devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", core.cas_outcome(state, transition, unresolved.dedup_key), "raising loop proposal round " .. tostring(next_n))
+    devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "raising loop proposal round " .. tostring(next_n))
     devloop_logging.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "consensus.proposal",
       "github-proxy.github_issue_comment_request",

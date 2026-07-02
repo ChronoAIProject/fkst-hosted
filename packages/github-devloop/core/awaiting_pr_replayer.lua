@@ -5,6 +5,7 @@ local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
 local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
+local devloop_state = require("devloop.state")
 -- `awaiting-pr` is the issue-side `dependency_wait` twin: poll-reconcile the delegated PR's terminal fact and never drive `github-devloop-pr` internal lifecycle queues; the PR package owns those queues.
 local S, replay_fields = {}, require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
@@ -32,7 +33,7 @@ end
 
 local function next_reimplementation_version(version)
   local base = tostring(version or "")
-  local next_n = M.version_reimplement_round(base) + 1
+  local next_n = devloop_state.version_reimplement_round(base) + 1
   return base .. "/reimplement/" .. tostring(next_n)
 end
 
@@ -45,7 +46,7 @@ local function parent_state_for_child_terminal(state, child_state)
     }
   end
   if child_state.state == "closed-unmerged" then
-    if M.version_reimplement_round(state.version) >= config.max_fix_rounds(M) then
+    if devloop_state.version_reimplement_round(state.version) >= config.max_fix_rounds(M) then
       return {
         to_state = "blocked",
         version = tostring(state.version or "") .. "/blocked/replacement-budget-exhausted",
@@ -111,7 +112,7 @@ end
 
 local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
   local source_ref = issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
-  local state_marker = M.state_marker(delegation.proposal_id, next_state.to_state, next_state.version)
+  local state_marker = devloop_state.state_marker(delegation.proposal_id, next_state.to_state, next_state.version)
   return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = issue.repo,
@@ -176,9 +177,9 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
       return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", outcome, reason)
     end
   end
-  local transition = M.versioned_transition_status(state, { "awaiting-pr" }, next_state.to_state, state.version)
+  local transition = devloop_state.versioned_transition_status(state, { "awaiting-pr" }, next_state.to_state, state.version)
   if transition ~= "apply" and transition ~= "idempotent" then
-    return log_skip(dept, proposal_id, state, "awaiting-pr", next_state.to_state, M.cas_outcome(state, transition, state.version), next_state.reason)
+    return log_skip(dept, proposal_id, state, "awaiting-pr", next_state.to_state, devloop_state.cas_outcome(state, transition, state.version), next_state.reason)
   end
   if transition == "idempotent" then
     return log_skip(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "skip-idempotent(already at to_state)", "parent issue already reflects delegated child terminal")
@@ -200,7 +201,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     }),
     issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
   )
-  local add_labels, remove_labels = M.state_label_changes(next_state.to_state)
+  local add_labels, remove_labels = devloop_state.state_label_changes(next_state.to_state)
   devloop_logging.log_cas_decision(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "applied(" .. next_state.reason .. ")", "delegated child terminal fact matched parent delegation")
   local effects = {
     { queue = "github-proxy.github_issue_comment_request", payload = comment_request },

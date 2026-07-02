@@ -34,10 +34,21 @@ _SUBMOD = re.compile(r'["\'](devloop\.[A-Za-z0-9_./]+)["\']')
 _M_METHOD = re.compile(
     r'^\s*(?:function M\.([A-Za-z_][A-Za-z0-9_]*)|M\.([A-Za-z_][A-Za-z0-9_]*)\s*=)', re.M
 )
+# A self-contained module may loop-bind its own C functions onto M in the installer, e.g.
+#   function S.install(M) for _, n in ipairs({"a", "b", ...}) do M[n] = C[n] end end
+# Those names ARE installed onto M just as much as an explicit `M.name =`, so they must be
+# counted; otherwise a self-contain that switches to loop-binding would silently hide the
+# module's whole surface from the ratchet (a false drop). Capture the ipairs name list guarded
+# by a dynamic `M[<var>] = ...` binding in the same module.
+_LOOP_BIND = re.compile(r'ipairs\(\s*\{([^}]*)\}\s*\)\s*do\s*M\[[A-Za-z_][A-Za-z0-9_]*\]\s*=')
+_QUOTED = re.compile(r'["\']([A-Za-z_][A-Za-z0-9_]*)["\']')
 
 
 def _install_method_names(text: str) -> set[str]:
-    return {(m.group(1) or m.group(2)) for m in _M_METHOD.finditer(text)}
+    names = {(m.group(1) or m.group(2)) for m in _M_METHOD.finditer(text)}
+    for loop in _LOOP_BIND.finditer(text):
+        names.update(_QUOTED.findall(loop.group(1)))
+    return names
 
 
 def _module_path(root: Path, mod: str) -> Path:

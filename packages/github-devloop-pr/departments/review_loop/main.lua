@@ -20,6 +20,7 @@ local v_pr_review_unresolved = require("devloop.validators.pr_review_unresolved"
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -71,7 +72,7 @@ local function reviewing_segment_transition_status(state, review_version)
     and tostring(transition_version.safe_version_segment(state.version or "")) == tostring(review_version) then
     return "apply"
   end
-  if state.state ~= nil and core.stage_rank(state.state) > core.stage_rank("reviewing") then
+  if state.state ~= nil and devloop_state.stage_rank(state.state) > devloop_state.stage_rank("reviewing") then
     return "stale"
   end
   if state.state == "reviewing" then
@@ -141,7 +142,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
     local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then
-      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", devloop_state.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
       error("github-devloop: reviewing marker not yet visible for review loop; retrying")
     end
     if transition == "stale" then
@@ -177,7 +178,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       local reason = hit_round_cap
         and ("PR review convergence budget reached at round " .. tostring(budget_round))
         or ("true PR review convergence stall at round " .. tostring(round))
-      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", core.cas_outcome(state, transition, review_version), reason)
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", devloop_state.cas_outcome(state, transition, review_version), reason)
       devloop_logging.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
         "devloop_review_reconcile",
@@ -187,14 +188,14 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
     if review_truth_table_unapproved(unresolved) then
-      marker_body = marker_body .. "\n" .. core.state_marker(origin.proposal_id, "review-meta", state.version)
+      marker_body = marker_body .. "\n" .. devloop_state.state_marker(origin.proposal_id, "review-meta", state.version)
       local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
       local review_meta = payloads_builders.build_devloop_review_meta_payload(core, unresolved, origin.proposal_id, state.version, pr_number, round, pr_source_ref)
       local label_request = nil
       if origin.issue_number ~= nil then
         label_request = requests_labels.build_state_label_request(core, origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
       end
-      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", core.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", devloop_state.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
       devloop_logging.log_apply("review_loop", origin.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = {} }, {
         "github-proxy.github_pr_comment_request",
         "github-proxy.github_issue_label_request",

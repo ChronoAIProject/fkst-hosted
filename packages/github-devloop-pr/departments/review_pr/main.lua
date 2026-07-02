@@ -12,6 +12,7 @@ local payloads_predicates = require("devloop.payloads.predicates")
 local v_reviewing = require("devloop.validators.reviewing")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -37,7 +38,7 @@ local function reviewing_transition_status(state, reviewing_version)
     return "version-mismatch"
   end
 
-  local canonical_order = core.compare_state_marker_order({
+  local canonical_order = devloop_state.compare_state_marker_order({
     state = state.state,
     version = state_base,
   }, "reviewing", reviewing_base)

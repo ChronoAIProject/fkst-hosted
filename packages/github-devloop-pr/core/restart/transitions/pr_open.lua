@@ -1,4 +1,5 @@
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 return function(M, h)
   local fact = h.fact
   local obligation = h.obligation
@@ -41,7 +42,7 @@ return function(M, h)
       input_fact_family = "pr-link",
       output_postcondition_family = "pr_viability_routed",
       decision_type = "PrViability",
-      phase_rank = M.stage_rank("pr-open"),
+      phase_rank = devloop_state.stage_rank("pr-open"),
       lineage_keys = { "pr-link.impl_version", "pr-link.pr", "pr-mergeable", "source_ref" },
       successors = {
         {

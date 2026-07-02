@@ -6,6 +6,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
+local devloop_state = require("devloop.state")
 local M = {}
 local root_ref = nil
 local strings = require("forge.strings")
@@ -543,7 +544,7 @@ function M.dependency_hold_fact(comments, proposal_id)
   if type(comments) ~= "table" then
     return nil
   end
-  local current = core.current_state(comments, proposal_id)
+  local current = devloop_state.current_state(comments, proposal_id)
   if type(current) ~= "table" or current.version == nil then
     return nil
   end
@@ -649,7 +650,7 @@ end
 function M.ready_split_version(version)
   local core = root()
   local base = transition_version.strip_suffixes(version)
-  local next_n = core.version_ready_split_round(version) + 1
+  local next_n = devloop_state.version_ready_split_round(version) + 1
   return tostring(base) .. "/ready-split/" .. tostring(next_n)
 end
 
@@ -658,7 +659,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
   if type(state) ~= "table" or state.version == nil then
     return false, nil
   end
-  if not core.reached(current and current.comments, blocker_proposal_id, "awaiting-pr", {
+  if not devloop_state.reached(current and current.comments, blocker_proposal_id, "awaiting-pr", {
     lineage_base = state.version,
   }) then
     return false, nil
@@ -691,7 +692,7 @@ function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, c
     or tostring(origin.impl_version or "") ~= tostring(delegation.version or "") then
     return nil, "pr-origin-mismatch"
   end
-  if not core.reached(pr_current.comments, blocker_proposal_id, "merged", {
+  if not devloop_state.reached(pr_current.comments, blocker_proposal_id, "merged", {
     lineage_base = delegation.version,
   }) then
     return false, nil

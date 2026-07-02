@@ -12,6 +12,7 @@ local devloop_base = require("devloop.base")
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
@@ -82,7 +83,7 @@ local function verified_pr_state(repo, handoff, comment_id, state)
     state = state,
     marker_version = handoff.version,
     event_version = handoff.version,
-    stage_rank = core.stage_rank(state),
+    stage_rank = devloop_state.stage_rank(state),
     comment_id = comment_id,
   }
   return payloads_predicates.verified_hand_off_state(core, repo, marker_hand_off, expected)

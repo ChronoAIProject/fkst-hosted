@@ -15,6 +15,7 @@ local m_shared = require("devloop.markers.shared")
 local entity_lib = require("devloop.entity")
 local workflow_codex = require("workflow.codex")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -165,7 +166,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     return nil
   end
   local intake_fact = m_facts.intake_decision_fact(core, current.comments, candidate.proposal_id)
-  local authoritative_state = core.current_state(current.comments, candidate.proposal_id)
+  local authoritative_state = devloop_state.current_state(current.comments, candidate.proposal_id)
   local can_replay_enable_successor = intake_fact ~= nil
     and intake_fact.decision == "enable"
     and tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "")

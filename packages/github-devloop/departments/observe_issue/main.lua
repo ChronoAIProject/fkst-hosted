@@ -23,6 +23,7 @@ local v_pr = require("devloop.validators.pr")
 local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 local M = {}
 
 local spec = {
@@ -311,7 +312,7 @@ local function timeout_reconcile_reready_reentry_state(current, proposal_id, sta
   return {
     state = fact.from_state,
     version = fact.from_version,
-    stage_rank = core.stage_rank(fact.from_state),
+    stage_rank = devloop_state.stage_rank(fact.from_state),
     marker_created_at = fact.comment_created_at,
     operator_reentry = {
       command = "reready",
@@ -546,7 +547,7 @@ local function process_issue_event(event)
     end
     core.log_forged_markers("observe_issue", proposal_id, current.comments)
     local link = m_facts.pr_link_fact(core, current.comments, proposal_id)
-    local issue_state = core.current_state(current.comments, proposal_id)
+    local issue_state = devloop_state.current_state(current.comments, proposal_id)
     if devloop_base.is_intake_held(current.labels) then
       devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-held", "fkst-dev:hold label is present")
       return
@@ -599,7 +600,7 @@ local function process_issue_event(event)
       local pr_proposal_id = entity_lib.pr_proposal_id(issue.repo, link.pr_number)
       local delegation = "g" .. tostring(core.implementation_retry_attempt(issue_state.version) or 1)
       local comment_body = "github-devloop canonicalized legacy issue PR state to delegated PR child"
-        .. "\n\n" .. core.state_marker(proposal_id, "awaiting-pr", issue_state.version)
+        .. "\n\n" .. devloop_state.state_marker(proposal_id, "awaiting-pr", issue_state.version)
         .. "\n" .. m_builders.pr_delegation_marker(core, proposal_id, pr_proposal_id, link.pr_number, issue_state.version, delegation)
       local comment_request = entity_lib.build_entity_comment_request({
         kind = "issue",
@@ -620,7 +621,7 @@ local function process_issue_event(event)
         tostring(issue_state.version),
         tostring(link.pr_number),
       }), issue.source_ref)
-      local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
+      local add_labels, remove_labels = devloop_state.state_label_changes("awaiting-pr")
       devloop_logging.log_cas_decision("observe_issue", proposal_id, issue_state, "pr-open", "awaiting-pr", "applied(legacy-pr-open-canonicalized)", "open linked PR preserved as delegated child")
       devloop_logging.log_apply("observe_issue", proposal_id, "awaiting-pr", issue_state.version, { add = add_labels, remove = remove_labels }, {
         "github-proxy.github_issue_comment_request",
@@ -647,7 +648,7 @@ local function process_issue_event(event)
         return
       end
       local label_state = issue_label_projection_state(issue_state, link, snapshot)
-      local add_labels, remove_labels = core.state_label_reconcile_changes(current.labels, label_state.state)
+      local add_labels, remove_labels = devloop_state.state_label_reconcile_changes(current.labels, label_state.state)
       if #add_labels > 0 or #remove_labels > 0 then
         local label_request = requests_labels.build_label_request(core,
           issue.repo,
@@ -676,19 +677,19 @@ local function process_issue_event(event)
         return
       end
     end
-    local transition = core.versioned_transition_status(state, { "unmanaged" }, "thinking", issue.dedup_key)
+    local transition = devloop_state.versioned_transition_status(state, { "unmanaged" }, "thinking", issue.dedup_key)
     if transition == "stale" then
-      devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "current marker is not an unmanaged start")
+      devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "current marker is not an unmanaged start")
       return
     end
     if transition == "pending" then
-      devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
+      devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
       error("github-devloop: unmanaged state marker pending for observe; retrying")
     end
     if not m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id) then
       return
     end
-    devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", core.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
+    devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "starting consensus for opted-in issue")
 
     issue.content_fetch = context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "observe_issue",
@@ -706,7 +707,7 @@ local function process_issue_event(event)
 
     local comment_request = requests_lifecycle.build_observe_comment_request(core, issue, proposal)
     local label_request = requests_labels.build_thinking_label_request(core, issue, proposal)
-    local add_labels, remove_labels = core.state_label_changes("thinking")
+    local add_labels, remove_labels = devloop_state.state_label_changes("thinking")
     devloop_logging.log_apply("observe_issue", proposal_id, "thinking", proposal.dedup_key, { add = add_labels, remove = remove_labels }, {
       "consensus.proposal",
       "github-proxy.github_issue_comment_request",

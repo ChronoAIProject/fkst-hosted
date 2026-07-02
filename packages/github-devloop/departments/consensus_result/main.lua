@@ -8,6 +8,7 @@ local saga = require("workflow.saga")
 local v_result = require("devloop.validators.result")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
+local devloop_state = require("devloop.state")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -28,9 +29,9 @@ local function dependency_hold_effects_complete(current, reached, version)
   if type(current) ~= "table" or type(reached) ~= "table" then
     return false
   end
-  return core.has_state_marker(current.comments, reached.proposal_id, "dependency_wait", version)
+  return devloop_state.has_state_marker(current.comments, reached.proposal_id, "dependency_wait", version)
     and core.dependency_hold_fact(current.comments, reached.proposal_id) ~= nil
-    and core.state_label_hint_matches(current.labels, "dependency_wait")
+    and devloop_state.state_label_hint_matches(current.labels, "dependency_wait")
     and core.has_label(current.labels, core._blocked_on_dependency_label)
 end
 
@@ -78,10 +79,10 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
   table.insert(label_request.remove_labels, core._blocked_on_dependency_label)
 
   local raised = {}
-  if not core.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then
+  if not devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then
     table.insert(raised, "github-proxy.github_issue_comment_request")
   end
-  if not core.state_label_hint_matches(current.labels, "ready") then
+  if not devloop_state.state_label_hint_matches(current.labels, "ready") then
     table.insert(raised, "github-proxy.github_issue_label_request")
   end
   if gate.ok then
@@ -98,10 +99,10 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
   end
   devloop_logging.log_apply("consensus_result", reached.proposal_id, to_state, version, { add = { "fkst-dev:ready" }, remove = { "fkst-dev:thinking" } }, raised)
 
-  if not core.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then
+  if not devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then
     devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   end
-  if not core.state_label_hint_matches(current.labels, "ready") then
+  if not devloop_state.state_label_hint_matches(current.labels, "ready") then
     devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
   if not gate.ok then
@@ -164,14 +165,14 @@ local function make_department(ports)
         force_fresh = true,
       })
       core.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
-      local state = core.current_state(current.comments, reached.proposal_id)
+      local state = devloop_state.current_state(current.comments, reached.proposal_id)
       local gate = core.dependency_gate(repo, issue_number, {
         proposal_id = reached.proposal_id,
         version = version,
         comments = current.comments,
       })
       local to_state = gate.ok and "ready" or "dependency_wait"
-      local transition = core.versioned_transition_status(state, { "thinking" }, to_state, version)
+      local transition = devloop_state.versioned_transition_status(state, { "thinking" }, to_state, version)
       if transition == "idempotent" or transition == "stale" then
         if transition == "idempotent" and tostring(state.version or "") == tostring(version) then
           local complete = gate.ok
@@ -194,16 +195,16 @@ local function make_department(ports)
           )
           return
         end
-        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus result cannot advance current marker")
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, devloop_state.cas_outcome(state, transition, version), "consensus result cannot advance current marker")
         return
       end
       if transition == "pending" then
-        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "thinking state marker not yet visible")
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, devloop_state.cas_outcome(state, transition, version), "thinking state marker not yet visible")
         error("github-devloop: thinking state marker not yet visible for consensus result; retrying")
       end
-      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus decision=" .. tostring(reached.decision))
+      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, devloop_state.cas_outcome(state, transition, version), "consensus decision=" .. tostring(reached.decision))
 
-      raise_result_effects(repo, issue_number, reached, current, state, gate, core.cas_outcome(state, transition, version), version, to_state)
+      raise_result_effects(repo, issue_number, reached, current, state, gate, devloop_state.cas_outcome(state, transition, version), version, to_state)
     end)
   end
 

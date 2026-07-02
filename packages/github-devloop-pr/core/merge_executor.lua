@@ -20,6 +20,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local v_merge_ready = require("devloop.validators.merge_ready")
 local m_facts = require("devloop.markers.facts")
 local m_mq = require("devloop.merge_queue")
+local devloop_state = require("devloop.state")
 local M = {}
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
@@ -101,11 +102,11 @@ end
 
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
   local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
-  if core.version_fix_round(current_state.version) >= config.max_fix_rounds(core) then
+  if devloop_state.version_fix_round(current_state.version) >= config.max_fix_rounds(core) then
     raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
     return
   end
-  local fix_version = core.fix_version_from_review_version(current_state.version)
+  local fix_version = devloop_state.fix_version_from_review_version(current_state.version)
   local gate_baseline_sha = gate_baseline_sha_for_reason(merge_ready.proposal_id, merge_ready.pr_number, current_pr, reason)
   local predecessor_set = nil
   if queue_position ~= nil then
@@ -129,7 +130,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     merge_ready.dedup_key .. "/label/fixing",
     entity_lib.issue_source_ref(repo, issue_number)
   ) or nil
-  local add_labels, remove_labels = core.state_label_changes("fixing")
+  local add_labels, remove_labels = devloop_state.state_label_changes("fixing")
   devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "fixing", "applied", reason)
   local raised = {
     "github-proxy.github_pr_comment_request",
@@ -146,15 +147,15 @@ end
 
 local function raise_reviewing_for_current_head(repo, issue_number, merge_ready, current_state, current_pr, reason)
   local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
-  local review_version = core.next_review_loop_version(merge_ready.version)
-  if core.has_state_marker(current_pr.comments, merge_ready.proposal_id, "reviewing", review_version) then
+  local review_version = devloop_state.next_review_loop_version(merge_ready.version)
+  if devloop_state.has_state_marker(current_pr.comments, merge_ready.proposal_id, "reviewing", review_version) then
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "skip-idempotent(already at to_state)", reason)
     return
   end
   local current_head_sha = tostring(current_pr.head_sha or "")
   local comment_request = requests_review.build_merge_head_reviewing_comment_request(core, repo, issue_number, merge_ready, merge_ready.reviewed_head_sha, current_head_sha, review_version, source_ref)
   local label_request = issue_number ~= nil and requests_labels.build_merge_head_reviewing_label_request(core, repo, issue_number, merge_ready, current_head_sha, review_version, entity_lib.issue_source_ref(repo, issue_number)) or nil
-  local add_labels, remove_labels = core.state_label_changes("reviewing")
+  local add_labels, remove_labels = devloop_state.state_label_changes("reviewing")
   devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "applied", reason)
   local raised = {
     "github-proxy.github_pr_comment_request",
@@ -221,7 +222,7 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
 end
 
 local function speculative_fix_fact_for_merge(comments, merge_ready)
-  local fix_version = core._strip_latest_fix_version_suffix(merge_ready.version)
+  local fix_version = devloop_state._strip_latest_fix_version_suffix(merge_ready.version)
   if tostring(fix_version or "") == tostring(merge_ready.version or "") then
     return nil
   end
@@ -380,21 +381,21 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-idempotent(already at to_state)", "merged marker already visible")
     return
   end
-  local transition = core.cyclic_transition_status(state, { "merge-ready", "merging" }, "merging", merge_ready.version)
+  local transition = devloop_state.cyclic_transition_status(state, { "merge-ready", "merging" }, "merging", merge_ready.version)
   if state.state ~= "merge-ready" and state.state ~= "merging" and state.state ~= "merged" then
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(from-state-mismatch)", "issue is not currently merge-ready or merging")
     return
   end
   if transition == "pending" then
-    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", core.cas_outcome(state, transition, merge_ready.version), "merge-ready state marker not yet visible")
+    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", devloop_state.cas_outcome(state, transition, merge_ready.version), "merge-ready state marker not yet visible")
     error("github-devloop: merge-ready state marker not yet visible for merge; retrying")
   end
   if transition == "stale" then
-    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", core.cas_outcome(state, transition, merge_ready.version), "issue is not currently merge-ready")
+    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", devloop_state.cas_outcome(state, transition, merge_ready.version), "issue is not currently merge-ready")
     return
   end
   if transition == "idempotent" and state.state ~= "merging" then
-    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", core.cas_outcome(state, transition, merge_ready.version), "issue is not currently merge-ready or merging")
+    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", devloop_state.cas_outcome(state, transition, merge_ready.version), "issue is not currently merge-ready or merging")
     return
   end
   if transition == "apply" and state.state ~= "merge-ready" then
@@ -402,7 +403,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
   if transition ~= "apply" and transition ~= "idempotent" then
-    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", core.cas_outcome(state, transition, merge_ready.version), "issue is not currently merge-ready or merging")
+    devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", devloop_state.cas_outcome(state, transition, merge_ready.version), "issue is not currently merge-ready or merging")
     return
   end
   if tostring(state.version or "") ~= tostring(merge_ready.version) then

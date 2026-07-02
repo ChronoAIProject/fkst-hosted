@@ -1,4 +1,5 @@
 local parsers_misc = require("devloop.parsers.misc")
+local devloop_state = require("devloop.state")
 local M = {}
 local root_ref = nil
 
@@ -11,7 +12,7 @@ function M.dependency_wait_fact(comments, proposal_id)
   if type(comments) ~= "table" then
     return nil
   end
-  local current = core.current_state(comments, proposal_id)
+  local current = devloop_state.current_state(comments, proposal_id)
   if type(current) ~= "table" or current.version == nil then
     return nil
   end
