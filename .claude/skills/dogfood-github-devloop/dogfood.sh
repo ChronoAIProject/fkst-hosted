@@ -118,12 +118,14 @@ cfg() {
   esac
 }
 
-validate_platform_manifest_matches_devloop_pkgs() { # $1 name
+sync_platform_manifest_to_devloop_pkgs() { # $1 name
   local name="$1" output
   # The packages target is the platform repository itself: its workspace enumerates
   # available packages, not the narrower dogfood run composition.
   [ "$HOST" = "$PKGSRC" ] && return 0
   output="$(python3 - "$name" "$HOST" "$DEVLOOP_PKGS" <<'PY'
+import json
+import re
 import sys
 import tomllib
 from pathlib import Path
@@ -170,6 +172,57 @@ def reject_duplicates(values: list[str], field: str) -> None:
         fail(f"{field} contains duplicate package names: {' '.join(duplicates)}")
 
 
+def external_source_blocks(lines: list[str]) -> list[tuple[int, int]]:
+    blocks: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        if line.strip() != "[[external_sources]]":
+            continue
+        end = len(lines)
+        for cursor in range(index + 1, len(lines)):
+            stripped = lines[cursor].strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                end = cursor
+                break
+        blocks.append((index, end))
+    return blocks
+
+
+def block_id(lines: list[str], start: int, end: int) -> object:
+    try:
+        data = tomllib.loads("".join(lines[start:end]))
+    except tomllib.TOMLDecodeError as exc:
+        fail(f"invalid external_sources block in fkst.workspace.toml: {exc}")
+    sources = table_array(data, "external_sources")
+    if len(sources) != 1:
+        fail("external_sources block parser expected exactly one source")
+    return sources[0].get("id")
+
+
+def package_assignment_range(lines: list[str], start: int, end: int) -> tuple[int, int, str] | None:
+    pattern = re.compile(r"^(\s*)packages\s*=")
+    for index in range(start + 1, end):
+        match = pattern.match(lines[index])
+        if not match:
+            continue
+        cursor = index + 1
+        rhs = lines[index].split("=", 1)[1]
+        depth = rhs.count("[") - rhs.count("]")
+        while depth > 0 and cursor < end:
+            depth += lines[cursor].count("[") - lines[cursor].count("]")
+            cursor += 1
+        return index, cursor, match.group(1)
+    return None
+
+
+def insertion_point(lines: list[str], start: int, end: int) -> tuple[int, str]:
+    pattern = re.compile(r"^(\s*)git\s*=")
+    for index in range(start + 1, end):
+        match = pattern.match(lines[index])
+        if match:
+            return index + 1, match.group(1)
+    return end, ""
+
+
 name = sys.argv[1]
 host = Path(sys.argv[2])
 requested = [item for item in sys.argv[3].split() if item]
@@ -177,9 +230,10 @@ reject_duplicates(requested, "DEVLOOP_PKGS")
 
 workspace_path = host / "fkst.workspace.toml"
 if not workspace_path.is_file():
-    fail(f"{name}: target fkst.workspace.toml is required for dogfood platform validation: {workspace_path}")
+    fail(f"{name}: target fkst.workspace.toml is required for dogfood platform sync: {workspace_path}")
 try:
-    workspace = tomllib.loads(workspace_path.read_text(encoding="utf-8"))
+    text = workspace_path.read_text(encoding="utf-8")
+    workspace = tomllib.loads(text)
 except tomllib.TOMLDecodeError as exc:
     fail(f"{name}: invalid target fkst.workspace.toml: {workspace_path}: {exc}")
 if not isinstance(workspace, dict):
@@ -193,26 +247,49 @@ for source in table_array(workspace, "external_sources"):
 if platform_source is None:
     fail(f"{name}: target fkst.workspace.toml must declare external_sources(id=fkst-packages-platform)")
 
-declared = package_list(
-    platform_source.get("packages", []),
-    "external_sources(id=fkst-packages-platform).packages",
-)
-reject_duplicates(declared, "external_sources(id=fkst-packages-platform).packages")
+lines = text.splitlines(keepends=True)
+target_block = None
+for start, end in external_source_blocks(lines):
+    if block_id(lines, start, end) == "fkst-packages-platform":
+        target_block = (start, end)
+        break
+if target_block is None:
+    fail(f"{name}: could not locate external_sources(id=fkst-packages-platform) in fkst.workspace.toml")
 
-requested_set = set(requested)
-declared_set = set(declared)
-missing = [package for package in requested if package not in declared_set]
-extra = [package for package in declared if package not in requested_set]
-if missing or extra:
-    print(
-        f"error: {name}: dogfood platform package drift: DEVLOOP_PKGS and "
-        "target fkst.workspace.toml external_sources(id=fkst-packages-platform).packages must match"
-    )
-    if missing:
-        print("  requested but not declared: " + " ".join(missing))
-    if extra:
-        print("  declared but not requested: " + " ".join(extra))
-    raise SystemExit(1)
+start, end = target_block
+new_line = f"{json.dumps(requested)}\n"
+assignment = package_assignment_range(lines, start, end)
+if assignment is None:
+    insert_at, indent = insertion_point(lines, start, end)
+    replacement = f"{indent}packages = {new_line}"
+    new_lines = lines[:insert_at] + [replacement] + lines[insert_at:]
+else:
+    package_start, package_end, indent = assignment
+    replacement = f"{indent}packages = {new_line}"
+    new_lines = lines[:package_start] + [replacement] + lines[package_end:]
+
+new_text = "".join(new_lines)
+if new_text != text:
+    tmp_path = workspace_path.with_name(workspace_path.name + ".tmp")
+    tmp_path.write_text(new_text, encoding="utf-8")
+    tmp_path.replace(workspace_path)
+
+try:
+    synced = tomllib.loads(new_text)
+except tomllib.TOMLDecodeError as exc:
+    fail(f"{name}: synced fkst.workspace.toml is invalid: {exc}")
+for source in table_array(synced, "external_sources"):
+    if source.get("id") == "fkst-packages-platform":
+        declared = package_list(
+            source.get("packages", []),
+            "external_sources(id=fkst-packages-platform).packages",
+        )
+        reject_duplicates(declared, "external_sources(id=fkst-packages-platform).packages")
+        if declared != requested:
+            fail(f"{name}: synced platform package list does not match DEVLOOP_PKGS")
+        break
+else:
+    fail(f"{name}: synced fkst.workspace.toml lost external_sources(id=fkst-packages-platform)")
 PY
 )" || { printf '%s\n' "$output" >&2; return 1; }
 }
@@ -460,7 +537,7 @@ launch_one() { # $1 name, $2 restart flag (0|1)
   clean_stale_runtime_worktrees "$name" "$rt"
   [ -n "$DEVLOOP_PKGS" ] || { echo "[$name] DEVLOOP_PKGS unset — set the platform packages to load in dogfood.config.sh (see dogfood.config.example.sh)"; return 1; }
   [ -x "$PKGSRC/scripts/run.sh" ] || { echo "[$name] missing host-run contract: $PKGSRC/scripts/run.sh"; return 1; }
-  validate_platform_manifest_matches_devloop_pkgs "$name" || return 1
+  sync_platform_manifest_to_devloop_pkgs "$name" || return 1
 
   args=(
     "$PKGSRC/scripts/run.sh" supervise

@@ -412,7 +412,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                     if target in hydrated_roots:
                         self.assertFalse(hydrated_roots[target].exists())
 
-    def test_website_start_fails_before_supervise_when_manifest_is_stale(self) -> None:
+    def test_website_start_syncs_stale_manifest_before_supervise(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
             encoding="utf-8"
         )
@@ -426,12 +426,10 @@ class HostRunEquivalenceTest(unittest.TestCase):
 
             result = layout.run_start("website")
 
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse(layout.capture.exists())
-            self.assertIn("dogfood platform package drift", result.stderr)
-            self.assertIn("requested but not declared", result.stderr)
-            self.assertIn("github-devloop-intake", result.stderr)
-            self.assertIn("idle-detector", result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertTrue(layout.capture.exists())
+            workspace = layout.dogfood_root / "website-dogfood" / "site" / "fkst.workspace.toml"
+            self.assertIn(f"packages = {json.dumps(PLATFORM_PACKAGES.split())}", workspace.read_text(encoding="utf-8"))
 
     def test_dogfood_start_fails_when_supervise_exits_before_readiness(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
