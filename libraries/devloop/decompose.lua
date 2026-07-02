@@ -261,7 +261,7 @@ function C.decompose_lineage_marker(root_proposal_id, depth)
     .. '" -->'
 end
 
-function C.decompose_lineage_depth(M, body)
+function C.decompose_lineage_depth(body)
   local text = tostring(body or "")
   local marker_pattern = "<!%-%- fkst:github%-devloop:decompose%-lineage:v1.-%-%->"
   local max_depth = 0
@@ -274,11 +274,11 @@ function C.decompose_lineage_depth(M, body)
   return max_depth
 end
 
-function C.max_decompose_issues(M)
+function C.max_decompose_issues()
   return max_decompose_issues
 end
 
-function C.max_decompose_depth(M)
+function C.max_decompose_depth()
   return max_decompose_depth
 end
 

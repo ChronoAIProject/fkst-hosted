@@ -53,7 +53,7 @@ local function build_timeout_reconcile_pr_comment_request(repo, pr_number, recon
     number = pr_number,
   }, "github-devloop timeout reconcile action: " .. tostring(action)
     .. "\n\nReason:\n" .. tostring(reason or "")
-    .. "\n\nStructured WHY:\n" .. conv_reconcile.timeout_reconcile_reason_body(core, fields or {})
+    .. "\n\nStructured WHY:\n" .. conv_reconcile.timeout_reconcile_reason_body(fields or {})
     .. "\n\n" .. state_marker .. "\n" .. marker
     .. "\n" .. "⟦AI:FKST⟧", base_ids.dedup_key({
     "timeout-reconcile",

@@ -477,7 +477,7 @@ local function review_proposal_version_matches_merge_ready(review_version, merge
     and merge_text:find("/review%-meta%-action/", 1) ~= nil
 end
 
-function C.merge_ready_approval_matches_event(M, fact, merge_ready)
+function C.merge_ready_approval_matches_event(fact, merge_ready)
   if type(fact) ~= "table" or type(merge_ready) ~= "table" then
     return false, "missing-merge-ready-approval"
   end

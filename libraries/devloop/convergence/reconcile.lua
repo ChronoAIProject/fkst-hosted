@@ -100,7 +100,7 @@ function C.build_devloop_timeout_reconcile_payload(row, state, proposal_id, sour
   }
 end
 
-function C.timeout_reconcile_reason_body(M, fields)
+function C.timeout_reconcile_reason_body(fields)
   local source_ref = type(fields.source_ref) == "table" and fields.source_ref or {}
   return "reason_class=" .. tostring(fields.reason_class or "state-output-obligation-timeout")
     .. "\nfrom_state=" .. tostring(fields.from_state or "")
@@ -123,7 +123,7 @@ function C.build_timeout_reconcile_comment_request(M, repo, issue_number, reconc
     issue_number = issue_number,
     body = "github-devloop timeout reconcile action: " .. tostring(action)
       .. "\n\nReason:\n" .. tostring(reason or "")
-      .. "\n\nStructured WHY:\n" .. C.timeout_reconcile_reason_body(M, fields or {})
+      .. "\n\nStructured WHY:\n" .. C.timeout_reconcile_reason_body(fields or {})
       .. "\n\n" .. state_marker .. "\n" .. marker
       .. "\n" .. "⟦AI:FKST⟧",
     dedup_key = base_ids.dedup_key({

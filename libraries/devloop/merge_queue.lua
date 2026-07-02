@@ -268,11 +268,11 @@ function C.merge_queue_position(M, repo, base_branch, current)
   return {
     is_head = #predecessors == 0,
     predecessors = predecessors,
-    predecessor_set = C.merge_queue_predecessor_set(M, predecessors),
+    predecessor_set = C.merge_queue_predecessor_set(predecessors),
   }, "ok"
 end
 
-function C.merge_queue_predecessor_set(M, entries)
+function C.merge_queue_predecessor_set(entries)
   local values = {}
   for _, entry in ipairs(entries or {}) do
     table.insert(values, predecessor_identity(entry))

@@ -94,8 +94,8 @@ end
 
 local function plan_current_decompose(event, repo, issue_number, decompose)
   local current_issue = read_decompose_issue(repo, issue_number)
-  local depth = decompose_lib.decompose_lineage_depth(core, current_issue.body)
-  if depth >= decompose_lib.max_decompose_depth(core) then
+  local depth = decompose_lib.decompose_lineage_depth(current_issue.body)
+  if depth >= decompose_lib.max_decompose_depth() then
     return current_issue, nil, "depth-cap"
   end
   decompose.current_issue_body = current_issue.body
@@ -386,8 +386,8 @@ local function act_decompose(event)
     end
 
     local current_issue, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
-    local depth = decompose_lib.decompose_lineage_depth(core, current_issue.body)
-    if reason == "depth-cap" or depth >= decompose_lib.max_decompose_depth(core) then
+    local depth = decompose_lib.decompose_lineage_depth(current_issue.body)
+    if reason == "depth-cap" or depth >= decompose_lib.max_decompose_depth() then
       devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "applied(decompose-exhausted:depth-cap)", "decompose lineage depth cap reached")
       devloop_logging.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
@@ -401,7 +401,7 @@ local function act_decompose(event)
       ))
       return
     end
-    local count = math.min(#issues, decompose_lib.max_decompose_issues(core))
+    local count = math.min(#issues, decompose_lib.max_decompose_issues())
     if count < 1 then
       issues = core.fallback_decompose_plan(decompose)
       count = 1

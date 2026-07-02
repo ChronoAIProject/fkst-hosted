@@ -206,7 +206,7 @@ local function current_predecessors_for_fix(repo, integration_branch, fix, curre
   if predecessors == nil then
     return nil, reason
   end
-  return predecessors, m_mq.merge_queue_predecessor_set(core, predecessors)
+  return predecessors, m_mq.merge_queue_predecessor_set(predecessors)
 end
 
 local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)

@@ -417,7 +417,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
       return
     end
 
-    local blocked_version = requests_review.pr_base_unmanaged_blocked_version(core, origin.impl_version)
+    local blocked_version = requests_review.pr_base_unmanaged_blocked_version(origin.impl_version)
     local blocked_state = {
       state = "blocked",
       version = blocked_version,

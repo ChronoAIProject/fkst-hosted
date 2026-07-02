@@ -67,7 +67,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     return false
   end
   local source_ref = entity_lib.pr_source_ref(repo, pr.number)
-  local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(core, origin.repo, origin.issue_number), state, {
+  local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(origin.repo, origin.issue_number), state, {
     proposal_id = origin.proposal_id,
     current = { comments = current.comments or {}, labels = current.labels or {} },
     current_pr = current,
@@ -105,13 +105,13 @@ local function act_liveness_scan(event)
   devloop_logging.log_entry("liveness_scan", event, "github-devloop/liveness-scan", "tick")
   devloop_base.assert_trusted_bot_configured()
 
-  local repo = liveness_scan.liveness_scan_read_repo(core)
+  local repo = liveness_scan.liveness_scan_read_repo()
   if repo == nil then
     devloop_logging.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
     return
   end
 
-  local limits = liveness_scan.liveness_scan_limits(core)
+  local limits = liveness_scan.liveness_scan_limits()
   local deadline = sweep_bounds.sweep_deadline(now(), limits)
   local timeout = sweep_bounds.sweep_call_timeout(limits, deadline)
   if timeout <= 0 then
@@ -149,7 +149,7 @@ local function act_liveness_scan(event)
     end
     processed = processed + 1
     if should_reinject then
-      liveness_scan.liveness_scan_reinject(core, repo, activation.entity, "pr", event and event.ts)
+      liveness_scan.liveness_scan_reinject(repo, activation.entity, "pr", event and event.ts)
     end
   end
 

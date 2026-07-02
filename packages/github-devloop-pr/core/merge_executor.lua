@@ -191,7 +191,7 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
   end
 
   local fact = m_facts.merge_ready_fact(core, pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
-  local approval_ok, approval_reason = m_facts.merge_ready_approval_matches_event(core, fact, merge_ready)
+  local approval_ok, approval_reason = m_facts.merge_ready_approval_matches_event(fact, merge_ready)
   if not approval_ok then
     return false, "merge-ready fact changed: " .. tostring(approval_reason), state
   end
@@ -415,7 +415,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "retry-pending(merge-ready fact marker not visible)", "trusted merge-ready fact marker missing")
     error("github-devloop: merge-ready fact marker not visible for merge; retrying")
   end
-  local approval_ok, approval_reason = m_facts.merge_ready_approval_matches_event(core, fact, merge_ready)
+  local approval_ok, approval_reason = m_facts.merge_ready_approval_matches_event(fact, merge_ready)
   if not approval_ok then
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. tostring(approval_reason) .. ")", "merge-ready event does not match canonical approval fact marker")
     return
