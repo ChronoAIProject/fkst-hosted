@@ -41,6 +41,19 @@ pub async fn reconcile_repo(
     let owner_repo = format!("{}/{}", repo.owner, repo.name);
     let cfg = &ctx.config.reconcile;
 
+    // Best-effort, non-failing: keep this repo's issue templates at the bundled
+    // version. Gated (one round-trip per repo per version/TTL) so it is a cheap
+    // no-op on the vast majority of reconciles. Placed BEFORE the fallible reads
+    // below so a later GitHub/K8s read failure (which `?`-returns) never skips the
+    // template ensure; a failure inside the ensure never aborts the reconcile.
+    crate::reconcile::ensure_issue_templates(
+        (installation_id, repo.clone()),
+        &owner_repo,
+        &ctx.github,
+        &ctx.ensured_templates,
+    )
+    .await;
+
     // 1. One repo-scoped installation token drives every GitHub read below.
     let token = ctx.github.token_for_repo(&owner_repo, None).await?;
 

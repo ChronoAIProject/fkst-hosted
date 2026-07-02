@@ -22,6 +22,7 @@ pub mod pending;
 pub mod reachability;
 pub mod registry;
 pub mod repo;
+pub mod templates;
 
 use tokio::sync::mpsc;
 
@@ -35,6 +36,7 @@ pub use execute::{execute, ReconcileCtx};
 pub use loops::{run_full_resync_loop, run_reconcile_loop, run_sweep_loop};
 pub use registry::parse_registration;
 pub use repo::reconcile_repo;
+pub use templates::ensure_issue_templates;
 
 /// The label the reconciler latches onto a trigger issue whose body fails to parse
 /// (or whose package refs are unreachable). The presence of this label on an issue
@@ -59,6 +61,32 @@ pub type ActiveRepos = std::sync::Arc<std::sync::Mutex<std::collections::HashSet
 /// A fresh, empty [`ActiveRepos`] for the reconciler to share across its loops.
 pub fn new_active_repos() -> ActiveRepos {
     std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// TTL after which a repo's issue templates are re-checked against GitHub even at
+/// the same recorded version (~6h). Bounds how long a manually-reverted template
+/// lingers before the ensure repairs it, without paying a round-trip every
+/// reconcile (which fire on every repo-touching webhook + sweep + full-resync).
+pub const ENSURED_TEMPLATES_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+
+/// What the issue-template ensure last recorded for a repo: the version it
+/// confirmed present and WHEN it confirmed it (monotonic [`std::time::Instant`]).
+#[derive(Debug, Clone)]
+pub struct EnsuredMark {
+    pub version: u32,
+    pub checked_at: std::time::Instant,
+}
+
+/// Per-repo issue-template ensure gate: at most one GitHub round-trip per repo
+/// per `(version, TTL)`. Shared (cheap `Arc<Mutex>`) across the reconciler loops,
+/// mirroring [`ActiveRepos`]. Re-checked only when the bundled version is newer
+/// than the recorded one, or the record is older than [`ENSURED_TEMPLATES_TTL`].
+pub type EnsuredTemplates =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<RepoKey, EnsuredMark>>>;
+
+/// A fresh, empty [`EnsuredTemplates`] for the reconciler to share across loops.
+pub fn new_ensured_templates() -> EnsuredTemplates {
+    std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
 /// A clonable handle for enqueuing repositories onto the reconcile queue. The
