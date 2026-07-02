@@ -36,6 +36,12 @@ hmac = "0.12"
 # in-memory `SessionRepo` CAS round-trip (`bson::to_document`).
 bson = "2"
 regex = "1"
+# Multi-pattern substring search for the session log-stream redactor: one
+# automaton scans every known-secret plaintext (and its base64/base64url/
+# percent-encoded/URL-composed derived forms) over each log line in a single pass,
+# so exact-secret redaction stays linear regardless of how many secrets a session
+# injects. `regex` (already present) covers the pattern-denylist + entropy layers.
+aho-corasick = "1"
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
