@@ -44,7 +44,7 @@ local function cleanup_worktree(worktree)
   end
   local result = core.git.worktree_remove(worktree, 60)
   if result.exit_code ~= 0 then
-    core.log_line("warn", "pr_freshness_scan", "pr-freshness", "CLEANUP", {
+    devloop_logging.log_line("warn", "pr_freshness_scan", "pr-freshness", "CLEANUP", {
       "worktree=" .. tostring(worktree),
       "reason=" .. error_facts.one_line(result.stderr or ""),
     })
@@ -158,7 +158,7 @@ local function raise_conflict(repo, branch, integration, branch_sha, integration
     dedup_key = core.pr_freshness_dedup_key(repo, branch, integration_sha),
     source_ref = core.pr_freshness_source_ref(repo, pr_number),
   }
-  core.log_raise("pr_freshness_scan", "pr-freshness", "devloop_sync_conflict", payload)
+  devloop_logging.log_raise("pr_freshness_scan", "pr-freshness", "devloop_sync_conflict", payload)
 end
 
 local function write_refresh_commit(worktree, runtime, repo, branch, integration, branch_sha, integration_sha)
@@ -169,7 +169,7 @@ end
 
 local function push_if_real(repo, branch, branch_sha, worktree)
   if config.write_mode(core) ~= "real" then
-    core.log_line("info", "pr_freshness_scan", "pr-freshness", "OUTBOUND", {
+    devloop_logging.log_line("info", "pr_freshness_scan", "pr-freshness", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
       "branch=" .. tostring(branch),
@@ -183,7 +183,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
   git_mechanics.fetch_branches(core.git, repo, { branch }, "PR freshness fetch")
   local rechecked_branch_sha = git_mechanics.remote_head(core.git, branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if rechecked_branch_sha ~= branch_sha then
-    core.log_cas_decision("pr_freshness_scan", "pr-freshness", {
+    devloop_logging.log_cas_decision("pr_freshness_scan", "pr-freshness", {
       state = "branch",
       version = rechecked_branch_sha,
     }, "freshness", "push", "skip-foreign(head)", "PR branch head changed before push")
@@ -199,7 +199,7 @@ local function push_if_real(repo, branch, branch_sha, worktree)
   if pushed_head ~= merge_head then
     error("github-devloop: PR freshness push verification failed")
   end
-  core.log_apply("pr_freshness_scan", "pr-freshness", "refreshed", merge_head, {}, {})
+  devloop_logging.log_apply("pr_freshness_scan", "pr-freshness", "refreshed", merge_head, {}, {})
 end
 
 local function in_managed_scope(repo, branches, pr, origin)
@@ -219,7 +219,7 @@ local function process_pr(repo, branches, listed_pr)
   pr.number = listed_pr.number
   local origin = m_facts.pr_origin_fact(core, pr.comments)
   if not in_managed_scope(repo, branches, pr, origin) then
-    core.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = nil, version = nil }, "tick", "freshness", "skip-foreign(pr-shape)", "PR is outside managed freshness scope")
+    devloop_logging.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = nil, version = nil }, "tick", "freshness", "skip-foreign(pr-shape)", "PR is outside managed freshness scope")
     return
   end
 
@@ -230,7 +230,7 @@ local function process_pr(repo, branches, listed_pr)
   local state = require("devloop.entity").current_entity_state(core, pr.comments, origin.proposal_id)
   local reason, skip_reason = candidate_reason(pr, origin, issue, state)
   if reason == nil then
-    core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(" .. skip_reason .. ")", "PR is not a freshness candidate")
+    devloop_logging.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(" .. skip_reason .. ")", "PR is not a freshness candidate")
     return
   end
 
@@ -239,11 +239,11 @@ local function process_pr(repo, branches, listed_pr)
     local integration_sha = git_mechanics.remote_head(core.git, branches.integration, "PR freshness remote head", "unsafe PR freshness branch head")
     local branch_sha = git_mechanics.remote_head(core.git, pr.head_ref_name, "PR freshness remote head", "unsafe PR freshness branch head")
     if branch_sha ~= pr.head_sha then
-      core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-stale(head)", "PR head changed after GitHub read")
+      devloop_logging.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-stale(head)", "PR head changed after GitHub read")
       return
     end
     if git_mechanics.is_ancestor(core.git, integration_sha, branch_sha, "PR freshness ancestor check") then
-      core.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(integration-ancestor)", "PR branch already contains integration")
+      devloop_logging.log_cas_decision("pr_freshness_scan", origin.proposal_id, state, "tick", "freshness", "skip-idempotent(integration-ancestor)", "PR branch already contains integration")
       return
     end
 
@@ -274,7 +274,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)
   if branches.integration == branches.upstream then
-    core.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = "same-branch", version = branches.integration }, "tick", "freshness", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
+    devloop_logging.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = "same-branch", version = branches.integration }, "tick", "freshness", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
     return
   end
   for _, pr in ipairs(list_open_prs(repo)) do

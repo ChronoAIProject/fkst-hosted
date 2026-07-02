@@ -51,7 +51,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
 
   local current = parsers_issue.parse_issue_view_state(core, state_view.stdout)
   if tostring(current.state or ""):upper() ~= "OPEN" then
-    core.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-closed", "issue is not open")
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-closed", "issue is not open")
     return false
   end
 
@@ -107,7 +107,7 @@ local function act_liveness_scan(event)
 
   local repo = liveness_scan.liveness_scan_read_repo(core)
   if repo == nil then
-    core.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
+    devloop_logging.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
     return
   end
 

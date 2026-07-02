@@ -18,6 +18,7 @@ local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
 local context_bundle = require("devloop.context_bundle")
 local decompose_lib = require("devloop.decompose")
+local devloop_logging = require("devloop.logging")
 
 local skip_capture_by_core = setmetatable({}, { __mode = "k" })
 
@@ -30,7 +31,7 @@ local function restart_row(M, state_name)
 end
 
 local function raise_effects(M, dept, proposal_id, apply_state, version, label_changes, effects)
-  return replay_fields.replay_raise_effects(M.log_apply, M.log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
+  return replay_fields.replay_raise_effects(devloop_logging.log_apply, devloop_logging.log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
 end
 
 local function find_linked_pr(snapshot, pr_number)
@@ -374,7 +375,7 @@ local function log_skip(M, dept, proposal_id, state, from_state, to_state, outco
     skip_capture_by_core[M].from_state = from_state
     skip_capture_by_core[M].to_state = to_state
   end
-  M.log_cas_decision(dept, proposal_id, state, from_state, to_state, outcome, reason)
+  devloop_logging.log_cas_decision(dept, proposal_id, state, from_state, to_state, outcome, reason)
   return false
 end
 
@@ -453,12 +454,12 @@ local function replay_thinking(M, dept, issue, state, row, facts)
   if terminal ~= nil then
     return terminal
   end
-  M.log_cas_decision(dept, proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "unmanaged", "thinking", "skip-idempotent(already at to_state)", "trusted thinking state marker is already visible")
   local proposal = build_thinking_replay_proposal(M, issue, proposal_id, state, facts.current, facts.event_ts)
   if proposal == nil then
     return log_skip(M, dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(payload)", "cannot rebuild thinking replay proposal")
   end
-  M.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "applied(replay)", "replaying consensus proposal from trusted state facts")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "applied(replay)", "replaying consensus proposal from trusted state facts")
   return raise_effects(M, dept, proposal_id, "thinking", proposal.dedup_key, { add = {}, remove = {} }, {
     { queue = "consensus.proposal", payload = proposal },
   })
@@ -494,7 +495,7 @@ local function replay_implementing(M, dept, issue, state, row, facts)
     source_ref = issue.source_ref,
     impl_retry_attempt = M.implementation_retry_attempt(state.version),
   })
-  M.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(codex-run-absent)", "no matching implement codex run is running")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "implementing", "implementing", "applied(codex-run-absent)", "no matching implement codex run is running")
   return raise_effects(M, dept, proposal_id, "implementing", state.version, { add = {}, remove = {} }, {
     { queue = "devloop_ready", payload = payload },
   })
@@ -518,7 +519,7 @@ local function replay_impl_failed(M, dept, issue, state, row, facts)
     source_ref = fields.source_ref,
     impl_retry_attempt = M.next_impl_retry_attempt(failure),
   })
-  M.log_cas_decision(dept, proposal_id, state, "impl-failed", "implementing", "applied(replay)", "retryable implementation failure is below the retry ceiling")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "impl-failed", "implementing", "applied(replay)", "retryable implementation failure is below the retry ceiling")
   return raise_effects(M, dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
     { queue = "devloop_ready", payload = payload },
   })
@@ -527,7 +528,7 @@ end
 local function replay_fixing_to_reviewing(M, dept, issue, state, proposal_id, link, current_pr, feedback, source_ref)
   local intended_head_sha = git_mechanics.current_branch_head_sha(M.git, link.branch)
   if intended_head_sha == nil then
-    M.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
+    devloop_logging.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
     error("github-devloop: PR head changed before fix replay and deterministic branch head is not readable")
   end
   if tostring(current_pr.head_sha or "") ~= intended_head_sha then
@@ -607,7 +608,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       proposal_id = fields.proposal_id,
       impl_version = fields.version,
     }, fields.pr_number, feedback, fields.source_ref)
-    M.log_cas_decision(dept, proposal_id, state, "fixing", "fixing", "applied(replay)", "trusted feedback fact is visible")
+    devloop_logging.log_cas_decision(dept, proposal_id, state, "fixing", "fixing", "applied(replay)", "trusted feedback fact is visible")
     if not dept_can_direct_fixing(dept) then
       local comment_request = fixing_replay_comment_request(M, issue, fields.pr_number, fix_payload, feedback, fields.source_ref)
       return raise_effects(M, dept, proposal_id, "fixing", state.version, { add = {}, remove = {} }, {
@@ -642,7 +643,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       tostring(new_version),
       tostring(link.pr_number),
     }), issue.source_ref)
-    M.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "applied(replay)", "no feedback fact is visible; re-entering review for current PR head")
+    devloop_logging.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "applied(replay)", "no feedback fact is visible; re-entering review for current PR head")
     return raise_effects(M, dept, proposal_id, "reviewing", new_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:fixing" } }, {
       { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
       { queue = "github-proxy.github_issue_label_request", payload = label_request },
@@ -696,7 +697,7 @@ local function replay_review_meta(M, tools, dept, issue, state, row, facts)
   else
     payload = payloads_builders.build_devloop_review_meta_payload(M, fact, proposal_id, fields.version, fields.pr_number, fact.n, fields.source_ref)
   end
-  M.log_cas_decision(dept, proposal_id, state, "review-meta", "review-meta", "applied(replay)", "trusted review-meta fact is visible")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "review-meta", "review-meta", "applied(replay)", "trusted review-meta fact is visible")
   return raise_effects(M, dept, proposal_id, "review-meta", state.version, { add = {}, remove = {} }, {
     { queue = M.pr_package_queue("devloop_review_meta"), payload = payload },
   })
@@ -710,7 +711,7 @@ local function raise_reviewing_for_current_head(M, dept, issue, state, proposal_
     return log_skip(M, dept, proposal_id, state, "merge-ready", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
   local reviewing_payload = payloads_builders.build_current_head_reviewing_payload(M, { repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, entity_lib.pr_source_ref(issue.repo, link.pr_number))
-  M.log_cas_decision(dept, proposal_id, state, "merge-ready", "reviewing", outcome, reason)
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "reviewing", outcome, reason)
   if reviewing_payload == nil then
     return false
   end
@@ -769,7 +770,7 @@ local function maybe_replay_review_carry_over(M, dept, issue, state, row, facts,
   end
   local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
   local comment_request = requests_review.build_review_carry_over_comment_request(M, issue.repo, link.pr_number, proposal_id, state.version, carry, source_ref)
-  M.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "merge-ready", "applied(review-carry-over)", "resolution delta is empty")
   return raise_effects(M, dept, proposal_id, "merge-ready", state.version, { add = {}, remove = {} }, {
     { queue = "github-proxy.github_pr_comment_request", payload = comment_request },
   })
@@ -810,7 +811,7 @@ local function replay_merge_ready_like(M, tools, dept, issue, state, row, facts)
     reviewed_head_sha = fields.reviewed_head_sha,
     current_head_sha = current_pr.head_sha,
   }, fields.source_ref)
-  M.log_cas_decision(dept, proposal_id, state, row.from_state, "merge-ready", "applied(replay)", "trusted head-bound merge-ready fact is visible")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, row.from_state, "merge-ready", "applied(replay)", "trusted head-bound merge-ready fact is visible")
   return raise_effects(M, dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
     { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
   })
@@ -849,7 +850,7 @@ local function replay_blocked(M, dept, issue, state, row, facts)
   if payload == nil then
     return log_skip(M, dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decompose-binding)", "trusted fix feedback for decomposed replay is not visible")
   end
-  M.log_cas_decision(dept, proposal_id, state, "blocked", "decomposed", "applied(decomposed-children-missing)", "decomposed marker count exceeds derived child count " .. tostring(completed_count))
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "blocked", "decomposed", "applied(decomposed-children-missing)", "decomposed marker count exceeds derived child count " .. tostring(completed_count))
   local queue = type(M.decompose_package_queue) == "function" and M.decompose_package_queue() or "devloop_decompose"
   return raise_effects(M, dept, proposal_id, "blocked", state.version, { add = {}, remove = {} }, {
     { queue = queue, payload = payload },

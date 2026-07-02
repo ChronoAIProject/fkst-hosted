@@ -10,6 +10,7 @@ local config = require("devloop.config")
 
 function S.install(M)
 local strings = require("contract.strings")
+local devloop_logging = require("devloop.logging")
 local substrate_ref_path = ".fkst/substrate-ref"
 local substrate_repo = "ChronoAIProject/fkst-substrate"
 local substrate_remote = "https://github.com/ChronoAIProject/fkst-substrate.git"
@@ -444,7 +445,7 @@ local function log_scan(action, fields)
   for _, field in ipairs(fields or {}) do
     table.insert(parts, tostring(field))
   end
-  M.log_line("info", "substrate_ref_scan", "repo-management-plane", "SUBSTRATE_REF", parts)
+  devloop_logging.log_line("info", "substrate_ref_scan", "repo-management-plane", "SUBSTRATE_REF", parts)
 end
 
 local function read_pr(pr_number_value, repo)
@@ -570,7 +571,7 @@ local function raise_merge_audit(repo, pr, target_sha, outcome, reason)
     tostring(outcome),
     tostring(reason or ""),
   }), entity_lib.pr_source_ref(repo, pr.number))
-  M.log_raise("substrate_ref_scan", "substrate-ref-merge", "github-proxy.github_pr_comment_request", request)
+  devloop_logging.log_raise("substrate_ref_scan", "substrate-ref-merge", "github-proxy.github_pr_comment_request", request)
   raise("github-proxy.github_pr_comment_request", request)
   return request
 end

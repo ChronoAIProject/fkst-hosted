@@ -3,6 +3,7 @@ local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local S = {}
 local conflict_telemetry = require("devloop.conflict_telemetry")
+local devloop_logging = require("devloop.logging")
 
 function S.install(M)
 local conflict_hotspot_threshold = 3
@@ -96,7 +97,7 @@ function M.observe_conflict_hotspots(repo, timeout)
   local raised = 0
   for _, hotspot in ipairs(hotspots) do
     local request = M.build_conflict_hotspot_issue_create_request(repo, hotspot)
-    M.log_raise("observability", "conflict-hotspot/" .. tostring(hotspot.file), "github-proxy.github_issue_create_request", request)
+    devloop_logging.log_raise("observability", "conflict-hotspot/" .. tostring(hotspot.file), "github-proxy.github_issue_create_request", request)
     raised = raised + 1
     log.info("github-devloop dept=observability tag=CONFLICT_HOTSPOT_PATROL"
       .. " action=raise"

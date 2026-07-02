@@ -3,6 +3,7 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local C = {}
 local shared = require("devloop.payloads.shared")
+local devloop_logging = require("devloop.logging")
 
 local function board_feed_cmd(M)
   local cmd = devloop_base.read_env("FKST_DEVLOOP_BOARD_CMD")
@@ -183,7 +184,7 @@ function C.append_board_digest_to_proposal(M, proposal, repo, tick)
   local neutralized = devloop_base.neutralize_untrusted_prompt_text(block)
   local remaining = M._max_body_len - #body - #prefix
   if remaining <= 0 then
-    M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
+    devloop_logging.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
       "outcome=drop",
       "reason=body-budget-exhausted",
       "repo=" .. tostring(repo or ""),
@@ -192,7 +193,7 @@ function C.append_board_digest_to_proposal(M, proposal, repo, tick)
     return proposal
   end
   if #neutralized > remaining then
-    M.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
+    devloop_logging.log_line("warn", "payloads", proposal.proposal_id, "BOARD_DIGEST", {
       "outcome=truncate",
       "reason=body-budget",
       "repo=" .. tostring(repo or ""),

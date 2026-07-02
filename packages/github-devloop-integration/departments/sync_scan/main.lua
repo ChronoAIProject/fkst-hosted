@@ -50,7 +50,7 @@ local function cleanup_worktree(worktree)
   end
   local result = core.git.worktree_remove(worktree, 60)
   if result.exit_code ~= 0 then
-    core.log_line("warn", "sync_scan", "branch-sync", "CLEANUP", {
+    devloop_logging.log_line("warn", "sync_scan", "branch-sync", "CLEANUP", {
       "worktree=" .. tostring(worktree),
       "reason=" .. error_facts.one_line(result.stderr or ""),
     })
@@ -88,12 +88,12 @@ local function raise_conflict(repo, upstream, integration, upstream_sha, integra
     dedup_key = core.branch_sync_dedup_key(repo, upstream, integration, upstream_sha),
     source_ref = core.branch_sync_source_ref(repo, upstream, integration),
   }
-  core.log_raise("sync_scan", "branch-sync", "devloop_sync_conflict", payload)
+  devloop_logging.log_raise("sync_scan", "branch-sync", "devloop_sync_conflict", payload)
 end
 
 local function push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
   if config.write_mode(core) ~= "real" then
-    core.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
+    devloop_logging.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
       "upstream=" .. tostring(upstream),
@@ -109,7 +109,7 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
   local rechecked_integration_sha = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
-    core.log_cas_decision("sync_scan", "branch-sync", {
+    devloop_logging.log_cas_decision("sync_scan", "branch-sync", {
       state = "integration",
       version = rechecked_integration_sha,
     }, "sync", "push", "skip-foreign(head)", "integration head changed before push")
@@ -126,12 +126,12 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
   if pushed_head ~= merge_head then
     error("github-devloop: branch sync push verification failed")
   end
-  core.log_apply("sync_scan", "branch-sync", "synced", upstream_sha, {}, {})
+  devloop_logging.log_apply("sync_scan", "branch-sync", "synced", upstream_sha, {}, {})
 end
 
 local function converge_integration_to_upstream(repo, upstream, integration, upstream_sha, integration_sha)
   if config.write_mode(core) ~= "real" then
-    core.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
+    devloop_logging.log_line("info", "sync_scan", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
       "upstream=" .. tostring(upstream),
@@ -147,7 +147,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
   local rechecked_integration_sha = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= integration_sha then
-    core.log_cas_decision("sync_scan", "branch-sync", {
+    devloop_logging.log_cas_decision("sync_scan", "branch-sync", {
       state = "integration",
       version = rechecked_integration_sha,
     }, "sync", "converge", "skip-foreign(head)", "integration head changed before converge reset")
@@ -155,7 +155,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   end
 
   if not trees_equal(upstream_sha, integration_sha) then
-    core.log_cas_decision("sync_scan", "branch-sync", {
+    devloop_logging.log_cas_decision("sync_scan", "branch-sync", {
       state = "diverged",
       version = integration_sha,
     }, "sync", "converge", "skip-idempotent(tree-changed)", "branch trees changed before converge reset")
@@ -168,7 +168,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   if pushed_head ~= upstream_sha then
     error("github-devloop: branch sync converge verification failed")
   end
-  core.log_apply("sync_scan", "branch-sync", "converged", upstream_sha, {}, {})
+  devloop_logging.log_apply("sync_scan", "branch-sync", "converged", upstream_sha, {}, {})
 end
 
 local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
@@ -186,7 +186,7 @@ local function act(event)
   local repo = require_repo(cfg.repo)
 
   if branches.integration == branches.upstream then
-    core.log_cas_decision("sync_scan", "branch-sync", { state = "same-branch", version = branches.upstream }, "tick", "sync", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
+    devloop_logging.log_cas_decision("sync_scan", "branch-sync", { state = "same-branch", version = branches.upstream }, "tick", "sync", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
     return
   end
 
@@ -196,7 +196,7 @@ local function act(event)
     local integration_sha = git_mechanics.remote_head(core.git, branches.integration, "remote branch head", "unsafe remote branch head")
 
     if git_mechanics.is_ancestor(core.git, upstream_sha, integration_sha, "ancestor check") then
-      core.log_cas_decision("sync_scan", "branch-sync", { state = "synced", version = integration_sha }, "tick", "sync", "skip-idempotent(upstream-ancestor)", "upstream head is already contained in integration")
+      devloop_logging.log_cas_decision("sync_scan", "branch-sync", { state = "synced", version = integration_sha }, "tick", "sync", "skip-idempotent(upstream-ancestor)", "upstream head is already contained in integration")
       return
     end
     if git_mechanics.is_ancestor(core.git, integration_sha, upstream_sha, "ancestor check") then

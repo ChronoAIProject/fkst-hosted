@@ -5,6 +5,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
+local devloop_logging = require("devloop.logging")
 
 local ai_sentinel = "⟦AI:FKST⟧"
 
@@ -74,7 +75,7 @@ function C.operator_command_fact(M, comments, command_name)
           blocker_number = parsed.blocker_number,
         }
       else
-        M.log_line("info", "operator_command", "IGNORED", {
+        devloop_logging.log_line("info", "operator_command", "IGNORED", {
           "command=" .. tostring(parsed.command),
           "reason=untrusted-author",
           "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),

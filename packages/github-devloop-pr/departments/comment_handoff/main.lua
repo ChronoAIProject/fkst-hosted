@@ -101,8 +101,8 @@ local function emit_merge_ready(payload, handoff)
     reviewed_head_sha = handoff.reviewed_head_sha,
     current_head_sha = handoff.current_head_sha,
   }, handoff.source_ref)
-  core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "merge-ready", version = handoff.version }, "comment-written", "devloop_merge_ready", "applied(own-write-comment-id)", "merge-ready marker comment write was acknowledged")
-  core.log_raise("comment_handoff", handoff.proposal_id, "devloop_merge_ready", merge_ready)
+  devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "merge-ready", version = handoff.version }, "comment-written", "devloop_merge_ready", "applied(own-write-comment-id)", "merge-ready marker comment write was acknowledged")
+  devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_merge_ready", merge_ready)
   maybe_raise_pr_label(payload, handoff)
 end
 
@@ -123,8 +123,8 @@ local function emit_fixing(payload, handoff)
   if handoff.dedup_key ~= nil then
     fixing.dedup_key = handoff.dedup_key
   end
-  core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "fixing", version = handoff.version }, "comment-written", "devloop_fixing", "applied(own-write-comment-id)", "fixing marker comment write was acknowledged")
-  core.log_raise("comment_handoff", handoff.proposal_id, "devloop_fixing", fixing)
+  devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "fixing", version = handoff.version }, "comment-written", "devloop_fixing", "applied(own-write-comment-id)", "fixing marker comment write was acknowledged")
+  devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_fixing", fixing)
   maybe_raise_pr_label(payload, handoff)
 end
 
@@ -146,10 +146,10 @@ local function emit_pr_open(payload, handoff)
   local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, "pr-open")
   if verified_state == nil then
     if retryable_visibility_reason(reason) then
-      core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "devloop_observe_pr", "retry-pending(pr-open marker not visible)", "pr-open marker comment write was acknowledged but exact marker is not visible")
+      devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "devloop_observe_pr", "retry-pending(pr-open marker not visible)", "pr-open marker comment write was acknowledged but exact marker is not visible")
       error("comment-handoff: pr-open-marker-not-visible: pr-open marker not visible for PR observer handoff; retrying")
     end
-    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "devloop_observe_pr", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR-open observer precondition")
+    devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "devloop_observe_pr", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR-open observer precondition")
     return
   end
 
@@ -171,8 +171,8 @@ local function emit_pr_open(payload, handoff)
     }),
     source_ref = base_ids.normalize_source_ref(handoff.source_ref),
   }
-  core.log_cas_decision("comment_handoff", handoff.proposal_id, verified_state, "comment-written", "devloop_observe_pr", "applied(own-write-comment-id)", "pr-open marker comment write was acknowledged")
-  core.log_raise("comment_handoff", handoff.proposal_id, "devloop_observe_pr", observe)
+  devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, verified_state, "comment-written", "devloop_observe_pr", "applied(own-write-comment-id)", "pr-open marker comment write was acknowledged")
+  devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_observe_pr", observe)
 end
 
 local function emit_reviewing(payload, handoff)
@@ -184,8 +184,8 @@ local function emit_reviewing(payload, handoff)
     impl_version = handoff.version,
     reviewing_comment_id = payload.comment_id,
   }, handoff.pr_number, handoff.source_ref, handoff.version)
-  core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "reviewing", version = handoff.version }, "comment-written", "devloop_reviewing", "applied(own-write-comment-id)", "reviewing marker comment write was acknowledged")
-  core.log_raise("comment_handoff", handoff.proposal_id, "devloop_reviewing", reviewing)
+  devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "reviewing", version = handoff.version }, "comment-written", "devloop_reviewing", "applied(own-write-comment-id)", "reviewing marker comment write was acknowledged")
+  devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_reviewing", reviewing)
   maybe_raise_pr_label(payload, handoff)
 end
 
@@ -279,10 +279,10 @@ maybe_raise_pr_label = function(payload, handoff)
   local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, state)
   if verified_state == nil then
     if retryable_visibility_reason(reason) then
-      core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "retry-pending(" .. tostring(state) .. " marker not visible)", tostring(state) .. " marker comment write was acknowledged but exact marker is not visible")
+      devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "retry-pending(" .. tostring(state) .. " marker not visible)", tostring(state) .. " marker comment write was acknowledged but exact marker is not visible")
       error("github-devloop: " .. tostring(state) .. " marker not visible for PR label handoff; retrying")
     end
-    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR label precondition")
+    devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR label precondition")
     return
   end
 
@@ -295,10 +295,10 @@ maybe_raise_pr_label = function(payload, handoff)
     verified_state.version,
     handoff.source_ref
   )
-  core.log_apply("comment_handoff", handoff.proposal_id, verified_state.state, verified_state.version, { add = label_request.add_labels, remove = label_request.remove_labels }, {
+  devloop_logging.log_apply("comment_handoff", handoff.proposal_id, verified_state.state, verified_state.version, { add = label_request.add_labels, remove = label_request.remove_labels }, {
     "github-proxy.github_issue_label_request",
   })
-  core.log_raise("comment_handoff", handoff.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
 local function act_handoff(event)

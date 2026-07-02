@@ -17,7 +17,7 @@ local function done(_event)
 end
 
 local function log_skip(payload, reason)
-  core.log_line("info", "rollup_merge", "rollup", "GATE", {
+  devloop_logging.log_line("info", "rollup_merge", "rollup", "GATE", {
     "repo=" .. tostring(core.payload_field(payload, "repo")),
     "pr=" .. tostring(core.payload_field(payload, "pr_number")),
     "outcome=skip",
@@ -108,8 +108,8 @@ local function act(event)
       log_skip(payload, reason)
       return
     end
-    core.log_apply("rollup_merge", "rollup", "rollup-merged", payload.head_sha, {}, {})
-    core.log_raise(
+    devloop_logging.log_apply("rollup_merge", "rollup", "rollup-merged", payload.head_sha, {}, {})
+    devloop_logging.log_raise(
       "rollup_merge",
       "rollup",
       "github-devloop.devloop_liveness_tick",

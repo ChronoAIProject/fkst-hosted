@@ -1,5 +1,6 @@
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
+local devloop_logging = require("devloop.logging")
 local C = {}
 
 function C.dispatch_live_run_exec_ref(M, role, proposal_id, dedup_key)
@@ -24,8 +25,8 @@ local function codex_runs_status(M, role)
     return error_facts.one_line(value)
   end
   local function fallback(reason)
-    if type(M.log_line) == "function" then
-      M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
+    if type(devloop_logging.log_line) == "function" then
+      devloop_logging.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
         "outcome=marker-budget-fallback",
         "error_class=codex-runs-unavailable",
         "role=" .. one_line(role),

@@ -5,6 +5,7 @@ local replayer = require("devloop.replayer")
 local m_rrc = require("devloop.restart_responsibility_contract")
 local h = require("tests.devloop_core_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
+local devloop_logging = require("devloop.logging")
 local core = h.core
 local t = h.t
 local span = require("core.span_conformance")
@@ -30,12 +31,12 @@ end
 
 local function capture_raises(fn)
   local raised = {}
-  local previous = core.log_raise
-  core.log_raise = function(_, _, queue, payload)
+  local previous = devloop_logging.log_raise
+  devloop_logging.log_raise = function(_, _, queue, payload)
     table.insert(raised, { queue = queue, payload = payload })
   end
   local ok, err = pcall(fn)
-  core.log_raise = previous
+  devloop_logging.log_raise = previous
   if not ok then
     error(err)
   end
@@ -300,8 +301,8 @@ return {
       if state.state ~= "impl-failed" or facts.impl_failure == nil then
         return false
       end
-      fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-false-exemption)", "synthetic durable impl-failure advanced an exempt row")
-      fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
+      devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-false-exemption)", "synthetic durable impl-failure advanced an exempt row")
+      devloop_logging.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
       return true
     end
     local rows = {
@@ -354,8 +355,8 @@ return {
       if state.state ~= "impl-failed" or facts["hidden-durable-trigger"] == nil then
         return false
       end
-      fake_core.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-row-local-false-exemption)", "synthetic row-local durable fact advanced an exempt row")
-      fake_core.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
+      devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "impl-failed", "implementing", "applied(synthetic-row-local-false-exemption)", "synthetic row-local durable fact advanced an exempt row")
+      devloop_logging.log_apply(dept, facts.proposal_id, "implementing", state.version, { add = {}, remove = {} }, { "devloop_ready" })
       return true
     end
     local rows = {

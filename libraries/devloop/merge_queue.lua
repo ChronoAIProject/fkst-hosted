@@ -16,6 +16,7 @@ local support = require("devloop.commands.support")
 local config = require("devloop.config")
 
 local strings = require("contract.strings")
+local devloop_logging = require("devloop.logging")
 
 local active_wip_states = {
   implementing = true,
@@ -596,6 +597,6 @@ function C.log_wip_exclusion(M, proposal_id, classification)
   if classification.wait_reason ~= nil then
     table.insert(fields, "wait_reason=" .. tostring(classification.wait_reason))
   end
-  M.log_line("info", "wip", proposal_id, "WIP_EXCLUDE", fields)
+  devloop_logging.log_line("info", "wip", proposal_id, "WIP_EXCLUDE", fields)
 end
 return C

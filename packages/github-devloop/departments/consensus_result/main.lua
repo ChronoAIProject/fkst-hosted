@@ -96,28 +96,28 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
   end
-  core.log_apply("consensus_result", reached.proposal_id, to_state, version, { add = { "fkst-dev:ready" }, remove = { "fkst-dev:thinking" } }, raised)
+  devloop_logging.log_apply("consensus_result", reached.proposal_id, to_state, version, { add = { "fkst-dev:ready" }, remove = { "fkst-dev:thinking" } }, raised)
 
   if not core.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then
-    core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+    devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
   end
   if not core.state_label_hint_matches(current.labels, "ready") then
-    core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
   if not gate.ok then
-    core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "dependency_wait", "hold-dependency", gate.reason)
+    devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "dependency_wait", "hold-dependency", gate.reason)
     if dependency_comment_request ~= nil then
-      core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_comment_request)
+      devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_comment_request)
     end
     if dependency_label_request ~= nil then
-      core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", dependency_label_request)
+      devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_label_request", dependency_label_request)
     end
     return
   end
   if dependency_release_comment_request ~= nil then
-    core.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_release_comment_request)
+    devloop_logging.log_raise("consensus_result", reached.proposal_id, "github-proxy.github_issue_comment_request", dependency_release_comment_request)
   end
-  core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready", reason, "result effects complete or recoverable")
+  devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", "ready", reason, "result effects complete or recoverable")
 end
 
 local function make_department(ports)
@@ -130,12 +130,12 @@ local function make_department(ports)
     if type(reached) == "table" and reached.schema == "consensus.consensus_reached.v1"
       and reached.decision == "reject" then
       devloop_logging.log_entry("consensus_result", event, tostring(reached.proposal_id or "unknown"), reached.dedup_key)
-      core.log_cas_decision("consensus_result", tostring(reached.proposal_id or "unknown"), { state = nil, version = nil }, "thinking", "ready", "skip-unsupported(decision)", "issue consensus does not support reject")
+      devloop_logging.log_cas_decision("consensus_result", tostring(reached.proposal_id or "unknown"), { state = nil, version = nil }, "thinking", "ready", "skip-unsupported(decision)", "issue consensus does not support reject")
       return
     end
     if not v_result.is_supported_result(core, reached) then
       devloop_logging.log_entry("consensus_result", event, "unknown", core.payload_field(reached, "dedup_key"))
-      core.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
+      devloop_logging.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
       return
     end
 
@@ -143,13 +143,13 @@ local function make_department(ports)
     local version = result_version(reached)
     local repo, issue_number = base_ids.parse_proposal_id(reached.proposal_id)
     if repo == nil then
-      core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
       return
     end
 
     local lock_key = entity_lib.result_lock_key(reached.proposal_id)
     if lock_key == nil then
-      core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "no transition lock key")
+      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "no transition lock key")
       return
     end
 
@@ -178,7 +178,7 @@ local function make_department(ports)
             and requests_lifecycle.result_effects_complete(core, current, reached)
             or dependency_hold_effects_complete(current, reached, version)
           if complete then
-            core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, "skip-idempotent(result effects complete)", "all declared result effects are derivable")
+            devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, "skip-idempotent(result effects complete)", "all declared result effects are derivable")
             return
           end
           raise_result_effects(
@@ -194,14 +194,14 @@ local function make_department(ports)
           )
           return
         end
-        core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus result cannot advance current marker")
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus result cannot advance current marker")
         return
       end
       if transition == "pending" then
-        core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "thinking state marker not yet visible")
+        devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "thinking state marker not yet visible")
         error("github-devloop: thinking state marker not yet visible for consensus result; retrying")
       end
-      core.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus decision=" .. tostring(reached.decision))
+      devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, core.cas_outcome(state, transition, version), "consensus decision=" .. tostring(reached.decision))
 
       raise_result_effects(repo, issue_number, reached, current, state, gate, core.cas_outcome(state, transition, version), version, to_state)
     end)

@@ -1,4 +1,4 @@
-local base_ids, h, entity_lib, devloop_base = require("devloop.base_ids"), require("tests.devloop_helpers"), require("devloop.entity"), require("devloop.base")
+local base_ids, h, entity_lib, devloop_base, devloop_logging = require("devloop.base_ids"), require("tests.devloop_helpers"), require("devloop.entity"), require("devloop.base"), require("devloop.logging")
 local cache_seed_helpers = require("tests.cache_seed_helpers")
 local contract_time = require("contract.time")
 local conv_reconcile, conv_attempts = require("devloop.convergence.reconcile"), require("devloop.convergence.attempts")
@@ -299,17 +299,17 @@ end
 local function capture_timeout_raises_and_logs(fn)
   local raised = {}
   local logs = {}
-  local original_log_raise = core.log_raise
-  local original_log_line = core.log_line
-  core.log_raise = function(_, _, queue, payload)
+  local original_log_raise = devloop_logging.log_raise
+  local original_log_line = devloop_logging.log_line
+  devloop_logging.log_raise = function(_, _, queue, payload)
     table.insert(raised, { queue = queue, payload = payload })
   end
-  core.log_line = function(level, dept, proposal, tag, fields)
+  devloop_logging.log_line = function(level, dept, proposal, tag, fields)
     table.insert(logs, { level = level, dept = dept, proposal = proposal, tag = tag, fields = fields })
   end
   local ok, err = pcall(fn)
-  core.log_raise = original_log_raise
-  core.log_line = original_log_line
+  devloop_logging.log_raise = original_log_raise
+  devloop_logging.log_line = original_log_line
   if not ok then
     error(err)
   end

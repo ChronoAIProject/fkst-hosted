@@ -1,6 +1,7 @@
 local core = require("core")
 local git_adapter = require("forge.git")
 local forge_validators = require("devloop.forge_validators")
+local devloop_logging = require("devloop.logging")
 
 local M = {}
 
@@ -71,7 +72,7 @@ function M.refresh(worktree, branch, base_head, merge_clean, opts)
   end
   local base_pin = show_pin(base_head, { missing_ok = true, git = opts and opts.git })
   if base_pin == nil then
-    core.log_line("info", "implement", "substrate-pin", "IMPLEMENT", {
+    devloop_logging.log_line("info", "implement", "substrate-pin", "IMPLEMENT", {
       "reason=substrate-pin: .fkst/substrate-ref absent — repo does not pin substrate, nothing to refresh",
       "base_head=" .. tostring(base_head),
     })

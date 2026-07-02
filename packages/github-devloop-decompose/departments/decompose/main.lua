@@ -116,7 +116,7 @@ end
 
 local function raise_issue_create(repo, decompose, issue, index)
   local create_request = core.build_issue_create_request(repo, decompose, issue, index)
-  core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_issue_create_request", create_request)
+  devloop_logging.log_raise("decompose", decompose.proposal_id, "github-proxy.github_issue_create_request", create_request)
 end
 
 local function child_completion_check(child_issues, decompose, index)
@@ -171,13 +171,13 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
     end
   end
   if #child_body_missing == 0 then
-    core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
+    devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
     return
   end
 
   local _, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
   if reason == "depth-cap" then
-    core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(decomposed children missing)", "decomposed marker is visible but child issues are missing")
+    devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(decomposed children missing)", "decomposed marker is visible but child issues are missing")
     error("github-devloop: decomposed marker visible but child issues are missing")
   end
   local count = math.min(#issues, decomposed.count)
@@ -196,11 +196,11 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
     end
   end
   if #missing == 0 then
-    core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
+    devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
     return
   end
 
-  core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
+  devloop_logging.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
     "github-proxy.github_issue_create_request",
   })
   for _, index in ipairs(missing) do
@@ -244,7 +244,7 @@ local function decompose_context(event)
   local decompose = event.payload or {}
   if not decompose_lib.is_supported_decompose(core, decompose) then
     devloop_logging.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
-    core.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
+    devloop_logging.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     if type(event) == "table" then
       context_cache[event] = false
     end
@@ -254,7 +254,7 @@ local function decompose_context(event)
   devloop_logging.log_entry("decompose", event, decompose.proposal_id, decompose.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(decompose.proposal_id)
   if entity == nil or entity.issue_number == nil then
-    core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "proposal_id is outside issue-backed github-devloop")
+    devloop_logging.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "proposal_id is outside issue-backed github-devloop")
     if type(event) == "table" then
       context_cache[event] = false
     end
@@ -264,7 +264,7 @@ local function decompose_context(event)
   local issue_number = entity.issue_number
   local _, pr_number = devloop_base.parse_pr_source_ref(decompose.source_ref)
   if tostring(pr_number or "") ~= tostring(decompose.pr_number) then
-    core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(source_ref)", "source_ref PR does not match decompose payload")
+    devloop_logging.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(source_ref)", "source_ref PR does not match decompose payload")
     if type(event) == "table" then
       context_cache[event] = false
     end
@@ -279,7 +279,7 @@ local function decompose_context(event)
 
   local lock_key = entity_lib.transition_lock_key(decompose.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "no transition lock key")
+    devloop_logging.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "no transition lock key")
     if type(event) == "table" then
       context_cache[event] = false
     end
@@ -330,7 +330,7 @@ local function decomposed_done(event)
     local decomposed = decompose_lib.decomposed_fact(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
     if decomposed == nil then
       if conv_attempts.has_decompose_exhausted_marker(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version) then
-        core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed",
+        devloop_logging.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed",
           "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
         done = true
       end
@@ -340,7 +340,7 @@ local function decomposed_done(event)
     if not all_children_complete(child_issues, context.decompose, decomposed.count) then
       return
     end
-    core.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
+    devloop_logging.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed", "skip-idempotent(decomposed marker and children already visible)", "decompose already applied")
     done = true
   end)
   if done and type(event) == "table" then
@@ -370,7 +370,7 @@ local function act_decompose(event)
     if not conv_reconcile.has_fix_reconcile_marker(core, current_pr.comments, decompose.proposal_id, decompose.version)
       or state.state ~= "blocked"
       or tostring(state.version or "") ~= tostring(decompose.version) then
-      core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
+      devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
       error("github-devloop: blocked fix reconcile marker not yet visible for decompose; retrying")
     end
     local decomposed = decompose_lib.decomposed_fact(core,
@@ -387,11 +387,11 @@ local function act_decompose(event)
     local current_issue, issues, reason = plan_current_decompose(event, repo, issue_number, decompose)
     local depth = decompose_lib.decompose_lineage_depth(core, current_issue.body)
     if reason == "depth-cap" or depth >= decompose_lib.max_decompose_depth(core) then
-      core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "applied(decompose-exhausted:depth-cap)", "decompose lineage depth cap reached")
-      core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
+      devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "applied(decompose-exhausted:depth-cap)", "decompose lineage depth cap reached")
+      devloop_logging.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
       })
-      core.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", conv_attempts.build_decompose_exhausted_comment_request(core,
+      devloop_logging.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", conv_attempts.build_decompose_exhausted_comment_request(core,
         { kind = "pr", repo = repo, number = decompose.pr_number },
         decompose.proposal_id,
         state,
@@ -407,13 +407,13 @@ local function act_decompose(event)
     end
 
     if config.write_mode(core) ~= "real" then
-      core.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "dry-run(marker-write-required)", "FKST_GITHUB_WRITE=1 is required before issue create requests")
+      devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "dry-run(marker-write-required)", "FKST_GITHUB_WRITE=1 is required before issue create requests")
       return
     end
     write_decomposed_marker(repo, decompose, count)
     local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
 
-    core.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
+    devloop_logging.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "github-proxy.github_issue_create_request",
     })
     for index = 1, count do

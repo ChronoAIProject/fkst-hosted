@@ -8,6 +8,7 @@ local t = h.t
 local replay_fields = require("devloop.replay_fields")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
+local devloop_logging = require("devloop.logging")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -533,8 +534,8 @@ return {
       now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),
     }
     local raised = {}
-    local original_log_raise = core.log_raise
-    core.log_raise = function(_, _, queue, payload)
+    local original_log_raise = devloop_logging.log_raise
+    devloop_logging.log_raise = function(_, _, queue, payload)
       table.insert(raised, { queue = queue, payload = payload })
     end
     local ok, err = pcall(function()
@@ -544,7 +545,7 @@ return {
         source_ref = entity_lib.issue_source_ref(repo, issue_number),
       }, state, row, facts), true)
     end)
-    core.log_raise = original_log_raise
+    devloop_logging.log_raise = original_log_raise
     if not ok then
       error(err)
     end

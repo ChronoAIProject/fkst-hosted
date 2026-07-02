@@ -1,6 +1,7 @@
 local base_ids = require("devloop.base_ids")
 local contract_time = require("contract.time")
 local strings = require("contract.strings")
+local devloop_logging = require("devloop.logging")
 local decimal_checksum = strings.decimal_checksum
 
 local conflict_hotspot_threshold = 3
@@ -44,7 +45,7 @@ function C.conflict_file_paths_from_unmerged(M, stdout)
         table.insert(paths, path)
       end
     elseif path ~= nil then
-      M.log_line("warn", "fix", "unknown", "CONFLICT_FILE_SKIPPED", {
+      devloop_logging.log_line("warn", "fix", "unknown", "CONFLICT_FILE_SKIPPED", {
         "reason=unsafe-path",
         "path_key=" .. C.conflict_path_key(M, path),
       })
@@ -57,7 +58,7 @@ end
 function C.log_conflict_files(M, dept, proposal_id, pr_number, unmerged_stdout)
   local paths = C.conflict_file_paths_from_unmerged(M, unmerged_stdout)
   if #paths == 0 then
-    M.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
+    devloop_logging.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
       "action=no-op",
       "reason=no-safe-conflict-files",
       "pr=" .. tostring(pr_number or ""),
@@ -65,7 +66,7 @@ function C.log_conflict_files(M, dept, proposal_id, pr_number, unmerged_stdout)
     return paths
   end
   for _, path in ipairs(paths) do
-    M.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
+    devloop_logging.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
       "ts=" .. current_conflict_timestamp(),
       "conflict_file=" .. path,
       "pr=" .. tostring(pr_number or ""),

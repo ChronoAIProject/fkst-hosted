@@ -4,6 +4,7 @@ local C = {}
 local strings = require("contract.strings")
 local github_risk = require("devloop.github_risk")
 local base_ids = require("devloop.base_ids")
+local devloop_logging = require("devloop.logging")
 local decimal_checksum = strings.decimal_checksum
 
 local max_bundle_file_len = 10 * 1024 * 1024
@@ -241,7 +242,7 @@ local function truncate_if_needed(M, text, dept, proposal_id, file_name)
   if #value <= max_bundle_file_len then
     return value
   end
-  M.log_line("warn", dept or "context_bundle", proposal_id, "CONTEXT_BUNDLE", {
+  devloop_logging.log_line("warn", dept or "context_bundle", proposal_id, "CONTEXT_BUNDLE", {
     "outcome=truncate",
     "file=" .. tostring(file_name),
     "limit=" .. tostring(max_bundle_file_len),

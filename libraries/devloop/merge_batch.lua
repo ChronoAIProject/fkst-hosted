@@ -3,13 +3,14 @@ local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local C = {}
 local m_mq = require("devloop.merge_queue")
+local devloop_logging = require("devloop.logging")
 
 local function log_batch_window(M, proposal_id, fields)
   local facts = { "batch_window=true" }
   for _, field in ipairs(fields or {}) do
     table.insert(facts, field)
   end
-  M.log_line("info", "merge", proposal_id or "merge", "BATCH_WINDOW", facts)
+  devloop_logging.log_line("info", "merge", proposal_id or "merge", "BATCH_WINDOW", facts)
 end
 
 local function record_merged_files(M, repo, entry, merged_files)

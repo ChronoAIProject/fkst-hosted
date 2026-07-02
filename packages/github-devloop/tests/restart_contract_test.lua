@@ -10,6 +10,7 @@ local conv_rounds = require("devloop.convergence.rounds")
 local core = h.core
 local t = h.t
 local replay_fields = require("devloop.replay_fields")
+local devloop_logging = require("devloop.logging")
 
 local function restart_transition_row(state_name)
   return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
@@ -109,12 +110,12 @@ end
 
 local function capture_raises(fn)
   local raised = {}
-  local original_log_raise = core.log_raise
-  core.log_raise = function(_, _, queue, payload)
+  local original_log_raise = devloop_logging.log_raise
+  devloop_logging.log_raise = function(_, _, queue, payload)
     table.insert(raised, { queue = queue, payload = payload })
   end
   local ok, err = pcall(fn, raised)
-  core.log_raise = original_log_raise
+  devloop_logging.log_raise = original_log_raise
   if not ok then
     error(err)
   end
@@ -548,8 +549,8 @@ return {
     local row = table_by_state().thinking
     local base = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local raised = {}
-    local original_log_raise = core.log_raise
-    core.log_raise = function(_, _, queue, payload)
+    local original_log_raise = devloop_logging.log_raise
+    devloop_logging.log_raise = function(_, _, queue, payload)
       table.insert(raised, { queue = queue, payload = payload })
     end
     local ok, err = pcall(function()
@@ -568,7 +569,7 @@ return {
       })
       t.eq(applied, true)
     end)
-    core.log_raise = original_log_raise
+    devloop_logging.log_raise = original_log_raise
     if not ok then
       error(err)
     end

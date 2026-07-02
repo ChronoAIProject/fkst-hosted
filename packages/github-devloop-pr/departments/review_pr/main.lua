@@ -51,14 +51,14 @@ return saga.department(spec, { done = function() return false end, act = functio
   local reviewing = event.payload or {}
   if not v_reviewing.is_supported_reviewing(core, reviewing) then
     devloop_logging.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
-    core.log_cas_decision("review_pr", "unknown", { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(payload)", "unsupported event payload")
+    devloop_logging.log_cas_decision("review_pr", "unknown", { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   devloop_logging.log_entry("review_pr", event, reviewing.proposal_id, reviewing.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(reviewing.proposal_id)
   if entity == nil then
-    core.log_cas_decision("review_pr", reviewing.proposal_id, { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
   local repo = entity.repo
@@ -66,7 +66,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   local lock_key = entity_lib.review_lock_key(reviewing.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("review_pr", reviewing.proposal_id, { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(proposal_id)", "no transition lock key")
+    devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 
@@ -95,30 +95,30 @@ return saga.department(spec, { done = function() return false end, act = functio
       if verified_state ~= nil then
         state = verified_state
         transition = "apply"
-        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "apply(verified-own-reviewing-hand-off)", "reviewing marker comment verified by direct id lookup")
+        devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "apply(verified-own-reviewing-hand-off)", "reviewing marker comment verified by direct id lookup")
       else
         if reviewing.reviewing_hand_off ~= nil then
-          core.log_line("info", "review_pr", reviewing.proposal_id, "HANDOFF", {
+          devloop_logging.log_line("info", "review_pr", reviewing.proposal_id, "HANDOFF", {
             "state=reviewing",
             "outcome=verify-failed",
             "reason=" .. tostring(hand_off_reason),
           })
         end
         if transition == "version-mismatch" then
-          core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
+          devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
           return
         end
-        core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
+        devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
         error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
       end
     end
     if transition == "stale" then
-      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale/diverged", "issue is not currently reviewing")
+      devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale/diverged", "issue is not currently reviewing")
       return
     end
 
     if transition == "version-mismatch" then
-      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
+      devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(version-mismatch)", "reviewing event version does not match canonical issue marker")
       return
     end
 
@@ -126,7 +126,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       error("github-devloop: gh pr review head view returned unsafe head sha")
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then
-      core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(pr-closed)", "re-derived PR is not open")
+      devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(pr-closed)", "re-derived PR is not open")
       return
     end
 
@@ -165,9 +165,9 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
 
-    core.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "applied", "raising PR diff review proposal")
+    devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "applied", "raising PR diff review proposal")
     local raised = { "consensus.proposal" }
-    core.log_apply("review_pr", reviewing.proposal_id, nil, nil, { add = {}, remove = {} }, raised)
-    core.log_raise("review_pr", reviewing.proposal_id, "consensus.proposal", proposal)
+    devloop_logging.log_apply("review_pr", reviewing.proposal_id, nil, nil, { add = {}, remove = {} }, raised)
+    devloop_logging.log_raise("review_pr", reviewing.proposal_id, "consensus.proposal", proposal)
   end)
 end, wrap = core.wrap_pipeline_failure, name = "review_pr" })

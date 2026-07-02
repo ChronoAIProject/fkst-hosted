@@ -51,42 +51,42 @@ local function raise_impl_failed(repo, issue_number, ready, reason, detail, atte
   local comment_request = requests_lifecycle.build_impl_failure_comment_request(core, repo, issue_number, ready, reason, detail, attempt)
   local label_request = requests_labels.build_impl_failed_label_request(core, repo, issue_number, ready, reason)
   local add_labels, remove_labels = core.state_label_changes("impl-failed")
-  core.log_apply("implement", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
+  devloop_logging.log_apply("implement", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
   })
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
 local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   local comment_request = requests_lifecycle.build_implementing_state_comment_request(core, repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   local label_request = requests_labels.build_implementing_label_request(core, repo, issue_number, ready)
   local add_labels, remove_labels = core.state_label_changes("implementing")
-  core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
+  devloop_logging.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
   })
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
 local function raise_implementing(repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
   local comment_request = requests_lifecycle.build_implementing_comment_request(core, repo, issue_number, ready, worktree, branch, head_sha, base_branch, base_sha, attempt, started_at, exec_ref)
-  core.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = {}, remove = {} }, {
+  devloop_logging.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = {}, remove = {} }, {
     "github-proxy.github_issue_comment_request",
   })
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
 end
 
 local function raise_implement_attempt(repo, issue_number, ready, attempt, started_at, exec_ref)
   local request = requests_lifecycle.build_implement_attempt_comment_request(core, repo, issue_number, ready, attempt, started_at, exec_ref)
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
 local function publish_implementation_branch(repo, issue_number, ready, worktree, branch)
   if config.write_mode(core) ~= "real" then
-    core.log_line("info", "implement", ready.proposal_id, "OUTBOUND", {
+    devloop_logging.log_line("info", "implement", ready.proposal_id, "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
       "issue=" .. tostring(issue_number),
@@ -182,7 +182,7 @@ local function raise_implement_version_mismatch(repo, issue_number, ready, state
     state and state.version,
     attempt
   )
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", request)
 end
 
 local function handle_implementing_version_mismatch(repo, issue_number, current, ready, state, expected_version)
@@ -200,7 +200,7 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
       attempt = attempt,
       terminal = false,
     })
-    core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", message)
+    devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", message)
     raise_implement_version_mismatch(repo, issue_number, ready, state, expected_version, attempt)
     error("github-devloop: implement-version-mismatch retrying: ready event version "
       .. tostring(expected_version or "")
@@ -212,7 +212,7 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
     attempt = attempt,
     terminal = true,
   })
-  core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "fail-closed(version-mismatch-budget)", message)
+  devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "fail-closed(version-mismatch-budget)", message)
   error("github-devloop: implement-version-mismatch: ready event version "
     .. tostring(expected_version or "")
     .. " does not match current implementing version "
@@ -261,7 +261,7 @@ local function merge_integration_for_implementation(worktree, integration_branch
   if tostring(unmerged_result.stdout or "") == "" then
     error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
   end
-  core.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
+  devloop_logging.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
     "integration_branch=" .. tostring(integration_branch),
     "integration_sha=" .. tostring(base_head),
     "reason=integration merge requires codex conflict resolution",
@@ -325,7 +325,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   if tostring(status.stdout or "") == "" then
     local head_sha = implemented_branch_head(base_head, branch)
     if head_sha ~= nil and not substrate_pin.is_only_pin_delta(base_head, branch) then
-      core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+      devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
         "branch=" .. tostring(branch),
         "head_sha=" .. tostring(head_sha),
         "reason=reusing clean ahead implementation branch",
@@ -478,17 +478,17 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
     end
     local fact = m_facts.implementing_fact(core, current.comments, marker_ready.proposal_id, marker_ready.dedup_key)
     if fact ~= nil then
-      core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "implementing", "skip-idempotent(implementation marker already visible)", "implementation fact marker already visible")
+      devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "implementing", "skip-idempotent(implementation marker already visible)", "implementation fact marker already visible")
       return false
     end
     if not transitions.expected_states_include(expected_from_states, "implementing") and not allow_same_version_implementing then
-      core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
+      devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
       return false
     end
     return true
   end
   if state.state == "impl-failed" and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
-    core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "impl-failed", "skip-idempotent(already failed)", "implementation failure marker already visible")
+    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "impl-failed", "skip-idempotent(already failed)", "implementation failure marker already visible")
     return false
   end
   for _, expected in ipairs(expected_from_states or {}) do
@@ -499,14 +499,14 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
     if transition == "pending" and payloads_predicates.is_ready_hand_off(core, accepted_ready_hand_off, marker_ready) then
-      core.log_cas_decision("implement", marker_ready.proposal_id, {
+      devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
         stage_rank = core.stage_rank("ready"),
       }, "ready", "implementing", "apply(own-ready-hand-off)", "write-time ready hand-off still matches this generation")
       return true
     end
-    core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "write-time issue state changed")
+    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "write-time issue state changed")
     return false
   end
   return true
@@ -528,13 +528,13 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
       return false
     end
     if not transitions.expected_states_include(expected_from_states, "implementing") then
-      core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
+      devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
       return false
     end
     return true
   end
   if state.state == "impl-failed" and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
-    core.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "impl-failed", "skip-idempotent(already failed)", "implementation failure marker already visible")
+    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "impl-failed", "skip-idempotent(already failed)", "implementation failure marker already visible")
     return false
   end
   for _, expected in ipairs(expected_from_states or {}) do
@@ -545,14 +545,14 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
     if transition == "pending" and payloads_predicates.is_ready_hand_off(core, accepted_ready_hand_off, marker_ready) then
-      core.log_cas_decision("implement", marker_ready.proposal_id, {
+      devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
         stage_rank = core.stage_rank("ready"),
       }, "ready", "implementing", "apply(own-ready-hand-off)", "pre-spawn ready hand-off still matches this generation")
       return true
     end
-    core.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "pre-spawn issue state changed")
+    devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, marker_ready.dedup_key), "pre-spawn issue state changed")
     return false
   end
   return true
@@ -585,20 +585,20 @@ local function process_ready_event(event)
   local ready = event.payload or {}
   if not v_ready.is_supported_ready(core, ready) then
     devloop_logging.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
-    core.log_cas_decision("implement", "unknown", { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "unsupported event payload")
+    devloop_logging.log_cas_decision("implement", "unknown", { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
   devloop_logging.log_entry("implement", event, ready.proposal_id, ready.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(ready.proposal_id)
   if repo == nil then
-    core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
 
   local lock_key = entity_lib.implement_lock_key(ready.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "no transition lock key")
+    devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 
@@ -617,7 +617,7 @@ local function process_ready_event(event)
     local managed = m_claims.managed_bot_logins(core)
     core.log_forged_markers("implement", ready.proposal_id, current.comments)
     if tostring(current.state or ""):upper() ~= "OPEN" then
-      core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")
       return
     end
     if slice_gate.check(repo, issue_number, ready, current) then
@@ -625,7 +625,7 @@ local function process_ready_event(event)
     end
     local origin, original = backing_original(current, managed)
     if original ~= nil and tostring(original.state or ""):upper() ~= "OPEN" then
-      core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "fork backing issue is closed: " .. tostring(origin.repo) .. "#" .. tostring(origin.issue_number))
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "fork backing issue is closed: " .. tostring(origin.repo) .. "#" .. tostring(origin.issue_number))
       return
     end
     if fork_gate.check(repo, issue_number, ready, origin, original, managed) then
@@ -640,12 +640,12 @@ local function process_ready_event(event)
     if not gate.ok then
       local inner_ready_version = core.ready_payload_inner_version(ready.dedup_key)
       local dep_version = core.ready_split_version(inner_ready_version)
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "dependency_wait", "hold-dependency-backstop", gate.reason)
-      core.log_apply("implement", ready.proposal_id, "dependency_wait", dep_version, { add = { core._blocked_on_dependency_label }, remove = {} }, {
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "dependency_wait", "hold-dependency-backstop", gate.reason)
+      devloop_logging.log_apply("implement", ready.proposal_id, "dependency_wait", dep_version, { add = { core._blocked_on_dependency_label }, remove = {} }, {
         "github-proxy.github_issue_comment_request",
         "github-proxy.github_issue_label_request",
       })
-      core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", core.build_ready_split_canonicalized_comment_request(
+      devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request", core.build_ready_split_canonicalized_comment_request(
         repo,
         issue_number,
         ready.proposal_id,
@@ -655,7 +655,7 @@ local function process_ready_event(event)
         gate,
         ready.source_ref
       ))
-      core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(core,
+      devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(core,
         repo,
         issue_number,
         { core._blocked_on_dependency_label },
@@ -675,7 +675,7 @@ local function process_ready_event(event)
     if state.state == "implementing" then
       if tostring(state.version or "") ~= tostring(marker_ready.dedup_key or "") then
         if not implementing_mismatch_is_durable(current, ready.proposal_id, state) then
-          core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "implementing state marker has no durable progress fact")
+          devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", "implementing state marker has no durable progress fact")
           return
         end
         handle_implementing_version_mismatch(repo, issue_number, current, ready, state, marker_ready.dedup_key)
@@ -688,7 +688,7 @@ local function process_ready_event(event)
       end
       local fact = m_facts.implementing_fact(core, current.comments, ready.proposal_id, marker_ready.dedup_key)
       if fact == nil and live_implement_attempt_visible(current.comments, ready.proposal_id, marker_ready.dedup_key) then
-        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation attempt heartbeat is still live")
+        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation attempt heartbeat is still live")
         return
       end
       local progress = nil
@@ -715,11 +715,11 @@ local function process_ready_event(event)
       end
       local attempts = core.implement_attempt_count(current.comments, ready.proposal_id, marker_ready.dedup_key)
       if attempts >= MAX_IMPLEMENT_ATTEMPTS then
-        core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "impl-failed", "applied(attempts-exhausted)", "implementation attempts exhausted with no PR or branch progress")
+        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "impl-failed", "applied(attempts-exhausted)", "implementation attempts exhausted with no PR or branch progress")
         raise_impl_failed(repo, issue_number, marker_ready, "retry-exhausted", "No linked PR, remote branch, or local branch progress was visible after " .. tostring(attempts) .. " attempts.", attempts)
         return
       end
-      core.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(retry-no-progress)", "no PR or branch progress is visible; retrying implementation attempt")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "implementing", "implementing", "applied(retry-no-progress)", "no PR or branch progress is visible; retrying implementation attempt")
       attempt_plan = {
         marker_ready = marker_ready,
         current = current,
@@ -737,13 +737,13 @@ local function process_ready_event(event)
     if state.state == "impl-failed" and ready.impl_retry_attempt ~= nil and state.version == ready.dedup_key then
       retry_failure = core.impl_failure_fact(current.comments, ready.proposal_id, ready.dedup_key)
       if retry_failure ~= nil and tonumber(ready.impl_retry_attempt) <= tonumber(retry_failure.attempt or 1) then
-        core.log_cas_decision("implement", ready.proposal_id, state, "impl-failed", "implementing", "skip-idempotent(retry-not-advanced)", "implementation retry event does not advance the failure attempt")
+        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "impl-failed", "implementing", "skip-idempotent(retry-not-advanced)", "implementation retry event does not advance the failure attempt")
         return
       end
     elseif state.state == "blocked" and ready.impl_retry_attempt ~= nil and operator_blocked_reimplement_allowed(ready, current, state) then
       blocked_reentry = true
     elseif state.state == "implementing" or state.state == "impl-failed" then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation fact marker already visible")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation fact marker already visible")
       return
     end
     local expected_states = blocked_reentry
@@ -751,7 +751,7 @@ local function process_ready_event(event)
       or (retry_failure ~= nil and { "impl-failed" } or { "ready" })
     local transition = transitions.implementation_transition_status(state, expected_states, ready.dedup_key)
     if transition == "idempotent" or transition == "stale" then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready event cannot advance current marker")
       return
     end
     local accepted_ready_hand_off = nil
@@ -769,11 +769,11 @@ local function process_ready_event(event)
       if retry_failure == nil and ready.impl_retry_attempt == nil and verified_state ~= nil then
         state = verified_state
         accepted_ready_hand_off = ready.ready_hand_off
-        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "apply(verified-own-ready-hand-off)", "ready marker comment verified by direct id lookup")
+        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "apply(verified-own-ready-hand-off)", "ready marker comment verified by direct id lookup")
       else
-        core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
+        devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready state marker not yet visible")
         if ready.ready_hand_off ~= nil then
-          core.log_line("info", "implement", ready.proposal_id, "HANDOFF", {
+          devloop_logging.log_line("info", "implement", ready.proposal_id, "HANDOFF", {
             "state=ready",
             "outcome=verify-failed",
             "reason=" .. tostring(hand_off_reason),
@@ -782,17 +782,17 @@ local function process_ready_event(event)
         error("github-devloop: ready state marker not yet visible for implement; retrying")
       end
     else
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", core.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")
     end
 
     local wip_ok, wip_reason, wip_count, wip_max = m_mq.wip_capacity_allows_start(core, repo, issue_number)
     if not wip_ok then
-      core.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-wip-cap", wip_reason .. ": " .. tostring(wip_count) .. "/" .. tostring(wip_max))
+      devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "hold-wip-cap", wip_reason .. ": " .. tostring(wip_count) .. "/" .. tostring(wip_max))
       return
     end
 
     local issue_slug = devloop_base.safe_issue_slug(repo, issue_number)
-    core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+    devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
       "issue_slug=" .. tostring(issue_slug),
       "branch=" .. tostring(branch),
       "reason=implementation fact marker absent for this version",
@@ -822,7 +822,7 @@ local function process_ready_event(event)
       attempt_plan.accepted_ready_hand_off
     ) then
       if dispatch_live_run.dispatch_live_run_dedup(core, "implement", attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key) then
-        core.log_cas_decision(
+        devloop_logging.log_cas_decision(
           "implement",
           attempt_plan.marker_ready.proposal_id,
           { state = "ready", version = attempt_plan.marker_ready.dedup_key, stage_rank = core.stage_rank("ready") },

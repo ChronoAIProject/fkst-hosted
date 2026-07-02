@@ -5,6 +5,7 @@ local m_claims = require("devloop.claims")
 local requests_labels = require("devloop.requests.labels")
 local core = require("core")
 local forks = require("devloop.forks")
+local devloop_logging = require("devloop.logging")
 
 local M = {}
 
@@ -66,13 +67,13 @@ function M.check(repo, issue_number, ready, origin, original, managed)
     return false
   end
 
-  core.log_cas_decision("implement", ready.proposal_id, {
+  devloop_logging.log_cas_decision("implement", ready.proposal_id, {
     state = "ready",
     version = ready.dedup_key,
   }, "ready", "duplicate-fork", "skip-stale(noncanonical-fork)", "canonical fork is #" .. tostring(canonical))
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request",
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_comment_request",
     duplicate_comment(repo, issue_number, ready, origin, canonical))
-  core.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request",
+  devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request",
     duplicate_label(repo, issue_number, ready, origin, canonical))
   if devloop_base.read_env("FKST_GITHUB_WRITE") == "1" then
     local closed = core.gh_issue_close(repo, issue_number, 30)

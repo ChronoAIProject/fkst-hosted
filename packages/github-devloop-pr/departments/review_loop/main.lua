@@ -85,7 +85,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local unresolved = event.payload or {}
   if not v_pr_review_unresolved.is_supported_pr_review_unresolved(core, unresolved) then
     devloop_logging.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
-    core.log_cas_decision("review_loop", "unknown", { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
+    devloop_logging.log_cas_decision("review_loop", "unknown", { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
@@ -93,7 +93,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local _, pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(unresolved.proposal_id)
   local repo, source_pr_number = devloop_base.parse_pr_source_ref(unresolved.source_ref)
   if repo == nil or tostring(source_pr_number) ~= tostring(pr_number) then
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(source_ref)", "review source_ref does not match PR review proposal")
+    devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(source_ref)", "review source_ref does not match PR review proposal")
     return
   end
 
@@ -109,20 +109,20 @@ return saga.department(spec, { done = function() return false end, act = functio
     origin = entity_lib.pr_native_origin(repo, pr_number, current_pr)
   end
   if origin.repo ~= repo or tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(pr-origin)", "PR origin mismatch")
+    devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(pr-origin)", "PR origin mismatch")
     return
   end
   if tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
     or tostring(origin.base_branch or "") ~= tostring(branches.integration) then
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(base)", "PR base branch mismatch")
+    devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(base)", "PR base branch mismatch")
     return
   end
   if tostring(current_pr.state or ""):lower() ~= "open" then
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(pr-closed)", "re-derived PR is not open")
+    devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(pr-closed)", "re-derived PR is not open")
     return
   end
   if tostring(current_pr.head_sha or "") ~= tostring(reviewed_head_sha) then
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(head-advanced)", "PR head advanced since unresolved review")
+    devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(head-advanced)", "PR head advanced since unresolved review")
     return
   end
   if not m_claims.verify_pr_review_issue_claim(core, "review_loop", origin.repo, origin.issue_number, nil, origin.proposal_id) then
@@ -131,7 +131,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   local lock_key = entity_lib.transition_lock_key(origin.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "no issue transition lock key")
+    devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "no issue transition lock key")
     return
   end
   local pr_source_ref = entity_lib.pr_source_ref(repo, pr_number)
@@ -141,11 +141,11 @@ return saga.department(spec, { done = function() return false end, act = functio
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
     local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", core.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
       error("github-devloop: reviewing marker not yet visible for review loop; retrying")
     end
     if transition == "stale" then
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", "skip-stale(reviewing-version)", "issue is not currently reviewing at this version")
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", "skip-stale(reviewing-version)", "issue is not currently reviewing at this version")
       return
     end
     local heartbeat_version = state.version
@@ -153,7 +153,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local facts = conv_rounds.review_converge_round_facts(core, current_pr.comments, unresolved.proposal_id, origin.proposal_id, heartbeat_version, reviewed_head_sha, sr_digest)
     local round = math.max(tonumber(unresolved.round) or 0, conv_rounds.max_converge_round(core, facts))
     if conv_rounds.has_review_converge_round_marker(core, current_pr.comments, unresolved.proposal_id, origin.proposal_id, heartbeat_version, reviewed_head_sha, sr_digest, round) then
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review converge round marker already visible)", "review converge round marker for incoming round is already visible")
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review converge round marker already visible)", "review converge round marker for incoming round is already visible")
       return
     end
 
@@ -177,13 +177,13 @@ return saga.department(spec, { done = function() return false end, act = functio
       local reason = hit_round_cap
         and ("PR review convergence budget reached at round " .. tostring(budget_round))
         or ("true PR review convergence stall at round " .. tostring(round))
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", core.cas_outcome(state, transition, review_version), reason)
-      core.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", core.cas_outcome(state, transition, review_version), reason)
+      devloop_logging.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
         "devloop_review_reconcile",
       })
-      core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-      core.log_raise("review_loop", origin.proposal_id, "devloop_review_reconcile", review_reconcile)
+      devloop_logging.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+      devloop_logging.log_raise("review_loop", origin.proposal_id, "devloop_review_reconcile", review_reconcile)
       return
     end
     if review_truth_table_unapproved(unresolved) then
@@ -194,17 +194,17 @@ return saga.department(spec, { done = function() return false end, act = functio
       if origin.issue_number ~= nil then
         label_request = requests_labels.build_state_label_request(core, origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
       end
-      core.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", core.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
-      core.log_apply("review_loop", origin.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = {} }, {
+      devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", core.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
+      devloop_logging.log_apply("review_loop", origin.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = {} }, {
         "github-proxy.github_pr_comment_request",
         "github-proxy.github_issue_label_request",
         "devloop_review_meta",
       })
-      core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+      devloop_logging.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
       if label_request ~= nil then
-        core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
+        devloop_logging.log_raise("review_loop", origin.proposal_id, "github-proxy.github_issue_label_request", label_request)
       end
-      core.log_raise("review_loop", origin.proposal_id, "devloop_review_meta", review_meta)
+      devloop_logging.log_raise("review_loop", origin.proposal_id, "devloop_review_meta", review_meta)
       return
     end
     local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
@@ -242,11 +242,11 @@ return saga.department(spec, { done = function() return false end, act = functio
       log.warn("github-devloop dept=review_loop proposal_id=" .. tostring(origin.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-loop-proposal")
       return
     end
-    core.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
+    devloop_logging.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
       "consensus.proposal",
       "github-proxy.github_pr_comment_request",
     })
-    core.log_raise("review_loop", origin.proposal_id, "consensus.proposal", proposal)
-    core.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    devloop_logging.log_raise("review_loop", origin.proposal_id, "consensus.proposal", proposal)
+    devloop_logging.log_raise("review_loop", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   end)
 end, wrap = core.wrap_pipeline_failure, name = "review_loop" })

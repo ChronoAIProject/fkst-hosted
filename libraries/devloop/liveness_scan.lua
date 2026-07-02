@@ -5,6 +5,7 @@ local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local C, replay_fields, sweep_bounds = {}, require("devloop.replay_fields"), require("devloop.sweep_bounds")
 local entity_list_cache = require("devloop.entity_list_cache")
+local devloop_logging = require("devloop.logging")
 
 local LIVENESS_SCAN_MAX_PER_TICK = 100
 local LIVENESS_SCAN_CALL_TIMEOUT = 10
@@ -31,7 +32,7 @@ function C.liveness_scan_cursor_key(M, repo, prefix)
 end
 
 function C.liveness_scan_log_deferred(M, reason, fields)
-  M.log_line("info", "liveness_scan", "github-devloop/liveness-scan", "LIVENESS_DEFERRED", {
+  devloop_logging.log_line("info", "liveness_scan", "github-devloop/liveness-scan", "LIVENESS_DEFERRED", {
     "reason=" .. tostring(reason or "budget"),
     "listed_issues=" .. tostring(fields and fields.listed_issues or 0),
     "listed_prs=" .. tostring(fields and fields.listed_prs or 0),
@@ -84,11 +85,11 @@ end
 
 function C.liveness_scan_should_reinject_state(M, proposal_id, state)
   if state == nil or state.state == nil then
-    M.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "no current restart state marker")
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "no current restart state marker")
     return false
   end
   if not C.liveness_scan_state_is_non_terminal(M, state) then
-    M.log_cas_decision("liveness_scan", proposal_id, state, "tick", "observe", "skip-terminal", "current restart state is terminal or unknown")
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, state, "tick", "observe", "skip-terminal", "current restart state is terminal or unknown")
     return false
   end
   return true
@@ -129,7 +130,7 @@ function C.liveness_scan_maybe_timeout_action(M, entity, state, facts)
   end
   local proposal_id = facts.proposal_id or state.proposal_id
   if M.restart_row_liveness_deferred(row, state, facts, facts.now_seconds or now()) then
-    M.log_cas_decision("liveness_scan", proposal_id, state, row.from_state, row.driving_queue, "skip-active-output-obligation", "receiver liveness contract signal is still fresh")
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, state, row.from_state, row.driving_queue, "skip-active-output-obligation", "receiver liveness contract signal is still fresh")
     return nil
   end
   if M.maybe_timeout_redrive_from_table("liveness_scan", entity, state, row, facts) then
@@ -189,7 +190,7 @@ function C.liveness_scan_activation_slice(M, repo, kind, items, cursor_prefix)
       LIVENESS_SCAN_MAX_PER_TICK,
       LIVENESS_SCAN_MAX_PER_TICK
     )
-    M.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "deferred-cap", tostring(total - LIVENESS_SCAN_MAX_PER_TICK) .. " open entities deferred by LIVENESS_SCAN_MAX_PER_TICK")
+    devloop_logging.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "deferred-cap", tostring(total - LIVENESS_SCAN_MAX_PER_TICK) .. " open entities deferred by LIVENESS_SCAN_MAX_PER_TICK")
     return bounded, deferred, cursor_key, cursor, total
   end
   cache_set(C.liveness_scan_cursor_key(M, repo, cursor_prefix), "0")
@@ -200,10 +201,10 @@ function C.liveness_scan_reinject(M, repo, entity, kind, tick)
   local proposal_id = kind == "pr" and entity_lib.pr_proposal_id(repo, entity.number) or base_ids.proposal_id(repo, entity.number)
   local payload = C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
   local queue = C.liveness_scan_observe_queue(M, kind)
-  M.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
+  devloop_logging.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
     queue,
   })
-  M.log_raise("liveness_scan", proposal_id, queue, payload)
+  devloop_logging.log_raise("liveness_scan", proposal_id, queue, payload)
 end
 
 return C

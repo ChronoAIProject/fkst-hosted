@@ -2,6 +2,7 @@ local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
+local devloop_logging = require("devloop.logging")
 
 local H = {}
 
@@ -44,13 +45,13 @@ end
 
 local function emit_effects(dept, proposal_id, effects)
   for _, effect in ipairs(effects or {}) do
-    core.log_raise(dept, proposal_id, effect.queue, effect.payload)
+    devloop_logging.log_raise(dept, proposal_id, effect.queue, effect.payload)
   end
 end
 
 function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current, fact, reason)
   if config.write_mode(core) ~= "real" then
-    core.log_line("info", dept, ready.proposal_id, "OUTBOUND", {
+    devloop_logging.log_line("info", dept, ready.proposal_id, "OUTBOUND", {
       "mode=dry-run",
       "queue=github-proxy.github_pr_comment_request",
       "repo=" .. tostring(repo),
@@ -83,7 +84,7 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
     issue.pr_comments = current_pr.comments
   end
   local child = core.ensure_pr_child(issue, ready.dedup_key, core.implementation_retry_attempt(ready.dedup_key) or 1)
-  core.log_cas_decision(dept, ready.proposal_id, {
+  devloop_logging.log_cas_decision(dept, ready.proposal_id, {
     state = "implementing",
     version = ready.dedup_key,
   }, "implementing", "awaiting-pr", child.ready_for_parent_awaiting_pr and "applied(progress-derived)" or "retry-pending(child-start-not-visible)", reason)
@@ -95,12 +96,12 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
   local comment_request = core.build_parent_awaiting_pr_comment_request(repo, issue_number, ready, child)
   local label_request = core.build_parent_awaiting_pr_label_request(repo, issue_number, ready, child)
   local add_labels, remove_labels = core.state_label_changes("awaiting-pr")
-  core.log_apply(dept, ready.proposal_id, "awaiting-pr", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
+  devloop_logging.log_apply(dept, ready.proposal_id, "awaiting-pr", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_label_request",
   })
-  core.log_raise(dept, ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
-  core.log_raise(dept, ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  devloop_logging.log_raise(dept, ready.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
+  devloop_logging.log_raise(dept, ready.proposal_id, "github-proxy.github_issue_label_request", label_request)
 end
 
 return H

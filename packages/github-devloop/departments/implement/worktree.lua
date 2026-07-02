@@ -1,5 +1,6 @@
 local devloop_base = require("devloop.base")
 local core = require("core")
+local devloop_logging = require("devloop.logging")
 local exec_sync = exec_sync
 
 local M = {}
@@ -69,7 +70,7 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
     local existing_worktree = core.find_worktree_for_branch_under_runtime(list_result.stdout, branch, runtime_result.stdout)
     for _, stale_worktree in ipairs(core.find_worktrees_for_branch(list_result.stdout, branch)) do
       if not devloop_base.path_under_runtime_root(runtime_result.stdout, stale_worktree) then
-        core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+        devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
           "branch=" .. tostring(branch),
           "worktree=" .. tostring(stale_worktree),
           "reason=removing non-current-runtime deterministic worktree",
@@ -79,7 +80,7 @@ function M.prepare_worktree(repo, issue_number, ready, branch, base_head)
     end
     if existing_worktree ~= nil then
       worktree = existing_worktree
-      core.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
+      devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
         "branch=" .. tostring(branch),
         "worktree=" .. tostring(worktree),
         "reason=reusing current-runtime deterministic worktree",

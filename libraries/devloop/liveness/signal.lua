@@ -10,6 +10,7 @@ local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
+local devloop_logging = require("devloop.logging")
 
 function S.install(M, shared)
 local numeric_minutes = shared.numeric_minutes
@@ -78,8 +79,8 @@ local function codex_run_status(M)
     return error_facts.one_line(value)
   end
   local function fallback(reason)
-    if type(M.log_line) == "function" then
-      M.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
+    if type(devloop_logging.log_line) == "function" then
+      devloop_logging.log_line("warn", "liveness", "github-devloop/codex-runs", "CODEX_RUNS", {
         "outcome=defer",
         "error_class=codex-runs-unavailable",
         "reason=" .. one_line(reason),

@@ -32,11 +32,11 @@ local function read_current(repo, issue_number, request)
   current.repo, current.number = repo, issue_number
   core.log_forged_markers("execute_start", request.proposal_id, current.comments)
   if current.state ~= "OPEN" then
-    core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-closed", "issue is not open")
+    devloop_logging.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-closed", "issue is not open")
     return nil
   end
   if devloop_base.is_intake_held(current.labels) then
-    core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-held", "fkst-dev:hold label is present")
+    devloop_logging.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-held", "fkst-dev:hold label is present")
     return nil
   end
   if not m_claims.claim_issue_for_management(core, "execute_start", repo, issue_number, current, request.proposal_id) then
@@ -53,7 +53,7 @@ local function raise_execution_start(repo, issue_number, request, current, event
   end
   local proposal = effects.proposal
   local add_labels, remove_labels = core.state_label_changes("thinking")
-  core.log_apply("execute_start", request.proposal_id, "thinking", proposal.effect_version, {
+  devloop_logging.log_apply("execute_start", request.proposal_id, "thinking", proposal.effect_version, {
     add = add_labels,
     remove = remove_labels,
   }, {
@@ -61,9 +61,9 @@ local function raise_execution_start(repo, issue_number, request, current, event
     "github-proxy.github_issue_label_request",
     "consensus.proposal",
   })
-  core.log_raise("execute_start", request.proposal_id, "github-proxy.github_issue_comment_request", effects.thinking_comment_request)
-  core.log_raise("execute_start", request.proposal_id, "github-proxy.github_issue_label_request", effects.thinking_label_request)
-  core.log_raise("execute_start", request.proposal_id, "consensus.proposal", proposal)
+  devloop_logging.log_raise("execute_start", request.proposal_id, "github-proxy.github_issue_comment_request", effects.thinking_comment_request)
+  devloop_logging.log_raise("execute_start", request.proposal_id, "github-proxy.github_issue_label_request", effects.thinking_label_request)
+  devloop_logging.log_raise("execute_start", request.proposal_id, "consensus.proposal", proposal)
   return true
 end
 
@@ -71,14 +71,14 @@ local function act_execute_start(event)
   local request = event.payload or {}
   if not v_execution_request.is_supported_execution_request(core, request) then
     devloop_logging.log_entry("execute_start", event, "unknown", core.payload_field(request, "dedup_key"))
-    core.log_cas_decision("execute_start", "unknown", { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(payload)", "unsupported event payload")
+    devloop_logging.log_cas_decision("execute_start", "unknown", { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   devloop_logging.log_entry("execute_start", event, request.proposal_id, request.dedup_key)
   local repo, issue_number = devloop_base.parse_issue_source_ref(request.source_ref)
   if repo == nil then
-    core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(source_ref)", "invalid source_ref")
+    devloop_logging.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(source_ref)", "invalid source_ref")
     return
   end
 

@@ -134,7 +134,7 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
     end
     result.conflicted = true
     result.unmerged_paths = tostring(unmerged_result.stdout or "")
-    core.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
+    devloop_logging.log_line("info", "fix", "merge-target", "MERGE_SKEW", {
       "integration_branch=" .. tostring(integration_branch),
       "integration_sha=" .. tostring(base_head),
       "reason=integration merge requires codex conflict resolution",
@@ -176,7 +176,7 @@ local function merge_sha_for_fix(worktree, sha, context, log_values)
   end
   context.conflicted = true
   context.unmerged_paths = append_unmerged_paths(context.unmerged_paths, unmerged_result.stdout)
-  core.log_line("info", "fix", "merge-target", "MERGE_SKEW", log_values)
+  devloop_logging.log_line("info", "fix", "merge-target", "MERGE_SKEW", log_values)
   return context
 end
 
@@ -270,16 +270,16 @@ local function raise_review_meta(repo, issue_number, fix, reason, detail)
   local comment_request = core.build_fix_review_meta_comment_request(repo, issue_number, fix, reason, detail)
   local label_request = core.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
   local add_labels, remove_labels = core.state_label_changes("review-meta")
-  core.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
+  devloop_logging.log_apply("fix", fix.proposal_id, "review-meta", fix.version, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_pr_comment_request",
     "github-proxy.github_issue_label_request",
     "devloop_review_meta",
   })
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if issue_number ~= nil then
-    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
-  core.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
+  devloop_logging.log_raise("fix", fix.proposal_id, "devloop_review_meta", {
     schema = "github-devloop.review-meta.v1",
     proposal_id = fix.proposal_id,
     review_proposal_id = fix.review_proposal_id,
@@ -340,17 +340,17 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
     entity_lib.issue_source_ref(repo, issue_number)
   ) or nil
   local add_labels, remove_labels = core.state_label_changes("fixing")
-  core.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
+  devloop_logging.log_cas_decision("fix", fix.proposal_id, current_state, "fixing", "fixing", "applied", reason)
   local raised = {
     "github-proxy.github_pr_comment_request",
   }
   if label_request ~= nil then
     table.insert(raised, "github-proxy.github_issue_label_request")
   end
-  core.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, raised)
-  core.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  devloop_logging.log_apply("fix", fix.proposal_id, "fixing", next_version, { add = add_labels, remove = remove_labels }, raised)
+  devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if label_request ~= nil then
-    core.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    devloop_logging.log_raise("fix", fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
 end
 
@@ -359,7 +359,7 @@ local function assert_fix_write_gate(fix, repo, issue_number)
   if write_enabled then
     return true
   end
-  core.log_line("info", "fix", fix.proposal_id, "OUTBOUND", {
+  devloop_logging.log_line("info", "fix", fix.proposal_id, "OUTBOUND", {
     "mode=dry-run",
     "repo=" .. tostring(repo),
     "issue=" .. tostring(issue_number),
@@ -409,7 +409,7 @@ local function run_fix_attempt(plan)
         reason = "speculative predecessor set changed",
       }
     end
-    core.log_cas_decision("fix", plan.fix.proposal_id, plan.state, "fixing", "reviewing", "skip-stale(" .. tostring(speculative_reason) .. ")", "speculative predecessor set is no longer current")
+    devloop_logging.log_cas_decision("fix", plan.fix.proposal_id, plan.state, "fixing", "reviewing", "skip-stale(" .. tostring(speculative_reason) .. ")", "speculative predecessor set is no longer current")
     return nil
   end
   if merge_context == nil then
@@ -544,7 +544,7 @@ end
 local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_prefix, fail_closed)
   local rechecked_state = require("devloop.entity").current_entity_state(core, pr.comments, fix.proposal_id)
   if rechecked_state.state ~= "fixing" or tostring(rechecked_state.version or "") ~= tostring(fix.version) then
-    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
+    devloop_logging.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", "skip-stale(write-gate)", tostring(reason_prefix) .. " issue state changed")
     return nil
   end
   if tostring(pr.state or ""):lower() ~= "open"
@@ -552,7 +552,7 @@ local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_pr
     or tostring(pr.head_sha or "") ~= tostring(fix.reviewed_head_sha)
     or not require("forge.merge.shared").is_same_repo_pr_head(pr, repo) then
     local outcome = fail_closed and "fail-closed(write-gate)" or "skip-stale(write-gate)"
-    core.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
+    devloop_logging.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
     if fail_closed then
       error("github-devloop: write-time PR fact changed or head repository missing")
     end
@@ -629,14 +629,14 @@ local function act_fix(event)
   local fix = event.payload or {}
   if not v_fixing.is_supported_fixing(core, fix) then
     devloop_logging.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
-    core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
+    devloop_logging.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   devloop_logging.log_entry("fix", event, fix.proposal_id, fix.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(fix.proposal_id)
   if entity == nil then
-    core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    devloop_logging.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
   local repo = entity.repo
@@ -647,7 +647,7 @@ local function act_fix(event)
 
   local lock_key = entity_lib.transition_lock_key(fix.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "no transition lock key")
+    devloop_logging.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 
@@ -664,25 +664,25 @@ local function act_fix(event)
     core.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
     local reviewing_version = core.next_fix_version(fix.version)
     if core.has_state_marker(current_pr.comments, fix.proposal_id, "reviewing", reviewing_version) then
-      core.log_cas_decision("fix", fix.proposal_id, { state = "reviewing", version = reviewing_version }, "fixing", "reviewing", "skip-idempotent(already at to_state)", "reviewing state marker for fix already visible")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, { state = "reviewing", version = reviewing_version }, "fixing", "reviewing", "skip-idempotent(already at to_state)", "reviewing state marker for fix already visible")
       return
     end
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, fix.proposal_id)
     local transition = core.cyclic_transition_status(state, { "fixing" }, "reviewing", fix.version, reviewing_version)
     if transition == "pending" then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")
       error("github-devloop: fixing state marker not yet visible for fix; retrying")
     end
     if transition == "idempotent" then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "reviewing state marker for fix already visible")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "reviewing state marker for fix already visible")
       return
     end
     if state.state ~= "fixing" or transition == "stale" then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "issue is not currently fixing")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", core.cas_outcome(state, transition, fix.version), "issue is not currently fixing")
       return
     end
     if tostring(state.version or "") ~= tostring(fix.version) then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(version-mismatch)", "fix event version does not match canonical issue marker")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(version-mismatch)", "fix event version does not match canonical issue marker")
       return
     end
     local reject_fact = m_facts.review_reject_fact(core, current_pr.comments, fix.proposal_id, fix.version)
@@ -704,7 +704,7 @@ local function act_fix(event)
       end
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
       error("github-devloop: fix feedback marker not visible for fix; retrying")
     end
     local feedback_reason = nil
@@ -712,13 +712,13 @@ local function act_fix(event)
       if reject_fact.review_proposal_id ~= fix.review_proposal_id
         or reject_fact.review_dedup_key ~= fix.review_dedup_key
         or reject_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
-        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-fact-mismatch)", "fix event does not match canonical reject review marker")
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-fact-mismatch)", "fix event does not match canonical reject review marker")
         return
       end
       feedback_reason = reject_fact.review_reason
     elseif meta_fix_fact ~= nil then
       if meta_fix_fact.review_dedup_key ~= fix.review_dedup_key then
-        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-meta-fact-mismatch)", "fix event does not match canonical review-meta fix marker")
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-meta-fact-mismatch)", "fix event does not match canonical review-meta fix marker")
         return
       end
       feedback_reason = meta_fix_fact.review_reason
@@ -726,11 +726,11 @@ local function act_fix(event)
       if merge_gate_fact.review_proposal_id ~= fix.review_proposal_id
         or merge_gate_fact.review_dedup_key ~= fix.review_dedup_key
         or merge_gate_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
-        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
         return
       end
       if merge_gate_fact.gate_baseline_sha ~= fix.gate_baseline_sha then
-        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
         return
       end
       feedback_reason = merge_gate_fact.review_reason
@@ -745,22 +745,22 @@ local function act_fix(event)
       or tostring(origin.base_branch) ~= tostring(branches.integration)
       or tostring(current_pr.base_ref_name or "") ~= tostring(origin.base_branch)
       or tostring(current_pr.head_ref_name or "") ~= tostring(origin.branch) then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-foreign(pr-origin)", "PR origin/link does not match immutable PR branch")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-foreign(pr-origin)", "PR origin/link does not match immutable PR branch")
       return
     end
     local branch = origin.branch
     if tostring(current_pr.state or ""):lower() ~= "open" then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
       return
     end
     if not require("forge.merge.shared").is_same_repo_pr_head(current_pr, repo) then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(head-repository)", "PR head repository is missing or not the target repository")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(head-repository)", "PR head repository is missing or not the target repository")
       error("github-devloop: PR head repository is missing or not the target repository")
     end
     if tostring(current_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha) then
       local branch_head = core.git_branch_head(branch, 30)
       if branch_head.exit_code ~= 0 then
-        core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
         error("github-devloop: PR head changed before fix marker and deterministic branch head is not readable")
       end
       local intended_head_sha = tostring(branch_head.stdout or ""):gsub("%s+$", "")
@@ -772,7 +772,7 @@ local function act_fix(event)
         raise_reviewing(repo, issue_number, fix, fix.reviewed_head_sha, intended_head_sha, "push already visible; self-healing missing reviewing marker")
         return
       end
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(head-advanced)", "PR head changed since rejected review")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(head-advanced)", "PR head changed since rejected review")
       return
     end
 
@@ -794,7 +794,7 @@ local function act_fix(event)
     end
 
     if merge_gate_fact ~= nil and tostring(merge_gate_fact.predecessor_set or "") ~= tostring(fix.predecessor_set or "") then
-      core.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(predecessor-marker-mismatch)", "fix event does not match canonical merge-gate predecessor set")
+      devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(predecessor-marker-mismatch)", "fix event does not match canonical merge-gate predecessor set")
       return
     end
 
@@ -820,7 +820,7 @@ local function act_fix(event)
   with_lock(lock_key, function()
     pre_spawn_gate_ok = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
     if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup(core, "fix", fix.proposal_id, fix.version) then
-      core.log_cas_decision(
+      devloop_logging.log_cas_decision(
         "fix",
         fix.proposal_id,
         { state = "fixing", version = fix.version, stage_rank = core.stage_rank("fixing") },

@@ -100,7 +100,7 @@ local function act(event)
   local repo = require_repo(cfg.repo)
 
   if branches.integration == branches.upstream then
-    core.log_cas_decision("rollup_scan", "rollup", { state = "same-branch", version = branches.upstream }, "tick", "rollup", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
+    devloop_logging.log_cas_decision("rollup_scan", "rollup", { state = "same-branch", version = branches.upstream }, "tick", "rollup", "skip-idempotent(same-branch)", "integration branch equals upstream branch")
     return
   end
 
@@ -108,11 +108,11 @@ local function act(event)
     git_mechanics.fetch_branches(core.git, repo, { branches.upstream, branches.integration }, "rollup fetch")
     local ahead = ahead_count(branches.upstream, branches.integration)
     if ahead == 0 then
-      core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(not-ahead)", "integration is not ahead of upstream")
+      devloop_logging.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(not-ahead)", "integration is not ahead of upstream")
       return
     end
     if not has_content_diff(branches.upstream, branches.integration) then
-      core.log_cas_decision("rollup_scan", "rollup", { state = "empty-diff", version = branches.integration }, "tick", "rollup", "skip-idempotent(empty-diff)", "integration has no content diff from upstream")
+      devloop_logging.log_cas_decision("rollup_scan", "rollup", { state = "empty-diff", version = branches.integration }, "tick", "rollup", "skip-idempotent(empty-diff)", "integration has no content diff from upstream")
       return
     end
 
@@ -120,7 +120,7 @@ local function act(event)
     local pr = list_open_pr(repo, branches.integration, branches.upstream)
     if pr == nil then
       if cfg.write_mode ~= "real" then
-        core.log_line("info", "rollup_scan", "rollup", "OUTBOUND", {
+        devloop_logging.log_line("info", "rollup_scan", "rollup", "OUTBOUND", {
           "mode=dry-run",
           "repo=" .. repo,
           "upstream=" .. branches.upstream,
@@ -139,7 +139,7 @@ local function act(event)
         core.release_notes_publish_policy(cfg)
       )
       if not created then
-        core.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(no-commits-between)", "GitHub reports no commits between upstream and integration")
+        devloop_logging.log_cas_decision("rollup_scan", "rollup", { state = "not-ahead", version = branches.integration }, "tick", "rollup", "skip-idempotent(no-commits-between)", "GitHub reports no commits between upstream and integration")
         return
       end
       pr = list_open_pr(repo, branches.integration, branches.upstream)
@@ -158,7 +158,7 @@ local function act(event)
       core.rollup_red_window_minutes()
     )
     if cfg.rollup_merge == "manual" then
-      core.log_line("info", "rollup_scan", "rollup", "POSTURE", {
+      devloop_logging.log_line("info", "rollup_scan", "rollup", "POSTURE", {
         "posture=manual",
         "repo=" .. repo,
         "pr=" .. tostring(pr.number),
@@ -168,7 +168,7 @@ local function act(event)
     end
 
     local payload = core.rollup_ready_payload(repo, branches.upstream, branches.integration, pr.number, integration_head)
-    core.log_raise("rollup_scan", "rollup", "devloop_rollup_ready", payload)
+    devloop_logging.log_raise("rollup_scan", "rollup", "devloop_rollup_ready", payload)
   end)
 end
 

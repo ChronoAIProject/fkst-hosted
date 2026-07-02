@@ -4,6 +4,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local C = {}
 local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
+local devloop_logging = require("devloop.logging")
 
 local function visible_true_stall(M, issue, state, facts)
     local current = facts and facts.current or issue
@@ -48,7 +49,7 @@ function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_
     local comment_request = M.build_reconcile_comment_request(issue.repo, issue.number, reconcile, action, reason, version)
     local label_request = M.build_reconcile_label_request(issue.repo, issue.number, reconcile)
     local add_labels, remove_labels = M.state_label_changes("blocked")
-    M.log_cas_decision(dept, proposal_id, state, "thinking", "blocked", M.cas_outcome(state, transition, version), reason)
+    devloop_logging.log_cas_decision(dept, proposal_id, state, "thinking", "blocked", M.cas_outcome(state, transition, version), reason)
     return raise_effects(dept, proposal_id, "blocked", version, { add = add_labels, remove = remove_labels }, {
       { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
       { queue = "github-proxy.github_issue_label_request", payload = label_request },

@@ -14,6 +14,7 @@ local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local devloop_logging = require("devloop.logging")
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -26,7 +27,7 @@ local function log_skip(dept, proposal_id, state, from_state, to_state, outcome,
 end
 
 local function raise_effects(dept, proposal_id, apply_state, version, label_changes, effects)
-  return replay_fields.replay_raise_effects(M.log_apply, M.log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
+  return replay_fields.replay_raise_effects(devloop_logging.log_apply, devloop_logging.log_raise, dept, proposal_id, apply_state, version, label_changes, effects)
 end
 
 local function next_reimplementation_version(version)
@@ -200,7 +201,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
   )
   local add_labels, remove_labels = M.state_label_changes(next_state.to_state)
-  M.log_cas_decision(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "applied(" .. next_state.reason .. ")", "delegated child terminal fact matched parent delegation")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "applied(" .. next_state.reason .. ")", "delegated child terminal fact matched parent delegation")
   local effects = {
     { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
     { queue = "github-proxy.github_issue_label_request", payload = label_request },

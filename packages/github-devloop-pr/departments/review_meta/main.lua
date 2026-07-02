@@ -26,14 +26,14 @@ return saga.department(spec, { done = function() return false end, act = functio
   local review_meta = event.payload or {}
   if not v_review_meta.is_supported_review_meta(core, review_meta) then
     devloop_logging.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
-    core.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
+    devloop_logging.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
   devloop_logging.log_entry("review_meta", event, review_meta.proposal_id, review_meta.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(review_meta.proposal_id)
   if entity == nil then
-    core.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
+    devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
     return
   end
   local repo = entity.repo
@@ -44,7 +44,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
   local lock_key = entity_lib.transition_lock_key(review_meta.proposal_id)
   if lock_key == nil then
-    core.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "no transition lock key")
+    devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "no transition lock key")
     return
   end
 
@@ -76,23 +76,23 @@ return saga.department(spec, { done = function() return false end, act = functio
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, review_meta.proposal_id)
     local transition = core.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
-      core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
       error("github-devloop: review-meta state marker not yet visible; retrying")
     end
     if state.state ~= "review-meta" or transition == "stale" then
-      core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", core.cas_outcome(state, transition, review_meta.version), "current marker is no longer review-meta")
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", core.cas_outcome(state, transition, review_meta.version), "current marker is no longer review-meta")
       return
     end
     if tostring(state.version or "") ~= tostring(review_meta.version) then
-      core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-stale(version-mismatch)", "review-meta event version does not match canonical issue marker")
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-stale(version-mismatch)", "review-meta event version does not match canonical issue marker")
       return
     end
     if m_facts.has_review_meta_marker(core, current_pr.comments, review_meta.proposal_id, review_meta.dedup_key) then
-      core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-idempotent(review-meta marker already visible)", "review-meta result marker for incoming version is already visible")
+      devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-idempotent(review-meta marker already visible)", "review-meta result marker for incoming version is already visible")
       return
     end
 
-    core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
+    devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
     local codex_started_at = now()
     devloop_logging.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
     local content_fetch = context_bundle.context_fetch_from_bundle(core, {
@@ -171,10 +171,10 @@ return saga.department(spec, { done = function() return false end, act = functio
     if label_request ~= nil then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
-    core.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
-    core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+    devloop_logging.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
+    devloop_logging.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     if label_request ~= nil then
-      core.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
+      devloop_logging.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
     end
   end)
 end, wrap = core.wrap_pipeline_failure, name = "review_meta" })

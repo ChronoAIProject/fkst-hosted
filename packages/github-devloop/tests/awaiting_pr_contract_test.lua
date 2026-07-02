@@ -2,6 +2,7 @@ local entity_lib = require("devloop.entity")
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local contract_time = require("contract.time")
+local devloop_logging = require("devloop.logging")
 local t = h.t
 
 local function has_value(values, expected)
@@ -65,8 +66,8 @@ return {
       marker_created_at = "2026-06-03T01:02:03Z",
     }
     local raised = {}
-    local original_log_raise = core.log_raise
-    core.log_raise = function(_, _, queue, payload)
+    local original_log_raise = devloop_logging.log_raise
+    devloop_logging.log_raise = function(_, _, queue, payload)
       table.insert(raised, { queue = queue, payload = payload })
     end
     local ok, err = pcall(function()
@@ -83,7 +84,7 @@ return {
       })
       t.eq(applied, true)
     end)
-    core.log_raise = original_log_raise
+    devloop_logging.log_raise = original_log_raise
     if not ok then
       error(err)
     end

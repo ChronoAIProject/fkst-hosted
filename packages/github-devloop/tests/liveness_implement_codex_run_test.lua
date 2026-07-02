@@ -7,6 +7,7 @@ local t = h.t
 local core = h.core
 local ready = h.ready
 local replay_fields = require("devloop.replay_fields")
+local devloop_logging = require("devloop.logging")
 
 local repo = "owner/repo"
 
@@ -54,12 +55,12 @@ end
 
 local function capture_raises(fn)
   local raised = {}
-  local original = core.log_raise
-  core.log_raise = function(_, _, queue, payload)
+  local original = devloop_logging.log_raise
+  devloop_logging.log_raise = function(_, _, queue, payload)
     table.insert(raised, { queue = queue, payload = payload })
   end
   local ok, err = pcall(fn)
-  core.log_raise = original
+  devloop_logging.log_raise = original
   if not ok then
     error(err)
   end

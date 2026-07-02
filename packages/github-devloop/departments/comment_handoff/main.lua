@@ -70,8 +70,8 @@ local function act_handoff(event)
       include_ready_hand_off = true,
       ready_comment_id = payload.comment_id,
     })
-    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "ready", version = ready.dedup_key }, "comment-written", "devloop_ready", "applied(own-write-comment-id)", "ready marker comment write was acknowledged")
-    core.log_raise("comment_handoff", handoff.proposal_id, "devloop_ready", ready)
+    devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "ready", version = ready.dedup_key }, "comment-written", "devloop_ready", "applied(own-write-comment-id)", "ready marker comment write was acknowledged")
+    devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_ready", ready)
     return
   end
 
@@ -80,8 +80,8 @@ local function act_handoff(event)
       proposal_id = handoff.proposal_id,
       source_ref = handoff.source_ref,
     }, handoff.round, handoff.base_version)
-    core.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "thinking", version = handoff.base_version }, "comment-written", "devloop_reconcile", "applied(own-write-comment-id)", "converge round comment write was acknowledged")
-    core.log_raise("comment_handoff", handoff.proposal_id, "devloop_reconcile", reconcile)
+    devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = "thinking", version = handoff.base_version }, "comment-written", "devloop_reconcile", "applied(own-write-comment-id)", "converge round comment write was acknowledged")
+    devloop_logging.log_raise("comment_handoff", handoff.proposal_id, "devloop_reconcile", reconcile)
     return
   end
 

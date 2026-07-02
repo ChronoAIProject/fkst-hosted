@@ -5,6 +5,7 @@ local requests_review = require("devloop.requests.review")
 local m_facts = require("devloop.markers.facts")
 local S = {}
 local github_risk = require("devloop.github_risk")
+local devloop_logging = require("devloop.logging")
 
 function S.install(M)
 local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version, comments, current_head_sha)
@@ -102,11 +103,11 @@ function M.raise_review_carry_over(dept, repo, pr_number, issue_proposal_id, ver
   end
   local source_ref = entity_lib.pr_source_ref(repo, pr_number)
   local comment_request = requests_review.build_review_carry_over_comment_request(M, repo, pr_number, issue_proposal_id, version, carry, source_ref)
-  M.log_cas_decision(dept, issue_proposal_id, current_state, "merge-ready", "merge-ready", "applied(review-carry-over)", "approved head is ancestor and resolution delta is empty")
-  M.log_apply(dept, issue_proposal_id, "merge-ready", version, { add = {}, remove = {} }, {
+  devloop_logging.log_cas_decision(dept, issue_proposal_id, current_state, "merge-ready", "merge-ready", "applied(review-carry-over)", "approved head is ancestor and resolution delta is empty")
+  devloop_logging.log_apply(dept, issue_proposal_id, "merge-ready", version, { add = {}, remove = {} }, {
     "github-proxy.github_pr_comment_request",
   })
-  M.log_raise(dept, issue_proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  devloop_logging.log_raise(dept, issue_proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   return comment_request, "review-carry-over"
 end
 end

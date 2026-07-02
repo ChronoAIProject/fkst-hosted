@@ -25,7 +25,7 @@ local function cleanup_worktree(worktree)
   end
   local result = core.git.worktree_remove(worktree, 60)
   if result.exit_code ~= 0 then
-    core.log_line("warn", "sync_conflict", "branch-sync", "CLEANUP", {
+    devloop_logging.log_line("warn", "sync_conflict", "branch-sync", "CLEANUP", {
       "worktree=" .. tostring(worktree),
       "reason=" .. error_facts.one_line(result.stderr or ""),
     })
@@ -71,7 +71,7 @@ local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, re
     reason,
     unmerged_stdout
   )
-  core.log_raise("sync_conflict", "branch-sync", "github-proxy.github_issue_create_request", request)
+  devloop_logging.log_raise("sync_conflict", "branch-sync", "github-proxy.github_issue_create_request", request)
   devloop_logging.log_error_fact("error", "sync_conflict", "branch-sync", "SYNC_CONFLICT_TERMINAL", "sync-conflict-unresolved", "devloop_sync_conflict", reason, {
     source_ref = conflict.source_ref,
     attempt = attempt,
@@ -107,7 +107,7 @@ end
 
 local function push_if_real(conflict, worktree)
   if config.write_mode(core) ~= "real" then
-    core.log_line("info", "sync_conflict", "branch-sync", "OUTBOUND", {
+    devloop_logging.log_line("info", "sync_conflict", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(conflict.repo),
       "upstream=" .. tostring(conflict.upstream_branch),
@@ -123,7 +123,7 @@ local function push_if_real(conflict, worktree)
   git_mechanics.fetch_branches(core.git, conflict.repo, { conflict.integration_branch }, "branch fetch")
   local rechecked_integration_sha = git_mechanics.remote_head(core.git, conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if rechecked_integration_sha ~= conflict.integration_sha then
-    core.log_cas_decision("sync_conflict", "branch-sync", {
+    devloop_logging.log_cas_decision("sync_conflict", "branch-sync", {
       state = "integration",
       version = rechecked_integration_sha,
     }, "resolved", "push", "skip-foreign(head)", "integration head changed before resolved push")
@@ -140,7 +140,7 @@ local function push_if_real(conflict, worktree)
   if pushed_head ~= merge_head then
     error("github-devloop: resolved branch sync push verification failed")
   end
-  core.log_apply("sync_conflict", "branch-sync", "synced", conflict.upstream_sha, {}, {})
+  devloop_logging.log_apply("sync_conflict", "branch-sync", "synced", conflict.upstream_sha, {}, {})
 end
 
 local function done(_event)
@@ -151,7 +151,7 @@ local function act(event)
   local conflict = event.payload or {}
   if not core.is_supported_sync_conflict(conflict) then
     devloop_logging.log_entry("sync_conflict", event, "branch-sync", core.payload_field(conflict, "dedup_key"))
-    core.log_cas_decision("sync_conflict", "branch-sync", { state = nil, version = nil }, "conflict", "resolved", "skip-foreign(payload)", "unsupported sync conflict payload")
+    devloop_logging.log_cas_decision("sync_conflict", "branch-sync", { state = nil, version = nil }, "conflict", "resolved", "skip-foreign(payload)", "unsupported sync conflict payload")
     return
   end
   devloop_logging.log_entry("sync_conflict", event, "branch-sync", conflict.dedup_key)
@@ -161,11 +161,11 @@ local function act(event)
     local upstream_sha = git_mechanics.remote_head(core.git, conflict.upstream_branch, "remote branch head", "unsafe remote branch head")
     local integration_sha = git_mechanics.remote_head(core.git, conflict.integration_branch, "remote branch head", "unsafe remote branch head")
     if integration_sha ~= conflict.integration_sha then
-      core.log_cas_decision("sync_conflict", "branch-sync", { state = "integration", version = integration_sha }, "conflict", "resolved", "skip-stale(integration-head)", "integration head advanced after conflict event")
+      devloop_logging.log_cas_decision("sync_conflict", "branch-sync", { state = "integration", version = integration_sha }, "conflict", "resolved", "skip-stale(integration-head)", "integration head advanced after conflict event")
       return
     end
     if git_mechanics.is_ancestor(core.git, upstream_sha, integration_sha, "ancestor check") then
-      core.log_cas_decision("sync_conflict", "branch-sync", { state = "synced", version = integration_sha }, "conflict", "resolved", "skip-idempotent(upstream-ancestor)", "conflict resolved elsewhere")
+      devloop_logging.log_cas_decision("sync_conflict", "branch-sync", { state = "synced", version = integration_sha }, "conflict", "resolved", "skip-idempotent(upstream-ancestor)", "conflict resolved elsewhere")
       return
     end
 

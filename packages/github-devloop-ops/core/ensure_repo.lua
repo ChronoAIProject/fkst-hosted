@@ -10,6 +10,7 @@ function S.install(M)
 local strings = require("contract.strings")
 local dashboard = require("devloop.commands.dashboard")
 local labels = require("devloop.commands.labels")
+local devloop_logging = require("devloop.logging")
 local dashboard_title = "fkst-dev board"
 local dashboard_label = "fkst-dashboard"
 local dashboard_marker_prefix = "<!-- fkst:dashboard:v1"
@@ -86,7 +87,7 @@ local function log_ensure(item, action, fields)
   for _, field in ipairs(fields or {}) do
     table.insert(parts, tostring(field))
   end
-  M.log_line("info", "ensure_repo", "repo-management-plane", "ENSURE", parts)
+  devloop_logging.log_line("info", "ensure_repo", "repo-management-plane", "ENSURE", parts)
 end
 
 local function dashboard_anchor_body()

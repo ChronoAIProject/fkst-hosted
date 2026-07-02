@@ -3,6 +3,7 @@ local core = require("core")
 local dead_letter = require("workflow.dead_letter")
 local error_facts = require("contract.error_facts")
 local saga = require("workflow.saga")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "dead_letter" },
@@ -30,7 +31,7 @@ local function act_dead_letter(event)
 
   local decision = core.failure_triage_decision(payload)
   if decision.action == "raise" then
-    core.log_raise("failure_triage", decision.fact.fingerprint, "github-proxy.github_issue_create_request", decision.request)
+    devloop_logging.log_raise("failure_triage", decision.fact.fingerprint, "github-proxy.github_issue_create_request", decision.request)
   else
     log.info(
       "github-devloop dept=failure_triage tag=TRIAGE"

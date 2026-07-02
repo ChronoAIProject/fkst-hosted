@@ -55,7 +55,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   local origin = m_facts.pr_origin_fact(core, current.comments)
   local proposal_id = origin and origin.proposal_id or entity_lib.pr_proposal_id(repo, pr.number)
   if origin == nil then
-    core.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "PR has no origin marker")
+    devloop_logging.log_cas_decision("liveness_scan", proposal_id, { state = nil, version = nil }, "tick", "observe", "skip-no-state", "PR has no origin marker")
     return false
   end
   if not m_claims.verify_pr_review_issue_claim(core, "liveness_scan", origin.repo, origin.issue_number, nil, origin.proposal_id) then
@@ -107,7 +107,7 @@ local function act_liveness_scan(event)
 
   local repo = liveness_scan.liveness_scan_read_repo(core)
   if repo == nil then
-    core.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
+    devloop_logging.log_cas_decision("liveness_scan", "github-devloop/liveness-scan", { state = nil, version = nil }, "tick", "observe", "skip-invalid-repo", "FKST_GITHUB_REPO is missing or invalid")
     return
   end
 

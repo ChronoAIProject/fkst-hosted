@@ -7,6 +7,7 @@ local error_facts = require("contract.error_facts")
 local contract_time = require("contract.time")
 local config = require("devloop.config")
 local github_view = require("forge.github_view")
+local devloop_logging = require("devloop.logging")
 local forks_handle = nil
 
 local function forks()
@@ -182,7 +183,7 @@ function C.verify_issue_claim(M, repo, issue_number, owner)
 end
 
 local function log_claim(M, dept, proposal_id, action, reason)
-  M.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "claim", "claim", action, reason)
+  devloop_logging.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "claim", "claim", action, reason)
 end
 
 local function log_terminal_skip(M, dept, proposal_id, queue, source_ref, error_class, why)
@@ -191,7 +192,7 @@ local function log_terminal_skip(M, dept, proposal_id, queue, source_ref, error_
     terminal = true,
   })
   table.insert(fields, "WHY=" .. error_facts.one_line(why))
-  M.log_line("warn", dept, proposal_id, "SKIP", fields)
+  devloop_logging.log_line("warn", dept, proposal_id, "SKIP", fields)
 end
 
 local function is_assign_permission_denied(err)
@@ -328,7 +329,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
       return false
     end
     log_claim(M, dept, proposal_id, "fork-raised", "other-authored unassigned issue is forked before management")
-    M.log_raise(dept, proposal_id, "github-proxy.github_issue_create_request", request)
+    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_create_request", request)
     return false
   end
 

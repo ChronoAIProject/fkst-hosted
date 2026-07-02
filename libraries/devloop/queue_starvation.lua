@@ -9,6 +9,7 @@ local transition_version = require("contract.transition_version")
 local strings = require("contract.strings")
 local config = require("devloop.config")
 local m_mq = require("devloop.merge_queue")
+local devloop_logging = require("devloop.logging")
 
 local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
@@ -363,7 +364,7 @@ local function raise_redrive(M, redrive)
     log.info("github-devloop dept=observability tag=QUEUE_STARVATION action=no-op reason=pr-redrive-queue-unavailable")
     return
   end
-  M.log_raise("observability", detector .. "/merge-ready", queue, redrive)
+  devloop_logging.log_raise("observability", detector .. "/merge-ready", queue, redrive)
   raise(queue, redrive)
 end
 
@@ -472,7 +473,7 @@ function C.observe_queue_starvation(M, repo, entities, limits, deadline, now_sec
   end
   local snapshot = write_snapshot(M, repo, evidence.window_key, evidence)
   local request = C.build_queue_starvation_issue_create_request(M, repo, evidence, snapshot)
-  M.log_raise("observability", detector .. "/merge-ready", "github-proxy.github_issue_create_request", request)
+  devloop_logging.log_raise("observability", detector .. "/merge-ready", "github-proxy.github_issue_create_request", request)
   raise_redrive(M, redrive)
   log.info("github-devloop dept=observability tag=QUEUE_STARVATION"
     .. " action=raise"

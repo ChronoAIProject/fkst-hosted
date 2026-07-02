@@ -5,6 +5,7 @@ local decompose_lib = require("devloop.decompose")
 local replayer = require("devloop.replayer")
 local conv_rounds = require("devloop.convergence.rounds")
 local m_builders = require("devloop.markers.builders")
+local devloop_logging = require("devloop.logging")
 
 local C = {}
 
@@ -274,10 +275,10 @@ local function with_effect_capture(core, fn)
     raises = {},
     applies = {},
   }
-  local previous_decision = core.log_cas_decision
-  local previous_raise = core.log_raise
-  local previous_apply = core.log_apply
-  core.log_cas_decision = function(dept, proposal_id, state, from_state, to_state, outcome, reason)
+  local previous_decision = devloop_logging.log_cas_decision
+  local previous_raise = devloop_logging.log_raise
+  local previous_apply = devloop_logging.log_apply
+  devloop_logging.log_cas_decision = function(dept, proposal_id, state, from_state, to_state, outcome, reason)
     table.insert(events.decisions, {
       dept = dept,
       proposal_id = proposal_id,
@@ -288,7 +289,7 @@ local function with_effect_capture(core, fn)
       reason = reason,
     })
   end
-  core.log_raise = function(dept, proposal_id, queue, payload)
+  devloop_logging.log_raise = function(dept, proposal_id, queue, payload)
     table.insert(events.raises, {
       dept = dept,
       proposal_id = proposal_id,
@@ -296,7 +297,7 @@ local function with_effect_capture(core, fn)
       payload = payload,
     })
   end
-  core.log_apply = function(dept, proposal_id, apply_state, version, label_changes, queues)
+  devloop_logging.log_apply = function(dept, proposal_id, apply_state, version, label_changes, queues)
     table.insert(events.applies, {
       dept = dept,
       proposal_id = proposal_id,
@@ -307,9 +308,9 @@ local function with_effect_capture(core, fn)
     })
   end
   local ok, result = pcall(fn)
-  core.log_cas_decision = previous_decision
-  core.log_raise = previous_raise
-  core.log_apply = previous_apply
+  devloop_logging.log_cas_decision = previous_decision
+  devloop_logging.log_raise = previous_raise
+  devloop_logging.log_apply = previous_apply
   if not ok then
     error(result)
   end

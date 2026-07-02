@@ -11,6 +11,7 @@ local comment_strings = require("devloop.strings")
 local labels = require("devloop.requests.labels")
 local shared = require("devloop.requests.shared")
 local m_builders = require("devloop.markers.builders")
+local devloop_logging = require("devloop.logging")
 
 local ai_sentinel = shared.ai_sentinel
 
@@ -373,7 +374,7 @@ function C.raise_fix_reviewing(M, opts)
     fix.fix_summary = opts.fix_summary
   end
 
-  M.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", "applied", reason)
+  devloop_logging.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", "applied", reason)
   local comment_request = C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
   local label_request = labels.build_fix_reviewing_label_request(M, repo, issue_number, fix, new_head_sha, new_version)
   local add_labels, remove_labels = M.state_label_changes("reviewing")
@@ -383,10 +384,10 @@ function C.raise_fix_reviewing(M, opts)
   if issue_number ~= nil then
     table.insert(raised, "github-proxy.github_issue_label_request")
   end
-  M.log_apply(dept, fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, raised)
-  M.log_raise(dept, fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  devloop_logging.log_apply(dept, fix.proposal_id, "reviewing", new_version, { add = add_labels, remove = remove_labels }, raised)
+  devloop_logging.log_raise(dept, fix.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
   if issue_number ~= nil then
-    M.log_raise(dept, fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
+    devloop_logging.log_raise(dept, fix.proposal_id, "github-proxy.github_issue_label_request", label_request)
   end
 end
 

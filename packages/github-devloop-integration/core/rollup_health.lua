@@ -9,6 +9,7 @@ local config = require("devloop.config")
 
 function S.install(M)
 local strings = require("contract.strings")
+local devloop_logging = require("devloop.logging")
 local detector = "rollup-health"
 local default_red_window_minutes = 30
 
@@ -225,7 +226,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
   }
   local snapshot = write_snapshot(repo, evidence)
   local request = M.build_rollup_health_issue_create_request(repo, evidence, snapshot)
-  M.log_raise("rollup_scan", detector .. "/" .. tostring(pr and pr.number or "unknown"), "github-proxy.github_issue_create_request", request)
+  devloop_logging.log_raise("rollup_scan", detector .. "/" .. tostring(pr and pr.number or "unknown"), "github-proxy.github_issue_create_request", request)
   log.info("github-devloop dept=rollup_scan tag=ROLLUP_HEALTH"
     .. " action=raise"
     .. " pr=" .. tostring(pr and pr.number or "")

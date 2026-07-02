@@ -26,6 +26,7 @@ local mock_bot_env = h.mock_bot_env
 local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
+local devloop_logging = require("devloop.logging")
 
 local repo = "owner/repo"
 local proposal_id = "github-devloop/issue/owner/repo/42"
@@ -213,12 +214,12 @@ end
 
 local function capture_raises(fn)
   local raised = {}
-  local original = core.log_raise
-  core.log_raise = function(_, _, queue, payload)
+  local original = devloop_logging.log_raise
+  devloop_logging.log_raise = function(_, _, queue, payload)
     table.insert(raised, { queue = queue, payload = payload })
   end
   local ok, err = pcall(fn)
-  core.log_raise = original
+  devloop_logging.log_raise = original
   if not ok then
     error(err)
   end
