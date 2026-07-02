@@ -41,6 +41,7 @@ const HELPER_SCRIPT_MODE: u32 = 0o700;
 pub const CREDENTIAL_HELPER_SCRIPT: &str = include_str!("git-credential-fkst.sh");
 
 /// One `GIT_CONFIG` key/value entry to inject on the substrate child.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitConfigEntry {
     pub key: String,
     pub value: String,

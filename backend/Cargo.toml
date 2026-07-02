@@ -18,7 +18,7 @@ axum = "0.7"
 # 0.1 targets axum 0.7 (0.2+ moved to axum 0.8); both track utoipa 5.
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "io-std", "fs"] }
 tokio-util = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "request-id", "util"] }
