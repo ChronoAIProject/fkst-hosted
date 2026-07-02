@@ -30,7 +30,7 @@ use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
 
-use super::SUBSTRATE_INVALID_LABEL;
+use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
 
 /// Reconcile ONE repository against its open trigger issues + live pods.
 pub async fn reconcile_repo(
@@ -71,9 +71,13 @@ pub async fn reconcile_repo(
     let mut regs = Vec::new();
     let mut invalid: Vec<(i64, String)> = Vec::new();
     let mut latched_invalid: HashSet<i64> = HashSet::new();
+    let mut latched_announced: HashSet<i64> = HashSet::new();
     for issue in &issues {
         if issue.labels.iter().any(|l| l == SUBSTRATE_INVALID_LABEL) {
             latched_invalid.insert(issue.number);
+        }
+        if issue.labels.iter().any(|l| l == SUBSTRATE_ANNOUNCED_LABEL) {
+            latched_announced.insert(issue.number);
         }
         match parse_registration(installation_id, repo, issue) {
             Ok(reg) => regs.push(reg),
@@ -117,6 +121,7 @@ pub async fn reconcile_repo(
         &live,
         &pending,
         &latched_invalid,
+        &latched_announced,
         Utc::now(),
         cfg,
     );

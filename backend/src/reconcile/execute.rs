@@ -31,10 +31,11 @@ use crate::k8s::{
     session_object_name, KubeClient, SessionPodOutcome, SessionPodSpec,
 };
 use crate::models::RepoRef;
+use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
 use crate::reconcile::reachability;
 
-use super::SUBSTRATE_INVALID_LABEL;
+use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
 
 /// The `validation-status` annotation value a fully-written environment carries;
 /// only a `ready` environment is injected into a session (mirrors Model A).
@@ -93,6 +94,23 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         }
         ReconcileAction::ClearInvalid { trigger_issue } => {
             clear_invalid(&ctx.github, &owner_repo, trigger_issue).await
+        }
+        ReconcileAction::AnnounceSession {
+            trigger_issue,
+            session_name,
+            work_label,
+            packages,
+            environment,
+            auto_merge,
+        } => {
+            let comment = announce_session_comment(
+                &session_name,
+                &work_label,
+                &packages,
+                environment.as_deref(),
+                auto_merge,
+            );
+            announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
         }
     }
 }
@@ -309,6 +327,25 @@ async fn flag_invalid(github: &GithubAppTokens, owner_repo: &str, issue: i64, co
         .await
     {
         tracing::warn!(owner_repo = %owner_repo, issue, error = %error, "reconcile: latch invalid label failed");
+    }
+}
+
+/// Announce a freshly-registered session: post `comment`, then latch the durable
+/// announced label. Both are best-effort + idempotent (the label add is additive;
+/// the planner emits this only on the FIRST observation of a not-yet-announced valid
+/// registration). Mirrors [`flag_invalid`], minus any clear path (announcements are
+/// never un-latched — see [`SUBSTRATE_ANNOUNCED_LABEL`]).
+async fn announce_session(github: &GithubAppTokens, owner_repo: &str, issue: i64, comment: &str) {
+    post_comment_best_effort(github, owner_repo, issue, comment).await;
+    if let Err(error) = github
+        .add_issue_labels(
+            owner_repo,
+            issue as u64,
+            &[SUBSTRATE_ANNOUNCED_LABEL.to_string()],
+        )
+        .await
+    {
+        tracing::warn!(owner_repo = %owner_repo, issue, error = %error, "reconcile: latch announced label failed");
     }
 }
 
