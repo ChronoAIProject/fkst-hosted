@@ -391,7 +391,7 @@ function M.ensure_repo()
   local claim_label_result = nil
   if config.claim_mode() == "label" then
     claim_label_result = ensure_label(repo, apply_mode, repo_labels, {
-      name = m_claims.claimed_label(M),
+      name = m_claims.claimed_label(),
       color = "0E8A16",
       description = "fkst-dev-label-mode-ownership-claim",
     })

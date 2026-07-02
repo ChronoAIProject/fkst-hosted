@@ -36,7 +36,7 @@ end
 
 local function files_disjoint_from_window(M, files, merged_files)
   for _, merged in ipairs(merged_files or {}) do
-    local disjoint, path = m_mq.merge_queue_files_disjoint(M, files, merged)
+    local disjoint, path = m_mq.merge_queue_files_disjoint(files, merged)
     if not disjoint then
       return false, path, merged.pr_number
     end

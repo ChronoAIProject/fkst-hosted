@@ -581,15 +581,15 @@ return {
   end,
 
   test_task_class_uses_explicit_label_before_title_fallback = function()
-    t.eq(autonomy_ledger.autonomy_task_class(core, {
+    t.eq(autonomy_ledger.autonomy_task_class({
       title = "fix scheduler regression",
       labels = { "fkst-avm:L4" },
     }), "L4")
-    t.eq(autonomy_ledger.autonomy_task_class(core, {
+    t.eq(autonomy_ledger.autonomy_task_class({
       title = "docs: update readme",
       labels = {},
     }), "L0")
-    t.eq(autonomy_ledger.autonomy_task_class(core, {
+    t.eq(autonomy_ledger.autonomy_task_class({
       title = "Add useful thing",
       labels = {},
     }), "unknown")

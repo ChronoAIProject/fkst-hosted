@@ -157,7 +157,7 @@ end
 
 return {
   test_fork_grace_elapsed_uses_created_at_and_clamps_future_age = function()
-    local elapsed, reason, age = m_claims.fork_grace_elapsed(core, "owner/repo", 42, {
+    local elapsed, reason, age = m_claims.fork_grace_elapsed("owner/repo", 42, {
       created_at = "2026-06-03T00:00:00Z",
       updated_at = "2026-06-03T23:59:00Z",
     }, 1782835200, 3 * 60 * 60)
@@ -165,7 +165,7 @@ return {
     t.eq(reason, "fork-grace-elapsed")
     t.is_true(age >= 3 * 60 * 60)
 
-    elapsed, reason, age = m_claims.fork_grace_elapsed(core, "owner/repo", 42, {
+    elapsed, reason, age = m_claims.fork_grace_elapsed("owner/repo", 42, {
       created_at = "2999-01-01T00:00:00Z",
       updated_at = "2026-06-03T01:02:03Z",
     }, 1782835200, 3 * 60 * 60)
@@ -173,7 +173,7 @@ return {
     t.eq(reason, "fork-grace-pending")
     t.eq(age, 0)
 
-    elapsed, reason, age = m_claims.fork_grace_elapsed(core, "owner/repo", 42, {
+    elapsed, reason, age = m_claims.fork_grace_elapsed("owner/repo", 42, {
       updated_at = "2026-06-03T01:02:03Z",
     }, 1782835200, 3 * 60 * 60)
     t.eq(elapsed, false)

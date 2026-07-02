@@ -85,7 +85,7 @@ local function ownership_json(logins, author_login, labels)
     .. '"},"labels":[' .. table.concat(rendered_labels, ",") .. "]}\n"
 end
 
-local claimed_label = m_claims.claimed_label(core)
+local claimed_label = m_claims.claimed_label()
 
 return {
   -- (a) [bot] normalization on BOTH sides of the author-vs-bot comparison.

@@ -343,7 +343,7 @@ function C.queue_starvation_redrive_payload(M, repo, evidence)
   if type(head) ~= "table" or head.pr_number == nil then
     return nil
   end
-  return m_mq.merge_queue_starvation_tick_payload(M, repo, evidence.incident_identity, {
+  return m_mq.merge_queue_starvation_tick_payload(repo, evidence.incident_identity, {
     pr_number = head.pr_number,
     proposal_id = head.proposal_id,
     version = head.state and head.state.version or nil,
@@ -368,7 +368,7 @@ local function raise_redrive(M, redrive)
   raise(queue, redrive)
 end
 
-function C.queue_starvation_dedup_key(M, repo, identity)
+function C.queue_starvation_dedup_key(repo, identity)
   return base_ids.dedup_key({
     detector,
     tostring(repo or ""),
@@ -416,7 +416,7 @@ function C.build_queue_starvation_issue_create_request(M, repo, evidence, snapsh
     title = alert_title(evidence.queue_head),
     body = alert_body(M, evidence, snapshot),
     labels = json.decode("[]"),
-    dedup_key = C.queue_starvation_dedup_key(M, repo, identity),
+    dedup_key = C.queue_starvation_dedup_key(repo, identity),
     parent_comment_target = {
       repo = repo,
       issue_number = tostring(evidence.queue_head.issue_number),

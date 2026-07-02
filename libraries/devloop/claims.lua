@@ -102,7 +102,7 @@ end
 
 local claimed_label = "fkst-dev:claimed"
 
-function C.claimed_label(M)
+function C.claimed_label()
   return claimed_label
 end
 
@@ -239,7 +239,7 @@ function C.verify_pr_review_issue_claim(M, dept, repo, issue_number, current_iss
   return false
 end
 
-function C.fork_grace_seconds(M, exec)
+function C.fork_grace_seconds(exec)
   local raw = devloop_base.read_env("FKST_DEVLOOP_FORK_GRACE_HOURS", exec)
   raw = strings.trim(raw or "")
   if raw == "" then
@@ -252,7 +252,7 @@ function C.fork_grace_seconds(M, exec)
   return math.floor(hours * 60 * 60)
 end
 
-function C.fork_grace_elapsed(M, repo, issue_number, current, now_seconds, grace_seconds)
+function C.fork_grace_elapsed(repo, issue_number, current, now_seconds, grace_seconds)
   local current_seconds = tonumber(now_seconds)
   local grace = tonumber(grace_seconds)
   if current_seconds == nil or grace == nil then
@@ -308,8 +308,8 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
       log_claim(M, dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
-    local grace_seconds = C.fork_grace_seconds(M)
-    local elapsed, grace_reason, age_seconds = C.fork_grace_elapsed(M, repo, issue_number, current, now(), grace_seconds)
+    local grace_seconds = C.fork_grace_seconds()
+    local elapsed, grace_reason, age_seconds = C.fork_grace_elapsed(repo, issue_number, current, now(), grace_seconds)
     if not elapsed then
       local reason = "other-authored unassigned issue is inside fork grace window"
         .. " reason=" .. tostring(grace_reason)

@@ -367,7 +367,7 @@ return {
     local source_ref = entity_lib.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
-    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(row, {
       state = "merge-ready",
       version = timeout_version,
     }, proposal_id, source_ref, 3)
@@ -391,7 +391,7 @@ return {
     local source_ref = entity_lib.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
-    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(row, {
       state = "merge-ready",
       version = timeout_version,
     }, proposal_id, source_ref, 3)
@@ -414,7 +414,7 @@ return {
     local source_ref = entity_lib.pr_source_ref(repo, 7)
     local wait_age_minutes = 391
     local now_seconds = timeout_reconcile_age_clock()
-    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core, row, {
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(row, {
       state = "merge-ready",
       version = timeout_version,
     }, proposal_id, source_ref, 3)

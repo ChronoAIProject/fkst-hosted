@@ -351,7 +351,7 @@ function C.merge_queue_allows_event(M, repo, base_branch, merge_ready, current_p
   return true, "merge-queue-head"
 end
 
-function C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry)
+function C.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry)
   if type(next_entry) ~= "table" then
     error("github-devloop: invalid merge queue next entry")
   end
@@ -373,7 +373,7 @@ function C.merge_queue_tick_payload(M, repo, merged_pr_number, next_entry)
   end
   return {
     schema = "github-devloop.merge-queue-tick.v1",
-    dedup_key = C.merge_queue_tick_dedup_key(M, repo, merged_pr_number, next_entry),
+    dedup_key = C.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry),
     source_ref = entity_lib.pr_source_ref(repo, next_entry.pr_number),
     cause = {
       kind = "merge-progress",
@@ -384,7 +384,7 @@ function C.merge_queue_tick_payload(M, repo, merged_pr_number, next_entry)
   }
 end
 
-function C.merge_queue_starvation_tick_payload(M, repo, incident_identity, head_entry, attempt_key)
+function C.merge_queue_starvation_tick_payload(repo, incident_identity, head_entry, attempt_key)
   if type(head_entry) ~= "table" then
     return nil
   end
@@ -468,7 +468,7 @@ function C.merge_queue_changed_files(M, repo, entry)
   }, "changed-files-ok"
 end
 
-function C.merge_queue_files_disjoint(M, left, right)
+function C.merge_queue_files_disjoint(left, right)
   local path = intersecting_path(left and left.set, right and right.set)
   if path ~= nil then
     return false, path
@@ -504,7 +504,7 @@ function C.wip_capacity_allows_start(M, repo, current_issue_number)
       if classification.counts then
         count = count + 1
       elseif classification.reason ~= "state-not-active-wip" then
-        C.log_wip_exclusion(M, proposal_id, classification)
+        C.log_wip_exclusion(proposal_id, classification)
       end
     end
   end
@@ -577,7 +577,7 @@ function C.wip_admission_classification(M, repo, proposal_id, issue_comments, st
   }
 end
 
-function C.log_wip_exclusion(M, proposal_id, classification)
+function C.log_wip_exclusion(proposal_id, classification)
   local fields = {
     "reason=" .. tostring(classification.reason),
     "state=" .. tostring(classification.state),

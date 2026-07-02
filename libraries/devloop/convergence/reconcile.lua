@@ -85,7 +85,7 @@ function C.build_devloop_fix_reconcile_payload(M, reject_ctx, issue_version)
   }
 end
 
-function C.build_devloop_timeout_reconcile_payload(M, row, state, proposal_id, source_ref, attempt)
+function C.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, attempt)
   return {
     schema = "github-devloop.timeout-reconcile.v1",
     proposal_id = proposal_id,

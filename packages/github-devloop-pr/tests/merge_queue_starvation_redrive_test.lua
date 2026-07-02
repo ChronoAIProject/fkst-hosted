@@ -33,7 +33,7 @@ end
 local function run_starvation_merge_queue_tick(event, run_opts)
   return t.run_department("departments/merge_queue/main.lua", {
     queue = "devloop_merge_queue_tick",
-    payload = m_mq.merge_queue_starvation_tick_payload(core, "owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
+    payload = m_mq.merge_queue_starvation_tick_payload("owner/repo", "merge-ready/pr/" .. tostring(event.pr_number), {
       pr_number = event.pr_number,
       proposal_id = event.proposal_id,
       version = event.version,

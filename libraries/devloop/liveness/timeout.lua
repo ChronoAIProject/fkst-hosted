@@ -137,7 +137,7 @@ local function build_timeout_reconcile(row, entity, state, facts, decision)
   if source_refs.has_bounded_source_ref(source_ref, M._max_key_len)
     and strings.is_path_safe_key(proposal_id, M._max_key_len)
     and strings.is_bounded_string(state and state.version, M._max_dedup_len) then
-    return "devloop_timeout_reconcile", conv_reconcile.build_devloop_timeout_reconcile_payload(M, row, state, proposal_id, source_ref, decision.attempt)
+    return "devloop_timeout_reconcile", conv_reconcile.build_devloop_timeout_reconcile_payload(row, state, proposal_id, source_ref, decision.attempt)
   end
   return nil, nil
 end

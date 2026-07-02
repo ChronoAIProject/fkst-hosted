@@ -52,7 +52,7 @@ local function merge_ready()
 end
 
 local function timeout_reconcile()
-  return conv_reconcile.build_devloop_timeout_reconcile_payload(core, {
+  return conv_reconcile.build_devloop_timeout_reconcile_payload({
     from_state = "merge-ready",
   }, {
     version = h.merge_ready().version .. "/timeout/merge-ready/1",

@@ -110,7 +110,7 @@ local title_patterns = {
   { class = "L0", patterns = { "docs", "documentation", "readme", "comment", "chore" } },
 }
 
-function C.autonomy_task_class(M, issue)
+function C.autonomy_task_class(issue)
   if type(issue) == "table" then
     for _, label in ipairs(issue.labels or {}) do
       local class = task_class_from_label(label)
@@ -494,7 +494,7 @@ function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, pos
     version = tostring(merge_ready.version),
     head_sha = tostring(merge_ready.reviewed_head_sha),
     merged_at = post_merge_pr and post_merge_pr.merged_at or nil,
-    task_class = C.autonomy_task_class(M, issue),
+    task_class = C.autonomy_task_class(issue),
     human_touch_count = human_touch_count,
     pre_merge_ci = gates.pre_merge_ci,
     rounds = C.autonomy_merge_rounds(M, merge_ready.version),

@@ -254,7 +254,7 @@ local function payload_for_queue(queue)
       mode = "round_trip",
       root = "/tmp/fkst-packages-test/github-devloop-unsupported-context-bundle",
     },
-    devloop_timeout_reconcile = conv_reconcile.build_devloop_timeout_reconcile_payload(core, {
+    devloop_timeout_reconcile = conv_reconcile.build_devloop_timeout_reconcile_payload({
       from_state = "ready",
     }, {
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/timeout/ready/1",

@@ -54,7 +54,7 @@ function C.liveness_scan_update_cursor(M, cursor_key, cursor, total, processed)
   cache_set(cursor_key, tostring(sweep_bounds.sweep_cursor_advance(cursor, total, processed)))
 end
 
-function C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
+function C.liveness_scan_build_observe_payload(repo, entity, kind, tick)
   local number = tostring(entity.number or "")
   local updated_at = tostring(entity.updated_at or "")
   local source_ref = kind == "pr" and entity_lib.pr_source_ref(repo, number) or entity_lib.issue_source_ref(repo, number)
@@ -139,7 +139,7 @@ function C.liveness_scan_maybe_timeout_action(M, entity, state, facts)
   return nil
 end
 
-function C.liveness_scan_observe_queue(M, kind)
+function C.liveness_scan_observe_queue(kind)
   if kind == "pr" then
     return "devloop_observe_pr"
   end
@@ -199,8 +199,8 @@ end
 
 function C.liveness_scan_reinject(M, repo, entity, kind, tick)
   local proposal_id = kind == "pr" and entity_lib.pr_proposal_id(repo, entity.number) or base_ids.proposal_id(repo, entity.number)
-  local payload = C.liveness_scan_build_observe_payload(M, repo, entity, kind, tick)
-  local queue = C.liveness_scan_observe_queue(M, kind)
+  local payload = C.liveness_scan_build_observe_payload(repo, entity, kind, tick)
+  local queue = C.liveness_scan_observe_queue(kind)
   devloop_logging.log_apply("liveness_scan", proposal_id, nil, nil, { add = {}, remove = {} }, {
     queue,
   })

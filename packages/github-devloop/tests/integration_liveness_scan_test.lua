@@ -655,8 +655,7 @@ return {
   test_liveness_scan_timeout_reconcile_blocks_ready_when_payload_version_is_stale_but_live_state_is_stuck = function()
     local stale_version = version .. "/timeout/ready/1"
     local live_version = version .. "/timeout/ready/2"
-    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core,
-      restart_transition_row("ready"),
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(restart_transition_row("ready"),
       {
         state = "ready",
         version = stale_version,
@@ -687,8 +686,7 @@ return {
   test_liveness_scan_timeout_reconcile_skips_when_ready_state_advanced = function()
     local stale_version = version .. "/timeout/ready/2"
     local advanced_version = version .. "/timeout/ready/2"
-    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core,
-      restart_transition_row("ready"),
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(restart_transition_row("ready"),
       {
         state = "ready",
         version = stale_version,

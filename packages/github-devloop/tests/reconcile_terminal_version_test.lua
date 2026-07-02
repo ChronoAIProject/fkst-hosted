@@ -122,8 +122,7 @@ return {
     end
     t.eq(eval.status, "actionable")
     t.eq(eval.signal.reason, "codex-run-not-running")
-    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(core,
-      row,
+    local payload = conv_reconcile.build_devloop_timeout_reconcile_payload(row,
       state,
       proposal_id,
       entity_lib.issue_source_ref(repo, issue_number),
