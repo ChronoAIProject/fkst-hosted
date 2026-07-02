@@ -599,7 +599,7 @@ return {
   end,
 
   test_loop_round_cap_records_round_and_handoff_reconcile_even_when_question_varies = function()
-    local cap = config.max_converge_rounds(core)
+    local cap = config.max_converge_rounds()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local function varying_digest(round)
       return {

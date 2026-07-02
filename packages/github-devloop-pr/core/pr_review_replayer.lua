@@ -263,7 +263,7 @@ local function replay_review_converge(dept, issue, state, facts, tools, link, cu
   if latest == nil then
     return nil
   end
-  if conv_rounds.is_true_stall(M, records, round) or round >= config.max_converge_rounds(M) then
+  if conv_rounds.is_true_stall(M, records, round) or round >= config.max_converge_rounds() then
     local payload = conv_reconcile.build_devloop_review_reconcile_payload(M, latest, round, facts.proposal_id, state.version, current_pr.head_sha)
     devloop_logging.log_cas_decision(dept, facts.proposal_id, state, "reviewing", "blocked", "applied(replay)", "trusted review-converge-round fact reached terminal reconcile")
     return tools.raise_effects(dept, facts.proposal_id, "blocked", conv_reconcile.review_reconcile_terminal_state_version(M, state.version, round), { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:reviewing" } }, {

@@ -90,7 +90,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     )
     local facts_with_current = conv_rounds.append_converge_round_fact(core, facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local budget_round = math.max(round, conv_rounds.converge_boundary_budget_round(core, current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
-    local hit_round_cap = budget_round >= config.max_converge_rounds(core)
+    local hit_round_cap = budget_round >= config.max_converge_rounds()
     if hit_round_cap or conv_rounds.is_true_stall(core, facts_with_current, round) then
       local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body, {
         kind = "github-devloop.reconcile",

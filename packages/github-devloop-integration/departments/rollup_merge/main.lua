@@ -61,7 +61,7 @@ local function act(event)
 
   devloop_logging.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
   with_lock(core.rollup_lock_key(payload.repo, payload.upstream_branch, payload.integration_branch), function()
-    if config.write_mode(core) ~= "real" then
+    if config.write_mode() ~= "real" then
       log_skip(payload, "dry-run")
       return
     end

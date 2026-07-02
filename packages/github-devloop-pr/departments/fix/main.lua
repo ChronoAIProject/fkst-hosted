@@ -357,7 +357,7 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
 end
 
 local function assert_fix_write_gate(fix, repo, issue_number)
-  local write_enabled = config.write_mode(core) == "real"
+  local write_enabled = config.write_mode() == "real"
   if write_enabled then
     return true
   end
@@ -656,7 +656,7 @@ local function act_fix(event)
   local attempt_plan = nil
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
-    local branches = config.branch_config(core)
+    local branches = config.branch_config()
 
     local pr_view = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
     if pr_view.exit_code ~= 0 then

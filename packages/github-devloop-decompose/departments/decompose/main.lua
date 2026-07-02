@@ -407,7 +407,7 @@ local function act_decompose(event)
       count = 1
     end
 
-    if config.write_mode(core) ~= "real" then
+    if config.write_mode() ~= "real" then
       devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "dry-run(marker-write-required)", "FKST_GITHUB_WRITE=1 is required before issue create requests")
       return
     end

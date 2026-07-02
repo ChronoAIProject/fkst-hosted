@@ -51,7 +51,7 @@ return {
   end,
 
   test_review_loop_round_cap_records_round_and_raises_review_reconcile_even_when_question_varies = function()
-    local cap = config.max_converge_rounds(core)
+    local cap = config.max_converge_rounds()
     local event = review_unresolved({
       dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/" .. tostring(cap),
       round = cap,
@@ -95,7 +95,7 @@ return {
   end,
 
   test_review_loop_round_cap_uses_review_budget_when_version_head_and_source_ref_drift = function()
-    local cap = config.max_converge_rounds(core)
+    local cap = config.max_converge_rounds()
     local event = review_unresolved({
       dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/6",
       round = 6,

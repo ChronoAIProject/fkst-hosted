@@ -170,7 +170,7 @@ local function write_refresh_commit(worktree, runtime, repo, branch, integration
 end
 
 local function push_if_real(repo, branch, branch_sha, worktree)
-  if config.write_mode(core) ~= "real" then
+  if config.write_mode() ~= "real" then
     devloop_logging.log_line("info", "pr_freshness_scan", "pr-freshness", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(repo),
@@ -272,8 +272,8 @@ end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   devloop_logging.log_entry("pr_freshness_scan", event, "pr-freshness", event and event.queue or "")
-  local branches = config.branch_config(core)
-  local cfg = config.devloop_config(core)
+  local branches = config.branch_config()
+  local cfg = config.devloop_config()
   local repo = require_repo(cfg.repo)
   if branches.integration == branches.upstream then
     devloop_logging.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = "same-branch", version = branches.integration }, "tick", "freshness", "skip-idempotent(same-branch)", "integration branch equals upstream branch")

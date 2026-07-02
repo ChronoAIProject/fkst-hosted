@@ -11,6 +11,7 @@ import check_repo_devloop_decouple
 import check_repo_devloop_installer
 import check_repo_service_locator
 import check_repo_ambient_surface
+import check_repo_core_param
 import check_repo_hidden_state
 import check_repo_intake_default_surface
 import check_repo_intake_routing
@@ -163,6 +164,8 @@ def run_library_b_specific(c, config: check_repo_config.CheckRepoConfig, violati
         c.add(violations, "G-DEVLOOP-SERVICE-LOCATOR", message)
     for message in check_repo_ambient_surface.repository_messages(root):
         c.add(violations, "G-DEVLOOP-AMBIENT-SURFACE", message)
+    for message in check_repo_core_param.repository_messages(root):
+        c.add(violations, "G-DEVLOOP-CORE-PARAM", message)
 
 
 def run(c, config: check_repo_config.CheckRepoConfig, violations: list[str], warnings: list[str]) -> None:

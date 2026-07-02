@@ -115,7 +115,7 @@ local function mock_issue_reads()
 end
 
 local function unresolved_at_cap()
-  local cap = config.max_converge_rounds(core)
+  local cap = config.max_converge_rounds()
   return {
     schema = "consensus.consensus_converge.v1",
     proposal_id = "github-devloop/issue/owner/repo/42",

@@ -321,7 +321,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
   if mergeable or not check_runs.is_not_mergeable_reason(reason) then
     return false
   end
-  if devloop_state.version_fix_round(state.version) >= config.max_fix_rounds(core) then
+  if devloop_state.version_fix_round(state.version) >= config.max_fix_rounds() then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, state.state, recovery.to_state, "skip-idempotent(fix-loop-max-rounds)", reason)
     return false
   end
@@ -445,7 +445,7 @@ local function process_pr_event(event)
 
   devloop_logging.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   devloop_base.assert_trusted_bot_configured()
-  local branches = config.branch_config(core)
+  local branches = config.branch_config()
   local pr_view = devloop_entity_view.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))

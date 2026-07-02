@@ -453,7 +453,7 @@ function M.dependency_gate(repo, issue_number, context)
   if type(gate_context) ~= "table" then
     gate_context = {}
   end
-  gate_context.managed_sibling_repos = config.managed_sibling_repos(core)
+  gate_context.managed_sibling_repos = config.managed_sibling_repos()
   local ok, result = pcall(visit, repo, issue_number, {}, {}, {}, {}, 0, gate_context, {})
   if not ok or type(result) ~= "table" then
     return gate("unresolvable", "dependency-gate-exception", {})

@@ -169,7 +169,7 @@ local function reap_orphan_pr(repo, entity)
     return
   end
 
-  if config.write_mode(core) ~= "real" then
+  if config.write_mode() ~= "real" then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "dry-run", reason.code))
     return
   end

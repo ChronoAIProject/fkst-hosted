@@ -286,7 +286,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
   if gate_baseline_sha ~= nil and not forge_validators.is_git_sha(gate_baseline_sha) then
     error("github-devloop: invalid merge-gate baseline sha")
   end
-  local test_command = devloop_base.neutralize_untrusted_comment_text(config.test_command(M))
+  local test_command = devloop_base.neutralize_untrusted_comment_text(config.test_command())
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
   local marker = m_builders.merge_gate_marker(M,
     merge_ready.proposal_id,

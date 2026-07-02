@@ -47,7 +47,7 @@ local function parent_state_for_child_terminal(state, child_state)
     }
   end
   if child_state.state == "closed-unmerged" then
-    if devloop_state.version_reimplement_round(state.version) >= config.max_fix_rounds(M) then
+    if devloop_state.version_reimplement_round(state.version) >= config.max_fix_rounds() then
       return {
         to_state = "blocked",
         version = tostring(state.version or "") .. "/blocked/replacement-budget-exhausted",
@@ -208,7 +208,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
     { queue = "github-proxy.github_issue_label_request", payload = label_request },
   }
-  if next_state.to_state == "merged" and config.write_mode(M) == "real" then
+  if next_state.to_state == "merged" and config.write_mode() == "real" then
     local close_result = devloop_commands.gh_issue_close(issue.repo, issue.number, 60)
     if close_result.exit_code ~= 0 then
       error("github-devloop: awaiting-pr-issue-close-failed: " .. tostring(close_result.stderr))
@@ -264,7 +264,7 @@ canonical_merged_child_state = function(issue, state, delegation, current_pr)
 end
 
 merged_child_landed_on_upstream = function(dept, issue, state, delegation, current_pr)
-  local branches = config.branch_config(M)
+  local branches = config.branch_config()
   if not origin_matches_delegation(issue, delegation, current_pr, branches) then
     return false, "skip-stale(pr-origin-rollup-lineage)", "merged child PR lacks current split-topology origin facts"
   end

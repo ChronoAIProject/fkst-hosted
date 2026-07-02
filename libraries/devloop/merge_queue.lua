@@ -477,12 +477,12 @@ function C.merge_queue_files_disjoint(M, left, right)
 end
 
 function C.wip_capacity_allows_start(M, repo, current_issue_number)
-  local max_inflight = config.max_inflight(M)
+  local max_inflight = config.max_inflight()
   if max_inflight == nil then
     return true, "wip-cap-disabled", 0, nil
   end
 
-  local integration_branch = config.branch_config(M).integration
+  local integration_branch = config.branch_config().integration
 
   local list = M.gh_issue_list_wip(repo, 30)
   if list.exit_code ~= 0 then

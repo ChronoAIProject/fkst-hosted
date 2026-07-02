@@ -58,11 +58,11 @@ function C.read_env(name, exec)
   return read_env(name, exec)
 end
 
-function C.env_present_command(M, name)
+function C.env_present_command(name)
   return env_present_command(name)
 end
 
-function C.env_present(M, name, exec)
+function C.env_present(name, exec)
   local run = exec or exec_sync
   if type(run) ~= "function" then
     return false
@@ -71,7 +71,7 @@ function C.env_present(M, name, exec)
   return ok and type(out) == "table" and out.exit_code == 0 and out.stdout ~= ""
 end
 
-function C.write_mode(M, exec)
+function C.write_mode(exec)
   return C.read_env("FKST_GITHUB_WRITE", exec) == "1" and "real" or "dry-run"
 end
 
@@ -93,11 +93,11 @@ end
 -- files a passive issue). When "1", the watchdog issue is created already
 -- fkst-dev:enabled + fkst-class:expedite so the loop claims and fixes the red
 -- rollup ahead of new issues (expedite class + inflight cap = priority).
-function C.rollup_autofix_enabled(M, exec)
+function C.rollup_autofix_enabled(exec)
   return strings.trim(C.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
 end
 
-function C.max_inflight(M, exec)
+function C.max_inflight(exec)
   local value = C.read_env("FKST_DEVLOOP_MAX_INFLIGHT", exec)
   if value == nil then
     return nil
@@ -113,7 +113,7 @@ function C.max_inflight(M, exec)
   return parsed
 end
 
-function C.managed_sibling_repos(M, exec)
+function C.managed_sibling_repos(exec)
   local raw = C.read_env("FKST_DEVLOOP_MANAGED_SIBLING_REPOS", exec)
   local repos = {}
   if raw == nil then
@@ -128,31 +128,31 @@ function C.managed_sibling_repos(M, exec)
   return repos
 end
 
-function C.max_fix_rounds(M)
+function C.max_fix_rounds()
   return 12
 end
 
-function C.max_converge_rounds(M)
+function C.max_converge_rounds()
   return 8
 end
 
-function C.default_test_command(M)
+function C.default_test_command()
   return "scripts/run.sh test"
 end
 
-function C.test_command(M, exec)
+function C.test_command(exec)
   local command = C.read_env("FKST_DEVLOOP_TEST_COMMAND", exec)
   if command == nil then
-    return C.default_test_command(M)
+    return C.default_test_command()
   end
   return command
 end
 
-function C.local_iteration_test_command(M, _exec)
+function C.local_iteration_test_command(_exec)
   return "scripts/run.sh test-affected"
 end
 
-local function current_checkout_branch(M, exec)
+local function current_checkout_branch(exec)
   local run = exec or exec_argv
   if type(run) ~= "function" then
     error("github-devloop: branch config requires exec_argv")
@@ -171,7 +171,7 @@ local function current_checkout_branch(M, exec)
   return branch
 end
 
-local function validated_branch(M, name, branch)
+local function validated_branch(name, branch)
   branch = strings.trim(branch)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid " .. name)
@@ -179,26 +179,26 @@ local function validated_branch(M, name, branch)
   return branch
 end
 
-function C.branch_config(M, exec)
+function C.branch_config(exec)
   local upstream_env = C.read_env("FKST_DEVLOOP_UPSTREAM_BRANCH", exec)
   local upstream = upstream_env
   if upstream == nil then
-    upstream = current_checkout_branch(M, exec)
+    upstream = current_checkout_branch(exec)
   end
-  upstream = validated_branch(M, "FKST_DEVLOOP_UPSTREAM_BRANCH", upstream)
+  upstream = validated_branch("FKST_DEVLOOP_UPSTREAM_BRANCH", upstream)
   local integration = C.read_env("FKST_DEVLOOP_INTEGRATION_BRANCH", exec)
   if integration == nil then
     integration = upstream
   end
-  integration = validated_branch(M, "FKST_DEVLOOP_INTEGRATION_BRANCH", integration)
+  integration = validated_branch("FKST_DEVLOOP_INTEGRATION_BRANCH", integration)
   return {
     upstream = upstream,
     integration = integration,
   }
 end
 
-function C.devloop_config(M, exec)
-  local branches = C.branch_config(M, exec)
+function C.devloop_config(exec)
+  local branches = C.branch_config(exec)
   local rollup_merge = C.read_env("FKST_DEVLOOP_ROLLUP_MERGE", exec) or "auto"
   rollup_merge = strings.trim(rollup_merge)
   if rollup_merge ~= "auto" and rollup_merge ~= "manual" then
@@ -207,7 +207,7 @@ function C.devloop_config(M, exec)
   return {
     repo = C.read_env("FKST_GITHUB_REPO", exec),
     bot_login = C.read_env("FKST_GITHUB_BOT_LOGIN", exec),
-    write_mode = C.write_mode(M, exec),
+    write_mode = C.write_mode(exec),
     upstream_branch = branches.upstream,
     integration_branch = branches.integration,
     rollup_merge = rollup_merge,

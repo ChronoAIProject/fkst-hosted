@@ -643,7 +643,7 @@ function M.substrate_ref_constants()
 end
 
 function M.substrate_ref_scan()
-  local cfg = config.devloop_config(M)
+  local cfg = config.devloop_config()
   local repo = require_repo(cfg.repo)
   if cfg.write_mode == "real" then
     devloop_base.assert_trusted_bot_configured()

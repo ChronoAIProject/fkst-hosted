@@ -359,7 +359,7 @@ function M.ensure_repo_label_specs()
 end
 
 function M.ensure_repo()
-  local cfg = config.devloop_config(M)
+  local cfg = config.devloop_config()
   local repo = require_repo(cfg.repo)
   if cfg.write_mode == "real" then
     devloop_base.assert_trusted_bot_configured()

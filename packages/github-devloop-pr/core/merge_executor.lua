@@ -102,7 +102,7 @@ end
 
 local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
   local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
-  if devloop_state.version_fix_round(current_state.version) >= config.max_fix_rounds(core) then
+  if devloop_state.version_fix_round(current_state.version) >= config.max_fix_rounds() then
     raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
     return
   end
@@ -112,7 +112,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
   if queue_position ~= nil then
     predecessor_set = queue_position.predecessor_set
   else
-    local branches = config.branch_config(core)
+    local branches = config.branch_config()
     local position, predecessor_reason = m_mq.merge_queue_position(core, repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
@@ -255,7 +255,7 @@ local function revalidate_speculative_predecessors(repo, issue_number, merge_rea
   end
   local current_position = queue_position
   if current_position == nil then
-    local branches = config.branch_config(core)
+    local branches = config.branch_config()
     local position, reason = m_mq.merge_queue_position(core, repo, branches.integration, {
       pr_number = merge_ready.pr_number,
       pr = current_pr,
@@ -267,7 +267,7 @@ local function revalidate_speculative_predecessors(repo, issue_number, merge_rea
     end
     current_position = position
   end
-  local branches = config.branch_config(core)
+  local branches = config.branch_config()
   local matches, match_reason = m_mq.merge_queue_predecessor_set_matches_current_base(core,
     speculative_fact.predecessor_set,
     current_position.predecessor_set,
@@ -431,7 +431,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-foreign(pr-origin)", "PR origin/link does not match immutable PR branch")
     return
   end
-  local write_enabled = (write_mode or config.write_mode(core)) == "real"
+  local write_enabled = (write_mode or config.write_mode()) == "real"
   local pr_ok, pr_reason = assert_open_same_repo_pr(merge_ready, current_pr, repo, origin.branch, merge_ready.reviewed_head_sha)
   if not pr_ok then
     if core.is_merged_pr(current_pr)
@@ -811,7 +811,7 @@ local function process_merge_queue_tick(event)
   end
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
-    local branches = config.branch_config(core)
+    local branches = config.branch_config()
     local head, entries = merge_queue_head_all(repo, branches.integration)
     if head == nil then
       devloop_logging.log_line("info", "merge", "unknown", "GATE", {
@@ -879,7 +879,7 @@ local function process_merge_queue_tick(event)
     merge_ready._merge_pass = "poll"
     devloop_logging.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local selected_is_fifo_head = queue_starvation_cause_matches_entry(cause, head)
-    local write_mode = config.write_mode(core)
+    local write_mode = config.write_mode()
     local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, {
       enforce_queue = false,
       write_mode = write_mode,
@@ -918,7 +918,7 @@ local function process_merge_ready_event(event)
 
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
-    local branches = config.branch_config(core)
+    local branches = config.branch_config()
     process_merge_ready_locked(repo, issue_number, merge_ready, branches)
   end)
 end

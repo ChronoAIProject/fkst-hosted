@@ -55,7 +55,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   end
 
   devloop_base.assert_trusted_bot_configured()
-  local branches = config.branch_config(core)
+  local branches = config.branch_config()
   local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
@@ -160,7 +160,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local issue_version = state.version
     local reflection_checkpoint = false
-    if effective_decision == "reject" and devloop_state.version_fix_round(state.version) < config.max_fix_rounds(core) then
+    if effective_decision == "reject" and devloop_state.version_fix_round(state.version) < config.max_fix_rounds() then
       issue_version = devloop_state.fix_version_from_review_version(state.version)
       reflection_checkpoint = devloop_state.version_fix_round(issue_version) == devloop_base.fix_reflection_checkpoint_round()
     end
@@ -189,7 +189,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     if effective_decision == "reject" then
       local fix_round = devloop_state.version_fix_round(state.version)
-      local max_rounds_hit = fix_round >= config.max_fix_rounds(core)
+      local max_rounds_hit = fix_round >= config.max_fix_rounds()
       if max_rounds_hit then
         local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload(core, {
           proposal_id = origin.proposal_id,

@@ -107,7 +107,7 @@ local function commit_resolution(worktree, runtime, conflict)
 end
 
 local function push_if_real(conflict, worktree)
-  if config.write_mode(core) ~= "real" then
+  if config.write_mode() ~= "real" then
     devloop_logging.log_line("info", "sync_conflict", "branch-sync", "OUTBOUND", {
       "mode=dry-run",
       "repo=" .. tostring(conflict.repo),

@@ -246,7 +246,7 @@ local function merge_ready_queue_head(M, entities, now_seconds)
 end
 
 local function merge_queue_head_entity(M, repo, now_seconds)
-  local branches = config.branch_config(M)
+  local branches = config.branch_config()
   local _, entries = m_mq.merge_queue_head(M, repo, branches.integration)
   local head, age = m_mq.merge_queue_starvation_candidate(M, entries, m_mq._merge_ready_starvation_threshold_minutes, now_seconds)
   if head == nil then
