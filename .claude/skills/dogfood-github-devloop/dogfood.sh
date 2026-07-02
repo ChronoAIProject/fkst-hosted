@@ -59,16 +59,15 @@ GITHUB_PROXY_POLL_LABEL_PREFIX="${FKST_GITHUB_PROXY_POLL_LABEL_PREFIX:-${GITHUB_
 GH_ORG="${GH_ORG:-ChronoAIProject}"
 DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos this host drives ('all' / board default expand here)
 
-# The shared devloop trio = the PLATFORM (like GitHub runners + marketplace actions), loaded from the
+# The shared devloop family = the PLATFORM (like GitHub runners + marketplace actions), loaded from the
 # platform fkst-packages (Lua-primary) checkout's repo-root packages/ (PKGSRC). Each website-source-
 # primary TARGET repo (host) commits its OWN custom Lua packages under `.fkst/local-packages/<pkg>`
-# (root stays website source) — so the trio comes from `$PKGSRC/packages/<pkg>`, a host's own package
+# (root stays website source) — so platform packages come from `$PKGSRC/packages/<pkg>`, a host's own package
 # from `$HOST/.fkst/local-packages/<pkg>`. (`.fkst/` is a tracked+ignored runtime INTERFACE dir, not
 # "all runtime": host repos commit their own Lua there. See fkst-website CLAUDE.md.)
-# Platform packages every dogfood supervise LOADS + RUNS from PKGSRC/packages/. The DEFAULT below is
-# the full platform set (the github-devloop trio + the rest of the library) and lives HERE in the tool
-# so every host is consistent; a host OVERRIDES it only when it genuinely differs (env DEVLOOP_PKGS >
-# dogfood.config.sh > this default). The supervise loads only the platform (not every package in
+# Platform packages every dogfood supervise LOADS + RUNS from PKGSRC/packages/. The DEFAULT list lives
+# in dogfood.platform-packages so every host is consistent; a host OVERRIDES it only when it genuinely
+# differs (env DEVLOOP_PKGS > dogfood.config.sh > this default). The supervise loads only the platform (not every package in
 # packages/) because it RUNS packages (raisers fire); co-loading independent agents would fight over
 # the same repo's issues. (`test` loads all to validate the graph.) Auto-audit is DISABLED: the
 # archaudit audit AGENT is NOT loaded on any target (re-add it here to re-enable). archaudit auditing
@@ -81,7 +80,20 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # integration-coverage-producer IS loaded: a co-run-safe issue-producer SCOPED to Lua-package run_graph
 # coverage gaps (idle-gated + dedup'd + Lua-coverage-only, never engine) — the lasting self-drive arm of
 # the integration-edge coverage ratchet; unlike archaudit it cannot file engine/SDK work.
-DEVLOOP_PKGS="${DEVLOOP_PKGS:-github-devloop github-devloop-pr github-devloop-integration github-devloop-intake github-devloop-intake-default github-devloop-decompose github-devloop-ops github-proxy consensus github-external-pr-intake github-ratchet-migration-slicer fkst-substrate-ref-maintainer integration-coverage-producer idle-detector}"
+load_default_devloop_pkgs() {
+  local list_file="$_self_dir/dogfood.platform-packages" line pkgs=()
+  [ -f "$list_file" ] || { echo "missing default platform package list: $list_file" >&2; return 1; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -n "$line" ] || continue
+    pkgs+=("$line")
+  done < "$list_file"
+  [ "${#pkgs[@]}" -gt 0 ] || { echo "empty default platform package list: $list_file" >&2; return 1; }
+  printf '%s\n' "${pkgs[*]}"
+}
+DEVLOOP_PKGS="${DEVLOOP_PKGS:-$(load_default_devloop_pkgs)}"
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
 # layout across machines); stable durable roots default under it but are commonly PINNED per machine
@@ -104,6 +116,105 @@ cfg() {
       DUR="${DUR_WEBSITE:-$DOGFOOD_ROOT/dogfood-durable-website}"; LOCAL_PKGS="site-board" ;;
     *) echo "unknown dogfood: $1 (packages|substrate|website)" >&2; return 1 ;;
   esac
+}
+
+validate_platform_manifest_matches_devloop_pkgs() { # $1 name
+  local name="$1" output
+  # The packages target is the platform repository itself: its workspace enumerates
+  # available packages, not the narrower dogfood run composition.
+  [ "$HOST" = "$PKGSRC" ] && return 0
+  output="$(python3 - "$name" "$HOST" "$DEVLOOP_PKGS" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    print(f"error: {message}")
+    raise SystemExit(1)
+
+
+def table_array(data: dict[str, object], key: str) -> list[dict[str, object]]:
+    value = data.get(key, [])
+    if isinstance(value, dict):
+        value = [value]
+    if not isinstance(value, list):
+        fail(f"fkst.workspace.toml {key} must be a table array")
+    rows: list[dict[str, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            fail(f"fkst.workspace.toml {key} entries must be tables")
+        rows.append(item)
+    return rows
+
+
+def package_list(value: object, field: str) -> list[str]:
+    if not isinstance(value, list):
+        fail(f"fkst.workspace.toml {field} must be a string array")
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            fail(f"fkst.workspace.toml {field} must contain only non-empty strings")
+        out.append(item)
+    return out
+
+
+def reject_duplicates(values: list[str], field: str) -> None:
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for value in values:
+        if value in seen and value not in duplicates:
+            duplicates.append(value)
+        seen.add(value)
+    if duplicates:
+        fail(f"{field} contains duplicate package names: {' '.join(duplicates)}")
+
+
+name = sys.argv[1]
+host = Path(sys.argv[2])
+requested = [item for item in sys.argv[3].split() if item]
+reject_duplicates(requested, "DEVLOOP_PKGS")
+
+workspace_path = host / "fkst.workspace.toml"
+if not workspace_path.is_file():
+    fail(f"{name}: target fkst.workspace.toml is required for dogfood platform validation: {workspace_path}")
+try:
+    workspace = tomllib.loads(workspace_path.read_text(encoding="utf-8"))
+except tomllib.TOMLDecodeError as exc:
+    fail(f"{name}: invalid target fkst.workspace.toml: {workspace_path}: {exc}")
+if not isinstance(workspace, dict):
+    fail(f"{name}: target fkst.workspace.toml must be a TOML table")
+
+platform_source = None
+for source in table_array(workspace, "external_sources"):
+    if source.get("id") == "fkst-packages-platform":
+        platform_source = source
+        break
+if platform_source is None:
+    fail(f"{name}: target fkst.workspace.toml must declare external_sources(id=fkst-packages-platform)")
+
+declared = package_list(
+    platform_source.get("packages", []),
+    "external_sources(id=fkst-packages-platform).packages",
+)
+reject_duplicates(declared, "external_sources(id=fkst-packages-platform).packages")
+
+requested_set = set(requested)
+declared_set = set(declared)
+missing = [package for package in requested if package not in declared_set]
+extra = [package for package in declared if package not in requested_set]
+if missing or extra:
+    print(
+        f"error: {name}: dogfood platform package drift: DEVLOOP_PKGS and "
+        "target fkst.workspace.toml external_sources(id=fkst-packages-platform).packages must match"
+    )
+    if missing:
+        print("  requested but not declared: " + " ".join(missing))
+    if extra:
+        print("  declared but not requested: " + " ".join(extra))
+    raise SystemExit(1)
+PY
+)" || { printf '%s\n' "$output" >&2; return 1; }
 }
 
 pidof_df() { pgrep -f -- "supervise --project-root ${HOST} " 2>/dev/null; }
@@ -349,6 +460,7 @@ launch_one() { # $1 name, $2 restart flag (0|1)
   clean_stale_runtime_worktrees "$name" "$rt"
   [ -n "$DEVLOOP_PKGS" ] || { echo "[$name] DEVLOOP_PKGS unset — set the platform packages to load in dogfood.config.sh (see dogfood.config.example.sh)"; return 1; }
   [ -x "$PKGSRC/scripts/run.sh" ] || { echo "[$name] missing host-run contract: $PKGSRC/scripts/run.sh"; return 1; }
+  validate_platform_manifest_matches_devloop_pkgs "$name" || return 1
 
   args=(
     "$PKGSRC/scripts/run.sh" supervise

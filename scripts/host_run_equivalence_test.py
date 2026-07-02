@@ -17,7 +17,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_PATH = REPO_ROOT / "scripts" / "host_run_equivalence_golden.json"
 TARGETS = ("packages", "substrate", "website")
-PLATFORM_PACKAGES = "github-proxy consensus github-devloop"
+PLATFORM_PACKAGES_PATH = REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.platform-packages"
+PLATFORM_PACKAGES = " ".join(
+    line.split("#", 1)[0].strip()
+    for line in PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8").splitlines()
+    if line.split("#", 1)[0].strip()
+)
+STALE_WEBSITE_PACKAGES = "github-devloop github-devloop-pr github-devloop-integration"
 FIXED_TS = "1760000000"
 
 
@@ -107,7 +113,14 @@ def run_git(args: list[str], cwd: Path, env: dict[str, str]) -> None:
 
 
 class DogfoodLayout:
-    def __init__(self, root: Path, dogfood_script: str) -> None:
+    def __init__(
+        self,
+        root: Path,
+        dogfood_script: str,
+        platform_package_list: str,
+        *,
+        stale_website_manifest: bool = False,
+    ) -> None:
         self.root = root
         self.dogfood_root = root / "dogfood"
         self.skill_dir = root / "skill"
@@ -124,6 +137,8 @@ class DogfoodLayout:
         make_fake_tools(self.bin_dir)
         make_fake_bin(self.fake_bin)
         write_executable(self.script, dogfood_script)
+        (self.skill_dir / "dogfood.platform-packages").write_text(platform_package_list, encoding="utf-8")
+        self.stale_website_manifest = stale_website_manifest
         self.platform_revs: dict[Path, str] = {}
         self._populate_repos()
 
@@ -186,6 +201,9 @@ class DogfoodLayout:
             (host / "fkst.workspace.toml").write_text(manifest, encoding="utf-8")
             return
 
+        packages = PLATFORM_PACKAGES.split()
+        if self.stale_website_manifest and host == self.dogfood_root / "website-dogfood" / "site":
+            packages = STALE_WEBSITE_PACKAGES.split()
         (host / "fkst.workspace.toml").write_text(
             textwrap.dedent(
                 f"""\
@@ -195,7 +213,7 @@ class DogfoodLayout:
                 [[external_sources]]
                 id = "fkst-packages-platform"
                 git = {json.dumps(str(platform))}
-                packages = {json.dumps(PLATFORM_PACKAGES.split())}
+                packages = {json.dumps(packages)}
                 """
             ),
             encoding="utf-8",
@@ -361,7 +379,11 @@ class HostRunEquivalenceTest(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             tmp_root = Path(tmp)
-            new_layout = DogfoodLayout(tmp_root / "new", new_script)
+            new_layout = DogfoodLayout(
+                tmp_root / "new",
+                new_script,
+                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+            )
 
             for target in TARGETS:
                 with self.subTest(target=target):
@@ -390,12 +412,37 @@ class HostRunEquivalenceTest(unittest.TestCase):
                     if target in hydrated_roots:
                         self.assertFalse(hydrated_roots[target].exists())
 
+    def test_website_start_fails_before_supervise_when_manifest_is_stale(self) -> None:
+        new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = DogfoodLayout(
+                Path(tmp) / "stale-website",
+                new_script,
+                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+                stale_website_manifest=True,
+            )
+
+            result = layout.run_start("website")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(layout.capture.exists())
+            self.assertIn("dogfood platform package drift", result.stderr)
+            self.assertIn("requested but not declared", result.stderr)
+            self.assertIn("github-devloop-intake", result.stderr)
+            self.assertIn("idle-detector", result.stderr)
+
     def test_dogfood_start_fails_when_supervise_exits_before_readiness(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
             encoding="utf-8"
         )
         with tempfile.TemporaryDirectory() as tmp:
-            layout = DogfoodLayout(Path(tmp) / "failed", new_script)
+            layout = DogfoodLayout(
+                Path(tmp) / "failed",
+                new_script,
+                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+            )
             write_executable(
                 layout.fake_bin,
                 textwrap.dedent(
@@ -422,7 +469,11 @@ class HostRunEquivalenceTest(unittest.TestCase):
             encoding="utf-8"
         )
         with tempfile.TemporaryDirectory() as tmp:
-            layout = DogfoodLayout(Path(tmp) / "sync-failed", new_script)
+            layout = DogfoodLayout(
+                Path(tmp) / "sync-failed",
+                new_script,
+                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+            )
             (layout.dogfood_root / "stable-durable-packages").mkdir(parents=True, exist_ok=True)
             (layout.dogfood_root / "stable-durable-packages" / ".fkst-supervise.pid").write_text(
                 "999999\n",
@@ -430,7 +481,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
             )
             (layout.dogfood_root / "packages-sv-100.log").write_text(
                 "TIMESTAMP=2026-01-01T00:00:00Z LEVEL=info EVENT=code_provenance "
-                "ENGINE_VER=aaaaaaaa PKG_VERS=github-proxy@bbbbbbbb\n",
+                "ENGINE_VER=aaaaaaaa PKG_VERS=github-devloop@bbbbbbbb\n",
                 encoding="utf-8",
             )
             write_executable(layout.bin_dir / "pgrep", "#!/usr/bin/env bash\nprintf '999999\\n'\n")

@@ -1,0 +1,17 @@
+# Default dogfood platform package set.
+# Keep this list in sync with each non-self host's
+# fkst.workspace.toml external_sources(id=fkst-packages-platform).packages.
+github-devloop
+github-devloop-pr
+github-devloop-integration
+github-devloop-intake
+github-devloop-intake-default
+github-devloop-decompose
+github-devloop-ops
+github-proxy
+consensus
+github-external-pr-intake
+github-ratchet-migration-slicer
+fkst-substrate-ref-maintainer
+integration-coverage-producer
+idle-detector

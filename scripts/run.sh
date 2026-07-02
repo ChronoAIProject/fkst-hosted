@@ -645,7 +645,7 @@ collect_composed_package() {
 }
 
 cmd_test_composed() {
-  local pkg name args project_root rc
+  local pkg name args project_root rc hermetic_var hermetic_env
   ensure_package_view
   COMPOSED_SEEN=()
   for pkg in "$LOCAL_PACKAGES_ROOT"/*/ "$EXTERNAL_PACKAGES_ROOT"/*/; do
@@ -664,6 +664,11 @@ cmd_test_composed() {
     return 0
   fi
 
+  hermetic_env=(env)
+  for hermetic_var in FKST_GITHUB_BOT_LOGIN FKST_GITHUB_CLAIM_MODE FKST_GITHUB_REPO FKST_GITHUB_WRITE FKST_GITHUB_PROXY_POLL_LABEL_PREFIX FKST_DEVLOOP_UPSTREAM_BRANCH FKST_DEVLOOP_INTEGRATION_BRANCH FKST_DEVLOOP_FORK_GRACE_HOURS FKST_DEVLOOP_MAX_INFLIGHT FKST_DEVLOOP_MANAGED_SIBLING_REPOS FKST_DEVLOOP_MANAGED_BOT_LOGINS FKST_DEVLOOP_ROLLUP_MERGE FKST_DEVLOOP_ROLLUP_AUTOFIX FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES FKST_DEVLOOP_RELEASE_NOTES_FALLBACK FKST_DEVLOOP_CONFLICT_LOG_CMD FKST_DEVLOOP_BOARD_CMD FKST_DEVLOOP_TEST_COMMAND FKST_OUTPUT_LANG FKST_DEBUG_STAMP; do
+    hermetic_env+=(-u "$hermetic_var")
+  done
+
   args=()
   project_root="$(package_root_for_name "${COMPOSED_SEEN[0]}")" || return 1
   for name in "${COMPOSED_SEEN[@]}"; do
@@ -678,7 +683,7 @@ cmd_test_composed() {
     args+=(--package-root "${pkg%/}")
   done
   echo "=== composed conformance ==="
-  run_quiet_pass "$BIN" conformance --project-root "$project_root" "${args[@]}"
+  run_quiet_pass "${hermetic_env[@]}" "$BIN" conformance --project-root "$project_root" "${args[@]}"
 }
 
 cmd_run() {
