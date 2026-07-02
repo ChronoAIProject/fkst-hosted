@@ -85,13 +85,18 @@ pub(crate) fn scrub_transport(e: &reqwest::Error) -> String {
     }
 }
 
-/// Build a [`ChronoStorageClient`] from an already-resolved config over a freshly
-/// built, timeout-bounded HTTP client.
+/// Build a [`ChronoStorageClient`] from an already-resolved [`ChronoStorageConfig`]
+/// over the shared, timeout-bounded pooled HTTP client.
 ///
-/// The in-pod log uploader reaches for this: it resolves the WRITE-ONLY SA config
-/// from its mounted creds and needs a client without the process-environment scan
-/// [`try_from_env`] performs. Kept here so the single [`build_http_client`] recipe
-/// (timeout + User-Agent) is shared by both entry points.
+/// Two callers reach for this once the config has been loaded + fail-closed-
+/// validated at startup, so the client is built from the SAME parsed values (no
+/// second env pass, unlike [`try_from_env`]):
+/// - the in-pod log uploader, which resolves the WRITE-ONLY SA config from its
+///   mounted creds;
+/// - the control plane's log-download path, which reuses `Config::storage`.
+///
+/// Kept here so the single [`build_http_client`] recipe (timeout + User-Agent) is
+/// shared by every entry point.
 pub fn client_from_config(config: ChronoStorageConfig) -> ChronoStorageClient {
     ChronoStorageClient::new(build_http_client(), config)
 }

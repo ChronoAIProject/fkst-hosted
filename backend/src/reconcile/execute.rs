@@ -69,6 +69,10 @@ pub struct ReconcileCtx {
     /// version-aware template reconcile to one GitHub round-trip per repo per
     /// (version, TTL) so it is a cheap no-op on the vast majority of reconciles.
     pub ensured_templates: crate::reconcile::EnsuredTemplates,
+    /// The shared `session_id -> log-access context` registry the reconciler upserts
+    /// each sweep so the identity-gated log-download endpoint can reverse a
+    /// `session_id` to its authorization context. A cheap `Arc`-backed handle.
+    pub log_registry: crate::log_access::LogAccessRegistry,
 }
 
 /// Execute ONE action for the repo it belongs to. Best-effort: logs and swallows
@@ -102,18 +106,27 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         }
         ReconcileAction::AnnounceSession {
             trigger_issue,
+            session_id,
             session_name,
             work_label,
             packages,
             environment,
             auto_merge,
         } => {
+            // Build the identity-gated log-download link from the configured public
+            // base URL; `None` (unset) omits the log line. The endpoint authorizes
+            // every request, so the static URL is safe to post.
+            let log_url =
+                ctx.config.log.public_base_url.as_ref().map(|base| {
+                    format!("{}/api/v1/logs/{}", base.trim_end_matches('/'), session_id)
+                });
             let comment = announce_session_comment(
                 &session_name,
                 &work_label,
                 &packages,
                 environment.as_deref(),
                 auto_merge,
+                log_url.as_deref(),
             );
             announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
         }

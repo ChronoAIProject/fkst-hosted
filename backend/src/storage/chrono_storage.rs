@@ -115,10 +115,27 @@ impl ChronoStorageClient {
         Ok(body.data.url)
     }
 
+    /// Mint a presigned GET URL for `key`, requesting a `expires_in_secs` lifetime.
+    ///
+    /// Unlike [`Self::download`] (which resolves then immediately fetches the bytes
+    /// server-side), this RETURNS the signed URL for a caller to hand to an
+    /// already-authenticated, already-authorized client (the log-download endpoint).
+    /// The URL is short-lived + capability-bearing, so it is NEVER logged. Best-effort
+    /// on the TTL: the `expiresIn` hint is honoured by chrono-storage where supported
+    /// and otherwise falls back to the server default (an unknown query param is
+    /// ignored), so a caller must treat `expires_in_secs` as the intended lifetime.
+    pub async fn presigned_get_url(
+        &self,
+        key: &str,
+        expires_in_secs: u64,
+    ) -> Result<String, StorageError> {
+        self.presigned_url(key, Some(expires_in_secs)).await
+    }
+
     /// Download the object at `key`: resolve a presigned GET URL, then fetch it
     /// directly (no auth header — the URL is pre-signed).
     pub async fn download(&self, key: &str) -> Result<Bytes, StorageError> {
-        let presigned = self.presigned_url(key).await?;
+        let presigned = self.presigned_url(key, None).await?;
         // Direct fetch of the signed URL: NO Authorization header.
         let response = self
             .http
@@ -133,18 +150,29 @@ impl ChronoStorageClient {
             .map_err(|e| transport("download-body", &e))
     }
 
-    /// Resolve a presigned GET URL for `key`.
-    async fn presigned_url(&self, key: &str) -> Result<String, StorageError> {
+    /// Resolve a presigned GET URL for `key`, optionally requesting a specific
+    /// `expires_in_secs` lifetime (carried as the `expiresIn` query param when set).
+    async fn presigned_url(
+        &self,
+        key: &str,
+        expires_in_secs: Option<u64>,
+    ) -> Result<String, StorageError> {
         let token = self.token.access_token().await?;
         let url = format!(
             "{}/api/buckets/{}/presigned-url",
             self.base(),
             self.config.bucket
         );
+        // `key` first; append `expiresIn` only when a TTL is requested so the
+        // default-lifetime path (download) sends exactly the same query as before.
+        let mut query: Vec<(&str, String)> = vec![("key", key.to_string())];
+        if let Some(secs) = expires_in_secs {
+            query.push(("expiresIn", secs.to_string()));
+        }
         let response = self
             .http
             .get(url)
-            .query(&[("key", key)])
+            .query(&query)
             .bearer_auth(token.expose_secret())
             .send()
             .await

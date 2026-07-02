@@ -19,6 +19,10 @@ pub mod announce;
 pub mod automerge;
 pub mod desired;
 pub mod execute;
+// Pure three-tier authorization for on-demand session-log downloads (author /
+// per-issue `### Log Access` allow-list / global admins). No I/O; consumed by the
+// identity-gated `/api/v1/logs/{session_id}` endpoint.
+pub mod log_authz;
 mod loops;
 pub mod pending;
 pub mod reachability;

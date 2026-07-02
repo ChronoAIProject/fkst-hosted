@@ -27,6 +27,8 @@ fn app(webhook_secret: bool) -> axum::Router {
         github_app: None,
         github_app_webhook_secret,
         reconciler: None,
+        storage: None,
+        log_registry: Default::default(),
     })
     .expect("router builds")
 }
@@ -82,6 +84,9 @@ async fn paths_are_the_trimmed_v1_surface() {
     for expected in [
         "/api/v1/users/me/environments",
         "/api/v1/users/me/environments/{name}",
+        // The identity-gated log-download endpoint + its browser-OAuth callback.
+        "/api/v1/logs/{session_id}",
+        "/api/v1/logs/oauth/callback",
         "/health",
         "/metrics",
     ] {
@@ -131,6 +136,8 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "EnvironmentList",
         "EnvironmentSummary",
         "InstallValidationError",
+        // The log-download response DTO.
+        "LogDownloadResponse",
     ] {
         assert!(
             schemas.get(expected).is_some(),
@@ -187,6 +194,20 @@ async fn no_operation_requires_security_the_whole_surface_is_open() {
         paths["/metrics"]["get"].get("security").is_none(),
         "/metrics must not require security"
     );
+    // The log-download endpoint + callback self-authorize in-handler (GitHub token or
+    // OAuth), so they carry NO documented security scheme (like the webhook).
+    assert!(
+        paths["/api/v1/logs/{session_id}"]["get"]
+            .get("security")
+            .is_none(),
+        "the log-download endpoint must NOT carry a security scheme"
+    );
+    assert!(
+        paths["/api/v1/logs/oauth/callback"]["get"]
+            .get("security")
+            .is_none(),
+        "the log-download OAuth callback must NOT carry a security scheme"
+    );
 }
 
 #[tokio::test]
@@ -232,6 +253,7 @@ async fn document_tags_are_exactly_the_live_surface() {
     assert_eq!(
         tags,
         vec![
+            "logs".to_string(),
             "system".to_string(),
             "users".to_string(),
             "webhooks".to_string()

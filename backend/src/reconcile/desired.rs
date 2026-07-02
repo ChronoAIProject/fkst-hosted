@@ -69,6 +69,13 @@ pub struct SessionRegistration {
     /// is NOT part of `config_hash` — a pod runs identically regardless, so toggling
     /// it never respawns the pod; it only gates the reconcile-side log-stream step.
     pub log_streaming: bool,
+    /// Per-session log-download allow-list (from the trigger issue's `### Log
+    /// Access`): the GitHub logins/ids permitted to pull this session's redacted
+    /// logs, IN ADDITION to the issue author + the global admins. Like the two
+    /// opt-ins it is NOT part of `config_hash` (a pod runs identically regardless),
+    /// but it IS part of [`full_config_hash`] so config-immutability FREEZES it — the
+    /// allow-list cannot be edited after registration to grant access retroactively.
+    pub log_access: Vec<String>,
 }
 
 /// The lifecycle phase of a live session pod, as the reconciler observes it. This
@@ -160,6 +167,9 @@ pub enum ReconcileAction {
     /// queued work yet.
     AnnounceSession {
         trigger_issue: i64,
+        /// The deterministic session id, so the executor can build the identity-gated
+        /// log-download link (`<base>/api/v1/logs/<session_id>`) the comment carries.
+        session_id: String,
         /// The session name (`### Session Name`).
         session_name: String,
         /// The GitHub work label whose open issues queue this session's work.
@@ -223,9 +233,11 @@ pub fn config_hash(packages: &[PackageRef], work_label: &str, environment: Optio
 /// had *some* config edited, even one (like an opt-in) that does not respawn the pod.
 ///
 /// Canonical form: SHA-256 over the canonical JSON of
-/// `{packages, work_label, environment, name, auto_merge, log_streaming}`. The field
-/// order below IS part of the canonical form (serde serialises in declaration order),
-/// so identical inputs always hash identically and any changed field flips the hash.
+/// `{packages, work_label, environment, name, auto_merge, log_streaming, log_access}`.
+/// The field order below IS part of the canonical form (serde serialises in
+/// declaration order), so identical inputs always hash identically and any changed
+/// field flips the hash — including `log_access`, so the log allow-list is FROZEN by
+/// the config-immutability check (it cannot be widened after registration).
 pub fn full_config_hash(reg: &SessionRegistration) -> String {
     // Borrow-only projection so `PackageRef` need not itself be `Serialize`; the
     // field set + order is the canonical package identity (as in `config_hash`).
@@ -244,6 +256,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         name: &'a str,
         auto_merge: bool,
         log_streaming: bool,
+        log_access: &'a [String],
     }
     let canonical = Canonical {
         packages: reg
@@ -262,6 +275,7 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         name: &reg.def.name,
         auto_merge: reg.auto_merge,
         log_streaming: reg.log_streaming,
+        log_access: &reg.log_access,
     };
     let json =
         serde_json::to_vec(&canonical).expect("canonical full-config-hash json is infallible");
@@ -373,6 +387,7 @@ pub fn plan_repo(
         if !latched_announced.contains(&reg.trigger_issue) {
             actions.push(ReconcileAction::AnnounceSession {
                 trigger_issue: reg.trigger_issue,
+                session_id: reg.session_id.clone(),
                 session_name: reg.def.name.clone(),
                 work_label: reg.def.work_label.clone(),
                 packages: reg

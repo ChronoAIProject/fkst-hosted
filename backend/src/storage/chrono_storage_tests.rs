@@ -129,6 +129,49 @@ async fn download_resolves_presigned_url_then_fetches_bytes() {
 }
 
 #[tokio::test]
+async fn presigned_get_url_requests_expiry_and_returns_the_signed_url() {
+    let (client, server) = client_and_server().await;
+    let signed = "https://cdn.example/signed/blob?sig=xyz".to_string();
+    Mock::given(method("GET"))
+        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
+        .and(query_param("key", "logs/sess-1/latest.tar.gz"))
+        // The requested 900s TTL rides the `expiresIn` query param.
+        .and(query_param("expiresIn", "900"))
+        .and(header("authorization", bearer().as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "data": { "presignedUrl": signed, "expiresAt": "2999-01-01T00:00:00Z" }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let url = client
+        .presigned_get_url("logs/sess-1/latest.tar.gz", 900)
+        .await
+        .expect("presign succeeds");
+    assert_eq!(url, "https://cdn.example/signed/blob?sig=xyz");
+}
+
+#[tokio::test]
+async fn presigned_get_url_maps_missing_object_to_status_404() {
+    let (client, server) = client_and_server().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/buckets/{BUCKET}/presigned-url")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+
+    let err = client
+        .presigned_get_url("logs/missing/latest.tar.gz", 900)
+        .await
+        .expect_err("404 must error");
+    assert!(
+        matches!(err, StorageError::Status { status: 404 }),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
 async fn download_maps_presigned_404_to_status_error() {
     let (client, server) = client_and_server().await;
     Mock::given(method("GET"))

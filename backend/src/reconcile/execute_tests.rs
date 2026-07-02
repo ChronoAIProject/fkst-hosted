@@ -155,7 +155,7 @@ async fn announce_session_posts_a_comment_and_latches_the_announced_label() {
     let api = Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
 
-    let body = announce_session_comment("demo", "fkst-run", &[], None, false);
+    let body = announce_session_comment("demo", "fkst-run", &[], None, false, None);
     announce_session(&github, "acme/site", 11, &body).await;
 
     let comments = api.comments.lock().unwrap();
@@ -244,6 +244,7 @@ fn registration() -> SessionRegistration {
         config_hash: "hash123".to_string(),
         auto_merge: false,
         log_streaming: false,
+        log_access: vec![],
     }
 }
 

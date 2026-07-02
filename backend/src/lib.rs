@@ -15,6 +15,15 @@ pub mod github_app;
 // that keys the per-user environment/secret store.
 pub mod github_identity;
 pub mod goals;
+// In-memory `session_id -> log-access context` registry: the reverse map the
+// identity-gated `/api/v1/logs/{session_id}` endpoint needs (session_id is a one-way
+// hash) but cannot itself yield. The reconciler writes it each sweep; the endpoint
+// reads it.
+pub mod log_access;
+// On-demand session-log download config knobs (`FKST_LOG_ADMINS`,
+// `FKST_PUBLIC_BASE_URL`, `FKST_GITHUB_OAUTH_*`): the global-admin allow-list, the
+// public base URL the announce comment links, and the browser-mode OAuth creds.
+pub mod log_config;
 // Shared in-pod install-command runner + the `validate-env` subcommand (issue
 // #338 §3.2/§3.4): runs an environment's ordered install commands and emits a
 // machine-readable verdict frame. Reused by the env-validation pod (wired here)

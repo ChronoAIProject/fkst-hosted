@@ -29,6 +29,7 @@ fn valid_registration_not_yet_announced_is_announced() {
         actions,
         vec![ReconcileAction::AnnounceSession {
             trigger_issue: 1,
+            session_id: "s1".to_string(),
             session_name: "demo".to_string(),
             work_label: "wl".to_string(),
             packages: vec![],
@@ -59,6 +60,7 @@ fn valid_registration_announces_alongside_spawn() {
             ReconcileAction::Spawn(regs[0].clone()),
             ReconcileAction::AnnounceSession {
                 trigger_issue: 1,
+                session_id: "s1".to_string(),
                 session_name: "demo".to_string(),
                 work_label: "wl".to_string(),
                 packages: vec![],
@@ -144,6 +146,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
         actions,
         vec![ReconcileAction::AnnounceSession {
             trigger_issue: 1,
+            session_id: "s1".to_string(),
             session_name: "demo".to_string(),
             work_label: "wl".to_string(),
             packages: vec![

@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::env_config::EnvConfig;
 use crate::error::AppError;
+use crate::log_config::LogConfig;
 use crate::reconcile_config::ReconcileConfig;
 use crate::storage::ChronoStorageConfig;
 
@@ -282,6 +283,12 @@ pub struct Config {
     /// disabled); a partial config fails closed at startup (see
     /// [`ChronoStorageConfig::from_vars`]).
     pub storage: Option<ChronoStorageConfig>,
+    /// On-demand session-log download config (`FKST_LOG_ADMINS`,
+    /// `FKST_PUBLIC_BASE_URL`, `FKST_GITHUB_OAUTH_*`): the global-admin allow-list,
+    /// the public base URL the announce comment links, and the browser-mode OAuth
+    /// creds. All optional; a half-configured OAuth pair fails closed (see
+    /// [`LogConfig::from_vars`]).
+    pub log: LogConfig,
 }
 
 impl Default for Config {
@@ -299,6 +306,7 @@ impl Default for Config {
             env: EnvConfig::default(),
             reconcile: ReconcileConfig::default(),
             storage: None,
+            log: LogConfig::default(),
         }
     }
 }
@@ -461,6 +469,11 @@ impl Config {
         // and fails closed on a partial config (naming the missing vars).
         let storage = ChronoStorageConfig::from_vars(&vars)?;
 
+        // On-demand session-log download config (FKST_LOG_ADMINS,
+        // FKST_PUBLIC_BASE_URL, FKST_GITHUB_OAUTH_*). Shares the same `vars`
+        // snapshot; fails closed only on a half-configured OAuth id/secret pair.
+        let log = LogConfig::from_vars(&vars)?;
+
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -474,6 +487,7 @@ impl Config {
             env,
             reconcile,
             storage,
+            log,
         })
     }
 
@@ -864,5 +878,37 @@ mod tests {
         .expect_err("partial storage config must fail closed through Config");
         assert!(matches!(err, AppError::Config(_)));
         assert!(err.to_string().contains("FKST_NYXID_CLIENT_SECRET"));
+    }
+
+    // ---- log-download (FKST_LOG_ADMINS / FKST_PUBLIC_BASE_URL / OAuth) wiring ---
+
+    #[test]
+    fn log_config_defaults_are_wired_into_config() {
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert!(config.log.admins.is_empty());
+        assert_eq!(config.log.public_base_url, None);
+        assert_eq!(config.log.oauth_base_url, "https://github.com");
+    }
+
+    #[test]
+    fn log_config_surfaces_through_config_from_vars_when_set() {
+        let config = Config::from_vars(vars(&[
+            ("FKST_LOG_ADMINS", "ops, 42"),
+            ("FKST_PUBLIC_BASE_URL", "https://fkst.example"),
+        ]))
+        .expect("log config loads");
+        assert_eq!(config.log.admins, vec!["ops", "42"]);
+        assert_eq!(
+            config.log.public_base_url.as_deref(),
+            Some("https://fkst.example")
+        );
+    }
+
+    #[test]
+    fn half_configured_oauth_pair_fails_closed_through_config_from_vars() {
+        let err = Config::from_vars(vars(&[("FKST_GITHUB_OAUTH_CLIENT_ID", "Iv1.abc")]))
+            .expect_err("half OAuth config must fail closed through Config");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_GITHUB_OAUTH_CLIENT_SECRET"));
     }
 }

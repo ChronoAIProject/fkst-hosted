@@ -29,6 +29,7 @@ fn base_reg() -> SessionRegistration {
         config_hash: "ignored".to_string(),
         auto_merge: false,
         log_streaming: false,
+        log_access: vec!["alice".to_string()],
     }
 }
 
@@ -90,6 +91,25 @@ fn full_config_hash_changes_with_each_config_field() {
         base,
         full_config_hash(&reg),
         "log_streaming must move the hash"
+    );
+
+    // log_access — the allow-list is FROZEN by config-immutability, so editing it
+    // MUST move the full hash (that is how the immutability check catches a widening).
+    let mut reg = base_reg();
+    reg.log_access = vec!["alice".to_string(), "bob".to_string()];
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "log_access must move the full hash (it is frozen by config-immutability)"
+    );
+
+    // A DIFFERENT allow-list (order/content) hashes differently again.
+    let mut reg = base_reg();
+    reg.log_access = vec![];
+    assert_ne!(
+        base,
+        full_config_hash(&reg),
+        "clearing log_access must also move the hash"
     );
 }
 
