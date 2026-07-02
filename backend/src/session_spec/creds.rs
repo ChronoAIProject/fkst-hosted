@@ -28,6 +28,20 @@ pub const LLM_API_KEY_FILE: &str = "llm-api-key";
 /// Kubernetes Secret data key (`[-._a-zA-Z0-9]+`).
 pub const USER_ENV_PREFIX: &str = "userenv.";
 
+/// The write-only chrono-storage SA client id the in-pod log uploader mints its
+/// OAuth2 token with. Non-secret (an OAuth client identifier), mounted alongside
+/// the secret below. Present only when the control plane configured a write-only
+/// SA; absent otherwise (the uploader then produces no bundle — fail-closed).
+pub const STORAGE_CLIENT_ID_FILE: &str = "storage-client-id";
+/// The write-only chrono-storage SA client secret (SECRET). Mounted 0400.
+pub const STORAGE_CLIENT_SECRET_FILE: &str = "storage-client-secret";
+/// The NyxID OAuth2 token endpoint the in-pod uploader mints against.
+pub const STORAGE_TOKEN_URL_FILE: &str = "storage-token-url";
+/// The proxied chrono-storage base URL (non-secret).
+pub const STORAGE_BASE_URL_FILE: &str = "storage-base-url";
+/// The chrono-storage bucket the log bundle is written to (non-secret).
+pub const STORAGE_BUCKET_FILE: &str = "storage-bucket";
+
 /// Default mount path of the per-session credential Secret volume inside the pod.
 pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
 
@@ -85,6 +99,31 @@ impl CredsLayout {
         self.base.join(LLM_API_KEY_FILE)
     }
 
+    /// Path to the write-only chrono-storage SA client id (non-secret).
+    pub fn storage_client_id(&self) -> PathBuf {
+        self.base.join(STORAGE_CLIENT_ID_FILE)
+    }
+
+    /// Path to the write-only chrono-storage SA client secret (SECRET).
+    pub fn storage_client_secret(&self) -> PathBuf {
+        self.base.join(STORAGE_CLIENT_SECRET_FILE)
+    }
+
+    /// Path to the NyxID OAuth2 token endpoint the uploader mints against.
+    pub fn storage_token_url(&self) -> PathBuf {
+        self.base.join(STORAGE_TOKEN_URL_FILE)
+    }
+
+    /// Path to the proxied chrono-storage base URL (non-secret).
+    pub fn storage_base_url(&self) -> PathBuf {
+        self.base.join(STORAGE_BASE_URL_FILE)
+    }
+
+    /// Path to the chrono-storage bucket the log bundle is written to.
+    pub fn storage_bucket(&self) -> PathBuf {
+        self.base.join(STORAGE_BUCKET_FILE)
+    }
+
     /// List the mounted per-user env files (PR4b): every entry directly under
     /// [`base`](Self::base) whose filename starts with [`USER_ENV_PREFIX`],
     /// returned as `(KEY, path)` with the prefix stripped from `KEY`. The
@@ -130,6 +169,31 @@ mod tests {
     fn honors_a_custom_base() {
         let layout = CredsLayout::new("/mnt/creds");
         assert_eq!(layout.github_token(), Path::new("/mnt/creds/github-token"));
+    }
+
+    #[test]
+    fn storage_creds_compose_the_expected_paths() {
+        let layout = CredsLayout::new("/mnt/creds");
+        assert_eq!(
+            layout.storage_client_id(),
+            Path::new("/mnt/creds/storage-client-id")
+        );
+        assert_eq!(
+            layout.storage_client_secret(),
+            Path::new("/mnt/creds/storage-client-secret")
+        );
+        assert_eq!(
+            layout.storage_token_url(),
+            Path::new("/mnt/creds/storage-token-url")
+        );
+        assert_eq!(
+            layout.storage_base_url(),
+            Path::new("/mnt/creds/storage-base-url")
+        );
+        assert_eq!(
+            layout.storage_bucket(),
+            Path::new("/mnt/creds/storage-bucket")
+        );
     }
 
     #[test]

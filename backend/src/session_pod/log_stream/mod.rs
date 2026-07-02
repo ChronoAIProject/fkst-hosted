@@ -27,6 +27,7 @@ pub mod gitbranch;
 pub mod instance;
 pub mod redact;
 pub mod seed;
+pub mod sink;
 pub mod tail;
 pub mod tee;
 
