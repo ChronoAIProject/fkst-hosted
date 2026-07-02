@@ -7,6 +7,7 @@ local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local v_review_meta = require("devloop.validators.review_meta")
+local workflow_codex = require("workflow.codex")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -102,7 +103,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       version = review_meta.dedup_key,
       tick = event.ts,
     })
-    local codex_opts = core.judgment_codex_opts(
+    local codex_opts = workflow_codex.judgment_codex_opts(
       core.build_review_meta_prompt(review_meta, current_issue, content_fetch),
       core.judgment_worktree("review-meta", review_meta.dedup_key)
     )

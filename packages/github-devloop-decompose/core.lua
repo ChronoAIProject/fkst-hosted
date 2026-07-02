@@ -27,7 +27,6 @@ M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, .
 M.max_body_len = function(...) return base.max_body_len(M, ...) end
 M.quote_untrusted_prompt_text = function(...) return base.quote_untrusted_prompt_text(M, ...) end
 M.gh_exec_opts = function(...) return base.gh_exec_opts(M, ...) end
-M.judgment_codex_opts = base.judgment_codex_opts
 M._max_key_len = base._max_key_len
 M._max_dedup_len = base._max_dedup_len
 M._max_title_len = base._max_title_len

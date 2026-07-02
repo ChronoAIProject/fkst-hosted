@@ -19,6 +19,7 @@ local decompose_lib = require("devloop.decompose")
 local prompt_installers = require("devloop.prompts")
 local m_builders = require("devloop.markers.builders")
 local entity_lib = require("devloop.entity")
+local workflow_codex = require("workflow.codex")
 local has_value = h.has_value
 local source_ref = h.source_ref
 local reached = h.reached
@@ -454,7 +455,7 @@ return {
     local judgment_path = core.judgment_worktree_path("/tmp/fkst-rt", "intake", ready.dedup_key)
     t.is_true(judgment_path:find("/tmp/fkst-rt/judgment-worktrees/github-devloop-intake-", 1, true) == 1)
     t.is_nil(judgment_path:find("/worktrees/", 1, true))
-    local judgment_opts = core.judgment_codex_opts("prompt", judgment_path)
+    local judgment_opts = workflow_codex.judgment_codex_opts("prompt", judgment_path)
     t.eq(judgment_opts.prompt, "prompt")
     t.eq(judgment_opts.worktree, judgment_path)
     t.eq(judgment_opts.sandbox, "read-only")

@@ -1,7 +1,6 @@
 local C = {}
 local config = require("devloop.config")
 
-local codex = require("workflow.codex")
 local error_facts = require("contract.error_facts")
 local forge_validators = require("devloop.forge_validators")
 local base_ids = require("devloop.base_ids")
@@ -561,7 +560,6 @@ function C.judgment_worktree_with_exec(M, exec_sync_fn, role, identity)
   return worktree
 end
 
-C.judgment_codex_opts = codex.judgment_codex_opts
 
 function C.max_body_len(M)
   return max_body_len

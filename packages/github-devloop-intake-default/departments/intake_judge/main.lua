@@ -13,6 +13,7 @@ local v_intake_candidate = require("devloop.validators.intake_candidate")
 local m_facts = require("devloop.markers.facts")
 local m_shared = require("devloop.markers.shared")
 local entity_lib = require("devloop.entity")
+local workflow_codex = require("workflow.codex")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -231,7 +232,7 @@ local function act_intake_judge(event)
     version = gate.decision_dedup_key,
     tick = event.ts,
   })
-  local result = spawn_codex_sync(core.judgment_codex_opts(
+  local result = spawn_codex_sync(workflow_codex.judgment_codex_opts(
     core.build_intake_prompt(candidate.proposal_id, gate.current, content_fetch),
     core.judgment_worktree("intake", candidate.dedup_key)
   ))

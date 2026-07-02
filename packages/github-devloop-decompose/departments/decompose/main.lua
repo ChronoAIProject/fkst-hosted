@@ -13,6 +13,7 @@ local config = require("devloop.config")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local workflow_codex = require("workflow.codex")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -43,7 +44,7 @@ end
 
 local function decompose_plan(decompose, current_issue, content_fetch)
   local prompt = core.build_decompose_prompt(decompose, current_issue, content_fetch)
-  local result = spawn_codex_sync(core.judgment_codex_opts(
+  local result = spawn_codex_sync(workflow_codex.judgment_codex_opts(
     prompt,
     core.judgment_worktree("decompose", decompose.dedup_key)
   ))
