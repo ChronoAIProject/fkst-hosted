@@ -847,7 +847,7 @@ return {
     t.is_true(comment.body:find("github-devloop review reconcile action: drop", 1, true) ~= nil)
     t.is_true(comment.body:find("no-actionable-framing-after-3-review-rounds", 1, true) ~= nil)
     t.is_true(comment.body:find(core.state_marker(event.proposal_id, "blocked", version), 1, true) ~= nil)
-    t.is_true(comment.body:find(conv_reconcile.review_reconcile_marker(core, event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
+    t.is_true(comment.body:find(conv_reconcile.review_reconcile_marker(event.proposal_id, event.issue_version, event.round, "drop"), 1, true) ~= nil)
     t.eq(label.add_labels[1], "fkst-dev:blocked")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
     t.eq(count_calls("codex exec"), 0)

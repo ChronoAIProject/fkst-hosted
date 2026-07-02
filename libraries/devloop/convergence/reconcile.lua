@@ -234,7 +234,7 @@ function C.reconcile_state_version(base_version, round)
   return tostring(base_version) .. "/loop/" .. tostring(round)
 end
 
-function C.reconcile_marker(M, proposal_id, base_version, round, action)
+function C.reconcile_marker(proposal_id, base_version, round, action)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid reconcile round")
@@ -242,15 +242,15 @@ function C.reconcile_marker(M, proposal_id, base_version, round, action)
   if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
     error("github-devloop: invalid reconcile action")
   end
-  return '<!-- fkst:github-devloop:reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(C.reconcile_state_version(base_version, n), M._max_dedup_len)
+  return '<!-- fkst:github-devloop:reconcile:v1 proposal="' .. safe_attr(proposal_id, devloop_base._max_key_len)
+    .. '" version="' .. safe_attr(C.reconcile_state_version(base_version, n), devloop_base._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
-    .. '" dedup="' .. safe_attr("reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(n), M._max_dedup_len)
+    .. '" dedup="' .. safe_attr("reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(n), devloop_base._max_dedup_len)
     .. '" -->'
 end
 
-function C.review_reconcile_marker(M, issue_proposal_id, issue_version, round, action)
+function C.review_reconcile_marker(issue_proposal_id, issue_version, round, action)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review reconcile round")
@@ -258,11 +258,11 @@ function C.review_reconcile_marker(M, issue_proposal_id, issue_version, round, a
   if action ~= "drop" and action ~= "re-design" and action ~= "re-cluster" then
     error("github-devloop: invalid review reconcile action")
   end
-  return '<!-- fkst:github-devloop:review-reconcile:v1 proposal="' .. safe_attr(issue_proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(C.review_reconcile_state_version(issue_version, n), M._max_dedup_len)
+  return '<!-- fkst:github-devloop:review-reconcile:v1 proposal="' .. safe_attr(issue_proposal_id, devloop_base._max_key_len)
+    .. '" version="' .. safe_attr(C.review_reconcile_state_version(issue_version, n), devloop_base._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
-    .. '" dedup="' .. safe_attr("review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(n), M._max_dedup_len)
+    .. '" dedup="' .. safe_attr("review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(n), devloop_base._max_dedup_len)
     .. '" -->'
 end
 

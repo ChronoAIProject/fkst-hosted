@@ -183,7 +183,7 @@ return {
     t.eq(reconcile.schema, "github-devloop.reconcile.v1")
     t.eq(reconcile.dedup_key, "reconcile:" .. base_version .. "/loop/3")
     t.eq(conv_reconcile.is_supported_reconcile(reconcile), true)
-    local reconcile_marker = conv_reconcile.reconcile_marker(core, proposal_id, base_version, 3, "drop")
+    local reconcile_marker = conv_reconcile.reconcile_marker(proposal_id, base_version, 3, "drop")
     t.eq(conv_reconcile.has_reconcile_marker(core, { reconcile_marker }, proposal_id, base_version, 3), true)
     t.eq(conv_reconcile.reconcile_state_version(base_version, 3), base_version .. "/loop/3")
     local live_thinking_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
@@ -241,7 +241,7 @@ return {
     t.eq(terminal_version, live_reviewing_version .. "/review-loop/10")
     t.eq(core.versioned_transition_status({ state = "reviewing", version = live_reviewing_version }, { "reviewing" }, "blocked", terminal_version), "apply")
 
-    local marker = conv_reconcile.review_reconcile_marker(core, issue_proposal_id, issue_version, 3, "drop")
+    local marker = conv_reconcile.review_reconcile_marker(issue_proposal_id, issue_version, 3, "drop")
     t.eq(conv_reconcile.has_review_reconcile_marker(core, { marker }, issue_proposal_id, issue_version, 3), true)
     t.is_true(marker:find('action="drop"', 1, true) ~= nil)
     t.is_true(marker:find('dedup="review-reconcile:' .. issue_version .. '/review-loop/3"', 1, true) ~= nil)
