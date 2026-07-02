@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import json
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -130,6 +131,101 @@ class RunShCoverageRatchetHarness:
                 ),
             ],
             cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+
+class RunShComposedConformanceHarness:
+    def __init__(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "repo"
+        self.scripts = self.root / "scripts"
+        self.framework = self.root / "fkst-framework"
+        self.scripts.mkdir(parents=True)
+        for name in (
+            "run.sh",
+            "bin_bootstrap.sh",
+            "host_run.sh",
+            "host_entry.sh",
+            "composed_manifest.sh",
+            "test_affected.sh",
+        ):
+            shutil.copy2(REPO_ROOT / "scripts" / name, self.scripts / name)
+        for package, kind in (("composed", "package.composed"), ("dep", "package")):
+            pkg = self.root / "packages" / package
+            pkg.mkdir(parents=True)
+            manifest = f'kind = "{kind}"\nname = "{package}"\n'
+            if package == "composed":
+                manifest += '\n[event_deps]\npackages = ["dep"]\n'
+            (pkg / "fkst.toml").write_text(manifest, encoding="utf-8")
+        write_executable(
+            self.framework,
+            textwrap.dedent(
+                """\
+                #!/usr/bin/env python3
+                import os
+                import sys
+
+                operational = [
+                    "FKST_GITHUB_BOT_LOGIN",
+                    "FKST_GITHUB_CLAIM_MODE",
+                    "FKST_GITHUB_REPO",
+                    "FKST_GITHUB_WRITE",
+                    "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX",
+                    "FKST_DEVLOOP_UPSTREAM_BRANCH",
+                    "FKST_DEVLOOP_INTEGRATION_BRANCH",
+                    "FKST_DEVLOOP_ROLLUP_MERGE",
+                    "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+                    "FKST_DEVLOOP_TEST_COMMAND",
+                    "FKST_OUTPUT_LANG",
+                ]
+                if sys.argv[1:4] == ["manifest", "composed-deps", "--manifest"]:
+                    if sys.argv[4].replace("//", "/").endswith("/composed/fkst.toml"):
+                        print("dep")
+                        raise SystemExit(0)
+                    raise SystemExit(10)
+                if sys.argv[1:2] == ["conformance"]:
+                    leaked = [name for name in operational if os.environ.get(name)]
+                    if leaked:
+                        print("leaked operational env: " + ",".join(leaked), file=sys.stderr)
+                        raise SystemExit(64)
+                    print('{"ok":true,"violations":[],"counts":{"packs":2,"checks":1,"passed":1,"failed":0}}')
+                    raise SystemExit(0)
+                print("unexpected argv: " + " ".join(sys.argv[1:]), file=sys.stderr)
+                raise SystemExit(2)
+                """
+            ),
+        )
+
+    def close(self) -> None:
+        self.tmp.cleanup()
+
+    def run_composed(self) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update(
+            {
+                "BIN": str(self.framework),
+                "FKST_NO_AUTOBUILD": "1",
+                "FKST_GITHUB_BOT_LOGIN": "live-bot",
+                "FKST_GITHUB_CLAIM_MODE": "label",
+                "FKST_GITHUB_REPO": "owner/live",
+                "FKST_GITHUB_WRITE": "1",
+                "FKST_GITHUB_PROXY_POLL_LABEL_PREFIX": "live-dev:",
+                "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
+                "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-live",
+                "FKST_DEVLOOP_ROLLUP_MERGE": "manual",
+                "FKST_DEVLOOP_MANAGED_BOT_LOGINS": "live-bot,peer-bot",
+                "FKST_DEVLOOP_TEST_COMMAND": "live-test-command",
+                "FKST_OUTPUT_LANG": "zh",
+            }
+        )
+        return subprocess.run(
+            ["/bin/bash", "-c", "source scripts/run.sh; cmd_test_composed"],
+            cwd=self.root,
             env=env,
             text=True,
             stdout=subprocess.PIPE,
@@ -274,6 +370,17 @@ class RunShCoverageSelfTest(unittest.TestCase):
             self.assertEqual(data["files"][0]["file"], "packages/example/core.lua")
             self.assertIn("coverable_lines", data["files"][0])
             self.assertNotIn("--covered-json", result.stdout + result.stderr)
+        finally:
+            h.close()
+
+    def test_composed_conformance_scrubs_live_dogfood_environment(self) -> None:
+        h = RunShComposedConformanceHarness()
+        try:
+            result = h.run_composed()
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn('"ok":true', result.stdout)
+            self.assertNotIn("leaked operational env", result.stderr + result.stdout)
         finally:
             h.close()
 

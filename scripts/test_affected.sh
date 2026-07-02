@@ -35,6 +35,7 @@ test_affected_is_root_config() {
 test_affected_is_broad_path() {
   local path="$1"
   case "$path" in
+    .claude/skills/dogfood-github-devloop/*) return 0 ;;
     libraries/*|scripts/*|.github/*) return 0 ;;
   esac
   test_affected_is_root_config "$path"

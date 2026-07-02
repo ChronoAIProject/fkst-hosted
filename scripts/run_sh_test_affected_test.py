@@ -176,6 +176,18 @@ class RunShTestAffectedTest(unittest.TestCase):
             finally:
                 h.close()
 
+    def test_runs_full_for_dogfood_operator_paths(self) -> None:
+        h = TestAffectedHarness()
+        try:
+            h._write(".claude/skills/dogfood-github-devloop/dogfood.platform-packages", "github-devloop\n")
+
+            result = h.run()
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(h.runner_args(), ["test"])
+        finally:
+            h.close()
+
     def test_runs_each_changed_package(self) -> None:
         h = TestAffectedHarness()
         try:

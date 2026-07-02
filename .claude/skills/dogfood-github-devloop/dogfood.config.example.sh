@@ -40,9 +40,10 @@
 # DOGFOOD_REPOS="packages substrate website"
 
 # The github-devloop PLATFORM packages each supervise loads + runs from PKGSRC/packages/. The DEFAULT
-# (the full platform: the github-devloop trio + the rest of the library; auto-audit DISABLED) now lives
-# in dogfood.sh so every host stays consistent — you do NOT set it here unless THIS host genuinely
-# differs. Precedence: env DEVLOOP_PKGS > this file > the dogfood.sh default.
+# (auto-audit DISABLED) lives in dogfood.platform-packages; least-privilege host defaults may live in
+# dogfood.platform-packages.<target> (for example, website excludes substrate-only agents). You do NOT
+# set it here unless THIS machine genuinely differs. Precedence: env DEVLOOP_PKGS > this file >
+# dogfood.platform-packages.<target> > dogfood.platform-packages.
 #   WHERE TO LOOK (what packages exist + each one's role): PKGSRC/packages/<pkg>/ — `fkst.toml` gives
 #     its `kind` (package | package.composed) and `[event_deps]`; `departments/<d>/main.lua` gives each
 #     dept's `consumes`/`produces` (its event contract). That is the source of truth, not this list.
@@ -53,9 +54,10 @@
 #     work that github-devloop's intake then judges (e.g. an architecture-audit agent). An issue-CONSUMER
 #     (consumes github_entity_changed / claims + manages the issue lifecycle, e.g. an issue->reply agent)
 #     WOULD fight github-devloop over the same issues and must run as its OWN separate supervise, not here.
-#   AUTO-AUDIT is DISABLED: the archaudit + idle-detector audit-producer agents are NOT loaded on any
-#     target (archaudit auto-filed engine SDK changes the pipeline could not safely develop). Re-enable
-#     by adding `idle-detector archaudit` back to the dogfood.sh default DEVLOOP_PKGS if ever wanted.
+#   AUTO-AUDIT is DISABLED: the archaudit audit-producer agent is NOT loaded on any target (archaudit
+#     auto-filed engine SDK changes the pipeline could not safely develop). idle-detector remains loaded
+#     because website site-board consumes idle-detector.system_idle. Re-enable audit by adding
+#     `archaudit` to dogfood.platform-packages if ever wanted.
 #   OVERRIDE the whole platform list only if this host differs from the dogfood.sh default, e.g.:
 #       # DEVLOOP_PKGS="github-devloop github-devloop-pr github-devloop-integration github-proxy consensus"
 
