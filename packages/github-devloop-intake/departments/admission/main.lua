@@ -72,7 +72,7 @@ end
 
 local function admit_issue_event(event, entity)
   entity = entity or event.payload or {}
-  devloop_logging.log_entry("admission", event, "github-devloop/intake", core.payload_field(entity, "dedup_key"))
+  devloop_logging.log_entry("admission", event, "github-devloop/intake", devloop_logging.payload_field(entity, "dedup_key"))
   local repo, issue_number = devloop_base.parse_issue_source_ref(entity.source_ref)
   if repo == nil or issue_number == nil then
     devloop_logging.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "entity", "candidate", "skip-foreign(source_ref)", "invalid issue source_ref")
@@ -89,7 +89,7 @@ local function admit_issue_event(event, entity)
   current.updated_at = current.updated_at or entity.updated_at
   current.number = issue_number
 
-  core.log_forged_markers("admission", proposal_id, current.comments)
+  devloop_logging.log_forged_markers("admission", proposal_id, current.comments)
   local issue = {
     number = issue_number,
     title = current.title,

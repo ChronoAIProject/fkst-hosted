@@ -27,7 +27,7 @@ local spec = {
 return saga.department(spec, { done = function() return false end, act = function(event)
   local review_meta = event.payload or {}
   if not v_review_meta.is_supported_review_meta(core, review_meta) then
-    devloop_logging.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
+    devloop_logging.log_entry("review_meta", event, "unknown", devloop_logging.payload_field(review_meta, "dedup_key"))
     devloop_logging.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -73,7 +73,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         current_issue.title = parsed_issue.title
       end
     end
-    core.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
+    devloop_logging.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
 
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, review_meta.proposal_id)
     local transition = devloop_state.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)

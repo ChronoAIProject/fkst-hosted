@@ -517,7 +517,7 @@ end
 local function process_issue_event(event)
   local issue = event.payload or {}
   if not v_issue.is_supported_issue(core, issue) then
-    devloop_logging.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, "unknown", devloop_logging.payload_field(issue, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "unmanaged", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -545,7 +545,7 @@ local function process_issue_event(event)
       devloop_logging.log_cas_decision("observe_issue", proposal_id, { state = nil, version = nil }, "unmanaged", "thinking", "skip-not-opted-in", "fkst-dev:enabled label is absent")
       return
     end
-    core.log_forged_markers("observe_issue", proposal_id, current.comments)
+    devloop_logging.log_forged_markers("observe_issue", proposal_id, current.comments)
     local link = m_facts.pr_link_fact(core, current.comments, proposal_id)
     local issue_state = devloop_state.current_state(current.comments, proposal_id)
     if devloop_base.is_intake_held(current.labels) then
@@ -722,7 +722,7 @@ end
 local function process_pr_event(event)
   local pr = event.payload or {}
   if not v_pr.is_supported_pr(core, pr) then
-    devloop_logging.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, "unknown", devloop_logging.payload_field(pr, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr)", "unsupported PR payload")
     return
   end
@@ -739,13 +739,13 @@ local function process_pr_event(event)
   current_pr.force_fresh = true
   local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin == nil or origin.pr_native == true or origin.repo ~= pr.repo or tonumber(origin.issue_number) == nil then
-    devloop_logging.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, "unknown", devloop_logging.payload_field(pr, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr-origin)", "PR entity change has no issue-backed devloop origin")
     return
   end
   if tostring(origin.branch or "") ~= tostring(current_pr.head_ref_name or "")
     or tostring(origin.base_branch or "") ~= tostring(current_pr.base_ref_name or "") then
-    devloop_logging.log_entry("observe_issue", event, origin.proposal_id, core.payload_field(pr, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, origin.proposal_id, devloop_logging.payload_field(pr, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", origin.proposal_id, { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-stale(pr-origin)", "PR origin no longer matches current PR head/base")
     return
   end
@@ -772,7 +772,7 @@ end
 return saga.department(spec, { done = function() return false end, act = function(event)
   queue.dispatch_consumed_queue("observe_issue", spec, event, {
     ["github-proxy.github_entity_changed"] = function(e)
-      if core.payload_field(e and e.payload, "type") == "pr" then
+      if devloop_logging.payload_field(e and e.payload, "type") == "pr" then
         return process_pr_event(e)
       end
       return process_issue_event(e)

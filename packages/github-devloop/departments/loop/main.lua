@@ -31,7 +31,7 @@ local spec = {
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
   if not v_unresolved.is_supported_unresolved(core, unresolved) then
-    devloop_logging.log_entry("loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
+    devloop_logging.log_entry("loop", event, "unknown", devloop_logging.payload_field(unresolved, "dedup_key"))
     devloop_logging.log_cas_decision("loop", "unknown", { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -58,7 +58,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
-    core.log_forged_markers("loop", unresolved.proposal_id, current.comments)
+    devloop_logging.log_forged_markers("loop", unresolved.proposal_id, current.comments)
     local state = devloop_state.current_state(current.comments, unresolved.proposal_id)
     local transition = devloop_state.transition_status(state, { "thinking" }, "blocked")
     if transition == "idempotent" or transition == "stale" then

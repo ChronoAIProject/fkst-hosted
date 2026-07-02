@@ -86,7 +86,7 @@ end
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
   if not v_pr_review_unresolved.is_supported_pr_review_unresolved(core, unresolved) then
-    devloop_logging.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
+    devloop_logging.log_entry("review_loop", event, "unknown", devloop_logging.payload_field(unresolved, "dedup_key"))
     devloop_logging.log_cas_decision("review_loop", "unknown", { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -139,7 +139,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local pr_source_ref = entity_lib.pr_source_ref(repo, pr_number)
 
   with_lock(lock_key, function()
-    core.log_forged_markers("review_loop", origin.proposal_id, current_pr.comments)
+    devloop_logging.log_forged_markers("review_loop", origin.proposal_id, current_pr.comments)
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
     local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then

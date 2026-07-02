@@ -32,7 +32,7 @@ local function read_current(repo, issue_number, request)
   end
   local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
   current.repo, current.number = repo, issue_number
-  core.log_forged_markers("execute_start", request.proposal_id, current.comments)
+  devloop_logging.log_forged_markers("execute_start", request.proposal_id, current.comments)
   if current.state ~= "OPEN" then
     devloop_logging.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-closed", "issue is not open")
     return nil
@@ -72,7 +72,7 @@ end
 local function act_execute_start(event)
   local request = event.payload or {}
   if not v_execution_request.is_supported_execution_request(core, request) then
-    devloop_logging.log_entry("execute_start", event, "unknown", core.payload_field(request, "dedup_key"))
+    devloop_logging.log_entry("execute_start", event, "unknown", devloop_logging.payload_field(request, "dedup_key"))
     devloop_logging.log_cas_decision("execute_start", "unknown", { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(payload)", "unsupported event payload")
     return
   end

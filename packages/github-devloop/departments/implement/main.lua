@@ -469,7 +469,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
   local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
-  core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
+  devloop_logging.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
   local state = devloop_state.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
@@ -520,7 +520,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
     error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
   local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
-  core.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
+  devloop_logging.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
   local state = devloop_state.current_state(current.comments, marker_ready.proposal_id)
   if state.state == "implementing"
     and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
@@ -586,7 +586,7 @@ end
 local function process_ready_event(event)
   local ready = event.payload or {}
   if not v_ready.is_supported_ready(core, ready) then
-    devloop_logging.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
+    devloop_logging.log_entry("implement", event, "unknown", devloop_logging.payload_field(ready, "dedup_key"))
     devloop_logging.log_cas_decision("implement", "unknown", { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -617,7 +617,7 @@ local function process_ready_event(event)
     current.repo = repo
     current.number = issue_number
     local managed = m_claims.managed_bot_logins(core)
-    core.log_forged_markers("implement", ready.proposal_id, current.comments)
+    devloop_logging.log_forged_markers("implement", ready.proposal_id, current.comments)
     if tostring(current.state or ""):upper() ~= "OPEN" then
       devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")
       return

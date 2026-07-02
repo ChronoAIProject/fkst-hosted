@@ -96,7 +96,7 @@ end
 local function pipeline_thinking(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_reconcile(core, reconcile) then
-    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", devloop_logging.payload_field(reconcile, "dedup_key"))
     devloop_logging.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -123,7 +123,7 @@ local function pipeline_thinking(event)
     end
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
-    core.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
+    devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = devloop_state.current_state(current.comments, reconcile.proposal_id)
     if conv_reconcile.has_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.base_version, reconcile.round) then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-idempotent(reconcile marker already visible)", "reconcile result marker for incoming version is already visible")
@@ -165,7 +165,7 @@ end
 local function pipeline_timeout(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_timeout_reconcile(core, reconcile) then
-    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", devloop_logging.payload_field(reconcile, "dedup_key"))
     devloop_logging.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "timeout", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
@@ -188,7 +188,7 @@ local function pipeline_timeout(event)
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
     local comments = current.comments or {}
-    core.log_forged_markers("reconcile", reconcile.proposal_id, comments)
+    devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, comments)
     local state = require("devloop.entity").current_entity_state(core, comments, reconcile.proposal_id)
     if conv_reconcile.has_timeout_reconcile_marker(core, comments, reconcile.proposal_id, reconcile.issue_version, reconcile.state, reconcile.round) then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-idempotent(timeout reconcile marker already visible)", "timeout reconcile result marker for incoming version is already visible")
@@ -300,7 +300,7 @@ end
 return saga.department(spec, {
   done = function() return false end,
   act = function(event)
-    local schema = core.payload_field(event and event.payload, "schema")
+    local schema = devloop_logging.payload_field(event and event.payload, "schema")
     if schema == "github-devloop.timeout-reconcile.v1" then
       return pipeline_timeout(event)
     end

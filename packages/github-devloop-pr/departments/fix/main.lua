@@ -630,7 +630,7 @@ end
 local function act_fix(event)
   local fix = event.payload or {}
   if not v_fixing.is_supported_fixing(core, fix) then
-    devloop_logging.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
+    devloop_logging.log_entry("fix", event, "unknown", devloop_logging.payload_field(fix, "dedup_key"))
     devloop_logging.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -663,7 +663,7 @@ local function act_fix(event)
       error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_fix(core, pr_view.stdout)
-    core.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
+    devloop_logging.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
     local reviewing_version = devloop_state.next_fix_version(fix.version)
     if devloop_state.has_state_marker(current_pr.comments, fix.proposal_id, "reviewing", reviewing_version) then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, { state = "reviewing", version = reviewing_version }, "fixing", "reviewing", "skip-idempotent(already at to_state)", "reviewing state marker for fix already visible")

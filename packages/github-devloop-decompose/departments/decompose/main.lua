@@ -244,7 +244,7 @@ local function decompose_context(event)
   end
   local decompose = event.payload or {}
   if not decompose_lib.is_supported_decompose(core, decompose) then
-    devloop_logging.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
+    devloop_logging.log_entry("decompose", event, "unknown", devloop_logging.payload_field(decompose, "dedup_key"))
     devloop_logging.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     if type(event) == "table" then
       context_cache[event] = false
@@ -319,7 +319,7 @@ local function decomposed_done(event)
   with_lock(context.lock_key, function()
     devloop_base.assert_trusted_bot_configured()
     local current_pr = read_current_pr(context.repo, context.decompose.pr_number)
-    core.log_forged_markers("decompose",
+    devloop_logging.log_forged_markers("decompose",
       context.decompose.proposal_id,
       current_pr.comments)
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, context.decompose.proposal_id)
@@ -365,7 +365,7 @@ local function act_decompose(event)
     devloop_base.assert_trusted_bot_configured()
 
     local current_pr = read_current_pr(repo, decompose.pr_number)
-    core.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)
+    devloop_logging.log_forged_markers("decompose", decompose.proposal_id, current_pr.comments)
 
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, decompose.proposal_id)
     if not conv_reconcile.has_fix_reconcile_marker(core, current_pr.comments, decompose.proposal_id, decompose.version)

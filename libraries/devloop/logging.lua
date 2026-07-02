@@ -146,28 +146,25 @@ function C.log_codex_result(dept, proposal_id, role, result, parsed, failure, co
   C.log_line(level, dept, proposal_id, "CODEX", fields)
 end
 
--- log_forged_markers still reaches the parsers_misc comment collaborators through the ambient M
--- (parsers_misc._is_trusted_comment(M, ...) etc.), so it stays installed as an M method until the
--- parsers_misc comment surface is untangled in a later slice. It is intentionally NOT a C
--- function yet; keeping it install-only avoids introducing a nil-M call into the parsers surface.
-local function install_log_forged_markers(M)
-  function M.log_forged_markers(dept, proposal_id, comments)
-    if type(comments) ~= "table" then
-      return
-    end
+-- log_forged_markers reaches the parsers_misc comment collaborators through devloop_base, which
+-- carries the base constants those collaborators read off their first argument (trusted-bot login
+-- etc.); passing devloop_base keeps it a self-contained C function rather than an ambient-M method.
+function C.log_forged_markers(dept, proposal_id, comments)
+  if type(comments) ~= "table" then
+    return
+  end
 
-    local marker_pattern = "<!%-%- fkst:github%-devloop:([%w%-]+):v1.-%-%->"
-    for _, comment in ipairs(comments) do
-      if not parsers_misc._is_trusted_comment(M, comment) then
-        for marker, marker_kind in parsers_misc._comment_body(M, comment):gmatch("(" .. marker_pattern .. ")") do
-          local marker_proposal = marker:match('proposal="([^"]+)"')
-          if marker_proposal == proposal_id then
-            C.log_line("warn", dept, proposal_id, "FORGE", {
-              "marker_kind=" .. tostring(marker_kind),
-              "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),
-              "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
-            })
-          end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:([%w%-]+):v1.-%-%->"
+  for _, comment in ipairs(comments) do
+    if not parsers_misc._is_trusted_comment(devloop_base, comment) then
+      for marker, marker_kind in parsers_misc._comment_body(devloop_base, comment):gmatch("(" .. marker_pattern .. ")") do
+        local marker_proposal = marker:match('proposal="([^"]+)"')
+        if marker_proposal == proposal_id then
+          C.log_line("warn", dept, proposal_id, "FORGE", {
+            "marker_kind=" .. tostring(marker_kind),
+            "ignored_author=" .. tostring(parsers_misc._comment_author_login(devloop_base, comment) or ""),
+            "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
+          })
         end
       end
     end
@@ -191,7 +188,7 @@ function S.install(M)
   M.log_raise = C.log_raise
   M.log_codex_start = C.log_codex_start
   M.log_codex_result = C.log_codex_result
-  install_log_forged_markers(M)
+  M.log_forged_markers = C.log_forged_markers
 end
 
 C.install = S.install

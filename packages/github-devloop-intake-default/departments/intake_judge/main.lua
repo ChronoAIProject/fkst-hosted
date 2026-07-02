@@ -113,7 +113,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   end
   local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
   current.repo, current.number = repo, issue_number
-  core.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
+  devloop_logging.log_forged_markers("intake_judge", candidate.proposal_id, current.comments)
   if current.state ~= "OPEN" then
     devloop_logging.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-closed", "issue is not open")
     return nil
@@ -204,7 +204,7 @@ end
 local function act_intake_judge(event)
   local candidate = event.payload or {}
   if not v_intake_candidate.is_supported_intake_candidate(core, candidate) then
-    devloop_logging.log_entry("intake_judge", event, "unknown", core.payload_field(candidate, "dedup_key"))
+    devloop_logging.log_entry("intake_judge", event, "unknown", devloop_logging.payload_field(candidate, "dedup_key"))
     devloop_logging.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return
   end

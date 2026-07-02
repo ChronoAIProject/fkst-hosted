@@ -135,7 +135,7 @@ local function make_department(ports)
       return
     end
     if not v_result.is_supported_result(core, reached) then
-      devloop_logging.log_entry("consensus_result", event, "unknown", core.payload_field(reached, "dedup_key"))
+      devloop_logging.log_entry("consensus_result", event, "unknown", devloop_logging.payload_field(reached, "dedup_key"))
       devloop_logging.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
       return
     end
@@ -164,7 +164,7 @@ local function make_department(ports)
         consumer = "consensus_result",
         force_fresh = true,
       })
-      core.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
+      devloop_logging.log_forged_markers("consensus_result", reached.proposal_id, current.comments)
       local state = devloop_state.current_state(current.comments, reached.proposal_id)
       local gate = core.dependency_gate(repo, issue_number, {
         proposal_id = reached.proposal_id,

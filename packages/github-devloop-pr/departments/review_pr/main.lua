@@ -52,7 +52,7 @@ end
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reviewing = event.payload or {}
   if not v_reviewing.is_supported_reviewing(core, reviewing) then
-    devloop_logging.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
+    devloop_logging.log_entry("review_pr", event, "unknown", devloop_logging.payload_field(reviewing, "dedup_key"))
     devloop_logging.log_cas_decision("review_pr", "unknown", { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(payload)", "unsupported event payload")
     return
   end
@@ -80,7 +80,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       error("github-devloop: gh pr review head view failed: " .. tostring(pr_view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
-    core.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
+    devloop_logging.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
     local state = require("devloop.entity").current_entity_state(core, current_pr.comments, reviewing.proposal_id)
     local transition = reviewing_transition_status(state, reviewing.version)
     if transition == "pending" or transition == "version-mismatch" then
