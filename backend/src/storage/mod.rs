@@ -85,6 +85,17 @@ pub(crate) fn scrub_transport(e: &reqwest::Error) -> String {
     }
 }
 
+/// Build a [`ChronoStorageClient`] from an already-resolved config over a freshly
+/// built, timeout-bounded HTTP client.
+///
+/// The in-pod log uploader reaches for this: it resolves the WRITE-ONLY SA config
+/// from its mounted creds and needs a client without the process-environment scan
+/// [`try_from_env`] performs. Kept here so the single [`build_http_client`] recipe
+/// (timeout + User-Agent) is shared by both entry points.
+pub fn client_from_config(config: ChronoStorageConfig) -> ChronoStorageClient {
+    ChronoStorageClient::new(build_http_client(), config)
+}
+
 /// A pooled HTTP client for chrono-storage + NyxID, built with a bounded timeout
 /// and a User-Agent (some proxies reject a UA-less request). `reqwest::Client`
 /// holds a connection pool and is cheap to clone, so the same client is shared by

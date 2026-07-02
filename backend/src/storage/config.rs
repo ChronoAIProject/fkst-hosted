@@ -9,11 +9,21 @@
 //! - `FKST_STORAGE_BASE_URL` — the proxied chrono-storage base URL.
 //! - `FKST_STORAGE_BUCKET` — the bucket every object lands in.
 //! - `FKST_NYXID_TOKEN_URL` — the OAuth2 `token` endpoint.
-//! - `FKST_NYXID_CLIENT_ID` — the service-account client id.
-//! - `FKST_NYXID_CLIENT_SECRET` — the service-account client secret (held in a
+//! - `FKST_NYXID_CLIENT_ID` — the service-account client id (the control plane's
+//!   READ/responder SA).
+//! - `FKST_NYXID_CLIENT_SECRET` — the read SA's client secret (held in a
 //!   [`SecretString`], never logged, redacted in `Debug`).
 //!
-//! The whole feature is OPTIONAL. When NONE of the five vars are set the config
+//! Two OPTIONAL extra vars carry a SECOND, WRITE-ONLY service account that the
+//! control plane hands to each session pod so the in-pod collector can PUT its log
+//! bundle without ever gaining read/list/delete on the bucket:
+//!
+//! - `FKST_STORAGE_WRITER_CLIENT_ID` — the write-only SA client id.
+//! - `FKST_STORAGE_WRITER_CLIENT_SECRET` — the write-only SA client secret (also a
+//!   [`SecretString`]). The base-url/bucket/token-url above are SHARED between the
+//!   two SAs; only the client-id/secret differ.
+//!
+//! The whole feature is OPTIONAL. When NONE of the five core vars are set the config
 //! resolves to `None` (log streaming stays disabled and the process boots
 //! normally). A PARTIAL configuration — some set, some missing — is a genuine
 //! operator mistake, so it fails closed naming the missing variables rather than
@@ -45,6 +55,13 @@ struct StorageVars {
     nyxid_client_id: Option<String>,
     #[serde(default)]
     nyxid_client_secret: Option<String>,
+    // The optional write-only SA (see the module docs). Absent by default; when
+    // set, its creds are injected into every session Secret for the in-pod
+    // uploader. They do NOT participate in the five-core "all or none" policy.
+    #[serde(default)]
+    storage_writer_client_id: Option<String>,
+    #[serde(default)]
+    storage_writer_client_secret: Option<String>,
 }
 
 /// Resolved chrono-storage configuration. Present only when all five vars are
@@ -65,6 +82,14 @@ pub struct ChronoStorageConfig {
     /// NyxID service-account client secret. Env: `FKST_NYXID_CLIENT_SECRET`.
     /// Held in a [`SecretString`]; never logged and redacted in `Debug`.
     pub nyxid_client_secret: SecretString,
+    /// The optional WRITE-ONLY SA client id handed to session pods for the in-pod
+    /// log uploader. Env: `FKST_STORAGE_WRITER_CLIENT_ID`. `None` disables the
+    /// per-session uploader creds (log bundles are not produced — fail-closed).
+    pub writer_client_id: Option<String>,
+    /// The optional WRITE-ONLY SA client secret (paired with `writer_client_id`).
+    /// Env: `FKST_STORAGE_WRITER_CLIENT_SECRET`. A [`SecretString`]; never logged,
+    /// redacted in `Debug`.
+    pub writer_client_secret: Option<SecretString>,
 }
 
 // Manual `Debug` that renders the client secret as `<redacted>` (the codebase
@@ -78,6 +103,11 @@ impl std::fmt::Debug for ChronoStorageConfig {
             .field("nyxid_token_url", &self.nyxid_token_url)
             .field("nyxid_client_id", &self.nyxid_client_id)
             .field("nyxid_client_secret", &"<redacted>")
+            .field("writer_client_id", &self.writer_client_id)
+            .field(
+                "writer_client_secret",
+                &self.writer_client_secret.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -142,12 +172,19 @@ impl ChronoStorageConfig {
         // above), so the destructured unwraps cannot panic.
         let [base_url, bucket, nyxid_token_url, nyxid_client_id, nyxid_client_secret] =
             fields.map(|(_, v)| v.expect("all fields present past the partial-config guard"));
+        // The write-only SA is a fully-optional add-on: both must be present to
+        // enable per-session upload creds, else neither is surfaced.
+        let writer_client_id = non_blank(raw.storage_writer_client_id);
+        let writer_client_secret =
+            non_blank(raw.storage_writer_client_secret).map(SecretString::from);
         Ok(Some(Self {
             base_url,
             bucket,
             nyxid_token_url,
             nyxid_client_id,
             nyxid_client_secret: SecretString::from(nyxid_client_secret),
+            writer_client_id,
+            writer_client_secret,
         }))
     }
 }
@@ -193,6 +230,35 @@ mod tests {
         assert_eq!(config.nyxid_token_url, "https://nyx.example/oauth/token");
         assert_eq!(config.nyxid_client_id, "sa-client");
         assert_eq!(config.nyxid_client_secret.expose_secret(), "sa-secret");
+        // The write-only SA is optional and absent by default.
+        assert!(config.writer_client_id.is_none());
+        assert!(config.writer_client_secret.is_none());
+    }
+
+    #[test]
+    fn write_only_sa_creds_surface_when_set() {
+        let mut vars = full();
+        vars.push((
+            "FKST_STORAGE_WRITER_CLIENT_ID".to_string(),
+            "writer-client".to_string(),
+        ));
+        vars.push((
+            "FKST_STORAGE_WRITER_CLIENT_SECRET".to_string(),
+            "writer-secret".to_string(),
+        ));
+        let config = ChronoStorageConfig::from_vars(&vars)
+            .expect("valid")
+            .expect("enabled");
+        assert_eq!(config.writer_client_id.as_deref(), Some("writer-client"));
+        assert_eq!(
+            config
+                .writer_client_secret
+                .as_ref()
+                .map(|s| s.expose_secret()),
+            Some("writer-secret")
+        );
+        // The read SA is distinct from the write-only SA.
+        assert_eq!(config.nyxid_client_id, "sa-client");
     }
 
     #[test]
@@ -229,16 +295,31 @@ mod tests {
 
     #[test]
     fn client_secret_is_redacted_in_debug_output() {
-        let config = ChronoStorageConfig::from_vars(&full())
+        let mut vars = full();
+        vars.push((
+            "FKST_STORAGE_WRITER_CLIENT_ID".to_string(),
+            "writer-client".to_string(),
+        ));
+        vars.push((
+            "FKST_STORAGE_WRITER_CLIENT_SECRET".to_string(),
+            "writer-secret".to_string(),
+        ));
+        let config = ChronoStorageConfig::from_vars(&vars)
             .expect("valid")
             .expect("enabled");
         let debug = format!("{config:?}");
+        // Neither the read SA nor the write-only SA secret may appear in Debug.
         assert!(
             !debug.contains("sa-secret"),
-            "Debug leaked the client secret: {debug}"
+            "Debug leaked the read client secret: {debug}"
+        );
+        assert!(
+            !debug.contains("writer-secret"),
+            "Debug leaked the write-only client secret: {debug}"
         );
         assert!(debug.contains("<redacted>"), "{debug}");
         // Non-secret fields are still visible for diagnostics.
         assert!(debug.contains("fkst-logs"), "{debug}");
+        assert!(debug.contains("writer-client"), "{debug}");
     }
 }
