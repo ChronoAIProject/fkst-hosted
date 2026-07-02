@@ -94,7 +94,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     return
   end
 
-  local lock_key = core.review_result_lock_key(origin.proposal_id)
+  local lock_key = entity_lib.review_result_lock_key(origin.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "no issue transition lock key")
     return

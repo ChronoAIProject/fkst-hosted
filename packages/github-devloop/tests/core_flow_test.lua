@@ -18,6 +18,7 @@ local t = h.t
 local decompose_lib = require("devloop.decompose")
 local prompt_installers = require("devloop.prompts")
 local m_builders = require("devloop.markers.builders")
+local entity_lib = require("devloop.entity")
 local has_value = h.has_value
 local source_ref = h.source_ref
 local reached = h.reached
@@ -113,10 +114,10 @@ return {
   test_same_issue_transition_lock_key_is_shared = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local expected = "github-devloop/transition/owner/repo/issue/42"
-    t.eq(core.observe_lock_key("owner/repo", 42), expected)
-    t.eq(core.result_lock_key(proposal_id), expected)
-    t.eq(core.loop_lock_key(proposal_id), expected)
-    t.eq(core.implement_lock_key(proposal_id), expected)
+    t.eq(entity_lib.observe_lock_key("owner/repo", 42), expected)
+    t.eq(entity_lib.result_lock_key(proposal_id), expected)
+    t.eq(entity_lib.loop_lock_key(proposal_id), expected)
+    t.eq(entity_lib.implement_lock_key(proposal_id), expected)
   end,
 
   test_converge_round_and_reconcile_requests = function()

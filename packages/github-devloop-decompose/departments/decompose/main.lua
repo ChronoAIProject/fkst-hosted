@@ -275,7 +275,7 @@ local function decompose_context(event)
     return nil
   end
 
-  local lock_key = core.transition_lock_key(decompose.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(decompose.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "no transition lock key")
     if type(event) == "table" then

@@ -12,6 +12,7 @@ local v_execution_request = require("devloop.validators.execution_request")
 local v_intake_candidate = require("devloop.validators.intake_candidate")
 local m_facts = require("devloop.markers.facts")
 local m_shared = require("devloop.markers.shared")
+local entity_lib = require("devloop.entity")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -211,7 +212,7 @@ local function act_intake_judge(event)
     return
   end
 
-  local lock_key = core.observe_lock_key(repo, issue_number)
+  local lock_key = entity_lib.observe_lock_key(repo, issue_number)
   local gate = nil
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()

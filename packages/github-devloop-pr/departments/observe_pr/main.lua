@@ -384,7 +384,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "blocked", "skip-not-owned", "backing issue is absent")
     return true
   end
-  local lock_key = core.transition_lock_key(origin.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(origin.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "blocked", "skip-foreign(proposal_id)", "no transition lock key")
     return true
@@ -469,7 +469,7 @@ local function process_pr_event(event)
   end
 
   local source_ref = pr_source_ref(pr.repo, pr.number)
-  local lock_key = core.transition_lock_key(origin.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(origin.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(proposal_id)", "no transition lock key")
     return

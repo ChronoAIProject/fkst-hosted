@@ -25,6 +25,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local v_ready = require("devloop.validators.ready")
 local m_facts = require("devloop.markers.facts")
+local entity_lib = require("devloop.entity")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -594,7 +595,7 @@ local function process_ready_event(event)
     return
   end
 
-  local lock_key = core.implement_lock_key(ready.proposal_id)
+  local lock_key = entity_lib.implement_lock_key(ready.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "no transition lock key")
     return

@@ -30,13 +30,6 @@ M.intake_dedup_key = function(...) return base.intake_dedup_key(M, ...) end
 M.intake_candidate_delivery_dedup_key = function(...) return base.intake_candidate_delivery_dedup_key(M, ...) end
 M.ci_selfheal_once_key = function(...) return base.ci_selfheal_once_key(M, ...) end
 M.ci_missing_status_first_observed_key = function(...) return base.ci_missing_status_first_observed_key(M, ...) end
-M.observe_lock_key = function(...) return base.observe_lock_key(M, ...) end
-M.transition_lock_key = function(...) return base.transition_lock_key(M, ...) end
-M.result_lock_key = function(...) return base.result_lock_key(M, ...) end
-M.review_result_lock_key = function(...) return base.review_result_lock_key(M, ...) end
-M.review_lock_key = function(...) return base.review_lock_key(M, ...) end
-M.loop_lock_key = function(...) return base.loop_lock_key(M, ...) end
-M.implement_lock_key = function(...) return base.implement_lock_key(M, ...) end
 M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, ...) end
 M.max_body_len = function(...) return base.max_body_len(M, ...) end
 M.quote_untrusted_prompt_text = function(...) return base.quote_untrusted_prompt_text(M, ...) end
@@ -145,14 +138,6 @@ require("core.pr_label_requests").install(M)
 require("core.review_meta_requests").install(M)
 local entity = require("devloop.entity")
 M.linked_pr_surface_snapshot = function(...) return entity.linked_pr_surface_snapshot(M, ...) end
-M.pr_transition_lock_key = function(...) return entity.pr_transition_lock_key(M, ...) end
-M.transition_lock_key = function(...) return entity.transition_lock_key(M, ...) end
-M.observe_lock_key = function(...) return entity.observe_lock_key(M, ...) end
-M.result_lock_key = function(...) return entity.result_lock_key(M, ...) end
-M.review_result_lock_key = function(...) return entity.review_result_lock_key(M, ...) end
-M.review_lock_key = function(...) return entity.review_lock_key(M, ...) end
-M.loop_lock_key = function(...) return entity.loop_lock_key(M, ...) end
-M.implement_lock_key = function(...) return entity.implement_lock_key(M, ...) end
 require("core.span_conformance").install(M)
 
 return M

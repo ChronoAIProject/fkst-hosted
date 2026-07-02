@@ -149,7 +149,7 @@ function C.parse_pr_proposal_id(proposal_id)
   return repo_part, tonumber(number)
 end
 
-function C.pr_transition_lock_key(M, repo, pr_number)
+function C.pr_transition_lock_key(repo, pr_number)
   return "github-devloop/transition/" .. strings.sanitize_key(repo, false) .. "/pr/" .. tostring(pr_number)
 end
 
@@ -193,8 +193,8 @@ function C.is_safe_entity_proposal_ref(proposal_id, dedup_key)
     and strings.is_path_safe_key(dedup_key, devloop_base._max_dedup_len)
 end
 
-function C.transition_lock_key(M, proposal_id)
-  local lock = require("devloop.base").transition_lock_key(M, proposal_id)
+function C.transition_lock_key(proposal_id)
+  local lock = require("devloop.base").transition_lock_key(proposal_id)
   if lock ~= nil then
     return lock
   end
@@ -202,34 +202,34 @@ function C.transition_lock_key(M, proposal_id)
   if repo == nil then
     return nil
   end
-  return C.pr_transition_lock_key(M, repo, pr_number)
+  return C.pr_transition_lock_key(repo, pr_number)
 end
 
-function C.observe_lock_key(M, repo, number, kind)
+function C.observe_lock_key(repo, number, kind)
   if kind == "pr" then
-    return C.pr_transition_lock_key(M, repo, number)
+    return C.pr_transition_lock_key(repo, number)
   end
-  return require("devloop.base").observe_lock_key(M, repo, number)
+  return require("devloop.base").observe_lock_key(repo, number)
 end
 
-function C.result_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.result_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.review_result_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.review_result_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.review_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.review_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.loop_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.loop_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.implement_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.implement_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
 function C.pr_native_origin(repo, pr_number, pr)

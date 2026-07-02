@@ -6,6 +6,7 @@ local core = require("core")
 local ports_seam = require("forge.ports")
 local saga = require("workflow.saga")
 local v_result = require("devloop.validators.result")
+local entity_lib = require("devloop.entity")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -145,7 +146,7 @@ local function make_department(ports)
       return
     end
 
-    local lock_key = core.result_lock_key(reached.proposal_id)
+    local lock_key = entity_lib.result_lock_key(reached.proposal_id)
     if lock_key == nil then
       core.log_cas_decision("consensus_result", reached.proposal_id, { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "no transition lock key")
       return

@@ -5,6 +5,7 @@ local core = require("core")
 local execution_start = require("devloop.execution_start")
 local saga = require("workflow.saga")
 local v_execution_request = require("devloop.validators.execution_request")
+local entity_lib = require("devloop.entity")
 
 local spec = {
   consumes = { "devloop_execute_request" },
@@ -80,7 +81,7 @@ local function act_execute_start(event)
     return
   end
 
-  local lock_key = core.observe_lock_key(repo, issue_number)
+  local lock_key = entity_lib.observe_lock_key(repo, issue_number)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
     local current = read_current(repo, issue_number, request)

@@ -153,7 +153,7 @@ local function pipeline_review(event)
     return
   end
 
-  local lock_key = core.transition_lock_key(reconcile.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "no transition lock key")
     return
@@ -229,7 +229,7 @@ local function pipeline_fix(event)
     return
   end
 
-  local lock_key = core.transition_lock_key(reconcile.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "no transition lock key")
     return
@@ -290,7 +290,7 @@ local function pipeline_timeout(event)
   core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
-  local lock_key = core.transition_lock_key(reconcile.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, reconcile.state, "blocked", "skip-foreign(proposal_id)", "no transition lock key")
     return

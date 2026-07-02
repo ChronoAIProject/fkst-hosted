@@ -644,7 +644,7 @@ local function act_fix(event)
     return
   end
 
-  local lock_key = core.transition_lock_key(fix.proposal_id)
+  local lock_key = entity_lib.transition_lock_key(fix.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "no transition lock key")
     return

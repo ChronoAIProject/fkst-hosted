@@ -13,6 +13,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
 local v_unresolved = require("devloop.validators.unresolved")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
+local entity_lib = require("devloop.entity")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -39,7 +40,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     return
   end
 
-  local lock_key = core.loop_lock_key(unresolved.proposal_id)
+  local lock_key = entity_lib.loop_lock_key(unresolved.proposal_id)
   if lock_key == nil then
     core.log_cas_decision("loop", unresolved.proposal_id, { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "no transition lock key")
     return

@@ -428,36 +428,36 @@ function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
   })
 end
 
-function C.observe_lock_key(M, repo, issue_number)
+function C.observe_lock_key(repo, issue_number)
   return "github-devloop/transition/" .. base_ids.safe_repo(repo) .. "/issue/" .. base_ids.safe_issue(issue_number)
 end
 
-function C.transition_lock_key(M, proposal_id)
+function C.transition_lock_key(proposal_id)
   local repo, issue_number = base_ids.parse_proposal_id(proposal_id)
   if repo == nil then
     return nil
   end
-  return C.observe_lock_key(M, repo, issue_number)
+  return C.observe_lock_key(repo, issue_number)
 end
 
-function C.result_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.result_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.review_result_lock_key(M, issue_proposal_id)
-  return C.transition_lock_key(M, issue_proposal_id)
+function C.review_result_lock_key(issue_proposal_id)
+  return C.transition_lock_key(issue_proposal_id)
 end
 
-function C.review_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.review_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.loop_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.loop_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
-function C.implement_lock_key(M, proposal_id)
-  return C.transition_lock_key(M, proposal_id)
+function C.implement_lock_key(proposal_id)
+  return C.transition_lock_key(proposal_id)
 end
 
 function C.safe_issue_slug(repo, issue_number)
