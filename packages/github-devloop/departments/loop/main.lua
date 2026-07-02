@@ -30,7 +30,7 @@ local spec = {
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
-  if not v_unresolved.is_supported_unresolved(core, unresolved) then
+  if not v_unresolved.is_supported_unresolved(unresolved) then
     devloop_logging.log_entry("loop", event, "unknown", devloop_logging.payload_field(unresolved, "dedup_key"))
     devloop_logging.log_cas_decision("loop", "unknown", { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return

@@ -516,7 +516,7 @@ end
 
 local function process_issue_event(event)
   local issue = event.payload or {}
-  if not v_issue.is_supported_issue(core, issue) then
+  if not v_issue.is_supported_issue(issue) then
     devloop_logging.log_entry("observe_issue", event, "unknown", devloop_logging.payload_field(issue, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "unmanaged", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
@@ -721,7 +721,7 @@ end
 
 local function process_pr_event(event)
   local pr = event.payload or {}
-  if not v_pr.is_supported_pr(core, pr) then
+  if not v_pr.is_supported_pr(pr) then
     devloop_logging.log_entry("observe_issue", event, "unknown", devloop_logging.payload_field(pr, "dedup_key"))
     devloop_logging.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr)", "unsupported PR payload")
     return

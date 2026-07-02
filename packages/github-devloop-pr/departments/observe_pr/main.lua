@@ -48,7 +48,7 @@ end
 
 local function pr_context(event)
   local payload = event.payload or {}
-  if v_pr.is_supported_pr(core, payload) then
+  if v_pr.is_supported_pr(payload) then
     return {
       source = "poll",
       repo = payload.repo,
