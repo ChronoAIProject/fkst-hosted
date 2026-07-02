@@ -76,6 +76,7 @@ prod-env
             environment: Some("prod-env".to_string()),
             auto_merge: false,
             log_streaming: false,
+            log_access: vec![],
         }
     );
 }
@@ -172,6 +173,51 @@ fn log_streaming_reads_true_below_a_kept_comment() {
     assert!(
         spec.log_streaming,
         "a truthy line below a kept comment still enables log streaming"
+    );
+}
+
+// ---- Log Access (optional allow-list; lenient, never a 422) ----
+
+/// Build a body with the four required sections held valid plus a `### Log Access`
+/// section carrying `val`, so a parse's `log_access` reflects only that value.
+fn body_with_log_access(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Log Access\n{val}\n"
+    )
+}
+
+#[test]
+fn log_access_absent_defaults_empty() {
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(
+        spec.log_access.is_empty(),
+        "an absent `### Log Access` section defaults to an empty allow-list"
+    );
+}
+
+#[test]
+fn log_access_parses_comma_whitespace_and_newline_separated_tokens() {
+    // A mix of commas, spaces, and newlines all separate tokens; a leading `@` is
+    // stripped; numeric ids are kept verbatim.
+    let spec =
+        parse_trigger_issue_body(&body_with_log_access("@alice, bob   carol\n12345")).expect("parses");
+    assert_eq!(
+        spec.log_access,
+        vec![
+            "alice".to_string(),
+            "bob".to_string(),
+            "carol".to_string(),
+            "12345".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn log_access_blank_section_is_empty() {
+    let spec = parse_trigger_issue_body(&body_with_log_access("   \n\n")).expect("parses");
+    assert!(
+        spec.log_access.is_empty(),
+        "a blank `### Log Access` section yields an empty allow-list"
     );
 }
 

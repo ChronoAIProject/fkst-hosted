@@ -244,6 +244,7 @@ fn registration() -> SessionRegistration {
         config_hash: "hash123".to_string(),
         auto_merge: false,
         log_streaming: false,
+        log_access: vec![],
     }
 }
 

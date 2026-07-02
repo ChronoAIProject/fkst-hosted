@@ -240,6 +240,7 @@ fn registration(name: &str, work_label: &str) -> SessionRegistration {
         config_hash: "hash".to_string(),
         auto_merge: false,
         log_streaming: false,
+        log_access: vec![],
     }
 }
 
