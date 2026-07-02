@@ -40,6 +40,11 @@ pub mod k8s;
 pub mod openapi;
 pub mod router;
 pub mod routes;
+// Optional chrono-storage object-store client + its NyxID service-account token
+// provider (log-streaming Wave 1). Self-contained + wiremock-tested; disabled
+// (resolves to `None`) unless the `FKST_STORAGE_*` / `FKST_NYXID_*` vars are set.
+// No in-pod wiring yet — this is the client library only.
+pub mod storage;
 // In-pod `run-substrate` subcommand (Model B, issue #359 §5): the long-lived
 // substrate-session entrypoint that fetches packages + the target repo, wires the
 // rotating GitHub token into git + gh, renders the codex config, and execs
