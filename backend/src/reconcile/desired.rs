@@ -167,6 +167,9 @@ pub enum ReconcileAction {
     /// queued work yet.
     AnnounceSession {
         trigger_issue: i64,
+        /// The deterministic session id, so the executor can build the identity-gated
+        /// log-download link (`<base>/api/v1/logs/<session_id>`) the comment carries.
+        session_id: String,
         /// The session name (`### Session Name`).
         session_name: String,
         /// The GitHub work label whose open issues queue this session's work.
@@ -384,6 +387,7 @@ pub fn plan_repo(
         if !latched_announced.contains(&reg.trigger_issue) {
             actions.push(ReconcileAction::AnnounceSession {
                 trigger_issue: reg.trigger_issue,
+                session_id: reg.session_id.clone(),
                 session_name: reg.def.name.clone(),
                 work_label: reg.def.work_label.clone(),
                 packages: reg

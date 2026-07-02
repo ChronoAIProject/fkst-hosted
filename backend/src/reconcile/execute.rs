@@ -105,18 +105,26 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
         }
         ReconcileAction::AnnounceSession {
             trigger_issue,
+            session_id,
             session_name,
             work_label,
             packages,
             environment,
             auto_merge,
         } => {
+            // Build the identity-gated log-download link from the configured public
+            // base URL; `None` (unset) omits the log line. The endpoint authorizes
+            // every request, so the static URL is safe to post.
+            let log_url = ctx.config.log.public_base_url.as_ref().map(|base| {
+                format!("{}/api/v1/logs/{}", base.trim_end_matches('/'), session_id)
+            });
             let comment = announce_session_comment(
                 &session_name,
                 &work_label,
                 &packages,
                 environment.as_deref(),
                 auto_merge,
+                log_url.as_deref(),
             );
             announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
         }
