@@ -57,7 +57,7 @@ local function merge_gate_wait_comment(state_version, created_at)
 end
 
 local function timeout_attempt_comment(state_name, state_version, round, source_ref)
-  return trusted_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, state_name, round, source_ref), "2026-06-03T00:00:00Z")
+  return trusted_comment(conv_attempts.timeout_attempt_marker(proposal_id, state_version, state_name, round, source_ref), "2026-06-03T00:00:00Z")
 end
 
 local function timeout_attempt_v2_comment(row, generation_key, round, source_ref)

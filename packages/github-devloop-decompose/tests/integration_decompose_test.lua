@@ -396,7 +396,7 @@ return {
 
   test_decompose_depth_cap_exhausted_marker_is_idempotent = function()
     local event = decompose_event()
-    local exhausted_marker = conv_attempts.decompose_exhausted_marker(core, event.proposal_id, event.version, 1, event.source_ref)
+    local exhausted_marker = conv_attempts.decompose_exhausted_marker(event.proposal_id, event.version, 1, event.source_ref)
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, { trusted_comment(exhausted_marker) }))

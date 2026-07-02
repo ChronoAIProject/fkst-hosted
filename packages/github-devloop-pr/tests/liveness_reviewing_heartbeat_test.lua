@@ -140,7 +140,7 @@ local function state_comment(state_name, state_version, created_at)
 end
 
 local function timeout_attempt_comment(state_version, round)
-  return trusted_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, "reviewing", round, entity_lib.pr_source_ref(repo, 7)))
+  return trusted_comment(conv_attempts.timeout_attempt_marker(proposal_id, state_version, "reviewing", round, entity_lib.pr_source_ref(repo, 7)))
 end
 
 local function review_round_comment(created_at)

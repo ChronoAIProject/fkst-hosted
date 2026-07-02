@@ -273,7 +273,7 @@ local function ready_state_comment(comment_id, state_version, created_at)
 end
 local function timeout_attempt_comment(state_name, state_version, round, created_at)
   return {
-    body = conv_attempts.timeout_attempt_marker(core, proposal_id, state_version, state_name, round, entity_lib.issue_source_ref(repo, 42)),
+    body = conv_attempts.timeout_attempt_marker(proposal_id, state_version, state_name, round, entity_lib.issue_source_ref(repo, 42)),
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }
@@ -544,7 +544,7 @@ return {
     t.eq(decompose.payload.version, version)
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
-    t.is_true(attempt.payload.body:find(conv_attempts.timeout_attempt_marker(core, proposal_id, version, "blocked", 1, entity_lib.issue_source_ref(repo, 42)), 1, true) ~= nil)
+    t.is_true(attempt.payload.body:find(conv_attempts.timeout_attempt_marker(proposal_id, version, "blocked", 1, entity_lib.issue_source_ref(repo, 42)), 1, true) ~= nil)
   end,
 
   test_liveness_scan_over_budget_ready_escalates_to_timeout_reconcile = function()

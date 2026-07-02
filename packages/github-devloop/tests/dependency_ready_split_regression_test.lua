@@ -321,7 +321,7 @@ return {
   test_ready_redrive_generation_advances_with_timeout_attempt_markers = function()
     local marker_version = version
     local marker = core.state_marker(proposal_id, "ready", marker_version, "result-marker,ready-label,devloop-ready")
-    local attempt_1 = conv_attempts.timeout_attempt_marker(core, proposal_id, marker_version, "ready", 1, source_ref())
+    local attempt_1 = conv_attempts.timeout_attempt_marker(proposal_id, marker_version, "ready", 1, source_ref())
     local first_raises = replay_ready_with_comments({
       trusted_comment("IC_ready_visible", marker),
       trusted_comment("IC_timeout_1", attempt_1, "2026-06-03T01:01:00Z"),
@@ -337,7 +337,7 @@ return {
     t.eq(first_ready.payload.ready_hand_off.marker_version, marker_version)
     t.eq(first_ready.payload.ready_hand_off.event_version, first_ready.payload.dedup_key)
 
-    local attempt_2 = conv_attempts.timeout_attempt_marker(core, proposal_id, marker_version, "ready", 2, source_ref())
+    local attempt_2 = conv_attempts.timeout_attempt_marker(proposal_id, marker_version, "ready", 2, source_ref())
     local second_raises = replay_ready_with_comments({
       trusted_comment("IC_ready_visible", marker),
       trusted_comment("IC_timeout_1", attempt_1, "2026-06-03T01:01:00Z"),
@@ -396,7 +396,7 @@ return {
             trusted_comment("IC_ready_visible", marker),
             trusted_comment(
               "IC_timeout_1",
-              conv_attempts.timeout_attempt_marker(core, proposal_id, marker_version, "ready", 1, source_ref()),
+              conv_attempts.timeout_attempt_marker(proposal_id, marker_version, "ready", 1, source_ref()),
               "2026-06-03T01:01:00Z"
             ),
           },
