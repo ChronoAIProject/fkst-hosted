@@ -33,6 +33,10 @@ use crate::k8s::{
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
+use crate::reconcile::execute_comments::{
+    config_rejected_comment, env_not_ready_comment, env_verify_failed_comment,
+    flag_invalid_comment, invalid_refs_comment,
+};
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
 
@@ -472,55 +476,6 @@ async fn resolve_environment(
             }
         }
     }
-}
-
-// --- Feedback comment bodies (pure) ------------------------------------------
-
-fn env_not_ready_comment(name: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't start this session: environment `{name}` was not found in your account \
-         (or isn't ready). Create it first with `PUT /api/v1/users/me/environments/{name}`, then \
-         re-trigger. Omit the `### Environment` section to run with no environment."
-    )
-}
-
-fn env_verify_failed_comment(name: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't verify environment `{name}` right now (a transient error reading your \
-         environments). Please re-trigger in a moment."
-    )
-}
-
-fn invalid_refs_comment(failures: &[(String, String)]) -> String {
-    let mut body = String::from(
-        "⚠️ fkst couldn't start this session: one or more `### Packages` refs are not reachable \
-         on public GitHub.\n\n",
-    );
-    for (r, reason) in failures {
-        body.push_str(&format!("- `{r}` — {reason}\n"));
-    }
-    body.push_str(
-        "\nEach ref must be `owner/repo@ref:path/to/package` in a PUBLIC repo with an `fkst.toml` \
-         at that path. Fix the refs and re-trigger.",
-    );
-    body
-}
-
-fn config_rejected_comment() -> String {
-    "⚠️ **Config changes are not allowed after a session trigger exists.** Your edit \
-     has been ignored and will not be accepted. To change packages, environment, the \
-     log-streaming flag, or any other setting, **close this issue and open a new \
-     session.**"
-        .to_string()
-}
-
-fn flag_invalid_comment(detail: &str) -> String {
-    format!(
-        "⚠️ fkst couldn't parse this trigger issue: {detail}\n\nExpected the \
-         `fkst-substrate-trigger` body with `### Session Name`, `### Packages` (one \
-         `owner/repo@ref:path` per line), `### Work Label`, and an optional `### Environment`. \
-         Fix the issue body and the reconciler will retry."
-    )
 }
 
 #[cfg(test)]

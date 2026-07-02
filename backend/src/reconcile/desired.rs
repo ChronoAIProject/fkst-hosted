@@ -14,13 +14,15 @@
 use std::collections::{HashMap, HashSet};
 
 use k8s_openapi::chrono::{DateTime, Duration, Utc};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
 use crate::reconcile::reachability;
 use crate::reconcile_config::ReconcileConfig;
+
+// The pure content hashes live in the sibling `hashing` module; re-exported here so
+// the planner (and its attached test modules) reach them as `desired::…` unchanged.
+pub use crate::reconcile::hashing::{config_hash, full_config_hash};
 
 /// The launch inputs one substrate session needs, distilled from a parsed trigger
 /// issue. This is the non-identifying "what to run" half of a
@@ -181,102 +183,6 @@ pub enum ReconcileAction {
     /// re-comments. The edit is separately prevented from respawning the pod (see
     /// [`plan_repo`]); this action is purely the user-facing feedback.
     RejectConfigChange { trigger_issue: i64 },
-}
-
-/// A stable content hash over a session's launch inputs: its ordered package
-/// references, its work label, and its optional environment. Mirrors
-/// [`crate::k8s::env_store_meta::content_hash`] (canonical JSON → SHA-256 hex) so a
-/// live pod's recorded hash can be compared for drift. Stable and, for a fixed
-/// package ORDER, deterministic (packages are author-ordered, so order is part of
-/// the identity).
-pub fn config_hash(packages: &[PackageRef], work_label: &str, environment: Option<&str>) -> String {
-    // A borrow-only projection of each package so `PackageRef` need not itself be
-    // `Serialize`; the field set + order is the canonical package identity.
-    #[derive(Serialize)]
-    struct CanonPackage<'a> {
-        owner: &'a str,
-        repo: &'a str,
-        git_ref: &'a str,
-        path: &'a str,
-    }
-    #[derive(Serialize)]
-    struct Canonical<'a> {
-        packages: Vec<CanonPackage<'a>>,
-        work_label: &'a str,
-        environment: Option<&'a str>,
-    }
-    let canonical = Canonical {
-        packages: packages
-            .iter()
-            .map(|p| CanonPackage {
-                owner: &p.owner,
-                repo: &p.repo,
-                git_ref: &p.git_ref,
-                path: &p.path,
-            })
-            .collect(),
-        work_label,
-        environment,
-    };
-    let json = serde_json::to_vec(&canonical).expect("canonical config-hash json is infallible");
-    let digest = Sha256::digest(&json);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// A stable content hash over a registration's FULL launch config — the superset of
-/// [`config_hash`]: the ordered package refs, work label, environment, session name,
-/// and BOTH opt-ins (`auto_merge`, `log_streaming`).
-///
-/// Where [`config_hash`] covers only the pod-affecting subset (so pod drift ignores
-/// the two opt-ins), this covers everything the trigger author can set. It is the
-/// basis for a later immutability check: a registration whose full hash changed has
-/// had *some* config edited, even one (like an opt-in) that does not respawn the pod.
-///
-/// Canonical form: SHA-256 over the canonical JSON of
-/// `{packages, work_label, environment, name, auto_merge, log_streaming}`. The field
-/// order below IS part of the canonical form (serde serialises in declaration order),
-/// so identical inputs always hash identically and any changed field flips the hash.
-pub fn full_config_hash(reg: &SessionRegistration) -> String {
-    // Borrow-only projection so `PackageRef` need not itself be `Serialize`; the
-    // field set + order is the canonical package identity (as in `config_hash`).
-    #[derive(Serialize)]
-    struct CanonPackage<'a> {
-        owner: &'a str,
-        repo: &'a str,
-        git_ref: &'a str,
-        path: &'a str,
-    }
-    #[derive(Serialize)]
-    struct Canonical<'a> {
-        packages: Vec<CanonPackage<'a>>,
-        work_label: &'a str,
-        environment: Option<&'a str>,
-        name: &'a str,
-        auto_merge: bool,
-        log_streaming: bool,
-    }
-    let canonical = Canonical {
-        packages: reg
-            .def
-            .packages
-            .iter()
-            .map(|p| CanonPackage {
-                owner: &p.owner,
-                repo: &p.repo,
-                git_ref: &p.git_ref,
-                path: &p.path,
-            })
-            .collect(),
-        work_label: &reg.def.work_label,
-        environment: reg.def.environment.as_deref(),
-        name: &reg.def.name,
-        auto_merge: reg.auto_merge,
-        log_streaming: reg.log_streaming,
-    };
-    let json =
-        serde_json::to_vec(&canonical).expect("canonical full-config-hash json is infallible");
-    let digest = Sha256::digest(&json);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Decide whether a live, non-pending pod is due for an idle-kill.

@@ -19,6 +19,8 @@ pub mod announce;
 pub mod automerge;
 pub mod desired;
 pub mod execute;
+mod execute_comments;
+pub mod hashing;
 mod loops;
 pub mod pending;
 pub mod reachability;
