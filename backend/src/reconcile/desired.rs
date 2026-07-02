@@ -170,6 +170,9 @@ pub enum ReconcileAction {
         environment: Option<String>,
         /// Whether this trigger opted into reconcile-side PR auto-merge.
         auto_merge: bool,
+        /// The registration's [`full_config_hash`], latched as a hidden marker in the
+        /// announcement comment so a later config edit can be detected + rejected.
+        full_config_hash: String,
     },
 }
 
@@ -383,6 +386,7 @@ pub fn plan_repo(
                     .collect(),
                 environment: reg.def.environment.clone(),
                 auto_merge: reg.auto_merge,
+                full_config_hash: full_config_hash(reg),
             });
         }
     }

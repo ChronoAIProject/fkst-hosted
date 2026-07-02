@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use super::desired_test_fixtures::*;
-use super::{plan_repo, PodLiveness, ReconcileAction};
+use super::{full_config_hash, plan_repo, PodLiveness, ReconcileAction};
 
 // ---- session announcement --------------------------------------------------
 
@@ -34,6 +34,7 @@ fn valid_registration_not_yet_announced_is_announced() {
             packages: vec![],
             environment: None,
             auto_merge: false,
+            full_config_hash: full_config_hash(&regs[0]),
         }]
     );
 }
@@ -64,6 +65,7 @@ fn valid_registration_announces_alongside_spawn() {
                 packages: vec![],
                 environment: None,
                 auto_merge: false,
+                full_config_hash: full_config_hash(&regs[0]),
             },
         ]
     );
@@ -152,6 +154,7 @@ fn announcement_carries_rendered_packages_and_auto_merge() {
             ],
             environment: Some("prod".to_string()),
             auto_merge: true,
+            full_config_hash: full_config_hash(&regs[0]),
         }]
     );
 }

@@ -155,7 +155,7 @@ async fn announce_session_posts_a_comment_and_latches_the_announced_label() {
     let api = Arc::new(RecordingApi::default());
     let github = tokens(api.clone());
 
-    let body = announce_session_comment("demo", "fkst-run", &[], None, false);
+    let body = announce_session_comment("demo", "fkst-run", &[], None, false, "cfg99");
     announce_session(&github, "acme/site", 11, &body).await;
 
     let comments = api.comments.lock().unwrap();
@@ -164,6 +164,10 @@ async fn announce_session_posts_a_comment_and_latches_the_announced_label() {
     assert!(
         comments[0].3.contains("fkst session `demo` registered."),
         "the posted body is the rendered announcement"
+    );
+    assert!(
+        comments[0].3.contains("<!-- fkst-config-hash: cfg99 -->"),
+        "the posted body latches the config-hash marker"
     );
 
     let added = api.labels_added.lock().unwrap();

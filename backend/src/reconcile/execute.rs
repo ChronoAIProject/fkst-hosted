@@ -106,6 +106,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
             packages,
             environment,
             auto_merge,
+            full_config_hash,
         } => {
             let comment = announce_session_comment(
                 &session_name,
@@ -113,6 +114,7 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 &packages,
                 environment.as_deref(),
                 auto_merge,
+                &full_config_hash,
             );
             announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
         }
