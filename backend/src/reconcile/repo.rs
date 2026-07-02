@@ -21,8 +21,8 @@ use kube::api::{Api, ListParams};
 use crate::error::AppError;
 use crate::k8s::session_launcher::{
     ANNOTATION_CONFIG_HASH, ANNOTATION_INSTALLATION, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER,
-    ANNOTATION_REPO, ANNOTATION_TRIGGER_ISSUE, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE,
-    SESSION_ID_LABEL,
+    ANNOTATION_REPO, ANNOTATION_TRIGGER_ISSUE, ANNOTATION_WORK_LABEL, COMPONENT_LABEL_KEY,
+    COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
 };
 use crate::models::RepoRef;
 use crate::reconcile::desired::{plan_repo, LivePod, PodLiveness};
@@ -267,6 +267,10 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
 
     let config_hash = annotation(pod, ANNOTATION_CONFIG_HASH).map(str::to_string);
 
+    // The work label lets the planner retire-notify this session's still-open work
+    // issues when the pod is orphaned (its trigger issue closed).
+    let work_label = annotation(pod, ANNOTATION_WORK_LABEL).map(str::to_string);
+
     Some(LivePod {
         session_id,
         trigger_issue,
@@ -274,6 +278,7 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
         created_at,
         last_pending_at,
         config_hash,
+        work_label,
     })
 }
 
