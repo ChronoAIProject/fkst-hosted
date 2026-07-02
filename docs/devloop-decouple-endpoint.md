@@ -6,6 +6,15 @@ legitimate remaining kernel is, and what genuine debt is left. It is the adversa
 SPEC (sshx thinking-triplet + ChatGPT Pro cross-model) referenced by the standing dissolution
 goal, written as prose so the classification stays auditable and greppable.
 
+**Scope of the claim (do not overstate).** What was dissolved is the **copy-onto-`M` facade
+anti-pattern** — arbitrary `M.fn = mod.fn` exposure the ratchet measures — driven 659 → 27. This
+is **not** the claim that ambient composed-core `M` usage is gone: a **large sanctioned
+`install(M)` composed-core kernel still exists** (~168 functions, ~925 reads: lifecycle-state,
+logging, and the egress-adapter over forge). That kernel is legitimate, cohesive architecture,
+adversarially validated — but it is a substantial ambient composed-core API, not its absence.
+The honest headline is "**facade dissolved, documented composed-core kernel remains**", never
+"ambient-M / god-lib dissolved" unqualified.
+
 ## Two distinct coupling shapes — only one is the god-table anti-pattern
 
 `libraries/devloop` capabilities reach a package's ambient `M` two ways, and they are **not**
@@ -47,10 +56,14 @@ global-primitive threading for `exec_sync`/`core.git`). The residual 27:
   (integration-coverage-producer's own `function M.trim`), `judgment_codex_opts` 1
   (`workflow.codex`), `error_fingerprint` 1 (`contract.error_facts`), `git` 1 (`forge.git`).
   These are a measurement artifact of name collision, not god-table coupling.
-- **2 genuine, forge-deferred** — `linked_pr_surface_snapshot` (github-devloop-pr,
-  github-devloop) is `devloop.entity`-bound and genuine, but decoupling it needs
-  `M.gh_pr_view_observe` (a GitHub egress capability) relocated to `libraries/forge`; it is a
-  forge-port item, tracked with the egress debt below.
+- **2 `linked_pr_surface_snapshot`** (github-devloop-pr, github-devloop) — a `devloop.entity`
+  operation that consumes kernel capabilities (`gh_pr_view_observe`, `cached_entity_view`)
+  through the composed `M`. It is a **kernel-consumer**, not a copy-onto-M facade: it uses the
+  sanctioned composed-core kernel rather than aliasing an unrelated function onto `M`. It is the
+  last explicit `M.name=` binding the ratchet still attributes to a devloop module; it could be
+  rewired to `require("devloop.entity").linked_pr_surface_snapshot(core, ...)` for symmetry, but
+  since it legitimately needs the composed `M` to reach the kernel, that is a cosmetic call-form
+  change, not a coupling reduction.
 
 ## `install(M)` kernel (shape 2): the documented composed-core kernel
 
@@ -66,43 +79,56 @@ Per the converged design, the `install(M)` capabilities split by module:
   *expected* for logging and is not evidence of god-table coupling: the surface is a handful
   of stable primitives and the dependency direction is a leaf capability, not a tangle.
   Forcing every department to re-`require` logging would be uglier, not cleaner.
-- **`devloop.commands` = DEBT (forge-port).** GitHub/git **egress** (e.g. `gh_pr_view_observe`,
-  `gh_issue_view_observe`, git operations) belongs in `libraries/forge` per the repo's
-  forge-port doctrine (all `gh`/`git` egress goes through `forge.github`/`forge.git`), not on
-  the composed core. This is the genuine remaining ambient-`M` debt, to be relocated to the
-  forge library. Its measured `core.*` fan-in through the composed core is small.
+- **`devloop.commands` = KERNEL (egress-adapter over forge).** The GitHub/git egress
+  (`gh_pr_view_observe`, `gh_issue_view_observe`, git operations, ~89 wrappers across
+  `commands/{git_ops,issue_reads,prs,observe_lists}.lua`) **already routes through forge**:
+  `support.github()` / `support.git()` ARE the `forge.github` / `forge.git` argv adapters behind
+  `exec_argv`, so the forge-port doctrine's actual rule (raw `gh`/`git` construction + shell
+  quoting + execution live in `libraries/forge`) is satisfied. What the `commands` submodules
+  add on top is the devloop-domain egress *adapter* — field selection (which PR/issue fields to
+  fetch), `gh_result` error handling, and observe-vs-fix variants — which belongs in the devloop
+  composed core, not in the generic domain-agnostic `forge` library (relocating it there would be
+  a layering violation). An initial pass mis-classified this as forge-port debt before that
+  ground-truth; a second unanimous sshx thinking-triplet plus ChatGPT Pro re-judged it KERNEL.
 
 ## Kernel guardrail — the composed core is not a new service locator
 
-Classifying `devloop.state` + `devloop.logging` as a documented kernel is legitimate only while
-that surface stays **small, stable, cohesive, and one-directional**. It is not a license to
-copy arbitrary devloop functions onto `M` again — that would recreate the facade escape hatch
-this whole effort removed. So the kernel is bounded by three rules:
+The `install(M)` composed-core kernel (`devloop.state` + `devloop.logging` +
+`devloop.commands` egress-adapter) is substantial by raw count (~168 functions, ~925 reads),
+so "kernel" here does **not** mean tiny — it means the **sanctioned `install(M)` composed-core
+surface**, as opposed to the facade escape-hatch (arbitrary `M.fn = mod.fn` copy-onto-M) the
+ratchet was built to kill and which is dissolved. The distinction that keeps this honest rather
+than "the whole god-table renamed kernel" is **cohesion + the sanctioned mechanism**, bounded by:
 
-- **Explicit + closed.** Only `devloop.state` (version-CAS lifecycle) and `devloop.logging`
-  (structured lifecycle logging) install into the composed core as kernel. Any new `install(M)`
-  capability, or any new symbol on those installers that is not lifecycle/logging, is treated as
-  debt (either a direct `require(module).fn(...)` call site or a forge-port) until justified and
-  added here deliberately — never a silent growth of the ambient surface.
-- **No egress in the kernel.** GitHub/git egress never belongs on the composed core. The
-  `devloop.commands` submodule egress (`gh_pr_view_observe`, `gh_issue_view_observe`, git
-  operations) is debt to relocate into `libraries/forge`, not kernel to keep, regardless of
-  fan-in.
-- **One direction, boring.** Kernel capabilities are leaf lifecycle/logging primitives that
-  departments consume; they must not grow into a general dependency hub. High fan-in on a tiny
-  boring surface (logging) is fine; a wide or growing surface is the signal it is turning back
-  into a god-table and must be split out.
+- **`install(M)`-only, cohesive, closed.** The kernel is exactly the three cohesive
+  composed-core capabilities installed via `install(M)`: lifecycle-state, structured logging, and
+  the egress-adapter over forge. It is NOT a license to resume the facade pattern (copy an
+  unrelated devloop function onto `M` as a wrapper) — that remains debt the ratchet counts. New
+  `install(M)` growth outside those three cohesive domains must be justified here deliberately,
+  never a silent widening of the ambient surface.
+- **Egress construction stays in forge.** The egress-adapter is kernel only because raw
+  `gh`/`git` construction/quoting/execution already lives in `libraries/forge` (via
+  `support.github()`/`support.git()`); the composed core holds only devloop-domain field
+  selection + variants. If any raw `gh`/`git` construction ever appears in `commands` directly,
+  that part is debt to push back into forge.
+- **One direction, boring.** Kernel capabilities are leaf primitives departments consume; they
+  must not grow into a general dependency hub. High fan-in on a stable boring surface (logging)
+  is fine; a *widening* surface is the signal it is turning back into a god-table and must split.
 
 ## Endpoint
 
 The god-table facade anti-pattern is dissolved (659 → 27 explicit facade reads, of which 25
-are non-devloop name collisions and 2 are the forge-deferred `linked_pr_surface_snapshot`).
-The remaining `install(M)` composed-core surface is the sanctioned kernel: `devloop.state`
-(version-CAS lifecycle) and `devloop.logging` (cross-cutting structured logging), confirmed
-kernel by an unanimous sshx thinking-triplet and ChatGPT Pro. The only genuine remaining
-ambient-`M` debt is GitHub/git **egress** (`devloop.commands`) plus the egress-dependent
-`linked_pr_surface_snapshot`, both of which are forge-port work: relocate the egress into
-`libraries/forge` and thread the handle, after which the composed core carries only the
-documented state + logging kernel.
+are non-devloop name collisions and 2 are `linked_pr_surface_snapshot`). The `install(M)`
+composed-core surface — `devloop.state` (version-CAS lifecycle), `devloop.logging`
+(cross-cutting structured logging), and `devloop.commands` (the egress-adapter over forge) — is
+the sanctioned kernel, each confirmed by an unanimous sshx thinking-triplet plus ChatGPT Pro
+(commands re-judged from an initial forge-port mis-classification once the already-through-forge
+ground-truth was established). There is therefore **no forge-port debt**: raw `gh`/`git`
+construction already lives in `libraries/forge`. The only residual under the ratchet's
+facade measure is 25 non-devloop name collisions (documented above, not devloop coupling) plus
+`linked_pr_surface_snapshot` (2 reads) — an entity operation that consumes the kernel
+capabilities (`gh_pr_view_observe`, `cached_entity_view`) through the composed `M`, i.e. a
+kernel-consumer, not a copy-onto-M facade. The god-lib facade is dissolved; the composed core
+carries a cohesive, sanctioned, `install(M)`-only lifecycle + logging + egress-adapter kernel.
 
 ⟦AI:FKST⟧
