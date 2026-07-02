@@ -259,6 +259,8 @@ fn session_pod_spec_is_built_from_the_registration() {
     assert_eq!(spec.work_label, "fkst-run");
     assert_eq!(spec.bot_login, "fkst-bot");
     assert_eq!(spec.config_hash, "hash123");
+    // The default registration keeps streaming off.
+    assert!(!spec.log_streaming);
     // package_roots are the refs rendered back to `owner/repo@ref:path`, in order.
     assert_eq!(
         spec.package_roots,
@@ -266,6 +268,17 @@ fn session_pod_spec_is_built_from_the_registration() {
             "ChronoAIProject/fkst-packages@dev:packages/github-devloop".to_string(),
             "acme/pkgs@main:packages/proxy".to_string(),
         ]
+    );
+}
+
+#[test]
+fn session_pod_spec_threads_the_log_streaming_opt_in() {
+    let mut reg = registration();
+    reg.log_streaming = true;
+    let spec = session_pod_spec_from(&reg, Some("fkst-bot".to_string()));
+    assert!(
+        spec.log_streaming,
+        "the per-session opt-in must reach the pod spec"
     );
 }
 

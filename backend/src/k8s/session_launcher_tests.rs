@@ -17,6 +17,7 @@ fn spec() -> SessionPodSpec {
         work_label: "fkst".to_string(),
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
+        log_streaming: false,
     }
 }
 
@@ -146,6 +147,62 @@ fn build_session_pod_injects_the_section_5_2_env() {
         Some("web api")
     );
     assert_eq!(env_value(env, "FKST_SESSION_WORK_LABEL"), Some("fkst"));
+}
+
+#[test]
+fn build_session_pod_omits_log_streaming_env_by_default() {
+    // The default (opt-out) pod carries none of the log-streaming env or downward refs.
+    let pod = build_session_pod(&spec(), &config()).expect("pod builds");
+    let env = pod.spec.unwrap().containers.remove(0).env.unwrap();
+    assert!(env_value(&env, "FKST_LOG_STREAMING").is_none());
+    assert!(env.iter().all(|e| e.name != "FKST_LOG_BRANCH"));
+    assert!(env.iter().all(|e| e.name != "FKST_POD_UID"));
+}
+
+#[test]
+fn build_session_pod_injects_log_streaming_env_when_opted_in() {
+    let mut spec = spec();
+    spec.log_streaming = true;
+    let pod = build_session_pod(&spec, &config()).expect("pod builds");
+    let env = pod.spec.unwrap().containers.remove(0).env.unwrap();
+
+    assert_eq!(env_value(&env, "FKST_LOG_STREAMING"), Some("1"));
+    // Branch is derived from the trigger issue number (spec fixture uses issue 7).
+    assert_eq!(
+        env_value(&env, "FKST_LOG_BRANCH"),
+        Some("fkst-logs/issue-7")
+    );
+    assert_eq!(env_value(&env, "FKST_TRIGGER_ISSUE"), Some("7"));
+    assert_eq!(env_value(&env, "FKST_CONFIG_HASH"), Some("cfg-deadbeef"));
+
+    // The pod UID/name ride the downward API (a fieldRef), never a literal value —
+    // and NO storage credential is added.
+    let uid = env
+        .iter()
+        .find(|e| e.name == "FKST_POD_UID")
+        .expect("uid env");
+    assert_eq!(
+        uid.value, None,
+        "uid must come from the downward API, not a literal"
+    );
+    assert_eq!(
+        uid.value_from
+            .as_ref()
+            .and_then(|s| s.field_ref.as_ref())
+            .map(|f| f.field_path.as_str()),
+        Some("metadata.uid")
+    );
+    let name = env
+        .iter()
+        .find(|e| e.name == "FKST_POD_NAME")
+        .expect("name env");
+    assert_eq!(
+        name.value_from
+            .as_ref()
+            .and_then(|s| s.field_ref.as_ref())
+            .map(|f| f.field_path.as_str()),
+        Some("metadata.name")
+    );
 }
 
 #[test]
