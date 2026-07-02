@@ -170,6 +170,8 @@ class DogfoodLayout:
             (self.dogfood_root / "website-dogfood" / "site", self.dogfood_root / "website-dogfood" / "pkgs"),
         ):
             self._write_host_workspace(host, platform)
+        for platform in platform_roots:
+            self._advance_platform_git_repo(platform)
 
     def _write_host_workspace(self, host: Path, platform: Path) -> None:
         if host == platform:
@@ -214,17 +216,7 @@ class DogfoodLayout:
         )
 
     def _make_platform_git_repo(self, platform: Path) -> str:
-        git_env = os.environ.copy()
-        git_env.update(
-            {
-                "GIT_AUTHOR_NAME": "Host Run Equivalence",
-                "GIT_AUTHOR_EMAIL": "host-run-equivalence@example.invalid",
-                "GIT_COMMITTER_NAME": "Host Run Equivalence",
-                "GIT_COMMITTER_EMAIL": "host-run-equivalence@example.invalid",
-                "GIT_AUTHOR_DATE": "2001-09-09T01:46:40Z",
-                "GIT_COMMITTER_DATE": "2001-09-09T01:46:40Z",
-            }
-        )
+        git_env = self._git_env()
         run_git(["init", "-q"], cwd=platform, env=git_env)
         run_git(["add", "."], cwd=platform, env=git_env)
         run_git(["commit", "-q", "-m", "seed"], cwd=platform, env=git_env)
@@ -240,6 +232,27 @@ class DogfoodLayout:
         if result.returncode != 0:
             raise AssertionError(result.stderr)
         return result.stdout.strip()
+
+    def _advance_platform_git_repo(self, platform: Path) -> None:
+        marker = platform / "packages" / "github-proxy" / "current.txt"
+        marker.write_text("advanced local platform checkout\n", encoding="utf-8")
+        git_env = self._git_env()
+        run_git(["add", "packages/github-proxy/current.txt"], cwd=platform, env=git_env)
+        run_git(["commit", "-q", "-m", "advance local platform"], cwd=platform, env=git_env)
+
+    def _git_env(self) -> dict[str, str]:
+        git_env = os.environ.copy()
+        git_env.update(
+            {
+                "GIT_AUTHOR_NAME": "Host Run Equivalence",
+                "GIT_AUTHOR_EMAIL": "host-run-equivalence@example.invalid",
+                "GIT_COMMITTER_NAME": "Host Run Equivalence",
+                "GIT_COMMITTER_EMAIL": "host-run-equivalence@example.invalid",
+                "GIT_AUTHOR_DATE": "2001-09-09T01:46:40Z",
+                "GIT_COMMITTER_DATE": "2001-09-09T01:46:40Z",
+            }
+        )
+        return git_env
 
     def env(self, target: str) -> dict[str, str]:
         base_path = os.environ.get("PATH", "")
@@ -360,6 +373,22 @@ class HostRunEquivalenceTest(unittest.TestCase):
                         env["FKST_RUNTIME_ROOT"],  # type: ignore[index]
                         f"$ROOT/dogfood/dogfood-rt-{target}.{FIXED_TS}",
                     )
+                    hydrated_roots = {
+                        "substrate": new_layout.dogfood_root
+                        / "substrate-dogfood"
+                        / "sub"
+                        / ".fkst"
+                        / "run"
+                        / "fkst-packages-platform",
+                        "website": new_layout.dogfood_root
+                        / "website-dogfood"
+                        / "site"
+                        / ".fkst"
+                        / "run"
+                        / "fkst-packages-platform",
+                    }
+                    if target in hydrated_roots:
+                        self.assertFalse(hydrated_roots[target].exists())
 
     def test_dogfood_start_fails_when_supervise_exits_before_readiness(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(

@@ -177,6 +177,20 @@ def create_git_source(root: Path, name: str, files: dict[str, str]) -> tuple[Pat
     return repo, result.stdout.strip()
 
 
+def commit_git_file(repo: Path, rel: str, content: str) -> str:
+    path = repo / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    for args in (["git", "add", rel], ["git", "commit", "-q", "-m", "advance"]):
+        result = run_argv(args, cwd=repo)
+        if result.returncode != 0:
+            raise AssertionError(result.stderr)
+    result = run_argv(["git", "rev-parse", "HEAD"], cwd=repo)
+    if result.returncode != 0:
+        raise AssertionError(result.stderr)
+    return result.stdout.strip()
+
+
 def pid_is_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -313,8 +327,8 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str((h.substrate_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
-                    str((h.substrate_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "consensus").resolve()),
+                    str((platform_repo / "packages" / "github-proxy").resolve()),
+                    str((platform_repo / "packages" / "consensus").resolve()),
                 ],
             )
         finally:
@@ -355,8 +369,8 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
-                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "consensus").resolve()),
+                    str((platform_repo / "packages" / "github-proxy").resolve()),
+                    str((platform_repo / "packages" / "consensus").resolve()),
                     str(h.website_host / ".fkst" / "local-packages" / "site-board"),
                 ],
             )
@@ -397,7 +411,7 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform" / "packages" / "github-proxy").resolve()),
+                    str((platform_repo / "packages" / "github-proxy").resolve()),
                     str(custom_local / "site-board"),
                 ],
             )
@@ -465,16 +479,14 @@ class HostRunTest(unittest.TestCase):
                 )
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            platform_checkout = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
-            platform_checkout = platform_checkout.resolve()
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    f"platform={platform_checkout}",
-                    str(platform_checkout / "packages" / "github-proxy"),
+                    f"platform={platform_repo.resolve()}",
+                    str((platform_repo / "packages" / "github-proxy").resolve()),
                 ],
             )
-            self.assertTrue((platform_checkout / "packages" / "github-proxy").is_dir())
+            self.assertTrue((platform_repo / "packages" / "github-proxy").is_dir())
             self.assertFalse((h.website_host / ".fkst" / "run" / "site-tools").exists())
         finally:
             h.close()
@@ -573,7 +585,7 @@ class HostRunTest(unittest.TestCase):
         finally:
             h.close()
 
-    def test_host_external_sources_are_hydrated_from_lock_before_launch(self) -> None:
+    def test_host_external_source_uses_trusted_platform_root_when_head_advanced_past_lock(self) -> None:
         h = HostRunHarness()
         try:
             platform_repo, platform_rev = create_git_source(
@@ -592,6 +604,12 @@ class HostRunTest(unittest.TestCase):
                     ("site-tools", tools_repo, tools_rev),
                 ]
             )
+            platform_head = commit_git_file(
+                platform_repo,
+                "packages/github-proxy/current.txt",
+                "advanced local platform checkout\n",
+            )
+            self.assertNotEqual(platform_head, platform_rev)
             h.write_workspace_manifest(
                 external_sources=[
                     ("fkst-packages-platform", platform_repo, ["github-proxy"]),
@@ -611,26 +629,22 @@ class HostRunTest(unittest.TestCase):
                     """
                 )
             )
-            platform_checkout = (h.website_host / ".fkst" / "run" / "fkst-packages-platform").resolve()
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
                 result.stdout.splitlines(),
                 [
-                    f"platform={platform_checkout}",
-                    str(platform_checkout / "packages" / "github-proxy"),
+                    f"platform={platform_repo.resolve()}",
+                    str((platform_repo / "packages" / "github-proxy").resolve()),
                 ],
             )
-            checkout = h.website_host / ".fkst" / "run" / "fkst-packages-platform"
-            self.assertTrue((checkout / ".git").is_dir(), f"{checkout} is not a checkout")
-            head = run_argv(["git", "rev-parse", "HEAD"], cwd=checkout)
-            self.assertEqual(head.returncode, 0, head.stderr)
-            self.assertEqual(head.stdout.strip(), platform_rev)
-            self.assertTrue((checkout / "packages" / "github-proxy").is_dir())
+            self.assertTrue((platform_repo / "packages" / "github-proxy").is_dir())
+            self.assertTrue((platform_repo / "packages" / "github-proxy" / "current.txt").is_file())
+            self.assertFalse((h.website_host / ".fkst" / "run" / "fkst-packages-platform").exists())
             self.assertFalse((h.website_host / ".fkst" / "run" / "site-tools").exists())
         finally:
             h.close()
 
-    def test_host_external_source_rehydrates_wrong_existing_checkout(self) -> None:
+    def test_host_external_source_ignores_wrong_existing_hydrated_checkout(self) -> None:
         h = HostRunHarness()
         try:
             source_repo, source_rev = create_git_source(
@@ -663,43 +677,55 @@ class HostRunTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             head = run_argv(["git", "rev-parse", "HEAD"], cwd=checkout)
             self.assertEqual(head.returncode, 0, head.stderr)
-            self.assertEqual(head.stdout.strip(), source_rev)
+            self.assertNotEqual(head.stdout.strip(), source_rev)
             origin = run_argv(["git", "config", "--get", "remote.origin.url"], cwd=checkout)
             self.assertEqual(origin.returncode, 0, origin.stderr)
-            self.assertEqual(origin.stdout.strip(), str(source_repo))
+            self.assertEqual(origin.stdout.strip(), str(stale_repo))
         finally:
             h.close()
 
-    def test_host_external_source_fails_closed_on_invalid_lock(self) -> None:
-        h = HostRunHarness()
-        try:
-            h.write_workspace_manifest(
-                external_sources=[
-                    ("fkst-packages-platform", Path("https://example.invalid/fkst-packages.git"), ["github-proxy"])
-                ]
-            )
-            h.write_external_sources_lock(
-                [("fkst-packages-platform", Path("https://example.invalid/fkst-packages.git"), "not-a-sha")]
-            )
-            result = h.run_helper(
-                textwrap.dedent(
-                    f"""\
-                    set -euo pipefail
-                    source scripts/host_run.sh
-                    host_run_parse_supervise_args --project-root {shell_quote(h.website_host)} --platform-root {shell_quote(h.platform)} --platform-packages 'github-proxy' --durable-root {shell_quote(h.durable)} --runtime-root {shell_quote(h.runtime)}
-                    host_run_build_package_roots
-                    """
-                )
-            )
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(
-                result.stderr.strip(),
-                "error: fkst.lock external_source(id=fkst-packages-platform) is missing resolved.rev as a full git SHA",
-            )
-        finally:
-            h.close()
+    def test_external_source_lock_is_required_and_identity_checked(self) -> None:
+        cases = ("missing", "mismatched_git", "invalid_rev")
+        for case in cases:
+            with self.subTest(case=case):
+                h = HostRunHarness()
+                try:
+                    platform_repo, platform_rev = create_git_source(
+                        h.root,
+                        f"{case}-platform-source",
+                        {"packages/github-proxy/fkst.toml": 'kind = "package"\nname = "github-proxy"\n'},
+                    )
+                    h.write_workspace_manifest(
+                        external_sources=[("fkst-packages-platform", platform_repo, ["github-proxy"])]
+                    )
+                    expected = "target fkst.lock is required for external platform packages"
+                    if case == "mismatched_git":
+                        other_repo, other_rev = create_git_source(h.root, "other-source", {"README.md": "other\n"})
+                        h.write_external_sources_lock([("fkst-packages-platform", other_repo, other_rev)])
+                        expected = "fkst.workspace.toml external_sources(id=fkst-packages-platform) git does not match fkst.lock"
+                    elif case == "invalid_rev":
+                        h.write_external_sources_lock([("fkst-packages-platform", platform_repo, "not-a-sha")])
+                        expected = "fkst.lock external_source(id=fkst-packages-platform) is missing resolved.rev as a full git SHA"
+                    result = h.package_roots(
+                        [
+                            "--project-root",
+                            str(h.website_host),
+                            "--platform-root",
+                            str(platform_repo),
+                            "--platform-packages",
+                            "github-proxy",
+                            "--durable-root",
+                            str(h.durable),
+                            "--runtime-root",
+                            str(h.runtime),
+                        ]
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(expected, result.stderr)
+                finally:
+                    h.close()
 
-    def test_supervise_contract_hydrates_before_byte_identical_launch_args(self) -> None:
+    def test_supervise_contract_uses_trusted_platform_root_for_launch_args(self) -> None:
         h = HostRunHarness()
         fake_bin = h.root / "fake-framework"
         capture = h.root / "capture.json"
@@ -711,6 +737,12 @@ class HostRunTest(unittest.TestCase):
             )
             h.write_workspace_manifest(external_sources=[("fkst-packages-platform", source_repo, ["github-proxy"])])
             h.write_external_sources_lock([("fkst-packages-platform", source_repo, source_rev)])
+            source_head = commit_git_file(
+                source_repo,
+                "packages/github-proxy/current.txt",
+                "advanced local platform checkout\n",
+            )
+            self.assertNotEqual(source_head, source_rev)
             fake_bin.write_text(
                 textwrap.dedent(
                     f"""\
@@ -721,7 +753,7 @@ class HostRunTest(unittest.TestCase):
                     import subprocess
                     import sys
 
-                    checkout = pathlib.Path({json.dumps(str(h.website_host / ".fkst" / "run" / "fkst-packages-platform"))})
+                    checkout = pathlib.Path({json.dumps(str(source_repo))})
                     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=checkout, text=True).strip()
                     pathlib.Path({json.dumps(str(capture))}).write_text(json.dumps({{"argv": sys.argv, "head": head, "runtime": os.environ.get("FKST_RUNTIME_ROOT"), "durable": os.environ.get("FKST_DURABLE_ROOT")}}, sort_keys=True) + "\\n", encoding="utf-8")
                     """
@@ -741,7 +773,7 @@ class HostRunTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             payload = json.loads(capture.read_text(encoding="utf-8"))
-            self.assertEqual(payload["head"], source_rev)
+            self.assertEqual(payload["head"], source_head)
             self.assertEqual(
                 payload["argv"],
                 [
@@ -750,7 +782,7 @@ class HostRunTest(unittest.TestCase):
                     "--project-root",
                     str(h.website_host),
                     "--package-root",
-                    str((h.website_host / ".fkst" / "run" / "fkst-packages-platform").resolve() / "packages" / "github-proxy"),
+                    str((source_repo / "packages" / "github-proxy").resolve()),
                     "--framework-bin",
                     str(fake_bin),
                 ],

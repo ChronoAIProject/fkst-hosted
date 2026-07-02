@@ -40,7 +40,6 @@ host_run_resolve_target_platform_roots() {
   local output line
   output="$(python3 - "$HOST_RUN_PROJECT_ROOT" "$HOST_RUN_PLATFORM_PACKAGES" "$HOST_RUN_PLATFORM_ROOT" <<'PY'
 import re
-import shutil
 import subprocess
 import sys
 import tomllib
@@ -57,15 +56,6 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def run_git(args: list[str], *, cwd: Path | None = None) -> None:
-    try:
-        subprocess.run(["git", *args], cwd=cwd, check=True)
-    except FileNotFoundError:
-        fail("git is required to hydrate host external sources")
-    except subprocess.CalledProcessError as exc:
-        fail(f"git {' '.join(args)} failed with exit {exc.returncode}")
-
-
 def git_output(args: list[str], *, cwd: Path) -> str:
     try:
         result = subprocess.run(
@@ -77,7 +67,7 @@ def git_output(args: list[str], *, cwd: Path) -> str:
             check=True,
         )
     except FileNotFoundError:
-        fail("git is required to hydrate host external sources")
+        fail("git is required to resolve host external sources")
     except subprocess.CalledProcessError as exc:
         fail(f"git {' '.join(args)} failed with exit {exc.returncode}")
     return result.stdout.strip()
@@ -94,19 +84,10 @@ def git_output_optional(args: list[str], *, cwd: Path) -> str | None:
             check=False,
         )
     except FileNotFoundError:
-        fail("git is required to hydrate host external sources")
+        fail("git is required to resolve host external sources")
     if result.returncode != 0:
         return None
     return result.stdout.strip()
-
-
-def remove_target(target: Path, run_root: Path) -> None:
-    if target.parent != run_root:
-        fail(f"refusing to remove external source outside .fkst/run: {target}")
-    if target.is_symlink() or target.is_file():
-        target.unlink()
-    elif target.exists():
-        shutil.rmtree(target)
 
 
 def list_of_tables(data: dict[str, object], key: str) -> list[dict[str, object]]:
@@ -216,26 +197,6 @@ def read_workspace(workspace_path: Path) -> dict[str, object]:
     return data
 
 
-def hydrate_source(project_root: Path, source_id: str, git_url: str, rev: str) -> Path:
-    run_root = project_root / ".fkst" / "run"
-    target = run_root / source_id
-    if target.exists() or target.is_symlink():
-        if not target.is_symlink() and (target / ".git").is_dir():
-            current = git_output(["rev-parse", "HEAD"], cwd=target).lower()
-            origin = git_output_optional(["config", "--get", "remote.origin.url"], cwd=target)
-            if current == rev and origin == git_url:
-                return target
-        remove_target(target, run_root)
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    run_git(["clone", "--quiet", "--no-checkout", git_url, str(target)])
-    run_git(["checkout", "--quiet", rev], cwd=target)
-    current = git_output(["rev-parse", "HEAD"], cwd=target).lower()
-    if current != rev:
-        fail(f"external source {source_id} checkout is at {current}, expected {rev}")
-    return target
-
-
 project_root = Path(sys.argv[1]).resolve()
 requested_packages = [item for item in sys.argv[2].split() if item]
 trusted_platform_root = Path(sys.argv[3]).resolve()
@@ -300,23 +261,20 @@ if needed_external_source_ids:
         lock_by_id[source_id] = (git_url, rev)
 
 source_roots: dict[str, Path] = {}
-trusted_platform_head = ""
 trusted_platform_refs: set[str] = set()
 if needed_external_source_ids:
-    trusted_platform_head, trusted_platform_refs = trusted_platform_identity(trusted_platform_root)
+    _, trusted_platform_refs = trusted_platform_identity(trusted_platform_root)
 
 for source_id in sorted(needed_external_source_ids):
     if source_id not in lock_by_id:
         fail(f"fkst.lock has no external_source(id={source_id}) for target platform packages")
     expected_git = external_sources[source_id]["git"]
-    git_url, rev = lock_by_id[source_id]
+    git_url, _rev = lock_by_id[source_id]
     if git_url != expected_git:
         fail(f"fkst.workspace.toml external_sources(id={source_id}) git does not match fkst.lock")
-    if rev != trusted_platform_head:
-        fail(f"fkst.lock external_source(id={source_id}) resolved.rev does not match trusted --platform-root HEAD")
     if trusted_platform_refs.isdisjoint(git_ref_names(git_url, base=project_root)):
         fail(f"fkst.workspace.toml external_sources(id={source_id}) git does not match trusted --platform-root")
-    source_roots[source_id] = hydrate_source(project_root, source_id, git_url, rev)
+    source_roots[source_id] = trusted_platform_root
 
 package_roots: list[Path] = []
 platform_roots: set[Path] = set()
