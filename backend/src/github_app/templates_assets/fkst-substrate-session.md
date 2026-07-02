@@ -6,7 +6,7 @@ labels: [fkst-substrate-trigger]
 ---
 
 <!--
-Opening this issue starts an fkst session. fkst parses the four sections below by
+Opening this issue starts an fkst session. fkst parses the sections below by
 their EXACT `### ` headings. Do NOT rename the headings. Do NOT put secrets,
 tokens, or credentials anywhere in this issue — they are supplied only through
 your environment and are never read from issue text.
@@ -41,3 +41,14 @@ Optional. One line naming an environment you created via
 `PUT /api/v1/users/me/environments/<name>`. Delete this whole section to run with
 no environment.
 -->
+
+### Auto-merge
+
+<!--
+Optional. Set to `true` to have fkst automatically merge THIS session's pull
+requests into the default branch as soon as GitHub reports them mergeable. This
+BYPASSES review and status checks — use it only on trusted repos. Accepted truthy
+values: true / yes / on / enabled / 1 (case-insensitive). Anything else, or
+deleting this section, leaves auto-merge OFF (the default).
+-->
+false

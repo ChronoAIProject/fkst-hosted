@@ -74,6 +74,7 @@ prod-env
             ],
             work_label: "fkst-cloud".to_string(),
             environment: Some("prod-env".to_string()),
+            auto_merge: false,
         }
     );
 }
@@ -96,6 +97,37 @@ fn package_ref_accepts_branch_tag_and_sha_refs() {
         "feature/foo",
         "a `/`-namespaced branch ref is allowed"
     );
+}
+
+/// Build a body with the four required sections held valid plus an `### Auto-merge`
+/// section carrying `val`, so a parse's `auto_merge` reflects only that value.
+fn body_with_auto_merge(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Auto-merge\n{val}\n"
+    )
+}
+
+#[test]
+fn auto_merge_true_variants() {
+    for val in ["true", "YES", "On", "enabled", "1"] {
+        let spec = parse_trigger_issue_body(&body_with_auto_merge(val)).expect("parses");
+        assert!(spec.auto_merge, "{val:?} must enable auto-merge");
+    }
+}
+
+#[test]
+fn auto_merge_false_variants() {
+    for val in ["false", "no", "off", "", "maybe"] {
+        let spec = parse_trigger_issue_body(&body_with_auto_merge(val)).expect("parses");
+        assert!(!spec.auto_merge, "{val:?} must leave auto-merge off");
+    }
+}
+
+#[test]
+fn auto_merge_absent_defaults_false() {
+    // The minimal body carries no `### Auto-merge` section at all.
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(!spec.auto_merge, "an absent section defaults off");
 }
 
 #[test]

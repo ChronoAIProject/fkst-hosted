@@ -56,6 +56,7 @@ pub fn parse_registration(
         },
         session_id,
         config_hash: hash,
+        auto_merge: spec.auto_merge,
     })
 }
 

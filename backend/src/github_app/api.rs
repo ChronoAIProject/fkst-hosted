@@ -67,6 +67,15 @@ pub struct RemoteFile {
     pub content_base64: String,
 }
 
+/// One OPEN pull request, trimmed to what the auto-merge step needs.
+#[derive(Debug, Clone)]
+pub struct PullRequestSummary {
+    pub number: u64,
+    /// The PR author's login (matched against the configured bot login).
+    pub author_login: String,
+    pub head_sha: String,
+}
+
 // Hand-written: the token must never appear in Debug.
 impl fmt::Debug for InstallationToken {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -251,6 +260,32 @@ pub trait GithubApi: Send + Sync {
     ) -> Result<(), GithubAppError> {
         let _ = (token, owner, repo, number, commit_title);
         unimplemented!("merge_pull_request is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/pulls?state=open&per_page=100` → the open
+    /// PRs (number + author login + head sha). Single page (v1). Default panics.
+    async fn list_open_pulls(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequestSummary>, GithubAppError> {
+        let _ = (token, owner, repo);
+        unimplemented!("list_open_pulls is only implemented by the HTTP transport")
+    }
+
+    /// `GET {base}/repos/{owner}/{repo}/pulls/{number}` → GitHub's `mergeable`
+    /// tri-state: `Some(true)` mergeable, `Some(false)` conflict, `None` not yet
+    /// computed (JSON `null`/absent → retry next reconcile). Default panics.
+    async fn pull_request_mergeable(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Option<bool>, GithubAppError> {
+        let _ = (token, owner, repo, number);
+        unimplemented!("pull_request_mergeable is only implemented by the HTTP transport")
     }
 
     /// `DELETE {base}/repos/{owner}/{repo}/git/refs/heads/{branch}` deleting a
@@ -882,6 +917,88 @@ impl GithubApi for HttpGithubApi {
             )));
         }
         Ok(())
+    }
+
+    async fn list_open_pulls(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<PullRequestSummary>, GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/pulls?state=open&per_page=100",
+            self.api_base
+        );
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("list_open_pulls: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "list_open_pulls status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("list_open_pulls body: {e}")))?;
+        let arr = body.as_array().cloned().unwrap_or_default();
+        Ok(arr
+            .iter()
+            .filter_map(|pr| {
+                Some(PullRequestSummary {
+                    number: pr["number"].as_u64()?,
+                    author_login: pr["user"]["login"].as_str().unwrap_or_default().to_string(),
+                    head_sha: pr["head"]["sha"].as_str().unwrap_or_default().to_string(),
+                })
+            })
+            .collect())
+    }
+
+    async fn pull_request_mergeable(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Option<bool>, GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/pulls/{number}", self.api_base);
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("pull_request_mergeable: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "pull_request_mergeable status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("pull_request_mergeable body: {e}")))?;
+        // `mergeable` is `null` until GitHub computes it — `as_bool()` maps that
+        // (and an absent field) to `None`, the "retry next reconcile" signal.
+        Ok(body["mergeable"].as_bool())
     }
 
     async fn delete_ref(

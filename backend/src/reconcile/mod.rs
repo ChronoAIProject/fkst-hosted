@@ -15,6 +15,7 @@
 //! the webhook is NOT rewired to enqueue here yet — that is the PR6 flip. Model A
 //! (the Job launcher + webhook trigger) is untouched.
 
+pub mod automerge;
 pub mod desired;
 pub mod execute;
 mod loops;

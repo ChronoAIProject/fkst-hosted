@@ -86,6 +86,17 @@ pub async fn reconcile_repo(
     // it when the last trigger issue is gone so idle repos don't churn the sweep.
     set_active(ctx, installation_id, repo, !regs.is_empty());
 
+    // Best-effort, non-failing: if ANY registered session on this repo opted into
+    // auto-merge (`### Auto-merge`), merge the App bot's mergeable open PRs. Mirrors
+    // the ensure_issue_templates hook — a failure here never aborts the reconcile.
+    crate::reconcile::automerge::auto_merge_bot_pull_requests(
+        &ctx.github,
+        &owner_repo,
+        cfg.github_bot_login.as_deref(),
+        regs.iter().any(|r| r.auto_merge),
+    )
+    .await;
+
     // 3. Observe the live pods for this repo.
     let live = list_live_pods(ctx, repo).await?;
 
