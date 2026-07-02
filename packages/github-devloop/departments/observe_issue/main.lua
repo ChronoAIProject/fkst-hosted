@@ -276,7 +276,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
 end
 
 local function raise_stale_dependency_label_clear(issue, proposal_id, state, labels)
-  if state.state == "ready" or state.state == "dependency_wait" or not core.has_label(labels, core._blocked_on_dependency_label) then
+  if state.state == "ready" or state.state == "dependency_wait" or not devloop_state.has_label(labels, core._blocked_on_dependency_label) then
     return false
   end
   devloop_logging.log_apply("observe_issue", proposal_id, state.state, state.version, { add = {}, remove = { core._blocked_on_dependency_label } }, {

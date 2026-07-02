@@ -89,7 +89,7 @@ end
 
 local function read_runtime_root()
   local result = run_cmd(function()
-    return exec_sync({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+    return exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
   end, "runtime root read")
   local root = strings.trim(result.stdout)
   if root == "" or root:find("[\r\n]") ~= nil then

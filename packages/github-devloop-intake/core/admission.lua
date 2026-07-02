@@ -1,13 +1,14 @@
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local payloads_builders = require("devloop.payloads.builders")
+local devloop_state = require("devloop.state")
 local S = {}
 local operator_commands = require("devloop.operator_commands")
 
 function S.install(M)
 local function has_devloop_state_label(labels)
   for _, label in ipairs(labels or {}) do
-    if M.is_state_label(label) then
+    if devloop_state.is_state_label(label) then
       return true
     end
   end

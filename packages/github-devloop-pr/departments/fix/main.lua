@@ -38,7 +38,7 @@ local function fix_done(_event)
 end
 
 local function branch_worktree(repo, issue_number, version, branch)
-  local runtime_result = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
+  local runtime_result = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end

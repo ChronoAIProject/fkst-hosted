@@ -5,6 +5,7 @@ local parsers_pr = require("devloop.parsers.pr")
 local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
 local devloop_commands = require("devloop.commands")
+local devloop_state = require("devloop.state")
 local S = {}
 local issue_lifecycle = require("devloop.restart.issue_lifecycle")
 local decompose_lib = require("devloop.decompose")
@@ -46,7 +47,7 @@ end
 
 local function has_state_label(labels)
   for _, label in ipairs(labels or {}) do
-    if M.is_state_label(label) then
+    if devloop_state.is_state_label(label) then
       return true
     end
   end

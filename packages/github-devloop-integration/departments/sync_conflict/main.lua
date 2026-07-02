@@ -43,7 +43,7 @@ local function with_temp_worktree(conflict, fn)
     conflict.integration_sha
   )
   local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, conflict.integration_sha)
-  git_mechanics.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
+  git_mechanics.run_required(exec_sync({ cmd = devloop_commands.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
   git_mechanics.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree, runtime)

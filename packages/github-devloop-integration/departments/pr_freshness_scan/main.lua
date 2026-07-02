@@ -15,6 +15,7 @@ local saga = require("workflow.saga")
 local m_facts = require("devloop.markers.facts")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
+local devloop_state = require("devloop.state")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -55,7 +56,7 @@ end
 local function with_temp_worktree(runtime, repo, branch, integration, branch_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, integration, branch, branch_sha)
   local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, branch_sha)
-  git_mechanics.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
+  git_mechanics.run_required(exec_sync({ cmd = devloop_commands.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "PR freshness worktree parent directory setup")
   git_mechanics.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "PR freshness worktree add")
 
   local ok, result = pcall(fn, worktree)
@@ -107,8 +108,8 @@ local function issue_state(repo, issue_number)
 end
 
 local function is_blocked_by_skew(pr, issue)
-  return core.has_label(issue.labels, blocked_by_skew_label)
-    or core.has_label(pr.labels, blocked_by_skew_label)
+  return devloop_state.has_label(issue.labels, blocked_by_skew_label)
+    or devloop_state.has_label(pr.labels, blocked_by_skew_label)
     or has_trusted_text(issue.comments, "blocked-by-skew")
     or has_trusted_text(pr.comments, "blocked-by-skew")
 end

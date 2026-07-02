@@ -7,6 +7,7 @@ local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
+local devloop_commands = require("devloop.commands")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -60,7 +61,7 @@ end
 local function with_temp_worktree(runtime, repo, upstream, integration, integration_sha, fn)
   local worktree = core.branch_sync_worktree_path(runtime, repo, upstream, integration, integration_sha)
   local plan = git("github-devloop").git_worktree_add_detached_plan(worktree, integration_sha)
-  git_mechanics.run_required(exec_sync({ cmd = core.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
+  git_mechanics.run_required(exec_sync({ cmd = devloop_commands.mkdir_p_cmd(plan.parent_dir), timeout = 30 }), "worktree parent directory setup")
   git_mechanics.run_required(git("github-devloop").git_worktree_add_detached(plan.worktree, plan.sha, 60), "worktree add")
 
   local ok, result = pcall(fn, worktree)

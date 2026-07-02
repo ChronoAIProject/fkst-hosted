@@ -91,7 +91,7 @@ end
 
 local function has_devloop_state_label(labels)
   for _, label in ipairs(labels or {}) do
-    if core.is_state_label(label) then
+    if devloop_state.is_state_label(label) then
       return true
     end
   end

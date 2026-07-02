@@ -76,7 +76,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     table.insert(raised, "github-proxy.github_issue_label_request")
   else
     remove_labels = { M._blocked_on_dependency_label }
-    if M.has_label(current.labels, M._blocked_on_dependency_label) then
+    if devloop_state.has_label(current.labels, M._blocked_on_dependency_label) then
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
   end
@@ -103,7 +103,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     ))
     return true
   end
-  if M.has_label(current.labels, M._blocked_on_dependency_label) then
+  if devloop_state.has_label(current.labels, M._blocked_on_dependency_label) then
     devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
       issue.repo,
       issue.number,
@@ -161,7 +161,7 @@ end
 local function raise_dependency_release(M, dept, issue, proposal_id, state, current, command_comment_request, gate, release_fact)
   local ready_version = M.ready_split_version(state.version)
   local raised = { "github-proxy.github_issue_comment_request" }
-  local has_blocked_label = M.has_label(current.labels, M._blocked_on_dependency_label)
+  local has_blocked_label = devloop_state.has_label(current.labels, M._blocked_on_dependency_label)
   if release_fact == nil then table.insert(raised, "github-proxy.github_issue_comment_request") end
   if command_comment_request ~= nil then table.insert(raised, "github-proxy.github_issue_comment_request") end
   if has_blocked_label then table.insert(raised, "github-proxy.github_issue_label_request") end

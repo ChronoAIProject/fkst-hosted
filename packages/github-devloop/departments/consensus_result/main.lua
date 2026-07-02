@@ -32,7 +32,7 @@ local function dependency_hold_effects_complete(current, reached, version)
   return devloop_state.has_state_marker(current.comments, reached.proposal_id, "dependency_wait", version)
     and core.dependency_hold_fact(current.comments, reached.proposal_id) ~= nil
     and devloop_state.state_label_hint_matches(current.labels, "dependency_wait")
-    and core.has_label(current.labels, core._blocked_on_dependency_label)
+    and devloop_state.has_label(current.labels, core._blocked_on_dependency_label)
 end
 
 local function raise_result_effects(repo, issue_number, reached, current, state, gate, reason, version, to_state)
