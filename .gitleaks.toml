@@ -13,6 +13,15 @@ paths = [
   # Template files that hold placeholder secrets by design (MIIE… / CHANGE_ME).
   '''(^|/)\.env\.example$''',
   '''(^|/)secret\.example\.yaml$''',
+  # Rust test-fixture files. They carry synthetic, non-real secrets BY DESIGN — the
+  # log redactor's denylist tests assert a fake ghp_ PAT / sk- key / example JWT /
+  # 512-bit test PEM get masked, and the storage/log-download tests use throwaway
+  # SA creds. None are live credentials (each is a sequential/example literal). Only
+  # test files are allowlisted; production code is still fully scanned.
+  '''(^|/).*_tests\.rs$''',
+  '''(^|/)tests\.rs$''',
+  '''(^|/)tests_browser\.rs$''',
+  '''(^|/)test_support\.rs$''',
 ]
 # The fake PEM in the error-redaction unit test (backend/src/error.rs): a literal
 # "-----BEGIN RSA PRIVATE KEY-----\nSECRET\n-----END RSA PRIVATE KEY-----".
