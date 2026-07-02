@@ -214,7 +214,7 @@ local function payload_for_queue(queue)
       source_ref = { kind = "external", ref = "owner/repo#issue/42" },
       include_ready_hand_off = true,
     }),
-    devloop_reconcile = conv_reconcile.build_devloop_reconcile_payload(core, {
+    devloop_reconcile = conv_reconcile.build_devloop_reconcile_payload({
       schema = "consensus.consensus_converge.v1",
       proposal_id = "github-devloop/issue/owner/repo/42",
       dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
@@ -226,7 +226,7 @@ local function payload_for_queue(queue)
       dedup_key = "consensus:" .. review_proposal_id() .. "/review/loop/2",
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     }, "github-devloop/issue/owner/repo/42", "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z", 7, 3),
-    devloop_review_reconcile = conv_reconcile.build_devloop_review_reconcile_payload(core, {
+    devloop_review_reconcile = conv_reconcile.build_devloop_review_reconcile_payload({
       schema = "consensus.consensus_converge.v1",
       proposal_id = review_proposal_id(),
       dedup_key = "consensus:" .. review_proposal_id() .. "/review/loop/3",

@@ -74,12 +74,12 @@ function C.append_converge_round_fact(facts, round, narrowed_question, angle_dig
   return copied
 end
 
-function C.converge_base_version(M, consensus_dedup)
+function C.converge_base_version(consensus_dedup)
   return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
 end
 
 function C.converge_proposal_base_dedup(M, consensus_dedup)
-  local base_version = C.converge_base_version(M, consensus_dedup)
+  local base_version = C.converge_base_version(consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end
 function C.converge_round_marker(M, proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
@@ -168,11 +168,11 @@ function C.review_converge_round_facts(M, comments, review_proposal_id, issue_pr
 end
 
 function C.converge_budget_round(M, comments, proposal_id)
-  return C.max_converge_round(M, C.converge_round_facts_for_proposal(M, comments, proposal_id))
+  return C.max_converge_round(C.converge_round_facts_for_proposal(M, comments, proposal_id))
 end
 
 function C.converge_boundary_budget_round(M, comments, proposal_id, narrowed_question, angle_digests)
-  return C.max_converge_round(M, C.converge_round_facts_for_proposal_boundary(M, comments, proposal_id, narrowed_question, angle_digests))
+  return C.max_converge_round(C.converge_round_facts_for_proposal_boundary(M, comments, proposal_id, narrowed_question, angle_digests))
 end
 
 function C.review_converge_budget_round(M, comments, review_proposal_id, issue_proposal_id)
@@ -180,10 +180,10 @@ function C.review_converge_budget_round(M, comments, review_proposal_id, issue_p
     return attr(marker, "proposal") == tostring(review_proposal_id)
       and attr(marker, "issue_proposal") == tostring(issue_proposal_id)
   end
-  return C.max_converge_round(M, converge_record_map(M, comments, "review%-converge%-round", matches))
+  return C.max_converge_round(converge_record_map(M, comments, "review%-converge%-round", matches))
 end
 
-function C.max_converge_round(M, facts)
+function C.max_converge_round(facts)
   local max_seen = 0
   if type(facts) ~= "table" then
     return max_seen
@@ -222,7 +222,7 @@ function C.has_review_converge_round_marker(M, comments, review_proposal_id, iss
   return false
 end
 
-function C.is_true_stall(M, facts, current_round)
+function C.is_true_stall(facts, current_round)
   local round = valid_round(current_round)
   if round == nil or round < 3 or type(facts) ~= "table" then
     return false

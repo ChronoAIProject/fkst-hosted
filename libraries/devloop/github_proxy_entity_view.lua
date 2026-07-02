@@ -449,7 +449,7 @@ end
 -- share a slot. This collapses the dominant GraphQL drain: the same entity
 -- re-read every poll by the same scan dept (measured ~10x duplication on hot
 -- issues).
-function C.gh_exec_cached(M, cmd, cache_key, ttl_seconds, exec)
+function C.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
   local cached = cache_get(cache_key)
   if type(cached) == "string" and cached ~= "" then
     local sep = cached:find("\n", 1, true)

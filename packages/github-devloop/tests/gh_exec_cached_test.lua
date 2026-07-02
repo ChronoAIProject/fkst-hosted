@@ -20,10 +20,10 @@ return {
       calls = calls + 1
       return { stdout = MULTILINE, exit_code = 0 }
     end
-    local first = require("devloop.github_proxy_entity_view").gh_exec_cached(core, { argv = { "gh", "issue", "view", "9001" } }, key, 90, exec)
+    local first = require("devloop.github_proxy_entity_view").gh_exec_cached({ argv = { "gh", "issue", "view", "9001" } }, key, 90, exec)
     t.eq(first.stdout, MULTILINE)
     t.eq(calls, 1)
-    local second = require("devloop.github_proxy_entity_view").gh_exec_cached(core, { argv = { "gh", "issue", "view", "9001" } }, key, 90, exec)
+    local second = require("devloop.github_proxy_entity_view").gh_exec_cached({ argv = { "gh", "issue", "view", "9001" } }, key, 90, exec)
     t.eq(second.stdout, MULTILINE, "multi-line stdout round-trips intact from cache")
     t.eq(second.cached, true)
     t.eq(calls, 1, "second call within TTL must NOT re-exec gh")
@@ -37,9 +37,9 @@ return {
       calls = calls + 1
       return { stdout = "", stderr = "boom", exit_code = 1 }
     end
-    local first = require("devloop.github_proxy_entity_view").gh_exec_cached(core, { argv = { "gh", "issue", "view", "9002" } }, key, 90, exec)
+    local first = require("devloop.github_proxy_entity_view").gh_exec_cached({ argv = { "gh", "issue", "view", "9002" } }, key, 90, exec)
     t.eq(first.exit_code, 1)
-    local second = require("devloop.github_proxy_entity_view").gh_exec_cached(core, { argv = { "gh", "issue", "view", "9002" } }, key, 90, exec)
+    local second = require("devloop.github_proxy_entity_view").gh_exec_cached({ argv = { "gh", "issue", "view", "9002" } }, key, 90, exec)
     t.eq(calls, 2, "a non-zero exit read must not be memoized")
   end,
 
@@ -52,7 +52,7 @@ return {
       calls = calls + 1
       return { stdout = "fresh-body", exit_code = 0 }
     end
-    local result = require("devloop.github_proxy_entity_view").gh_exec_cached(core, { argv = { "gh", "issue", "view", "9003" } }, key, 90, exec)
+    local result = require("devloop.github_proxy_entity_view").gh_exec_cached({ argv = { "gh", "issue", "view", "9003" } }, key, 90, exec)
     t.eq(result.stdout, "fresh-body", "an expired cache entry must re-fetch, not serve stale")
     t.eq(calls, 1)
   end,

@@ -89,7 +89,7 @@ local function read_decompose_child_issues(repo, proposal_id)
   if child_list.exit_code ~= 0 then
     error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
   end
-  return decompose_lib.parse_decompose_child_issue_list(core, child_list.stdout)
+  return decompose_lib.parse_decompose_child_issue_list(child_list.stdout)
 end
 
 local function plan_current_decompose(event, repo, issue_number, decompose)

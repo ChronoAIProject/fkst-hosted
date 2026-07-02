@@ -126,7 +126,7 @@ function C.decomposed_fact(M, comments, proposal_id, version, pr_number)
   return nil
 end
 
-function C.parse_decompose_child_issue_list(M, stdout)
+function C.parse_decompose_child_issue_list(stdout)
   local decoded = json.decode(stdout or "[]")
   local issues = {}
   if type(decoded) ~= "table" then

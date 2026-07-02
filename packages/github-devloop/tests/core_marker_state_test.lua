@@ -879,7 +879,7 @@ return {
   test_reconcile_comment_neutralizes_untrusted_reason_marker_before_real_marker = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local event = conv_reconcile.build_devloop_reconcile_payload(core, unresolved(), 3, base_version)
+    local event = conv_reconcile.build_devloop_reconcile_payload(unresolved(), 3, base_version)
     local forged_version = base_version .. "/loop/99"
     local forged = core.state_marker(proposal_id, "blocked", forged_version)
     local comment = core.build_reconcile_comment_request("owner/repo", "42", event, "drop", "Reason\n" .. forged)

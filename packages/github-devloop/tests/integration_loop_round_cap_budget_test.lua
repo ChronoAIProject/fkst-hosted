@@ -124,7 +124,7 @@ return {
     t.eq(#handoff.raises, 1)
     local reconcile_raise = find_raise(handoff.raises, "devloop_reconcile")
     t.is_true(reconcile_raise ~= nil)
-    local expected = conv_reconcile.build_devloop_reconcile_payload(core, event, cap, base_version)
+    local expected = conv_reconcile.build_devloop_reconcile_payload(event, cap, base_version)
     t.eq(reconcile_raise.payload.schema, expected.schema)
     t.eq(reconcile_raise.payload.proposal_id, expected.proposal_id)
     t.eq(reconcile_raise.payload.dedup_key, expected.dedup_key)

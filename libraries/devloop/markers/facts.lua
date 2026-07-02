@@ -553,7 +553,7 @@ function C.merged_fact(M, comments, issue_proposal_id, pr_number, version)
         and forge_validators.is_git_sha(marker_head_sha) then
         local autonomy_result = nil
         if marker:find('autonomy_result="v1"', 1, true) ~= nil then
-          autonomy_result = autonomy_ledger.autonomy_result_record_from_marker(M, marker, comment, marker_issue, marker_pr, marker_version, marker_head_sha)
+          autonomy_result = autonomy_ledger.autonomy_result_record_from_marker(marker, comment, marker_issue, marker_pr, marker_version, marker_head_sha)
         end
         return {
           proposal_id = marker_issue,

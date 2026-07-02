@@ -12,7 +12,7 @@ local max_attr_len = shared.max_attr_len
 local safe_attr = shared.safe_attr
 local attr = shared.attr
 
-function C.build_devloop_reconcile_payload(M, unresolved, round, base_version)
+function C.build_devloop_reconcile_payload(unresolved, round, base_version)
   return {
     schema = "github-devloop.reconcile.v1",
     proposal_id = unresolved.proposal_id,
@@ -51,7 +51,7 @@ function C.is_supported_reconcile(M, payload)
     and valid_round(payload.round) ~= nil
 end
 
-function C.build_devloop_review_reconcile_payload(M, unresolved, round, issue_proposal_id, issue_version, head_sha)
+function C.build_devloop_review_reconcile_payload(unresolved, round, issue_proposal_id, issue_version, head_sha)
   return {
     schema = "github-devloop.review-reconcile.v1",
     proposal_id = issue_proposal_id,
@@ -135,7 +135,7 @@ function C.build_timeout_reconcile_comment_request(M, repo, issue_number, reconc
   }
 end
 
-function C.review_reconcile_state_version(M, issue_version, round)
+function C.review_reconcile_state_version(issue_version, round)
   return tostring(issue_version) .. "/review-loop/" .. tostring(round)
 end
 
@@ -163,11 +163,11 @@ function C.review_reconcile_terminal_state_version(M, current_version, round)
   return tostring(current_version) .. "/review-loop/" .. tostring(next_n)
 end
 
-function C.fix_reconcile_state_version(M, issue_version)
+function C.fix_reconcile_state_version(issue_version)
   return tostring(issue_version)
 end
 
-function C.timeout_reconcile_state_version(M, issue_version, state_name, round)
+function C.timeout_reconcile_state_version(issue_version, state_name, round)
   return tostring(issue_version) .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(round)
 end
 
@@ -229,7 +229,7 @@ function C.is_supported_timeout_reconcile(M, payload)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
-function C.reconcile_state_version(M, base_version, round)
+function C.reconcile_state_version(base_version, round)
   return tostring(base_version) .. "/loop/" .. tostring(round)
 end
 
@@ -242,7 +242,7 @@ function C.reconcile_marker(M, proposal_id, base_version, round, action)
     error("github-devloop: invalid reconcile action")
   end
   return '<!-- fkst:github-devloop:reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(C.reconcile_state_version(M, base_version, n), M._max_dedup_len)
+    .. '" version="' .. safe_attr(C.reconcile_state_version(base_version, n), M._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
     .. '" dedup="' .. safe_attr("reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(n), M._max_dedup_len)
@@ -258,7 +258,7 @@ function C.review_reconcile_marker(M, issue_proposal_id, issue_version, round, a
     error("github-devloop: invalid review reconcile action")
   end
   return '<!-- fkst:github-devloop:review-reconcile:v1 proposal="' .. safe_attr(issue_proposal_id, M._max_key_len)
-    .. '" version="' .. safe_attr(C.review_reconcile_state_version(M, issue_version, n), M._max_dedup_len)
+    .. '" version="' .. safe_attr(C.review_reconcile_state_version(issue_version, n), M._max_dedup_len)
     .. '" round="' .. tostring(n)
     .. '" action="' .. safe_attr(action, max_attr_len)
     .. '" dedup="' .. safe_attr("review-reconcile:" .. tostring(issue_version) .. "/review-loop/" .. tostring(n), M._max_dedup_len)
@@ -291,7 +291,7 @@ function C.timeout_reconcile_marker(M, proposal_id, issue_version, state_name, r
   end
   local why = fields or {}
   local source_ref = type(why.source_ref) == "table" and why.source_ref or {}
-  local marker_version = why.terminal_version or C.timeout_reconcile_state_version(M, issue_version, state_name, n)
+  local marker_version = why.terminal_version or C.timeout_reconcile_state_version(issue_version, state_name, n)
   return '<!-- fkst:github-devloop:timeout-reconcile:v1 proposal="' .. safe_attr(proposal_id, M._max_key_len)
     .. '" version="' .. safe_attr(marker_version, M._max_dedup_len)
     .. '" state="' .. safe_attr(state_name, max_attr_len)
@@ -315,7 +315,7 @@ function C.has_reconcile_marker(M, comments, proposal_id, base_version, round)
   if n == nil or type(comments) ~= "table" then
     return false
   end
-  local version = C.reconcile_state_version(M, base_version, n)
+  local version = C.reconcile_state_version(base_version, n)
   local marker_pattern = "<!%-%- fkst:github%-devloop:reconcile:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
@@ -334,7 +334,7 @@ function C.has_review_reconcile_marker(M, comments, issue_proposal_id, issue_ver
   if n == nil or type(comments) ~= "table" then
     return false
   end
-  local version = C.review_reconcile_state_version(M, issue_version, n)
+  local version = C.review_reconcile_state_version(issue_version, n)
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-reconcile:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
@@ -371,7 +371,7 @@ function C.has_timeout_reconcile_marker(M, comments, proposal_id, issue_version,
   if n == nil or type(comments) ~= "table" then
     return false
   end
-  local version = C.timeout_reconcile_state_version(M, issue_version, state_name, n)
+  local version = C.timeout_reconcile_state_version(issue_version, state_name, n)
   local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do

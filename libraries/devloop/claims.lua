@@ -107,7 +107,7 @@ function C.claimed_label()
 end
 
 -- assignee (default) ⇒ exactly today's behavior. label ⇒ opt-in GitHub App mode.
-function C.claim_mode_active(M)
+function C.claim_mode_active()
   return config.claim_mode()
 end
 

@@ -179,8 +179,8 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
     current_pr.head_sha,
     sr_digest
   )
-  local round = conv_rounds.max_converge_round(core, facts)
-  return conv_rounds.is_true_stall(core, facts, round)
+  local round = conv_rounds.max_converge_round(facts)
+  return conv_rounds.is_true_stall(facts, round)
 end
 
 local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)

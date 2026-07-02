@@ -115,7 +115,7 @@ local function unresolved(extra)
   return value
 end
 local function reconcile(extra)
-  local value = conv_reconcile.build_devloop_reconcile_payload(core, unresolved({
+  local value = conv_reconcile.build_devloop_reconcile_payload(unresolved({
     dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/3",
   }), 3, "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
   for key, field in pairs(extra or {}) do
@@ -228,7 +228,7 @@ local function review_reconcile(extra)
     dedup_key = "consensus:" .. devloop_base.pr_review_proposal_id("owner/repo", 7, reviewing().version, "def456") .. "/review/loop/3",
     round = 3,
   })
-  local value = conv_reconcile.build_devloop_review_reconcile_payload(core, event, 3, "github-devloop/issue/owner/repo/42", reviewing().version, "def456")
+  local value = conv_reconcile.build_devloop_review_reconcile_payload(event, 3, "github-devloop/issue/owner/repo/42", reviewing().version, "def456")
   for key, field in pairs(extra or {}) do
     value[key] = field
   end

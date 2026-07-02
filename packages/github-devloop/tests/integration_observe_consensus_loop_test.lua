@@ -631,7 +631,7 @@ return {
 
   test_loop_duplicate_converge_round_marker_skips = function()
     local event = unresolved({ round = 1 })
-    local base_version = conv_rounds.converge_base_version(core, event.dedup_key)
+    local base_version = conv_rounds.converge_base_version(event.dedup_key)
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
       conv_rounds.converge_round_marker(core, event.proposal_id, base_version, sr_digest, 1, event.dedup_key, nil, nil),

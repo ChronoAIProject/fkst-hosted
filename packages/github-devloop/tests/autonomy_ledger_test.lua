@@ -102,16 +102,16 @@ return {
       no_revert_reopen = "pending",
       cost_budget = "pending",
     }
-    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(core, gates), "pending")
+    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(gates), "pending")
 
     gates.evidence_manifest = "pass"
     gates.post_merge_probe = "pass"
     gates.no_revert_reopen = "pass"
     gates.cost_budget = "pass"
-    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(core, gates), "true")
+    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(gates), "true")
 
     gates.cost_budget = "fail"
-    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(core, gates), "false")
+    t.eq(autonomy_ledger.autonomy_valid_autonomous_merge(gates), "false")
   end,
 
   test_autonomy_result_marker_recomputes_pending_predicate = function()

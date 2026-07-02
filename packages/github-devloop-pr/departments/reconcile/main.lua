@@ -249,7 +249,7 @@ local function pipeline_fix(event)
     local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
     devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = require("devloop.entity").current_entity_state(core, current.comments, reconcile.proposal_id)
-    local version = conv_reconcile.fix_reconcile_state_version(core, reconcile.issue_version)
+    local version = conv_reconcile.fix_reconcile_state_version(reconcile.issue_version)
     if conv_reconcile.has_fix_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.issue_version) then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-idempotent(fix reconcile marker already visible)", "fix reconcile result marker for incoming version is already visible")
       return
@@ -401,7 +401,7 @@ local function pipeline_timeout(event)
       return
     end
 
-    local version = conv_reconcile.timeout_reconcile_state_version(core, state.version, reconcile.state, decision.attempt)
+    local version = conv_reconcile.timeout_reconcile_state_version(state.version, reconcile.state, decision.attempt)
     local transition = devloop_state.versioned_transition_status(state, { reconcile.state }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")

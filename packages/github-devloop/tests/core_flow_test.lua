@@ -124,7 +124,7 @@ return {
   test_converge_round_and_reconcile_requests = function()
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
-    local base_version = conv_rounds.converge_base_version(core, dedup_key .. "/loop/2")
+    local base_version = conv_rounds.converge_base_version(dedup_key .. "/loop/2")
     local sr_digest = convergence_shared.source_ref_digest(source_ref())
     local marker = conv_rounds.converge_round_marker(core, proposal_id, base_version, sr_digest, 2, dedup_key .. "/loop/2", "Same question?", {
       { angle = "minimal", verdict = "abstain", digest = "a" },
@@ -136,7 +136,7 @@ return {
     local facts = conv_rounds.converge_round_facts(core, { marker }, proposal_id, base_version, sr_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].round, 2)
-    t.eq(conv_rounds.max_converge_round(core, facts), 2)
+    t.eq(conv_rounds.max_converge_round(facts), 2)
 
     local forged = core.state_marker(proposal_id, "blocked", base_version .. "/loop/99")
     local forged_converge_marker = conv_rounds.converge_round_marker(core,
@@ -179,13 +179,13 @@ return {
     t.eq(comment_facts[1].verdicts, facts[1].verdicts)
     t.is_true(round_comment.dedup_key:find("converge-round", 1, true) ~= nil)
 
-    local reconcile = conv_reconcile.build_devloop_reconcile_payload(core, event, 3, base_version)
+    local reconcile = conv_reconcile.build_devloop_reconcile_payload(event, 3, base_version)
     t.eq(reconcile.schema, "github-devloop.reconcile.v1")
     t.eq(reconcile.dedup_key, "reconcile:" .. base_version .. "/loop/3")
     t.eq(conv_reconcile.is_supported_reconcile(core, reconcile), true)
     local reconcile_marker = conv_reconcile.reconcile_marker(core, proposal_id, base_version, 3, "drop")
     t.eq(conv_reconcile.has_reconcile_marker(core, { reconcile_marker }, proposal_id, base_version, 3), true)
-    t.eq(conv_reconcile.reconcile_state_version(core, base_version, 3), base_version .. "/loop/3")
+    t.eq(conv_reconcile.reconcile_state_version(base_version, 3), base_version .. "/loop/3")
     local live_thinking_version = "github-devloop/issue/owner/repo/42/2026-06-14T05-22-55Z/intake/1287859418"
     local terminal_version = conv_reconcile.reconcile_terminal_state_version(core, live_thinking_version, 3)
     t.eq(terminal_version, live_thinking_version .. "/loop/3")
@@ -218,7 +218,7 @@ return {
     local issue_proposal_id = "github-devloop/issue/owner/repo/42"
     local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local event = review_unresolved()
-    local reconcile = conv_reconcile.build_devloop_review_reconcile_payload(core, event, 3, issue_proposal_id, issue_version, "def456")
+    local reconcile = conv_reconcile.build_devloop_review_reconcile_payload(event, 3, issue_proposal_id, issue_version, "def456")
 
     t.eq(reconcile.schema, "github-devloop.review-reconcile.v1")
     t.eq(reconcile.proposal_id, issue_proposal_id)
@@ -235,7 +235,7 @@ return {
     t.eq(conv_reconcile.is_supported_review_reconcile(core, missing_round), false)
     t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { round = "1.5" })), false)
     t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
-    t.eq(conv_reconcile.review_reconcile_state_version(core, issue_version, 3), issue_version .. "/review-loop/3")
+    t.eq(conv_reconcile.review_reconcile_state_version(issue_version, 3), issue_version .. "/review-loop/3")
     local live_reviewing_version = issue_version .. "/review-loop/9"
     local terminal_version = conv_reconcile.review_reconcile_terminal_state_version(core, live_reviewing_version, 3)
     t.eq(terminal_version, live_reviewing_version .. "/review-loop/10")
@@ -281,7 +281,7 @@ return {
     t.eq(reconcile.round, 4)
     t.eq(reconcile.pr_number, 7)
     t.eq(reconcile.dedup_key, "fix-reconcile:" .. issue_version)
-    t.eq(conv_reconcile.fix_reconcile_state_version(core, issue_version), issue_version)
+    t.eq(conv_reconcile.fix_reconcile_state_version(issue_version), issue_version)
     t.eq(conv_reconcile.is_supported_fix_reconcile(core, reconcile), true)
     t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { dedup_key = "fix-reconcile:" .. issue_version .. "/other" })), false)
     t.eq(conv_reconcile.is_supported_fix_reconcile(core, copy_table(reconcile, { round = 3 })), false)

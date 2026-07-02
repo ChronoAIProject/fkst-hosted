@@ -129,9 +129,9 @@ return {
       positive_state.version,
       convergence_shared.source_ref_digest(positive_entity.source_ref)
     )
-    local positive_round = conv_rounds.max_converge_round(core, positive_facts)
+    local positive_round = conv_rounds.max_converge_round(positive_facts)
     t.eq(positive_round, 3)
-    t.is_true(conv_rounds.is_true_stall(core, positive_facts, positive_round))
+    t.is_true(conv_rounds.is_true_stall(positive_facts, positive_round))
 
     local negative_entity, negative_state = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, false)
     local negative_facts = conv_rounds.converge_round_facts(core,
@@ -140,9 +140,9 @@ return {
       negative_state.version,
       convergence_shared.source_ref_digest(negative_entity.source_ref)
     )
-    local negative_round = conv_rounds.max_converge_round(core, negative_facts)
+    local negative_round = conv_rounds.max_converge_round(negative_facts)
     t.eq(negative_round, 3)
-    t.eq(conv_rounds.is_true_stall(core, negative_facts, negative_round), false)
+    t.eq(conv_rounds.is_true_stall(negative_facts, negative_round), false)
   end,
 
   test_hidden_state_implementing_fixture_uses_over_budget_fact = function()

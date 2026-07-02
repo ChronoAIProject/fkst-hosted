@@ -54,7 +54,7 @@ function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
 end
 
 function M.build_reconcile_comment_request(repo, issue_number, reconcile, action, reason, state_version)
-  local version = state_version or conv_reconcile.reconcile_state_version(M, reconcile.base_version, reconcile.round)
+  local version = state_version or conv_reconcile.reconcile_state_version(reconcile.base_version, reconcile.round)
   local marker = conv_reconcile.reconcile_marker(M, reconcile.proposal_id, reconcile.base_version, reconcile.round, action)
   local state_marker = devloop_state.state_marker(reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
@@ -77,7 +77,7 @@ function M.build_reconcile_comment_request(repo, issue_number, reconcile, action
 end
 
 function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile, action, reason)
-  local version = conv_reconcile.fix_reconcile_state_version(M, fix_reconcile.issue_version)
+  local version = conv_reconcile.fix_reconcile_state_version(fix_reconcile.issue_version)
   local marker = conv_reconcile.fix_reconcile_marker(M, fix_reconcile.proposal_id, fix_reconcile.issue_version, action)
   local state_marker = devloop_state.state_marker(fix_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
@@ -98,7 +98,7 @@ function M.build_fix_reconcile_comment_request(repo, issue_number, fix_reconcile
 end
 
 function M.build_review_reconcile_comment_request(repo, issue_number, review_reconcile, action, reason, state_version)
-  local version = state_version or conv_reconcile.review_reconcile_state_version(M, review_reconcile.issue_version, review_reconcile.round)
+  local version = state_version or conv_reconcile.review_reconcile_state_version(review_reconcile.issue_version, review_reconcile.round)
   local marker = conv_reconcile.review_reconcile_marker(M, review_reconcile.proposal_id, review_reconcile.issue_version, review_reconcile.round, action)
   local state_marker = devloop_state.state_marker(review_reconcile.proposal_id, "blocked", version)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")

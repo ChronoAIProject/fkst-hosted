@@ -269,7 +269,7 @@ local function maybe_decompose_children(repo, entity)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-decompose-child-list-failed: " .. tostring(result.stderr))
   end
-  return decompose_lib.parse_decompose_child_issue_list(M, result.stdout)
+  return decompose_lib.parse_decompose_child_issue_list(result.stdout)
 end
 
 function M.saga_doctor_collect(opts)

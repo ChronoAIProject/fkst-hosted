@@ -174,7 +174,7 @@ local function require_marker_fact(M, facts, family)
     return fetch_child_state_fact(M, facts)
   end
   if family == "converge-round" then
-    local base_version = M.version_loop_round(facts.state.version) > 0 and conv_rounds.converge_base_version(M, facts.state.version) or nil
+    local base_version = M.version_loop_round(facts.state.version) > 0 and conv_rounds.converge_base_version(facts.state.version) or nil
     return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, base_version, facts.issue.source_ref)
   end
   if family == "dependency-release" then
@@ -279,7 +279,7 @@ local function gather_fetch_before_compare_fact(M, facts, entity, family)
     if child_list.exit_code ~= 0 then
       error("github-devloop: gh issue decompose child list failed: " .. tostring(child_list.stderr))
     end
-    facts.decompose_children = decompose_lib.parse_decompose_child_issue_list(M, child_list.stdout)
+    facts.decompose_children = decompose_lib.parse_decompose_child_issue_list(child_list.stdout)
     return facts.decompose_children
   end
   if family == "branch-head" then
@@ -439,9 +439,9 @@ function C.has_thinking_converge_replay(M, current, proposal_id, state, source_r
   local base_version = transition_version.strip_suffixes(state.version)
   local sr_digest = convergence_shared.source_ref_digest(source_ref)
   local facts = conv_rounds.converge_round_facts(M, current.comments, proposal_id, base_version, sr_digest)
-  local round = conv_rounds.max_converge_round(M, facts)
+  local round = conv_rounds.max_converge_round(facts)
   return M.latest_complete_converge_round(current.comments, proposal_id, base_version, source_ref) ~= nil
-    or conv_rounds.is_true_stall(M, facts, round)
+    or conv_rounds.is_true_stall(facts, round)
 end
 
 local function replay_thinking(M, dept, issue, state, row, facts)

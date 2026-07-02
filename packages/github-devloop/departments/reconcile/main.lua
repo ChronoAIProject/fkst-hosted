@@ -260,7 +260,7 @@ local function pipeline_timeout(event)
       return
     end
 
-    local version = conv_reconcile.timeout_reconcile_state_version(core, state.version, reconcile.state, decision.attempt)
+    local version = conv_reconcile.timeout_reconcile_state_version(state.version, reconcile.state, decision.attempt)
     local transition = devloop_state.versioned_transition_status(state, { reconcile.state }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")

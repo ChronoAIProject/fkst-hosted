@@ -76,7 +76,7 @@ local function act_handoff(event)
   end
 
   if handoff.kind == "github-devloop.reconcile" then
-    local reconcile = conv_reconcile.build_devloop_reconcile_payload(core, {
+    local reconcile = conv_reconcile.build_devloop_reconcile_payload({
       proposal_id = handoff.proposal_id,
       source_ref = handoff.source_ref,
     }, handoff.round, handoff.base_version)

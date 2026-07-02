@@ -130,7 +130,7 @@ function C.autonomy_task_class(issue)
   return "unknown"
 end
 
-function C.autonomy_valid_autonomous_merge(M, gates)
+function C.autonomy_valid_autonomous_merge(gates)
   local has_pending = false
   for _, name in ipairs(required_gate_names) do
     local state = normalize_gate_state(type(gates) == "table" and gates[name] or nil)
@@ -332,7 +332,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
         and forge_validators.is_git_sha(head_sha) then
         local autonomy_result = nil
         if marker:find('autonomy_result="v1"', 1, true) ~= nil then
-          autonomy_result = C.autonomy_result_record_from_marker(M, marker, comment, marker_proposal, pr_number, version, head_sha)
+          autonomy_result = C.autonomy_result_record_from_marker(marker, comment, marker_proposal, pr_number, version, head_sha)
         end
         put_terminal_event(terminals, "merged:" .. tostring(version), {
           kind = "terminal",
@@ -501,7 +501,7 @@ function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, pos
     retry_count = M.version_fix_round(merge_ready.version),
     codex_calls = nil,
     gates = gates,
-    valid_autonomous_merge = C.autonomy_valid_autonomous_merge(M, gates),
+    valid_autonomous_merge = C.autonomy_valid_autonomous_merge(gates),
   }
 end
 
@@ -521,7 +521,7 @@ local function autonomy_result_parts(M, record)
   local retry_count = tonumber(record.retry_count)
   local codex_calls = record.codex_calls
   local gates = type(record.gates) == "table" and record.gates or {}
-  local valid = C.autonomy_valid_autonomous_merge(M, gates)
+  local valid = C.autonomy_valid_autonomous_merge(gates)
   if valid ~= "true" and valid ~= "false" and valid ~= "pending" then
     error("github-devloop: invalid autonomy result predicate")
   end
@@ -604,7 +604,7 @@ function C.autonomy_result_marker(M, record)
     .. ' -->'
 end
 
-function C.autonomy_result_record_from_marker(M, marker, comment, proposal_id, pr_number, version, head_sha)
+function C.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
   local marker_proposal = marker:match('proposal="([^"]+)"')
   local marker_pr = marker:match('pr="([^"]+)"')
   local marker_version = marker:match('version="([^"]*)"')
@@ -688,7 +688,7 @@ function C.autonomy_result_record_from_marker(M, marker, comment, proposal_id, p
     retry_count = retry_count,
     codex_calls = codex_calls,
     gates = gates,
-    valid_autonomous_merge = C.autonomy_valid_autonomous_merge(M, gates),
+    valid_autonomous_merge = C.autonomy_valid_autonomous_merge(gates),
     comment_created_at = parsers_misc._comment_created_at(M, comment),
   }
 end
@@ -700,7 +700,7 @@ function C.autonomy_result_fact(M, comments, proposal_id, pr_number, version, he
   local marker_pattern = "<!%-%- fkst:github%-devloop:autonomy%-result:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
-      local fact = C.autonomy_result_record_from_marker(M, marker, comment, proposal_id, pr_number, version, head_sha)
+      local fact = C.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
       if fact ~= nil then
         return fact
       end
@@ -734,7 +734,7 @@ function C.autonomy_audit_valid_autonomous_merge(M, fact, opts)
   local claimed_probe = normalize_gate_state(type(fact.gates) == "table" and fact.gates.post_merge_probe or nil)
   if green then
     return {
-      valid_autonomous_merge = C.autonomy_valid_autonomous_merge(M, {
+      valid_autonomous_merge = C.autonomy_valid_autonomous_merge({
         human_touch = type(fact.gates) == "table" and fact.gates.human_touch or nil,
         pre_merge_ci = type(fact.gates) == "table" and fact.gates.pre_merge_ci or nil,
         evidence_manifest = type(fact.gates) == "table" and fact.gates.evidence_manifest or nil,

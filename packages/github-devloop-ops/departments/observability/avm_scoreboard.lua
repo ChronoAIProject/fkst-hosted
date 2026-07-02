@@ -229,7 +229,7 @@ local function decorate_with_no_revert_reopen(fact, now_seconds, entities, recen
     fact.gates = {}
   end
   fact.gates.no_revert_reopen = gate
-  fact.valid_autonomous_merge = autonomy_ledger.autonomy_valid_autonomous_merge(core, fact.gates)
+  fact.valid_autonomous_merge = autonomy_ledger.autonomy_valid_autonomous_merge(fact.gates)
   if type(fact.attempt_projection) == "table" then
     autonomy_projection.apply_audited_fact(fact.attempt_projection, fact)
     fact.avm_rate_numerator = fact.attempt_projection.valid_merges
@@ -246,7 +246,7 @@ local function fact_from_marker(marker, comment)
   if proposal_id == nil or pr_number == nil or version == nil or head_sha == nil then
     return nil, "missing_identity"
   end
-  local fact, reason = autonomy_ledger.autonomy_result_record_from_marker(core, marker, comment, proposal_id, pr_number, version, head_sha)
+  local fact, reason = autonomy_ledger.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
   if fact ~= nil and fact.issue_number == nil then
     local _, issue_number = base_ids.parse_proposal_id(proposal_id)
     fact.issue_number = tonumber(issue_number)
