@@ -101,6 +101,21 @@ pub async fn reconcile_repo(
     )
     .await;
 
+    // Best-effort, non-failing: give each open WORK issue (one carrying a session's
+    // work label) a visible, fkst-owned "picked up" acknowledgment — a work issue is
+    // otherwise often silent from GitHub's side, so the author has no signal it was
+    // claimed. Mirrors the announce latch (comment + durable label), reuses the token
+    // minted above, and gates on ≥1 registration; a failure here never aborts the
+    // reconcile.
+    crate::reconcile::work_ack::ack_open_work_issues(
+        &ctx.github,
+        ctx.listing.as_ref(),
+        &token,
+        repo,
+        &regs,
+    )
+    .await;
+
     // 3. Observe the live pods for this repo.
     let live = list_live_pods(ctx, repo).await?;
 
