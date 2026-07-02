@@ -1,0 +1,17 @@
+# Default dogfood platform package set.
+# Host-specific files named dogfood.platform-packages.<target> may narrow this
+# set for least-privilege scheduler composition.
+github-devloop
+github-devloop-pr
+github-devloop-integration
+github-devloop-intake
+github-devloop-intake-default
+github-devloop-decompose
+github-devloop-ops
+github-proxy
+consensus
+github-external-pr-intake
+github-ratchet-migration-slicer
+fkst-substrate-ref-maintainer
+integration-coverage-producer
+idle-detector
