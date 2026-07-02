@@ -424,7 +424,7 @@ local function run_fix_attempt(plan)
     )
   end
   if merge_context.conflicted then
-    conflict_telemetry.log_conflict_files(core, "fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
+    conflict_telemetry.log_conflict_files("fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
   local codex_started_at = now()
   devloop_logging.log_codex_start("fix", plan.fix.proposal_id, "fix")

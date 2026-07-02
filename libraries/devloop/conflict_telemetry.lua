@@ -21,7 +21,7 @@ local function is_safe_conflict_path(path)
     and text:find("^[%w%._%-%/]+$") ~= nil
 end
 
-function C.conflict_path_key(M, path)
+function C.conflict_path_key(path)
   local key = strings.sanitize_key(tostring(path or ""), false):gsub("/", "-"):gsub("%-+", "-")
   if #key > 140 then
     local suffix = "-" .. decimal_checksum(key)
@@ -34,7 +34,7 @@ local function current_conflict_timestamp()
   return os.date("!%Y-%m-%dT%H:%M:%SZ", now())
 end
 
-function C.conflict_file_paths_from_unmerged(M, stdout)
+function C.conflict_file_paths_from_unmerged(stdout)
   local paths = {}
   local seen = {}
   for line in tostring(stdout or ""):gmatch("[^\r\n]+") do
@@ -47,7 +47,7 @@ function C.conflict_file_paths_from_unmerged(M, stdout)
     elseif path ~= nil then
       devloop_logging.log_line("warn", "fix", "unknown", "CONFLICT_FILE_SKIPPED", {
         "reason=unsafe-path",
-        "path_key=" .. C.conflict_path_key(M, path),
+        "path_key=" .. C.conflict_path_key(path),
       })
     end
   end
@@ -55,8 +55,8 @@ function C.conflict_file_paths_from_unmerged(M, stdout)
   return paths
 end
 
-function C.log_conflict_files(M, dept, proposal_id, pr_number, unmerged_stdout)
-  local paths = C.conflict_file_paths_from_unmerged(M, unmerged_stdout)
+function C.log_conflict_files(dept, proposal_id, pr_number, unmerged_stdout)
+  local paths = C.conflict_file_paths_from_unmerged(unmerged_stdout)
   if #paths == 0 then
     devloop_logging.log_line("info", dept or "fix", proposal_id, "CONFLICT_FILE", {
       "action=no-op",

@@ -124,7 +124,7 @@ end
 
 return {
   test_unmerged_paths_are_deduped_into_safe_conflict_files = function()
-    local paths = conflict_telemetry.conflict_file_paths_from_unmerged(core, table.concat({
+    local paths = conflict_telemetry.conflict_file_paths_from_unmerged(table.concat({
       "100644 abc123 1\tpackages/github-devloop/core.lua",
       "100644 def456 2\tpackages/github-devloop/core.lua",
       "100644 bad 1\tunsafe path.lua",

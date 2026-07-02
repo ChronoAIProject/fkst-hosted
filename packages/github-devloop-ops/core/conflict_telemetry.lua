@@ -61,7 +61,7 @@ local function hotspot_parent_comment_target(repo, hotspot)
 end
 
 function M.build_conflict_hotspot_issue_create_request(repo, hotspot)
-  local key = conflict_telemetry.conflict_path_key(M, hotspot.file)
+  local key = conflict_telemetry.conflict_path_key(hotspot.file)
   return {
     schema = "github-proxy.issue-create.v1",
     repo = repo,
