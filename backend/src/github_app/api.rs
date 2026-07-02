@@ -74,6 +74,13 @@ pub struct PullRequestSummary {
     /// The PR author's login (matched against the configured bot login).
     pub author_login: String,
     pub head_sha: String,
+    /// The PR's head branch name (GitHub `head.ref`). The devloop bot encodes the
+    /// work-issue number in it (`devloop/issue/<owner>/<repo>/<N>/…`), so the
+    /// auto-merge step parses it to close the linked issue after a merge.
+    pub head_ref: String,
+    /// The PR title (GitHub `title`). A fallback source for the work-issue number
+    /// (`… for #<N>` / `… for issue #<N>`) when the branch name does not carry it.
+    pub title: String,
 }
 
 // Hand-written: the token must never appear in Debug.
@@ -147,6 +154,20 @@ pub trait GithubApi: Send + Sync {
     ) -> Result<(), GithubAppError> {
         let _ = (token, owner, repo, number, label);
         unimplemented!("remove_issue_label is only implemented by the HTTP transport")
+    }
+
+    /// `PATCH {base}/repos/{owner}/{repo}/issues/{number}` with `{"state":"closed"}`
+    /// closing the issue (needs `issues:write`). Used to complete an auto-merge by
+    /// closing the merged PR's linked work issue. Default panics.
+    async fn close_issue(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<(), GithubAppError> {
+        let _ = (token, owner, repo, number);
+        unimplemented!("close_issue is only implemented by the HTTP transport")
     }
 
     /// `GET {base}/repos/{owner}/{repo}/contents/{path}` (optionally `?ref=…`)
@@ -615,6 +636,37 @@ impl GithubApi for HttpGithubApi {
         Ok(())
     }
 
+    async fn close_issue(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<(), GithubAppError> {
+        let url = format!("{}/repos/{owner}/{repo}/issues/{number}", self.api_base);
+        let response = self
+            .client
+            .patch(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .json(&serde_json::json!({ "state": "closed" }))
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("close_issue: {e}")))?;
+        let status = response.status();
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "close_issue status {status}: {body}"
+            )));
+        }
+        Ok(())
+    }
+
     async fn content_file(
         &self,
         token: &SecretString,
@@ -960,6 +1012,8 @@ impl GithubApi for HttpGithubApi {
                     number: pr["number"].as_u64()?,
                     author_login: pr["user"]["login"].as_str().unwrap_or_default().to_string(),
                     head_sha: pr["head"]["sha"].as_str().unwrap_or_default().to_string(),
+                    head_ref: pr["head"]["ref"].as_str().unwrap_or_default().to_string(),
+                    title: pr["title"].as_str().unwrap_or_default().to_string(),
                 })
             })
             .collect())
