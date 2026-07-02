@@ -25,6 +25,7 @@ pub mod reachability;
 pub mod registry;
 pub mod repo;
 pub mod templates;
+pub mod work_ack;
 
 use tokio::sync::mpsc;
 
@@ -53,6 +54,16 @@ pub const SUBSTRATE_INVALID_LABEL: &str = "fkst-substrate-invalid";
 /// announced trigger do NOT re-announce in v1 (the label stays) — an accepted
 /// limitation; there is no clear/removal path (unlike [`SUBSTRATE_INVALID_LABEL`]).
 pub const SUBSTRATE_ANNOUNCED_LABEL: &str = "fkst-substrate-active";
+
+/// The DURABLE latch label the reconciler adds to a WORK issue (one carrying a
+/// session's `work_label`) once it has posted the one-time "picked up" acknowledgment
+/// ([`work_ack::ack_open_work_issues`]). A work issue is otherwise often silent from
+/// GitHub's side — the pod's output (e.g. the codex-triage package) lands elsewhere —
+/// so the author has no signal it was claimed. Mirrors [`SUBSTRATE_ANNOUNCED_LABEL`]:
+/// because the latch lives on the issue (not process memory), a control-plane restart
+/// re-reads it and never re-acks. There is no clear/removal path (like the announce
+/// latch) — an acknowledged work issue stays acknowledged for its lifetime.
+pub const WORK_PICKED_UP_LABEL: &str = "fkst-picked-up";
 
 /// The identity of one repository to reconcile: `(installation_id, repo)`. The
 /// installation id scopes the GitHub App token; the repo names the work.
