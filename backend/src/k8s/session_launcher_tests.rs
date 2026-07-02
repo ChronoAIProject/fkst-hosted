@@ -17,7 +17,6 @@ fn spec() -> SessionPodSpec {
         work_label: "fkst".to_string(),
         bot_login: "fkst-bot[bot]".to_string(),
         config_hash: "cfg-deadbeef".to_string(),
-        log_streaming: false,
     }
 }
 
@@ -150,33 +149,21 @@ fn build_session_pod_injects_the_section_5_2_env() {
 }
 
 #[test]
-fn build_session_pod_omits_log_streaming_env_by_default() {
-    // The default (opt-out) pod carries none of the log-streaming env or downward refs.
+fn build_session_pod_injects_the_log_streaming_env_unconditionally() {
+    // Streaming is always on: every session carries the log env + downward refs.
     let pod = build_session_pod(&spec(), &config()).expect("pod builds");
     let env = pod.spec.unwrap().containers.remove(0).env.unwrap();
-    assert!(env_value(&env, "FKST_LOG_STREAMING").is_none());
+
+    // The session id is the collector's bundle key; the retired FKST_LOG_BRANCH /
+    // FKST_LOG_STREAMING enable-flag are gone.
+    assert_eq!(env_value(&env, "FKST_SESSION_ID"), Some("abc123"));
     assert!(env.iter().all(|e| e.name != "FKST_LOG_BRANCH"));
-    assert!(env.iter().all(|e| e.name != "FKST_POD_UID"));
-}
-
-#[test]
-fn build_session_pod_injects_log_streaming_env_when_opted_in() {
-    let mut spec = spec();
-    spec.log_streaming = true;
-    let pod = build_session_pod(&spec, &config()).expect("pod builds");
-    let env = pod.spec.unwrap().containers.remove(0).env.unwrap();
-
-    assert_eq!(env_value(&env, "FKST_LOG_STREAMING"), Some("1"));
-    // Branch is derived from the trigger issue number (spec fixture uses issue 7).
-    assert_eq!(
-        env_value(&env, "FKST_LOG_BRANCH"),
-        Some("fkst-logs/issue-7")
-    );
+    assert!(env.iter().all(|e| e.name != "FKST_LOG_STREAMING"));
     assert_eq!(env_value(&env, "FKST_TRIGGER_ISSUE"), Some("7"));
     assert_eq!(env_value(&env, "FKST_CONFIG_HASH"), Some("cfg-deadbeef"));
 
     // The pod UID/name ride the downward API (a fieldRef), never a literal value —
-    // and NO storage credential is added.
+    // and NO storage credential is added to the env (it rides the Secret).
     let uid = env
         .iter()
         .find(|e| e.name == "FKST_POD_UID")

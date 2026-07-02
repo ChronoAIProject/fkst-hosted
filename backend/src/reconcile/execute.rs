@@ -248,8 +248,6 @@ fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -
         work_label: reg.def.work_label.clone(),
         bot_login: bot_login.unwrap_or_default(),
         config_hash: reg.config_hash.clone(),
-        // Per-session opt-in; drives the in-pod log collector env at launch.
-        log_streaming: reg.log_streaming,
     }
 }
 

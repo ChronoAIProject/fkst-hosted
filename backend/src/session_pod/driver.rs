@@ -24,7 +24,7 @@ use crate::session_spec::creds::CredsLayout;
 
 use super::codex::render_codex_config;
 use super::creds_helper::{git_config_entries, materialize_helper_script, GitConfigEntry};
-use super::log_stream::collector::{collector_config_from_env, spawn_collector, LogStreamHandle};
+use super::log_stream::collector::{collector_config_from_env, spawn_collector};
 use super::plan::{
     build_supervise_args, plan_clones, read_substrate_env, substrate_child_env, SubstrateEnv,
 };
@@ -188,33 +188,29 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // Prepend the shim dir so our `gh` wins over /usr/bin/gh on PATH.
     prepend_path(&mut child_env, &shim_dir);
 
-    // 6b. Log streaming (opt-in): spawn the in-pod collector BEFORE supervise so it
-    //     captures the whole run. Best-effort + gated on `FKST_LOG_STREAMING=1`; a
-    //     `None` config means streaming is off and supervise runs exactly as before.
-    //     It reuses the SAME git identity + credential helper the clones use and adds
-    //     no new credential. The collector runs on its own thread; a failure inside it
-    //     can never crash or block supervise.
-    let log_stream = collector_config_from_env(
+    // 6b. Log streaming: spawn the in-pod collector BEFORE supervise so it captures
+    //     the whole run. Streaming is unconditional — the collector redacts every
+    //     record and uploads a `tar.gz` bundle to chrono-storage as the mounted
+    //     write-only SA (or, absent that SA, captures without uploading). It reads
+    //     only the mounted creds it already has and adds no new credential. The
+    //     collector runs on its own thread; a failure inside it can never crash or
+    //     block supervise.
+    let log_stream = spawn_collector(collector_config_from_env(
         env.repo.clone(),
         plan.platform_repo.git_ref.clone(),
         runtime_root.to_path_buf(),
         Path::new(&env.codex_home).to_path_buf(),
         Path::new(&env.creds_dir).to_path_buf(),
-        git_entries.clone(),
-        token_file.clone(),
-    )
-    .map(spawn_collector);
-    let log_sender = log_stream.as_ref().map(LogStreamHandle::sender);
-    if let Some(handle) = &log_stream {
-        tracing::info!("run-substrate: in-pod log streaming enabled");
-        // Seed `fkst-hosted/driver.log` with the driver's own launch record (the
-        // engine ref + repo it is about to supervise) so the branch captures the
-        // fkst-hosted side of the run, not only the supervise/codex output.
-        handle.emit_driver(format!(
-            "run-substrate: supervising {} at engine ref {}",
-            env.repo, plan.platform_repo.git_ref
-        ));
-    }
+    ));
+    let log_sender = Some(log_stream.sender());
+    tracing::info!("run-substrate: in-pod log streaming enabled");
+    // Seed `fkst-hosted/driver.log` with the driver's own launch record (the engine
+    // ref + repo it is about to supervise) so the bundle captures the fkst-hosted
+    // side of the run, not only the supervise/codex output.
+    log_stream.emit_driver(format!(
+        "run-substrate: supervising {} at engine ref {}",
+        env.repo, plan.platform_repo.git_ref
+    ));
 
     // 7. exec supervise, forwarding SIGTERM to its group for a graceful drain, and
     //    (when streaming) tee'ing its stdout/stderr into the collector.
@@ -222,11 +218,9 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
 
     // 7b. Record the exit into driver.log, then signal end-of-stream + wait (bounded)
     //     for the collector's final flush so a revived pod does not race the last
-    //     push. Non-fatal regardless of `code`.
-    if let Some(handle) = log_stream {
-        handle.emit_driver("run-substrate: supervise exited; finalizing logs");
-        handle.shutdown().await;
-    }
+    //     upload. Non-fatal regardless of `code`.
+    log_stream.emit_driver("run-substrate: supervise exited; finalizing logs");
+    log_stream.shutdown().await;
     code
 }
 

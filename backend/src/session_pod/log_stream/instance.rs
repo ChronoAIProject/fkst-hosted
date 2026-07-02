@@ -1,11 +1,10 @@
-//! The per-pod INSTANCE identity + the branch-root documents.
+//! The per-pod INSTANCE identity + the bundle-root documents.
 //!
-//! A session's log branch (`fkst-logs/issue-<N>`) is shared across every pod that
-//! ever serves the session; each pod lifetime is ONE instance, written under its
-//! own `instances/<INSTANCE>/` dir so a revived session only ever ADDS a dir and
-//! never rewrites an earlier one. This module is pure: it computes the instance id
-//! from the pod's identity + a clock, and renders the branch `README.md` and the
-//! per-instance `meta.json` — all as unit-testable string builders.
+//! A session's log bundle (`logs/<session_id>/latest.tar.gz`) is overwritten by
+//! every pod that serves the session; each pod lifetime is ONE instance, recorded
+//! in the bundle's `meta.json`. This module is pure: it computes the instance id
+//! from the pod's identity + a clock, and renders the bundle `README.md` and the
+//! `meta.json` — all as unit-testable string builders.
 
 use k8s_openapi::chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
@@ -99,20 +98,18 @@ impl InstanceMeta {
     }
 }
 
-/// Render the branch `README.md`: the session's trigger link + a loud "generated,
-/// redacted" notice so a human who stumbles onto the branch understands what it is.
-pub fn readme_markdown(repo: &str, trigger_issue: i64, branch: &str) -> String {
+/// Render the bundle `README.md`: the session's trigger link + a loud "generated,
+/// redacted" notice so a human who downloads the bundle understands what it is.
+pub fn readme_markdown(repo: &str, trigger_issue: i64) -> String {
     let issue_url = format!("https://github.com/{repo}/issues/{trigger_issue}");
     format!(
         "# Session logs — `{repo}` issue #{trigger_issue}\n\
          \n\
-         Branch `{branch}` holds the **redacted** logs for the substrate session \
+         This bundle holds the **redacted** logs for the substrate session \
          triggered by [issue #{trigger_issue}]({issue_url}).\n\
          \n\
          > These files are **auto-generated** and **redacted**: every credential-shaped \
-         run is masked before it is written. Do not treat any value here as sensitive, \
-         and do not edit this branch by hand — each pod lifetime appends a new \
-         `instances/<id>/` dir and never rewrites an earlier one.\n"
+         value is masked before it is written. Do not treat any value here as sensitive.\n"
     )
 }
 

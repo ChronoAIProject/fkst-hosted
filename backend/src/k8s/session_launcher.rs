@@ -30,8 +30,7 @@ use secrecy::{ExposeSecret, SecretString};
 use crate::config::PodConfig;
 use crate::models::RepoRef;
 use crate::session_pod::log_stream::{
-    log_branch_for_issue, ENV_CONFIG_HASH, ENV_LOG_BRANCH, ENV_LOG_STREAMING, ENV_POD_NAME,
-    ENV_POD_UID, ENV_TRIGGER_ISSUE, LOG_STREAMING_ENABLED,
+    ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
 };
 use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds, DEFAULT_CREDS_DIR};
 
@@ -145,11 +144,6 @@ pub struct SessionPodSpec {
     pub bot_login: String,
     /// Config-hash annotation used by the reconciler for drift detection.
     pub config_hash: String,
-    /// Per-session opt-in: when set, the pod runs the in-pod log collector (the
-    /// driver reads [`ENV_LOG_STREAMING`] and fans this session's redacted logs onto
-    /// `fkst-logs/issue-<trigger#>`). Off by default; adds ONLY non-secret env +
-    /// downward-API refs, never any storage credential.
-    pub log_streaming: bool,
 }
 
 /// The deterministic Pod/Secret name for a session (`fkst-sess-<session_id>`).
@@ -201,18 +195,14 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
     }
 }
 
-/// The log-streaming env, injected ONLY when the session opted in. Carries the
-/// enable flag, the derived log branch, the trigger issue + config-hash (for the
-/// per-instance `meta.json`), and the downward-API pod UID/name (for the instance
-/// id). It adds NO storage credential — the pod pushes redacted logs with the git
-/// token it already holds; the control plane backs the branch up separately.
+/// The log-streaming env, injected on EVERY session (streaming is unconditional).
+/// Carries the session id (the collector's bundle key `logs/<id>/latest.tar.gz`),
+/// the trigger issue + config-hash (for the `meta.json`), and the downward-API pod
+/// UID/name (for the instance id). It adds NO storage credential — the write-only
+/// SA creds ride the per-session Secret (see [`build_session_secret`]), never env.
 fn log_streaming_env(spec: &SessionPodSpec) -> Vec<EnvVar> {
     vec![
-        env_var(ENV_LOG_STREAMING, LOG_STREAMING_ENABLED),
-        env_var(
-            ENV_LOG_BRANCH,
-            log_branch_for_issue(spec.trigger_issue_number),
-        ),
+        env_var(ENV_SESSION_ID, spec.session_id.clone()),
         env_var(ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
         env_var(ENV_CONFIG_HASH, spec.config_hash.clone()),
         downward_env_var(ENV_POD_UID, "metadata.uid"),
@@ -244,10 +234,9 @@ fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
         env_var(SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         env_var(SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
     ];
-    // Opt-in log streaming adds only non-secret env + downward-API refs.
-    if spec.log_streaming {
-        env.extend(log_streaming_env(spec));
-    }
+    // Log streaming is unconditional: every session carries the (non-secret) log
+    // env + downward-API refs. The write-only storage creds ride the Secret.
+    env.extend(log_streaming_env(spec));
     env
 }
 

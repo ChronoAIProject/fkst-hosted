@@ -1,4 +1,4 @@
-//! Tests for the instance id + branch-root document builders. Split into a sibling
+//! Tests for the instance id + bundle-root document builders. Split into a sibling
 //! file so `instance.rs` stays under the 500-line module cap.
 
 use super::*;
@@ -68,12 +68,11 @@ fn meta_json_carries_the_expected_shape() {
 
 #[test]
 fn readme_links_the_trigger_issue_and_flags_redaction() {
-    let md = readme_markdown("acme/site", 7, "fkst-logs/issue-7");
+    let md = readme_markdown("acme/site", 7);
     assert!(
         md.contains("https://github.com/acme/site/issues/7"),
         "issue link: {md}"
     );
-    assert!(md.contains("fkst-logs/issue-7"), "branch name: {md}");
     assert!(
         md.to_lowercase().contains("redacted"),
         "redaction notice: {md}"
