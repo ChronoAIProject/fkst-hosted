@@ -185,6 +185,22 @@ pub trait GithubApi: Send + Sync {
         unimplemented!("get_issue_labels is only implemented by the HTTP transport")
     }
 
+    /// `GET {base}/repos/{owner}/{repo}/issues/{number}/comments?per_page=100` →
+    /// each comment's raw markdown BODY (author order). Used by the config-immutability
+    /// check to recover the original `full_config_hash` latched (as a hidden marker) in
+    /// the one-time session-announcement comment. A 404 (issue gone) yields an empty
+    /// list. Default panics.
+    async fn list_issue_comments(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<String>, GithubAppError> {
+        let _ = (token, owner, repo, number);
+        unimplemented!("list_issue_comments is only implemented by the HTTP transport")
+    }
+
     /// `GET {base}/repos/{owner}/{repo}/contents/{path}` (optionally `?ref=…`)
     /// returning the file's blob SHA + base64 content. A 404 yields `Ok(None)`
     /// (missing file — installed template v0 / the CREATE path). Default panics.
@@ -729,6 +745,57 @@ impl GithubApi for HttpGithubApi {
             })
             .unwrap_or_default();
         Ok(labels)
+    }
+
+    async fn list_issue_comments(
+        &self,
+        token: &SecretString,
+        owner: &str,
+        repo: &str,
+        number: u64,
+    ) -> Result<Vec<String>, GithubAppError> {
+        let url = format!(
+            "{}/repos/{owner}/{repo}/issues/{number}/comments?per_page=100",
+            self.api_base
+        );
+        let response = self
+            .client
+            .get(&url)
+            .header("accept", "application/vnd.github+json")
+            .header("user-agent", "fkst-hosted")
+            .bearer_auth(token.expose_secret())
+            .send()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("list_issue_comments: {e}")))?;
+        let status = response.status();
+        // A vanished issue carries no comments — treat it as an empty list so the
+        // caller latches no original hash for it (mirrors get_issue_labels' 404).
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(Vec::new());
+        }
+        if let Some(err) = classify_auth_status(status, response.headers()) {
+            return Err(err);
+        }
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(GithubAppError::Http(format!(
+                "list_issue_comments status {status}: {body}"
+            )));
+        }
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| GithubAppError::Http(format!("list_issue_comments body: {e}")))?;
+        let comments = body
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| c.get("body").and_then(|b| b.as_str()))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(comments)
     }
 
     async fn content_file(
