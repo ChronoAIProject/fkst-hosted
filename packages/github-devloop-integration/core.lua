@@ -107,7 +107,7 @@ prompts.install(M, wiring.prompts(), { sync_conflict = true })
 local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
 M.cached_entity_view = function(...) return github_proxy_entity_view.cached_entity_view(M, ...) end
 M.fetch_pr_view_origin = function(...) return github_proxy_entity_view.fetch_pr_view_origin(M, ...) end
-M.invalidate_entity_after_write = function(...) return github_proxy_entity_view.invalidate_entity_after_write(M, ...) end
+M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_after_write
 require("core.branches").install(M)
 require("core.sync_conflict").install(M)
 require("core.rollup_health").install(M)

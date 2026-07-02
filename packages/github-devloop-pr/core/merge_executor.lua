@@ -23,6 +23,7 @@ local m_mq = require("devloop.merge_queue")
 local M = {}
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local function log_gate(merge_ready, outcome, reason)
   local pass = merge_ready and merge_ready._merge_pass
@@ -313,7 +314,7 @@ local function write_merging_marker(repo, merge_ready, comments)
   if result.exit_code ~= 0 then
     error("github-devloop: PR merging marker comment failed: " .. tostring(result.stderr))
   end
-  core.invalidate_entity_after_write(repo, "pr", merge_ready.pr_number)
+  devloop_entity_view.invalidate_entity_after_write(repo, "pr", merge_ready.pr_number)
 end
 
 local function build_merged_requests(repo, issue_number, merge_ready, merged_pr)

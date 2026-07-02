@@ -350,16 +350,16 @@ function C.entity_view_cache_key(M, repo, kind, number)
   return entity_view_cache_key(repo, kind, number)
 end
 
-function C.entity_cache_key(M, repo, entity_type, number)
+function C.entity_cache_key(repo, entity_type, number)
   return "github-proxy/" .. tostring(entity_type) .. "/" .. tostring(repo) .. "/" .. tostring(number)
 end
 
-function C.invalidate_entity_after_write(M, repo, kind, number)
+function C.invalidate_entity_after_write(repo, kind, number)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
     error("github-devloop: invalid post-write invalidation kind")
   end
-  local entity_key = C.entity_cache_key(M, repo, selected_kind, number)
+  local entity_key = C.entity_cache_key(repo, selected_kind, number)
   local view_key = entity_view_cache_key(repo, selected_kind, number)
   with_lock(entity_key, function()
     cache_set(entity_key, "")

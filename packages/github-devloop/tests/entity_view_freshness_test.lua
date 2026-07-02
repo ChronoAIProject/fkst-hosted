@@ -3,6 +3,7 @@ local core = h.core
 local t = h.t
 local seam = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local function count_calls(needle)
   return gh_argv.count_calls(t, needle)
@@ -200,7 +201,7 @@ return {
       updated_at = updated_at,
     }), updated_at)
 
-    core.invalidate_entity_after_write(repo, "issue", issue_number)
+    devloop_entity_view.invalidate_entity_after_write(repo, "issue", issue_number)
     seam.mock_issue_read_forms(t, {
       repo = repo,
       number = issue_number,

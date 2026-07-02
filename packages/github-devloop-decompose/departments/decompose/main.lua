@@ -12,6 +12,7 @@ local decompose_lib = require("devloop.decompose")
 local config = require("devloop.config")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -222,7 +223,7 @@ local function write_decomposed_marker(repo, decompose, count)
   if result.exit_code ~= 0 then
     error("github-devloop: gh pr decomposed marker comment failed: " .. tostring(result.stderr))
   end
-  core.invalidate_entity_after_write(repo, "pr", decompose.pr_number)
+  devloop_entity_view.invalidate_entity_after_write(repo, "pr", decompose.pr_number)
 
   local confirmed_pr = read_current_pr(repo, decompose.pr_number)
   if not decompose_lib.has_decomposed_marker(core, confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then

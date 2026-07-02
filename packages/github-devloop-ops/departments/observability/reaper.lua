@@ -9,6 +9,7 @@ local decompose_lib = require("devloop.decompose")
 local config = require("devloop.config")
 local m_facts = require("devloop.markers.facts")
 local m_builders = require("devloop.markers.builders")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 
 local M = {}
 
@@ -181,7 +182,7 @@ local function reap_orphan_pr(repo, entity)
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline"))
     return
   end
-  core.invalidate_entity_after_write(repo, "pr", pr_number)
+  devloop_entity_view.invalidate_entity_after_write(repo, "pr", pr_number)
   local path = reaper_body_path(repo, pr_number, proposal_id)
   local body = core.with_github_debug_stamp(reaper_comment_body(proposal_id, pr_number, reason), {
     emitter = "github-devloop.observability.reaper",
@@ -199,7 +200,7 @@ local function reap_orphan_pr(repo, entity)
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "deferred", "deadline-after-close"))
     return
   end
-  core.invalidate_entity_after_write(repo, "pr", pr_number)
+  devloop_entity_view.invalidate_entity_after_write(repo, "pr", pr_number)
   log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "closed", reason.code))
 end
 

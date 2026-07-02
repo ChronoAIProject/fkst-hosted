@@ -13,6 +13,7 @@ local contract_time = require("contract.time")
 local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
+local devloop_entity_view = require("devloop.github_proxy_entity_view")
 function S.install(M)
 local child_terminal_states = {
   merged = true,
@@ -209,7 +210,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     if close_result.exit_code ~= 0 then
       error("github-devloop: awaiting-pr-issue-close-failed: " .. tostring(close_result.stderr))
     end
-    M.invalidate_entity_after_write(issue.repo, "issue", issue.number)
+    devloop_entity_view.invalidate_entity_after_write(issue.repo, "issue", issue.number)
   end
   return raise_effects(dept, proposal_id, next_state.to_state, next_state.version, { add = add_labels, remove = remove_labels }, effects)
 end
