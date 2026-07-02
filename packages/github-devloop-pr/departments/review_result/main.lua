@@ -15,6 +15,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local v_review_result = require("devloop.validators.review_result")
+local devloop_logging = require("devloop.logging")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -34,12 +35,12 @@ local spec = {
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reached = event.payload or {}
   if not v_review_result.is_supported_review_result(core, reached) then
-    core.log_entry("review_result", event, "unknown", core.payload_field(reached, "dedup_key"))
+    devloop_logging.log_entry("review_result", event, "unknown", core.payload_field(reached, "dedup_key"))
     core.log_cas_decision("review_result", "unknown", { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("review_result", event, reached.proposal_id, reached.dedup_key)
+  devloop_logging.log_entry("review_result", event, reached.proposal_id, reached.dedup_key)
   local review_repo, proposal_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
   if review_repo == nil then
     core.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop pr-review")

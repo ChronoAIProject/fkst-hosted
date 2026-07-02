@@ -19,6 +19,7 @@ local config = require("devloop.config")
 local conv_rounds = require("devloop.convergence.rounds")
 local v_pr = require("devloop.validators.pr")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local devloop_logging = require("devloop.logging")
 
 local M = {}
 
@@ -435,12 +436,12 @@ local function process_pr_event(event)
   local pr = pr_context(event)
   local raw = event.payload or {}
   if pr == nil then
-    core.log_entry("observe_pr", event, "unknown", core.payload_field(raw, "dedup_key"))
+    devloop_logging.log_entry("observe_pr", event, "unknown", core.payload_field(raw, "dedup_key"))
     core.log_cas_decision("observe_pr", "unknown", { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "unsupported event payload")
     return
   end
 
-  core.log_entry("observe_pr", event, "unknown", pr.dedup_key)
+  devloop_logging.log_entry("observe_pr", event, "unknown", pr.dedup_key)
   devloop_base.assert_trusted_bot_configured()
   local branches = config.branch_config(core)
   local pr_view = devloop_entity_view.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)

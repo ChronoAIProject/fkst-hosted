@@ -7,6 +7,7 @@ local ports_seam = require("forge.ports")
 local saga = require("workflow.saga")
 local v_result = require("devloop.validators.result")
 local entity_lib = require("devloop.entity")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -128,17 +129,17 @@ local function make_department(ports)
     local reached = event.payload or {}
     if type(reached) == "table" and reached.schema == "consensus.consensus_reached.v1"
       and reached.decision == "reject" then
-      core.log_entry("consensus_result", event, tostring(reached.proposal_id or "unknown"), reached.dedup_key)
+      devloop_logging.log_entry("consensus_result", event, tostring(reached.proposal_id or "unknown"), reached.dedup_key)
       core.log_cas_decision("consensus_result", tostring(reached.proposal_id or "unknown"), { state = nil, version = nil }, "thinking", "ready", "skip-unsupported(decision)", "issue consensus does not support reject")
       return
     end
     if not v_result.is_supported_result(core, reached) then
-      core.log_entry("consensus_result", event, "unknown", core.payload_field(reached, "dedup_key"))
+      devloop_logging.log_entry("consensus_result", event, "unknown", core.payload_field(reached, "dedup_key"))
       core.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
       return
     end
 
-    core.log_entry("consensus_result", event, reached.proposal_id, reached.dedup_key)
+    devloop_logging.log_entry("consensus_result", event, reached.proposal_id, reached.dedup_key)
     local version = result_version(reached)
     local repo, issue_number = base_ids.parse_proposal_id(reached.proposal_id)
     if repo == nil then

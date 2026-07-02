@@ -14,6 +14,7 @@ local m_facts = require("devloop.markers.facts")
 local m_shared = require("devloop.markers.shared")
 local entity_lib = require("devloop.entity")
 local workflow_codex = require("workflow.codex")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "github-devloop-intake.devloop_intake_candidate" },
@@ -201,12 +202,12 @@ end
 local function act_intake_judge(event)
   local candidate = event.payload or {}
   if not v_intake_candidate.is_supported_intake_candidate(core, candidate) then
-    core.log_entry("intake_judge", event, "unknown", core.payload_field(candidate, "dedup_key"))
+    devloop_logging.log_entry("intake_judge", event, "unknown", core.payload_field(candidate, "dedup_key"))
     core.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
-  core.log_entry("intake_judge", event, candidate.proposal_id, candidate.dedup_key)
+  devloop_logging.log_entry("intake_judge", event, candidate.proposal_id, candidate.dedup_key)
   local repo, issue_number = devloop_base.parse_issue_source_ref(candidate.source_ref)
   if repo == nil then
     core.log_cas_decision("intake_judge", candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(source_ref)", "invalid source_ref")
@@ -223,7 +224,7 @@ local function act_intake_judge(event)
     return
   end
 
-  core.log_codex_start("intake_judge", candidate.proposal_id, "intake")
+  devloop_logging.log_codex_start("intake_judge", candidate.proposal_id, "intake")
   local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "intake_judge",
     repo = repo,
@@ -238,7 +239,7 @@ local function act_intake_judge(event)
   ))
   if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
     local stderr = type(result) == "table" and result.stderr or "nil result"
-    core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr, {
+    devloop_logging.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, nil, stderr, {
       queue = event.queue,
       source_ref = candidate.source_ref,
       terminal = false,
@@ -250,10 +251,10 @@ local function act_intake_judge(event)
   if parsed == nil then
     parsed = decline_result()
     parsed.service_class = m_shared.normalize_intake_service_class(nil)
-    core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
+    devloop_logging.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=decline reason=parse-failed", nil)
   else
     parsed.service_class = m_shared.normalize_intake_service_class(parsed.service_class)
-    core.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " class=" .. tostring(parsed.service_class) .. " reason=" .. tostring(parsed.reason), nil)
+    devloop_logging.log_codex_result("intake_judge", candidate.proposal_id, "intake", result, "action=" .. tostring(parsed.action) .. " class=" .. tostring(parsed.service_class) .. " reason=" .. tostring(parsed.reason), nil)
   end
 
   with_lock(lock_key, function()

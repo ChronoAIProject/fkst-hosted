@@ -14,6 +14,7 @@ local conv_rounds = require("devloop.convergence.rounds")
 local v_unresolved = require("devloop.validators.unresolved")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local entity_lib = require("devloop.entity")
+local devloop_logging = require("devloop.logging")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -28,12 +29,12 @@ local spec = {
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
   if not v_unresolved.is_supported_unresolved(core, unresolved) then
-    core.log_entry("loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
+    devloop_logging.log_entry("loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
     core.log_cas_decision("loop", "unknown", { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("loop", event, unresolved.proposal_id, unresolved.dedup_key)
+  devloop_logging.log_entry("loop", event, unresolved.proposal_id, unresolved.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(unresolved.proposal_id)
   if repo == nil then
     core.log_cas_decision("loop", unresolved.proposal_id, { state = nil, version = nil }, "thinking", "thinking", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")

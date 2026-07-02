@@ -26,6 +26,7 @@ local payloads_predicates = require("devloop.payloads.predicates")
 local v_ready = require("devloop.validators.ready")
 local m_facts = require("devloop.markers.facts")
 local entity_lib = require("devloop.entity")
+local devloop_logging = require("devloop.logging")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
 local implemented_branch_head
@@ -194,7 +195,7 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
   local attempt = prior_attempts + 1
   local message = "ready event does not match current implementing version"
   if attempt < MAX_VERSION_MISMATCH_DELIVERIES then
-    core.log_error_fact("warn", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
+    devloop_logging.log_error_fact("warn", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
       source_ref = ready.source_ref,
       attempt = attempt,
       terminal = false,
@@ -206,7 +207,7 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
       .. " does not match current implementing version "
       .. tostring(state and state.version or ""))
   end
-  core.log_error_fact("error", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
+  devloop_logging.log_error_fact("error", "implement", ready.proposal_id, "STALE_VERSION_MISMATCH", "devloop_ready", message, {
     source_ref = ready.source_ref,
     attempt = attempt,
     terminal = true,
@@ -279,7 +280,7 @@ local function prepare_attempt(repo, issue_number, ready, branches, branch, base
 end
 
 local function run_attempt(repo, issue_number, ready, current, branches, branch, base_head, worktree, codex_started_at, exec_ref, attempt, event_ts, event_queue)
-  core.log_codex_start("implement", ready.proposal_id, "implement")
+  devloop_logging.log_codex_start("implement", ready.proposal_id, "implement")
   local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "implement",
     repo = repo,
@@ -296,7 +297,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   if type(result) ~= "table" or result.exit_code ~= 0 then
     local stderr = type(result) == "table" and result.stderr or "nil result"
-    core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr, {
+    devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr, {
       queue = event_queue,
       source_ref = ready.source_ref,
       terminal = false,
@@ -314,7 +315,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       outcome = "failed: codex-failed",
     }
   end
-  core.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
+  devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, "result=completed", nil)
 
   local status = core.git_status(worktree, 30)
   if status.exit_code ~= 0 then
@@ -349,7 +350,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     if detail == "" then
       detail = tostring(result.stderr or "")
     end
-    core.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes", {
+    devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, nil, "no-changes", {
       queue = event_queue,
       source_ref = ready.source_ref,
       terminal = false,
@@ -583,12 +584,12 @@ end
 local function process_ready_event(event)
   local ready = event.payload or {}
   if not v_ready.is_supported_ready(core, ready) then
-    core.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
+    devloop_logging.log_entry("implement", event, "unknown", core.payload_field(ready, "dedup_key"))
     core.log_cas_decision("implement", "unknown", { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("implement", event, ready.proposal_id, ready.dedup_key)
+  devloop_logging.log_entry("implement", event, ready.proposal_id, ready.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(ready.proposal_id)
   if repo == nil then
     core.log_cas_decision("implement", ready.proposal_id, { state = nil, version = nil }, "ready", "implementing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")

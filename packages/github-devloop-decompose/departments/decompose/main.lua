@@ -14,6 +14,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local workflow_codex = require("workflow.codex")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_decompose" }, published_seam = { "devloop_decompose" },
@@ -242,7 +243,7 @@ local function decompose_context(event)
   end
   local decompose = event.payload or {}
   if not decompose_lib.is_supported_decompose(core, decompose) then
-    core.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
+    devloop_logging.log_entry("decompose", event, "unknown", core.payload_field(decompose, "dedup_key"))
     core.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     if type(event) == "table" then
       context_cache[event] = false
@@ -250,7 +251,7 @@ local function decompose_context(event)
     return nil
   end
 
-  core.log_entry("decompose", event, decompose.proposal_id, decompose.dedup_key)
+  devloop_logging.log_entry("decompose", event, decompose.proposal_id, decompose.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(decompose.proposal_id)
   if entity == nil or entity.issue_number == nil then
     core.log_cas_decision("decompose", decompose.proposal_id, { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(proposal_id)", "proposal_id is outside issue-backed github-devloop")

@@ -11,6 +11,7 @@ local devloop_base = require("devloop.base")
 
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
+local devloop_logging = require("devloop.logging")
 local spec = {
   consumes = { "github-proxy.github_comment_written" },
   produces = {
@@ -308,7 +309,7 @@ local function act_handoff(event)
     return
   end
 
-  core.log_entry("comment_handoff", event, handoff.proposal_id, payload.dedup_key)
+  devloop_logging.log_entry("comment_handoff", event, handoff.proposal_id, payload.dedup_key)
   handoff_strategies[handoff.kind].emit(payload, handoff)
 end
 

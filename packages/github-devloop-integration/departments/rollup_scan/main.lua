@@ -5,6 +5,7 @@ local core = require("core")
 local saga = require("workflow.saga")
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -93,7 +94,7 @@ local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, pu
 end
 
 local function act(event)
-  core.log_entry("rollup_scan", event, "rollup", event and event.queue or "")
+  devloop_logging.log_entry("rollup_scan", event, "rollup", event and event.queue or "")
   local branches = config.branch_config(core)
   local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)

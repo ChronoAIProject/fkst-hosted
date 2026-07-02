@@ -8,6 +8,7 @@ local m_facts = require("devloop.markers.facts")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local v_review_meta = require("devloop.validators.review_meta")
 local workflow_codex = require("workflow.codex")
+local devloop_logging = require("devloop.logging")
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -24,12 +25,12 @@ local spec = {
 return saga.department(spec, { done = function() return false end, act = function(event)
   local review_meta = event.payload or {}
   if not v_review_meta.is_supported_review_meta(core, review_meta) then
-    core.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
+    devloop_logging.log_entry("review_meta", event, "unknown", core.payload_field(review_meta, "dedup_key"))
     core.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
-  core.log_entry("review_meta", event, review_meta.proposal_id, review_meta.dedup_key)
+  devloop_logging.log_entry("review_meta", event, review_meta.proposal_id, review_meta.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(review_meta.proposal_id)
   if entity == nil then
     core.log_cas_decision("review_meta", review_meta.proposal_id, { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
@@ -93,7 +94,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     core.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
     local codex_started_at = now()
-    core.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
+    devloop_logging.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
     local content_fetch = context_bundle.context_fetch_from_bundle(core, {
       dept = "review_meta",
       repo = repo,
@@ -113,7 +114,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local result = spawn_codex_sync(codex_opts)
     if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
       local stderr = type(result) == "table" and result.stderr or "nil result"
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr, {
+      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr, {
         queue = event.queue,
         source_ref = review_meta.source_ref,
         terminal = false,
@@ -122,7 +123,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local parsed = core.parse_review_meta_action(result.stdout)
     if parsed == nil then
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed", {
+      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed", {
         queue = event.queue,
         source_ref = review_meta.source_ref,
         terminal = false,
@@ -140,7 +141,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       allowed_action = parsed.action == "fix" or parsed.action == "block" or parsed.action == "spec-amendment"
     end
     if not allowed_action then
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "invalid-action-for-mode")
+      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "invalid-action-for-mode")
       parsed = {
         action = is_reflection and "spec-gap" or "block",
         reason = "Review-meta codex output used an action outside this decision mode.",
@@ -148,13 +149,13 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if parsed.action == "fix"
       and not strings.is_bounded_string(parsed.blocking_gap, core._max_blocking_gap_len) then
-      core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
+      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
       parsed = {
         action = "block",
         reason = "Review-meta fix output omitted a bounded blocking gap.",
       }
     end
-    core.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
+    devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
 
     local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
     local exit_version = core.next_review_meta_action_version(review_meta.version)

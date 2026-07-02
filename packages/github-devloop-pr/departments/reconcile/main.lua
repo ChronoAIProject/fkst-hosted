@@ -16,6 +16,7 @@ local saga = require("workflow.saga")
 local forge_validators = require("devloop.forge_validators")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_review_reconcile", "devloop_fix_reconcile", "devloop_timeout_reconcile" },
@@ -132,12 +133,12 @@ end
 local function pipeline_review(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_review_reconcile(core, reconcile) then
-    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(reconcile.proposal_id)
   if entity == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
@@ -208,12 +209,12 @@ end
 local function pipeline_fix(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_fix_reconcile(core, reconcile) then
-    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(reconcile.proposal_id)
   if entity == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "reviewing", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
@@ -282,12 +283,12 @@ end
 local function pipeline_timeout(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_timeout_reconcile(core, reconcile) then
-    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "timeout", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   local _, pr_number = devloop_base.parse_pr_source_ref(reconcile.source_ref)
   local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)

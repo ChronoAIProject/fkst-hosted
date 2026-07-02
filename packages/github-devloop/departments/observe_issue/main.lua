@@ -22,6 +22,7 @@ local v_validate_proposal = require("devloop.validators.validate_proposal")
 local v_pr = require("devloop.validators.pr")
 local m_builders = require("devloop.markers.builders")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local devloop_logging = require("devloop.logging")
 local M = {}
 
 local spec = {
@@ -515,13 +516,13 @@ end
 local function process_issue_event(event)
   local issue = event.payload or {}
   if not v_issue.is_supported_issue(core, issue) then
-    core.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, "unknown", core.payload_field(issue, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "unmanaged", "thinking", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
   local proposal_id = base_ids.proposal_id(issue.repo, issue.number)
-  core.log_entry("observe_issue", event, proposal_id, issue.dedup_key)
+  devloop_logging.log_entry("observe_issue", event, proposal_id, issue.dedup_key)
   local lock_key = entity_lib.observe_lock_key(issue.repo, issue.number)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
@@ -720,7 +721,7 @@ end
 local function process_pr_event(event)
   local pr = event.payload or {}
   if not v_pr.is_supported_pr(core, pr) then
-    core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr)", "unsupported PR payload")
     return
   end
@@ -737,13 +738,13 @@ local function process_pr_event(event)
   current_pr.force_fresh = true
   local origin = m_facts.pr_origin_fact(core, current_pr.comments)
   if origin == nil or origin.pr_native == true or origin.repo ~= pr.repo or tonumber(origin.issue_number) == nil then
-    core.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, "unknown", core.payload_field(pr, "dedup_key"))
     core.log_cas_decision("observe_issue", "unknown", { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-foreign(pr-origin)", "PR entity change has no issue-backed devloop origin")
     return
   end
   if tostring(origin.branch or "") ~= tostring(current_pr.head_ref_name or "")
     or tostring(origin.base_branch or "") ~= tostring(current_pr.base_ref_name or "") then
-    core.log_entry("observe_issue", event, origin.proposal_id, core.payload_field(pr, "dedup_key"))
+    devloop_logging.log_entry("observe_issue", event, origin.proposal_id, core.payload_field(pr, "dedup_key"))
     core.log_cas_decision("observe_issue", origin.proposal_id, { state = nil, version = nil }, "awaiting-pr", "awaiting-pr", "skip-stale(pr-origin)", "PR origin no longer matches current PR head/base")
     return
   end

@@ -17,6 +17,7 @@ local m_mq = require("devloop.merge_queue")
 local payloads_builders = require("devloop.payloads.builders")
 local v_fixing = require("devloop.validators.fixing")
 local m_facts = require("devloop.markers.facts")
+local devloop_logging = require("devloop.logging")
 local spec = {
   consumes = { "devloop_fixing" },
   produces = {
@@ -424,7 +425,7 @@ local function run_fix_attempt(plan)
     conflict_telemetry.log_conflict_files(core, "fix", plan.fix.proposal_id, plan.fix.pr_number, merge_context.unmerged_paths)
   end
   local codex_started_at = now()
-  core.log_codex_start("fix", plan.fix.proposal_id, "fix")
+  devloop_logging.log_codex_start("fix", plan.fix.proposal_id, "fix")
   local content_fetch = context_bundle.context_fetch_from_bundle(core, {
     dept = "fix",
     repo = plan.repo,
@@ -440,7 +441,7 @@ local function run_fix_attempt(plan)
   })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     local stderr = type(result) == "table" and result.stderr or "nil result"
-    core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, stderr, {
+    devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, stderr, {
       queue = plan.event_queue,
       source_ref = plan.fix.source_ref,
       terminal = false,
@@ -454,7 +455,7 @@ local function run_fix_attempt(plan)
       finished_at = now(),
     }
   end
-  core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
+  devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=completed", nil)
   assert_no_unmerged_paths(worktree)
   assert_no_conflict_markers(worktree)
 
@@ -465,7 +466,7 @@ local function run_fix_attempt(plan)
   if tostring(status.stdout or "") == "" then
     local existing_head_sha = branch_head_if_ahead(plan.fix.reviewed_head_sha, plan.branch)
     if existing_head_sha ~= nil then
-      core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
+      devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=reusing-existing-head", nil)
       return {
         kind = "reviewing",
         old_head_sha = plan.fix.reviewed_head_sha,
@@ -477,7 +478,7 @@ local function run_fix_attempt(plan)
         finished_at = now(),
       }
     end
-    core.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, "no-changes", {
+    devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, "no-changes", {
       queue = plan.event_queue,
       source_ref = plan.fix.source_ref,
       terminal = false,
@@ -627,12 +628,12 @@ end
 local function act_fix(event)
   local fix = event.payload or {}
   if not v_fixing.is_supported_fixing(core, fix) then
-    core.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
+    devloop_logging.log_entry("fix", event, "unknown", core.payload_field(fix, "dedup_key"))
     core.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
-  core.log_entry("fix", event, fix.proposal_id, fix.dedup_key)
+  devloop_logging.log_entry("fix", event, fix.proposal_id, fix.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(fix.proposal_id)
   if entity == nil then
     core.log_cas_decision("fix", fix.proposal_id, { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")

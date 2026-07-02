@@ -9,6 +9,7 @@ local saga = require("workflow.saga")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local conv_attempts = require("devloop.convergence.attempts")
 local entity_lib = require("devloop.entity")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_reconcile", "devloop_timeout_reconcile" },
@@ -93,12 +94,12 @@ end
 local function pipeline_thinking(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_reconcile(core, reconcile) then
-    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   if repo == nil then
     core.log_cas_decision("reconcile", reconcile.proposal_id, { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")
@@ -162,12 +163,12 @@ end
 local function pipeline_timeout(event)
   local reconcile = event.payload or {}
   if not conv_reconcile.is_supported_timeout_reconcile(core, reconcile) then
-    core.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
+    devloop_logging.log_entry("reconcile", event, "unknown", core.payload_field(reconcile, "dedup_key"))
     core.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "timeout", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
+  devloop_logging.log_entry("reconcile", event, reconcile.proposal_id, reconcile.dedup_key)
   local repo, issue_number = base_ids.parse_proposal_id(reconcile.proposal_id)
   local lock_key = entity_lib.transition_lock_key(reconcile.proposal_id)
   if lock_key == nil then

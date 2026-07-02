@@ -19,6 +19,7 @@ local conv_reconcile = require("devloop.convergence.reconcile")
 local v_pr_review_unresolved = require("devloop.validators.pr_review_unresolved")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_facts = require("devloop.markers.facts")
+local devloop_logging = require("devloop.logging")
 local spec = {
   consumes = { "consensus.consensus_converge" },
   produces = {
@@ -83,12 +84,12 @@ end
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
   if not v_pr_review_unresolved.is_supported_pr_review_unresolved(core, unresolved) then
-    core.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
+    devloop_logging.log_entry("review_loop", event, "unknown", core.payload_field(unresolved, "dedup_key"))
     core.log_cas_decision("review_loop", "unknown", { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return
   end
 
-  core.log_entry("review_loop", event, unresolved.proposal_id, unresolved.dedup_key)
+  devloop_logging.log_entry("review_loop", event, unresolved.proposal_id, unresolved.dedup_key)
   local _, pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(unresolved.proposal_id)
   local repo, source_pr_number = devloop_base.parse_pr_source_ref(unresolved.source_ref)
   if repo == nil or tostring(source_pr_number) ~= tostring(pr_number) then

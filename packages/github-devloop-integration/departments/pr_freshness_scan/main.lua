@@ -13,6 +13,7 @@ local config = require("devloop.config")
 
 local saga = require("workflow.saga")
 local m_facts = require("devloop.markers.facts")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -268,7 +269,7 @@ local function process_pr(repo, branches, listed_pr)
 end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
-  core.log_entry("pr_freshness_scan", event, "pr-freshness", event and event.queue or "")
+  devloop_logging.log_entry("pr_freshness_scan", event, "pr-freshness", event and event.queue or "")
   local branches = config.branch_config(core)
   local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)

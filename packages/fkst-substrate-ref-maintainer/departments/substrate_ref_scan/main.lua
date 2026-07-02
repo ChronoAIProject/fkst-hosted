@@ -1,5 +1,6 @@
 local core = require("core")
 local saga = require("workflow.saga")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_substrate_ref_tick" },
@@ -12,7 +13,7 @@ local function done(_event)
 end
 
 local function act(event)
-  core.log_entry("substrate_ref_scan", event, "repo-management-plane", "tick")
+  devloop_logging.log_entry("substrate_ref_scan", event, "repo-management-plane", "tick")
   core.substrate_ref_scan()
 end
 

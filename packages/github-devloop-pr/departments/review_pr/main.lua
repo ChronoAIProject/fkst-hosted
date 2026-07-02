@@ -11,6 +11,7 @@ local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local v_reviewing = require("devloop.validators.reviewing")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
+local devloop_logging = require("devloop.logging")
 -- Preserve existing body line coordinates for the coverage ratchet.
 
 local spec = {
@@ -49,12 +50,12 @@ end
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reviewing = event.payload or {}
   if not v_reviewing.is_supported_reviewing(core, reviewing) then
-    core.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
+    devloop_logging.log_entry("review_pr", event, "unknown", core.payload_field(reviewing, "dedup_key"))
     core.log_cas_decision("review_pr", "unknown", { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
-  core.log_entry("review_pr", event, reviewing.proposal_id, reviewing.dedup_key)
+  devloop_logging.log_entry("review_pr", event, reviewing.proposal_id, reviewing.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(reviewing.proposal_id)
   if entity == nil then
     core.log_cas_decision("review_pr", reviewing.proposal_id, { state = nil, version = nil }, "reviewing", "review-proposal", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")

@@ -6,6 +6,7 @@ local execution_start = require("devloop.execution_start")
 local saga = require("workflow.saga")
 local v_execution_request = require("devloop.validators.execution_request")
 local entity_lib = require("devloop.entity")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_execute_request" },
@@ -69,12 +70,12 @@ end
 local function act_execute_start(event)
   local request = event.payload or {}
   if not v_execution_request.is_supported_execution_request(core, request) then
-    core.log_entry("execute_start", event, "unknown", core.payload_field(request, "dedup_key"))
+    devloop_logging.log_entry("execute_start", event, "unknown", core.payload_field(request, "dedup_key"))
     core.log_cas_decision("execute_start", "unknown", { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
-  core.log_entry("execute_start", event, request.proposal_id, request.dedup_key)
+  devloop_logging.log_entry("execute_start", event, request.proposal_id, request.dedup_key)
   local repo, issue_number = devloop_base.parse_issue_source_ref(request.source_ref)
   if repo == nil then
     core.log_cas_decision("execute_start", request.proposal_id, { state = nil, version = nil }, "execution-request", "thinking", "skip-foreign(source_ref)", "invalid source_ref")

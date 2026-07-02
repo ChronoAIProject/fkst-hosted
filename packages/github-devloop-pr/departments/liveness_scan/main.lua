@@ -9,6 +9,7 @@ local entity_list_cache = require("devloop.entity_list_cache")
 local saga = require("workflow.saga")
 local forge_validators = require("devloop.forge_validators")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local devloop_logging = require("devloop.logging")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
 
@@ -101,7 +102,7 @@ local function liveness_scan_done(_event)
 end
 
 local function act_liveness_scan(event)
-  core.log_entry("liveness_scan", event, "github-devloop/liveness-scan", "tick")
+  devloop_logging.log_entry("liveness_scan", event, "github-devloop/liveness-scan", "tick")
   devloop_base.assert_trusted_bot_configured()
 
   local repo = liveness_scan.liveness_scan_read_repo(core)

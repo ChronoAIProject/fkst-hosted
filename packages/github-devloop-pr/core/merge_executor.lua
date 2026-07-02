@@ -24,6 +24,7 @@ local M = {}
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local devloop_logging = require("devloop.logging")
 
 local function log_gate(merge_ready, outcome, reason)
   local pass = merge_ready and merge_ready._merge_pass
@@ -789,7 +790,7 @@ local function process_merge_queue_tick(event)
   local cause_kind = type(cause) == "table" and tostring(cause.kind or "") or ""
   local repo = devloop_base.read_env("FKST_GITHUB_REPO")
   if repo == nil or repo == "" then
-    core.log_entry("merge", event, "unknown", "")
+    devloop_logging.log_entry("merge", event, "unknown", "")
     core.log_line("info", "merge", "unknown", "GATE", {
       "outcome=skip",
       "reason=missing-repo-config",
@@ -799,7 +800,7 @@ local function process_merge_queue_tick(event)
   end
   local lock_key = entity_lib.merge_lane_lock_key(repo)
   if lock_key == nil then
-    core.log_entry("merge", event, "unknown", "")
+    devloop_logging.log_entry("merge", event, "unknown", "")
     core.log_line("info", "merge", "unknown", "GATE", {
       "outcome=skip",
       "reason=no-transition-lock-key",
@@ -875,7 +876,7 @@ local function process_merge_queue_tick(event)
       return
     end
     merge_ready._merge_pass = "poll"
-    core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
+    devloop_logging.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
     local selected_is_fifo_head = queue_starvation_cause_matches_entry(cause, head)
     local write_mode = config.write_mode(core)
     local outcome = process_merge_ready_locked(repo, entity.issue_number, merge_ready, branches, nil, {
@@ -895,12 +896,12 @@ end
 local function process_merge_ready_event(event)
   local merge_ready = type(event and event.payload) == "table" and event.payload or {}
   if not v_merge_ready.is_supported_merge_ready(core, merge_ready) then
-    core.log_entry("merge", event, "unknown", core.payload_field(merge_ready, "dedup_key"))
+    devloop_logging.log_entry("merge", event, "unknown", core.payload_field(merge_ready, "dedup_key"))
     core.log_cas_decision("merge", "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(payload)", "unsupported event payload")
     return
   end
 
-  core.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
+  devloop_logging.log_entry("merge", event, merge_ready.proposal_id, merge_ready.dedup_key)
   local entity = entity_lib.parse_entity_proposal_id(merge_ready.proposal_id)
   if entity == nil then
     core.log_cas_decision("merge", merge_ready.proposal_id, { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(proposal_id)", "proposal_id is outside github-devloop")

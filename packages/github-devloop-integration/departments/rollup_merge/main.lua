@@ -4,6 +4,7 @@ local core = require("core")
 local saga = require("workflow.saga")
 local github = require("forge.github").production_handle
 local config = require("devloop.config")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_rollup_ready" },
@@ -53,12 +54,12 @@ local function act(event)
   local payload = event.payload or {}
   local supported, unsupported_reason = core.validate_rollup_ready(payload)
   if not supported then
-    core.log_entry("rollup_merge", event, "rollup", core.payload_field(payload, "dedup_key"))
+    devloop_logging.log_entry("rollup_merge", event, "rollup", core.payload_field(payload, "dedup_key"))
     log_skip(payload, "unsupported-payload")
     error(unsupported_payload_error(payload, unsupported_reason))
   end
 
-  core.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
+  devloop_logging.log_entry("rollup_merge", event, "rollup", payload.dedup_key)
   with_lock(core.rollup_lock_key(payload.repo, payload.upstream_branch, payload.integration_branch), function()
     if config.write_mode(core) ~= "real" then
       log_skip(payload, "dry-run")

@@ -1,5 +1,6 @@
 local core = require("core")
 local saga = require("workflow.saga")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_ensure_repo_tick" },
@@ -14,7 +15,7 @@ local function ensure_repo_done(_event)
 end
 
 local function act_ensure_repo(event)
-  core.log_entry("ensure_repo", event, "repo-management-plane", "tick")
+  devloop_logging.log_entry("ensure_repo", event, "repo-management-plane", "tick")
   core.ensure_repo()
 end
 

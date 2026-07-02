@@ -6,6 +6,7 @@ local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
 local config = require("devloop.config")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
@@ -179,7 +180,7 @@ local function fast_forward_sync(repo, upstream, integration, upstream_sha, inte
 end
 
 local function act(event)
-  core.log_entry("sync_scan", event, "branch-sync", event and event.queue or "")
+  devloop_logging.log_entry("sync_scan", event, "branch-sync", event and event.queue or "")
   local branches = config.branch_config(core)
   local cfg = config.devloop_config(core)
   local repo = require_repo(cfg.repo)

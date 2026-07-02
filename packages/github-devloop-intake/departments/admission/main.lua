@@ -7,6 +7,7 @@ local operator_commands = require("devloop.operator_commands")
 local queue = require("devloop.queue")
 local saga = require("workflow.saga")
 local m_facts = require("devloop.markers.facts")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "github-proxy.github_entity_changed" },
@@ -70,7 +71,7 @@ end
 
 local function admit_issue_event(event, entity)
   entity = entity or event.payload or {}
-  core.log_entry("admission", event, "github-devloop/intake", core.payload_field(entity, "dedup_key"))
+  devloop_logging.log_entry("admission", event, "github-devloop/intake", core.payload_field(entity, "dedup_key"))
   local repo, issue_number = devloop_base.parse_issue_source_ref(entity.source_ref)
   if repo == nil or issue_number == nil then
     core.log_cas_decision("admission", "unknown", { state = nil, version = nil }, "entity", "candidate", "skip-foreign(source_ref)", "invalid issue source_ref")

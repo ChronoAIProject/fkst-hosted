@@ -5,6 +5,7 @@ local core = require("core")
 local config = require("devloop.config")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
+local devloop_logging = require("devloop.logging")
 
 local spec = {
   consumes = { "devloop_sync_conflict" },
@@ -71,7 +72,7 @@ local function raise_sync_conflict_escalation(conflict, fingerprint, attempt, re
     unmerged_stdout
   )
   core.log_raise("sync_conflict", "branch-sync", "github-proxy.github_issue_create_request", request)
-  core.log_error_fact("error", "sync_conflict", "branch-sync", "SYNC_CONFLICT_TERMINAL", "sync-conflict-unresolved", "devloop_sync_conflict", reason, {
+  devloop_logging.log_error_fact("error", "sync_conflict", "branch-sync", "SYNC_CONFLICT_TERMINAL", "sync-conflict-unresolved", "devloop_sync_conflict", reason, {
     source_ref = conflict.source_ref,
     attempt = attempt,
     terminal = true,
@@ -149,11 +150,11 @@ end
 local function act(event)
   local conflict = event.payload or {}
   if not core.is_supported_sync_conflict(conflict) then
-    core.log_entry("sync_conflict", event, "branch-sync", core.payload_field(conflict, "dedup_key"))
+    devloop_logging.log_entry("sync_conflict", event, "branch-sync", core.payload_field(conflict, "dedup_key"))
     core.log_cas_decision("sync_conflict", "branch-sync", { state = nil, version = nil }, "conflict", "resolved", "skip-foreign(payload)", "unsupported sync conflict payload")
     return
   end
-  core.log_entry("sync_conflict", event, "branch-sync", conflict.dedup_key)
+  devloop_logging.log_entry("sync_conflict", event, "branch-sync", conflict.dedup_key)
 
   with_lock(core.branch_sync_lock_key(conflict.repo, conflict.upstream_branch, conflict.integration_branch), function()
     git_mechanics.fetch_branches(core.git, conflict.repo, { conflict.upstream_branch, conflict.integration_branch }, "branch fetch")
@@ -201,14 +202,14 @@ local function act(event)
         return
       end
 
-      core.log_codex_start("sync_conflict", "branch-sync", "sync-conflict")
+      devloop_logging.log_codex_start("sync_conflict", "branch-sync", "sync-conflict")
       local result = spawn_codex_sync({
         prompt = core.build_sync_conflict_prompt(active_conflict),
         worktree = worktree,
       })
       if type(result) ~= "table" or result.exit_code ~= 0 then
         local stderr = type(result) == "table" and result.stderr or "nil result"
-        core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, stderr, {
+        devloop_logging.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, stderr, {
           queue = event.queue,
           source_ref = conflict.source_ref,
           terminal = false,
@@ -222,7 +223,7 @@ local function act(event)
         local attempt = previous_attempts + 1
         core.record_sync_conflict_attempt(active_conflict, fingerprint, attempt)
         local reason = "sync conflict remains unresolved after codex completed"
-        core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, reason, {
+        devloop_logging.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, nil, reason, {
           queue = event.queue,
           source_ref = conflict.source_ref,
           attempt = attempt,
@@ -235,7 +236,7 @@ local function act(event)
         end
         error("github-devloop: sync-conflict-unresolved: " .. reason)
       end
-      core.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, "result=completed", nil)
+      devloop_logging.log_codex_result("sync_conflict", "branch-sync", "sync-conflict", result, "result=completed", nil)
       commit_resolution(worktree, runtime, active_conflict)
       push_if_real(active_conflict, worktree)
     end)

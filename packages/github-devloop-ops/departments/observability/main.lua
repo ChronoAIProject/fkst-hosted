@@ -7,6 +7,7 @@ local dashboard = require("departments.observability.dashboard")
 local queue_starvation = require("devloop.queue_starvation")
 local reaper = require("departments.observability.reaper")
 local topology = require("departments.observability.topology")
+local devloop_logging = require("devloop.logging")
 
 
 local spec = {
@@ -74,7 +75,7 @@ function core.observe_devloop_entities(event)
 end
 
 local department = saga.department(spec, { done = function() return false end, act = function(event)
-  core.log_entry("observability", event, "github-devloop/observability", "tick")
+  devloop_logging.log_entry("observability", event, "github-devloop/observability", "tick")
   core.observe_devloop_entities(event)
 end, wrap = core.wrap_pipeline_failure, name = "observability" })
 department.spec.graph_json = true

@@ -1,17 +1,23 @@
 local devloop_base = require("devloop.base")
 local parsers_misc = require("devloop.parsers.misc")
+local C = {}
 local S = {}
 local error_facts = require("contract.error_facts")
 local logging = require("workflow.logging")
 local config = require("devloop.config")
 
-function S.install(M)
+-- Structured lifecycle logging as a self-contained module. Methods are module-local C functions
+-- with no ambient M dependency (inter-calls go through C, not M; write-mode/comment collaborators
+-- are reached directly), so departments can `require("devloop.logging")` and call them without
+-- routing through the composed-core ambient table. S.install(M) still binds the methods onto M
+-- as a migration scaffold so readers not yet rewired keep working; it is deleted once the
+-- G-DEVLOOP-INSTALLER ratchet shows zero logging reads through the ambient M.
 
-function M.error_fingerprint(error_class, queue, dept, message)
+function C.error_fingerprint(error_class, queue, dept, message)
   return error_facts.error_fingerprint(error_class, queue, dept, message)
 end
 
-function M.error_class_from_message(message)
+function C.error_class_from_message(message)
   local text = tostring(message or "")
   if text:match("github%-devloop: .-codex failed:") then
     return "codex-failed"
@@ -23,16 +29,16 @@ function M.error_class_from_message(message)
   return class or "caught-failure"
 end
 
-function M.log_error_fact(level, dept, proposal_id, tag, error_class, queue, message, context)
+function C.log_error_fact(level, dept, proposal_id, tag, error_class, queue, message, context)
   local fields = error_facts.error_fact_fields(error_class, queue, dept, message, context)
   table.insert(fields, "queue=" .. error_facts.one_line(queue))
   table.insert(fields, "error=" .. error_facts.one_line(message))
-  M.log_line(level or "error", dept, proposal_id, tag or "FAILURE", fields)
+  C.log_line(level or "error", dept, proposal_id, tag or "FAILURE", fields)
 end
 
 local event_source_ref = error_facts.event_source_ref
 
-function M.wrap_pipeline_failure(dept, fn)
+function C.wrap_pipeline_failure(dept, fn)
   return function(event)
     local ok, err = pcall(fn, event)
     if ok then
@@ -40,7 +46,7 @@ function M.wrap_pipeline_failure(dept, fn)
     end
     local payload = type(event) == "table" and event.payload or nil
     local proposal_id = type(payload) == "table" and payload.proposal_id or "unknown"
-    M.log_error_fact("error", dept, proposal_id, "FAILURE", M.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
+    C.log_error_fact("error", dept, proposal_id, "FAILURE", C.error_class_from_message(err), type(event) == "table" and event.queue or nil, err, {
       source_ref = event_source_ref(event),
       attempt = type(event) == "table" and event.attempt or nil,
     })
@@ -48,23 +54,23 @@ function M.wrap_pipeline_failure(dept, fn)
   end
 end
 
-function M.log_line(level, dept, proposal_id, tag, fields)
+function C.log_line(level, dept, proposal_id, tag, fields)
   return logging.log_line("github-devloop", level, dept, proposal_id, tag, fields)
 end
 
-function M.log_entry(dept, event, proposal_id, dedup_key)
+function C.log_entry(dept, event, proposal_id, dedup_key)
   return logging.log_entry("github-devloop", dept, event, proposal_id, dedup_key)
 end
 
-M.payload_field = logging.payload_field
+C.payload_field = logging.payload_field
 
-function M.log_cas_decision(dept, proposal_id, current, from_state, to_state, outcome, reason)
+function C.log_cas_decision(dept, proposal_id, current, from_state, to_state, outcome, reason)
   local current_state = current
   local current_version = type(current) == "table" and current.version or nil
   if type(current) == "table" then
     current_state = current.state
   end
-  M.log_line("info", dept, proposal_id, "CAS", {
+  C.log_line("info", dept, proposal_id, "CAS", {
     "current_state=" .. tostring(current_state or "unmanaged"),
     "current_version=" .. tostring(current_version or ""),
     "current_source=trusted-marker",
@@ -74,10 +80,10 @@ function M.log_cas_decision(dept, proposal_id, current, from_state, to_state, ou
   })
 end
 
-function M.log_apply(dept, proposal_id, to_state, version, labels, events)
+function C.log_apply(dept, proposal_id, to_state, version, labels, events)
   local add_labels = labels and labels.add or {}
   local remove_labels = labels and labels.remove or {}
-  M.log_line("info", dept, proposal_id, "APPLY", {
+  C.log_line("info", dept, proposal_id, "APPLY", {
     "state_marker_state=" .. tostring(to_state or "none"),
     "state_marker_version=" .. tostring(version or ""),
     "set_exclusive_add=" .. table.concat(add_labels, ","),
@@ -86,9 +92,9 @@ function M.log_apply(dept, proposal_id, to_state, version, labels, events)
   })
 end
 
-function M.log_outbound(dept, proposal_id, queue, request)
-  M.log_line("info", dept, proposal_id, "OUTBOUND", {
-    "mode=" .. config.write_mode(M),
+function C.log_outbound(dept, proposal_id, queue, request)
+  C.log_line("info", dept, proposal_id, "OUTBOUND", {
+    "mode=" .. config.write_mode(),
     "queue=" .. tostring(queue or ""),
     "repo=" .. tostring(request and request.repo or ""),
     "issue=" .. tostring(request and request.issue_number or ""),
@@ -98,24 +104,24 @@ function M.log_outbound(dept, proposal_id, queue, request)
   })
 end
 
-function M.log_raise(dept, proposal_id, queue, payload)
+function C.log_raise(dept, proposal_id, queue, payload)
   if queue == "github-proxy.github_issue_label_request"
     or queue == "github-proxy.github_issue_comment_request"
     or queue == "github-proxy.github_pr_comment_request"
     or queue == "github-proxy.github_issue_create_request" then
-    M.log_outbound(dept, proposal_id, queue, payload)
+    C.log_outbound(dept, proposal_id, queue, payload)
   end
   raise(queue, payload)
 end
 
-function M.log_codex_start(dept, proposal_id, role)
-  M.log_line("info", dept, proposal_id, "CODEX", {
+function C.log_codex_start(dept, proposal_id, role)
+  C.log_line("info", dept, proposal_id, "CODEX", {
     "phase=start",
     "role=" .. tostring(role or dept),
   })
 end
 
-function M.log_codex_result(dept, proposal_id, role, result, parsed, failure, context)
+function C.log_codex_result(dept, proposal_id, role, result, parsed, failure, context)
   local level = failure and "error" or "info"
   local fields = {
     "phase=result",
@@ -137,31 +143,57 @@ function M.log_codex_result(dept, proposal_id, role, result, parsed, failure, co
     end
     table.insert(fields, "failure=" .. error_facts.one_line(failure))
   end
-  M.log_line(level, dept, proposal_id, "CODEX", fields)
+  C.log_line(level, dept, proposal_id, "CODEX", fields)
 end
 
-function M.log_forged_markers(dept, proposal_id, comments)
-  if type(comments) ~= "table" then
-    return
-  end
+-- log_forged_markers still reaches the parsers_misc comment collaborators through the ambient M
+-- (parsers_misc._is_trusted_comment(M, ...) etc.), so it stays installed as an M method until the
+-- parsers_misc comment surface is untangled in a later slice. It is intentionally NOT a C
+-- function yet; keeping it install-only avoids introducing a nil-M call into the parsers surface.
+local function install_log_forged_markers(M)
+  function M.log_forged_markers(dept, proposal_id, comments)
+    if type(comments) ~= "table" then
+      return
+    end
 
-  local marker_pattern = "<!%-%- fkst:github%-devloop:([%w%-]+):v1.-%-%->"
-  for _, comment in ipairs(comments) do
-    if not parsers_misc._is_trusted_comment(M, comment) then
-      for marker, marker_kind in parsers_misc._comment_body(M, comment):gmatch("(" .. marker_pattern .. ")") do
-        local marker_proposal = marker:match('proposal="([^"]+)"')
-        if marker_proposal == proposal_id then
-          M.log_line("warn", dept, proposal_id, "FORGE", {
-            "marker_kind=" .. tostring(marker_kind),
-            "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),
-            "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
-          })
+    local marker_pattern = "<!%-%- fkst:github%-devloop:([%w%-]+):v1.-%-%->"
+    for _, comment in ipairs(comments) do
+      if not parsers_misc._is_trusted_comment(M, comment) then
+        for marker, marker_kind in parsers_misc._comment_body(M, comment):gmatch("(" .. marker_pattern .. ")") do
+          local marker_proposal = marker:match('proposal="([^"]+)"')
+          if marker_proposal == proposal_id then
+            C.log_line("warn", dept, proposal_id, "FORGE", {
+              "marker_kind=" .. tostring(marker_kind),
+              "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),
+              "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
+            })
+          end
         end
       end
     end
   end
 end
 
+-- Migration scaffold: bind the self-contained methods onto the composed core M so readers not yet
+-- rewired to require("devloop.logging") keep working. Deleted when the G-DEVLOOP-INSTALLER ratchet
+-- shows zero logging reads through the ambient M.
+function S.install(M)
+  M.error_fingerprint = C.error_fingerprint
+  M.error_class_from_message = C.error_class_from_message
+  M.log_error_fact = C.log_error_fact
+  M.wrap_pipeline_failure = C.wrap_pipeline_failure
+  M.log_line = C.log_line
+  M.log_entry = C.log_entry
+  M.payload_field = C.payload_field
+  M.log_cas_decision = C.log_cas_decision
+  M.log_apply = C.log_apply
+  M.log_outbound = C.log_outbound
+  M.log_raise = C.log_raise
+  M.log_codex_start = C.log_codex_start
+  M.log_codex_result = C.log_codex_result
+  install_log_forged_markers(M)
 end
 
-return S
+C.install = S.install
+
+return C
