@@ -213,6 +213,62 @@ pub fn config_hash(packages: &[PackageRef], work_label: &str, environment: Optio
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A stable content hash over a registration's FULL launch config — the superset of
+/// [`config_hash`]: the ordered package refs, work label, environment, session name,
+/// and BOTH opt-ins (`auto_merge`, `log_streaming`).
+///
+/// Where [`config_hash`] covers only the pod-affecting subset (so pod drift ignores
+/// the two opt-ins), this covers everything the trigger author can set. It is the
+/// basis for a later immutability check: a registration whose full hash changed has
+/// had *some* config edited, even one (like an opt-in) that does not respawn the pod.
+///
+/// Canonical form: SHA-256 over the canonical JSON of
+/// `{packages, work_label, environment, name, auto_merge, log_streaming}`. The field
+/// order below IS part of the canonical form (serde serialises in declaration order),
+/// so identical inputs always hash identically and any changed field flips the hash.
+pub fn full_config_hash(reg: &SessionRegistration) -> String {
+    // Borrow-only projection so `PackageRef` need not itself be `Serialize`; the
+    // field set + order is the canonical package identity (as in `config_hash`).
+    #[derive(Serialize)]
+    struct CanonPackage<'a> {
+        owner: &'a str,
+        repo: &'a str,
+        git_ref: &'a str,
+        path: &'a str,
+    }
+    #[derive(Serialize)]
+    struct Canonical<'a> {
+        packages: Vec<CanonPackage<'a>>,
+        work_label: &'a str,
+        environment: Option<&'a str>,
+        name: &'a str,
+        auto_merge: bool,
+        log_streaming: bool,
+    }
+    let canonical = Canonical {
+        packages: reg
+            .def
+            .packages
+            .iter()
+            .map(|p| CanonPackage {
+                owner: &p.owner,
+                repo: &p.repo,
+                git_ref: &p.git_ref,
+                path: &p.path,
+            })
+            .collect(),
+        work_label: &reg.def.work_label,
+        environment: reg.def.environment.as_deref(),
+        name: &reg.def.name,
+        auto_merge: reg.auto_merge,
+        log_streaming: reg.log_streaming,
+    };
+    let json =
+        serde_json::to_vec(&canonical).expect("canonical full-config-hash json is infallible");
+    let digest = Sha256::digest(&json);
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Decide whether a live, non-pending pod is due for an idle-kill.
 ///
 /// A non-pending pod is treated as idle (see the §4.3 matrix note). It is killed
@@ -399,6 +455,9 @@ pub fn plan_repo(
 #[cfg(test)]
 #[path = "desired_announce_tests.rs"]
 mod desired_announce_tests;
+#[cfg(test)]
+#[path = "desired_full_hash_tests.rs"]
+mod desired_full_hash_tests;
 #[cfg(test)]
 #[path = "desired_hash_tests.rs"]
 mod desired_hash_tests;
