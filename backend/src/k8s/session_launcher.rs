@@ -33,7 +33,7 @@ use crate::session_pod::log_stream::{
     log_branch_for_issue, ENV_CONFIG_HASH, ENV_LOG_BRANCH, ENV_LOG_STREAMING, ENV_POD_NAME,
     ENV_POD_UID, ENV_TRIGGER_ISSUE, LOG_STREAMING_ENABLED,
 };
-use crate::session_spec::creds::{credential_secret_data, DEFAULT_CREDS_DIR};
+use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds, DEFAULT_CREDS_DIR};
 
 /// Errors launching a substrate-session Pod (relocated from the deleted Model-A
 /// Job launcher, trimmed to the variants the Pod path actually raises).
@@ -363,8 +363,10 @@ pub fn build_session_pod(spec: &SessionPodSpec, config: &PodConfig) -> Result<Po
 }
 
 /// Build the per-session creds Secret (pure; no API calls). Carries the rotating
-/// `github-token` (the `{token, expires_at}` JSON), the static `llm-api-key`, and
-/// one `userenv.<KEY>` per injected per-user env entry — via the shared
+/// `github-token` (the `{token, expires_at}` JSON), the static `llm-api-key`, one
+/// `userenv.<KEY>` per injected per-user env entry, and — when `storage` is
+/// provided (the control plane configured a write-only chrono-storage SA) — the
+/// five `storage-*` files the in-pod log uploader reads. All via the shared
 /// [`credential_secret_data`] helper so the layout never diverges from the
 /// Model-A Job Secret. Owner-referenced to the Pod (when `owner` is provided) so
 /// K8s cascade-deletes it on Pod GC.
@@ -373,6 +375,7 @@ pub fn build_session_secret(
     github_token_json: &str,
     llm_api_key: &SecretString,
     user_env: &BTreeMap<String, String>,
+    storage: Option<StorageWriterCreds<'_>>,
     owner: Option<OwnerReference>,
 ) -> Secret {
     let data = credential_secret_data(
@@ -381,6 +384,7 @@ pub fn build_session_secret(
         user_env
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str())),
+        storage,
     );
 
     Secret {

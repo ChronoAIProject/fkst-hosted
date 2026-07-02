@@ -301,6 +301,7 @@ fn build_session_secret_carries_creds_with_the_userenv_prefix_and_owner() {
         r#"{"token":"ghs_xyz","expires_at":"2026-01-01T00:00:00Z"}"#,
         &SecretString::from("sk-test"),
         &user_env,
+        None,
         Some(owner),
     );
 
@@ -330,12 +331,40 @@ fn build_session_secret_without_user_env_carries_only_the_base_creds() {
         &SecretString::from("sk-test"),
         &BTreeMap::new(),
         None,
+        None,
     );
     let data = secret.string_data.as_ref().expect("string data");
     assert!(data.contains_key("github-token"));
     assert!(data.contains_key("llm-api-key"));
     assert_eq!(data.len(), 2);
     assert!(secret.metadata.owner_references.is_none());
+}
+
+#[test]
+fn build_session_secret_carries_the_write_only_sa_when_configured() {
+    let storage = StorageWriterCreds {
+        client_id: "writer-client",
+        client_secret: "writer-secret",
+        token_url: "https://nyx.example/oauth/token",
+        base_url: "https://storage.example/proxy",
+        bucket: "fkst-logs",
+    };
+    let secret = build_session_secret(
+        &spec(),
+        "ghs_json",
+        &SecretString::from("sk-test"),
+        &BTreeMap::new(),
+        Some(storage),
+        None,
+    );
+    let data = secret.string_data.as_ref().expect("string data");
+    // Base creds + the five write-only storage-* files, nothing else.
+    assert_eq!(data["storage-client-id"], "writer-client");
+    assert_eq!(data["storage-client-secret"], "writer-secret");
+    assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");
+    assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
+    assert_eq!(data["storage-bucket"], "fkst-logs");
+    assert_eq!(data.len(), 7);
 }
 
 #[test]

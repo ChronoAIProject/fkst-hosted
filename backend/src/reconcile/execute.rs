@@ -35,6 +35,7 @@ use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
+use crate::session_spec::creds::StorageWriterCreds;
 
 use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
 
@@ -203,11 +204,17 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
             return;
         }
     };
+    // Always inject the write-only SA creds when the control plane configured one
+    // (log streaming is unconditional; the per-session flag was retired). Absent a
+    // configured SA the Secret carries no storage-* keys and the in-pod uploader
+    // fails closed — no bundle, never a crash.
+    let storage = storage_writer_creds(&ctx.config);
     let secret = build_session_secret(
         &spec,
         &github_token_json,
         &ctx.config.llm_api_key,
         &user_env,
+        storage,
         None,
     );
     match create_session_pod(ctx.kube.client(), pod, secret).await {
@@ -244,6 +251,23 @@ fn session_pod_spec_from(reg: &SessionRegistration, bot_login: Option<String>) -
         // Per-session opt-in; drives the in-pod log collector env at launch.
         log_streaming: reg.log_streaming,
     }
+}
+
+/// Resolve the WRITE-ONLY chrono-storage SA creds to inject into a session Secret,
+/// or `None` when the control plane has no storage config OR no write-only SA
+/// configured (the in-pod uploader then fails closed — no bundle). Borrows the
+/// config, exposing the client secret only to copy it into the Secret builder.
+fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
+    let storage = config.storage.as_ref()?;
+    let client_id = storage.writer_client_id.as_deref()?;
+    let client_secret = storage.writer_client_secret.as_ref()?;
+    Some(StorageWriterCreds {
+        client_id,
+        client_secret: client_secret.expose_secret(),
+        token_url: &storage.nyxid_token_url,
+        base_url: &storage.base_url,
+        bucket: &storage.bucket,
+    })
 }
 
 // --- Pod lifecycle effects ---------------------------------------------------
