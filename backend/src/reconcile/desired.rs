@@ -66,11 +66,6 @@ pub struct SessionRegistration {
     /// of `config_hash` — a pod runs identically regardless, so toggling it never
     /// respawns the pod; it only gates the reconcile-side merge step.
     pub auto_merge: bool,
-    /// Per-session opt-in (from the trigger issue's `### Log Streaming`) for the
-    /// reconciler to fan out this session's redacted pod logs. Like `auto_merge` it
-    /// is NOT part of `config_hash` — a pod runs identically regardless, so toggling
-    /// it never respawns the pod; it only gates the reconcile-side log-stream step.
-    pub log_streaming: bool,
     /// Per-session log-download allow-list (from the trigger issue's `### Log
     /// Access`): the GitHub logins/ids permitted to pull this session's redacted
     /// logs, IN ADDITION to the issue author + the global admins. Like the two

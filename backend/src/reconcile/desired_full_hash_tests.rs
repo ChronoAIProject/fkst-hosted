@@ -1,8 +1,8 @@
 //! Tests for the pure [`super::full_config_hash`]: the FULL-config superset of
 //! [`super::config_hash`]. Verifies stability, per-config-field sensitivity, that
-//! identity fields are excluded, and that the two opt-ins (`auto_merge`,
-//! `log_streaming`) — which `config_hash` ignores — DO move the full hash. Fixtures
-//! live in [`super::desired_test_fixtures`].
+//! identity fields are excluded, and that the `auto_merge` opt-in + the `log_access`
+//! allow-list — which `config_hash` ignores — DO move the full hash. Fixtures live in
+//! [`super::desired_test_fixtures`].
 
 use super::desired_test_fixtures::pkg;
 use super::{config_hash, full_config_hash, SessionDef, SessionRegistration};
@@ -28,7 +28,6 @@ fn base_reg() -> SessionRegistration {
         session_id: "sid".to_string(),
         config_hash: "ignored".to_string(),
         auto_merge: false,
-        log_streaming: false,
         log_access: vec!["alice".to_string()],
     }
 }
@@ -82,15 +81,6 @@ fn full_config_hash_changes_with_each_config_field() {
         base,
         full_config_hash(&reg),
         "auto_merge must move the hash"
-    );
-
-    // log_streaming
-    let mut reg = base_reg();
-    reg.log_streaming = true;
-    assert_ne!(
-        base,
-        full_config_hash(&reg),
-        "log_streaming must move the hash"
     );
 
     // log_access — the allow-list is FROZEN by config-immutability, so editing it
@@ -160,7 +150,6 @@ fn full_config_hash_is_a_strict_superset_of_config_hash() {
 
     let mut toggled = base_reg();
     toggled.auto_merge = true;
-    toggled.log_streaming = true;
     let toggled_config = config_hash(
         &toggled.def.packages,
         &toggled.def.work_label,

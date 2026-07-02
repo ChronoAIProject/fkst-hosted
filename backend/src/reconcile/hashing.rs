@@ -74,19 +74,19 @@ pub fn config_hash(packages: &[PackageRef], work_label: &str, environment: Optio
 
 /// A stable content hash over a registration's FULL launch config — the superset of
 /// [`config_hash`]: the ordered package refs, work label, environment, session name,
-/// and BOTH opt-ins (`auto_merge`, `log_streaming`).
+/// the `auto_merge` opt-in, and the `log_access` allow-list.
 ///
 /// Where [`config_hash`] covers only the pod-affecting subset (so pod drift ignores
-/// the two opt-ins), this covers everything the trigger author can set. It is the
-/// basis for the immutability check: a registration whose full hash changed has had
-/// *some* config edited, even one (like an opt-in) that does not respawn the pod.
+/// the opt-ins), this covers everything the trigger author can set. It is the basis of
+/// the immutability check: a registration whose full hash changed has had *some* config
+/// edited, even one (like the auto-merge opt-in) that does not respawn the pod.
 ///
 /// Canonical form: SHA-256 over the canonical JSON of
-/// `{packages, work_label, environment, name, auto_merge, log_streaming, log_access}`.
-/// The field order below IS part of the canonical form (serde serialises in declaration
-/// order), so identical inputs always hash identically and any changed field flips the
-/// hash — including `log_access`, so the log allow-list is FROZEN by the config-
-/// immutability check (it cannot be widened after registration).
+/// `{packages, work_label, environment, name, auto_merge, log_access}`. The field order
+/// below IS part of the canonical form (serde serialises in declaration order), so
+/// identical inputs always hash identically and any changed field flips the hash —
+/// including `log_access`, so the log allow-list is FROZEN by the config-immutability
+/// check (it cannot be widened after registration).
 pub fn full_config_hash(reg: &SessionRegistration) -> String {
     #[derive(Serialize)]
     struct Canonical<'a> {
@@ -95,7 +95,6 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         environment: Option<&'a str>,
         name: &'a str,
         auto_merge: bool,
-        log_streaming: bool,
         log_access: &'a [String],
     }
     let canonical = Canonical {
@@ -104,7 +103,6 @@ pub fn full_config_hash(reg: &SessionRegistration) -> String {
         environment: reg.def.environment.as_deref(),
         name: &reg.def.name,
         auto_merge: reg.auto_merge,
-        log_streaming: reg.log_streaming,
         log_access: &reg.log_access,
     };
     hex_digest(&canonical, "full-config-hash")
