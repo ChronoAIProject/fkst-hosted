@@ -34,7 +34,7 @@ function C.review_meta_marker(M, issue_proposal_id, dedup_key, action, version, 
     .. '" -->'
 end
 
-function C.fix_reflection_marker(M, issue_proposal_id, dedup_key, verdict, version, fix_round)
+function C.fix_reflection_marker(issue_proposal_id, dedup_key, verdict, version, fix_round)
   if verdict ~= "checkpoint" and verdict ~= "continue" and verdict ~= "spec-gap" then
     error("github-devloop: invalid fix reflection verdict")
   end
@@ -54,7 +54,7 @@ function C.fix_reflection_marker(M, issue_proposal_id, dedup_key, verdict, versi
     .. '" -->'
 end
 
-function C.fix_marker(M, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+function C.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
   if not forge_validators.is_git_sha(old_head_sha) or not forge_validators.is_git_sha(new_head_sha) then
     error("github-devloop: invalid fix head sha")
   end
@@ -96,7 +96,7 @@ function C.merge_gate_marker(M, issue_proposal_id, pr_number, version, review_pr
     .. '" -->'
 end
 
-function C.implementing_marker(M, proposal_id, dedup_key, branch, head_sha, base_branch, base_sha)
+function C.implementing_marker(proposal_id, dedup_key, branch, head_sha, base_branch, base_sha)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end

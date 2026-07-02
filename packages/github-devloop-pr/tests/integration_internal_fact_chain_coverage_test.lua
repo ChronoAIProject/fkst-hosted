@@ -565,7 +565,7 @@ return {
         nil,
         "rollup-red"
       ),
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     }
     mock_bot_env()
     mock_pr_origin(comments)
@@ -602,7 +602,7 @@ return {
         nil,
         "rollup-red"
       ),
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     }
     mock_bot_env()
     mock_pr_origin(comments, nil, nil, nil, nil, nil, { "fkst-dev:blocked", "fkst-dev:reviewing" })

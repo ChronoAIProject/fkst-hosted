@@ -608,7 +608,7 @@ return {
       "mergeable-conflicting",
       predecessor_set
     ))
-    table.insert(comments, m_builders.fix_marker(core, current.proposal_id, old_review_proposal, old_review_dedup, "cccccccccccccccccccccccccccccccccccccccc", current.reviewed_head_sha))
+    table.insert(comments, m_builders.fix_marker(current.proposal_id, old_review_proposal, old_review_dedup, "cccccccccccccccccccccccccccccccccccccccc", current.reviewed_head_sha))
     mock_bot_env()
     mock_write_env("1")
     mock_branch_config_env(4)

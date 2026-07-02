@@ -69,7 +69,7 @@ end
 
 function M.decomposed_comment_body(decompose, count)
   return comment_strings.comment_string(M, "decomposed_prefix") .. tostring(count) .. comment_strings.comment_string(M, "decomposed_suffix")
-    .. "\n\n" .. decompose_lib.decomposed_marker(M, decompose.proposal_id, decompose.version, decompose.pr_number, count)
+    .. "\n\n" .. decompose_lib.decomposed_marker(decompose.proposal_id, decompose.version, decompose.pr_number, count)
 end
 
 function M.build_issue_create_request(repo, decompose, issue, index)

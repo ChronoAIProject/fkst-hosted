@@ -187,7 +187,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   local marker = m_builders.review_result_marker(M, reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
   local reflection_marker = ""
   if reached.reflection_checkpoint then
-    reflection_marker = "\n" .. m_builders.fix_reflection_marker(M, issue_proposal_id, reached.dedup_key, "checkpoint", issue_version, fix_round)
+    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, reached.dedup_key, "checkpoint", issue_version, fix_round)
   end
   local merge_marker = ""
   if reached.decision == "approve" then
@@ -335,7 +335,7 @@ end
 
 function C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
   local state_marker = M.state_marker(fix.proposal_id, "reviewing", new_version or fix.version)
-  local marker = m_builders.fix_marker(M, fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
+  local marker = m_builders.fix_marker(fix.proposal_id, fix.review_proposal_id, fix.review_dedup_key, old_head_sha, new_head_sha)
   local summary = ""
   if fix.fix_summary ~= nil and tostring(fix.fix_summary) ~= "" then
     summary = "\n" .. comment_strings.comment_string(M, "fix_round_summary_label") .. devloop_base.neutralize_untrusted_comment_text(fix.fix_summary)

@@ -302,7 +302,7 @@ return {
       core.state_marker(event.proposal_id, "ready", event.dedup_key),
       core.state_marker(event.proposal_id, "implementing", ready_payload.dedup_key),
       core.implement_attempt_marker(event.proposal_id, ready_payload.dedup_key, 1, tostring(now()), exec_ref),
-      m_builders.implementing_marker(core, event.proposal_id, ready_payload.dedup_key, branch, "abc123", "dev", "def456"),
+      m_builders.implementing_marker(event.proposal_id, ready_payload.dedup_key, branch, "abc123", "dev", "def456"),
       m_builders.pr_link_marker(core, event.proposal_id, 7, branch, ready_payload.dedup_key, "dev"),
     })
     local implemented = run_implement(ready_payload, opts("implement-ready-self-heal-advanced"))
@@ -469,7 +469,7 @@ return {
       m_builders.pr_link_marker(core, event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     })
     mock_linked_pr_state({})
     mock_decompose_child_issue_list(event, {})
@@ -494,7 +494,7 @@ return {
       m_builders.pr_link_marker(core, event.proposal_id, event.pr_number, "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     })
     mock_linked_pr_state({})
     mock_decompose_child_issue_list(event, { 1, 2, 3 })
@@ -512,7 +512,7 @@ return {
       core.state_marker(event.proposal_id, "blocked", event.version),
       merge_gate_fix_marker(event),
       {
-        body = decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+        body = decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
         author_login = "mallory",
       },
     })

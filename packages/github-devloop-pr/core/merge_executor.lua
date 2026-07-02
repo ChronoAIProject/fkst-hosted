@@ -754,7 +754,7 @@ local function chain_merge_queue_if_non_empty(repo, branches, merged_pr_number)
   if next_head == nil then
     devloop_logging.log_line("info", "merge", "merge", "GATE", { "outcome=quiescent", "reason=merge-queue-empty-after-progress", "pass=poll" })
   else
-    local payload = m_mq.merge_queue_tick_payload(core, repo, merged_pr_number, next_head)
+    local payload = m_mq.merge_queue_tick_payload(repo, merged_pr_number, next_head)
     devloop_logging.log_raise("merge", tostring(next_head.proposal_id or "merge"), "devloop_merge_queue_tick", payload)
     raise("devloop_merge_queue_tick", payload)
   end

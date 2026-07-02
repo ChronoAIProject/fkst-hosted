@@ -233,7 +233,7 @@ return {
     mock_pr_origin({
       m_builders.pr_origin_marker(core, "github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "blocked", impl_version .. "/blocked"),
-      decompose_lib.decomposed_marker(core, "github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, 1),
+      decompose_lib.decomposed_marker("github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, 1),
     }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "dev", nil, { "fkst-dev:reviewing" })
     mock_decompose_child_issue_list("github-devloop/issue/owner/repo/42", impl_version .. "/blocked", 7, {})
 

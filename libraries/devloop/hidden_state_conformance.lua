@@ -618,11 +618,11 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "implement-attempt" then
     table.insert(entity.comments, comment(core, core.implement_attempt_marker(ISSUE_PROPOSAL, state.version, value.attempt, value.started_at), "2026-06-03T01:03:06Z"))
   elseif family == "implementing" then
-    table.insert(entity.comments, comment(core, m_builders.implementing_marker(core, ISSUE_PROPOSAL, state.version, BRANCH, HEAD_SHA, BASE_BRANCH, BASE_SHA), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, m_builders.implementing_marker(ISSUE_PROPOSAL, state.version, BRANCH, HEAD_SHA, BASE_BRANCH, BASE_SHA), "2026-06-03T01:03:07Z"))
   elseif family == "impl-failure" then
     table.insert(entity.comments, comment(core, core.impl_failure_marker(ISSUE_PROPOSAL, state.version, value.reason or "codex-failed", value.attempt or 1), "2026-06-03T01:03:07Z"))
   elseif family == "decomposed" then
-    table.insert(entity.comments, comment(core, decompose_lib.decomposed_marker(core, ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
+    table.insert(entity.comments, comment(core, decompose_lib.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
     table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then

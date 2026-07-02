@@ -26,7 +26,7 @@ function C.merge_gate_wait_version_lineage(M, version)
   return text
 end
 
-function C.merge_gate_wait_marker(M, issue_proposal_id, pr_number, version, head_sha, reason, kind)
+function C.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sha, reason, kind)
   if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-gate-wait marker")
   end
@@ -42,8 +42,7 @@ end
 function C.build_merge_gate_wait_comment_request(M, repo, merge_ready, reason, kind, source_ref)
   local safe_reason = tostring(strings.sanitize_key(reason or "ci-wait", false):gsub("/", "-"))
   local wait_version = C.merge_gate_wait_version_lineage(M, merge_ready.version)
-  local marker = C.merge_gate_wait_marker(M,
-    merge_ready.proposal_id,
+  local marker = C.merge_gate_wait_marker(merge_ready.proposal_id,
     merge_ready.pr_number,
     wait_version,
     merge_ready.reviewed_head_sha,

@@ -614,7 +614,7 @@ function C.has_fix_marker(M, comments, issue_proposal_id, review_proposal_id, re
   if type(comments) ~= "table" then
     return false
   end
-  local needle = m_builders.fix_marker(M, issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
+  local needle = m_builders.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
     if parsers_misc._comment_body(M, comment):find(needle, 1, true) ~= nil then
       return true

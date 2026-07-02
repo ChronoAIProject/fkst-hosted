@@ -41,8 +41,7 @@ local function review_meta_result_marker(review_meta, action, reason, state_vers
   if review_meta.mode ~= "fix-reflection" then
     return m_builders.review_meta_marker(M, review_meta.proposal_id, review_meta.dedup_key, action, state_version, blocking_gap, reason)
   end
-  local marker = m_builders.fix_reflection_marker(M, 
-    review_meta.proposal_id,
+  local marker = m_builders.fix_reflection_marker(review_meta.proposal_id,
     review_meta.dedup_key,
     action,
     state_version,

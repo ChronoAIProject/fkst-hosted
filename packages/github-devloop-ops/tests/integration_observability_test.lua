@@ -594,7 +594,7 @@ return {
     mock_all_issue_lists({})
     mock_pr_list({ 7 })
     mock_reaper_pr(proposal_id, 42, 7, {
-      render_comment(decompose_lib.decomposed_marker(core, proposal_id, version, 7, 2), "fkst-test-bot"),
+      render_comment(decompose_lib.decomposed_marker(proposal_id, version, 7, 2), "fkst-test-bot"),
       render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/1/aaa" issue="132" -->', "fkst-test-bot"),
       render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/2/bbb" issue="146" -->', "fkst-test-bot"),
     })
@@ -623,7 +623,7 @@ return {
     mock_all_issue_lists({})
     mock_pr_list({ 7 })
     mock_reaper_pr(proposal_id, 42, 7, {
-      render_comment(decompose_lib.decomposed_marker(core, proposal_id, version, 7, 2), "fkst-test-bot"),
+      render_comment(decompose_lib.decomposed_marker(proposal_id, version, 7, 2), "fkst-test-bot"),
       render_comment('<!-- fkst:github-proxy:issue-created:v1 dedup="decompose/' .. proposal_id .. '/' .. version .. '/1/aaa" issue="132" -->', "fkst-test-bot"),
     })
     mock_issue_view({

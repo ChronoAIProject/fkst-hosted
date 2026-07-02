@@ -415,7 +415,7 @@ function C.fetch_issue_view_open_pr(M, repo, issue_number, updated_at, opts)
   return C.fetch_marker_issue_view(M, repo, issue_number, updated_at, options)
 end
 
-function C.commit_issue_subject_snapshot(M, repo, issue_number)
+function C.commit_issue_subject_snapshot(repo, issue_number)
   if issue_number == nil then
     return {}
   end

@@ -62,7 +62,7 @@ function C.is_supported_decompose(M, payload)
     and source_refs.has_bounded_source_ref(payload.source_ref, M._max_key_len)
 end
 
-function C.decomposed_marker(M, proposal_id, version, pr_number, count)
+function C.decomposed_marker(proposal_id, version, pr_number, count)
   local issue_count = tonumber(count)
   if issue_count == nil or issue_count < 1 or issue_count > max_decompose_issues or issue_count % 1 ~= 0 then
     error("github-devloop: invalid decomposed count")

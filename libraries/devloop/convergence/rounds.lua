@@ -60,7 +60,7 @@ local function converge_record_map(M, comments, kind, matches)
   end)
   return facts
 end
-function C.append_converge_round_fact(M, facts, round, narrowed_question, angle_digests, dedup_key)
+function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key)
   local copied = {}
   for _, fact in ipairs(facts or {}) do
     table.insert(copied, fact)

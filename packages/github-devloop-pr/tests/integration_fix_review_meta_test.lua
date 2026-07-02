@@ -139,7 +139,7 @@ return {
     local expected_version = core.next_fix_version(event.version)
 	    t.eq(label_raise.payload.add_labels[1], "fkst-dev:reviewing")
 	    t.is_true(has_value(label_raise.payload.remove_labels, "fkst-dev:fixing"))
-	    t.is_true(comment_raise.payload.body:find(m_builders.fix_marker(core, event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "feedface"), 1, true) ~= nil)
+	    t.is_true(comment_raise.payload.body:find(m_builders.fix_marker(event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "feedface"), 1, true) ~= nil)
     local current = core.current_state({
       core.state_marker(event.proposal_id, "fixing", event.version),
       comment_raise.payload.body,

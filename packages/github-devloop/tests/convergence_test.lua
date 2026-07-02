@@ -187,8 +187,7 @@ return {
     }
     local question = "  Which boundary\nshould narrow next?  "
     local angle_digests = angles()
-    local appended = conv_rounds.append_converge_round_fact(core,
-      existing,
+    local appended = conv_rounds.append_converge_round_fact(existing,
       2,
       question,
       angle_digests,

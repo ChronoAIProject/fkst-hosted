@@ -180,7 +180,7 @@ function C.build_implementing_comment_request(M, repo, issue_number, ready, work
   if not forge_validators.is_git_sha(base_sha) then
     error("github-devloop: invalid implementing base_sha")
   end
-  local marker = m_builders.implementing_marker(M, ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
+  local marker = m_builders.implementing_marker(ready.proposal_id, ready.dedup_key, branch, head_sha, base_branch, base_sha)
   local attempt_marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, attempt or 1, started_at or "", exec_ref)
   return m_claims.attach_issue_claim({
     schema = "github-proxy.v1",

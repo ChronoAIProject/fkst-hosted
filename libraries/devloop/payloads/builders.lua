@@ -228,7 +228,7 @@ function C.build_devloop_review_meta_payload(M, unresolved, issue_proposal_id, i
   }
 end
 
-function C.fix_reflection_dedup_key(M, issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+function C.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
   return base_ids.dedup_key({
     "fix-reflection",
     tostring(issue_proposal_id),
@@ -248,7 +248,7 @@ function C.build_devloop_fix_reflection_payload(M, unresolved, issue_proposal_id
   }, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
   payload.mode = "fix-reflection"
   payload.fix_round = fix_round
-  payload.dedup_key = C.fix_reflection_dedup_key(M, issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
+  payload.dedup_key = C.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, fix_round, review_dedup_key)
   return payload
 end
 

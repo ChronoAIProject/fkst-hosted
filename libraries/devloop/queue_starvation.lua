@@ -338,7 +338,7 @@ local function queue_head_entity(queue_head)
   return queue_head
 end
 
-function C.queue_starvation_redrive_payload(M, repo, evidence)
+function C.queue_starvation_redrive_payload(repo, evidence)
   local head = queue_head_entity(evidence and evidence.queue_head or nil)
   if type(head) ~= "table" or head.pr_number == nil then
     return nil
@@ -456,7 +456,7 @@ function C.observe_queue_starvation(M, repo, entities, limits, deadline, now_sec
     recent_closed = recent_closed,
   }
   evidence.incident_identity = stable_incident_identity(M, queue_head)
-  local redrive = C.queue_starvation_redrive_payload(M, repo, evidence)
+  local redrive = C.queue_starvation_redrive_payload(repo, evidence)
   if newest ~= nil and newest.age_minutes <= merge_recent_threshold_minutes then
     raise_redrive(M, redrive)
     log.info("github-devloop dept=observability tag=QUEUE_STARVATION action=suppress"

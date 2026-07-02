@@ -69,7 +69,7 @@ function C.entity_list_cache_key(M, repo, kind, scope, poll_key)
   return list_cache_key(M, repo, kind, scope, poll_key)
 end
 
-function C.entity_list_poll_key(M, event)
+function C.entity_list_poll_key(event)
   if type(event) == "table" then
     if event.ts ~= nil then
       return tostring(event.ts)

@@ -186,7 +186,7 @@ local function payload_for_queue(queue)
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
     },
     devloop_liveness_tick = { schema = "github-devloop.tick.v1" },
-    devloop_merge_queue_tick = m_mq.merge_queue_tick_payload(core, "owner/repo", 6, {
+    devloop_merge_queue_tick = m_mq.merge_queue_tick_payload("owner/repo", 6, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       pr_number = 7,
       version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",

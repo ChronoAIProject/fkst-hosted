@@ -170,7 +170,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.narrowed_question,
       unresolved.angle_digests
     )
-    local facts_with_current = conv_rounds.append_converge_round_fact(core, facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
+    local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
     local budget_round = math.max(round, conv_rounds.review_converge_budget_round(core, current_pr.comments, unresolved.proposal_id, origin.proposal_id))
     local hit_round_cap = budget_round >= config.max_converge_rounds()
     if hit_round_cap or conv_rounds.is_true_stall(core, facts_with_current, round) then

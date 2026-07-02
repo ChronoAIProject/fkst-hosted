@@ -73,7 +73,7 @@ end
 local function visible_issue_comments(event, branch)
   return {
     core.state_marker(event.proposal_id, "implementing", event.dedup_key),
-    m_builders.implementing_marker(core, event.proposal_id, event.dedup_key, branch, head_sha, "dev", base_sha),
+    m_builders.implementing_marker(event.proposal_id, event.dedup_key, branch, head_sha, "dev", base_sha),
     m_builders.pr_delegation_marker(core, event.proposal_id, pr_proposal_id, 7, event.dedup_key, "g1"),
   }
 end

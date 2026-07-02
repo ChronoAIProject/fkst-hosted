@@ -74,8 +74,7 @@ return {
 
   test_marker_builders_gitref_validation_does_not_need_base_install = function()
     local M = {}
-    local marker = marker_builders.implementing_marker(M,
-      "github-devloop/issue/owner/repo/42",
+    local marker = marker_builders.implementing_marker("github-devloop/issue/owner/repo/42",
       "dedup-key",
       "feature/foo",
       forty("a"),

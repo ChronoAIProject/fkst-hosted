@@ -107,7 +107,7 @@ return {
     t.eq(reviewing_raise, nil)
     t.eq(comment_raise.payload.pr_number, 7)
     t.eq(comment_raise.payload.issue_number, nil)
-    t.is_true(comment_raise.payload.body:find(m_builders.fix_marker(core, event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "feedface"), 1, true) ~= nil)
+    t.is_true(comment_raise.payload.body:find(m_builders.fix_marker(event.proposal_id, event.review_proposal_id, event.review_dedup_key, "def456", "feedface"), 1, true) ~= nil)
     t.eq(core.current_state({ comment_raise.payload.body }, event.proposal_id).state, "reviewing")
     t.eq(core.current_state({ comment_raise.payload.body }, event.proposal_id).version, expected_version)
     t.eq(comment_raise.payload.handoff.kind, "github-devloop.reviewing")

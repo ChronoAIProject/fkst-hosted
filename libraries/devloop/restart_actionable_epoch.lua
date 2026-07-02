@@ -454,7 +454,7 @@ function C.actionable_epoch_codex_run_decision(M, row, state, facts, due, age)
   }
 end
 
-function C.actionable_epoch_child_workflow_decision(M, row, state, facts, due, age)
+function C.actionable_epoch_child_workflow_decision(row, state, facts, due, age)
   local eval = facts and facts.actionable_epoch_eval
   if not (row
     and row.actionable_epoch

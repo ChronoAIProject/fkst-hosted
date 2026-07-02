@@ -35,7 +35,7 @@ end
 local function mock_reflection_context(event, ledger)
   mock_issue_review_meta({ "fkst-dev:review-meta" }, {
     core.state_marker(event.proposal_id, "review-meta", event.version),
-    m_builders.fix_reflection_marker(core, event.proposal_id, event.dedup_key, "checkpoint", event.version, 3),
+    m_builders.fix_reflection_marker(event.proposal_id, event.dedup_key, "checkpoint", event.version, 3),
     ledger,
   })
   h.mock_context_bundle()
@@ -122,7 +122,7 @@ return {
         body = table.concat({
           core.state_marker("github-devloop/issue/owner/repo/42", "review-meta", issue_version),
           m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "reject", review_dedup, 3, "missing regression guard"),
-          m_builders.fix_reflection_marker(core, "github-devloop/issue/owner/repo/42", review_dedup, "checkpoint", issue_version, 3),
+          m_builders.fix_reflection_marker("github-devloop/issue/owner/repo/42", review_dedup, "checkpoint", issue_version, 3),
         }, "\n"),
         created_at = "2026-06-03T01:02:03Z",
       },

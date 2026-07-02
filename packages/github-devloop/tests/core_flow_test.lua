@@ -508,10 +508,10 @@ return {
       "/tmp/fkst-rt"
     ))
 
-    local marker = m_builders.implementing_marker(core, ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
+    local marker = m_builders.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
     t.eq(m_facts.has_implementing_marker(core, { marker }, ready.proposal_id, ready.dedup_key), true)
-    local branch_marker = m_builders.implementing_marker(core, ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
+    local branch_marker = m_builders.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     local fact = m_facts.implementing_fact(core, { branch_marker }, ready.proposal_id, ready.dedup_key)
     t.eq(fact.branch, "devloop-owner-repo-42-01HY")
     t.eq(fact.head_sha, "abc123")

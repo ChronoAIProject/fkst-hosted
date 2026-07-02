@@ -687,7 +687,7 @@ return {
     local current = core.current_state({
       core.state_marker(proposal_id, "fixing", version),
       core.state_marker(proposal_id, "reviewing", new_version),
-      m_builders.fix_marker(core, proposal_id, "github-devloop/pr-review/owner-repo-0000000000/7/v1/def456", "review", "def456", sha_like_lower_version),
+      m_builders.fix_marker(proposal_id, "github-devloop/pr-review/owner-repo-0000000000/7/v1/def456", "review", "def456", sha_like_lower_version),
     }, proposal_id)
 
     t.eq(core.version_fix_round(new_version), core.version_fix_round(version) + 1)

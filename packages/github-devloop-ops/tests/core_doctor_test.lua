@@ -119,7 +119,7 @@ return {
     local current = entity({ "fkst-dev:enabled", "fkst-dev:blocked" }, {
       state_comment("blocked"),
       bot_comment(m_builders.pr_link_marker(core, proposal_id, 7, "devloop/issue/owner/repo/42/v", version, "dev")),
-      bot_comment(decompose_lib.decomposed_marker(core, proposal_id, version, 7, 2)),
+      bot_comment(decompose_lib.decomposed_marker(proposal_id, version, 7, 2)),
     })
 
     local result = classify(current, {

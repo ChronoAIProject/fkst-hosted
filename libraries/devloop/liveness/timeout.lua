@@ -164,7 +164,7 @@ function M.liveness_timeout_decision_with_facts(row, state, facts, now_seconds)
   if heartbeat ~= nil then return heartbeat end
   local codex_run = m_rae.actionable_epoch_codex_run_decision(M, row, state, facts, due, age)
   if codex_run ~= nil then return codex_run end
-  local child_workflow = m_rae.actionable_epoch_child_workflow_decision(M, row, state, facts, due, age)
+  local child_workflow = m_rae.actionable_epoch_child_workflow_decision(row, state, facts, due, age)
   if child_workflow ~= nil then return child_workflow end
   if not due then
     return { action = "wait", age_minutes = age }

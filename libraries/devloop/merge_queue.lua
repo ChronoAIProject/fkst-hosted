@@ -367,7 +367,7 @@ function C.merge_queue_tick_dedup_key(repo, merged_pr_number, next_entry)
   })
 end
 
-function C.merge_queue_tick_payload(M, repo, merged_pr_number, next_entry)
+function C.merge_queue_tick_payload(repo, merged_pr_number, next_entry)
   if type(next_entry) ~= "table" then
     return nil
   end

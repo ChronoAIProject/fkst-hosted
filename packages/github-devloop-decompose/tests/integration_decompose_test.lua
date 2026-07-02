@@ -40,7 +40,7 @@ local function run_decompose_with_post_marker(event, run_opts, count)
   mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
   mock_pr_view(event, blocked_comments(event), "2026-06-03T02:03:04Z")
   mock_pr_view(event, blocked_comments(event, {
-    decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, count),
+    decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, count),
   }), "2026-06-03T02:03:05Z")
   return t.run_department("departments/decompose/main.lua", {
     queue = "devloop_decompose",
@@ -258,7 +258,7 @@ return {
     mock_bot_env()
     mock_write_env_real()
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 1),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 1),
       issue_created_marker(child_dedup_key(event, 1), "101"),
     }))
     mock_child_issue_list(event, { 1 })
@@ -285,11 +285,11 @@ return {
       body = "Original body that describes too much scope.",
     })
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 2),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
       issue_created_marker(stale_dedup, "101"),
     }))
     mock_pr_view(event, blocked_comments(event, {
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 2),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 2),
       issue_created_marker(stale_dedup, "101"),
     }))
     mock_child_issue_list_repeated(event, {}, 4)
@@ -314,10 +314,10 @@ return {
       body = "Original body that describes too much scope.",
     })
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event, {
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     }))
     mock_pr_view(event, blocked_comments(event, {
-      decompose_lib.decomposed_marker(core, event.proposal_id, event.version, event.pr_number, 3),
+      decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, 3),
     }))
     mock_child_issue_list_repeated(event, { 1, 3 }, 3)
     mock_decompose_codex([[{"issues":[{"title":"One","body":"Smaller scope: one.\nNon-goals: none.\nAcceptance: one."},{"title":"Two","body":"Smaller scope: two.\nNon-goals: none.\nAcceptance: two."},{"title":"Three","body":"Smaller scope: three.\nNon-goals: none.\nAcceptance: three."}]}]])

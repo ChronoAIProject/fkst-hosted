@@ -106,7 +106,7 @@ local function payload_for_queue(_path, queue)
     devloop_fix_reconcile = h.fix_reconcile(),
     devloop_fixing = h.fixing(),
     devloop_liveness_tick = { schema = "github-devloop.tick.v1" },
-    devloop_merge_queue_tick = m_mq.merge_queue_tick_payload(core, "owner/repo", 6, {
+    devloop_merge_queue_tick = m_mq.merge_queue_tick_payload("owner/repo", 6, {
       proposal_id = "github-devloop/issue/owner/repo/42",
       pr_number = 7,
       version = h.reviewing().version,
