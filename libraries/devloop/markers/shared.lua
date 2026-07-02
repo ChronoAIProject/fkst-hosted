@@ -27,7 +27,7 @@ function S.marker_attr(marker, name)
   return marker:match(name .. '="([^"]*)"')
 end
 
-function S.safe_marker_attr(M, value, limit)
+function S.safe_marker_attr(value, limit)
   local text = tostring(value or "")
   text = text:gsub("<!%-%- fkst:[^\n]*%-%->", " ")
   text = text:gsub("&lt;!%-%- fkst:[^\n]*%-%-&gt;", " ")

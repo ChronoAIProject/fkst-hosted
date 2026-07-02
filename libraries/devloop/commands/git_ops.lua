@@ -49,61 +49,61 @@ end
   end
 
   function C.git_base_head(branch, timeout)
-    return support.git().remote_branch_head("origin", validators.require_safe_branch(nil, "base branch", branch), timeout)
+    return support.git().remote_branch_head("origin", validators.require_safe_branch("base branch", branch), timeout)
   end
 
   function C.git_fetch_branch(remote, branch, timeout)
-    return support.git().fetch_branch(validators.require_safe_remote(nil, remote), validators.require_safe_branch(nil, "fetch branch", branch), timeout)
+    return support.git().fetch_branch(validators.require_safe_remote(remote), validators.require_safe_branch("fetch branch", branch), timeout)
   end
 
   function C.git_ls_remote_branch(remote, branch, timeout)
-    return support.git().ls_remote_branch(validators.require_safe_remote(nil, remote), validators.require_safe_branch(nil, "remote branch", branch), timeout)
+    return support.git().ls_remote_branch(validators.require_safe_remote(remote), validators.require_safe_branch("remote branch", branch), timeout)
   end
 
   function C.git_ls_remote_ref(remote, ref, timeout)
     return support.git().ls_remote_ref(
-      validators.require_safe_remote(nil, remote),
-      validators.require_safe_ref(nil, "remote ref", ref),
+      validators.require_safe_remote(remote),
+      validators.require_safe_ref("remote ref", ref),
       timeout
     )
   end
 
   function C.git_fetch_ref(remote, ref, timeout)
     return support.git().fetch_ref(
-      validators.require_safe_remote(nil, remote),
-      validators.require_safe_ref(nil, "fetch ref", ref),
+      validators.require_safe_remote(remote),
+      validators.require_safe_ref("fetch ref", ref),
       timeout
     )
   end
 
   function C.git_fetch_remote_branch_to_tracking_ref(remote, branch, tracking_ref, timeout)
     return support.git().fetch_remote_branch_to_tracking_ref(
-      validators.require_safe_remote(nil, remote),
-      validators.require_safe_branch(nil, "remote branch", branch),
-      validators.require_safe_branch(nil, "tracking ref", tracking_ref),
+      validators.require_safe_remote(remote),
+      validators.require_safe_branch("remote branch", branch),
+      validators.require_safe_branch("tracking ref", tracking_ref),
       timeout
     )
   end
 
   function C.git_rev_parse_ref_commit(ref, timeout)
-    return support.git().rev_parse_ref_commit(validators.require_safe_ref(nil, "ref", ref), timeout)
+    return support.git().rev_parse_ref_commit(validators.require_safe_ref("ref", ref), timeout)
   end
 
   function C.git_rev_parse_ref_tree(ref, timeout)
-    return support.git().rev_parse_ref_tree(validators.require_safe_ref(nil, "tree ref", ref), timeout)
+    return support.git().rev_parse_ref_tree(validators.require_safe_ref("tree ref", ref), timeout)
   end
 
   function C.git_cat_file_pretty(ref, timeout)
-    return support.git().cat_file_pretty(validators.require_safe_ref(nil, "object ref", ref), timeout)
+    return support.git().cat_file_pretty(validators.require_safe_ref("object ref", ref), timeout)
   end
 
   function C.git_commit_tree(tree_sha, parent_sha, message_file, timeout)
     local parent = nil
     if parent_sha ~= nil and tostring(parent_sha) ~= "" then
-      parent = validators.require_safe_sha(nil, "parent commit", parent_sha)
+      parent = validators.require_safe_sha("parent commit", parent_sha)
     end
     return support.git().commit_tree(
-      validators.require_safe_sha(nil, "tree sha", tree_sha),
+      validators.require_safe_sha("tree sha", tree_sha),
       parent,
       message_file,
       timeout
@@ -113,23 +113,23 @@ end
   function C.git_push_ref_update(remote, sha, ref, force_with_lease, timeout)
     local lease = false
     if force_with_lease ~= nil and force_with_lease ~= false then
-      lease = validators.require_safe_sha(nil, "lease sha", force_with_lease)
+      lease = validators.require_safe_sha("lease sha", force_with_lease)
     end
     return support.git().push_ref_update(
-      validators.require_safe_remote(nil, remote),
-      validators.require_safe_sha(nil, "ref update sha", sha),
-      validators.require_safe_ref(nil, "ref update ref", ref),
+      validators.require_safe_remote(remote),
+      validators.require_safe_sha("ref update sha", sha),
+      validators.require_safe_ref("ref update ref", ref),
       lease,
       timeout
     )
   end
 
   function C.git_fetch_pr_merge_ref(remote, pr_number, timeout)
-    return support.git().fetch_ref(validators.require_safe_remote(nil, remote), "refs/pull/" .. validators.require_positive_pr_number(nil, pr_number) .. "/merge", timeout)
+    return support.git().fetch_ref(validators.require_safe_remote(remote), "refs/pull/" .. validators.require_positive_pr_number(pr_number) .. "/merge", timeout)
   end
 
   function C.git_fetch_pr_head_ref(remote, pr_number, timeout)
-    return support.git().fetch_ref(validators.require_safe_remote(nil, remote), "refs/pull/" .. validators.require_positive_pr_number(nil, pr_number) .. "/head", timeout)
+    return support.git().fetch_ref(validators.require_safe_remote(remote), "refs/pull/" .. validators.require_positive_pr_number(pr_number) .. "/head", timeout)
   end
 
   function C.git_fetch_head_commit(timeout)
@@ -137,15 +137,15 @@ end
   end
 
   function C.git_remote_branch_head(remote, branch, timeout)
-    return support.git().remote_branch_head(validators.require_safe_remote(nil, remote), validators.require_safe_branch(nil, "remote branch", branch), timeout)
+    return support.git().remote_branch_head(validators.require_safe_remote(remote), validators.require_safe_branch("remote branch", branch), timeout)
   end
 
   function C.git_worktree_merge_no_edit(worktree, sha, timeout)
-    return support.git().merge_no_edit(worktree, validators.require_safe_sha(nil, "merge sha", sha), timeout)
+    return support.git().merge_no_edit(worktree, validators.require_safe_sha("merge sha", sha), timeout)
   end
 
   function C.git_worktree_reset_hard(worktree, branch, timeout)
-    return support.git().reset_hard_branch(worktree, validators.require_safe_branch(nil, "reset branch", branch), timeout)
+    return support.git().reset_hard_branch(worktree, validators.require_safe_branch("reset branch", branch), timeout)
   end
 
   function C.git_worktree_clean(worktree, timeout)
@@ -154,34 +154,34 @@ end
 
   function C.git_ahead_count(upstream, integration, timeout)
     return support.git().remote_ahead_count(
-      validators.require_safe_branch(nil, "upstream branch", upstream),
-      validators.require_safe_branch(nil, "integration branch", integration),
+      validators.require_safe_branch("upstream branch", upstream),
+      validators.require_safe_branch("integration branch", integration),
       timeout
     )
   end
 
   function C.git_show_ref_branch(branch, timeout)
-    return support.git().show_ref_branch_quiet(validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().show_ref_branch_quiet(validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_show_ref(worktree, branch, timeout)
-    return support.git().show_ref_worktree_branch_quiet(worktree, validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().show_ref_worktree_branch_quiet(worktree, validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_branch_ahead_count(base, branch, timeout)
-    return support.git().branch_ahead_count(validators.require_safe_sha(nil, "base head", base), validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().branch_ahead_count(validators.require_safe_sha("base head", base), validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_branch_head(branch, timeout)
-    return support.git().branch_head(validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().branch_head(validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_push_branch(branch, timeout)
-    return support.git().push_branch_plain(validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().push_branch_plain(validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_switch_branch(worktree, branch, timeout)
-    return support.git().switch_branch(worktree, validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().switch_branch(worktree, validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_worktree_remove_if_present(worktree, timeout)
@@ -210,25 +210,25 @@ end
 
   function C.git_worktree_add_new_branch(worktree, branch, base, timeout)
     S.run_mkdir(nil, S.worktree_parent_dir(worktree), 30)
-    return support.git().worktree_add_new_branch(worktree, validators.require_safe_branch(nil, "branch", branch), validators.require_safe_sha(nil, "base head", base), timeout)
+    return support.git().worktree_add_new_branch(worktree, validators.require_safe_branch("branch", branch), validators.require_safe_sha("base head", base), timeout)
   end
 
   function C.git_worktree_add_reset_branch(worktree, branch, base, timeout)
     S.run_mkdir(nil, S.worktree_parent_dir(worktree), 30)
-    return support.git().worktree_add_reset_branch(worktree, validators.require_safe_branch(nil, "branch", branch), validators.require_safe_sha(nil, "base head", base), timeout)
+    return support.git().worktree_add_reset_branch(worktree, validators.require_safe_branch("branch", branch), validators.require_safe_sha("base head", base), timeout)
   end
 
   function C.git_worktree_add_existing_branch(worktree, branch, timeout)
     S.run_mkdir(nil, S.worktree_parent_dir(worktree), 30)
-    return support.git().worktree_add_existing_branch(worktree, validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().worktree_add_existing_branch(worktree, validators.require_safe_branch("branch", branch), timeout)
   end
 
   function C.git_worktree_add_remote_branch(worktree, remote, branch, force, timeout)
     S.run_mkdir(nil, S.worktree_parent_dir(worktree), 30)
     return support.git().worktree_add_remote_branch(
       worktree,
-      validators.require_safe_remote(nil, remote),
-      validators.require_safe_branch(nil, "branch", branch),
+      validators.require_safe_remote(remote),
+      validators.require_safe_branch("branch", branch),
       force == true,
       timeout
     )
@@ -243,7 +243,7 @@ end
   end
 
   function C.git_rev_parse_branch(worktree, branch, timeout)
-    return support.git().rev_parse_worktree_branch(worktree, validators.require_safe_branch(nil, "branch", branch), timeout)
+    return support.git().rev_parse_worktree_branch(worktree, validators.require_safe_branch("branch", branch), timeout)
   end
 
   C.read_runtime_root_cmd = devloop_base.read_runtime_root_cmd

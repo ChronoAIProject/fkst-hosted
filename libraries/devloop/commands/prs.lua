@@ -17,7 +17,7 @@ local validators = require("devloop.commands.validators")
 
   function C.gh_pr_list_merge_queue(repo, base, timeout)
     return support.gh_result(function()
-      return support.github().pr_list_merge_queue(repo, validators.require_safe_branch(nil, "merge queue base branch", base), timeout)
+      return support.github().pr_list_merge_queue(repo, validators.require_safe_branch("merge queue base branch", base), timeout)
     end)
   end
 
@@ -68,8 +68,8 @@ local validators = require("devloop.commands.validators")
     return support.gh_result(function()
       return support.github().pr_list_head(
         repo,
-        validators.require_safe_branch(nil, "PR head branch", head),
-        validators.require_safe_branch(nil, "PR base branch", base),
+        validators.require_safe_branch("PR head branch", head),
+        validators.require_safe_branch("PR base branch", base),
         timeout
       )
     end)
@@ -77,7 +77,7 @@ local validators = require("devloop.commands.validators")
 
   function C.gh_pr_list_head(repo, head, timeout)
     return support.gh_result(function()
-      return support.github().pr_list_head(repo, validators.require_safe_branch(nil, "PR head branch", head), nil, timeout)
+      return support.github().pr_list_head(repo, validators.require_safe_branch("PR head branch", head), nil, timeout)
     end)
   end
 
@@ -85,8 +85,8 @@ local validators = require("devloop.commands.validators")
     return support.gh_result(function()
       return support.github().pr_create(
         repo,
-        validators.require_safe_branch(nil, "PR head branch", head),
-        validators.require_safe_branch(nil, "PR base branch", base),
+        validators.require_safe_branch("PR head branch", head),
+        validators.require_safe_branch("PR base branch", base),
         title,
         body_file,
         timeout
@@ -98,8 +98,8 @@ local validators = require("devloop.commands.validators")
     return support.gh_result(function()
       return support.github().pr_create_body(
         repo,
-        validators.require_safe_branch(nil, "PR head branch", head),
-        validators.require_safe_branch(nil, "PR base branch", base),
+        validators.require_safe_branch("PR head branch", head),
+        validators.require_safe_branch("PR base branch", base),
         title,
         body,
         timeout

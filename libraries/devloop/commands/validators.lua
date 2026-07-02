@@ -17,23 +17,23 @@ function S.validate_fields(fields, message)
   return selected_fields
 end
 
-function S.require_safe_branch(M, name, value)
+function S.require_safe_branch(name, value)
   return forge_validators.require_safe_branch(name, value, "github-devloop")
 end
 
-function S.require_safe_ref(M, name, value)
+function S.require_safe_ref(name, value)
   return forge_validators.require_safe_branch(name, value, "github-devloop")
 end
 
-function S.require_safe_remote(M, remote)
+function S.require_safe_remote(remote)
   return forge_validators.require_safe_remote(remote, "github-devloop")
 end
 
-function S.require_safe_sha(M, name, value)
+function S.require_safe_sha(name, value)
   return forge_validators.require_safe_sha(name, value, "github-devloop")
 end
 
-function S.require_positive_pr_number(M, value)
+function S.require_positive_pr_number(value)
   return forge_validators.require_positive_pr_number(value, "github-devloop")
 end
 
