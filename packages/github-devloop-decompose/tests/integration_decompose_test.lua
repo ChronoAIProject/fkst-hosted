@@ -78,7 +78,7 @@ local function mock_child_issue_list(event, indexes)
       '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
       100 + index,
       index,
-      h.json_string(decompose_lib.decompose_child_marker(core, event.proposal_id, event.version, event.pr_number, index)),
+      h.json_string(decompose_lib.decompose_child_marker(event.proposal_id, event.version, event.pr_number, index)),
       100 + index
     ))
   end
@@ -379,7 +379,7 @@ return {
     h.set_pr_phase_comments({ "fkst-dev:blocked" }, blocked_comments(event))
     mock_issue_decompose({ "fkst-dev:blocked" }, blocked_comments(event), {
       title = "Child issue",
-      body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(core, event.proposal_id, 1),
+      body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(event.proposal_id, 1),
     })
     mock_pr_view(event, blocked_comments(event))
 

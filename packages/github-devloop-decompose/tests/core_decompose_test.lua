@@ -85,24 +85,24 @@ return {
       },
     }, {
       {
-        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 3),
+        body = decompose_lib.decompose_child_marker(proposal_id, version, 7, 3),
         author_login = "fkst-test-bot",
         state = "OPEN",
       },
       {
-        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 2),
+        body = decompose_lib.decompose_child_marker(proposal_id, version, 7, 2),
         author_login = "someone-else",
         state = "OPEN",
       },
     }, proposal_id, version, 7, dedup_by_index)
     local live_completed = decompose_lib.decompose_child_issue_fact_indexes(core, {
       {
-        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 1),
+        body = decompose_lib.decompose_child_marker(proposal_id, version, 7, 1),
         author_login = "fkst-test-bot",
         state = "CLOSED",
       },
       {
-        body = decompose_lib.decompose_child_marker(core, proposal_id, version, 7, 2),
+        body = decompose_lib.decompose_child_marker(proposal_id, version, 7, 2),
         author_login = "fkst-test-bot",
         state = "OPEN",
       },

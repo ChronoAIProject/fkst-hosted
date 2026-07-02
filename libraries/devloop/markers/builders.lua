@@ -136,7 +136,7 @@ function C.pr_link_marker(M, proposal_id, pr_number, branch, impl_version, base_
     .. '" -->'
 end
 
-function C.pr_link_marker_template(M, proposal_id, branch, impl_version, base_branch)
+function C.pr_link_marker_template(proposal_id, branch, impl_version, base_branch)
   if not forge_validators.is_git_ref_safe(branch) then
     error("github-devloop: invalid branch")
   end
@@ -321,7 +321,7 @@ function C.intake_decision_marker(M, issue_proposal_id, decision, dedup_key, ser
     .. '" -->'
 end
 
-function C.orphan_reaped_marker(M, proposal_id, pr_number, reason)
+function C.orphan_reaped_marker(proposal_id, pr_number, reason)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid orphan reaped pr number")
   end
@@ -332,7 +332,7 @@ function C.orphan_reaped_marker(M, proposal_id, pr_number, reason)
     .. '" -->'
 end
 
-function C.pr_base_unmanaged_marker(M, proposal_id, pr_number, pr_base, integration_branch)
+function C.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration_branch)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid unmanaged-base pr number")
   end

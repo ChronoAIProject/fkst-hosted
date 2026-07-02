@@ -67,7 +67,7 @@ local function mock_claim_and_reads(payload)
     repo = "owner/repo",
     number = 42,
     title = "Original large issue",
-    body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(core, payload.proposal_id, 1),
+    body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(payload.proposal_id, 1),
     labels = { "fkst-dev:blocked" },
     comments = {
       core.state_marker(payload.proposal_id, "blocked", payload.version),

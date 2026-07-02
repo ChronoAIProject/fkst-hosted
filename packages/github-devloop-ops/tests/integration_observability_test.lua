@@ -574,7 +574,7 @@ return {
     mock_all_issue_lists({})
     mock_pr_list({ 7 })
     mock_reaper_pr(proposal_id, 42, 7, {
-      render_comment(m_builders.orphan_reaped_marker(core, proposal_id, 7, "parent-closed"), "fkst-test-bot"),
+      render_comment(m_builders.orphan_reaped_marker(proposal_id, 7, "parent-closed"), "fkst-test-bot"),
     })
     mock_dashboard_issue_list()
     mock_dashboard_create()

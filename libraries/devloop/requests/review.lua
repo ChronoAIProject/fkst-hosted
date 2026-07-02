@@ -151,7 +151,7 @@ end
 function C.build_pr_base_unmanaged_comment_request(M, repo, pr_number, origin, integration_branch, source_ref)
   local blocked_version = C.pr_base_unmanaged_blocked_version(M, origin.impl_version)
   local state_marker = M.state_marker(origin.proposal_id, "blocked", blocked_version)
-  local reason_marker = m_builders.pr_base_unmanaged_marker(M, origin.proposal_id, pr_number, origin.base_branch, integration_branch)
+  local reason_marker = m_builders.pr_base_unmanaged_marker(origin.proposal_id, pr_number, origin.base_branch, integration_branch)
   return C.attach_blocked_handoff(M, entity_lib.build_entity_comment_request({
     kind = "pr",
     repo = repo,

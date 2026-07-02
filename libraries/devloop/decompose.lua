@@ -243,7 +243,7 @@ function C.build_decompose_replay_payload(M, fact, comments_or_feedback, source_
   return payload
 end
 
-function C.decompose_child_marker(M, proposal_id, version, pr_number, index)
+function C.decompose_child_marker(proposal_id, version, pr_number, index)
   return '<!-- fkst:github-devloop:decompose-child:v1 parent="' .. tostring(proposal_id)
     .. '" version="' .. tostring(version)
     .. '" pr="' .. tostring(pr_number)
@@ -251,7 +251,7 @@ function C.decompose_child_marker(M, proposal_id, version, pr_number, index)
     .. '" -->'
 end
 
-function C.decompose_lineage_marker(M, root_proposal_id, depth)
+function C.decompose_lineage_marker(root_proposal_id, depth)
   local n = tonumber(depth)
   if n == nil or n < 0 or n % 1 ~= 0 then
     error("github-devloop: invalid decompose lineage depth")

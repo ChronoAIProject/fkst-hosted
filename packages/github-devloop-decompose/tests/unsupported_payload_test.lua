@@ -29,7 +29,7 @@ return {
         core.state_marker(payload.proposal_id, "blocked", payload.version),
       },
       title = "Original large issue",
-      body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(core, payload.proposal_id, 1),
+      body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(payload.proposal_id, 1),
     }, "title,body,labels,comments")
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = {

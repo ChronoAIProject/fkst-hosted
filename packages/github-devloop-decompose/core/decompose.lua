@@ -82,8 +82,8 @@ function M.build_issue_create_request(repo, decompose, issue, index)
     .. "\n\nNon-goals:\n- Do not repeat the same high-round fix path without reducing scope or changing approach."
     .. "\n\nAcceptance:\n- The work is independently reviewable."
     .. "\n- The implementation can pass the normal intake, consensus, implementation, and review pipeline."
-    .. "\n\n" .. decompose_lib.decompose_lineage_marker(M, decompose.proposal_id, decompose_lib.decompose_lineage_depth(M, decompose.current_issue_body) + 1)
-    .. "\n\n" .. decompose_lib.decompose_child_marker(M, decompose.proposal_id, decompose.version, decompose.pr_number, index)
+    .. "\n\n" .. decompose_lib.decompose_lineage_marker(decompose.proposal_id, decompose_lib.decompose_lineage_depth(M, decompose.current_issue_body) + 1)
+    .. "\n\n" .. decompose_lib.decompose_child_marker(decompose.proposal_id, decompose.version, decompose.pr_number, index)
   if #body > M._max_body_len then
     body = base_ids.truncate_utf8(body, M._max_body_len)
   end

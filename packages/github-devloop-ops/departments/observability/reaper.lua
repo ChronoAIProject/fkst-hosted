@@ -117,7 +117,7 @@ local function reaper_comment_body(proposal_id, pr_number, reason)
     .. "Reason: " .. reason_text .. "\n"
     .. "Successors: " .. successor_summary(reason and reason.successors or {}, nil) .. "\n"
     .. "Branch cleanup is intentionally left to a separate manual or managed path.\n\n"
-    .. m_builders.orphan_reaped_marker(core, proposal_id, pr_number, reason and reason.code or "parent-terminal")
+    .. m_builders.orphan_reaped_marker(proposal_id, pr_number, reason and reason.code or "parent-terminal")
     .. "\n"
 end
 

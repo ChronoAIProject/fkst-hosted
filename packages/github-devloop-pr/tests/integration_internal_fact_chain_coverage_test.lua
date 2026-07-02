@@ -99,7 +99,7 @@ local function mock_decompose_child_issue_list(event, indexes)
       '{"number":%d,"title":"Child %d","state":"OPEN","author":{"login":"fkst-test-bot"},"body":"%s","url":"https://github.example/owner/repo/issues/%d"}',
       100 + index,
       index,
-      h.json_string(decompose_lib.decompose_child_marker(core, event.proposal_id, event.version, event.pr_number, index)),
+      h.json_string(decompose_lib.decompose_child_marker(event.proposal_id, event.version, event.pr_number, index)),
       100 + index
     ))
   end
