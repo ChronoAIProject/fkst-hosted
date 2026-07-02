@@ -16,6 +16,7 @@ use serde::Deserialize;
 use crate::env_config::EnvConfig;
 use crate::error::AppError;
 use crate::reconcile_config::ReconcileConfig;
+use crate::storage::ChronoStorageConfig;
 
 /// Prefix shared by every HTTP/server configuration environment variable.
 const ENV_PREFIX: &str = "FKST_HOSTED_";
@@ -276,6 +277,11 @@ pub struct Config {
     /// Model B reconciler knobs (`FKST_*`, issue #359 §4). Config surface only —
     /// no behaviour reads these yet (PR5b wires the loop; PR6 flips Model B on).
     pub reconcile: ReconcileConfig,
+    /// Optional chrono-storage log-streaming config (`FKST_STORAGE_*` /
+    /// `FKST_NYXID_*`). `None` when the feature is unset (log streaming
+    /// disabled); a partial config fails closed at startup (see
+    /// [`ChronoStorageConfig::from_vars`]).
+    pub storage: Option<ChronoStorageConfig>,
 }
 
 impl Default for Config {
@@ -292,6 +298,7 @@ impl Default for Config {
             pod: PodConfig::default(),
             env: EnvConfig::default(),
             reconcile: ReconcileConfig::default(),
+            storage: None,
         }
     }
 }
@@ -449,6 +456,11 @@ impl Config {
         // same `vars` snapshot; fails closed on its own zero bounds internally.
         let env = EnvConfig::from_vars(&vars)?;
 
+        // Optional chrono-storage log-streaming config (FKST_STORAGE_* /
+        // FKST_NYXID_*). Shares the same `vars` snapshot; `None` when unset,
+        // and fails closed on a partial config (naming the missing vars).
+        let storage = ChronoStorageConfig::from_vars(&vars)?;
+
         Ok(Config {
             port: http.port,
             bind_addr: http.bind_addr,
@@ -461,6 +473,7 @@ impl Config {
             pod,
             env,
             reconcile,
+            storage,
         })
     }
 
@@ -817,5 +830,39 @@ mod tests {
             assert!(matches!(err, AppError::Config(_)));
             assert!(err.to_string().contains(var), "error must name {var}");
         }
+    }
+
+    // ---- chrono-storage (FKST_STORAGE_* / FKST_NYXID_*) wiring tests ------------
+
+    #[test]
+    fn storage_config_is_none_by_default() {
+        // The optional log-streaming feature is disabled unless configured.
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert!(config.storage.is_none());
+    }
+
+    #[test]
+    fn storage_config_surfaces_through_config_from_vars_when_set() {
+        let config = Config::from_vars(vars(&[
+            ("FKST_STORAGE_BASE_URL", "https://storage.example/proxy"),
+            ("FKST_STORAGE_BUCKET", "fkst-logs"),
+            ("FKST_NYXID_TOKEN_URL", "https://nyx.example/oauth/token"),
+            ("FKST_NYXID_CLIENT_ID", "sa-client"),
+            ("FKST_NYXID_CLIENT_SECRET", "sa-secret"),
+        ]))
+        .expect("full storage config should load");
+        let storage = config.storage.expect("feature enabled");
+        assert_eq!(storage.bucket, "fkst-logs");
+    }
+
+    #[test]
+    fn partial_storage_config_fails_closed_through_config_from_vars() {
+        let err = Config::from_vars(vars(&[(
+            "FKST_STORAGE_BASE_URL",
+            "https://storage.example",
+        )]))
+        .expect_err("partial storage config must fail closed through Config");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("FKST_NYXID_CLIENT_SECRET"));
     }
 }
