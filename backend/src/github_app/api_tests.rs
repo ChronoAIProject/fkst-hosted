@@ -651,3 +651,63 @@ async fn delete_ref_tolerates_404() {
         .await
         .expect("404 tolerated");
 }
+
+#[tokio::test]
+async fn list_open_pulls_projects_number_author_and_head() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            { "number": 1, "user": { "login": "fkst-bot" }, "head": { "sha": "abc" } },
+            { "number": 2, "user": { "login": "carol" }, "head": { "sha": "def" } },
+        ])))
+        .mount(&server)
+        .await;
+    let pulls = api(&server.uri())
+        .list_open_pulls(&tok(), "acme", "site")
+        .await
+        .expect("ok");
+    assert_eq!(pulls.len(), 2);
+    assert_eq!(pulls[0].number, 1);
+    assert_eq!(pulls[0].author_login, "fkst-bot");
+    assert_eq!(pulls[0].head_sha, "abc");
+    assert_eq!(pulls[1].author_login, "carol");
+}
+
+#[tokio::test]
+async fn pull_request_mergeable_reads_tri_state() {
+    // A computed-true mergeable.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/7"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "mergeable": true })),
+        )
+        .mount(&server)
+        .await;
+    assert_eq!(
+        api(&server.uri())
+            .pull_request_mergeable(&tok(), "acme", "site", 7)
+            .await
+            .expect("ok"),
+        Some(true)
+    );
+
+    // A `null` mergeable => not yet computed => None.
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/acme/site/pulls/8"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "mergeable": serde_json::Value::Null })),
+        )
+        .mount(&server)
+        .await;
+    assert_eq!(
+        api(&server.uri())
+            .pull_request_mergeable(&tok(), "acme", "site", 8)
+            .await
+            .expect("ok"),
+        None
+    );
+}

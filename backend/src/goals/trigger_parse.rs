@@ -34,6 +34,7 @@ const HEADING_SESSION_NAME: &str = "### Session Name";
 const HEADING_PACKAGES: &str = "### Packages";
 const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
+const HEADING_AUTO_MERGE: &str = "### Auto-merge";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -95,6 +96,11 @@ pub struct TriggerSpec {
     /// The single named ENVIRONMENT the OPTIONAL `### Environment` section selects,
     /// or `None` when the section is absent or blank.
     pub environment: Option<String>,
+    /// The OPTIONAL `### Auto-merge` opt-in: `true` when the section's value is
+    /// one of true/yes/on/enabled/1 (case-insensitive); `false` when the value is
+    /// anything else, blank, or the section is absent. Never a 422 (lenient) so a
+    /// pre-v2 trigger issue without the section still parses.
+    pub auto_merge: bool,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -122,11 +128,37 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         None => None,
     };
 
+    let auto_merge = parse_auto_merge(&sections);
+
     Ok(TriggerSpec {
         name,
         packages,
         work_label,
         environment,
+        auto_merge,
+    })
+}
+
+/// `### Auto-merge` — OPTIONAL, lenient. `true` iff the section's FIRST non-empty
+/// line is one of true/yes/on/enabled/1 (case-insensitive). Absent/blank/any other
+/// value → `false`. Never errors: this is an opt-in flag, not a validated field.
+fn parse_auto_merge(sections: &[(String, String)]) -> bool {
+    let block = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_AUTO_MERGE)
+    {
+        Some((_, content)) => content.as_str(),
+        None => return false,
+    };
+    // Scan ALL non-empty lines for an exact truthy token (not only the first), so
+    // the flag still reads `true` when the user leaves the template's explanatory
+    // HTML comment above the value line. A comment/prose line never equals a bare
+    // token, so this stays a false-positive-free opt-in.
+    non_empty_lines(block).iter().any(|v| {
+        matches!(
+            v.to_ascii_lowercase().as_str(),
+            "true" | "yes" | "on" | "enabled" | "1"
+        )
     })
 }
 

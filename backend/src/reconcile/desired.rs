@@ -58,6 +58,11 @@ pub struct SessionRegistration {
     /// A stable hash over the launch inputs; a live pod whose recorded hash differs
     /// is running a stale config and must be re-spawned (see [`plan_repo`]).
     pub config_hash: String,
+    /// Per-session opt-in (from the trigger issue's `### Auto-merge`) for the
+    /// reconciler to auto-merge the App bot's mergeable PRs on this repo. NOT part
+    /// of `config_hash` — a pod runs identically regardless, so toggling it never
+    /// respawns the pod; it only gates the reconcile-side merge step.
+    pub auto_merge: bool,
 }
 
 /// The lifecycle phase of a live session pod, as the reconciler observes it. This

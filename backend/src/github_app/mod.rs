@@ -38,7 +38,7 @@ use jwt::{build_encoding_key, mint_app_jwt};
 pub use config::GithubAppConfig;
 
 /// Re-export API types for downstream consumers.
-pub use api::{InstallationId, InstallationToken, TokenPermissions};
+pub use api::{InstallationId, InstallationToken, PullRequestSummary, TokenPermissions};
 
 /// Re-export the Contents READ helper types (#179): the `get_contents` result
 /// shapes + the injectable `ContentsReader` abstraction the pre-flight uses.
@@ -212,6 +212,20 @@ pub fn session_permissions() -> TokenPermissions {
 /// `metadata` is omitted because installation tokens always include
 /// `metadata: read` implicitly.
 pub fn issue_templates_permissions() -> TokenPermissions {
+    TokenPermissions {
+        contents: Some("write".to_string()),
+        pull_requests: Some("write".to_string()),
+        issues: None,
+        administration: None,
+        metadata: None,
+    }
+}
+
+/// Least-privilege permissions for the reconciler's bot-PR auto-merge:
+/// `pull_requests:write` (merge) + `contents:write` (the merge commit) ONLY —
+/// deliberately withholding `administration` so a repo that never granted it can
+/// still auto-merge. The two read calls (list/mergeable) ride this superset token.
+pub fn auto_merge_permissions() -> TokenPermissions {
     TokenPermissions {
         contents: Some("write".to_string()),
         pull_requests: Some("write".to_string()),
@@ -449,6 +463,59 @@ impl GithubAppTokens {
         self.inner
             .api
             .remove_issue_label(&token, owner, repo, number, label)
+            .await
+    }
+
+    /// List `owner/repo`'s OPEN pull requests as the App (auto-merge step). Minted
+    /// with the least-privilege [`auto_merge_permissions`] set (never logged).
+    pub async fn list_open_pull_requests(
+        &self,
+        owner_repo: &str,
+    ) -> Result<Vec<PullRequestSummary>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner.api.list_open_pulls(&token, owner, repo).await
+    }
+
+    /// Read one PR's `mergeable` tri-state (`Some(true|false)` / `None` =
+    /// uncomputed) as the App.
+    pub async fn pull_request_mergeable(
+        &self,
+        owner_repo: &str,
+        number: u64,
+    ) -> Result<Option<bool>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner
+            .api
+            .pull_request_mergeable(&token, owner, repo, number)
+            .await
+    }
+
+    /// Merge `owner/repo`'s PR `number` as the App (default merge commit).
+    pub async fn merge_pull_request(
+        &self,
+        owner_repo: &str,
+        number: u64,
+        commit_title: &str,
+    ) -> Result<(), GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self
+            .token_for_repo(owner_repo, Some(auto_merge_permissions()))
+            .await?;
+        self.inner
+            .api
+            .merge_pull_request(&token, owner, repo, number, commit_title)
             .await
     }
 
