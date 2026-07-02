@@ -180,7 +180,7 @@ local function emit_reviewing(payload, handoff)
   if not issue_claim_ok(payload, handoff) then
     return
   end
-  local reviewing = payloads_builders.build_devloop_reviewing_payload(core, {
+  local reviewing = payloads_builders.build_devloop_reviewing_payload({
     proposal_id = handoff.proposal_id,
     impl_version = handoff.version,
     reviewing_comment_id = payload.comment_id,

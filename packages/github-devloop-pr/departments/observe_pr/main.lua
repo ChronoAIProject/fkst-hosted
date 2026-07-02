@@ -245,7 +245,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
     return true
   end
 
-  local new_version = operator_commands.operator_rereview_version(core, state.version, current_pr.head_sha)
+  local new_version = operator_commands.operator_rereview_version(state.version, current_pr.head_sha)
   local comment_request = requests_review.build_operator_rereview_comment_request(core,
     origin.repo,
     pr_number,

@@ -1,4 +1,5 @@
 local entity_lib = require("devloop.entity")
+local devloop_state = require("devloop.state")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
@@ -62,7 +63,7 @@ function C.build_devloop_ready_payload(M, source)
       state = "ready",
       marker_version = marker_version,
       event_version = ready_version,
-      stage_rank = M.stage_rank("ready"),
+      stage_rank = devloop_state.stage_rank("ready"),
       effects = "result-marker,ready-label,devloop-ready",
       comment_id = source.ready_comment_id,
     }
@@ -84,7 +85,7 @@ function C.build_devloop_ready_payload(M, source)
   return payload
 end
 
-function C.build_devloop_reviewing_payload(M, origin, pr_number, source_ref, version)
+function C.build_devloop_reviewing_payload(origin, pr_number, source_ref, version)
   local review_version = version or origin.impl_version
   local payload = {
     schema = "github-devloop.reviewing.v1",
@@ -106,7 +107,7 @@ function C.build_devloop_reviewing_payload(M, origin, pr_number, source_ref, ver
       state = "reviewing",
       marker_version = review_version,
       event_version = review_version,
-      stage_rank = M.stage_rank("reviewing"),
+      stage_rank = devloop_state.stage_rank("reviewing"),
       comment_id = origin.reviewing_comment_id,
     }
   end
@@ -118,7 +119,7 @@ function C.build_current_head_reviewing_payload(M, origin, pr_number, current_pr
   if m_facts.has_any_review_result_marker(M, current_pr.comments, review_proposal_id, origin.proposal_id) then
     return nil
   end
-  return C.build_devloop_reviewing_payload(M, {
+  return C.build_devloop_reviewing_payload({
     proposal_id = origin.proposal_id,
     impl_version = state.version,
   }, pr_number, source_ref, state.version)

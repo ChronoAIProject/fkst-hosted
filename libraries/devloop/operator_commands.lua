@@ -1,4 +1,5 @@
 local entity_lib = require("devloop.entity")
+local devloop_state = require("devloop.state")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
@@ -87,12 +88,12 @@ function C.operator_command_fact(M, comments, command_name)
   return latest
 end
 
-function C.operator_rereview_version(M, current_version, head_sha)
+function C.operator_rereview_version(current_version, head_sha)
   if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid operator rereview head sha")
   end
   local base = tostring(current_version or "")
-  local next_n = M.version_review_loop_round(base) + 1
+  local next_n = devloop_state.version_review_loop_round(base) + 1
   return base .. "/review-loop/" .. tostring(next_n) .. "/rereview/" .. tostring(next_n) .. "/" .. tostring(head_sha)
 end
 

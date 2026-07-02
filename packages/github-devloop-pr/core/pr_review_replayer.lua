@@ -816,7 +816,7 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
   else
     table.insert(effects, {
       queue = "devloop_reviewing",
-      payload = payloads_builders.build_devloop_reviewing_payload(M, {
+      payload = payloads_builders.build_devloop_reviewing_payload({
         proposal_id = fields.proposal_id,
         impl_version = fields.version,
       }, fields.pr_number, fields.source_ref, fields.version),

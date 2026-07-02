@@ -1,4 +1,5 @@
 local entity_lib = require("devloop.entity")
+local devloop_state = require("devloop.state")
 local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local m_claims = require("devloop.claims")
@@ -65,12 +66,12 @@ function C.build_result_comment_request(M, repo, issue_number, reached, state_na
   end
   return request
 end
-function C.result_effects_complete(M, current, reached)
+function C.result_effects_complete(current, reached)
   if type(current) ~= "table" or type(reached) ~= "table" then
     return false
   end
-  return M.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key)
-    and M.state_label_hint_matches(current.labels, "ready")
+  return devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key)
+    and devloop_state.state_label_hint_matches(current.labels, "ready")
 end
 
 function C.build_converge_round_comment_request(M, repo, issue_number, unresolved, round, marker_body, handoff)

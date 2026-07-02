@@ -176,7 +176,7 @@ local function make_department(ports)
       if transition == "idempotent" or transition == "stale" then
         if transition == "idempotent" and tostring(state.version or "") == tostring(version) then
           local complete = gate.ok
-            and requests_lifecycle.result_effects_complete(core, current, reached)
+            and requests_lifecycle.result_effects_complete(current, reached)
             or dependency_hold_effects_complete(current, reached, version)
           if complete then
             devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, "skip-idempotent(result effects complete)", "all declared result effects are derivable")
