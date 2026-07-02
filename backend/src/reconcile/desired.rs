@@ -102,6 +102,12 @@ pub struct LivePod {
     /// The `config_hash` recorded on the pod, if any. `None` means unknown (no
     /// drift decision can be made), which is treated as "no drift".
     pub config_hash: Option<String>,
+    /// The session's GitHub work label, recorded on the pod (from its
+    /// `fkst.chrono-ai.fun/work-label` annotation). Carried so that when this pod is
+    /// orphaned (its trigger issue closed) the planner can retire-notify the still-open
+    /// work issues that share this label. `None` when the annotation is absent (an
+    /// older pod predating the annotation), in which case no retire-notify is emitted.
+    pub work_label: Option<String>,
 }
 
 /// Why a pod is being killed. Carried on [`ReconcileAction::Kill`] so the executor
@@ -131,6 +137,13 @@ pub enum ReconcileAction {
     },
     /// GC a terminal pod (+ its owned Secret).
     CleanupTerminal { session_id: String },
+    /// Retire-notify the still-OPEN work issues of a session whose trigger issue was
+    /// closed (session retired). Emitted from the orphan-pod branch alongside the
+    /// `Kill { TriggerClosed }`, carrying the orphan pod's `work_label` so the executor
+    /// can list that label's open issues, comment "session retired, no longer worked",
+    /// latch [`crate::reconcile::SUBSTRATE_RETIRED_LABEL`], and drop the now-stale
+    /// picked-up label — leaving each issue OPEN.
+    RetireWorkIssues { work_label: String },
     /// Flag an invalid trigger issue (comment + label), first observation only.
     FlagInvalid { trigger_issue: i64, detail: String },
     /// Clear the invalid flag from an issue that now parses.
@@ -326,6 +339,15 @@ pub fn plan_repo(
                     session_id: pod.session_id.clone(),
                     reason: KillReason::TriggerClosed,
                 });
+                // Same cycle as the kill: retire-notify the still-open work issues so
+                // they no longer look claimed (a retired session is no longer working
+                // them). Only when the pod recorded its work label — an older pod
+                // without the annotation carries no label to list.
+                if let Some(work_label) = &pod.work_label {
+                    actions.push(ReconcileAction::RetireWorkIssues {
+                        work_label: work_label.clone(),
+                    });
+                }
             }
             PodLiveness::Terminal => {
                 actions.push(ReconcileAction::CleanupTerminal {
@@ -378,6 +400,9 @@ mod desired_hash_tests;
 #[cfg(test)]
 #[path = "desired_plan_tests.rs"]
 mod desired_plan_tests;
+#[cfg(test)]
+#[path = "desired_retire_tests.rs"]
+mod desired_retire_tests;
 #[cfg(test)]
 #[path = "desired_test_fixtures.rs"]
 mod desired_test_fixtures;

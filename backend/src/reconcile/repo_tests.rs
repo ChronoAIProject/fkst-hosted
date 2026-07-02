@@ -25,6 +25,7 @@ fn sample_pod(phase: Option<&str>, terminating: bool) -> Pod {
         (ANNOTATION_REPO.to_string(), "site".to_string()),
         (ANNOTATION_TRIGGER_ISSUE.to_string(), "7".to_string()),
         (ANNOTATION_CONFIG_HASH.to_string(), "hash-xyz".to_string()),
+        (ANNOTATION_WORK_LABEL.to_string(), "fkst-run".to_string()),
         (
             ANNOTATION_LAST_PENDING_AT.to_string(),
             "2026-07-01T10:00:00+00:00".to_string(),
@@ -56,6 +57,8 @@ fn maps_a_running_pod_to_a_live_pod() {
     assert_eq!(live.created_at, ts("2026-07-01T09:00:00Z"));
     assert_eq!(live.last_pending_at, Some(ts("2026-07-01T10:00:00Z")));
     assert_eq!(live.config_hash.as_deref(), Some("hash-xyz"));
+    // The work-label annotation is carried so an orphaned pod can retire-notify.
+    assert_eq!(live.work_label.as_deref(), Some("fkst-run"));
 }
 
 #[test]
@@ -110,6 +113,8 @@ fn missing_last_pending_and_config_hash_map_to_none() {
     let live = pod_to_live(&pod).expect("maps");
     assert_eq!(live.last_pending_at, None);
     assert_eq!(live.config_hash, None);
+    // An older pod predating the work-label annotation carries no label to retire.
+    assert_eq!(live.work_label, None);
     assert_eq!(live.liveness, PodLiveness::Starting);
 }
 
