@@ -105,7 +105,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     })
     local codex_opts = workflow_codex.judgment_codex_opts(
       core.build_review_meta_prompt(review_meta, current_issue, content_fetch),
-      core.judgment_worktree("review-meta", review_meta.dedup_key)
+      devloop_base.judgment_worktree_with_exec(exec_sync, "review-meta", review_meta.dedup_key)
     )
     codex_opts.role = "review-meta"
     codex_opts.proposal_id = review_meta.proposal_id

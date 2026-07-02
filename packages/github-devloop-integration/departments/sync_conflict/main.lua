@@ -32,7 +32,7 @@ local function cleanup_worktree(worktree)
 end
 
 local function with_temp_worktree(conflict, fn)
-  local runtime = core.runtime_root()
+  local runtime = git_mechanics.runtime_root_with_exec(exec_sync)
   local worktree = core.branch_sync_worktree_path(
     runtime,
     conflict.repo,

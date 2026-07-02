@@ -171,7 +171,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
 end
 
 local function fast_forward_sync(repo, upstream, integration, upstream_sha, integration_sha)
-  local runtime = core.runtime_root()
+  local runtime = git_mechanics.runtime_root_with_exec(exec_sync)
   with_temp_worktree(runtime, repo, upstream, integration, integration_sha, function(worktree)
     git_mechanics.run_required(git_mechanics.git_fast_forward(core.git, worktree, upstream_sha, 120), "branch sync fast-forward")
     push_if_real(repo, upstream, integration, upstream_sha, integration_sha, worktree)
@@ -207,7 +207,7 @@ local function act(event)
       return
     end
 
-    local runtime = core.runtime_root()
+    local runtime = git_mechanics.runtime_root_with_exec(exec_sync)
     with_temp_worktree(runtime, repo, branches.upstream, branches.integration, integration_sha, function(worktree)
       local merge_result = git_mechanics.git_merge_no_ff(core.git, worktree, upstream_sha, 120)
       if merge_result.exit_code == 0 then

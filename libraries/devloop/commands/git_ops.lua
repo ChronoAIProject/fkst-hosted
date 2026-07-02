@@ -13,7 +13,7 @@ function S.worktree_parent_dir(worktree)
 end
 
 function S.run_mkdir(M, path, timeout)
-  local result = exec_sync({ cmd = M.mkdir_p_cmd(path), timeout = timeout or 30 })
+  local result = exec_sync({ cmd = devloop_base.mkdir_p_cmd(path), timeout = timeout or 30 })
   if result.exit_code ~= 0 then
     error("github-devloop: directory setup failed: " .. tostring(result.stderr))
   end
@@ -246,17 +246,8 @@ function S.install(M)
     return support.git().rev_parse_worktree_branch(worktree, validators.require_safe_branch(M, "branch", branch), timeout)
   end
 
-  function M.read_runtime_root_cmd()
-    return 'printf %s "$FKST_RUNTIME_ROOT"'
-  end
-
-  function M.mkdir_p_cmd(path)
-    local value = tostring(path or "")
-    if value == "" or value:find("[\r\n]") ~= nil then
-      error("github-devloop: invalid directory path")
-    end
-    return "mkdir -p " .. devloop_base._shell_single_quote(value)
-  end
+  M.read_runtime_root_cmd = devloop_base.read_runtime_root_cmd
+  M.mkdir_p_cmd = devloop_base.mkdir_p_cmd
 
   function M.path_is_directory_cmd(path)
     local value = tostring(path or "")

@@ -118,7 +118,7 @@ return {
       exit_code = 0,
     })
 
-    local actual = core.judgment_worktree("review-meta", "dedup/key")
+    local actual = devloop_base.judgment_worktree_with_exec(exec_sync, "review-meta", "dedup/key")
 
     t.eq(actual, worktree)
     local saw_mkdir = false

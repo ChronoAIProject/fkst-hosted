@@ -44,13 +44,12 @@ end
 
 local base = require("devloop.base")
 local function dept_exec_sync(...) return exec_sync(...) end
-M.judgment_worktree = function(...) return base.judgment_worktree_with_exec(M, dept_exec_sync, ...) end
 M.safe_updated_at = function(...) return base.safe_updated_at(M, ...) end
 M.intake_dedup_key = function(...) return base.intake_dedup_key(M, ...) end
 M.intake_candidate_delivery_dedup_key = function(...) return base.intake_candidate_delivery_dedup_key(M, ...) end
 M.ci_selfheal_once_key = function(...) return base.ci_selfheal_once_key(M, ...) end
 M.ci_missing_status_first_observed_key = function(...) return base.ci_missing_status_first_observed_key(M, ...) end
-M.judgment_worktree_path = function(...) return base.judgment_worktree_path(M, ...) end
+M.judgment_worktree_path = base.judgment_worktree_path
 M.max_body_len = function(...) return base.max_body_len(M, ...) end
 M.quote_untrusted_prompt_text = function(...) return base.quote_untrusted_prompt_text(M, ...) end
 M.gh_exec_opts = function(...) return base.gh_exec_opts(M, ...) end
@@ -104,7 +103,6 @@ M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_aft
 local git_mechanics = require("devloop.git_mechanics")
 local function dept_exec_argv(...) return exec_argv(...) end
 M.git = require("forge.git").new(dept_exec_argv)
-M.runtime_root = function(...) return git_mechanics.runtime_root_with_exec(M, dept_exec_sync, ...) end
 require("devloop.logging").install(M)
 require("devloop.state").install(M)
 require("core.error_facts").install(M)

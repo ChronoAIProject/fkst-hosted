@@ -527,7 +527,19 @@ function C.path_under_runtime_root(runtime_root, path)
   return target == root or target:sub(1, #root + 1) == root .. "/"
 end
 
-function C.judgment_worktree_path(M, runtime_root, role, identity)
+function C.read_runtime_root_cmd()
+  return 'printf %s "$FKST_RUNTIME_ROOT"'
+end
+
+function C.mkdir_p_cmd(path)
+  local value = tostring(path or "")
+  if value == "" or value:find("[\r\n]") ~= nil then
+    error("github-devloop: invalid directory path")
+  end
+  return "mkdir -p " .. shell_single_quote(value)
+end
+
+function C.judgment_worktree_path(runtime_root, role, identity)
   local root = trim(runtime_root)
   if root == "" or root:find("[\r\n]") ~= nil then
     error("github-devloop: invalid FKST_RUNTIME_ROOT")
@@ -547,13 +559,13 @@ function C.judgment_worktree_path(M, runtime_root, role, identity)
   return root:gsub("/+$", "") .. "/judgment-worktrees/github-devloop-" .. slug .. "-" .. suffix
 end
 
-function C.judgment_worktree_with_exec(M, exec_sync_fn, role, identity)
-  local runtime = exec_sync_fn({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+function C.judgment_worktree_with_exec(exec_sync_fn, role, identity)
+  local runtime = exec_sync_fn({ cmd = C.read_runtime_root_cmd(), timeout = 30 })
   if runtime.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime.stderr))
   end
-  local worktree = C.judgment_worktree_path(M, runtime.stdout, role, identity)
-  local mkdir = exec_sync_fn({ cmd = M.mkdir_p_cmd(worktree), timeout = 30 })
+  local worktree = C.judgment_worktree_path(runtime.stdout, role, identity)
+  local mkdir = exec_sync_fn({ cmd = C.mkdir_p_cmd(worktree), timeout = 30 })
   if mkdir.exit_code ~= 0 then
     error("github-devloop: judgment scratch directory setup failed: " .. tostring(mkdir.stderr))
   end
