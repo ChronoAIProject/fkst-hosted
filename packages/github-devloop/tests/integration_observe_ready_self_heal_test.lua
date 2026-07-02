@@ -76,8 +76,7 @@ local function mock_decompose_child_issue_list(event, indexes)
 end
 
 local function merge_gate_fix_marker(event)
-  return m_builders.merge_gate_marker(core, 
-    event.proposal_id,
+  return m_builders.merge_gate_marker(event.proposal_id,
     event.pr_number,
     event.version,
     event.review_proposal_id,

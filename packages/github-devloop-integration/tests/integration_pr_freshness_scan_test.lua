@@ -75,8 +75,8 @@ local function pr_comments(state)
   return {
     m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
     core.state_marker("github-devloop/issue/owner/repo/42", state or "merge-ready", version),
-    m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
-    m_builders.merge_ready_marker(core, "github-devloop/issue/owner/repo/42", 7, version, review_proposal, review_dedup, branch_sha),
+    m_builders.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
+    m_builders.merge_ready_marker("github-devloop/issue/owner/repo/42", 7, version, review_proposal, review_dedup, branch_sha),
   }
 end
 
@@ -171,7 +171,7 @@ return {
     mock_pr_view("fixing", {
       m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", version),
-      m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
+      m_builders.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "approve", review_dedup),
     })
     mock_issue_view({})
 
@@ -191,7 +191,7 @@ return {
     mock_pr_view("reviewing", {
       m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", 42, branch, version, "integration/dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", version .. "/fix/1"),
-      m_builders.review_result_marker(core, old_review_proposal, "github-devloop/issue/owner/repo/42", "approve", old_review_dedup),
+      m_builders.review_result_marker(old_review_proposal, "github-devloop/issue/owner/repo/42", "approve", old_review_dedup),
     }, { head_sha = new_head_sha })
     mock_issue_view({})
 

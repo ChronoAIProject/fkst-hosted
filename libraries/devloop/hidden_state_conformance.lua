@@ -624,16 +624,16 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
   elseif family == "decomposed" then
     table.insert(entity.comments, comment(core, decompose_lib.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
-    table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then
-    table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, devloop_state.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, devloop_state.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     if value.decision == "approve" then
-      table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
     else
-      table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+      table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA, BASE_SHA, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     end
   elseif family == "review-meta" then
-    table.insert(entity.comments, comment(core, m_builders.review_meta_marker(core, ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_meta_marker(ISSUE_PROPOSAL, value.review_dedup_key, value.action, state.version, value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
   elseif family == "review-converge-round" then
     local digest = convergence_shared.source_ref_digest(PR_SOURCE_REF)
     if value.action == "block" then
@@ -649,12 +649,12 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
     end
   elseif family == "merge-ready" then
     if value.approve ~= false then
-      table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
+      table.insert(entity.comments, comment(core, m_builders.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, "approve", value.review_dedup_key), "2026-06-03T01:03:08Z"))
     end
-    table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
+    table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "merging" then
-    table.insert(entity.comments, comment(core, m_builders.review_result_marker(core, value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
-    table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(core, ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
+    table.insert(entity.comments, comment(core, m_builders.review_result_marker(value.review_proposal_id or review_proposal(core, state), ISSUE_PROPOSAL, "approve", value.review_dedup_key or review_dedup(core, state)), "2026-06-03T01:03:07Z"))
+    table.insert(entity.comments, comment(core, m_builders.merge_ready_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id or review_proposal(core, state), value.review_dedup_key or review_dedup(core, state), HEAD_SHA), "2026-06-03T01:03:08Z"))
     table.insert(entity.comments, comment(core, m_builders.merging_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, HEAD_SHA), "2026-06-03T01:03:09Z"))
   elseif family == "converge-round" then
     if value.true_stall_fixture == true then
@@ -689,7 +689,7 @@ local function add_context_facts(core, row, entity, state, facts, source_ref, in
       facts.current_pr.merged_at = "2026-06-03T01:04:03Z"
       facts.current_pr.merge_commit_sha = HEAD_SHA
     end
-    table.insert(entity.comments, comment(core, m_builders.pr_delegation_marker(core, ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
+    table.insert(entity.comments, comment(core, m_builders.pr_delegation_marker(ISSUE_PROPOSAL, PR_PROPOSAL, PR_NUMBER, state.version, "g1"), "2026-06-03T01:03:03Z"))
     facts.pr_delegation = {
       proposal_id = ISSUE_PROPOSAL,
       pr_proposal_id = PR_PROPOSAL,

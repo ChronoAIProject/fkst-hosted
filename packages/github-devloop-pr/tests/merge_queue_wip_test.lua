@@ -107,8 +107,8 @@ local function merge_comments_for_event(event)
       "dev"
     ),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
-    m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
+    m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+    m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
   }
 end
 
@@ -201,8 +201,8 @@ local function mock_merged_pr_view(event)
   local comments = {
     m_builders.pr_origin_marker(event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
-    m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
+    m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+    m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
   }
   table.insert(comments, core.state_marker(event.proposal_id, "merging", event.version))
   table.insert(comments, m_builders.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha))
@@ -596,8 +596,7 @@ return {
     local predecessor_set = predecessor_set_for(predecessor)
     local comments = merge_comments_for_event(current)
     table.insert(comments, core.state_marker(current.proposal_id, "fixing", fix_version))
-    table.insert(comments, m_builders.merge_gate_marker(core, 
-      current.proposal_id,
+    table.insert(comments, m_builders.merge_gate_marker(current.proposal_id,
       current.pr_number,
       fix_version,
       old_review_proposal,

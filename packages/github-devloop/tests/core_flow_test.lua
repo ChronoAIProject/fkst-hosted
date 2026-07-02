@@ -386,7 +386,7 @@ return {
     local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, core._strip_latest_fix_version_suffix(version), "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
     local comments = {
-      m_builders.merge_gate_marker(core, proposal_id, 7, version, review_proposal, review_dedup, "def456", nil, "rollup-red"),
+      m_builders.merge_gate_marker(proposal_id, 7, version, review_proposal, review_dedup, "def456", nil, "rollup-red"),
     }
     local fact = {
       proposal_id = proposal_id,

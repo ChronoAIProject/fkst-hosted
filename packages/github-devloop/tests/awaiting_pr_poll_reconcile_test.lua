@@ -82,8 +82,7 @@ local function parent_comments(fields)
     comment(core.state_marker(parent, state, state_version), core._test_bot_login, f.created_at or "2026-06-03T01:02:03Z"),
   }
   if f.delegation ~= false then
-    table.insert(comments, comment(m_builders.pr_delegation_marker(core, 
-      f.parent or parent,
+    table.insert(comments, comment(m_builders.pr_delegation_marker(f.parent or parent,
       f.child or child_pr,
       f.pr_number or pr_number,
       f.delegation_version or state_version,

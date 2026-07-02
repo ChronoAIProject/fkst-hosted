@@ -177,10 +177,10 @@ return {
         body = "noise only " .. cjk_probe .. "\n"
           .. core.state_marker(issue_proposal_id, "fixing", issue_version .. "/fix/1")
           .. "\n"
-          .. m_builders.review_result_marker(core, review_proposal_id, issue_proposal_id, "reject", review_dedup_key, 1, "missing guard")
-          .. "\n" .. m_builders.merge_ready_marker(core, issue_proposal_id, 7, issue_version, review_proposal_id, review_dedup_key, "def456")
-          .. "\n" .. m_builders.review_meta_marker(core, issue_proposal_id, review_dedup_key, "fix", issue_version .. "/fix/1", "missing guard")
-          .. "\n" .. m_builders.merge_gate_marker(core, issue_proposal_id, 7, issue_version .. "/fix/1", review_proposal_id, review_dedup_key, "def456", "abc123", "rollup-red"),
+          .. m_builders.review_result_marker(review_proposal_id, issue_proposal_id, "reject", review_dedup_key, 1, "missing guard")
+          .. "\n" .. m_builders.merge_ready_marker(issue_proposal_id, 7, issue_version, review_proposal_id, review_dedup_key, "def456")
+          .. "\n" .. m_builders.review_meta_marker(issue_proposal_id, review_dedup_key, "fix", issue_version .. "/fix/1", "missing guard")
+          .. "\n" .. m_builders.merge_gate_marker(issue_proposal_id, 7, issue_version .. "/fix/1", review_proposal_id, review_dedup_key, "def456", "abc123", "rollup-red"),
         author_login = devloop_base.trusted_bot_login(),
       },
     }

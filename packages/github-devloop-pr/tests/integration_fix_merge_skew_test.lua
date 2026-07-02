@@ -26,8 +26,7 @@ return {
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: mergeable-conflicting"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
-      .. "\n" .. m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,
@@ -95,8 +94,7 @@ return {
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
-      .. "\n" .. m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,
@@ -176,8 +174,7 @@ return {
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local reject_comment = "github-devloop merge gate failed: own-ci-red"
       .. "\n" .. core.state_marker(event.proposal_id, "fixing", event.version)
-      .. "\n" .. m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,

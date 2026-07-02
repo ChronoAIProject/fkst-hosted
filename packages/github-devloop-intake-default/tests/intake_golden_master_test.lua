@@ -426,7 +426,7 @@ return {
     payload.dedup_key = core.intake_candidate_delivery_dedup_key(payload.proposal_id, payload.effect_id, payload.effect_id)
     h.mock_bot_env()
     mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      m_builders.intake_decision_marker(core, payload.proposal_id, "decline", payload.effect_id, "standard"),
+      m_builders.intake_decision_marker(payload.proposal_id, "decline", payload.effect_id, "standard"),
       command,
     })
 

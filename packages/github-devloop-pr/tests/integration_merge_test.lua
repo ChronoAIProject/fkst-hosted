@@ -459,8 +459,7 @@ return {
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
-      m_builders.merge_ready_marker(core, 
-        event.proposal_id,
+      m_builders.merge_ready_marker(event.proposal_id,
         event.pr_number,
         event.version,
         devloop_base.pr_review_proposal_id("owner/repo", 8, event.version, event.reviewed_head_sha),
@@ -485,8 +484,7 @@ return {
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
-      m_builders.merge_ready_marker(core, 
-        event.proposal_id,
+      m_builders.merge_ready_marker(event.proposal_id,
         event.pr_number,
         event.version,
         devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, "other-version", event.reviewed_head_sha),
@@ -610,8 +608,7 @@ return {
     mock_issue_merge({ "fkst-dev:merge-ready" }, {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
-      m_builders.merge_ready_marker(core, 
-        event.proposal_id,
+      m_builders.merge_ready_marker(event.proposal_id,
         event.pr_number,
         event.version,
         devloop_base.pr_review_proposal_id("owner/repo", event.pr_number, event.version, "feedface"),
@@ -638,7 +635,7 @@ return {
       core.state_marker(event.proposal_id, "merge-ready", event.version),
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       {
-        body = m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+        body = m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
         author_login = "fkst-test-bot",
         created_at = "2026-06-03T02:00:00Z",
       },
@@ -927,7 +924,7 @@ return {
     t.eq(#idempotent.raises, 0)
     t.eq(count_calls("gh pr merge"), merge_calls_before)
 
-    local forged = m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha)
+    local forged = m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha)
     mock_bot_env()
     mock_write_env("1")
     mock_issue_merge({ "fkst-dev:merge-ready" }, {

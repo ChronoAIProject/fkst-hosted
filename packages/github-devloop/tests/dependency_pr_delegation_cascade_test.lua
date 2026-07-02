@@ -62,7 +62,7 @@ local function mock_delegated_blocker_issue()
     labels = { "fkst-dev:enabled", "fkst-dev:awaiting-pr" },
     comments = {
       core.state_marker(blocker_proposal, "awaiting-pr", blocker_version),
-      m_builders.pr_delegation_marker(core, blocker_proposal, child_pr_proposal, child_pr_number, blocker_version, "g1"),
+      m_builders.pr_delegation_marker(blocker_proposal, child_pr_proposal, child_pr_number, blocker_version, "g1"),
     },
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",

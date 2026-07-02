@@ -211,8 +211,8 @@ return {
     local new_head = "feedface"
     local new_review = devloop_base.pr_review_proposal_id("owner/repo", 7, event.version, new_head)
     local comments = merge_comments(event)
-    table.insert(comments, m_builders.review_result_marker(core, new_review, event.proposal_id, "approve", "consensus:" .. new_review .. "/review"))
-    table.insert(comments, m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, new_review, "consensus:" .. new_review .. "/review", new_head))
+    table.insert(comments, m_builders.review_result_marker(new_review, event.proposal_id, "approve", "consensus:" .. new_review .. "/review"))
+    table.insert(comments, m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, new_review, "consensus:" .. new_review .. "/review", new_head))
     mock_pr_origin({
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
     }, "devloop-owner-repo-42-01HY", new_head)

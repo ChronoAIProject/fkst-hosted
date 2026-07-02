@@ -32,7 +32,7 @@ end
 local function awaiting_pr_comments()
   return {
     core.state_marker(issue_proposal_id, "awaiting-pr", impl_version),
-    m_builders.pr_delegation_marker(core, issue_proposal_id, pr_proposal_id, 7, impl_version, "g1"),
+    m_builders.pr_delegation_marker(issue_proposal_id, pr_proposal_id, 7, impl_version, "g1"),
   }
 end
 

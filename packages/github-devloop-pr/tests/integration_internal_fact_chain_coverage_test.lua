@@ -439,8 +439,7 @@ return {
 
     mock_pr_origin({
       review_origin_marker(impl_version),
-      m_builders.review_result_marker(core, 
-        direct_merge.payload.review_proposal_id,
+      m_builders.review_result_marker(direct_merge.payload.review_proposal_id,
         "github-devloop/issue/owner/repo/42",
         "approve",
         direct_merge.payload.review_dedup_key
@@ -555,8 +554,7 @@ return {
     local comments = {
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
-      m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,
@@ -592,8 +590,7 @@ return {
     local comments = {
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "blocked", event.version),
-      m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,

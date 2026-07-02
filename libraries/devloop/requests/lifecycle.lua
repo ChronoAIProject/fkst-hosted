@@ -136,7 +136,7 @@ function C.build_intake_decision_comment_request(M, repo, issue_number, candidat
     error("github-devloop: invalid intake service class")
   end
   local normalized_class = m_shared.normalize_intake_service_class(service_class)
-  local marker = m_builders.intake_decision_marker(M, candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
+  local marker = m_builders.intake_decision_marker(candidate.proposal_id, decision, candidate.dedup_key, normalized_class)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "")
   if safe_reason == "" then
     safe_reason = comment_strings.comment_string(M, "no_reason_provided")

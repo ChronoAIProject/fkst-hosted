@@ -184,7 +184,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     fix_round = M.version_fix_round(issue_version)
   end
   local blocking_gap = shared.bounded_blocking_gap(M, reached)
-  local marker = m_builders.review_result_marker(M, reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
+  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
   local reflection_marker = ""
   if reached.reflection_checkpoint then
     reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, reached.dedup_key, "checkpoint", issue_version, fix_round)
@@ -192,7 +192,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   local merge_marker = ""
   if reached.decision == "approve" then
     local _, pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
-    merge_marker = "\n" .. m_builders.merge_ready_marker(M, issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
+    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
   end
   local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = shared.build_verdict_summary(M, reached.angle_results)
@@ -249,8 +249,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
 end
 
 function C.build_high_risk_review_evidence_comment_request(M, repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
-  local marker = m_builders.high_risk_review_evidence_marker(M,
-    issue_proposal_id,
+  local marker = m_builders.high_risk_review_evidence_marker(issue_proposal_id,
     issue_version,
     pr_number,
     reviewed_head_sha,
@@ -288,8 +287,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
   end
   local test_command = devloop_base.neutralize_untrusted_comment_text(config.test_command())
   local state_marker = M.state_marker(merge_ready.proposal_id, "fixing", fix_version)
-  local marker = m_builders.merge_gate_marker(M,
-    merge_ready.proposal_id,
+  local marker = m_builders.merge_gate_marker(merge_ready.proposal_id,
     merge_ready.pr_number,
     fix_version,
     merge_ready.review_proposal_id,
@@ -413,10 +411,9 @@ end
 
 function C.build_review_carry_over_comment_request(M, repo, pr_number, issue_proposal_id, version, carry, source_ref)
   local state_marker = M.state_marker(issue_proposal_id, "merge-ready", version)
-  local review_marker = m_builders.review_result_marker(M, carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)
-  local merge_marker = m_builders.merge_ready_marker(M, issue_proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
-  local carry_marker = m_builders.review_carry_over_marker(M,
-    issue_proposal_id,
+  local review_marker = m_builders.review_result_marker(carry.new_review_proposal_id, issue_proposal_id, "approve", carry.new_review_dedup_key)
+  local merge_marker = m_builders.merge_ready_marker(issue_proposal_id, pr_number, version, carry.new_review_proposal_id, carry.new_review_dedup_key, carry.new_head_sha)
+  local carry_marker = m_builders.review_carry_over_marker(issue_proposal_id,
     version,
     carry.old_review_proposal_id,
     carry.old_review_dedup_key,

@@ -15,7 +15,7 @@ local function json_literal(value)
   return '"' .. json_string(value) .. '"'
 end
 local function review_result_approve_marker(event)
-  return m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key)
+  return m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key)
 end
 
 local function append_merged_pr_merging_fact(comments, pr_state)
@@ -59,7 +59,7 @@ local function merge_comments(event, branch, impl_version, include_review_result
   local comments = {
     m_builders.pr_origin_marker(event.proposal_id, 42, branch or "devloop-owner-repo-42-01HY", impl_version or version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", version),
-    m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+    m_builders.merge_ready_marker(event.proposal_id, event.pr_number, version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
   }
   if include_review_result ~= false then
     table.insert(comments, review_result_approve_marker(event))
@@ -70,7 +70,7 @@ end
 local function pr_native_comments(event, include_review_result)
   local comments = {
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+    m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
   }
   if include_review_result ~= false then
     table.insert(comments, review_result_approve_marker(event))

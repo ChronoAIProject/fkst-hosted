@@ -281,7 +281,7 @@ return {
     h.mock_pr_origin({
       m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
-      m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "reject", review_dedup_key, 1, "missing retry guard"),
+      m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", review_dedup_key, 1, "missing retry guard"),
     })
     mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
@@ -316,8 +316,7 @@ return {
     h.mock_pr_origin({
       m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", original_fixing.payload.version),
-      m_builders.review_result_marker(core, 
-        original_fixing.payload.review_proposal_id,
+      m_builders.review_result_marker(original_fixing.payload.review_proposal_id,
         "github-devloop/issue/owner/repo/42",
         "reject",
         original_fixing.payload.review_dedup_key,
@@ -327,8 +326,7 @@ return {
     })
     mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", original_fixing.payload.version),
-      m_builders.review_result_marker(core, 
-        original_fixing.payload.review_proposal_id,
+      m_builders.review_result_marker(original_fixing.payload.review_proposal_id,
         "github-devloop/issue/owner/repo/42",
         "reject",
         original_fixing.payload.review_dedup_key,
@@ -369,7 +367,7 @@ return {
     }, "devloop-owner-repo-42-01HY", "feedface")
     mock_issue_result_view({ "fkst-dev:fixing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "fixing", fix_version),
-      m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
+      m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "missing retry guard"),
     })
     t.mock_command("git fetch origin devloop-owner-repo-42-01HY", {
       stdout = "",

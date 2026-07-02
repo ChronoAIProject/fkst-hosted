@@ -107,8 +107,7 @@ return {
   end,
 
   test_pr_delegation_marker_shape_is_declared = function()
-    local marker_text = m_builders.pr_delegation_marker(core, 
-      proposal_id,
+    local marker_text = m_builders.pr_delegation_marker(proposal_id,
       "github-devloop/pr/owner/repo/7",
       7,
       "2026-06-03T01-02-03Z",

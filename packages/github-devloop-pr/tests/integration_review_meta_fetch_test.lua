@@ -139,7 +139,7 @@ return {
     local comments = {
       m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev"),
       core.state_marker(event.proposal_id, "review-meta", event.version),
-      m_builders.review_meta_marker(core, event.proposal_id, review_dedup_key, "fix", event.version, "missing retry guard"),
+      m_builders.review_meta_marker(event.proposal_id, review_dedup_key, "fix", event.version, "missing retry guard"),
     }
     mock_bot_env()
     mock_pr_origin(comments, "devloop-owner-repo-42-01HY", "def456")
@@ -181,7 +181,7 @@ return {
     local event = review_meta_event()
     mock_issue_review_meta({ "fkst-dev:review-meta" }, {
       core.state_marker(event.proposal_id, "review-meta", event.version),
-      m_builders.review_meta_marker(core, event.proposal_id, event.dedup_key, "spec-amendment", core.next_review_meta_action_version(event.version)),
+      m_builders.review_meta_marker(event.proposal_id, event.dedup_key, "spec-amendment", core.next_review_meta_action_version(event.version)),
     })
     local replay = run_review_meta(event, opts("review-meta-spec-amendment-replay"))
     t.eq(replay.exit_code, 0)

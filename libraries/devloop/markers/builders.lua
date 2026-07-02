@@ -1,5 +1,6 @@
 local strings = require("contract.strings")
 local C = {}
+local devloop_base = require("devloop.base")
 local forge_validators = require("devloop.forge_validators")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local shared = require("devloop.markers.shared")
@@ -8,10 +9,10 @@ local valid_round = shared.valid_round
 local strings = shared.strings
 local safe_marker_attr = shared.safe_marker_attr
 
-function C.review_meta_marker(M, issue_proposal_id, dedup_key, action, version, blocking_gap, reason)
+function C.review_meta_marker(issue_proposal_id, dedup_key, action, version, blocking_gap, reason)
   local fields = ""
   if action ~= nil then
-    if not M._is_review_meta_action(action) then
+    if not devloop_base._is_review_meta_action(action) then
       error("github-devloop: invalid review-meta action")
     end
     fields = fields .. '" action="' .. tostring(action)
@@ -20,8 +21,8 @@ function C.review_meta_marker(M, issue_proposal_id, dedup_key, action, version, 
     fields = fields .. '" version="' .. tostring(version)
   end
   if action == "fix" then
-    local gap = safe_marker_attr(blocking_gap, M._max_blocking_gap_len)
-    if gap == "" or not strings.is_bounded_string(gap, M._max_blocking_gap_len) then
+    local gap = safe_marker_attr(blocking_gap, devloop_base._max_blocking_gap_len)
+    if gap == "" or not strings.is_bounded_string(gap, devloop_base._max_blocking_gap_len) then
       error("github-devloop: invalid review-meta gap")
     end
     fields = fields .. '" gap="' .. gap
@@ -66,7 +67,7 @@ function C.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, o
     .. '" -->'
 end
 
-function C.merge_gate_marker(M, issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, gate_baseline_sha, reason, predecessor_set)
+function C.merge_gate_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha, gate_baseline_sha, reason, predecessor_set)
   if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-gate marker")
   end
@@ -79,7 +80,7 @@ function C.merge_gate_marker(M, issue_proposal_id, pr_number, version, review_pr
   end
   local predecessor_field = ""
   if predecessor_set ~= nil then
-    if not strings.is_path_safe_key(predecessor_set, M._max_dedup_len) then
+    if not strings.is_path_safe_key(predecessor_set, devloop_base._max_dedup_len) then
       error("github-devloop: invalid merge-gate predecessor set")
     end
     predecessor_field = '" predecessor_set="' .. tostring(predecessor_set)
@@ -151,14 +152,14 @@ function C.pr_link_marker_template(proposal_id, branch, impl_version, base_branc
     .. '" -->'
 end
 
-function C.pr_delegation_marker(M, issue_proposal_id, pr_proposal_id, pr_number, version, delegation)
+function C.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, version, delegation)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid pr-delegation pr number")
   end
-  if not strings.is_bounded_string(issue_proposal_id, M._max_key_len)
-    or not strings.is_bounded_string(pr_proposal_id, M._max_key_len)
-    or not strings.is_bounded_string(version, M._max_dedup_len)
-    or not strings.is_path_safe_key(delegation, M._max_dedup_len) then
+  if not strings.is_bounded_string(issue_proposal_id, devloop_base._max_key_len)
+    or not strings.is_bounded_string(pr_proposal_id, devloop_base._max_key_len)
+    or not strings.is_bounded_string(version, devloop_base._max_dedup_len)
+    or not strings.is_path_safe_key(delegation, devloop_base._max_dedup_len) then
     error("github-devloop: invalid pr-delegation marker")
   end
   return '<!-- fkst:github-devloop:pr-delegation:v1 proposal="' .. tostring(issue_proposal_id)
@@ -184,7 +185,7 @@ function C.pr_origin_marker(proposal_id, issue_number, branch, impl_version, bas
     .. '" -->'
 end
 
-function C.review_result_marker(M, review_proposal_id, issue_proposal_id, decision, dedup_key, fix_round, blocking_gap)
+function C.review_result_marker(review_proposal_id, issue_proposal_id, decision, dedup_key, fix_round, blocking_gap)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid review decision")
   end
@@ -198,8 +199,8 @@ function C.review_result_marker(M, review_proposal_id, issue_proposal_id, decisi
       end
       fix_round_field = '" fix_round="' .. tostring(n)
     end
-    local gap = safe_marker_attr(blocking_gap, M._max_blocking_gap_len)
-    if gap == "" or not strings.is_bounded_string(gap, M._max_blocking_gap_len) then
+    local gap = safe_marker_attr(blocking_gap, devloop_base._max_blocking_gap_len)
+    if gap == "" or not strings.is_bounded_string(gap, devloop_base._max_blocking_gap_len) then
       error("github-devloop: invalid review reject gap")
     end
     gap_field = '" gap="' .. gap
@@ -213,16 +214,16 @@ function C.review_result_marker(M, review_proposal_id, issue_proposal_id, decisi
     .. '" -->'
 end
 
-function C.merge_ready_marker(M, issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha)
+function C.merge_ready_marker(issue_proposal_id, pr_number, version, review_proposal_id, review_dedup_key, head_sha)
   if not forge_validators.is_positive_pr_number(pr_number) then
     error("github-devloop: invalid merge-ready pr number")
   end
   if not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merge-ready head sha")
   end
-  if not strings.is_bounded_string(version, M._max_dedup_len)
-    or not strings.is_bounded_string(review_proposal_id, M._max_key_len)
-    or not strings.is_bounded_string(review_dedup_key, M._max_dedup_len) then
+  if not strings.is_bounded_string(version, devloop_base._max_dedup_len)
+    or not strings.is_bounded_string(review_proposal_id, devloop_base._max_key_len)
+    or not strings.is_bounded_string(review_dedup_key, devloop_base._max_dedup_len) then
     error("github-devloop: invalid merge-ready marker")
   end
   return '<!-- fkst:github-devloop:merge-ready:v1 proposal="' .. tostring(issue_proposal_id)
@@ -234,15 +235,15 @@ function C.merge_ready_marker(M, issue_proposal_id, pr_number, version, review_p
     .. '" -->'
 end
 
-function C.high_risk_review_evidence_marker(M, issue_proposal_id, version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest, angle_digest)
+function C.high_risk_review_evidence_marker(issue_proposal_id, version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest, angle_digest)
   if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid high-risk review evidence marker")
   end
-  if not strings.is_bounded_string(version, M._max_dedup_len)
-    or not strings.is_bounded_string(review_proposal_id, M._max_key_len)
-    or not strings.is_bounded_string(review_dedup_key, M._max_dedup_len)
-    or not strings.is_bounded_string(paths_digest, M._max_key_len)
-    or not strings.is_bounded_string(angle_digest, M._max_key_len) then
+  if not strings.is_bounded_string(version, devloop_base._max_dedup_len)
+    or not strings.is_bounded_string(review_proposal_id, devloop_base._max_key_len)
+    or not strings.is_bounded_string(review_dedup_key, devloop_base._max_dedup_len)
+    or not strings.is_bounded_string(paths_digest, devloop_base._max_key_len)
+    or not strings.is_bounded_string(angle_digest, devloop_base._max_key_len) then
     error("github-devloop: invalid high-risk review evidence marker")
   end
   return '<!-- fkst:github-devloop:high-risk-review-evidence:v1 proposal="' .. tostring(issue_proposal_id)
@@ -256,17 +257,17 @@ function C.high_risk_review_evidence_marker(M, issue_proposal_id, version, pr_nu
     .. '" -->'
 end
 
-function C.review_carry_over_marker(M, issue_proposal_id, version, old_review_proposal_id, old_review_dedup_key, approved_head_sha, new_review_proposal_id, new_review_dedup_key, new_head_sha, base_head_sha)
+function C.review_carry_over_marker(issue_proposal_id, version, old_review_proposal_id, old_review_dedup_key, approved_head_sha, new_review_proposal_id, new_review_dedup_key, new_head_sha, base_head_sha)
   if not forge_validators.is_git_sha(approved_head_sha)
     or not forge_validators.is_git_sha(new_head_sha)
     or not forge_validators.is_git_sha(base_head_sha) then
     error("github-devloop: invalid review carry-over marker")
   end
-  if not strings.is_bounded_string(version, M._max_dedup_len)
-    or not strings.is_bounded_string(old_review_proposal_id, M._max_key_len)
-    or not strings.is_bounded_string(old_review_dedup_key, M._max_dedup_len)
-    or not strings.is_bounded_string(new_review_proposal_id, M._max_key_len)
-    or not strings.is_bounded_string(new_review_dedup_key, M._max_dedup_len) then
+  if not strings.is_bounded_string(version, devloop_base._max_dedup_len)
+    or not strings.is_bounded_string(old_review_proposal_id, devloop_base._max_key_len)
+    or not strings.is_bounded_string(old_review_dedup_key, devloop_base._max_dedup_len)
+    or not strings.is_bounded_string(new_review_proposal_id, devloop_base._max_key_len)
+    or not strings.is_bounded_string(new_review_dedup_key, devloop_base._max_dedup_len) then
     error("github-devloop: invalid review carry-over marker")
   end
   return '<!-- fkst:github-devloop:review-carry-over:v1 proposal="' .. tostring(issue_proposal_id)
@@ -303,11 +304,11 @@ function C.merging_marker(issue_proposal_id, pr_number, version, head_sha)
     .. '" -->'
 end
 
-function C.intake_decision_marker(M, issue_proposal_id, decision, dedup_key, service_class)
+function C.intake_decision_marker(issue_proposal_id, decision, dedup_key, service_class)
   if decision ~= "enable" and decision ~= "track" and decision ~= "decline" and decision ~= "escalate-to-class" then
     error("github-devloop: invalid intake decision")
   end
-  if not strings.is_bounded_string(dedup_key, M._max_dedup_len) then
+  if not strings.is_bounded_string(dedup_key, devloop_base._max_dedup_len) then
     error("github-devloop: invalid intake dedup")
   end
   if not shared.is_intake_service_class(service_class) then

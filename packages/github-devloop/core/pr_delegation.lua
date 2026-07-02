@@ -132,7 +132,7 @@ local function build_pr_open_comment_request(repo, pr_number, pr_proposal_id, is
 end
 
 local function build_issue_delegation_comment_request(repo, issue_number, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation, source_ref)
-  local marker = m_builders.pr_delegation_marker(M, issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation)
+  local marker = m_builders.pr_delegation_marker(issue_proposal_id, pr_proposal_id, pr_number, impl_version, delegation)
   return entity_lib.build_entity_comment_request({
     kind = "issue",
     repo = repo,
@@ -151,8 +151,7 @@ end
 local function build_parent_awaiting_comment(repo, issue_number, ready, child)
   local body = "github-devloop delegated implementation to PR #" .. tostring(child.pr_number)
     .. "\n\n" .. devloop_state.state_marker(ready.proposal_id, "awaiting-pr", ready.dedup_key)
-    .. "\n" .. m_builders.pr_delegation_marker(M, 
-      ready.proposal_id,
+    .. "\n" .. m_builders.pr_delegation_marker(ready.proposal_id,
       child.pr_proposal_id,
       child.pr_number,
       ready.dedup_key,

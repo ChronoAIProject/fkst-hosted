@@ -65,7 +65,7 @@ return {
   test_awaiting_pr_issue_is_idempotent_for_legacy_canonicalizer = function()
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:awaiting-pr" }, "OPEN", {
       core.state_marker(proposal_id, "awaiting-pr", impl_version),
-      m_builders.pr_delegation_marker(core, proposal_id, pr_proposal_id, 7, impl_version, "g1"),
+      m_builders.pr_delegation_marker(proposal_id, pr_proposal_id, 7, impl_version, "g1"),
     })
     mock_linked_pr("OPEN")
 

@@ -66,15 +66,14 @@ local function merge_comments_for_event(event)
       "dev"
     ),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    m_builders.merge_ready_marker(core, 
-      event.proposal_id,
+    m_builders.merge_ready_marker(event.proposal_id,
       event.pr_number,
       event.version,
       event.review_proposal_id,
       event.review_dedup_key,
       event.reviewed_head_sha
     ),
-    m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
+    m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
   }
 end
 

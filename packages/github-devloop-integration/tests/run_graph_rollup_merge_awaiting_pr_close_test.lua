@@ -47,7 +47,7 @@ end
 local function parent_comments()
   return {
     comment(core.state_marker(parent, "awaiting-pr", version), "2026-06-03T01:02:03Z"),
-    comment(m_builders.pr_delegation_marker(core, parent, child_pr, child_pr_number, version, "g1"), "2026-06-03T01:03:03Z"),
+    comment(m_builders.pr_delegation_marker(parent, child_pr, child_pr_number, version, "g1"), "2026-06-03T01:03:03Z"),
   }
 end
 

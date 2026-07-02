@@ -165,7 +165,7 @@ return {
     local comments = {
       state_comment("implementing", event.dedup_key, "2026-06-03T00:00:00Z"),
       issue_comment(core.implement_attempt_marker(event.proposal_id, event.dedup_key, 1, tostring(now() - 60), exec_ref)),
-      issue_comment(m_builders.pr_delegation_marker(core, event.proposal_id, pr_proposal, 7, event.dedup_key, "g1")),
+      issue_comment(m_builders.pr_delegation_marker(event.proposal_id, pr_proposal, 7, event.dedup_key, "g1")),
     }
     mock_repo()
     mock_issue_list("2026-06-03T01:02:05Z")
@@ -183,7 +183,7 @@ return {
       state_comment("blocked", version, "2026-06-01T00:00:00Z"),
       m_builders.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
       decompose_lib.decomposed_marker(proposal_id, version, 7, 1),
-      m_builders.review_result_marker(core, review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
+      m_builders.review_result_marker(review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
       issue_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, version .. "/timeout-reconcile/blocked/1", "blocked", 1, entity_lib.issue_source_ref(repo, 42))),
       issue_comment(conv_attempts.timeout_attempt_marker(core, proposal_id, version .. "/timeout-reconcile/blocked/2", "blocked", 2, entity_lib.issue_source_ref(repo, 42))),
     }

@@ -133,9 +133,8 @@ local function fixing_comments(event, version)
   return {
     trusted_comment(m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
     trusted_comment(core.state_marker(event.proposal_id, "fixing", version or event.version)),
-    trusted_comment(m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
-    trusted_comment(m_builders.merge_gate_marker(core, 
-      event.proposal_id,
+    trusted_comment(m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
+    trusted_comment(m_builders.merge_gate_marker(event.proposal_id,
       event.pr_number,
       event.version,
       event.review_proposal_id,
@@ -151,8 +150,8 @@ local function review_meta_comments(event, version)
   return {
     trusted_comment(m_builders.pr_origin_marker(event.proposal_id, "42", "devloop-owner-repo-42-01HY", event.version, "dev")),
     trusted_comment(core.state_marker(event.proposal_id, "review-meta", version or event.version)),
-    trusted_comment(m_builders.review_meta_marker(core, event.proposal_id, event.dedup_key)),
-    trusted_comment(m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
+    trusted_comment(m_builders.review_meta_marker(event.proposal_id, event.dedup_key)),
+    trusted_comment(m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "reject", event.review_dedup_key, 1, "missing regression guard")),
     trusted_comment(conv_rounds.review_converge_round_marker(core,
       event.review_proposal_id,
       event.proposal_id,

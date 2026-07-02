@@ -344,7 +344,7 @@ return {
     })
     mock_issue_reviewing({ "fkst-dev:reviewing" }, {
       core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", reviewing_raise.payload.version),
-      m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "approve", "consensus:" .. review_id .. "/review"),
+      m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "approve", "consensus:" .. review_id .. "/review"),
     })
     local reviewed = run_observe_pr({
       schema = "github-proxy.v1",

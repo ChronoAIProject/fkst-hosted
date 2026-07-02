@@ -529,11 +529,11 @@ return {
     local fix_version = core.next_fix_version(issue_version)
     local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
     local foreign = {
-      body = m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:foreign/review", 1, "foreign gap"),
+      body = m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:foreign/review", 1, "foreign gap"),
       author_login = "fkst-test-bot",
     }
     local current = {
-      body = m_builders.review_result_marker(core, review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "current gap"),
+      body = m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. review_id .. "/review", 1, "current gap"),
       author_login = "fkst-test-bot",
     }
 
@@ -551,11 +551,11 @@ return {
     local current_review = devloop_base.pr_review_proposal_id("owner/repo", 7, current_version, "def456")
     local stale_review = devloop_base.pr_review_proposal_id("owner/repo", 7, stale_version, "def456")
     local trusted_stale = {
-      body = m_builders.review_result_marker(core, stale_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. stale_review .. "/review", 1, "stale gap"),
+      body = m_builders.review_result_marker(stale_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. stale_review .. "/review", 1, "stale gap"),
       author_login = "fkst-test-bot",
     }
     local untrusted_current = {
-      body = m_builders.review_result_marker(core, current_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. current_review .. "/review", 0, "untrusted gap"),
+      body = m_builders.review_result_marker(current_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. current_review .. "/review", 0, "untrusted gap"),
       author_login = "mallory",
     }
     local fix_version = core.next_fix_version(current_version)
@@ -570,13 +570,13 @@ return {
     local round1_review = devloop_base.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
     local round2_review = devloop_base.pr_review_proposal_id("owner/repo", 7, round2_fix, "feedface")
     local round1 = {
-      body = m_builders.review_result_marker(core, round1_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. round1_review .. "/review", 1, "round one gap")
+      body = m_builders.review_result_marker(round1_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. round1_review .. "/review", 1, "round one gap")
         .. "\nFix-round summary: Closed round one."
         .. "\n" .. core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", round2_fix),
       author_login = "fkst-test-bot",
     }
     local round2 = {
-      body = m_builders.review_result_marker(core, round2_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. round2_review .. "/review", 3, "round three gap")
+      body = m_builders.review_result_marker(round2_review, "github-devloop/issue/owner/repo/42", "reject", "consensus:" .. round2_review .. "/review", 3, "round three gap")
         .. "\nFix-round summary: Closed round three."
         .. "\n" .. core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", round3_fix),
       author_login = "fkst-test-bot",
@@ -594,8 +594,7 @@ return {
     local review = devloop_base.pr_review_proposal_id("owner/repo", 7, base_version, "def456")
     local cjk = fixtures.cjk_char()
     local reject = {
-      body = m_builders.review_result_marker(core, 
-        review,
+      body = m_builders.review_result_marker(review,
         "github-devloop/issue/owner/repo/42",
         "reject",
         "consensus:" .. review .. "/review",

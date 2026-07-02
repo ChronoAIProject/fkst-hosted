@@ -116,8 +116,7 @@ return {
 
   test_merge_gate_fix_fact_selects_same_version_marker_by_event_baseline = function()
     local event = fixing({ gate_baseline_sha = "828df8d3" })
-    local old_marker = m_builders.merge_gate_marker(core, 
-      event.proposal_id,
+    local old_marker = m_builders.merge_gate_marker(event.proposal_id,
       event.pr_number,
       event.version,
       event.review_proposal_id,
@@ -126,8 +125,7 @@ return {
       "281c4f9e",
       "mergeable-conflicting"
     )
-    local new_marker = m_builders.merge_gate_marker(core, 
-      event.proposal_id,
+    local new_marker = m_builders.merge_gate_marker(event.proposal_id,
       event.pr_number,
       event.version,
       event.review_proposal_id,
@@ -161,8 +159,7 @@ return {
     })
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local old_feedback = "github-devloop merge gate failed: mergeable-conflicting"
-      .. "\n" .. m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,
@@ -172,8 +169,7 @@ return {
         "mergeable-conflicting"
       )
     local new_feedback = "github-devloop merge gate failed: mergeable-conflicting"
-      .. "\n" .. m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,
@@ -249,8 +245,7 @@ return {
     }, event.source_ref)
     local branch = devloop_base.implement_branch("owner/repo", "42", event.version)
     local feedback = "github-devloop merge gate failed: mergeable-conflicting"
-      .. "\n" .. m_builders.merge_gate_marker(core, 
-        event.proposal_id,
+      .. "\n" .. m_builders.merge_gate_marker(event.proposal_id,
         event.pr_number,
         event.version,
         event.review_proposal_id,

@@ -67,8 +67,8 @@ local function comments_for(event, created_at, state, state_version)
   local comments = {
     m_builders.pr_origin_marker(event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
-    m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
+    m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+    m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
   }
   if state ~= nil then
     table.insert(comments, core.state_marker(event.proposal_id, state, state_version or event.version))
@@ -130,8 +130,8 @@ local function mock_merged_pr_view(event)
   local comments = {
     m_builders.pr_origin_marker(event.proposal_id, entity and entity.issue_number or 42, branch_for_pr(event.pr_number), event.version, "dev"),
     core.state_marker(event.proposal_id, "merge-ready", event.version),
-    m_builders.merge_ready_marker(core, event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
-    m_builders.review_result_marker(core, event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
+    m_builders.merge_ready_marker(event.proposal_id, event.pr_number, event.version, event.review_proposal_id, event.review_dedup_key, event.reviewed_head_sha),
+    m_builders.review_result_marker(event.review_proposal_id, event.proposal_id, "approve", event.review_dedup_key),
     core.state_marker(event.proposal_id, "merging", event.version),
     m_builders.merging_marker(event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha),
   }

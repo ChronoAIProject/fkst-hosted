@@ -526,7 +526,7 @@ return {
       timeout_state_comment("blocked", version, "2026-06-01T00:00:00Z"),
       m_builders.pr_link_marker(proposal_id, 7, "devloop-owner-repo-42-01HY", version, "dev"),
       decompose_lib.decomposed_marker(proposal_id, version, 7, 1),
-      m_builders.review_result_marker(core, review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
+      m_builders.review_result_marker(review_proposal, proposal_id, "reject", "consensus:" .. review_proposal .. "/review", 1, "missing decomposition"),
     })
     t.mock_command(core.gh_issue_list_decompose_children_cmd(repo, proposal_id), {
       stdout = "[]\n",

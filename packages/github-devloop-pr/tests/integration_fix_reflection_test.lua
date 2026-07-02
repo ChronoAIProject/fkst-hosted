@@ -121,7 +121,7 @@ return {
         author_login = core._test_bot_login,
         body = table.concat({
           core.state_marker("github-devloop/issue/owner/repo/42", "review-meta", issue_version),
-          m_builders.review_result_marker(core, review_proposal, "github-devloop/issue/owner/repo/42", "reject", review_dedup, 3, "missing regression guard"),
+          m_builders.review_result_marker(review_proposal, "github-devloop/issue/owner/repo/42", "reject", review_dedup, 3, "missing regression guard"),
           m_builders.fix_reflection_marker("github-devloop/issue/owner/repo/42", review_dedup, "checkpoint", issue_version, 3),
         }, "\n"),
         created_at = "2026-06-03T01:02:03Z",

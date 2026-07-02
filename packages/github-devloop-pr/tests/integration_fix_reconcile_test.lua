@@ -47,8 +47,7 @@ end
 local function reject_marker(version, created_at)
   local proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, version, "feedface")
   return {
-    body = m_builders.review_result_marker(core, 
-      proposal_id,
+    body = m_builders.review_result_marker(proposal_id,
       "github-devloop/issue/owner/repo/42",
       "reject",
       "consensus:" .. proposal_id .. "/review",
