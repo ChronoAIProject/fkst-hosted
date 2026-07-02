@@ -95,7 +95,7 @@ end
 
 local function pipeline_thinking(event)
   local reconcile = event.payload or {}
-  if not conv_reconcile.is_supported_reconcile(core, reconcile) then
+  if not conv_reconcile.is_supported_reconcile(reconcile) then
     devloop_logging.log_entry("reconcile", event, "unknown", devloop_logging.payload_field(reconcile, "dedup_key"))
     devloop_logging.log_cas_decision("reconcile", "unknown", { state = nil, version = nil }, "thinking", "blocked", "skip-foreign(proposal_id)", "unsupported event payload")
     return

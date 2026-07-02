@@ -68,7 +68,7 @@ local function raise_enable_successor(dept, repo, issue_number, candidate, curre
   local _ = current
   local __ = event_ts
   local execution_request = build_enable_request(candidate, decision_dedup_key)
-  if not v_execution_request.is_supported_execution_request(core, execution_request) then
+  if not v_execution_request.is_supported_execution_request(execution_request) then
     log.warn("github-devloop dept=" .. tostring(dept) .. " proposal_id=" .. tostring(candidate.proposal_id) .. " tag=SKIP reason=cannot-build-valid-execution-request")
     return false
   end
@@ -203,7 +203,7 @@ end
 
 local function act_intake_judge(event)
   local candidate = event.payload or {}
-  if not v_intake_candidate.is_supported_intake_candidate(core, candidate) then
+  if not v_intake_candidate.is_supported_intake_candidate(candidate) then
     devloop_logging.log_entry("intake_judge", event, "unknown", devloop_logging.payload_field(candidate, "dedup_key"))
     devloop_logging.log_cas_decision("intake_judge", "unknown", { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-foreign(payload)", "unsupported event payload")
     return

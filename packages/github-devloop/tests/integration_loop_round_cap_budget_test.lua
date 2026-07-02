@@ -132,7 +132,7 @@ return {
     t.eq(reconcile_raise.payload.base_version, expected.base_version)
     t.eq(reconcile_raise.payload.source_ref.kind, expected.source_ref.kind)
     t.eq(reconcile_raise.payload.source_ref.ref, expected.source_ref.ref)
-    t.eq(conv_reconcile.is_supported_reconcile(core, reconcile_raise.payload), true)
+    t.eq(conv_reconcile.is_supported_reconcile(reconcile_raise.payload), true)
   end,
 
   test_loop_round_cap_preserves_question_verdict_boundary_when_key_drifts = function()

@@ -26,7 +26,7 @@ local spec = {
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local review_meta = event.payload or {}
-  if not v_review_meta.is_supported_review_meta(core, review_meta) then
+  if not v_review_meta.is_supported_review_meta(review_meta) then
     devloop_logging.log_entry("review_meta", event, "unknown", devloop_logging.payload_field(review_meta, "dedup_key"))
     devloop_logging.log_cas_decision("review_meta", "unknown", { state = nil, version = nil }, "review-meta", "fixing|blocked", "skip-foreign(payload)", "unsupported event payload")
     return

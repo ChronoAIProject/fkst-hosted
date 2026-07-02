@@ -861,7 +861,7 @@ local function process_merge_queue_tick(event)
       return
     end
     local merge_ready = synthesize_merge_ready_from_queue_head(repo, selected)
-    if merge_ready == nil or not v_merge_ready.is_supported_merge_ready(core, merge_ready) then
+    if merge_ready == nil or not v_merge_ready.is_supported_merge_ready(merge_ready) then
       devloop_logging.log_line("info", "merge", selected.proposal_id, "GATE", {
         "pr=" .. tostring(selected.pr_number),
         "version=" .. tostring(selected.version),
@@ -896,7 +896,7 @@ local function process_merge_queue_tick(event)
 end
 local function process_merge_ready_event(event)
   local merge_ready = type(event and event.payload) == "table" and event.payload or {}
-  if not v_merge_ready.is_supported_merge_ready(core, merge_ready) then
+  if not v_merge_ready.is_supported_merge_ready(merge_ready) then
     devloop_logging.log_entry("merge", event, "unknown", core.payload_field(merge_ready, "dedup_key"))
     devloop_logging.log_cas_decision("merge", "unknown", { state = nil, version = nil }, "merge-ready", "merged|fixing", "skip-foreign(payload)", "unsupported event payload")
     return

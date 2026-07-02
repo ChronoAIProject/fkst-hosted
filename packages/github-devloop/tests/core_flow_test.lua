@@ -182,7 +182,7 @@ return {
     local reconcile = conv_reconcile.build_devloop_reconcile_payload(event, 3, base_version)
     t.eq(reconcile.schema, "github-devloop.reconcile.v1")
     t.eq(reconcile.dedup_key, "reconcile:" .. base_version .. "/loop/3")
-    t.eq(conv_reconcile.is_supported_reconcile(core, reconcile), true)
+    t.eq(conv_reconcile.is_supported_reconcile(reconcile), true)
     local reconcile_marker = conv_reconcile.reconcile_marker(core, proposal_id, base_version, 3, "drop")
     t.eq(conv_reconcile.has_reconcile_marker(core, { reconcile_marker }, proposal_id, base_version, 3), true)
     t.eq(conv_reconcile.reconcile_state_version(base_version, 3), base_version .. "/loop/3")
@@ -227,14 +227,14 @@ return {
     t.eq(reconcile.head_sha, "def456")
     t.eq(reconcile.round, 3)
     t.eq(reconcile.dedup_key, "review-reconcile:" .. issue_version .. "/review-loop/3")
-    t.eq(conv_reconcile.is_supported_review_reconcile(core, reconcile), true)
+    t.eq(conv_reconcile.is_supported_review_reconcile(reconcile), true)
     local missing_round = copy_table(reconcile)
     missing_round.round = nil
-    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { dedup_key = "review-reconcile:" .. issue_version .. "/review-loop/4" })), false)
-    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { head_sha = "not-a-sha" })), false)
-    t.eq(conv_reconcile.is_supported_review_reconcile(core, missing_round), false)
-    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { round = "1.5" })), false)
-    t.eq(conv_reconcile.is_supported_review_reconcile(core, copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { dedup_key = "review-reconcile:" .. issue_version .. "/review-loop/4" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { head_sha = "not-a-sha" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(missing_round), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { round = "1.5" })), false)
+    t.eq(conv_reconcile.is_supported_review_reconcile(copy_table(reconcile, { proposal_id = "autochrono/issue/owner/repo/42" })), false)
     t.eq(conv_reconcile.review_reconcile_state_version(issue_version, 3), issue_version .. "/review-loop/3")
     local live_reviewing_version = issue_version .. "/review-loop/9"
     local terminal_version = conv_reconcile.review_reconcile_terminal_state_version(core, live_reviewing_version, 3)
@@ -739,7 +739,7 @@ return {
       framing = "Fix the bounded source_ref migration only; do not raise payload limits.",
     }, source_ref())
     t.eq(fix.framing, "Fix the bounded source_ref migration only; do not raise payload limits.")
-    t.eq(v_fixing.is_supported_fixing(core, fix), true)
+    t.eq(v_fixing.is_supported_fixing(fix), true)
   end,
 
   test_replayed_fixing_dedup_binds_merge_gate_fact_identity = function()
@@ -769,9 +769,9 @@ return {
     t.is_true(defective.dedup_key:find("/nobase/nopred/def456", 1, true) ~= nil)
     t.is_true(corrected.dedup_key:find("/828df8d3/nopred/def456", 1, true) ~= nil)
     t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/def456", 1, true) ~= nil)
-    t.eq(v_fixing.is_supported_fixing(core, defective), true)
-    t.eq(v_fixing.is_supported_fixing(core, corrected), true)
-    t.eq(v_fixing.is_supported_fixing(core, new_predecessors), true)
+    t.eq(v_fixing.is_supported_fixing(defective), true)
+    t.eq(v_fixing.is_supported_fixing(corrected), true)
+    t.eq(v_fixing.is_supported_fixing(new_predecessors), true)
   end,
 
   test_parse_pr_view_origin_falls_back_on_empty_name_with_owner = function()

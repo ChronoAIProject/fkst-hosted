@@ -134,7 +134,7 @@ local function make_department(ports)
       devloop_logging.log_cas_decision("consensus_result", tostring(reached.proposal_id or "unknown"), { state = nil, version = nil }, "thinking", "ready", "skip-unsupported(decision)", "issue consensus does not support reject")
       return
     end
-    if not v_result.is_supported_result(core, reached) then
+    if not v_result.is_supported_result(reached) then
       devloop_logging.log_entry("consensus_result", event, "unknown", devloop_logging.payload_field(reached, "dedup_key"))
       devloop_logging.log_cas_decision("consensus_result", "unknown", { state = nil, version = nil }, "thinking", "ready", "skip-foreign(proposal_id)", "unsupported event payload")
       return

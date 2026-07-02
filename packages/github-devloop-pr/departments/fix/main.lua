@@ -629,7 +629,7 @@ end
 
 local function act_fix(event)
   local fix = event.payload or {}
-  if not v_fixing.is_supported_fixing(core, fix) then
+  if not v_fixing.is_supported_fixing(fix) then
     devloop_logging.log_entry("fix", event, "unknown", devloop_logging.payload_field(fix, "dedup_key"))
     devloop_logging.log_cas_decision("fix", "unknown", { state = nil, version = nil }, "fixing", "reviewing|review-meta", "skip-foreign(payload)", "unsupported event payload")
     return

@@ -247,7 +247,7 @@ return {
     t.eq(fixing.dedup_key, expected_replay.dedup_key)
     t.eq(fixing.source_ref.kind, expected.source_ref.kind)
     t.eq(fixing.source_ref.ref, expected.source_ref.ref)
-    t.eq(v_fixing.is_supported_fixing(core, fixing), true)
+    t.eq(v_fixing.is_supported_fixing(fixing), true)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.eq(label.expected_proposal_id, proposal_id)
     t.eq(label.expected_state, "fixing")
@@ -301,7 +301,7 @@ return {
     t.eq(merge_ready.dedup_key, expected.dedup_key)
     t.eq(merge_ready.source_ref.kind, expected.source_ref.kind)
     t.eq(merge_ready.source_ref.ref, expected.source_ref.ref)
-    t.eq(v_merge_ready.is_supported_merge_ready(core, merge_ready), true)
+    t.eq(v_merge_ready.is_supported_merge_ready(merge_ready), true)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request").payload
     t.eq(label.expected_proposal_id, "github-devloop/issue/owner/repo/42")
     t.eq(label.expected_state, "merge-ready")
