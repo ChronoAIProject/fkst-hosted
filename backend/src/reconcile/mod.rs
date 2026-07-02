@@ -88,6 +88,16 @@ pub const SUBSTRATE_RETIRED_LABEL: &str = "fkst-session-retired";
 /// [`SUBSTRATE_INVALID_LABEL`] rather than the one-way announce/pick-up latches.
 pub const SUBSTRATE_DEGRADED_LABEL: &str = "fkst-degraded";
 
+/// The DURABLE latch label the reconciler adds to a trigger issue when it REJECTS a
+/// config edit (config is immutable once a session exists —
+/// [`desired::plan_repo`] emits [`ReconcileAction::RejectConfigChange`]). Its presence
+/// is the "already told them" dedupe signal that keeps the reconciler from re-posting
+/// the rejection every cycle while the edited (and ignored) config sits on the issue.
+/// Mirrors the one-way announce/pick-up latches — there is no clear/removal path
+/// (unlike [`SUBSTRATE_INVALID_LABEL`]): the only way to change config is to close the
+/// session and open a new one.
+pub const SUBSTRATE_CONFIG_REJECTED_LABEL: &str = "fkst-config-rejected";
+
 /// The identity of one repository to reconcile: `(installation_id, repo)`. The
 /// installation id scopes the GitHub App token; the repo names the work.
 pub type RepoKey = (i64, RepoRef);

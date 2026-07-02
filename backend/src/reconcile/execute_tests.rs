@@ -177,6 +177,32 @@ async fn announce_session_posts_a_comment_and_latches_the_announced_label() {
 }
 
 #[tokio::test]
+async fn reject_config_change_posts_a_comment_and_latches_the_label() {
+    let api = Arc::new(RecordingApi::default());
+    let github = tokens(api.clone());
+
+    reject_config_change(&github, "acme/site", 13).await;
+
+    let comments = api.comments.lock().unwrap();
+    assert_eq!(comments.len(), 1, "exactly one comment");
+    assert_eq!(comments[0].2, 13);
+    assert!(
+        comments[0]
+            .3
+            .contains("Config changes are not allowed after a session trigger exists."),
+        "the posted body is the rejection feedback"
+    );
+
+    let added = api.labels_added.lock().unwrap();
+    assert_eq!(added.len(), 1, "exactly one label add");
+    assert_eq!(added[0].2, 13);
+    assert_eq!(
+        added[0].3,
+        vec![SUBSTRATE_CONFIG_REJECTED_LABEL.to_string()]
+    );
+}
+
+#[tokio::test]
 async fn clear_invalid_removes_the_label() {
     let api = Arc::new(RecordingApi::default());
     let github = tokens(api.clone());

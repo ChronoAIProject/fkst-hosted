@@ -36,7 +36,7 @@ use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
 
-use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
+use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
 
 /// The `validation-status` annotation value a fully-written environment carries;
 /// only a `ready` environment is injected into a session (mirrors Model A).
@@ -117,6 +117,9 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
                 &full_config_hash,
             );
             announce_session(&ctx.github, &owner_repo, trigger_issue, &comment).await
+        }
+        ReconcileAction::RejectConfigChange { trigger_issue } => {
+            reject_config_change(&ctx.github, &owner_repo, trigger_issue).await
         }
     }
 }
@@ -355,6 +358,25 @@ async fn announce_session(github: &GithubAppTokens, owner_repo: &str, issue: i64
     }
 }
 
+/// Reject a config edit on an already-triggered issue: post the "config is immutable"
+/// feedback, then latch the durable rejected label. Both are best-effort + idempotent
+/// (the label add is additive; the planner emits this only on the change TRANSITION).
+/// Mirrors [`flag_invalid`]/[`announce_session`], minus any clear path — the only way
+/// to change config is to close the session and open a new one.
+async fn reject_config_change(github: &GithubAppTokens, owner_repo: &str, issue: i64) {
+    post_comment_best_effort(github, owner_repo, issue, &config_rejected_comment()).await;
+    if let Err(error) = github
+        .add_issue_labels(
+            owner_repo,
+            issue as u64,
+            &[SUBSTRATE_CONFIG_REJECTED_LABEL.to_string()],
+        )
+        .await
+    {
+        tracing::warn!(owner_repo = %owner_repo, issue, error = %error, "reconcile: latch config-rejected label failed");
+    }
+}
+
 /// Clear the invalid label from an issue that now parses (404-tolerant: the label
 /// may already be gone).
 async fn clear_invalid(github: &GithubAppTokens, owner_repo: &str, issue: i64) {
@@ -482,6 +504,14 @@ fn invalid_refs_comment(failures: &[(String, String)]) -> String {
          at that path. Fix the refs and re-trigger.",
     );
     body
+}
+
+fn config_rejected_comment() -> String {
+    "⚠️ **Config changes are not allowed after a session trigger exists.** Your edit \
+     has been ignored and will not be accepted. To change packages, environment, the \
+     log-streaming flag, or any other setting, **close this issue and open a new \
+     session.**"
+        .to_string()
 }
 
 fn flag_invalid_comment(detail: &str) -> String {

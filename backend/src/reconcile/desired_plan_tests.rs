@@ -22,6 +22,8 @@ fn valid_absent_pending_spawns() {
         &pending(&[("s1", true)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -38,6 +40,8 @@ fn valid_absent_not_pending_does_nothing() {
         &pending(&[("s1", false)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -57,6 +61,8 @@ fn absent_liveness_pod_is_treated_as_absent_and_spawns() {
         &pending(&[("s1", true)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -75,6 +81,8 @@ fn valid_live_pending_touches() {
             &pending(&[("s1", true)]),
             &latched(&[]),
             &latched(&[1]),
+            &config_hashes(&[]),
+            &latched(&[]),
             now(),
             &cfg(300, 120),
         );
@@ -107,6 +115,8 @@ fn valid_live_idle_past_both_clocks_kills_idle() {
         &pending(&[("s1", false)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -138,6 +148,8 @@ fn idle_not_killed_before_idle_grace() {
         &pending(&[("s1", false)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -164,6 +176,8 @@ fn idle_not_killed_before_min_lifetime() {
         &pending(&[("s1", false)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(60, 600),
     );
@@ -190,6 +204,8 @@ fn config_mismatch_kills_config_changed_regardless_of_pending() {
             &pending(&[("s1", is_pending)]),
             &latched(&[]),
             &latched(&[1]),
+            &config_hashes(&[]),
+            &latched(&[]),
             now(),
             &cfg(300, 120),
         );
@@ -223,6 +239,8 @@ fn config_drift_kill_beats_idle() {
         &pending(&[("s1", false)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -248,6 +266,8 @@ fn unknown_pod_config_hash_is_not_drift() {
         &pending(&[("s1", true)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -277,6 +297,8 @@ fn valid_terminal_cleans_up() {
         &pending(&[("s1", true)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -306,6 +328,8 @@ fn valid_terminating_does_nothing() {
         &pending(&[("s1", false)]),
         &latched(&[]),
         &latched(&[1]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -323,6 +347,8 @@ fn orphan_live_pod_is_killed_trigger_closed() {
             &live,
             &pending(&[]),
             &latched(&[]),
+            &latched(&[]),
+            &config_hashes(&[]),
             &latched(&[]),
             now(),
             &cfg(300, 120),
@@ -347,6 +373,8 @@ fn orphan_terminal_pod_is_cleaned_up() {
         &live,
         &pending(&[]),
         &latched(&[]),
+        &latched(&[]),
+        &config_hashes(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),
@@ -376,6 +404,8 @@ fn orphan_terminating_pod_does_nothing() {
         &pending(&[]),
         &latched(&[]),
         &latched(&[]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -391,6 +421,8 @@ fn invalid_issue_not_latched_is_flagged() {
         &[],
         &pending(&[]),
         &latched(&[]),
+        &latched(&[]),
+        &config_hashes(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),
@@ -414,6 +446,8 @@ fn invalid_issue_already_latched_is_not_reflagged() {
         &pending(&[]),
         &latched(&[5]),
         &latched(&[]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -436,6 +470,8 @@ fn latched_issue_that_reparses_is_cleared() {
         &pending(&[("s5", false)]),
         &latched(&[5]),
         &latched(&[5]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -457,6 +493,8 @@ fn latched_issue_still_invalid_is_not_cleared() {
         &pending(&[]),
         &latched(&[5]),
         &latched(&[]),
+        &config_hashes(&[]),
+        &latched(&[]),
         now(),
         &cfg(300, 120),
     );
@@ -471,6 +509,8 @@ fn empty_inputs_produce_no_actions() {
         &[],
         &pending(&[]),
         &latched(&[]),
+        &latched(&[]),
+        &config_hashes(&[]),
         &latched(&[]),
         now(),
         &cfg(300, 120),
