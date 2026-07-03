@@ -38,6 +38,22 @@ return {
     t.is_nil(name)
   end,
 
+  test_join_repo_builds_canonical_repo_and_rejects_invalid_segments = function()
+    t.eq(forge_strings.join_repo("owner", "name"), "owner/name")
+    t.eq(forge_strings.join_repo(nil, "name"), nil)
+    t.eq(forge_strings.join_repo("owner", nil), nil)
+    t.eq(forge_strings.join_repo("", "name"), nil)
+    t.eq(forge_strings.join_repo("owner", ""), nil)
+    t.eq(forge_strings.join_repo("ow/ner", "name"), nil)
+    t.eq(forge_strings.join_repo("owner", "na/me"), nil)
+  end,
+
+  test_join_repo_round_trips_split_repo = function()
+    local repo = "owner/name"
+
+    t.eq(forge_strings.join_repo(forge_strings.split_repo(repo)), repo)
+  end,
+
   test_comment_body_normalizes_table_string_and_nil = function()
     t.eq(forge_strings.comment_body({ body = "hello" }), "hello")
     t.eq(forge_strings.comment_body({ body = nil }), "")
@@ -96,6 +112,7 @@ return {
   test_contract_strings_excludes_forge_specific_helpers = function()
     t.is_nil(strings.strip_bot_login_suffix)
     t.is_nil(strings.split_repo)
+    t.is_nil(strings.join_repo)
     t.is_nil(strings.comment_body)
     t.is_nil(strings.is_git_ref_safe)
   end,
