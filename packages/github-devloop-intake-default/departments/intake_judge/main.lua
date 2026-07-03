@@ -77,7 +77,7 @@ local function raise_enable_successor(dept, repo, issue_number, candidate, curre
     local class_add, class_remove = core.intake_service_class_label_changes(candidate.service_class)
     devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "intake-enable", "execution-request", "applied(" .. tostring(opts.reason or "direct") .. ")", "raising execution request successor event")
     devloop_logging.log_apply(dept, candidate.proposal_id, "enable", execution_request.dedup_key, {
-      add = { core._enabled_label, class_add[1] },
+      add = { devloop_base._enabled_label, class_add[1] },
       remove = class_remove,
     }, {
       "github-proxy.github_issue_label_request",
@@ -309,9 +309,9 @@ local function act_intake_judge(event)
       table.insert(raised, "github-proxy.github_issue_label_request")
     end
     if enables_pipeline(parsed.action) then
-      table.insert(apply_add, 1, core._enabled_label)
+      table.insert(apply_add, 1, devloop_base._enabled_label)
     elseif tracks_umbrella(parsed.action) then
-      table.insert(apply_add, 1, core._tracking_label)
+      table.insert(apply_add, 1, devloop_base._tracking_label)
     end
     devloop_logging.log_apply("intake_judge", candidate.proposal_id, parsed.action, candidate.dedup_key, {
       add = apply_add,

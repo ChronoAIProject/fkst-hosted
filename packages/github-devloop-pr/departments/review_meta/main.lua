@@ -150,7 +150,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       }
     end
     if parsed.action == "fix"
-      and not strings.is_bounded_string(parsed.blocking_gap, core._max_blocking_gap_len) then
+      and not strings.is_bounded_string(parsed.blocking_gap, devloop_base._max_blocking_gap_len) then
       devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
       parsed = {
         action = "block",

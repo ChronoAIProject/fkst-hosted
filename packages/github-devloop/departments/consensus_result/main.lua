@@ -32,7 +32,7 @@ local function dependency_hold_effects_complete(current, reached, version)
   return devloop_state.has_state_marker(current.comments, reached.proposal_id, "dependency_wait", version)
     and core.dependency_hold_fact(current.comments, reached.proposal_id) ~= nil
     and devloop_state.state_label_hint_matches(current.labels, "dependency_wait")
-    and devloop_state.has_label(current.labels, core._blocked_on_dependency_label)
+    and devloop_state.has_label(current.labels, devloop_base._blocked_on_dependency_label)
 end
 
 local function raise_result_effects(repo, issue_number, reached, current, state, gate, reason, version, to_state)
@@ -61,7 +61,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
     dependency_label_request = requests_labels.build_label_request(core,
       repo,
       issue_number,
-      { core._blocked_on_dependency_label },
+      { devloop_base._blocked_on_dependency_label },
       {},
       base_ids.dedup_key({ "dependency", "label", "hold", tostring(reached.proposal_id), version, tostring(gate.kind) }),
       reached.source_ref
@@ -76,7 +76,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       reached.source_ref
     )
   end
-  table.insert(label_request.remove_labels, core._blocked_on_dependency_label)
+  table.insert(label_request.remove_labels, devloop_base._blocked_on_dependency_label)
 
   local raised = {}
   if not devloop_state.has_result_marker(current.comments, reached.proposal_id, reached.decision, reached.dedup_key) then

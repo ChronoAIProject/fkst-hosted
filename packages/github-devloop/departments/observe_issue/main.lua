@@ -276,17 +276,17 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
 end
 
 local function raise_stale_dependency_label_clear(issue, proposal_id, state, labels)
-  if state.state == "ready" or state.state == "dependency_wait" or not devloop_state.has_label(labels, core._blocked_on_dependency_label) then
+  if state.state == "ready" or state.state == "dependency_wait" or not devloop_state.has_label(labels, devloop_base._blocked_on_dependency_label) then
     return false
   end
-  devloop_logging.log_apply("observe_issue", proposal_id, state.state, state.version, { add = {}, remove = { core._blocked_on_dependency_label } }, {
+  devloop_logging.log_apply("observe_issue", proposal_id, state.state, state.version, { add = {}, remove = { devloop_base._blocked_on_dependency_label } }, {
     "github-proxy.github_issue_label_request",
   })
   devloop_logging.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(core,
     issue.repo,
     issue.number,
     {},
-    { core._blocked_on_dependency_label },
+    { devloop_base._blocked_on_dependency_label },
     base_ids.dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version or "unversioned") }),
     issue.source_ref
   ))
