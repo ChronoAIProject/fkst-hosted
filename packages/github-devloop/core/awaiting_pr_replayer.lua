@@ -187,8 +187,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   end
 
   local comment_request = build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
-  local label_request = requests_labels.build_state_label_request(M,
-    issue.repo,
+  local label_request = requests_labels.build_state_label_request(issue.repo,
     issue.number,
     next_state.to_state,
     base_ids.dedup_key({

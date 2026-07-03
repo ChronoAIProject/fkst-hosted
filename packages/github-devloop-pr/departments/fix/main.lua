@@ -334,8 +334,7 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
       preserve_nil_gate_failure_excerpt = true,
     }
   )
-  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(core,
-    repo,
+  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
     issue_number,
     "fixing",
     fix.dedup_key .. "/label/refix/" .. tostring(devloop_state.version_fix_round(next_version)),

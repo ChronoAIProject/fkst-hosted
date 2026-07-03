@@ -553,7 +553,7 @@ return {
     t.eq(core.implementation_retry_attempt(ready.dedup_key .. "/reimplement/2"), 2)
     t.is_nil(core.implementation_retry_attempt(ready.dedup_key))
 
-    local label = requests_labels.build_implementing_label_request(core, "owner/repo", "42", ready)
+    local label = requests_labels.build_implementing_label_request("owner/repo", "42", ready)
     t.eq(label.add_labels[1], "fkst-dev:implementing")
     t.eq(label.label_colors["fkst-dev:implementing"], "FBCA04")
     t.eq(label.remove_labels[1], "fkst-dev:thinking")
@@ -574,7 +574,7 @@ return {
     t.is_true(attempt_comment.body:find("github-devloop implementation attempt started", 1, true) ~= nil)
     t.eq(core.implement_attempt_count({ attempt_comment.body }, ready.proposal_id, ready.dedup_key), 2)
 
-    local failed_label = requests_labels.build_impl_failed_label_request(core, "owner/repo", "42", ready, "no-changes")
+    local failed_label = requests_labels.build_impl_failed_label_request("owner/repo", "42", ready, "no-changes")
     t.eq(failed_label.add_labels[1], "fkst-dev:impl-failed")
     t.eq(failed_label.label_colors["fkst-dev:impl-failed"], "B60205")
     t.eq(failed_label.remove_labels[1], "fkst-dev:thinking")

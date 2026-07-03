@@ -171,7 +171,7 @@ local function build_parent_awaiting_comment(repo, issue_number, ready, child)
 end
 
 local function build_parent_awaiting_label(repo, issue_number, ready, child)
-  return requests_labels.build_state_label_request(M, repo, issue_number, "awaiting-pr", base_ids.dedup_key({
+  return requests_labels.build_state_label_request(repo, issue_number, "awaiting-pr", base_ids.dedup_key({
     "awaiting-pr",
     "label",
     tostring(ready.proposal_id),

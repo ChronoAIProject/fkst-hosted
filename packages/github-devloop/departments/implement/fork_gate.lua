@@ -35,8 +35,7 @@ local function duplicate_comment(repo, issue_number, ready, origin, canonical_nu
 end
 
 local function duplicate_label(repo, issue_number, ready, origin, canonical_number)
-  return requests_labels.build_label_request(core,
-    repo,
+  return requests_labels.build_label_request(repo,
     issue_number,
     { duplicate_label_name },
     {},

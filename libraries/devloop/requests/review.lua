@@ -375,7 +375,7 @@ function C.raise_fix_reviewing(M, opts)
 
   devloop_logging.log_cas_decision(dept, fix.proposal_id, current_state, "fixing", "reviewing", "applied", reason)
   local comment_request = C.build_fix_reviewing_comment_request(M, repo, issue_number, fix, old_head_sha, new_head_sha, new_version)
-  local label_request = labels.build_fix_reviewing_label_request(M, repo, issue_number, fix, new_head_sha, new_version)
+  local label_request = labels.build_fix_reviewing_label_request(repo, issue_number, fix, new_head_sha, new_version)
   local add_labels, remove_labels = M.state_label_changes("reviewing")
   local raised = {
     "github-proxy.github_pr_comment_request",

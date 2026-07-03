@@ -194,7 +194,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       local review_meta = payloads_builders.build_devloop_review_meta_payload(unresolved, origin.proposal_id, state.version, pr_number, round, pr_source_ref)
       local label_request = nil
       if origin.issue_number ~= nil then
-        label_request = requests_labels.build_state_label_request(core, origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
+        label_request = requests_labels.build_state_label_request(origin.repo, origin.issue_number, "review-meta", review_meta.dedup_key .. "/label/review-meta", pr_source_ref)
       end
       devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "review-meta", devloop_state.cas_outcome(state, transition, review_version), "review truth table reached no approve after bounded pass")
       devloop_logging.log_apply("review_loop", origin.proposal_id, "review-meta", state.version, { add = { "fkst-dev:review-meta" }, remove = {} }, {

@@ -635,7 +635,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       new_version,
       source_ref
     )
-    local label_request = requests_labels.build_state_label_request(M, issue.repo, issue.number, "reviewing", base_ids.dedup_key({
+    local label_request = requests_labels.build_state_label_request(issue.repo, issue.number, "reviewing", base_ids.dedup_key({
       "observe",
       "fixing",
       "renormalize",

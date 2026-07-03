@@ -842,8 +842,7 @@ function C.build_reconcile_state_label_request(repo, issue_number, proposal_id, 
   else
     add_labels, remove_labels = C.state_label_changes(state)
   end
-  return requests_labels.build_label_request(devloop_base,
-    repo,
+  return requests_labels.build_label_request(repo,
     issue_number,
     add_labels,
     remove_labels,

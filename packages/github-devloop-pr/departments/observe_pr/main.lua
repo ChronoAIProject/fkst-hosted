@@ -350,8 +350,7 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
       gate_failure_excerpt = reason,
     }
   )
-  local label_request = origin.issue_number ~= nil and requests_labels.build_state_label_request(core,
-    origin.repo,
+  local label_request = origin.issue_number ~= nil and requests_labels.build_state_label_request(origin.repo,
     origin.issue_number,
     "fixing",
     tostring(state.version) .. "/observe-pr-conflict/label/fixing",

@@ -288,7 +288,7 @@ local function pipeline_timeout(event)
       source_ref = base_ids.normalize_source_ref(reconcile.source_ref),
     }
     local comment_request = conv_reconcile.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
-    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", base_ids.dedup_key({
+    local label_request = requests_labels.build_state_label_request(repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",
       tostring(reconcile.dedup_key),

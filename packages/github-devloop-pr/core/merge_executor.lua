@@ -123,8 +123,7 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     predecessor_set = position.predecessor_set
   end
   local comment_request = requests_review.build_merge_gate_fix_comment_request(core, repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
-  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(core,
-    repo,
+  local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
     issue_number,
     "fixing",
     merge_ready.dedup_key .. "/label/fixing",
@@ -154,7 +153,7 @@ local function raise_reviewing_for_current_head(repo, issue_number, merge_ready,
   end
   local current_head_sha = tostring(current_pr.head_sha or "")
   local comment_request = requests_review.build_merge_head_reviewing_comment_request(core, repo, issue_number, merge_ready, merge_ready.reviewed_head_sha, current_head_sha, review_version, source_ref)
-  local label_request = issue_number ~= nil and requests_labels.build_merge_head_reviewing_label_request(core, repo, issue_number, merge_ready, current_head_sha, review_version, entity_lib.issue_source_ref(repo, issue_number)) or nil
+  local label_request = issue_number ~= nil and requests_labels.build_merge_head_reviewing_label_request(repo, issue_number, merge_ready, current_head_sha, review_version, entity_lib.issue_source_ref(repo, issue_number)) or nil
   local add_labels, remove_labels = devloop_state.state_label_changes("reviewing")
   devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, current_state, "merge-ready", "reviewing", "applied", reason)
   local raised = {

@@ -39,7 +39,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
   version = version or result_version(reached)
   to_state = to_state or (gate and gate.ok and "ready" or "dependency_wait")
   local comment_request = requests_lifecycle.build_result_comment_request(core, repo, issue_number, reached, to_state)
-  local label_request = requests_labels.build_result_label_request(core, repo, issue_number, reached)
+  local label_request = requests_labels.build_result_label_request(repo, issue_number, reached)
   local dependency_comment_request = nil
   local dependency_label_request = nil
   local dependency_release_comment_request = nil
@@ -58,8 +58,7 @@ local function raise_result_effects(repo, issue_number, reached, current, state,
       marker,
       reached.source_ref
     )
-    dependency_label_request = requests_labels.build_label_request(core,
-      repo,
+    dependency_label_request = requests_labels.build_label_request(repo,
       issue_number,
       { devloop_base._blocked_on_dependency_label },
       {},

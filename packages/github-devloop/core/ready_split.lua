@@ -93,8 +93,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     issue.source_ref
   ))
   if to_state == "dependency_wait" then
-    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
-      issue.repo,
+    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(issue.repo,
       issue.number,
       { M._blocked_on_dependency_label },
       {},
@@ -104,8 +103,7 @@ function M.canonicalize_legacy_ready_dependency_wait(dept, issue, state, facts)
     return true
   end
   if devloop_state.has_label(current.labels, M._blocked_on_dependency_label) then
-    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
-      issue.repo,
+    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(issue.repo,
       issue.number,
       {},
       { M._blocked_on_dependency_label },
@@ -178,8 +176,7 @@ local function raise_dependency_release(M, dept, issue, proposal_id, state, curr
     ))
   end
   if has_blocked_label then
-    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
-      issue.repo, issue.number, {}, { M._blocked_on_dependency_label },
+    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(issue.repo, issue.number, {}, { M._blocked_on_dependency_label },
       base_ids.dedup_key({ "dependency", "label", "clear", tostring(proposal_id), tostring(state.version) }), issue.source_ref
     ))
   end
@@ -211,8 +208,7 @@ local function raise_dependency_wait_hold(M, dept, issue, proposal_id, state, cu
   end
   if dependency_hold == nil then
     devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", requests_lifecycle.build_dependency_hold_comment_request(M, issue.repo, issue.number, proposal_id, state.version, gate, marker, issue.source_ref))
-    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
-      issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
+    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
       base_ids.dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(state.version), tostring(gate.kind) }), issue.source_ref
     ))
   end
@@ -232,8 +228,7 @@ local function raise_dependency_gate_blocked(M, dept, issue, proposal_id, state,
     dedup_key = base_ids.dedup_key({ "dependency", "blocked", tostring(proposal_id), tostring(state.version), tostring(gate.kind), tostring(gate.reason) }),
     source_ref = base_ids.normalize_source_ref(issue.source_ref),
   }, issue.source_ref)
-  local label_request = requests_labels.build_label_request(M,
-    issue.repo,
+  local label_request = requests_labels.build_label_request(issue.repo,
     issue.number,
     add_labels,
     remove_labels,
@@ -298,8 +293,7 @@ function M.replay_ready_state(dept, issue, state, row, facts)
     devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_comment_request", M.build_ready_split_canonicalized_comment_request(
       issue.repo, issue.number, proposal_id, state.version, "dependency_wait", dep_version, gate, issue.source_ref
     ))
-    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(M,
-      issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
+    devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(issue.repo, issue.number, { M._blocked_on_dependency_label }, {},
       base_ids.dedup_key({ "dependency", "label", "hold", tostring(proposal_id), tostring(dep_version), tostring(gate.kind) }), issue.source_ref
     ))
     return true

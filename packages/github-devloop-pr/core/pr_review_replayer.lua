@@ -100,7 +100,7 @@ local function append_issue_label_effect(issue, proposal_id, to_state, version, 
   end
   table.insert(effects, {
     queue = "github-proxy.github_issue_label_request",
-    payload = requests_labels.build_state_label_request(M, issue.repo, issue.number, to_state, key, source_ref),
+    payload = requests_labels.build_state_label_request(issue.repo, issue.number, to_state, key, source_ref),
   })
 end
 
@@ -110,7 +110,7 @@ local function add_issue_label_effect(issue, proposal_id, to_state, version, sou
   end
   table.insert(effects, {
     queue = "github-proxy.github_issue_label_request",
-    payload = requests_labels.build_state_label_request(M, issue.repo, issue.number, to_state, base_ids.dedup_key(dedup_parts), source_ref),
+    payload = requests_labels.build_state_label_request(issue.repo, issue.number, to_state, base_ids.dedup_key(dedup_parts), source_ref),
   })
 end
 
@@ -653,8 +653,7 @@ mark_issue_merged_from_linked_pr = function(dept, issue, state, proposal_id, lin
     tostring(link.pr_number),
     tostring(head_sha),
   }), issue.source_ref)
-  local label_request = requests_labels.build_state_label_request(M,
-    issue.repo,
+  local label_request = requests_labels.build_state_label_request(issue.repo,
     issue.number,
     "merged",
     base_ids.dedup_key({

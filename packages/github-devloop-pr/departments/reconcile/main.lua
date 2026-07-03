@@ -432,7 +432,7 @@ local function pipeline_timeout(event)
     local comment_request = target_pr_number ~= nil
       and build_timeout_reconcile_pr_comment_request(repo, target_pr_number, reconcile, action, reason, version, why_fields)
       or conv_reconcile.build_timeout_reconcile_comment_request(repo, issue_number, reconcile, action, reason, version, why_fields)
-    local label_request = requests_labels.build_state_label_request(core, repo, issue_number, "blocked", base_ids.dedup_key({
+    local label_request = requests_labels.build_state_label_request(repo, issue_number, "blocked", base_ids.dedup_key({
       "timeout-reconcile",
       "label",
       tostring(reconcile.dedup_key),

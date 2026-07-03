@@ -12,8 +12,7 @@ function S.install(M)
 local ai_sentinel = "⟦AI:FKST⟧"
 
 function M.build_reconcile_label_request(repo, issue_number, reconcile)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "blocked",
     base_ids.dedup_key({
@@ -26,8 +25,7 @@ function M.build_reconcile_label_request(repo, issue_number, reconcile)
 end
 
 function M.build_review_reconcile_label_request(repo, issue_number, review_reconcile)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "blocked",
     base_ids.dedup_key({
@@ -40,8 +38,7 @@ function M.build_review_reconcile_label_request(repo, issue_number, review_recon
 end
 
 function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "blocked",
     base_ids.dedup_key({

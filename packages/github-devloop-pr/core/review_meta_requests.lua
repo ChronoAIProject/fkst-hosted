@@ -60,8 +60,7 @@ local function review_meta_result_marker(review_meta, action, reason, state_vers
 end
 
 function M.build_fix_review_meta_label_request(repo, issue_number, fix, reason)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "review-meta",
     base_ids.dedup_key({
@@ -104,8 +103,7 @@ end
 
 function M.build_review_meta_label_request(repo, issue_number, review_meta, action, version)
   local normalized = normalized_reflection_action(review_meta, action)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     review_meta_to_state(normalized),
     base_ids.dedup_key({
@@ -152,8 +150,7 @@ function M.build_review_meta_comment_request(repo, issue_number, review_meta, ac
 end
 
 function M.build_review_reconcile_label_request(repo, issue_number, review_reconcile)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "blocked",
     base_ids.dedup_key({
@@ -166,8 +163,7 @@ function M.build_review_reconcile_label_request(repo, issue_number, review_recon
 end
 
 function M.build_fix_reconcile_label_request(repo, issue_number, fix_reconcile)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "blocked",
     base_ids.dedup_key({

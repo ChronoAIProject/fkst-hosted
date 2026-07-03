@@ -51,7 +51,7 @@ end
 
 local function raise_impl_failed(repo, issue_number, ready, reason, detail, attempt)
   local comment_request = requests_lifecycle.build_impl_failure_comment_request(core, repo, issue_number, ready, reason, detail, attempt)
-  local label_request = requests_labels.build_impl_failed_label_request(core, repo, issue_number, ready, reason)
+  local label_request = requests_labels.build_impl_failed_label_request(repo, issue_number, ready, reason)
   local add_labels, remove_labels = devloop_state.state_label_changes("impl-failed")
   devloop_logging.log_apply("implement", ready.proposal_id, "impl-failed", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
@@ -63,7 +63,7 @@ end
 
 local function raise_implementing_state(repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
   local comment_request = requests_lifecycle.build_implementing_state_comment_request(core, repo, issue_number, ready, worktree, branch, base_branch, base_sha, attempt, started_at, exec_ref)
-  local label_request = requests_labels.build_implementing_label_request(core, repo, issue_number, ready)
+  local label_request = requests_labels.build_implementing_label_request(repo, issue_number, ready)
   local add_labels, remove_labels = devloop_state.state_label_changes("implementing")
   devloop_logging.log_apply("implement", ready.proposal_id, "implementing", ready.dedup_key, { add = add_labels, remove = remove_labels }, {
     "github-proxy.github_issue_comment_request",
@@ -657,8 +657,7 @@ local function process_ready_event(event)
         gate,
         ready.source_ref
       ))
-      devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(core,
-        repo,
+      devloop_logging.log_raise("implement", ready.proposal_id, "github-proxy.github_issue_label_request", requests_labels.build_label_request(repo,
         issue_number,
         { devloop_base._blocked_on_dependency_label },
         {},

@@ -228,8 +228,7 @@ function M.build_intake_class_followup_comment_request(repo, issue_number, candi
 end
 
 function M.build_intake_class_folded_label_request(repo, issue_number, candidate)
-  return requests_labels.build_state_label_request(M,
-    repo,
+  return requests_labels.build_state_label_request(repo,
     issue_number,
     "blocked",
     base_ids.dedup_key({
