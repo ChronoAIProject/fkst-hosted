@@ -4,12 +4,12 @@
 //! and the not-found / unconfigured cases. Fixtures live in [`super::test_support`];
 //! the browser-mode + secret-hygiene suites live in [`super::tests_browser`].
 
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 
 use super::test_support::*;
 
 #[tokio::test]
-async fn api_mode_author_gets_a_presigned_url() {
+async fn api_mode_author_gets_the_streamed_bundle() {
     let gh = github_user_ok("alice", AUTHOR_ID).await; // id matches the author
     let (storage, _s) = storage_server(true).await;
     let st = state(
@@ -25,10 +25,24 @@ async fn api_mode_author_gets_a_presigned_url() {
         Some("gho_author"),
     )
     .await;
+    // Streamed through the control plane as a gzip attachment — NO presigned URL is ever
+    // handed back to the caller (it stays server-side inside `stream_download`).
     assert_eq!(response.status(), StatusCode::OK);
-    let body = body_json(response).await;
-    assert_eq!(body["url"], PRESIGNED_URL);
-    assert_eq!(body["expires_in"], 900);
+    let cd = response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .expect("content-disposition present")
+        .to_str()
+        .unwrap();
+    assert!(cd.starts_with("attachment;"), "must be an attachment: {cd}");
+    let ct = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(ct, "application/gzip");
+    assert_eq!(body_bytes(response).await, BUNDLE_BYTES);
 }
 
 #[tokio::test]

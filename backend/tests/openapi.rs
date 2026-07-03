@@ -136,8 +136,6 @@ async fn components_include_the_named_environment_schemas_and_not_the_removed_on
         "EnvironmentList",
         "EnvironmentSummary",
         "InstallValidationError",
-        // The log-download response DTO.
-        "LogDownloadResponse",
     ] {
         assert!(
             schemas.get(expected).is_some(),

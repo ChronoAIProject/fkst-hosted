@@ -11,13 +11,13 @@
 //! - **API mode** — an `Authorization: Bearer <github-token>` header. The token is
 //!   traded for `{login, id}` via `GET {api_base}/user` (never logged, used only for
 //!   that call, never stored; the lookup is cached briefly by token HASH). A rejected
-//!   token → 401. On success the endpoint returns JSON `{ url, expires_in }` with a
-//!   fresh 900s presigned URL, safe because it goes only to the authenticated caller.
+//!   token → 401. On success the endpoint STREAMS the redacted bundle back as a gzip
+//!   attachment.
 //! - **Browser mode** — no header. The endpoint 302-redirects to GitHub user-OAuth
 //!   with a SIGNED `state` carrying the `session_id` (CSRF/tamper guard); the
 //!   `/api/v1/logs/oauth/callback` route verifies `state`, exchanges the code for a
-//!   user token, resolves `/user`, and — on authorization — 302-redirects the browser
-//!   to the presigned URL (the download starts).
+//!   user token, resolves `/user`, and — on authorization — STREAMS the bundle back as
+//!   an attachment (the download starts).
 //!
 //! Authorization (both modes) is the pure three-tier
 //! [`crate::reconcile::log_authz::is_authorized`] over the session's trigger context,
@@ -25,8 +25,9 @@
 //! is a one-way hash, so this reverse map is how the endpoint recovers the author id
 //! + `### Log Access` allow-list). Deny → 403. Unknown session / missing object → 404.
 //!
-//! Secret hygiene: the caller's token and the OAuth client secret are NEVER logged;
-//! the presigned URL is a short-lived capability handed only to the resolved caller.
+//! Secret hygiene: the caller's token and the OAuth client secret are NEVER logged, and
+//! NO presigned S3 URL is ever exposed to the caller — the control plane fetches the
+//! bundle server-side (a presigned URL is used only internally) and returns the bytes.
 
 mod identity;
 mod oauth;
@@ -34,12 +35,11 @@ mod oauth;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use secrecy::ExposeSecret;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::OnceLock;
 use std::time::Duration;
-use utoipa::{IntoParams, ToSchema};
+use utoipa::IntoParams;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -50,26 +50,9 @@ use crate::reconcile::log_authz;
 use crate::state::AppState;
 use crate::storage::StorageError;
 
-/// The lifetime requested for a minted presigned GET URL, in seconds (15 minutes) —
-/// long enough for a browser download to start, short enough that a leaked URL
-/// expires quickly. Reported to API callers as `expires_in`.
-const PRESIGN_TTL_SECS: u64 = 900;
-
 /// The chrono-storage object key the producer uploads a session's redacted bundle to.
 fn log_object_key(session_id: &str) -> String {
     format!("logs/{session_id}/latest.tar.gz")
-}
-
-/// The JSON body an API-mode (Bearer) caller receives: a short-lived presigned GET
-/// URL for the session's redacted log bundle plus its lifetime in seconds.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct LogDownloadResponse {
-    /// A freshly-minted, short-lived presigned URL that downloads the redacted bundle.
-    #[schema(example = "https://storage.example/logs/<id>/latest.tar.gz?sig=...")]
-    pub url: String,
-    /// The presigned URL's lifetime in seconds.
-    #[schema(example = 900)]
-    pub expires_in: u64,
 }
 
 /// The OAuth callback query (`?code=&state=` on success, `?error=` on user denial).
@@ -90,8 +73,10 @@ pub struct OAuthCallbackQuery {
 /// `GET /api/v1/logs/{session_id}` — download a session's redacted logs.
 ///
 /// UNAUTHENTICATED at the routing layer; identity + authorization run in-handler
-/// (see the module docs). With a Bearer token it resolves identity and returns a
-/// presigned-URL JSON body; without one it 302-redirects into the browser OAuth flow.
+/// (see the module docs). With a Bearer token it resolves identity and streams the
+/// redacted bundle as a gzip attachment; without one it 302-redirects into the browser
+/// OAuth flow. No presigned S3 URL is ever exposed to the caller — the control plane
+/// fetches the bytes server-side and returns them.
 #[utoipa::path(
     get,
     path = "/logs/{session_id}",
@@ -99,8 +84,8 @@ pub struct OAuthCallbackQuery {
     operation_id = "download_session_logs",
     params(("session_id" = String, Path, description = "The deterministic session id (from the announce link)")),
     responses(
-        (status = 200, description = "Presigned download URL (API mode — a Bearer token was supplied)", body = LogDownloadResponse),
-        (status = 302, description = "Redirect: browser mode → GitHub OAuth; authorized → the presigned URL"),
+        (status = 200, description = "The redacted log bundle, streamed as a gzip attachment (API mode — a Bearer token was supplied)", content_type = "application/gzip"),
+        (status = 302, description = "Redirect: browser mode → GitHub OAuth"),
         (status = 401, description = "The supplied Bearer token was rejected by GitHub", body = ErrorEnvelope),
         (status = 403, description = "Authenticated but not authorized to access these logs", body = ErrorEnvelope),
         (status = 404, description = "Unknown session, or no logs retained yet", body = ErrorEnvelope),
@@ -123,8 +108,8 @@ async fn download_session_logs(
 /// `GET /api/v1/logs/oauth/callback` — the browser-mode OAuth return.
 ///
 /// Verifies the signed `state`, exchanges the `code` for a user token, resolves the
-/// caller's identity, authorizes, and 302-redirects to the presigned URL. Every
-/// failure renders a browser-friendly HTML page (never a token in the URL or body).
+/// caller's identity, authorizes, and streams the redacted bundle as a gzip attachment.
+/// Every failure renders a browser-friendly HTML page (never a token in the URL or body).
 #[utoipa::path(
     get,
     path = "/logs/oauth/callback",
@@ -132,7 +117,7 @@ async fn download_session_logs(
     operation_id = "session_logs_oauth_callback",
     params(OAuthCallbackQuery),
     responses(
-        (status = 302, description = "Authorized → redirect to the presigned download URL"),
+        (status = 200, description = "Authorized → the redacted log bundle as a gzip attachment", content_type = "application/gzip"),
         (status = 400, description = "Missing or tampered OAuth state/code (HTML)"),
         (status = 403, description = "Authenticated but not authorized (HTML)"),
         (status = 404, description = "No logs retained yet (HTML)"),
@@ -211,8 +196,10 @@ async fn oauth_callback(
 
 // ---- API mode + browser redirect --------------------------------------------
 
-/// API mode: resolve identity from the Bearer `token`, authorize, and return the
-/// presigned-URL JSON. Every failure renders the JSON [`AppError`] envelope.
+/// API mode: resolve identity from the Bearer `token`, authorize, and stream the
+/// redacted bundle back as a gzip attachment — identical to the browser path, so NO
+/// presigned S3 URL is ever handed to a caller (the presigned URL is used server-side
+/// only, inside [`stream_download`]). Every failure renders the JSON [`AppError`] envelope.
 async fn api_mode(state: &AppState, session_id: &str, token: &str) -> Response {
     let user = match identity::resolve(&state.config.github_api_base_url, token).await {
         Ok(user) => user,
@@ -221,12 +208,8 @@ async fn api_mode(state: &AppState, session_id: &str, token: &str) -> Response {
     if let Err(err) = authorize(state, session_id, &user) {
         return err.into_response();
     }
-    match presign(state, session_id).await {
-        Ok(url) => Json(LogDownloadResponse {
-            url,
-            expires_in: PRESIGN_TTL_SECS,
-        })
-        .into_response(),
+    match stream_download(state, session_id).await {
+        Ok(response) => response,
         Err(err) => err.into_response(),
     }
 }
@@ -290,30 +273,6 @@ fn authorize(state: &AppState, session_id: &str, user: &GithubUser) -> Result<()
         Err(AppError::Forbidden(
             "not authorized to access these logs".to_string(),
         ))
-    }
-}
-
-/// Mint a fresh 900s presigned GET URL for the session's log bundle. A missing object
-/// → 404 (`no logs available yet`); no storage configured → 503; any other storage
-/// error → 502. The signed URL is returned (to the resolved caller) and never logged.
-async fn presign(state: &AppState, session_id: &str) -> Result<String, AppError> {
-    let Some(storage) = state.storage.as_ref() else {
-        return Err(AppError::Unavailable(
-            "log storage is not configured".to_string(),
-        ));
-    };
-    let key = log_object_key(session_id);
-    match storage.presigned_get_url(&key, PRESIGN_TTL_SECS).await {
-        Ok(url) => Ok(url),
-        Err(StorageError::Status { status: 404 }) => {
-            Err(AppError::NotFound("no logs available yet".to_string()))
-        }
-        Err(err) => {
-            // The error carries only a numeric status / URL-free category — never the
-            // key, the signed URL, or the SA token.
-            tracing::warn!(session_id = %session_id, error = %err, "log presign failed");
-            Err(AppError::Upstream("log storage error".to_string()))
-        }
     }
 }
 
