@@ -97,120 +97,35 @@ function C.version_updated_at(version)
 end
 
 function C.version_loop_round(version)
-  -- Extract the no-consensus loop round wherever it appears, not only at the
-  -- end of the version string. A reviewing version like ".../loop/2" is later
-  -- extended to a fixing version ".../loop/2/fix/1"; an end-anchored match
-  -- returned 0 for the fixing version, so version ordering wrongly ranked the
-  -- (loop_n=2) reviewing marker above the (loop_n=0) fixing marker and the fix
-  -- loop stalled. Match the gmatch/max shape of the sibling round extractors.
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]loop[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.loop_round(version)
 end
 
 function C.version_fix_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]fix[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.fix_round(version)
 end
 
 function C.version_review_meta_action_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]review%-meta%-action[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.review_meta_action_round(version)
 end
 
 function C.version_review_loop_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]review%-loop[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.review_loop_round(version)
 end
 
 function C.version_timeout_round(version, state_name)
-  local max_n = 0
-  local state = tostring(state_name or "")
-  if state == "" then
-    return 0
-  end
-  local escaped = state:gsub("%-", "%%-")
-  for n in tostring(version or ""):gmatch("/timeout/" .. escaped .. "/(%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  for n in tostring(version or ""):gmatch("%-timeout%-" .. escaped .. "%-(%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.timeout_round(version, state_name)
 end
 
 function C.version_reimplement_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]reimplement[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.reimplement_round(version)
 end
 
 function C.version_ready_split_round(version)
-  local max_n = 0
-  for n in tostring(version or ""):gmatch("[/-]ready%-split[/-](%d+)") do
-    local parsed = tonumber(n) or 0
-    if parsed > max_n then
-      max_n = parsed
-    end
-  end
-  return max_n
+  return transition_version.ready_split_round(version)
 end
 
-local timeout_order_states = {
-  "thinking",
-  "ready",
-  "implementing",
-  "awaiting-pr",
-  "impl-failed",
-  "pr-open",
-  "reviewing",
-  "review-meta",
-  "merge-ready",
-  "merging",
-  "fixing",
-  "blocked",
-}
-
 local function version_max_timeout_round(version)
-  local max_n = 0
-  for _, state_name in ipairs(timeout_order_states) do
-    max_n = math.max(max_n, C.version_timeout_round(version, state_name))
-  end
-  return max_n
+  return transition_version.max_timeout_round(version)
 end
 
 function C.next_fix_version(version)

@@ -7,6 +7,217 @@ local strings = require("contract.strings")
 local max_version_key_len = 40
 local decimal_checksum = strings.decimal_checksum
 
+local slash_suffix_specs = {
+  ["review-meta-action"] = { kind = "review_meta_action", numeric = true },
+  ["review-loop"] = { kind = "review_loop", numeric = true },
+  ["ready-split"] = { kind = "ready_split", numeric = true },
+  ["reimplement"] = { kind = "reimplement", numeric = true },
+  ["timeout-reconcile"] = { kind = "timeout_reconcile", state_numeric = true },
+  ["timeout"] = { kind = "timeout", state_numeric = true },
+  ["rereview"] = { kind = "rereview", n_hex = true },
+  ["review-meta"] = { kind = "review_meta", numeric = true },
+  ["review"] = { kind = "review", numeric = true },
+  ["loop"] = { kind = "loop", numeric = true },
+  ["fix"] = { kind = "fix", numeric = true },
+}
+
+local hyphen_suffixes = {
+  { name = "review-meta-action", kind = "review_meta_action", parts = 1 },
+  { name = "review-loop", kind = "review_loop", parts = 1 },
+  { name = "ready-split", kind = "ready_split", parts = 1 },
+  { name = "reimplement", kind = "reimplement", parts = 1 },
+  { name = "timeout-reconcile", kind = "timeout_reconcile", state_numeric = true },
+  { name = "timeout", kind = "timeout", state_numeric = true },
+  { name = "rereview", kind = "rereview", parts = 2 },
+  { name = "review-meta", kind = "review_meta", parts = 1 },
+  { name = "review", kind = "review", parts = 1 },
+  { name = "loop", kind = "loop", parts = 1 },
+  { name = "fix", kind = "fix", parts = 1 },
+}
+
+local timeout_order_states = {
+  "thinking",
+  "ready",
+  "implementing",
+  "awaiting-pr",
+  "impl-failed",
+  "pr-open",
+  "reviewing",
+  "review-meta",
+  "merge-ready",
+  "merging",
+  "fixing",
+  "blocked",
+}
+
+local function slash_numeric_suffix(parts, pos, spec)
+  local n = tonumber(parts[pos + 1])
+  if n == nil then
+    return nil
+  end
+  return { kind = spec.kind, n = n, separator = "slash" }, pos + 2
+end
+
+local function slash_state_numeric_suffix(parts, pos, spec)
+  local state = parts[pos + 1]
+  local n = tonumber(parts[pos + 2])
+  if state == nil or state == "" or n == nil then
+    return nil
+  end
+  return { kind = spec.kind, state = state, n = n, separator = "slash" }, pos + 3
+end
+
+local function slash_n_hex_suffix(parts, pos, spec)
+  local n = tonumber(parts[pos + 1])
+  local hex = parts[pos + 2]
+  if n == nil or hex == nil or hex:match("^[0-9A-Fa-f]+$") == nil then
+    return nil
+  end
+  return { kind = spec.kind, n = n, hex = hex, separator = "slash" }, pos + 3
+end
+
+local function parse_slash_suffix_chain(parts, start_pos)
+  local suffixes = {}
+  local pos = start_pos
+  while pos <= #parts do
+    local spec = slash_suffix_specs[parts[pos]]
+    if spec == nil then
+      return nil
+    end
+    local suffix, next_pos
+    if spec.numeric then
+      suffix, next_pos = slash_numeric_suffix(parts, pos, spec)
+    elseif spec.state_numeric then
+      suffix, next_pos = slash_state_numeric_suffix(parts, pos, spec)
+    elseif spec.n_hex then
+      suffix, next_pos = slash_n_hex_suffix(parts, pos, spec)
+    end
+    if suffix == nil then
+      return nil
+    end
+    table.insert(suffixes, suffix)
+    pos = next_pos
+  end
+  return suffixes
+end
+
+local function split_slash(text)
+  local parts = {}
+  local start_pos = 1
+  while true do
+    local slash_pos = text:find("/", start_pos, true)
+    if slash_pos == nil then
+      table.insert(parts, text:sub(start_pos))
+      break
+    end
+    table.insert(parts, text:sub(start_pos, slash_pos - 1))
+    start_pos = slash_pos + 1
+  end
+  return parts
+end
+
+local function join_parts(parts, first_pos, last_pos, separator)
+  local values = {}
+  for i = first_pos, last_pos do
+    table.insert(values, parts[i])
+  end
+  return table.concat(values, separator)
+end
+
+local function parse_slash_version(text)
+  local parts = split_slash(text)
+  for pos = 1, #parts do
+    local suffixes = parse_slash_suffix_chain(parts, pos)
+    if suffixes ~= nil then
+      return {
+        base = join_parts(parts, 1, pos - 1, "/"),
+        suffixes = suffixes,
+      }
+    end
+  end
+  return {
+    base = text,
+    suffixes = {},
+  }
+end
+
+local function parse_hyphen_once(base)
+  for _, spec in ipairs(hyphen_suffixes) do
+    local prefix = "-" .. spec.name .. "-"
+    local prefix_pos = base:match(".*()" .. prefix:gsub("%-", "%%-"))
+    if prefix_pos ~= nil then
+      local suffix_text = base:sub(prefix_pos + #prefix)
+      local suffix_parts = {}
+      for part in suffix_text:gmatch("[^-]+") do
+        table.insert(suffix_parts, part)
+      end
+      if spec.state_numeric and #suffix_parts >= 2 then
+        local n = tonumber(suffix_parts[#suffix_parts])
+        if n ~= nil then
+          return base:sub(1, prefix_pos - 1), {
+            kind = spec.kind,
+            state = join_parts(suffix_parts, 1, #suffix_parts - 1, "-"),
+            n = n,
+            separator = "hyphen",
+          }
+        end
+      elseif #suffix_parts == spec.parts then
+        if spec.kind == "rereview" then
+          local n = tonumber(suffix_parts[1])
+          local hex = suffix_parts[2]
+          if n ~= nil and hex:match("^[0-9A-Fa-f]+$") ~= nil then
+            return base:sub(1, prefix_pos - 1), { kind = spec.kind, n = n, hex = hex, separator = "hyphen" }
+          end
+        else
+          local n = tonumber(suffix_parts[#suffix_parts])
+          if n ~= nil then
+            return base:sub(1, prefix_pos - 1), { kind = spec.kind, n = n, separator = "hyphen" }
+          end
+        end
+      end
+    end
+  end
+  return nil, nil
+end
+
+local function parse_hyphen_suffixes(parsed)
+  local suffixes = {}
+  local base = parsed.base
+  while true do
+    local next_base, suffix = parse_hyphen_once(base)
+    if suffix == nil then
+      break
+    end
+    table.insert(suffixes, 1, suffix)
+    base = next_base
+  end
+  parsed.base = base
+  for _, suffix in ipairs(suffixes) do
+    table.insert(parsed.suffixes, suffix)
+  end
+  return parsed
+end
+
+local function ensure_parsed(value)
+  if type(value) == "table" and type(value.suffixes) == "table" then
+    return value
+  end
+  return V.parse(value)
+end
+
+local function max_round(value, kind)
+  local max_n = 0
+  for _, suffix in ipairs(ensure_parsed(value).suffixes or {}) do
+    if suffix.kind == kind then
+      local parsed = tonumber(suffix.n) or 0
+      if parsed > max_n then
+        max_n = parsed
+      end
+    end
+  end
+  return max_n
+end
+
 function V.safe_version_segment(version)
   local safe = strings.sanitize_key(version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
@@ -53,6 +264,93 @@ function V.strip_suffixes(version)
       :gsub("%-loop%-%d+$", "")
   end
   return text
+end
+
+function V.parse(version)
+  local parsed = parse_slash_version(tostring(version or ""))
+  return parse_hyphen_suffixes(parsed)
+end
+
+function V.render(version)
+  local parsed = ensure_parsed(version)
+  local text = tostring(parsed.base or "")
+  for _, suffix in ipairs(parsed.suffixes or {}) do
+    local separator = suffix.separator or "slash"
+    if separator == "hyphen" then
+      if suffix.kind == "timeout" then
+        text = text .. "-timeout-" .. tostring(suffix.state or "") .. "-" .. tostring(suffix.n or 0)
+      elseif suffix.kind == "timeout_reconcile" then
+        text = text .. "-timeout-reconcile-" .. tostring(suffix.state or "") .. "-" .. tostring(suffix.n or 0)
+      elseif suffix.kind == "rereview" then
+        text = text .. "-rereview-" .. tostring(suffix.n or 0) .. "-" .. tostring(suffix.hex or "")
+      else
+        text = text .. "-" .. tostring(suffix.kind or ""):gsub("_", "-") .. "-" .. tostring(suffix.n or 0)
+      end
+    else
+      if suffix.kind == "timeout" then
+        text = text .. "/timeout/" .. tostring(suffix.state or "") .. "/" .. tostring(suffix.n or 0)
+      elseif suffix.kind == "timeout_reconcile" then
+        text = text .. "/timeout-reconcile/" .. tostring(suffix.state or "") .. "/" .. tostring(suffix.n or 0)
+      elseif suffix.kind == "rereview" then
+        text = text .. "/rereview/" .. tostring(suffix.n or 0) .. "/" .. tostring(suffix.hex or "")
+      else
+        text = text .. "/" .. tostring(suffix.kind or ""):gsub("_", "-") .. "/" .. tostring(suffix.n or 0)
+      end
+    end
+  end
+  return text
+end
+
+function V.loop_round(version)
+  return max_round(version, "loop")
+end
+
+function V.fix_round(version)
+  return max_round(version, "fix")
+end
+
+function V.review_loop_round(version)
+  return max_round(version, "review_loop")
+end
+
+function V.review_meta_action_round(version)
+  return max_round(version, "review_meta_action")
+end
+
+function V.ready_split_round(version)
+  return max_round(version, "ready_split")
+end
+
+function V.reimplement_round(version)
+  return max_round(version, "reimplement")
+end
+
+function V.timeout_round(version, state_name)
+  local max_n = 0
+  local state = tostring(state_name or "")
+  if state == "" then
+    return 0
+  end
+  for _, suffix in ipairs(ensure_parsed(version).suffixes or {}) do
+    if suffix.kind == "timeout" and tostring(suffix.state or "") == state then
+      local parsed = tonumber(suffix.n) or 0
+      if parsed > max_n then
+        max_n = parsed
+      end
+    end
+  end
+  return max_n
+end
+
+function V.max_timeout_round(version)
+  local max_n = 0
+  for _, state_name in ipairs(timeout_order_states) do
+    local parsed = V.timeout_round(version, state_name)
+    if parsed > max_n then
+      max_n = parsed
+    end
+  end
+  return max_n
 end
 
 return V
