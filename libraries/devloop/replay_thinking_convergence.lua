@@ -15,7 +15,7 @@ local function visible_true_stall(M, issue, state, facts)
     end
     local base_version = transition_version.strip_suffixes(state.version)
     local sr_digest = convergence_shared.source_ref_digest(source_ref)
-    local converge_facts = conv_rounds.converge_round_facts(M, current.comments, proposal_id, base_version, sr_digest)
+    local converge_facts = conv_rounds.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
     local round = conv_rounds.max_converge_round(converge_facts)
     if not conv_rounds.is_true_stall(converge_facts, round) then
       return nil

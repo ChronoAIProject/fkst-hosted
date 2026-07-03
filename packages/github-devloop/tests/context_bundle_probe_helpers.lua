@@ -298,7 +298,7 @@ local function run_stale_manifest_files(root)
   local ref = context_bundle.context_fetch_ref_from_bundle(core, args)
   local old_bundle = context_bundle.build_context_bundle(core, args)
   os.remove(old_bundle.issue_path)
-  local ok, err = pcall(context_bundle.context_bundle_manifest_from_ref, core, ref, args.exec)
+  local ok, err = pcall(context_bundle.context_bundle_manifest_from_ref, ref, args.exec)
   return {
     ok = ok,
     error = tostring(err or ""),
@@ -352,10 +352,10 @@ local function run_stale_manifest_rebuild(root)
   local old_bundle = context_bundle.build_context_bundle(core, old_args)
   os.remove(old_bundle.issue_path)
 
-  local stale_ok, stale_err = pcall(context_bundle.context_bundle_manifest_from_ref, core, old_ref, old_args.exec)
+  local stale_ok, stale_err = pcall(context_bundle.context_bundle_manifest_from_ref, old_ref, old_args.exec)
   local fresh_args = build_args(fresh_root, fresh_fixtures, { proposal_id = proposal_id, version = version })
   local fresh_ref = context_bundle.context_fetch_ref_from_bundle(core, fresh_args)
-  local fresh_manifest = context_bundle.context_bundle_manifest_from_ref(core, fresh_ref, fresh_args.exec)
+  local fresh_manifest = context_bundle.context_bundle_manifest_from_ref(fresh_ref, fresh_args.exec)
   return {
     stale_ok = stale_ok,
     stale = context_bundle.is_stale_generation_context_error(stale_err),

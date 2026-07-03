@@ -15,9 +15,9 @@ local context_bundle_cache_prefix = "github-devloop/context-bundle/"
 local context_bundle_manifest_cache_prefix = "github-devloop/context-bundle-manifest/"
 local stale_generation_context_error_class = "stale_generation_context"
 
-local function runtime_root(M, exec)
+local function runtime_root(exec)
   local run = exec or exec_sync
-  local result = run({ cmd = M.read_runtime_root_cmd(), timeout = 30 })
+  local result = run({ cmd = devloop_base.read_runtime_root_cmd(), timeout = 30 })
   if type(result) ~= "table" or result.exit_code ~= 0 then
     error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(result and result.stderr or "nil result"))
   end
@@ -85,7 +85,7 @@ local function run_optional(cmd, timeout, exec)
   return run({ cmd = cmd, timeout = timeout or 30 })
 end
 
-local function write_file(M, path, content, exec)
+local function write_file(path, content, exec)
   if exec ~= nil then
     run_required("touch " .. devloop_base._shell_single_quote(path), 30, "write", exec)
   end
@@ -124,7 +124,7 @@ local function manifest_has_notice(paths)
   return false
 end
 
-local function files_are_readable(M, paths, exec)
+local function files_are_readable(paths, exec)
   if type(paths) ~= "table" or #paths == 0 then
     return false
   end
@@ -136,7 +136,7 @@ local function files_are_readable(M, paths, exec)
   return type(result) == "table" and result.exit_code == 0
 end
 
-local function file_size(M, path, exec)
+local function file_size(path, exec)
   local result = run_optional("wc -c < " .. devloop_base._shell_single_quote(path), 30, exec)
   if type(result) ~= "table" or result.exit_code ~= 0 then
     return nil
@@ -145,9 +145,9 @@ local function file_size(M, path, exec)
   return tonumber(stdout)
 end
 
-local function manifest_files_are_valid(M, manifest, exec)
+local function manifest_files_are_valid(manifest, exec)
   local paths = manifest_paths(manifest)
-  return manifest_has_notice(paths) and files_are_readable(M, paths, exec)
+  return manifest_has_notice(paths) and files_are_readable(paths, exec)
 end
 
 local function bundle_paths(dir, has_pr)
@@ -162,25 +162,25 @@ local function bundle_paths(dir, has_pr)
   }
 end
 
-local function hydrate_bundle_sizes(M, bundle, exec)
-  bundle.notice_bytes = file_size(M, bundle.notice_path, exec)
-  bundle.issue_bytes = file_size(M, bundle.issue_path, exec)
-  bundle.pr_bytes = bundle.pr_path ~= nil and file_size(M, bundle.pr_path, exec) or nil
-  bundle.diff_bytes = bundle.diff_path ~= nil and file_size(M, bundle.diff_path, exec) or nil
-  bundle.risk_bytes = bundle.risk_path ~= nil and file_size(M, bundle.risk_path, exec) or nil
-  bundle.board_bytes = file_size(M, bundle.board_path, exec)
+local function hydrate_bundle_sizes(bundle, exec)
+  bundle.notice_bytes = file_size(bundle.notice_path, exec)
+  bundle.issue_bytes = file_size(bundle.issue_path, exec)
+  bundle.pr_bytes = bundle.pr_path ~= nil and file_size(bundle.pr_path, exec) or nil
+  bundle.diff_bytes = bundle.diff_path ~= nil and file_size(bundle.diff_path, exec) or nil
+  bundle.risk_bytes = bundle.risk_path ~= nil and file_size(bundle.risk_path, exec) or nil
+  bundle.board_bytes = file_size(bundle.board_path, exec)
   return bundle
 end
 
-local function validate_bundle(M, bundle, exec)
-  return manifest_files_are_valid(M, C.context_bundle_manifest(bundle), exec)
+local function validate_bundle(bundle, exec)
+  return manifest_files_are_valid(C.context_bundle_manifest(bundle), exec)
 end
 
-local function validate_cached_manifest(M, manifest, exec)
+local function validate_cached_manifest(manifest, exec)
   if type(manifest) ~= "string" or manifest == "" then
     return false
   end
-  return manifest_files_are_valid(M, manifest, exec)
+  return manifest_files_are_valid(manifest, exec)
 end
 
 local function has_stale_generation_context_error(text)
@@ -190,54 +190,54 @@ local function has_stale_generation_context_error(text)
     or text:find("runtime context manifest file is unreadable", 1, true) ~= nil
 end
 
-local function rename_dir_cmd(M, from_dir, to_dir)
+local function rename_dir_cmd(from_dir, to_dir)
   local script = "import os, sys\nos.rename(sys.argv[1], sys.argv[2])\n"
   return "python3 -c " .. devloop_base._shell_single_quote(script)
     .. " " .. devloop_base._shell_single_quote(from_dir)
     .. " " .. devloop_base._shell_single_quote(to_dir)
 end
 
-local function dir_exists(M, dir, exec)
+local function dir_exists(dir, exec)
   local result = run_optional("test -d " .. devloop_base._shell_single_quote(dir), 30, exec)
   return type(result) == "table" and result.exit_code == 0
 end
 
-local function path_exists(M, path, exec)
+local function path_exists(path, exec)
   local result = run_optional("test -e " .. devloop_base._shell_single_quote(path), 30, exec)
   return type(result) == "table" and result.exit_code == 0
 end
 
-local function uniquified_publish_dir(M, dir, exec)
+local function uniquified_publish_dir(dir, exec)
   for n = 1, 1000 do
     local candidate = dir .. ".publish-" .. tostring(n)
-    if not path_exists(M, candidate, exec) then
+    if not path_exists(candidate, exec) then
       return candidate
     end
   end
   error("github-devloop: context bundle publish path exhausted")
 end
 
-local function publish_bundle(M, tmp_dir, target_bundle, exec)
+local function publish_bundle(tmp_dir, target_bundle, exec)
   local target_dir = target_bundle.dir
-  local publish = run_optional(rename_dir_cmd(M, tmp_dir, target_dir), 30, exec)
+  local publish = run_optional(rename_dir_cmd(tmp_dir, target_dir), 30, exec)
   if type(publish) == "table" and publish.exit_code == 0 then
     return target_bundle
   end
 
-  if dir_exists(M, target_dir, exec) then
-    if validate_bundle(M, target_bundle, exec) then
+  if dir_exists(target_dir, exec) then
+    if validate_bundle(target_bundle, exec) then
       run_optional("rm -rf " .. devloop_base._shell_single_quote(tmp_dir), 30, exec)
       return target_bundle
     end
-    local unique_bundle = bundle_paths(uniquified_publish_dir(M, target_dir, exec), target_bundle.pr_path ~= nil)
-    run_required(rename_dir_cmd(M, tmp_dir, unique_bundle.dir), 30, "publish", exec)
+    local unique_bundle = bundle_paths(uniquified_publish_dir(target_dir, exec), target_bundle.pr_path ~= nil)
+    run_required(rename_dir_cmd(tmp_dir, unique_bundle.dir), 30, "publish", exec)
     return unique_bundle
   end
 
   error("github-devloop: context bundle publish failed: " .. tostring(publish and publish.stderr or "nil result"))
 end
 
-local function truncate_if_needed(M, text, dept, proposal_id, file_name)
+local function truncate_if_needed(text, dept, proposal_id, file_name)
   local value = tostring(text or "")
   if #value <= max_bundle_file_len then
     return value
@@ -371,7 +371,7 @@ function C.context_bundle_manifest_ref(key)
   return "runtime-cache:" .. tostring(key)
 end
 
-function C.context_bundle_manifest_from_ref(M, ref, exec)
+function C.context_bundle_manifest_from_ref(ref, exec)
   local key = tostring(ref or ""):match("^runtime%-cache:(.+)$")
   if key == nil or key == "" then
     return nil
@@ -380,7 +380,7 @@ function C.context_bundle_manifest_from_ref(M, ref, exec)
   if manifest == nil or manifest == "" then
     error("github-devloop: error_class=" .. stale_generation_context_error_class .. " context bundle manifest cache miss")
   end
-  if not files_are_readable(M, manifest_paths(manifest), exec) then
+  if not files_are_readable(manifest_paths(manifest), exec) then
     error("github-devloop: error_class=" .. stale_generation_context_error_class .. " context bundle manifest files are unreadable")
   end
   if not manifest_has_notice(manifest_paths(manifest)) then
@@ -412,21 +412,21 @@ function C.build_context_bundle(M, args)
 
   local key = C.context_bundle_key(proposal_id, version)
   local manifest_key = C.context_bundle_manifest_key(proposal_id, version)
-  local root = runtime_root(M, args.exec)
+  local root = runtime_root(args.exec)
   local dir = context_dir(root, proposal_id, version)
   local cached = cache_get(key)
   if cached ~= nil and cached ~= "" then
     local cached_bundle = bundle_paths(cached, args.pr_number ~= nil)
-    if validate_cached_manifest(M, cache_get(manifest_key), args.exec) and validate_bundle(M, cached_bundle, args.exec) then
-      hydrate_bundle_sizes(M, cached_bundle, args.exec)
+    if validate_cached_manifest(cache_get(manifest_key), args.exec) and validate_bundle(cached_bundle, args.exec) then
+      hydrate_bundle_sizes(cached_bundle, args.exec)
       cache_set(manifest_key, C.context_bundle_manifest(cached_bundle))
       return cached_bundle
     end
   end
 
   local existing_bundle = bundle_paths(dir, args.pr_number ~= nil)
-  if dir_exists(M, dir, args.exec) and validate_bundle(M, existing_bundle, args.exec) then
-    hydrate_bundle_sizes(M, existing_bundle, args.exec)
+  if dir_exists(dir, args.exec) and validate_bundle(existing_bundle, args.exec) then
+    hydrate_bundle_sizes(existing_bundle, args.exec)
     cache_set(manifest_key, C.context_bundle_manifest(existing_bundle))
     cache_set(key, dir)
     return existing_bundle
@@ -455,8 +455,8 @@ function C.build_context_bundle(M, args)
     "END UNTRUSTED BUNDLE DATA",
     "",
   }, "\n")
-  notice = truncate_if_needed(M, notice, args.dept, proposal_id, notice_file_name)
-  write_file(M, tmp_bundle.notice_path, notice, args.exec)
+  notice = truncate_if_needed(notice, args.dept, proposal_id, notice_file_name)
+  write_file(tmp_bundle.notice_path, notice, args.exec)
   tmp_bundle.notice_bytes = #notice
 
   local issue_json = '{"title":"PR-only context","body":"No backing GitHub issue is available for this delivery.","labels":[],"comments":[],"state":"UNKNOWN"}\n'
@@ -465,22 +465,22 @@ function C.build_context_bundle(M, args)
       return M.gh_issue_view(repo, issue_number, "title,body,updatedAt,labels,comments,state", timeout, args.exec)
     end, "issue fetch")
   end
-  issue_json = truncate_if_needed(M, issue_json, args.dept, proposal_id, "issue.json")
-  write_file(M, tmp_bundle.issue_path, issue_json, args.exec)
+  issue_json = truncate_if_needed(issue_json, args.dept, proposal_id, "issue.json")
+  write_file(tmp_bundle.issue_path, issue_json, args.exec)
   tmp_bundle.issue_bytes = #issue_json
 
   if args.pr_number ~= nil then
     local pr_json = fetch_result(function(timeout)
       return M.gh_pr_view_context(repo, args.pr_number, timeout, args.exec)
     end, "pr fetch")
-    pr_json = truncate_if_needed(M, pr_json, args.dept, proposal_id, "pr.json")
-    write_file(M, tmp_bundle.pr_path, pr_json, args.exec)
+    pr_json = truncate_if_needed(pr_json, args.dept, proposal_id, "pr.json")
+    write_file(tmp_bundle.pr_path, pr_json, args.exec)
     tmp_bundle.pr_bytes = #pr_json
     local diff = fetch_result(function(timeout)
       return M.gh_pr_diff(repo, args.pr_number, timeout, args.exec)
     end, "pr diff fetch")
-    diff = truncate_if_needed(M, diff, args.dept, proposal_id, "diff.patch")
-    write_file(M, tmp_bundle.diff_path, diff, args.exec)
+    diff = truncate_if_needed(diff, args.dept, proposal_id, "diff.patch")
+    write_file(tmp_bundle.diff_path, diff, args.exec)
     tmp_bundle.diff_bytes = #diff
     local name_result = (function(timeout)
       return M.gh_pr_diff_name_only(repo, args.pr_number, timeout, args.exec)
@@ -488,22 +488,22 @@ function C.build_context_bundle(M, args)
     local risk = github_risk.github_diff_name_risk(name_result)
     risk_classification = clone_risk_classification(risk)
     local risk_text = risk_report(risk)
-    risk_text = truncate_if_needed(M, risk_text, args.dept, proposal_id, risk_file_name)
-    write_file(M, tmp_bundle.risk_path, risk_text, args.exec)
+    risk_text = truncate_if_needed(risk_text, args.dept, proposal_id, risk_file_name)
+    write_file(tmp_bundle.risk_path, risk_text, args.exec)
     tmp_bundle.risk_bytes = #risk_text
   end
 
   local board = payloads_board.board_digest_block(M, repo, args.tick)
-  board = truncate_if_needed(M, board, args.dept, proposal_id, "board.txt")
-  write_file(M, tmp_bundle.board_path, board, args.exec)
+  board = truncate_if_needed(board, args.dept, proposal_id, "board.txt")
+  write_file(tmp_bundle.board_path, board, args.exec)
   tmp_bundle.board_bytes = #board
 
   local target_dir = dir
-  if dir_exists(M, dir, args.exec) and not validate_bundle(M, existing_bundle, args.exec) then
-    target_dir = uniquified_publish_dir(M, dir, args.exec)
+  if dir_exists(dir, args.exec) and not validate_bundle(existing_bundle, args.exec) then
+    target_dir = uniquified_publish_dir(dir, args.exec)
   end
-  local final_bundle = publish_bundle(M, tmp_dir, bundle_paths(target_dir, args.pr_number ~= nil), args.exec)
-  if not validate_bundle(M, final_bundle, args.exec) then
+  local final_bundle = publish_bundle(tmp_dir, bundle_paths(target_dir, args.pr_number ~= nil), args.exec)
+  if not validate_bundle(final_bundle, args.exec) then
     error("github-devloop: context bundle publish validation failed")
   end
   final_bundle.notice_bytes = tmp_bundle.notice_bytes

@@ -254,8 +254,8 @@ function M.latest_complete_converge_round(comments, proposal_id, base_version, s
   local sr_digest = convergence_shared.source_ref_digest(source_ref)
   local latest = nil
   local facts = base_version ~= nil
-    and conv_rounds.converge_round_facts(M, comments, proposal_id, base_version, sr_digest)
-    or conv_rounds.converge_round_facts_for_source(M, comments, proposal_id, sr_digest)
+    and conv_rounds.converge_round_facts(comments, proposal_id, base_version, sr_digest)
+    or conv_rounds.converge_round_facts_for_source(comments, proposal_id, sr_digest)
   for _, fact in ipairs(facts) do
     if fact.narrowed_question ~= nil
       and fact.narrowed_question ~= ""

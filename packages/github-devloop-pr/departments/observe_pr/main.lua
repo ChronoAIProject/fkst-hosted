@@ -131,7 +131,7 @@ local function issue_claim_for_origin(origin)
   if origin.issue_number == nil then
     return nil
   end
-  return m_claims.read_current_issue_ownership(core, origin.repo, origin.issue_number)
+  return m_claims.read_current_issue_ownership(origin.repo, origin.issue_number)
 end
 
 local function replay_pr_local_state(origin, pr_number, current_pr, state, source_ref)
@@ -386,7 +386,7 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
   with_lock(lock_key, function()
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local issue_current = issue_claim_for_origin(origin)
-    if not m_claims.verify_pr_review_issue_claim(core, "observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
+    if not m_claims.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
     end
     if state.state == "blocked" then
@@ -471,7 +471,7 @@ local function process_pr_event(event)
   with_lock(lock_key, function()
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local issue_current = issue_claim_for_origin(origin)
-    if not m_claims.verify_pr_review_issue_claim(core, "observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
+    if not m_claims.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
     end
     local merge_gate_feedback = nil

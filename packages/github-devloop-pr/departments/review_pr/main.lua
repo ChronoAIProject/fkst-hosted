@@ -145,7 +145,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       end
       current_issue = parsers_issue.parse_issue_view_review(core, issue_view.stdout)
     end
-    if not m_claims.verify_pr_review_issue_claim(core, "review_pr", repo, issue_number, current_issue, reviewing.proposal_id) then
+    if not m_claims.verify_pr_review_issue_claim("review_pr", repo, issue_number, current_issue, reviewing.proposal_id) then
       return
     end
     local review_id = devloop_base.pr_review_proposal_id(repo, reviewing.pr_number, reviewing.version, current_pr.head_sha)

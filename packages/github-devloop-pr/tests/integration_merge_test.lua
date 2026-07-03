@@ -164,7 +164,7 @@ return {
     t.is_true(merged_marker:find('autonomy_result="v1"', 1, true) ~= nil)
     t.is_true(merged_marker:find('valid_autonomous_merge="pending"', 1, true) ~= nil)
     t.is_true(merged_marker:find('post_merge_probe_green="pass"', 1, true) ~= nil)
-    local avm = autonomy_ledger.autonomy_result_fact(core, { comment_raise.payload.body }, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha)
+    local avm = autonomy_ledger.autonomy_result_fact({ comment_raise.payload.body }, event.proposal_id, event.pr_number, event.version, event.reviewed_head_sha)
     t.eq(avm.valid_autonomous_merge, "pending")
     t.eq(avm.pre_merge_ci, "pass")
     t.eq(avm.gates.post_merge_probe, "pass")

@@ -438,7 +438,7 @@ function C.has_thinking_converge_replay(M, current, proposal_id, state, source_r
   end
   local base_version = transition_version.strip_suffixes(state.version)
   local sr_digest = convergence_shared.source_ref_digest(source_ref)
-  local facts = conv_rounds.converge_round_facts(M, current.comments, proposal_id, base_version, sr_digest)
+  local facts = conv_rounds.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
   local round = conv_rounds.max_converge_round(facts)
   return M.latest_complete_converge_round(current.comments, proposal_id, base_version, source_ref) ~= nil
     or conv_rounds.is_true_stall(facts, round)

@@ -12,7 +12,7 @@ end
 function C.build_merged_comment_body(M, merge_ready, autonomy_record)
   local autonomy_marker = ""
   if autonomy_record ~= nil then
-    autonomy_marker = "\n" .. autonomy_ledger.autonomy_result_marker(M, autonomy_record)
+    autonomy_marker = "\n" .. autonomy_ledger.autonomy_result_marker(autonomy_record)
   end
   return comment_strings.comment_string(M, "merged_pr_prefix") .. tostring(merge_ready.pr_number)
     .. "\n\n" .. M.state_marker(merge_ready.proposal_id, "merging", merge_ready.version)

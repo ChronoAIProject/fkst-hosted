@@ -155,20 +155,20 @@ return {
   test_label_mode_claim_state_derives_from_claimed_label = function()
     mock_env("fkst-test-bot", "label", "")
     -- No claimed label => unclaimed regardless of assignees.
-    t.eq(m_claims.issue_claim_state(core, {}, "fkst-test-bot", {}), "unassigned")
-    t.eq(m_claims.issue_claim_state(core, { { login = "someone" } }, "fkst-test-bot", { "fkst-dev:enabled" }), "unassigned")
+    t.eq(m_claims.issue_claim_state({}, "fkst-test-bot", {}), "unassigned")
+    t.eq(m_claims.issue_claim_state({ { login = "someone" } }, "fkst-test-bot", { "fkst-dev:enabled" }), "unassigned")
     -- Claimed label present => self.
-    t.eq(m_claims.issue_claim_state(core, {}, "fkst-test-bot", { claimed_label }), "self")
-    t.eq(m_claims.issue_claim_state(core, {}, "fkst-test-bot", { "fkst-dev:enabled", claimed_label }), "self")
+    t.eq(m_claims.issue_claim_state({}, "fkst-test-bot", { claimed_label }), "self")
+    t.eq(m_claims.issue_claim_state({}, "fkst-test-bot", { "fkst-dev:enabled", claimed_label }), "self")
   end,
 
   test_label_mode_is_self_owned_uses_label_presence = function()
     mock_env("fkst-test-bot", "label", "")
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = {}, labels = { claimed_label }, author_login = "human" }, "fkst-test-bot"), true)
+    t.eq(m_claims.is_self_owned_issue({ assignees = {}, labels = { claimed_label }, author_login = "human" }, "fkst-test-bot"), true)
     -- Unassigned + self author still self-owned (fork-and-block isolation).
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = {}, labels = {}, author_login = "fkst-test-bot" }, "fkst-test-bot"), true)
+    t.eq(m_claims.is_self_owned_issue({ assignees = {}, labels = {}, author_login = "fkst-test-bot" }, "fkst-test-bot"), true)
     -- Unclaimed + other author => not self-owned.
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = {}, labels = {}, author_login = "human" }, "fkst-test-bot"), false)
+    t.eq(m_claims.is_self_owned_issue({ assignees = {}, labels = {}, author_login = "human" }, "fkst-test-bot"), false)
   end,
 
   test_label_mode_claim_adds_label_then_verifies_winner = function()
@@ -251,7 +251,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.eq(m_claims.verify_issue_claim(core, "owner/repo", 42, "fkst-test-bot"), true)
+    t.eq(m_claims.verify_issue_claim("owner/repo", 42, "fkst-test-bot"), true)
 
     mock_env("fkst-test-bot", "label", "")
     t.mock_command("gh issue view 42 --repo owner/repo --json assignees,author,labels", {
@@ -259,7 +259,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.eq(m_claims.verify_issue_claim(core, "owner/repo", 42, "fkst-test-bot"), false)
+    t.eq(m_claims.verify_issue_claim("owner/repo", 42, "fkst-test-bot"), false)
   end,
 
   test_label_mode_claim_view_projects_labels = function()
@@ -269,33 +269,33 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    local ownership = m_claims.read_current_issue_ownership(core, "owner/repo", 42)
+    local ownership = m_claims.read_current_issue_ownership("owner/repo", 42)
     t.eq(ownership.labels[1], claimed_label)
-    t.eq(m_claims.issue_claim_state(core, ownership.assignees, "fkst-test-bot", ownership.labels), "self")
+    t.eq(m_claims.issue_claim_state(ownership.assignees, "fkst-test-bot", ownership.labels), "self")
   end,
 
   -- (c) assignee-mode (default) is unchanged: unknown/empty claim mode behaves
   -- exactly like today's assignee claim.
   test_default_mode_is_assignee_claim_state = function()
     mock_env("fkst-test-bot", "", "")
-    t.eq(m_claims.issue_claim_state(core, {}, "fkst-test-bot"), "unassigned")
-    t.eq(m_claims.issue_claim_state(core, { { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
-    t.eq(m_claims.issue_claim_state(core, { { login = "human" } }, "fkst-test-bot"), "other")
+    t.eq(m_claims.issue_claim_state({}, "fkst-test-bot"), "unassigned")
+    t.eq(m_claims.issue_claim_state({ { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
+    t.eq(m_claims.issue_claim_state({ { login = "human" } }, "fkst-test-bot"), "other")
     -- A claimed label is irrelevant in assignee-mode.
-    t.eq(m_claims.issue_claim_state(core, {}, "fkst-test-bot", { claimed_label }), "unassigned")
+    t.eq(m_claims.issue_claim_state({}, "fkst-test-bot", { claimed_label }), "unassigned")
   end,
 
   test_unknown_mode_falls_back_to_assignee = function()
     mock_env("fkst-test-bot", "bogus-mode", "")
     t.eq(config.claim_mode(), "assignee")
-    t.eq(m_claims.issue_claim_state(core, { { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
+    t.eq(m_claims.issue_claim_state({ { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
     t.mock_command("gh issue view 42 --repo owner/repo --json assignees,author", {
       stdout = ownership_json({ "fkst-test-bot" }, "fkst-test-bot"),
       stderr = "",
       exit_code = 0,
     })
-    local ownership = m_claims.read_current_issue_ownership(core, "owner/repo", 42)
-    t.eq(m_claims.issue_claim_state(core, ownership.assignees, "fkst-test-bot", ownership.labels), "self")
+    local ownership = m_claims.read_current_issue_ownership("owner/repo", 42)
+    t.eq(m_claims.issue_claim_state(ownership.assignees, "fkst-test-bot", ownership.labels), "self")
   end,
 
   test_assignee_mode_claim_assigns_then_verifies = function()

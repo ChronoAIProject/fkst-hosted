@@ -84,7 +84,7 @@ local function entry_issue_number(M, entry)
 end
 
 local function batch_entry_claim_ok(M, repo, entry)
-  return m_claims.verify_pr_review_issue_claim(M, "merge_batch", repo, entry_issue_number(M, entry), nil, entry and entry.proposal_id)
+  return m_claims.verify_pr_review_issue_claim("merge_batch", repo, entry_issue_number(M, entry), nil, entry and entry.proposal_id)
 end
 
 local function find_queue_entry(entries, merge_ready)

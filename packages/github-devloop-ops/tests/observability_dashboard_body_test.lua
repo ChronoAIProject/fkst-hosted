@@ -555,7 +555,7 @@ return {
         cost_budget = "pass",
       },
     })
-    local valid_marker = autonomy_ledger.autonomy_result_marker(core, record)
+    local valid_marker = autonomy_ledger.autonomy_result_marker(record)
     local malformed_marker = '<!-- fkst:github-devloop:autonomy-result:v1'
       .. ' proposal="github-devloop/issue/owner/repo/1655"'
       .. ' pr="1656"'

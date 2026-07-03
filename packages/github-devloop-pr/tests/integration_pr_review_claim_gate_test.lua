@@ -63,7 +63,7 @@ end
 return {
   test_verify_pr_review_issue_claim_accepts_unassigned_self_author = function()
     mock_bot_env()
-    local ok = m_claims.verify_pr_review_issue_claim(core, "claim-test", "owner/repo", 42, {
+    local ok = m_claims.verify_pr_review_issue_claim("claim-test", "owner/repo", 42, {
       assignees = {},
       author_login = "fkst-test-bot",
     }, "github-devloop/issue/owner/repo/42")

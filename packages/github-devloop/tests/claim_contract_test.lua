@@ -182,18 +182,18 @@ return {
   end,
 
   test_issue_claim_state_is_current_assignees_only = function()
-    t.eq(m_claims.issue_claim_state(core, {}, "fkst-test-bot"), "unassigned")
-    t.eq(m_claims.issue_claim_state(core, { { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
-    t.eq(m_claims.issue_claim_state(core, { { login = "human" } }, "fkst-test-bot"), "other")
-    t.eq(m_claims.issue_claim_state(core, { { login = "fkst-test-bot" }, { login = "other-bot" } }, "fkst-test-bot"), "other")
+    t.eq(m_claims.issue_claim_state({}, "fkst-test-bot"), "unassigned")
+    t.eq(m_claims.issue_claim_state({ { login = "fkst-test-bot" } }, "fkst-test-bot"), "self")
+    t.eq(m_claims.issue_claim_state({ { login = "human" } }, "fkst-test-bot"), "other")
+    t.eq(m_claims.issue_claim_state({ { login = "fkst-test-bot" }, { login = "other-bot" } }, "fkst-test-bot"), "other")
   end,
 
   test_is_self_owned_issue_allows_self_assignee_or_unassigned_self_author = function()
-    t.eq(m_claims.is_self_owned_issue(core, nil, "fkst-test-bot"), false)
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = { "fkst-test-bot" }, author_login = "human" }, "fkst-test-bot"), true)
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = {}, author_login = "fkst-test-bot" }, "fkst-test-bot"), true)
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = {}, author_login = "human" }, "fkst-test-bot"), false)
-    t.eq(m_claims.is_self_owned_issue(core, { assignees = { "human" }, author_login = "fkst-test-bot" }, "fkst-test-bot"), false)
+    t.eq(m_claims.is_self_owned_issue(nil, "fkst-test-bot"), false)
+    t.eq(m_claims.is_self_owned_issue({ assignees = { "fkst-test-bot" }, author_login = "human" }, "fkst-test-bot"), true)
+    t.eq(m_claims.is_self_owned_issue({ assignees = {}, author_login = "fkst-test-bot" }, "fkst-test-bot"), true)
+    t.eq(m_claims.is_self_owned_issue({ assignees = {}, author_login = "human" }, "fkst-test-bot"), false)
+    t.eq(m_claims.is_self_owned_issue({ assignees = { "human" }, author_login = "fkst-test-bot" }, "fkst-test-bot"), false)
   end,
 
   test_dry_run_claim_proceeds_without_assigning = function()
@@ -634,33 +634,33 @@ return {
 
   test_verify_pr_review_issue_claim_predicate_contract = function()
     mock_bot("fkst-test-bot", "")
-    t.eq(m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = { "fkst-test-bot" },
       author_login = "human",
     }, "github-devloop/issue/owner/repo/42"), true)
-    t.eq(m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = { "human" },
       author_login = "fkst-test-bot",
     }, "github-devloop/issue/owner/repo/42"), false)
-    t.eq(m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = {},
       author_login = "fkst-test-bot",
     }, "github-devloop/issue/owner/repo/42"), true)
-    t.eq(m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = {},
       author_login = "human",
     }, "github-devloop/issue/owner/repo/42"), false)
-    t.eq(m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", nil, nil, "github-devloop/pr/owner/repo/7"), false)
+    t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", nil, nil, "github-devloop/pr/owner/repo/7"), false)
   end,
 
   test_verify_pr_review_issue_claim_uses_configured_claim_owner_before_assert = function()
     mock_bot("real-bot", "")
 
-    local self_owned = m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    local self_owned = m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = { "real-bot" },
       author_login = "human",
     }, "github-devloop/issue/owner/repo/42")
-    local other_owned = m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    local other_owned = m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = { "fkst-test-bot" },
       author_login = "human",
     }, "github-devloop/issue/owner/repo/42")
@@ -677,7 +677,7 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    t.eq(m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, {
+    t.eq(m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, {
       assignees = {},
     }, "github-devloop/issue/owner/repo/42"), true)
 
@@ -688,7 +688,7 @@ return {
       exit_code = 1,
     })
     local ok = pcall(function()
-      m_claims.verify_pr_review_issue_claim(core, "claim_contract", "owner/repo", 42, nil, "github-devloop/issue/owner/repo/42")
+      m_claims.verify_pr_review_issue_claim("claim_contract", "owner/repo", 42, nil, "github-devloop/issue/owner/repo/42")
     end)
     t.eq(ok, false)
   end,

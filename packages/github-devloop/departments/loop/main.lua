@@ -72,9 +72,9 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local base_version = conv_rounds.converge_base_version(unresolved.dedup_key)
     local sr_digest = convergence_shared.source_ref_digest(unresolved.source_ref)
-    local facts = conv_rounds.converge_round_facts_for_proposal_boundary(core, current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests)
+    local facts = conv_rounds.converge_round_facts_for_proposal_boundary(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests)
     local round = math.max(tonumber(unresolved.round) or 0, conv_rounds.max_converge_round(facts))
-    if conv_rounds.has_converge_round_marker(core, current.comments, unresolved.proposal_id, base_version, sr_digest, round) then
+    if conv_rounds.has_converge_round_marker(current.comments, unresolved.proposal_id, base_version, sr_digest, round) then
       devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-idempotent(converge round marker already visible)", "converge round marker for incoming round is already visible")
       return
     end
@@ -88,7 +88,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.angle_digests
     )
     local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
-    local budget_round = math.max(round, conv_rounds.converge_boundary_budget_round(core, current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
+    local budget_round = math.max(round, conv_rounds.converge_boundary_budget_round(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
     local hit_round_cap = budget_round >= config.max_converge_rounds()
     if hit_round_cap or conv_rounds.is_true_stall(facts_with_current, round) then
       local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body, {

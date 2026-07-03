@@ -67,7 +67,7 @@ local function issue_claim_ok(payload, handoff)
     end
     return entity.repo == repo and tostring(entity.pr_number) == tostring(handoff.pr_number)
   end
-  return m_claims.verify_pr_review_issue_claim(core, "comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id)
+  return m_claims.verify_pr_review_issue_claim("comment_handoff", entity.repo, entity.issue_number, nil, handoff.proposal_id)
 end
 
 local function verified_pr_state(repo, handoff, comment_id, state)

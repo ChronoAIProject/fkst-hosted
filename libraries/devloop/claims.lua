@@ -9,6 +9,7 @@ local config = require("devloop.config")
 local github_view = require("forge.github_view")
 local devloop_logging = require("devloop.logging")
 local forks_handle = nil
+local devloop_state_handle = nil
 
 local function forks()
   if forks_handle == nil then
@@ -26,6 +27,13 @@ local function github()
   end
   github_handle = require("forge.github").new(exec_argv)
   return github_handle
+end
+
+local function devloop_state()
+  if devloop_state_handle == nil then
+    devloop_state_handle = require("devloop.state")
+  end
+  return devloop_state_handle
 end
 
 local function assignee_login(assignee)
@@ -62,7 +70,7 @@ function C.issue_author_login(issue)
   return issue_author_login(issue)
 end
 
-function C.assignee_logins(M, value)
+function C.assignee_logins(value)
   local logins = {}
   if type(value) ~= "table" then
     return logins
@@ -83,7 +91,7 @@ function C.claim_owner()
   return devloop_base.strip_bot_login_suffix(devloop_base.assert_trusted_bot_configured() or devloop_base.trusted_bot_login())
 end
 
-function C.managed_bot_logins(M, exec)
+function C.managed_bot_logins(exec)
   local raw = devloop_base.read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS", exec)
   local logins = {}
   for entry in tostring(raw or ""):gmatch("[^,%s]+") do
@@ -95,7 +103,7 @@ function C.managed_bot_logins(M, exec)
   return logins
 end
 
-function C.is_managed_bot_login(M, login, managed)
+function C.is_managed_bot_login(login, managed)
   local normalized = devloop_base.strip_bot_login_suffix(login)
   return normalized ~= nil and normalized ~= "" and type(managed) == "table" and managed[normalized] == true
 end
@@ -115,14 +123,14 @@ end
 -- label-mode (opt-in): ownership is the presence of the fkst-dev:claimed label.
 -- labels is optional/extra and ignored in assignee-mode, so existing 2-arg
 -- callers keep byte-for-byte behavior.
-function C.issue_claim_state(M, assignees, owner, labels)
+function C.issue_claim_state(assignees, owner, labels)
   if config.claim_mode() == "label" then
-    if M.has_label(labels, claimed_label) then
+    if devloop_state().has_label(labels, claimed_label) then
       return "self"
     end
     return "unassigned"
   end
-  local logins = C.assignee_logins(M, assignees)
+  local logins = C.assignee_logins(assignees)
   if #logins == 0 then
     return "unassigned"
   end
@@ -132,11 +140,11 @@ function C.issue_claim_state(M, assignees, owner, labels)
   return "other"
 end
 
-function C.is_self_owned_issue(M, ownership, owner)
+function C.is_self_owned_issue(ownership, owner)
   if type(ownership) ~= "table" then
     return false
   end
-  local claim_state = C.issue_claim_state(M, ownership.assignees, owner, ownership.labels)
+  local claim_state = C.issue_claim_state(ownership.assignees, owner, ownership.labels)
   if claim_state == "self" then
     return true
   end
@@ -151,16 +159,16 @@ function C.is_self_owned_issue(M, ownership, owner)
   return devloop_base.strip_bot_login_suffix(author) == tostring(owner or "")
 end
 
-function C.read_current_issue_assignees(M, repo, issue_number)
-  local ownership = C.read_current_issue_ownership(M, repo, issue_number)
-  return C.assignee_logins(M, ownership and ownership.assignees)
+function C.read_current_issue_assignees(repo, issue_number)
+  local ownership = C.read_current_issue_ownership(repo, issue_number)
+  return C.assignee_logins(ownership and ownership.assignees)
 end
 
 local function issue_labels(decoded)
   return github_view.label_names(decoded and decoded.labels)
 end
 
-function C.read_current_issue_ownership(M, repo, issue_number)
+function C.read_current_issue_ownership(repo, issue_number)
   if issue_number == nil then
     return nil
   end
@@ -171,22 +179,22 @@ function C.read_current_issue_ownership(M, repo, issue_number)
   local view = github().issue_view(repo, issue_number, fields, 30)
   local decoded = json.decode(view.stdout or "{}")
   return {
-    assignees = C.assignee_logins(M, decoded.assignees),
+    assignees = C.assignee_logins(decoded.assignees),
     author_login = C.issue_author_login(decoded),
     labels = issue_labels(decoded),
   }
 end
 
-function C.verify_issue_claim(M, repo, issue_number, owner)
-  local ownership = C.read_current_issue_ownership(M, repo, issue_number)
-  return C.issue_claim_state(M, ownership and ownership.assignees, owner, ownership and ownership.labels) == "self"
+function C.verify_issue_claim(repo, issue_number, owner)
+  local ownership = C.read_current_issue_ownership(repo, issue_number)
+  return C.issue_claim_state(ownership and ownership.assignees, owner, ownership and ownership.labels) == "self"
 end
 
-local function log_claim(M, dept, proposal_id, action, reason)
+local function log_claim(dept, proposal_id, action, reason)
   devloop_logging.log_cas_decision(dept, proposal_id, { state = nil, version = nil }, "claim", "claim", action, reason)
 end
 
-local function log_terminal_skip(M, dept, proposal_id, queue, source_ref, error_class, why)
+local function log_terminal_skip(dept, proposal_id, queue, source_ref, error_class, why)
   local fields = error_facts.error_fact_fields(error_class, queue, dept, why, {
     source_ref = source_ref,
     terminal = true,
@@ -206,9 +214,9 @@ local function issue_source_ref(repo, issue_number)
   }
 end
 
-function C.verify_pr_review_issue_claim(M, dept, repo, issue_number, current_issue, proposal_id)
+function C.verify_pr_review_issue_claim(dept, repo, issue_number, current_issue, proposal_id)
   if issue_number == nil then
-    log_claim(M, dept, proposal_id, "skip-not-owned", "backing issue is absent")
+    log_claim(dept, proposal_id, "skip-not-owned", "backing issue is absent")
     return false
   end
   local owner = C.claim_owner()
@@ -225,16 +233,16 @@ function C.verify_pr_review_issue_claim(M, dept, repo, issue_number, current_iss
   if current_usable then
     ownership = current_issue
   else
-    ownership = C.read_current_issue_ownership(M, repo, issue_number)
+    ownership = C.read_current_issue_ownership(repo, issue_number)
   end
-  if C.is_self_owned_issue(M, ownership, owner) then
+  if C.is_self_owned_issue(ownership, owner) then
     return true
   end
-  local status = C.issue_claim_state(M, ownership and ownership.assignees, owner, ownership and ownership.labels)
+  local status = C.issue_claim_state(ownership and ownership.assignees, owner, ownership and ownership.labels)
   if status == "other" then
-    log_claim(M, dept, proposal_id, "skip-claimed-by-other", "backing issue assignee claim is held by another login")
+    log_claim(dept, proposal_id, "skip-claimed-by-other", "backing issue assignee claim is held by another login")
   else
-    log_claim(M, dept, proposal_id, "skip-not-owned", "backing issue is not self-owned")
+    log_claim(dept, proposal_id, "skip-not-owned", "backing issue is not self-owned")
   end
   return false
 end
@@ -277,18 +285,18 @@ end
 
 function C.claim_issue_for_management(M, dept, repo, issue_number, current, proposal_id)
   local owner = C.claim_owner()
-  local status = C.issue_claim_state(M, current and current.assignees, owner, current and current.labels)
+  local status = C.issue_claim_state(current and current.assignees, owner, current and current.labels)
   if status == "self" then
     return true
   end
   if status == "other" then
-    log_claim(M, dept, proposal_id, "skip-claimed-by-other", "issue assignee claim is held by another login")
+    log_claim(dept, proposal_id, "skip-claimed-by-other", "issue assignee claim is held by another login")
     return false
   end
 
   local author = C.issue_author_login(current)
   if author == nil or author == "" then
-    log_claim(M, dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
+    log_claim(dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
     return false
   end
   author = devloop_base.strip_bot_login_suffix(author)
@@ -298,14 +306,14 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   -- opts issues in via the fkst-dev:enabled label, so it claims directly
   -- (matching the label-claim fork). Assignee-mode keeps the original behavior.
   if config.claim_mode() ~= "label" and author ~= owner then
-    local managed = C.managed_bot_logins(M)
-    if C.is_managed_bot_login(M, author, managed) then
-      log_claim(M, dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
+    local managed = C.managed_bot_logins()
+    if C.is_managed_bot_login(author, managed) then
+      log_claim(dept, proposal_id, "skip-fork-peer-bot", "other-authored unassigned issue belongs to a managed bot login")
       return false
     end
     local dedup_key = forks().fork_issue_dedup_key(repo, issue_number)
     if forks().has_trusted_issue_create_parent_marker(M, current and current.comments, dedup_key, owner, managed) then
-      log_claim(M, dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
+      log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
     local grace_seconds = C.fork_grace_seconds()
@@ -315,40 +323,40 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
         .. " reason=" .. tostring(grace_reason)
         .. " age_seconds=" .. tostring(age_seconds or "unknown")
         .. " grace_seconds=" .. tostring(grace_seconds)
-      log_claim(M, dept, proposal_id, "skip-fork-grace", reason)
+      log_claim(dept, proposal_id, "skip-fork-grace", reason)
       return false
     end
     current = forks().rederive_issue_state(M, repo, issue_number)
     local request, request_reason = forks().build_fork_issue_create_request(M, repo, issue_number, current, require("devloop.entity").issue_source_ref(repo, issue_number))
     if request == nil then
-      log_claim(M, dept, proposal_id, "skip-fork-" .. tostring(request_reason or "invalid"), "fork request could not be built from current issue")
+      log_claim(dept, proposal_id, "skip-fork-" .. tostring(request_reason or "invalid"), "fork request could not be built from current issue")
       return false
     end
     if forks().has_trusted_issue_create_parent_marker(M, current and current.comments, request.dedup_key, owner, managed) then
-      log_claim(M, dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
+      log_claim(dept, proposal_id, "fork-present", "trusted fork issue-create ledger marker already exists")
       return false
     end
-    log_claim(M, dept, proposal_id, "fork-raised", "other-authored unassigned issue is forked before management")
+    log_claim(dept, proposal_id, "fork-raised", "other-authored unassigned issue is forked before management")
     devloop_logging.log_raise(dept, proposal_id, "github-proxy.github_issue_create_request", request)
     return false
   end
 
   if devloop_base.read_env("FKST_GITHUB_WRITE") ~= "1" then
-    log_claim(M, dept, proposal_id, "dry-run-claim", "FKST_GITHUB_WRITE!=1")
+    log_claim(dept, proposal_id, "dry-run-claim", "FKST_GITHUB_WRITE!=1")
     return true
   end
 
   if config.claim_mode() == "label" then
     github().issue_add_label(repo, issue_number, claimed_label, 30)
     M.invalidate_entity_after_write(repo, "issue", issue_number)
-    if C.verify_issue_claim(M, repo, issue_number, owner) then
-      log_claim(M, dept, proposal_id, "claim-won", "label claim verified after add-label")
+    if C.verify_issue_claim(repo, issue_number, owner) then
+      log_claim(dept, proposal_id, "claim-won", "label claim verified after add-label")
       return true
     end
 
     github().issue_remove_label(repo, issue_number, claimed_label, 30)
     M.invalidate_entity_after_write(repo, "issue", issue_number)
-    log_claim(M, dept, proposal_id, "claim-lost", "label claim lost after add-label verification")
+    log_claim(dept, proposal_id, "claim-lost", "label claim lost after add-label verification")
     return false
   end
 
@@ -358,21 +366,21 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
   if not assigned then
     if is_assign_permission_denied(assign_error) then
       local why = "assign permission-denied is permanent"
-      log_terminal_skip(M, dept, proposal_id, "claim", issue_source_ref(repo, issue_number), "intake-skip-unclaimable", why)
-      log_claim(M, dept, proposal_id, "skip-claim-permission-denied", why)
+      log_terminal_skip(dept, proposal_id, "claim", issue_source_ref(repo, issue_number), "intake-skip-unclaimable", why)
+      log_claim(dept, proposal_id, "skip-claim-permission-denied", why)
       return false
     end
     error(assign_error, 0)
   end
   M.invalidate_entity_after_write(repo, "issue", issue_number)
-  if C.verify_issue_claim(M, repo, issue_number, owner) then
-    log_claim(M, dept, proposal_id, "claim-won", "assignee claim verified after assign")
+  if C.verify_issue_claim(repo, issue_number, owner) then
+    log_claim(dept, proposal_id, "claim-won", "assignee claim verified after assign")
     return true
   end
 
   github().issue_unassign(repo, issue_number, owner, 30)
   M.invalidate_entity_after_write(repo, "issue", issue_number)
-  log_claim(M, dept, proposal_id, "claim-lost", "assignee claim lost after assign verification")
+  log_claim(dept, proposal_id, "claim-lost", "assignee claim lost after assign verification")
   return false
 end
 

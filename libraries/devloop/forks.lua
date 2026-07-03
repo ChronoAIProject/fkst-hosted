@@ -15,7 +15,7 @@ function F.managed_fork_trust_set(core, bot_login, managed)
       if trusted then trust_set[login] = true end
     end
   elseif type(core) == "table" then
-    for login, trusted in pairs(m_claims.managed_bot_logins(core) or {}) do
+    for login, trusted in pairs(m_claims.managed_bot_logins() or {}) do
       if trusted then trust_set[login] = true end
     end
   end
@@ -152,7 +152,7 @@ function F.fork_origin_fact(core, entity, managed)
     return nil
   end
   local trust_set = F.managed_fork_trust_set(core, m_claims.claim_owner(), managed)
-  if m_claims.is_managed_bot_login(core, m_claims.issue_author_login(entity), trust_set) then
+  if m_claims.is_managed_bot_login(m_claims.issue_author_login(entity), trust_set) then
     local body_fact = fork_origin_fact_from_text(core, entity.body)
     if body_fact ~= nil then
       return body_fact

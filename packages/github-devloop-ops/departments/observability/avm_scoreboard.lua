@@ -138,7 +138,7 @@ local function decorate_with_attempt_projection(fact, comments, now_seconds)
   if fact.repo == nil or fact.issue_number == nil then
     return fact
   end
-  local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, fact.repo, fact.issue_number, {
+  local projection = autonomy_ledger.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
     proposal_id = fact.proposal_id,
     now_seconds = now_seconds,
   })
@@ -268,7 +268,7 @@ local function log_marker_rejection(tag, reason, comment, marker)
 end
 
 local function append_comment_facts(facts, comments, now_seconds)
-  local trust_set = m_claims.managed_bot_logins(core)
+  local trust_set = m_claims.managed_bot_logins()
   if type(trust_set) == "table" and next(trust_set) == nil then
     trust_set = nil
   end

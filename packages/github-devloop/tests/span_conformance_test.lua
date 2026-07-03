@@ -123,8 +123,7 @@ return {
       end
     end
     local positive_entity, positive_state = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, true)
-    local positive_facts = conv_rounds.converge_round_facts(core,
-      positive_entity.comments,
+    local positive_facts = conv_rounds.converge_round_facts(positive_entity.comments,
       "github-devloop/issue/owner/repo/42",
       positive_state.version,
       convergence_shared.source_ref_digest(positive_entity.source_ref)
@@ -134,8 +133,7 @@ return {
     t.is_true(conv_rounds.is_true_stall(positive_facts, positive_round))
 
     local negative_entity, negative_state = hidden_state_conformance.hidden_state_behavior_fixture(core, row, declared, false)
-    local negative_facts = conv_rounds.converge_round_facts(core,
-      negative_entity.comments,
+    local negative_facts = conv_rounds.converge_round_facts(negative_entity.comments,
       "github-devloop/issue/owner/repo/42",
       negative_state.version,
       convergence_shared.source_ref_digest(negative_entity.source_ref)

@@ -271,7 +271,7 @@ local function decompose_context(event)
     end
     return nil
   end
-  if not m_claims.verify_pr_review_issue_claim(core, "decompose", repo, issue_number, nil, decompose.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim("decompose", repo, issue_number, nil, decompose.proposal_id) then
     if type(event) == "table" then
       context_cache[event] = false
     end

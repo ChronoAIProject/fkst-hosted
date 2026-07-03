@@ -286,7 +286,7 @@ function C.merged_marker(M, issue_proposal_id, pr_number, version, head_sha, aut
   if not forge_validators.is_positive_pr_number(pr_number) or not forge_validators.is_git_sha(head_sha) then
     error("github-devloop: invalid merged marker")
   end
-  local autonomy_attrs = autonomy_record ~= nil and (' autonomy_result="v1"' .. autonomy_ledger.autonomy_result_marker_attrs(M, autonomy_record)) or ""
+  local autonomy_attrs = autonomy_record ~= nil and (' autonomy_result="v1"' .. autonomy_ledger.autonomy_result_marker_attrs(autonomy_record)) or ""
   return '<!-- fkst:github-devloop:merged:v1 proposal="' .. tostring(issue_proposal_id)
     .. '" pr="' .. tostring(pr_number)
     .. '" version="' .. tostring(version)

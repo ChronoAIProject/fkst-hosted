@@ -127,7 +127,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_cas_decision("review_loop", unresolved.proposal_id, { state = nil, version = nil }, "reviewing", "reviewing|blocked", "skip-stale(head-advanced)", "PR head advanced since unresolved review")
     return
   end
-  if not m_claims.verify_pr_review_issue_claim(core, "review_loop", origin.repo, origin.issue_number, nil, origin.proposal_id) then
+  if not m_claims.verify_pr_review_issue_claim("review_loop", origin.repo, origin.issue_number, nil, origin.proposal_id) then
     return
   end
 
@@ -171,7 +171,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.angle_digests
     )
     local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
-    local budget_round = math.max(round, conv_rounds.review_converge_budget_round(core, current_pr.comments, unresolved.proposal_id, origin.proposal_id))
+    local budget_round = math.max(round, conv_rounds.review_converge_budget_round(current_pr.comments, unresolved.proposal_id, origin.proposal_id))
     local hit_round_cap = budget_round >= config.max_converge_rounds()
     if hit_round_cap or conv_rounds.is_true_stall(facts_with_current, round) then
       local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)

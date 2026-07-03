@@ -108,7 +108,7 @@ local function resume_terminal_markers(issue, next_state, delegation, current_pr
   }
   local autonomy_record = autonomy_ledger.autonomy_result_record(M, issue.repo, issue.number, merge_ready, issue, autonomy_post_merge_pr(current_pr))
   return "\n" .. m_builders.merged_marker(M, delegation.proposal_id, delegation.pr_number, next_state.version, head_sha, autonomy_record)
-    .. "\n" .. autonomy_ledger.autonomy_result_marker(M, autonomy_record)
+    .. "\n" .. autonomy_ledger.autonomy_result_marker(autonomy_record)
 end
 
 local function build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)

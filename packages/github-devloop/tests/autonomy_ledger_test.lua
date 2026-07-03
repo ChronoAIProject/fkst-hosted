@@ -50,11 +50,11 @@ local function ledger_event(fields)
 end
 
 local function assert_not_before(left, right)
-  t.eq(autonomy_ledger._autonomy_event_before(core, left, right), false)
+  t.eq(autonomy_ledger._autonomy_event_before(left, right), false)
 end
 
 local function assert_strictly_before(left, right)
-  t.is_true(autonomy_ledger._autonomy_event_before(core, left, right))
+  t.is_true(autonomy_ledger._autonomy_event_before(left, right))
   assert_not_before(right, left)
 end
 
@@ -62,8 +62,8 @@ local function assert_transitive(events)
   for _, a in ipairs(events) do
     for _, b in ipairs(events) do
       for _, c in ipairs(events) do
-        if autonomy_ledger._autonomy_event_before(core, a, b) and autonomy_ledger._autonomy_event_before(core, b, c) then
-          t.is_true(autonomy_ledger._autonomy_event_before(core, a, c))
+        if autonomy_ledger._autonomy_event_before(a, b) and autonomy_ledger._autonomy_event_before(b, c) then
+          t.is_true(autonomy_ledger._autonomy_event_before(a, c))
         end
       end
     end
@@ -139,11 +139,11 @@ return {
       valid_autonomous_merge = "true",
     }
 
-    local marker = autonomy_ledger.autonomy_result_marker(core, record)
+    local marker = autonomy_ledger.autonomy_result_marker(record)
     t.is_true(marker:find('valid_autonomous_merge="pending"', 1, true) ~= nil)
     t.is_true(marker:find('codex_calls="null"', 1, true) ~= nil)
     t.is_true(marker:find('post_merge_probe_green="pending"', 1, true) ~= nil)
-    local fact = autonomy_ledger.autonomy_result_fact(core, { marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
+    local fact = autonomy_ledger.autonomy_result_fact({ marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
     t.eq(fact.valid_autonomous_merge, "pending")
     t.eq(fact.task_class, "L2")
     t.eq(fact.retry_count, 2)
@@ -332,11 +332,11 @@ return {
       },
     }
 
-    local marker = autonomy_ledger.autonomy_result_marker(core, record):gsub(
+    local marker = autonomy_ledger.autonomy_result_marker(record):gsub(
       'valid_autonomous_merge="pending"',
       'valid_autonomous_merge="true"'
     )
-    local fact = autonomy_ledger.autonomy_result_fact(core, { marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
+    local fact = autonomy_ledger.autonomy_result_fact({ marker }, record.proposal_id, record.pr_number, record.version, record.head_sha)
     t.eq(fact.valid_autonomous_merge, "pending")
   end,
 
@@ -365,7 +365,7 @@ return {
     }
 
     mock_check_runs('{"total_count":0,"check_runs":[]}\n')
-    local marker = autonomy_ledger.autonomy_result_marker(core, record)
+    local marker = autonomy_ledger.autonomy_result_marker(record)
     local fact = autonomy_ledger.autonomy_audited_result_fact(
       core,
       { marker },
@@ -408,7 +408,7 @@ return {
     }
     local comments = {
       trusted_comment(core.implement_attempt_marker(proposal_id, version, 1, "100"), "2026-06-03T01:00:00Z", 1101),
-      trusted_comment(autonomy_ledger.autonomy_result_marker(core, autonomy_record), "2026-06-03T01:31:00Z", 1103),
+      trusted_comment(autonomy_ledger.autonomy_result_marker(autonomy_record), "2026-06-03T01:31:00Z", 1103),
       trusted_comment(m_builders.merged_marker(core, proposal_id, "7", version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1102),
     }
 
@@ -479,7 +479,7 @@ return {
       trusted_comment(m_builders.merged_marker(core, proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
     }
 
-    local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, "owner/repo", "42")
+    local projection = autonomy_ledger.autonomy_attempt_projection(comments, "owner/repo", "42")
     t.eq(projection.total_attempts, 2)
     t.eq(projection.outcomes.blocked, 1)
     t.eq(projection.outcomes.merged, 1)
@@ -489,7 +489,7 @@ return {
     t.eq(projection.attempts[2].claim_marker_id, 1003)
     t.eq(projection.attempts[2].outcome, "merged")
     t.eq(projection.attempts[2].autonomy_result.valid_autonomous_merge, "true")
-    t.eq(autonomy_ledger.autonomy_attempt_denominator(core, comments, "owner/repo", "42"), 2)
+    t.eq(autonomy_ledger.autonomy_attempt_denominator(comments, "owner/repo", "42"), 2)
   end,
 
   test_autonomy_attempt_projection_ignores_untrusted_attempt_markers = function()
@@ -504,7 +504,7 @@ return {
       trusted_comment(core.implement_attempt_marker(proposal_id, version, 1, "100"), "2026-06-03T01:01:00Z", 1001),
     }
 
-    local projection = autonomy_ledger.autonomy_attempt_projection(core, comments, "owner/repo", "42")
+    local projection = autonomy_ledger.autonomy_attempt_projection(comments, "owner/repo", "42")
     t.eq(projection.total_attempts, 1)
     t.eq(projection.attempts[1].claim_marker_id, 1001)
   end,
@@ -539,7 +539,7 @@ return {
       trusted_comment(core.implement_attempt_marker(proposal_id, first_version, 1, "100"), "2026-06-03T01:00:00Z", 1001),
       trusted_comment(core.state_marker(proposal_id, "blocked", first_version), "2026-06-03T01:10:00Z", 1002),
       trusted_comment(core.implement_attempt_marker(proposal_id, second_version, 2, "200"), "2026-06-03T01:20:00Z", 1003),
-      trusted_comment(autonomy_ledger.autonomy_result_marker(core, autonomy_record), "2026-06-03T01:31:00Z", 1005),
+      trusted_comment(autonomy_ledger.autonomy_result_marker(autonomy_record), "2026-06-03T01:31:00Z", 1005),
       trusted_comment(m_builders.merged_marker(core, proposal_id, "7", second_version, head_sha, autonomy_record), "2026-06-03T01:30:00Z", 1004),
     }
 

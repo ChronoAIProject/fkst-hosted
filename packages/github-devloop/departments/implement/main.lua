@@ -616,7 +616,7 @@ local function process_ready_event(event)
     local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
     current.repo = repo
     current.number = issue_number
-    local managed = m_claims.managed_bot_logins(core)
+    local managed = m_claims.managed_bot_logins()
     devloop_logging.log_forged_markers("implement", ready.proposal_id, current.comments)
     if tostring(current.state or ""):upper() ~= "OPEN" then
       devloop_logging.log_cas_decision("implement", ready.proposal_id, { state = nil, version = ready.dedup_key }, "ready", "implementing", "skip-stale(original-closed)", "current issue is not open")

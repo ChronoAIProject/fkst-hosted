@@ -5,6 +5,8 @@ local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local no_revert_reopen = require("devloop.autonomy.no_revert_reopen")
 local autonomy_projection = require("devloop.autonomy.projection")
+local devloop_base = require("devloop.base")
+local devloop_state_handle = nil
 
 local task_classes = {
   L0 = true,
@@ -27,6 +29,13 @@ local audit_states = {
   pending = true,
   invalid_self_attested = true,
 }
+
+local function devloop_state()
+  if devloop_state_handle == nil then
+    devloop_state_handle = require("devloop.state")
+  end
+  return devloop_state_handle
+end
 
 local required_gate_names = {
   "human_touch",
@@ -148,8 +157,7 @@ function C.autonomy_valid_autonomous_merge(gates)
 end
 
 function C.autonomy_merge_rounds(version)
-  local devloop_state = require("devloop.state")
-  return devloop_state.version_loop_round(version) + devloop_state.version_fix_round(version)
+  return devloop_state().version_loop_round(version) + devloop_state().version_fix_round(version)
 end
 
 function C.autonomy_post_merge_probe_gate(M, pr, opts)
@@ -167,7 +175,7 @@ local function autonomy_projection_proposal_id(repo, issue_number, opts)
   return "github-devloop/issue/" .. tostring(repo or "") .. "/" .. tostring(issue_number or "")
 end
 
-local function comment_evidence(M, comment)
+local function comment_evidence(comment)
   return {
     comment_id = type(comment) == "table" and comment.id or nil,
     comment_url = type(comment) == "table" and comment.url or nil,
@@ -175,42 +183,42 @@ local function comment_evidence(M, comment)
   }
 end
 
-local function event_created_seconds(M, event)
+local function event_created_seconds(event)
   return contract_time.iso_timestamp_epoch_seconds(event.comment_created_at)
 end
 
-local function version_max_timeout_round(M, version)
+local function version_max_timeout_round(version)
   local max_n = 0
   for _, state_name in ipairs(timeout_order_states) do
-    max_n = math.max(max_n, M.version_timeout_round(version, state_name))
+    max_n = math.max(max_n, devloop_state().version_timeout_round(version, state_name))
   end
   return max_n
 end
 
-local function event_order_key(M, event)
+local function event_order_key(event)
   local version = tostring(event.version or event.claim_epoch or "")
-  local primary = M.version_updated_at(version)
+  local primary = devloop_state().version_updated_at(version)
   if primary == "" then
-    primary = M.version_order_key(version)
+    primary = devloop_state().version_order_key(version)
   end
   return {
     primary = primary,
-    loop_n = M.version_loop_round(version),
-    fix_n = M.version_fix_round(version),
-    reimplement_n = M.version_reimplement_round(version),
-    timeout_n = version_max_timeout_round(M, version),
-    review_loop_n = M.version_review_loop_round(version),
-    review_meta_action_n = M.version_review_meta_action_round(version),
+    loop_n = devloop_state().version_loop_round(version),
+    fix_n = devloop_state().version_fix_round(version),
+    reimplement_n = devloop_state().version_reimplement_round(version),
+    timeout_n = version_max_timeout_round(version),
+    review_loop_n = devloop_state().version_review_loop_round(version),
+    review_meta_action_n = devloop_state().version_review_meta_action_round(version),
     stage_rank = tonumber(event.stage_rank) or 0,
     kind_rank = event.kind == "claim" and 0 or 1,
-    created_seconds = event_created_seconds(M, event),
+    created_seconds = event_created_seconds(event),
     sequence = tonumber(event.sequence) or 0,
   }
 end
 
-local function event_before(M, left, right)
-  local a = event_order_key(M, left)
-  local b = event_order_key(M, right)
+local function event_before(left, right)
+  local a = event_order_key(left)
+  local b = event_order_key(right)
   for _, name in ipairs({
     "primary",
     "loop_n",
@@ -238,15 +246,15 @@ local function event_before(M, left, right)
   return a.sequence < b.sequence
 end
 
-function C._autonomy_event_before(M, left, right)
-  return event_before(M, left, right)
+function C._autonomy_event_before(left, right)
+  return event_before(left, right)
 end
 
 local function claim_epoch_key(dedup_key, attempt)
   return tostring(dedup_key or "") .. "#" .. tostring(attempt or "")
 end
 
-local function collect_autonomy_claim_events(M, comments, proposal_id, repo, issue_number, events, sequence)
+local function collect_autonomy_claim_events(comments, proposal_id, repo, issue_number, events, sequence)
   local seen = {}
   local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-attempt:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
@@ -258,7 +266,7 @@ local function collect_autonomy_claim_events(M, comments, proposal_id, repo, iss
       local attempt = tonumber(marker_attr(marker, "attempt"))
       local started_at = marker_attr(marker, "started_at")
       if marker_proposal == proposal_id
-        and strings.is_bounded_string(dedup_key, M._max_dedup_len)
+        and strings.is_bounded_string(dedup_key, devloop_base._max_dedup_len)
         and attempt ~= nil
         and attempt >= 1
         and attempt == math.floor(attempt) then
@@ -276,7 +284,7 @@ local function collect_autonomy_claim_events(M, comments, proposal_id, repo, iss
             claim_attempt = attempt,
             started_at = started_at,
             comment_created_at = parsers_misc._comment_created_at(comment),
-            evidence = comment_evidence(M, comment),
+            evidence = comment_evidence(comment),
             sequence = sequence,
           })
         end
@@ -293,7 +301,7 @@ local function put_terminal_event(events_by_key, key, event)
   end
 end
 
-local function collect_autonomy_terminal_events(M, comments, proposal_id, events, sequence)
+local function collect_autonomy_terminal_events(comments, proposal_id, events, sequence)
   local terminals = {}
   local state_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
   local merged_pattern = "<!%-%- fkst:github%-devloop:merged:v1.-%-%->"
@@ -306,7 +314,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
       local version = marker_attr(marker, "version")
       if marker_proposal == proposal_id
         and terminal_attempt_states[state] == true
-        and strings.is_bounded_string(version, M._max_dedup_len) then
+        and strings.is_bounded_string(version, devloop_base._max_dedup_len) then
         put_terminal_event(terminals, tostring(state) .. ":" .. tostring(version), {
           kind = "terminal",
           marker_family = "state",
@@ -314,9 +322,9 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
           outcome = state,
           terminal_state = state,
           version = version,
-          stage_rank = M.stage_rank(state),
+          stage_rank = devloop_state().stage_rank(state),
           comment_created_at = parsers_misc._comment_created_at(comment),
-          evidence = comment_evidence(M, comment),
+          evidence = comment_evidence(comment),
           sequence = sequence,
         })
       end
@@ -328,7 +336,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
       local pr_number = marker_attr(marker, "pr")
       local head_sha = marker_attr(marker, "head_sha")
       if marker_proposal == proposal_id
-        and strings.is_bounded_string(version, M._max_dedup_len)
+        and strings.is_bounded_string(version, devloop_base._max_dedup_len)
         and forge_validators.is_positive_pr_number(pr_number)
         and forge_validators.is_git_sha(head_sha) then
         local autonomy_result = nil
@@ -346,9 +354,9 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
           head_sha = head_sha,
           autonomy_result = autonomy_result,
           valid_autonomous_merge = autonomy_result and autonomy_result.valid_autonomous_merge or nil,
-          stage_rank = M.stage_rank("merged"),
+          stage_rank = devloop_state().stage_rank("merged"),
           comment_created_at = parsers_misc._comment_created_at(comment),
-          evidence = comment_evidence(M, comment),
+          evidence = comment_evidence(comment),
           sequence = sequence,
         })
       end
@@ -360,7 +368,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
   return sequence
 end
 
-local function unresolved_attempt_outcome(M, row, opts)
+local function unresolved_attempt_outcome(row, opts)
   local options = opts or {}
   local now_seconds = tonumber(options.now_seconds)
   local claim_seconds = contract_time.iso_timestamp_epoch_seconds(row.claim_comment_created_at)
@@ -390,19 +398,19 @@ local function close_attempt_with_terminal(row, event)
   row.valid_autonomous_merge = event.valid_autonomous_merge
 end
 
-local function close_attempt_without_terminal(M, row, opts)
+local function close_attempt_without_terminal(row, opts)
   if row.outcome == nil then
-    row.outcome = unresolved_attempt_outcome(M, row, opts)
+    row.outcome = unresolved_attempt_outcome(row, opts)
   end
 end
 
-function C.autonomy_attempt_projection(M, comments, repo, issue_number, opts)
+function C.autonomy_attempt_projection(comments, repo, issue_number, opts)
   local proposal_id = autonomy_projection_proposal_id(repo, issue_number, opts)
   local events = {}
-  local sequence = collect_autonomy_claim_events(M, comments, proposal_id, repo, issue_number, events, 0)
-  collect_autonomy_terminal_events(M, comments, proposal_id, events, sequence)
+  local sequence = collect_autonomy_claim_events(comments, proposal_id, repo, issue_number, events, 0)
+  collect_autonomy_terminal_events(comments, proposal_id, events, sequence)
   table.sort(events, function(left, right)
-    return event_before(M, left, right)
+    return event_before(left, right)
   end)
 
   local projection = {
@@ -419,7 +427,7 @@ function C.autonomy_attempt_projection(M, comments, repo, issue_number, opts)
   for _, event in ipairs(events) do
     if event.kind == "claim" then
       if current ~= nil then
-        close_attempt_without_terminal(M, current, opts)
+        close_attempt_without_terminal(current, opts)
       end
       current = {
         attempt_id = tostring(repo or "") .. "#issue/" .. tostring(issue_number or "") .. "#" .. event.claim_epoch,
@@ -441,7 +449,7 @@ function C.autonomy_attempt_projection(M, comments, repo, issue_number, opts)
     end
   end
   if current ~= nil then
-    close_attempt_without_terminal(M, current, opts)
+    close_attempt_without_terminal(current, opts)
   end
 
   projection.total_attempts = #projection.attempts
@@ -455,8 +463,8 @@ function C.autonomy_attempt_projection(M, comments, repo, issue_number, opts)
   return projection
 end
 
-function C.autonomy_attempt_denominator(M, comments, repo, issue_number, opts)
-  return C.autonomy_attempt_projection(M, comments, repo, issue_number, opts).total_attempts
+function C.autonomy_attempt_denominator(comments, repo, issue_number, opts)
+  return C.autonomy_attempt_projection(comments, repo, issue_number, opts).total_attempts
 end
 
 function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, post_merge_pr)
@@ -499,14 +507,14 @@ function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, pos
     human_touch_count = human_touch_count,
     pre_merge_ci = gates.pre_merge_ci,
     rounds = C.autonomy_merge_rounds(merge_ready.version),
-    retry_count = M.version_fix_round(merge_ready.version),
+    retry_count = devloop_state().version_fix_round(merge_ready.version),
     codex_calls = nil,
     gates = gates,
     valid_autonomous_merge = C.autonomy_valid_autonomous_merge(gates),
   }
 end
 
-local function autonomy_result_parts(M, record)
+local function autonomy_result_parts(record)
   if type(record) ~= "table" then
     error("github-devloop: invalid autonomy result record")
   end
@@ -526,11 +534,11 @@ local function autonomy_result_parts(M, record)
   if valid ~= "true" and valid ~= "false" and valid ~= "pending" then
     error("github-devloop: invalid autonomy result predicate")
   end
-  if not strings.is_path_safe_key(proposal_id, M._max_key_len)
-    or not strings.is_path_safe_key(repo, M._max_key_len)
+  if not strings.is_path_safe_key(proposal_id, devloop_base._max_key_len)
+    or not strings.is_path_safe_key(repo, devloop_base._max_key_len)
     or not forge_validators.is_positive_pr_number(issue_number)
     or not forge_validators.is_positive_pr_number(pr_number)
-    or not strings.is_bounded_string(version, M._max_dedup_len)
+    or not strings.is_bounded_string(version, devloop_base._max_dedup_len)
     or not forge_validators.is_git_sha(head_sha)
     or human_touch_count == nil or human_touch_count < 0 or human_touch_count % 1 ~= 0
     or rounds == nil or rounds < 0 or rounds % 1 ~= 0
@@ -562,8 +570,8 @@ local function autonomy_result_parts(M, record)
   }
 end
 
-function C.autonomy_result_marker_attrs(M, record)
-  local parts = autonomy_result_parts(M, record)
+function C.autonomy_result_marker_attrs(record)
+  local parts = autonomy_result_parts(record)
   return ' repo="' .. parts.repo
     .. '" issue="' .. parts.issue_number
     .. '" task_class="' .. parts.task_class
@@ -581,8 +589,8 @@ function C.autonomy_result_marker_attrs(M, record)
     .. '" valid_autonomous_merge="' .. parts.valid .. '"'
 end
 
-function C.autonomy_result_marker(M, record)
-  local parts = autonomy_result_parts(M, record)
+function C.autonomy_result_marker(record)
+  local parts = autonomy_result_parts(record)
   return '<!-- fkst:github-devloop:autonomy-result:v1 proposal="' .. parts.proposal_id
     .. '" repo="' .. parts.repo
     .. '" issue="' .. parts.issue_number
@@ -694,7 +702,7 @@ function C.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_n
   }
 end
 
-function C.autonomy_result_fact(M, comments, proposal_id, pr_number, version, head_sha)
+function C.autonomy_result_fact(comments, proposal_id, pr_number, version, head_sha)
   if type(comments) ~= "table" then
     return nil
   end
@@ -775,7 +783,7 @@ function C.autonomy_audit_valid_autonomous_merge(M, fact, opts)
 end
 
 function C.autonomy_audited_result_fact(M, comments, proposal_id, pr_number, version, head_sha, opts)
-  local fact = C.autonomy_result_fact(M, comments, proposal_id, pr_number, version, head_sha)
+  local fact = C.autonomy_result_fact(comments, proposal_id, pr_number, version, head_sha)
   if fact == nil then
     return nil
   end
@@ -794,7 +802,7 @@ function C.autonomy_audited_result_fact(M, comments, proposal_id, pr_number, ver
       end
     end
   end
-  fact.attempt_projection = autonomy_projection.apply_audited_fact(C.autonomy_attempt_projection(M, comments, fact.repo, fact.issue_number, {
+  fact.attempt_projection = autonomy_projection.apply_audited_fact(C.autonomy_attempt_projection(comments, fact.repo, fact.issue_number, {
     proposal_id = proposal_id,
     now_seconds = type(opts) == "table" and opts.now_seconds or nil,
     timed_out_after_seconds = type(opts) == "table" and opts.timed_out_after_seconds or nil,
