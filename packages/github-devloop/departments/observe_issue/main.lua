@@ -513,7 +513,7 @@ local function process_issue_event(event)
       force_fresh = true,
     })
     if state_view.exit_code ~= 0 then
-      error("github-devloop: gh issue state view failed: " .. tostring(state_view.stderr))
+      error("github-devloop: issue-read-failed: gh issue state view failed: " .. tostring(state_view.stderr))
     end
 
     local current = parsers_issue.parse_issue_view_state(core, state_view.stdout)
@@ -664,7 +664,7 @@ local function process_issue_event(event)
     end
     if transition == "pending" then
       devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "unmanaged", "thinking", devloop_state.cas_outcome(state, transition, issue.dedup_key), "unmanaged state marker pending for observe")
-      error("github-devloop: unmanaged state marker pending for observe; retrying")
+      error("github-devloop: state-marker-pending: unmanaged state marker pending for observe; retrying")
     end
     if not m_claims.claim_issue_for_management(core, "observe_issue", issue.repo, issue.number, current, proposal_id) then
       return
@@ -712,7 +712,7 @@ local function process_pr_event(event)
     consumer = "observe_issue",
   })
   if pr_view.exit_code ~= 0 then
-    error("github-devloop: observe-issue-pr-view-failed: " .. tostring(pr_view.stderr))
+    error("github-devloop: pr-read-failed: observe-issue-pr-view-failed: " .. tostring(pr_view.stderr))
   end
   local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
   current_pr.number = pr.number

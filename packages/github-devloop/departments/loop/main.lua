@@ -55,7 +55,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local view = devloop_commands.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: gh issue loop view failed: " .. tostring(view.stderr))
+      error("github-devloop: issue-read-failed: gh issue loop view failed: " .. tostring(view.stderr))
     end
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
@@ -68,7 +68,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if transition == "pending" then
       devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "thinking state marker not yet visible")
-      error("github-devloop: thinking state marker not yet visible for unresolved; retrying")
+      error("github-devloop: state-marker-pending: thinking state marker not yet visible for unresolved; retrying")
     end
 
     local base_version = conv_rounds.converge_base_version(unresolved.dedup_key)

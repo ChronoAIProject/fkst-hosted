@@ -109,7 +109,7 @@ local function pipeline_thinking(event)
 
     local view = devloop_commands.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: gh issue reconcile view failed: " .. tostring(view.stderr))
+      error("github-devloop: issue-read-failed: gh issue reconcile view failed: " .. tostring(view.stderr))
     end
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
@@ -125,7 +125,7 @@ local function pipeline_thinking(event)
     end
     if state.state == nil then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "pending", "thinking state marker not yet visible")
-      error("github-devloop: thinking state marker not yet visible for reconcile; retrying")
+      error("github-devloop: state-marker-pending: thinking state marker not yet visible for reconcile; retrying")
     end
     if state.state ~= "thinking" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", "skip-stale(state-advanced)", "current marker advanced beyond thinking")
@@ -136,7 +136,7 @@ local function pipeline_thinking(event)
     local transition = devloop_state.versioned_transition_status(state, { "thinking" }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", devloop_state.cas_outcome(state, transition, version), "thinking state marker not yet visible")
-      error("github-devloop: thinking state marker not yet visible for reconcile; retrying")
+      error("github-devloop: state-marker-pending: thinking state marker not yet visible for reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "thinking", "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be reconciled from thinking")
@@ -173,7 +173,7 @@ local function pipeline_timeout(event)
 
     local view = devloop_commands.gh_issue_view_loop(repo, issue_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
+      error("github-devloop: issue-read-failed: timeout-reconcile-issue-view-failed: " .. tostring(view.stderr))
     end
 
     local current = parsers_issue.parse_issue_view_loop(core, view.stdout)
@@ -191,7 +191,7 @@ local function pipeline_timeout(event)
     end
     if state.state == nil then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "pending", "state marker not yet visible for timeout reconcile")
-      error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
+      error("github-devloop: state-marker-pending: state marker not yet visible for timeout reconcile; retrying")
     end
     if state.state ~= reconcile.state then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(state-advanced)", "current marker advanced beyond timeout reconcile state")
@@ -254,7 +254,7 @@ local function pipeline_timeout(event)
     local transition = devloop_state.versioned_transition_status(state, { reconcile.state }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
-      error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
+      error("github-devloop: state-marker-pending: state marker not yet visible for timeout reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")

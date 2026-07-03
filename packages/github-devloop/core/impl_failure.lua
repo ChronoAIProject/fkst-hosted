@@ -33,7 +33,7 @@ function M.impl_failure_marker(proposal_id, dedup_key, reason, attempt)
   if attempt ~= nil then
     local n = valid_attempt(attempt)
     if n == nil then
-      error("github-devloop: invalid impl failure attempt")
+      error("github-devloop: invalid-attempt: invalid impl failure attempt")
     end
     attempt_field = '" attempt="' .. tostring(n)
   end
@@ -115,7 +115,7 @@ function M.ready_payload_inner_version(version)
   local text = tostring(version or "")
   local inner, replaced = text:gsub("^ready/", "", 1)
   if replaced == 0 then
-    error("github-devloop: implementing marker version lacks the expected 'ready/' prefix: " .. text)
+    error("github-devloop: invalid-version-lineage: implementing marker version lacks the expected 'ready/' prefix: " .. text)
   end
   return inner
 end
@@ -127,7 +127,7 @@ function M.implementation_attempt_version(version, attempt)
     return base
   end
   if n ~= math.floor(n) or n > max_impl_retry_attempts then
-    error("github-devloop: invalid implementation attempt version")
+    error("github-devloop: invalid-attempt: invalid implementation attempt version")
   end
   return transition_version.reimplement_at(base, n)
 end

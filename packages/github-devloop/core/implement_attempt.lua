@@ -16,7 +16,7 @@ end
 function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at, exec_ref)
   local n = tonumber(attempt)
   if n == nil or n < 1 or n ~= math.floor(n) then
-    error("github-devloop: invalid implement attempt")
+    error("github-devloop: invalid-attempt: invalid implement attempt")
   end
   local marker = '<!-- fkst:github-devloop:implement-attempt:v1 proposal="' .. tostring(proposal_id)
     .. '" dedup="' .. tostring(dedup_key)
@@ -82,7 +82,7 @@ end
 function M.implement_version_mismatch_marker(proposal_id, expected_version, current_version, attempt)
   local n = tonumber(attempt)
   if n == nil or n < 1 or n ~= math.floor(n) then
-    error("github-devloop: invalid implement version mismatch attempt")
+    error("github-devloop: invalid-attempt: invalid implement version mismatch attempt")
   end
   return '<!-- fkst:github-devloop:implement-version-mismatch:v1 proposal="' .. tostring(proposal_id)
     .. '" key="' .. devloop_base.implement_version_mismatch_key(expected_version, current_version)

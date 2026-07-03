@@ -199,7 +199,7 @@ local function make_department(ports)
       end
       if transition == "pending" then
         devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, devloop_state.cas_outcome(state, transition, version), "thinking state marker not yet visible")
-        error("github-devloop: thinking state marker not yet visible for consensus result; retrying")
+        error("github-devloop: state-marker-pending: thinking state marker not yet visible for consensus result; retrying")
       end
       devloop_logging.log_cas_decision("consensus_result", reached.proposal_id, state, "thinking", to_state, devloop_state.cas_outcome(state, transition, version), "consensus decision=" .. tostring(reached.decision))
 

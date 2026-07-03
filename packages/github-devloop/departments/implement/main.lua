@@ -99,7 +99,7 @@ local function publish_implementation_branch(repo, issue_number, ready, worktree
   end
   local push = git_mechanics.git_push_worktree_branch_update(core.git, worktree, branch, 120)
   if push.exit_code ~= 0 then
-    error("github-devloop: IMPLEMENT_BRANCH_PUSH_FAILED: git implementation branch push failed: " .. tostring(push.stderr))
+    error("github-devloop: branch-push-failed: git implementation branch push failed: " .. tostring(push.stderr))
   end
 end
 
@@ -113,11 +113,11 @@ local function remote_branch_fact(branch, base_branch, source_fact)
     if head_result.exit_code == 1 then
       return nil
     end
-    error("github-devloop: git implementing remote branch head failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-head-read-failed: git implementing remote branch head failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
-    error("github-devloop: unsafe implementing remote branch head")
+    error("github-devloop: unsafe-head-sha: unsafe implementing remote branch head")
   end
   if source_fact ~= nil and source_fact.head_sha ~= nil and head_sha ~= source_fact.head_sha then
     local ancestry = git_mechanics.git_is_ancestor(core.git, source_fact.head_sha, head_sha, 30)
@@ -141,7 +141,7 @@ local function local_branch_fact(base_head, branch, base_branch, dedup_key)
     if branch_ref.exit_code == 1 then
       return nil
     end
-    error("github-devloop: git branch ref check failed: " .. tostring(branch_ref.stderr))
+    error("github-devloop: branch-ref-check-failed: git branch ref check failed: " .. tostring(branch_ref.stderr))
   end
   local head_sha = implemented_branch_head(base_head, branch)
   if head_sha == nil or substrate_pin.is_only_pin_delta(base_head, branch) then
@@ -204,7 +204,7 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
     })
     devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-stale(version-mismatch)", message)
     raise_implement_version_mismatch(repo, issue_number, ready, state, expected_version, attempt)
-    error("github-devloop: implement-version-mismatch retrying: ready event version "
+    error("github-devloop: fact-changed: implement-version-mismatch retrying: ready event version "
       .. tostring(expected_version or "")
       .. " does not match current implementing version "
       .. tostring(state and state.version or ""))
@@ -215,7 +215,7 @@ local function handle_implementing_version_mismatch(repo, issue_number, current,
     terminal = true,
   })
   devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "fail-closed(version-mismatch-budget)", message)
-  error("github-devloop: implement-version-mismatch: ready event version "
+  error("github-devloop: fact-changed: implement-version-mismatch: ready event version "
     .. tostring(expected_version or "")
     .. " does not match current implementing version "
     .. tostring(state and state.version or ""))
@@ -235,7 +235,7 @@ end
 implemented_branch_head = function(base_head, branch)
   local ahead_result = devloop_commands.git_branch_ahead_count(base_head, branch, 30)
   if ahead_result.exit_code ~= 0 then
-    error("github-devloop: git branch ahead check failed: " .. tostring(ahead_result.stderr))
+    error("github-devloop: branch-fact-read-failed: git branch ahead check failed: " .. tostring(ahead_result.stderr))
   end
   local ahead_count = tonumber(tostring(ahead_result.stdout or ""):match("%d+"))
   if ahead_count == nil or ahead_count <= 0 then
@@ -244,11 +244,11 @@ implemented_branch_head = function(base_head, branch)
 
   local head_result = devloop_commands.git_branch_head(branch, 30)
   if head_result.exit_code ~= 0 then
-    error("github-devloop: git branch head failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-head-read-failed: git branch head failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
-    error("github-devloop: unsafe implementing branch head")
+    error("github-devloop: unsafe-head-sha: unsafe implementing branch head")
   end
   return head_sha
 end
@@ -258,10 +258,10 @@ local function merge_integration_for_implementation(worktree, integration_branch
   if merge_result.exit_code == 0 then return true end
   local unmerged_result = core.git.unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
-    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    error("github-devloop: unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
   if tostring(unmerged_result.stdout or "") == "" then
-    error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+    error("github-devloop: integration-merge-failed: git integration merge failed: " .. tostring(merge_result.stderr))
   end
   devloop_logging.log_line("info", "implement", "merge-target", "MERGE_SKEW", {
     "integration_branch=" .. tostring(integration_branch),
@@ -321,7 +321,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   local status = devloop_commands.git_status(worktree, 30)
   if status.exit_code ~= 0 then
-    error("github-devloop: git status failed: " .. tostring(status.stderr))
+    error("github-devloop: git-status-failed: git status failed: " .. tostring(status.stderr))
   end
 
   if tostring(status.stdout or "") == "" then
@@ -373,7 +373,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
 
   local add_result = devloop_commands.git_add_all(worktree, 30)
   if add_result.exit_code ~= 0 then
-    error("github-devloop: git add failed: " .. tostring(add_result.stderr))
+    error("github-devloop: git-add-failed: git add failed: " .. tostring(add_result.stderr))
   end
 
   local commit_result = devloop_commands.git_commit(worktree, payloads_builders.implement_commit_subject(
@@ -381,28 +381,28 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
       require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(repo, issue_number)
     ), 60)
   if commit_result.exit_code ~= 0 then
-    error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
+    error("github-devloop: git-commit-failed: git commit failed: " .. tostring(commit_result.stderr))
   end
 
   local branch_result = devloop_commands.git_current_branch(worktree, 30)
   if branch_result.exit_code ~= 0 then
-    error("github-devloop: git branch fact failed: " .. tostring(branch_result.stderr))
+    error("github-devloop: branch-fact-read-failed: git branch fact failed: " .. tostring(branch_result.stderr))
   end
   local actual_branch = tostring(branch_result.stdout or ""):gsub("%s+$", "")
   if actual_branch ~= branch then
-    error("github-devloop: deterministic implementing branch mismatch")
+    error("github-devloop: branch-mismatch: deterministic implementing branch mismatch")
   end
   if not require("devloop.pr_safety").is_safe_branch(branch) then
-    error("github-devloop: unsafe implementing branch")
+    error("github-devloop: unsafe-branch: unsafe implementing branch")
   end
 
   local head_result = git("github-devloop").git_head_sha(worktree, 30)
   if head_result.exit_code ~= 0 then
-    error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-head-read-failed: git head fact failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
-    error("github-devloop: unsafe implementing head_sha")
+    error("github-devloop: unsafe-head-sha: unsafe implementing head_sha")
   end
 
   return {
@@ -460,13 +460,13 @@ local function raise_attempt_outcome(repo, issue_number, outcome)
     raise_impl_failed(repo, issue_number, outcome.ready, outcome.reason, outcome.detail, outcome.attempt)
     return
   end
-  error("github-devloop: unknown implementation outcome")
+  error("github-devloop: invalid-implementation-outcome: unknown implementation outcome")
 end
 
 local function recheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off, allow_same_version_implementing)
   local view = devloop_commands.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
-    error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
+    error("github-devloop: issue-recheck-failed: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
   local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
   devloop_logging.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
@@ -517,7 +517,7 @@ end
 local function precheck_implementation_write_gate(repo, issue_number, marker_ready, expected_from_states, accepted_ready_hand_off)
   local view = devloop_commands.gh_issue_view_implement(repo, issue_number, 30)
   if view.exit_code ~= 0 then
-    error("github-devloop: gh issue implement recheck failed: " .. tostring(view.stderr))
+    error("github-devloop: issue-recheck-failed: gh issue implement recheck failed: " .. tostring(view.stderr))
   end
   local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
   devloop_logging.log_forged_markers("implement", marker_ready.proposal_id, current.comments)
@@ -610,7 +610,7 @@ local function process_ready_event(event)
 
     local view = devloop_commands.gh_issue_view_implement(repo, issue_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: gh issue implement view failed: " .. tostring(view.stderr))
+      error("github-devloop: issue-read-failed: gh issue implement view failed: " .. tostring(view.stderr))
     end
 
     local current = parsers_issue.parse_issue_view_implement(core, view.stdout)
@@ -780,7 +780,7 @@ local function process_ready_event(event)
             "reason=" .. tostring(hand_off_reason),
           })
         end
-        error("github-devloop: ready state marker not yet visible for implement; retrying")
+        error("github-devloop: state-marker-pending: ready state marker not yet visible for implement; retrying")
       end
     else
       devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, ready.dedup_key), "ready marker visible; attempting implementation")

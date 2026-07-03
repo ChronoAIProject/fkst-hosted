@@ -42,7 +42,7 @@ local function read_ledger(entry_key)
   local ref = core.ratchet_slice_ledger_ref(entry_key)
   local listed = devloop_commands.git_ls_remote_ref("origin", ref, 30)
   if type(listed) ~= "table" or listed.exit_code ~= 0 then
-    error("github-devloop: ratchet slice ledger ls-remote failed: " .. tostring(listed and listed.stderr or "missing result"))
+    error("github-devloop: slice-ledger-read-failed: ratchet slice ledger ls-remote failed: " .. tostring(listed and listed.stderr or "missing result"))
   end
   local sha = core.parse_ratchet_slice_ledger_ref_sha(listed.stdout)
   if sha == nil then
@@ -50,11 +50,11 @@ local function read_ledger(entry_key)
   end
   local fetched = devloop_commands.git_fetch_ref("origin", ref, 30)
   if type(fetched) ~= "table" or fetched.exit_code ~= 0 then
-    error("github-devloop: ratchet slice ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
+    error("github-devloop: slice-ledger-read-failed: ratchet slice ledger fetch failed: " .. tostring(fetched and fetched.stderr or "missing result"))
   end
   local commit = devloop_commands.git_cat_file_pretty(sha, 30)
   if type(commit) ~= "table" or commit.exit_code ~= 0 then
-    error("github-devloop: ratchet slice ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
+    error("github-devloop: slice-ledger-read-failed: ratchet slice ledger cat-file failed: " .. tostring(commit and commit.stderr or "missing result"))
   end
   return core.decode_ratchet_slice_ledger(commit.stdout)
 end
@@ -118,7 +118,7 @@ function M.check(repo, issue_number, ready, current)
   if devloop_base.read_env("FKST_GITHUB_WRITE") == "1" then
     local closed = devloop_commands.gh_issue_close(repo, issue_number, 30)
     if type(closed) ~= "table" or closed.exit_code ~= 0 then
-      error("github-devloop: duplicate slice close failed: " .. tostring(closed and closed.stderr or "missing result"))
+      error("github-devloop: duplicate-slice-close-failed: duplicate slice close failed: " .. tostring(closed and closed.stderr or "missing result"))
     end
   end
   return true

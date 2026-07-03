@@ -40,7 +40,7 @@ function S.install(M)
     local query = M.render_github_graphql_query(name, fields)
     local run = exec or exec_argv
     if type(run) ~= "function" then
-      error("github-devloop: GitHub GraphQL adapter requires exec_argv")
+      error("github-devloop: adapter-unavailable: GitHub GraphQL adapter requires exec_argv")
     end
     return github_result(function()
       return require("forge.github").new(run).graphql(query, nil, timeout or 30)

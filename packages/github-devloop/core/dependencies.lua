@@ -173,14 +173,14 @@ end
 local function merged_blocker_cache_key(repo, blocker_number)
   local core = root()
   if not base_ids.issue_ref_round_trips(repo, blocker_number) then
-    error("github-devloop: invalid merged blocker cache key target")
+    error("github-devloop: invalid-cache-key: invalid merged blocker cache key target")
   end
   local key = "github-devloop/dependency/merged/"
     .. base_ids.safe_repo(repo)
     .. "/issue/"
     .. base_ids.safe_issue(blocker_number)
   if not strings_c.is_path_safe_key(key, core._max_key_len) then
-    error("github-devloop: invalid merged blocker cache key")
+    error("github-devloop: invalid-cache-key: invalid merged blocker cache key")
   end
   return key
 end
@@ -435,7 +435,7 @@ function M.gh_blocked_by(repo, issue_number, timeout, exec)
   local core = root()
   local owner, name = strings.split_repo(repo)
   if owner == nil or not forge_validators.is_positive_pr_number(issue_number) then
-    error("github-devloop: invalid dependency query target")
+    error("github-devloop: invalid-dependency-target: invalid dependency query target")
   end
   return core.github_graphql("dependency_blocked_by", {
     owner = owner,
