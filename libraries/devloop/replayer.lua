@@ -604,7 +604,7 @@ local function replay_fixing(M, tools, dept, issue, state, row, facts)
       feedback = feedback,
       proposal_id = proposal_id,
     })
-    local fix_payload = payloads_builders.build_replayed_fixing_payload(M, {
+    local fix_payload = payloads_builders.build_replayed_fixing_payload({
       proposal_id = fields.proposal_id,
       impl_version = fields.version,
     }, fields.pr_number, feedback, fields.source_ref)

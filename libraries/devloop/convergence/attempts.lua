@@ -77,7 +77,7 @@ function C.build_timeout_attempt_comment_request(target, proposal_id, state, row
   })
 end
 
-function C.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, generation_key)
+function C.build_timeout_attempt_v2_comment_request(target, proposal_id, state, row, source_ref, attempt, generation_key)
   local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key)

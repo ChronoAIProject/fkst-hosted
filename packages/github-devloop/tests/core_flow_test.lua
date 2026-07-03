@@ -753,11 +753,11 @@ return {
       reviewed_head_sha = "def456",
       blocking_gap = "rollup red",
     }
-    local defective = payloads_builders.build_replayed_fixing_payload(core, origin, 7, feedback, source_ref())
-    local corrected = payloads_builders.build_replayed_fixing_payload(core, origin, 7, copy_table(feedback, {
+    local defective = payloads_builders.build_replayed_fixing_payload(origin, 7, feedback, source_ref())
+    local corrected = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
       gate_baseline_sha = "828df8d3",
     }), source_ref())
-    local new_predecessors = payloads_builders.build_replayed_fixing_payload(core, origin, 7, copy_table(feedback, {
+    local new_predecessors = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
       predecessor_set = "pr5-github-devloop/issue/owner/repo/41-ready-aaa111",
     }), source_ref())
 

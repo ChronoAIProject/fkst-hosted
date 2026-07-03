@@ -331,7 +331,7 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
     devloop_logging.log_cas_decision(dept, proposal_id, state, "fixing", "reviewing", "applied(replay)", "push already visible; self-healing missing reviewing marker")
     return tools.raise_effects(dept, proposal_id, "reviewing", new_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:fixing" } }, effects)
   end
-  local payload = payloads_builders.build_replayed_fixing_payload(M, {
+  local payload = payloads_builders.build_replayed_fixing_payload({
     proposal_id = proposal_id,
     impl_version = state.version,
   }, link.pr_number, feedback, entity_lib.pr_source_ref(issue.repo, link.pr_number))

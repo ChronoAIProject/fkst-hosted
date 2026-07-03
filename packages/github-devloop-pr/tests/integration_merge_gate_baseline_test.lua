@@ -223,7 +223,7 @@ return {
       gate_baseline_sha = "828df8d3",
       gate_failure_excerpt = "mergeable-conflicting",
     })
-    local defective = payloads_builders.build_replayed_fixing_payload(core, {
+    local defective = payloads_builders.build_replayed_fixing_payload({
       proposal_id = event.proposal_id,
       impl_version = event.version,
     }, event.pr_number, {
@@ -232,7 +232,7 @@ return {
       reviewed_head_sha = event.reviewed_head_sha,
       blocking_gap = "mergeable-conflicting",
     }, event.source_ref)
-    local corrected = payloads_builders.build_replayed_fixing_payload(core, {
+    local corrected = payloads_builders.build_replayed_fixing_payload({
       proposal_id = event.proposal_id,
       impl_version = event.version,
     }, event.pr_number, {

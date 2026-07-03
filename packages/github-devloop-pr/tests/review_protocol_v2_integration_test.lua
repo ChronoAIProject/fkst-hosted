@@ -266,7 +266,7 @@ return {
     local fix_version = core.next_fix_version(impl_version)
     local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, impl_version, "def456")
     local review_dedup_key = "consensus:" .. review_id .. "/review"
-    local expected = payloads_builders.build_replayed_fixing_payload(core, {
+    local expected = payloads_builders.build_replayed_fixing_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = fix_version,
     }, 7, {

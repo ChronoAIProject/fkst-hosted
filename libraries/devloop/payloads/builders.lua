@@ -184,7 +184,7 @@ local function replay_fact_sha(value, fallback)
   return fallback
 end
 
-function C.build_replayed_fixing_payload(M, origin, pr_number, feedback, source_ref)
+function C.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref)
   local payload = C.build_devloop_fixing_payload(origin, pr_number, {
     review_proposal_id = feedback.review_proposal_id,
     review_dedup_key = feedback.review_dedup_key,

@@ -720,7 +720,7 @@ return {
     t.is_true(fixing_raise.payload.gate_failure_excerpt:find("rollup-red", 1, true) ~= nil)
     t.eq(fixing_raise.payload.source_ref.ref, "ChronoAIProject/fkst-packages#pr/305")
     assert_declared_merge_gate_fixing_replay_field_set(fixing_raise.payload)
-    local defective_replay = payloads_builders.build_replayed_fixing_payload(core, {
+    local defective_replay = payloads_builders.build_replayed_fixing_payload({
       proposal_id = event.proposal_id,
       impl_version = fixture.fixing_version,
     }, fixture.pr_number, {

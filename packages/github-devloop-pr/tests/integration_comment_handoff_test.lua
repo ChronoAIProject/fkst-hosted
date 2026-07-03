@@ -177,7 +177,7 @@ return {
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/v1/fix/1"
     local review_proposal_id = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/consensus-github-devloop/issue/owner/repo/42/v1", "def456")
     local review_dedup_key = "consensus:" .. review_proposal_id .. "/review"
-    local expected_replay = payloads_builders.build_replayed_fixing_payload(core, {
+    local expected_replay = payloads_builders.build_replayed_fixing_payload({
       proposal_id = proposal_id,
       impl_version = version,
     }, 7, {

@@ -208,7 +208,7 @@ local function emit_timeout_attempt_marker(dept, entity, state, row, facts, prop
       and type(eval) == "table"
       and eval.status == "actionable"
       and eval.generation_key ~= nil then
-      devloop_logging.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, eval.generation_key))
+      devloop_logging.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_v2_comment_request(target, proposal_id, state, row, source_ref, attempt, eval.generation_key))
     else
       devloop_logging.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt))
     end

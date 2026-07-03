@@ -38,7 +38,7 @@ function C.attach_blocked_handoff(request, proposal_id, pr_number, version, sour
   return request
 end
 
-function C.attach_fixing_handoff(M, request, proposal_id, pr_number, version, review_fact, source_ref)
+function C.attach_fixing_handoff(request, proposal_id, pr_number, version, review_fact, source_ref)
   local normalized = payloads_builders.build_devloop_fixing_payload({
     proposal_id = proposal_id,
     impl_version = version,
@@ -237,7 +237,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     }
   elseif reached.decision == "reject" and not reached.reflection_checkpoint then
     local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
-    C.attach_fixing_handoff(M, request, issue_proposal_id, pr_number, issue_version, {
+    C.attach_fixing_handoff(request, issue_proposal_id, pr_number, issue_version, {
       review_proposal_id = reached.proposal_id,
       review_dedup_key = reached.dedup_key,
       reviewed_head_sha = reviewed_head_sha,
@@ -320,7 +320,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
   if gate_failure_excerpt == nil and handoff_fields.preserve_nil_gate_failure_excerpt ~= true then
     gate_failure_excerpt = reason
   end
-  return C.attach_fixing_handoff(M, request, merge_ready.proposal_id, merge_ready.pr_number, fix_version, {
+  return C.attach_fixing_handoff(request, merge_ready.proposal_id, merge_ready.pr_number, fix_version, {
     review_proposal_id = merge_ready.review_proposal_id,
     review_dedup_key = merge_ready.review_dedup_key,
     reviewed_head_sha = merge_ready.reviewed_head_sha,
