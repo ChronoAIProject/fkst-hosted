@@ -109,7 +109,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
     devloop_logging.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
-    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, origin.proposal_id)
+    local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision
     local comment_reached = reached
     local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(core, reached.blocking_gap)

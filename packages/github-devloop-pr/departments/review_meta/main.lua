@@ -75,7 +75,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     devloop_logging.log_forged_markers("review_meta", review_meta.proposal_id, current_pr.comments)
 
-    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, review_meta.proposal_id)
+    local state = require("devloop.entity").current_entity_state(current_pr.comments, review_meta.proposal_id)
     local transition = devloop_state.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")

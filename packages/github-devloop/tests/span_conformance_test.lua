@@ -484,7 +484,7 @@ end
 ]],
       ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
 local function validate_fix_write_gate_snapshot(pr, fix)
-  local rechecked_state = require("devloop.entity").current_entity_state(core, pr.comments, fix.proposal_id)
+  local rechecked_state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
   if rechecked_state.state ~= "fixing" then
     return nil
   end
@@ -538,7 +538,7 @@ end
 ]],
       ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
 local function validate_fix_write_gate_snapshot(pr, fix)
-  local rechecked_state = require("devloop.entity").current_entity_state(core, pr.comments, fix.proposal_id)
+  local rechecked_state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
   if rechecked_state.state ~= "fixing" then
     return nil
   end
@@ -591,7 +591,7 @@ end
 ]],
       ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
 local function validate_fix_write_gate_snapshot(pr, fix)
-  local rechecked_state = require("devloop.entity").current_entity_state(core, pr.comments, fix.proposal_id)
+  local rechecked_state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
   if rechecked_state.state ~= "fixing" then
     return nil
   end

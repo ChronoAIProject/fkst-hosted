@@ -55,7 +55,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     return false
   end
 
-  local state = require("devloop.entity").current_entity_state(core, current.comments, proposal_id)
+  local state = require("devloop.entity").current_entity_state(current.comments, proposal_id)
   if not liveness_scan.liveness_scan_should_reinject_state(core, proposal_id, state) then
     return false
   end

@@ -156,7 +156,7 @@ local function fetch_child_state_fact(M, facts)
     facts.current_pr = parsers_pr.parse_pr_view_origin(M, view.stdout)
     facts.current_pr.number, facts.current_pr.force_fresh = delegation.pr_number, true
   end
-  facts.child_state = require("devloop.entity").current_entity_state(M, facts.current_pr.comments, delegation.proposal_id)
+  facts.child_state = require("devloop.entity").current_entity_state(facts.current_pr.comments, delegation.proposal_id)
   return facts.child_state
 end
 

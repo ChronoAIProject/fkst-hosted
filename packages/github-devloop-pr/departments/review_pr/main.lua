@@ -81,7 +81,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
     devloop_logging.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
-    local state = require("devloop.entity").current_entity_state(core, current_pr.comments, reviewing.proposal_id)
+    local state = require("devloop.entity").current_entity_state(current_pr.comments, reviewing.proposal_id)
     local transition = reviewing_transition_status(state, reviewing.version)
     if transition == "pending" or transition == "version-mismatch" then
       local verified_state = nil

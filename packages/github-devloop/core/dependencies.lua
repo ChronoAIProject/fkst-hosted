@@ -208,7 +208,7 @@ local function blocker_merged(repo, blocker_number)
   if not ok or type(current) ~= "table" then
     return nil, "malformed-json"
   end
-  local state = require("devloop.entity").current_entity_state(core, current.comments, blocker_proposal_id)
+  local state = require("devloop.entity").current_entity_state(current.comments, blocker_proposal_id)
   if type(state) == "table" and state.state == "merged" then
     return true, nil
   end
@@ -239,7 +239,7 @@ local function blocker_merged(repo, blocker_number)
     return nil, "pr-origin-mismatch"
   end
 
-  local pr_state = require("devloop.entity").current_entity_state(core, pr_current.comments, blocker_proposal_id)
+  local pr_state = require("devloop.entity").current_entity_state(pr_current.comments, blocker_proposal_id)
   if type(pr_state) ~= "table" or pr_state.state ~= "merged" then
     return false, nil
   end

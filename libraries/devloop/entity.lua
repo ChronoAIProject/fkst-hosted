@@ -51,8 +51,8 @@ function C.build_entity_comment_request(target, body, dedup_key, source_ref, opt
   return request
 end
 
-function C.current_entity_state(M, entity_comments, proposal_id)
-  return M.current_state(entity_comments, proposal_id)
+function C.current_entity_state(entity_comments, proposal_id)
+  return require("devloop.state").current_state(entity_comments, proposal_id)
 end
 
 local function command_indicates_not_found(result)

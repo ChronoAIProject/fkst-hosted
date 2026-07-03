@@ -154,7 +154,7 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
     return log_skip(dept, proposal_id, state, "awaiting-pr", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or cross-repo")
   end
   local current_pr = (facts.current_pr ~= nil and facts.current_pr.force_fresh == true) and facts.current_pr or read_delegated_child_pr(dept, issue, delegation)
-  local child_state = facts.child_state or facts["child-state"] or require("devloop.entity").current_entity_state(M, current_pr.comments, delegation.proposal_id)
+  local child_state = facts.child_state or facts["child-state"] or require("devloop.entity").current_entity_state(current_pr.comments, delegation.proposal_id)
   local canonical_merged_state = canonical_merged_child_state(issue, state, delegation, current_pr)
   if canonical_merged_state ~= nil then
     child_state = canonical_merged_state
