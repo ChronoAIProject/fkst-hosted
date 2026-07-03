@@ -130,7 +130,7 @@ local function candidate_reason(pr, origin, issue, state)
   if is_approved(pr, origin) then
     return "approved"
   end
-  if m_facts.merge_ready_fact(core, pr.comments, origin.proposal_id, state.version, pr.number) ~= nil then
+  if m_facts.merge_ready_fact(pr.comments, origin.proposal_id, state.version, pr.number) ~= nil then
     return "approved"
   end
   if is_blocked_by_skew(pr, issue) and is_imminently_mergeable(pr) then
@@ -219,7 +219,7 @@ end
 local function process_pr(repo, branches, listed_pr)
   local pr = load_current_pr(repo, listed_pr.number)
   pr.number = listed_pr.number
-  local origin = m_facts.pr_origin_fact(core, pr.comments)
+  local origin = m_facts.pr_origin_fact(pr.comments)
   if not in_managed_scope(repo, branches, pr, origin) then
     devloop_logging.log_cas_decision("pr_freshness_scan", "pr-freshness", { state = nil, version = nil }, "tick", "freshness", "skip-foreign(pr-shape)", "PR is outside managed freshness scope")
     return

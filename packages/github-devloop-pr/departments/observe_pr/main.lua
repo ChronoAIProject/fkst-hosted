@@ -61,7 +61,7 @@ local function pr_context(event)
 end
 
 local function origin_from_pr(repo, pr_number, current_pr)
-  local origin = m_facts.pr_origin_fact(core, current_pr.comments)
+  local origin = m_facts.pr_origin_fact(current_pr.comments)
   if origin ~= nil then
     return origin, true
   end
@@ -476,7 +476,7 @@ local function process_pr_event(event)
     end
     local merge_gate_feedback = nil
     if state.state == "reviewing" and origin.issue_number ~= nil then
-      merge_gate_feedback = m_facts.merge_gate_fix_fact(core, current_pr.comments, origin.proposal_id, devloop_state.next_fix_version(state.version))
+      merge_gate_feedback = m_facts.merge_gate_fix_fact(current_pr.comments, origin.proposal_id, devloop_state.next_fix_version(state.version))
     end
     if merge_gate_feedback ~= nil then
       if issue_current == nil or issue_current.comments == nil then

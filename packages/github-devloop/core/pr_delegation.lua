@@ -182,7 +182,7 @@ local function build_parent_awaiting_label(repo, issue_number, ready, child)
 end
 
 local function existing_delegation(issue, issue_proposal_id, delegation)
-  local fact = m_facts.pr_delegation_fact(M, issue and issue.comments, issue_proposal_id, nil, delegation)
+  local fact = m_facts.pr_delegation_fact(issue and issue.comments, issue_proposal_id, nil, delegation)
   if fact == nil then
     return nil
   end
@@ -198,7 +198,7 @@ local function existing_delegation(issue, issue_proposal_id, delegation)
 end
 
 local function child_start_facts(comments)
-  local origin = m_facts.pr_origin_fact(M, comments)
+  local origin = m_facts.pr_origin_fact(comments)
   local origin_fields = nil
   local pr_open_reached = false
   if origin ~= nil then

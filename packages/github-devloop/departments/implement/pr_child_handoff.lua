@@ -64,9 +64,9 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
     return
   end
   local handoff_fact = copy_fact(fact)
-  local current_link = m_facts.pr_link_fact(core, current and current.comments, ready.proposal_id)
+  local current_link = m_facts.pr_link_fact(current and current.comments, ready.proposal_id)
   local linked_pr_number = nil
-  local existing_delegation = m_facts.pr_delegation_fact(core, current and current.comments, ready.proposal_id, ready.dedup_key)
+  local existing_delegation = m_facts.pr_delegation_fact(current and current.comments, ready.proposal_id, ready.dedup_key)
   if existing_delegation ~= nil then
     linked_pr_number = existing_delegation.pr_number
   elseif current_link ~= nil then

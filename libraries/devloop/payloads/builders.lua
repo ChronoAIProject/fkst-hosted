@@ -10,7 +10,7 @@ local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.payloads.shared")
 local board = require("devloop.payloads.board")
 
-local function commit_subject_title(M, current)
+local function commit_subject_title(current)
   if type(current) ~= "table" then
     return nil
   end
@@ -26,9 +26,9 @@ local function commit_subject_title(M, current)
   return title
 end
 
-local function bounded_commit_subject(M, prefix, issue_number, current)
+local function bounded_commit_subject(prefix, issue_number, current)
   local subject = tostring(prefix) .. " refs #" .. tostring(issue_number)
-  local title = commit_subject_title(M, current)
+  local title = commit_subject_title(current)
   if title ~= nil then
     local title_prefix = subject .. ": "
     local room = 200 - #title_prefix
@@ -114,9 +114,9 @@ function C.build_devloop_reviewing_payload(origin, pr_number, source_ref, versio
   return payload
 end
 
-function C.build_current_head_reviewing_payload(M, origin, pr_number, current_pr, state, source_ref)
+function C.build_current_head_reviewing_payload(origin, pr_number, current_pr, state, source_ref)
   local review_proposal_id = devloop_base.pr_review_proposal_id(origin.repo, pr_number, state.version, current_pr.head_sha)
-  if m_facts.has_any_review_result_marker(M, current_pr.comments, review_proposal_id, origin.proposal_id) then
+  if m_facts.has_any_review_result_marker(current_pr.comments, review_proposal_id, origin.proposal_id) then
     return nil
   end
   return C.build_devloop_reviewing_payload({
@@ -320,11 +320,11 @@ function C.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
   }
 end
 
-function C.build_proposal(M, issue)
+function C.build_proposal(issue)
   local proposal_id = base_ids.proposal_id(issue.repo, issue.number)
   local title = tostring(issue.title or "")
-  if #title > M._max_title_len then
-    title = base_ids.truncate_utf8(title, M._max_title_len)
+  if #title > devloop_base._max_title_len then
+    title = base_ids.truncate_utf8(title, devloop_base._max_title_len)
   end
   local body = "Judge the current GitHub issue from the full source content."
     .. "\nIssue: " .. tostring(issue.repo) .. "#" .. tostring(issue.number)
@@ -343,7 +343,7 @@ function C.build_proposal(M, issue)
 end
 
 function C.build_board_proposal(M, issue, tick)
-  return board.append_board_digest_to_proposal(M, C.build_proposal(M, issue), issue.repo, tick)
+  return board.append_board_digest_to_proposal(M, C.build_proposal(issue), issue.repo, tick)
 end
 
 -- Thread the meta-judge's narrowing onto a re-raised next-round proposal so the next
@@ -365,7 +365,7 @@ local function apply_converge_fields(proposal, n, converge)
   return proposal
 end
 
-function C.build_loop_proposal(M, repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key)
+function C.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key)
   local issue = {
     repo = repo,
     number = issue_number,
@@ -374,13 +374,13 @@ function C.build_loop_proposal(M, repo, issue_number, current, source_ref, n, co
     source_ref = source_ref,
     content_fetch = content_fetch,
   }
-  local proposal = C.build_proposal(M, issue)
+  local proposal = C.build_proposal(issue)
   proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
   return apply_converge_fields(proposal, n, converge)
 end
 
 function C.build_board_loop_proposal(M, repo, issue_number, current, source_ref, n, converge, tick, content_fetch, dedup_key)
-  return board.append_board_digest_to_proposal(M, C.build_loop_proposal(M, repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key), repo, tick)
+  return board.append_board_digest_to_proposal(M, C.build_loop_proposal(repo, issue_number, current, source_ref, n, converge, content_fetch, dedup_key), repo, tick)
 end
 
 local function apply_high_risk_angles(proposal, high_risk)
@@ -416,7 +416,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
     .. "\nReview contract: reject only for a stated issue requirement the diff fails; beyond stated bounds is advisory/spec-amendment."
     .. "\nRead the local context bundle before judging."
   local issue_proposal_id = tostring(issue_number ~= nil and base_ids.proposal_id(repo, issue_number) or entity_lib.pr_proposal_id(repo, pr_number))
-  local ledger = m_facts.review_prior_round_ledger(M, pr_comments, issue_proposal_id, version)
+  local ledger = m_facts.review_prior_round_ledger(pr_comments, issue_proposal_id, version)
   if ledger ~= nil and ledger ~= "" then
     body = body
       .. "\nPrior review ledger:\n"
@@ -456,11 +456,11 @@ function C.build_board_pr_review_loop_proposal(M, repo, issue_number, pr_number,
   return board.append_board_digest_to_proposal(M, C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key), repo, tick)
 end
 
-function C.implement_commit_subject(M, issue_number, current)
-  return bounded_commit_subject(M, "auto-implement", issue_number, current)
+function C.implement_commit_subject(issue_number, current)
+  return bounded_commit_subject("auto-implement", issue_number, current)
 end
 
-function C.fix_commit_subject(M, issue_number, current)
-  return bounded_commit_subject(M, "auto-fix", issue_number, current)
+function C.fix_commit_subject(issue_number, current)
+  return bounded_commit_subject("auto-fix", issue_number, current)
 end
 return C

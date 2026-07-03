@@ -21,7 +21,7 @@ end
 local function put_issue_entity(entities, repo, issue_number, issue)
   local proposal_id = base_ids.proposal_id(repo, issue_number)
   local issue_state = devloop_state.current_state(issue.comments, proposal_id)
-  local link = m_facts.pr_link_fact(core, issue.comments, proposal_id)
+  local link = m_facts.pr_link_fact(issue.comments, proposal_id)
   local dependency_wait = core.dependency_wait_fact(issue.comments, proposal_id)
   local entity = entities[proposal_id] or {
     proposal_id = proposal_id,
@@ -47,7 +47,7 @@ local function put_issue_entity(entities, repo, issue_number, issue)
 end
 
 local function put_pr_entity(entities, repo, pr_number, pr)
-  local origin = m_facts.pr_origin_fact(core, pr.comments)
+  local origin = m_facts.pr_origin_fact(pr.comments)
   if origin == nil then
     return nil
   end

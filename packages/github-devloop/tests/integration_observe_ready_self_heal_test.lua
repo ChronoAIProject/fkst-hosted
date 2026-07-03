@@ -128,7 +128,7 @@ end
 return {
   test_observe_issue_reraises_thinking_proposal_for_poll_self_heal = function()
     local event = issue()
-    local original = payloads_builders.build_proposal(core, event)
+    local original = payloads_builders.build_proposal(event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(original.proposal_id, original.dedup_key),
     })
@@ -160,7 +160,7 @@ return {
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 1)
     local second_proposal = find_raise(second.raises, "consensus.proposal").payload
-    t.eq(second_proposal.dedup_key, payloads_builders.build_proposal(core, updated_event).dedup_key .. "/replay")
+    t.eq(second_proposal.dedup_key, payloads_builders.build_proposal(updated_event).dedup_key .. "/replay")
     t.is_true(second_proposal.dedup_key ~= first_proposal.dedup_key)
     t.is_true(second_proposal.content_fetch ~= first_proposal.content_fetch)
     t.eq(count_calls("--json body"), 0)
@@ -168,7 +168,7 @@ return {
 
   test_observe_issue_replays_mid_loop_thinking_proposal_from_converge_marker = function()
     local event = issue()
-    local original = payloads_builders.build_proposal(core, event)
+    local original = payloads_builders.build_proposal(event)
     local base_version = original.dedup_key
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     local angle_digests = {
@@ -183,7 +183,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, payloads_builders.build_proposal(core, event).dedup_key .. "/loop/1")
+    t.eq(proposal.dedup_key, payloads_builders.build_proposal(event).dedup_key .. "/loop/1")
     t.eq(proposal.round, 1)
     t.eq(proposal.convergence_question, "Narrow the question")
     t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
@@ -193,8 +193,8 @@ return {
   test_observe_issue_skips_stale_lineage_thinking_replay = function()
     local old_event = issue()
     local event = issue({ updated_at = "2026-06-03T01:02:04Z" })
-    local original = payloads_builders.build_proposal(core, old_event)
-    local current = payloads_builders.build_proposal(core, event)
+    local original = payloads_builders.build_proposal(old_event)
+    local current = payloads_builders.build_proposal(event)
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(current.proposal_id, current.dedup_key),
@@ -215,7 +215,7 @@ return {
 
   test_observe_issue_replays_thinking_base_proposal_when_converge_marker_is_missing = function()
     local event = issue()
-    local original = payloads_builders.build_proposal(core, event)
+    local original = payloads_builders.build_proposal(event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key .. "/loop/1"),
@@ -235,7 +235,7 @@ return {
 
   test_observe_issue_timeout_redrives_plain_thinking_before_replay = function()
     local event = issue()
-    local original = payloads_builders.build_proposal(core, event)
+    local original = payloads_builders.build_proposal(event)
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),

@@ -230,7 +230,7 @@ canonical_pr_is_merged = function(current_pr)
 end
 
 origin_matches_delegation = function(issue, delegation, current_pr, branches)
-  local origin = m_facts.pr_origin_fact(M, current_pr and current_pr.comments)
+  local origin = m_facts.pr_origin_fact(current_pr and current_pr.comments)
   if origin == nil
     or origin.pr_native == true
     or tostring(origin.proposal_id or "") ~= tostring(delegation.proposal_id or "")

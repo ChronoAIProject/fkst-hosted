@@ -61,7 +61,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
   end
   local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
-  local origin = m_facts.pr_origin_fact(core, current_pr.comments)
+  local origin = m_facts.pr_origin_fact(current_pr.comments)
   if origin == nil then
     origin = entity_lib.pr_native_origin(repo, pr_number, current_pr)
   end

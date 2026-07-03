@@ -132,7 +132,7 @@ end
 local function child_pr_delegation_fact(M, facts)
   return facts.pr_delegation
     or facts["pr-delegation"]
-    or m_facts.pr_delegation_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state and facts.state.version)
+    or m_facts.pr_delegation_fact(facts.snapshot.comments, facts.proposal_id, facts.state and facts.state.version)
 end
 
 local function fetch_child_state_fact(M, facts)
@@ -165,7 +165,7 @@ local function require_marker_fact(M, facts, family)
     return facts.state
   end
   if family == "pr-link" then
-    return m_facts.pr_link_fact(M, facts.snapshot.comments, facts.proposal_id) or (facts._synthetic_pr_link ~= true and facts.link or nil)
+    return m_facts.pr_link_fact(facts.snapshot.comments, facts.proposal_id) or (facts._synthetic_pr_link ~= true and facts.link or nil)
   end
   if family == "pr-delegation" then
     return child_pr_delegation_fact(M, facts)
@@ -184,7 +184,7 @@ local function require_marker_fact(M, facts, family)
     return M.dependency_hold_fact(facts.snapshot.comments, facts.proposal_id)
   end
   if family == "review-result" then
-    return m_facts.review_reject_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version)
+    return m_facts.review_reject_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "fix-feedback" then
     return M.fixing_replay_feedback_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
@@ -194,7 +194,7 @@ local function require_marker_fact(M, facts, family)
     if current_pr ~= nil and forge_validators.is_git_sha(current_pr.head_sha) then
       return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
     end
-    return m_facts.review_meta_fix_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version)
+    return m_facts.review_meta_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "fix-reflection" or family == "review-converge-round" then
     local current_pr = current_pr_fact(facts)
@@ -204,7 +204,7 @@ local function require_marker_fact(M, facts, family)
     return M.review_meta_replay_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
   end
   if family == "merge-gate" then
-    return m_facts.merge_gate_fix_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version)
+    return m_facts.merge_gate_fix_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "merge-gate-wait" then
     local current_pr = current_pr_fact(facts)
@@ -221,7 +221,7 @@ local function require_marker_fact(M, facts, family)
     return decompose_lib.decomposed_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
   end
   if family == "implementing" then
-    return m_facts.implementing_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version)
+    return m_facts.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
   end
   if family == "implement-attempt" then
     local attempt_version = facts.state.version
@@ -240,14 +240,14 @@ local function require_marker_fact(M, facts, family)
     if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
-    return m_facts.merge_ready_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+    return m_facts.merge_ready_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
   end
   if family == "merging" then
     local current_pr = current_pr_fact(facts)
     if current_pr == nil or not forge_validators.is_git_sha(current_pr.head_sha) then
       return nil
     end
-    return m_facts.merging_fact(M, facts.snapshot.comments, facts.proposal_id, facts.link.pr_number, facts.state.version, current_pr.head_sha)
+    return m_facts.merging_fact(facts.snapshot.comments, facts.proposal_id, facts.link.pr_number, facts.state.version, current_pr.head_sha)
   end
   if family == "review-carry-over" then
     return nil
@@ -267,7 +267,7 @@ local function gather_fetch_before_compare_fact(M, facts, entity, family)
       facts.snapshot.state = facts.state
     else
       facts.snapshot = snapshot_from_issue_comments(M, entity.repo, facts.proposal_id, facts.current and facts.current.comments or {})
-      facts.link = m_facts.pr_link_fact(M, facts.snapshot.comments, facts.proposal_id)
+      facts.link = m_facts.pr_link_fact(facts.snapshot.comments, facts.proposal_id)
     end
     return true
   end
@@ -353,7 +353,7 @@ local function gather_required_facts(M, row, entity, state, provided)
     end
   end
 
-  gathered.link = gathered.link or m_facts.pr_link_fact(M, gathered.snapshot.comments, gathered.proposal_id)
+  gathered.link = gathered.link or m_facts.pr_link_fact(gathered.snapshot.comments, gathered.proposal_id)
 
   for _, required in ipairs(row.required_facts or {}) do
     if required.freshness == "marker-read" then
@@ -710,13 +710,13 @@ local function raise_reviewing_for_current_head(M, dept, issue, state, proposal_
   if not forge_validators.is_git_sha(current_pr.head_sha) then
     return log_skip(M, dept, proposal_id, state, "merge-ready", "reviewing", "skip-foreign(head)", "linked PR head sha is missing")
   end
-  local reviewing_payload = payloads_builders.build_current_head_reviewing_payload(M, { repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, entity_lib.pr_source_ref(issue.repo, link.pr_number))
+  local reviewing_payload = payloads_builders.build_current_head_reviewing_payload({ repo = issue.repo, proposal_id = proposal_id }, link.pr_number, current_pr, state, entity_lib.pr_source_ref(issue.repo, link.pr_number))
   devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "reviewing", outcome, reason)
   if reviewing_payload == nil then
     return false
   end
   if not dept_can_direct_reviewing(dept) then
-    local merge_ready = m_facts.merge_ready_fact(M, current_pr.comments, proposal_id, state.version, link.pr_number)
+    local merge_ready = m_facts.merge_ready_fact(current_pr.comments, proposal_id, state.version, link.pr_number)
     local comment_request = requests_review.build_merge_head_reviewing_comment_request(M,
       issue.repo,
       issue.number,
@@ -765,7 +765,7 @@ local function maybe_replay_review_carry_over(M, dept, issue, state, row, facts,
     local outcome = "skip-stale(" .. tostring(carry_reason):match("^([^:]+)") .. ")"
     return raise_reviewing_for_current_head(M, dept, issue, state, proposal_id, link, current_pr, outcome, tostring(carry_reason))
   end
-  if m_facts.has_any_review_result_marker(M, current_pr.comments, carry.new_review_proposal_id, proposal_id) then
+  if m_facts.has_any_review_result_marker(current_pr.comments, carry.new_review_proposal_id, proposal_id) then
     return false
   end
   local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
@@ -793,7 +793,7 @@ local function replay_merge_ready_like(M, tools, dept, issue, state, row, facts)
   if maybe_replay_review_carry_over(M, dept, issue, state, row, facts, link, current_pr) then
     return true
   end
-  local fact = m_facts.merge_ready_fact(M, facts.snapshot.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
+  local fact = m_facts.merge_ready_fact(facts.snapshot.comments, proposal_id, state.version, link.pr_number, current_pr.head_sha)
   if fact == nil then
     return log_skip(M, dept, proposal_id, state, row.from_state, "merge-ready", "skip-foreign(merge-ready)", "head-bound merge-ready marker is not visible")
   end

@@ -103,7 +103,7 @@ return {
       state_comment("pr-open"),
       bot_comment(m_builders.pr_link_marker(proposal_id, 7, "devloop/issue/owner/repo/42/v", version, "dev")),
     })
-    t.eq(m_facts.pr_link_fact(core, current.comments, proposal_id).pr_number, 7)
+    t.eq(m_facts.pr_link_fact(current.comments, proposal_id).pr_number, 7)
 
     local result = classify(current, {
       facts = {

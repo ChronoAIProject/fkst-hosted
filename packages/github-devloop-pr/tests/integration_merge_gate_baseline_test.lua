@@ -88,7 +88,7 @@ return {
     t.is_true(comment_body:find("gate_baseline_sha", 1, true) ~= nil)
     t.is_true(comment_body:find("own-ci-red", 1, true) ~= nil)
     t.is_true(comment_body:find("Reproduce locally with `scripts/run.sh test`", 1, true) ~= nil)
-    local fix_fact = m_facts.merge_gate_fix_fact(core, { comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    local fix_fact = m_facts.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
     t.is_true(fix_fact.review_reason:find("own-ci-red", 1, true) ~= nil)
     t.eq(fix_fact.gate_baseline_sha, "ba5e9999")
     t.eq(count_calls("git fetch 'origin' 'dev'"), 0)
@@ -110,7 +110,7 @@ return {
       event.source_ref
     )
     t.is_true(request.body:find("gate_baseline_sha", 1, true) == nil)
-    local fix_fact = m_facts.merge_gate_fix_fact(core, { request.body }, event.proposal_id, fix_version)
+    local fix_fact = m_facts.merge_gate_fix_fact({ request.body }, event.proposal_id, fix_version)
     t.eq(fix_fact.gate_baseline_sha, nil)
   end,
 
@@ -135,7 +135,7 @@ return {
       "mergeable-conflicting"
     )
 
-    local fact = m_facts.merge_gate_fix_fact(core, { old_marker, new_marker }, event.proposal_id, event.version, {
+    local fact = m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,
       gate_baseline_sha = event.gate_baseline_sha,
@@ -143,7 +143,7 @@ return {
     })
     t.eq(fact.gate_baseline_sha, event.gate_baseline_sha)
 
-    local missing = m_facts.merge_gate_fix_fact(core, { old_marker, new_marker }, event.proposal_id, event.version, {
+    local missing = m_facts.merge_gate_fix_fact({ old_marker, new_marker }, event.proposal_id, event.version, {
       review_proposal_id = event.review_proposal_id,
       review_dedup_key = event.review_dedup_key,
       gate_baseline_sha = "feedface",

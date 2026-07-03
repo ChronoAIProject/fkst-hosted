@@ -509,19 +509,19 @@ return {
 
     local marker = m_builders.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
     t.is_true(marker:find("fkst:github-devloop:implementing:v1", 1, true) ~= nil)
-    t.eq(m_facts.has_implementing_marker(core, { marker }, ready.proposal_id, ready.dedup_key), true)
+    t.eq(m_facts.has_implementing_marker({ marker }, ready.proposal_id, ready.dedup_key), true)
     local branch_marker = m_builders.implementing_marker(ready.proposal_id, ready.dedup_key, "devloop-owner-repo-42-01HY", "abc123", "dev", "abc123")
-    local fact = m_facts.implementing_fact(core, { branch_marker }, ready.proposal_id, ready.dedup_key)
+    local fact = m_facts.implementing_fact({ branch_marker }, ready.proposal_id, ready.dedup_key)
     t.eq(fact.branch, "devloop-owner-repo-42-01HY")
     t.eq(fact.head_sha, "abc123")
     t.eq(fact.base_branch, "dev")
     t.eq(fact.base_sha, "abc123")
-    t.is_nil(m_facts.implementing_fact(core, {
+    t.is_nil(m_facts.implementing_fact({
       '<!-- fkst:github-devloop:implementing:v1 proposal="' .. ready.proposal_id
         .. '" dedup="' .. ready.dedup_key
         .. '" branch="devloop-owner-repo-42-01HY" head_sha="abc123" base_sha="abc123" -->',
     }, ready.proposal_id, ready.dedup_key))
-    t.is_nil(m_facts.implementing_fact(core, {
+    t.is_nil(m_facts.implementing_fact({
       '<!-- fkst:github-devloop:implementing:v1 proposal="' .. ready.proposal_id
         .. '" dedup="' .. ready.dedup_key
         .. '" branch="devloop-owner-repo-42-01HY" head_sha="abc123" base_branch="dev" -->',
@@ -598,23 +598,23 @@ return {
     t.eq(current.state, "impl-failed")
     t.eq(current.version, ready.dedup_key)
 
-    local origin = m_facts.pr_origin_fact(core, {
+    local origin = m_facts.pr_origin_fact({
       m_builders.pr_origin_marker(ready.proposal_id, "42", "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     })
     t.eq(origin.proposal_id, ready.proposal_id)
     t.eq(origin.issue_number, "42")
     t.eq(origin.branch, "devloop-owner-repo-42-01HY")
-    t.is_nil(m_facts.pr_origin_fact(core, {
+    t.is_nil(m_facts.pr_origin_fact({
       '<!-- fkst:github-devloop:pr-origin:v1 proposal="' .. ready.proposal_id
         .. '" issue="42" branch="devloop-owner-repo-42-01HY" impl_version="' .. ready.dedup_key .. '" -->',
     }))
 
-    local link = m_facts.pr_link_fact(core, {
+    local link = m_facts.pr_link_fact({
       m_builders.pr_link_marker(ready.proposal_id, 7, "devloop-owner-repo-42-01HY", ready.dedup_key, "dev"),
     }, ready.proposal_id)
     t.eq(link.pr_number, 7)
     t.eq(link.base_branch, "dev")
-    t.is_nil(m_facts.pr_link_fact(core, {
+    t.is_nil(m_facts.pr_link_fact({
       '<!-- fkst:github-devloop:pr-link:v1 proposal="' .. ready.proposal_id
         .. '" pr="7" branch="devloop-owner-repo-42-01HY" impl_version="' .. ready.dedup_key .. '" -->',
     }, ready.proposal_id))
@@ -797,7 +797,7 @@ return {
       },
     }
 
-    local thinking = payloads_builders.build_loop_proposal(core, "owner/repo", "42", {
+    local thinking = payloads_builders.build_loop_proposal("owner/repo", "42", {
       title = "Converge narrowing",
       body = "Body",
       updated_at = "2026-06-08T00:00:00Z",
@@ -843,7 +843,7 @@ return {
 
     -- Without a converge carry the proposal stays valid and blind-compatible: the round is
     -- still tracked, but no convergence_question / prior_round_digests are injected.
-    local blind = payloads_builders.build_loop_proposal(core, "owner/repo", "42", {
+    local blind = payloads_builders.build_loop_proposal("owner/repo", "42", {
       title = "Blind",
       body = "Body",
       updated_at = "2026-06-08T00:00:00Z",

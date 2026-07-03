@@ -102,7 +102,7 @@ return {
     t.is_true(comment:find("fkst:github-devloop:fix-reflection:v1", 1, true) ~= nil)
     t.is_true(comment:find('verdict="continue"', 1, true) ~= nil)
     t.is_true(comment:find("fkst:github-devloop:review-meta:v1", 1, true) ~= nil)
-    t.eq(m_facts.review_meta_fix_fact(core, { comment }, event.proposal_id, exit_version).blocking_gap, "missing regression guard")
+    t.eq(m_facts.review_meta_fix_fact({ comment }, event.proposal_id, exit_version).blocking_gap, "missing regression guard")
   end,
 
   test_fix_reflection_replay_fact_restores_blocking_gap = function()

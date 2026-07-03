@@ -117,7 +117,7 @@ local function load_timeout_issue_surface(repo, issue_number, proposal_id, state
   if timeout_reconcile_needs_pr_surface(state_name) then
     local snapshot = core.linked_pr_surface_snapshot(repo, proposal_id, current_issue.comments)
     local current_pr = nil
-    local link = m_facts.pr_link_fact(core, snapshot.comments, proposal_id)
+    local link = m_facts.pr_link_fact(snapshot.comments, proposal_id)
     if link ~= nil then
       for _, item in ipairs(snapshot.prs or {}) do
         if tostring(item.number or "") == tostring(link.pr_number or "") then

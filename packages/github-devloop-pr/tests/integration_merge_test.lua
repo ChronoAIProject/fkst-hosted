@@ -520,7 +520,7 @@ return {
     t.eq(result.exit_code, 0)
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("Reproduce locally with `cargo build && cargo test`", 1, true) ~= nil)
-    local fix_fact = m_facts.merge_gate_fix_fact(core, { comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    local fix_fact = m_facts.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
     t.is_true(fix_fact.review_reason:find("cargo build && cargo test", 1, true) ~= nil)
   end,
 
@@ -594,7 +594,7 @@ return {
     t.eq(find_causal_raise(result, "devloop_fixing").payload.schema, "github-devloop.fixing.v1")
     local comment_body = find_raise(result.raises, "github-proxy.github_pr_comment_request").payload.body
     t.is_true(comment_body:find("own-ci-red", 1, true) ~= nil)
-    local fix_fact = m_facts.merge_gate_fix_fact(core, { comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
+    local fix_fact = m_facts.merge_gate_fix_fact({ comment_body }, event.proposal_id, core.fix_version_from_review_version(event.version))
     t.is_true(fix_fact.review_reason:find("own-ci-red", 1, true) ~= nil)
   end,
 

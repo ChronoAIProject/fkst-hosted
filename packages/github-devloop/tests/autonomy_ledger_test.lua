@@ -304,7 +304,7 @@ return {
     t.is_true(marker:find('autonomy_result="v1"', 1, true) ~= nil)
     t.is_true(marker:find('valid_autonomous_merge="pending"', 1, true) ~= nil)
     t.is_true(marker:find('gate_evidence_manifest="pending"', 1, true) ~= nil)
-    local fact = m_facts.merged_fact(core, { marker }, record.proposal_id, record.pr_number, record.version)
+    local fact = m_facts.merged_fact({ marker }, record.proposal_id, record.pr_number, record.version)
     t.eq(fact.autonomy_result.valid_autonomous_merge, "pending")
     t.eq(fact.autonomy_result.task_class, "L2")
   end,

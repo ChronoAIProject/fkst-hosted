@@ -41,7 +41,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an open issue", source_ref)
     return true
   end
-  if not m_facts.has_intake_decision_marker(core, current.comments, proposal_id) then
+  if not m_facts.has_intake_decision_marker(current.comments, proposal_id) then
     raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires an existing intake decision", source_ref)
     return true
   end
@@ -106,7 +106,7 @@ local function admit_issue_event(event, entity)
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-known-state", "fresh issue labels show an active devloop state")
     return
   end
-  if m_facts.has_intake_decision_marker(core, current.comments, proposal_id) then
+  if m_facts.has_intake_decision_marker(current.comments, proposal_id) then
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "entity", "candidate", "skip-intake-decision", "trusted intake decision marker is already visible")
     return
   end

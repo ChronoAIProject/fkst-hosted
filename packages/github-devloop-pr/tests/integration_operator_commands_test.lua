@@ -60,7 +60,7 @@ end
 
 local function thinking_converge_comments(event, rounds, command)
   local proposal_id = base_ids.proposal_id(event.repo, event.number)
-  local base_version = payloads_builders.build_proposal(core, event).dedup_key
+  local base_version = payloads_builders.build_proposal(event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local angle_digests = {
     { angle = "minimal", verdict = "abstain", digest = "same-digest" },
@@ -86,7 +86,7 @@ end
 
 local function thinking_changing_converge_comments(event, rounds, command)
   local proposal_id = base_ids.proposal_id(event.repo, event.number)
-  local base_version = payloads_builders.build_proposal(core, event).dedup_key
+  local base_version = payloads_builders.build_proposal(event).dedup_key
   local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
   local comments = {
     core.state_marker(proposal_id, "thinking", base_version .. "/loop/" .. tostring(rounds)),

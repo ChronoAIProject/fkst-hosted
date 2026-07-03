@@ -183,7 +183,7 @@ end
 
 local function replay_review_result(dept, issue, state, facts, tools, link, current_pr)
   local proposal_id = facts.proposal_id
-  local fact = facts["review-result"] or m_facts.review_result_fact(M, comments_for_pr_facts(facts, current_pr), proposal_id, state.version)
+  local fact = facts["review-result"] or m_facts.review_result_fact(comments_for_pr_facts(facts, current_pr), proposal_id, state.version)
   if fact == nil then
     return nil
   end
@@ -193,7 +193,7 @@ local function replay_review_result(dept, issue, state, facts, tools, link, curr
     return tools.log_skip(dept, proposal_id, state, "reviewing", "review-result", "skip-foreign(review-result-binding)", "review result does not bind the current linked PR head")
   end
   if fact.decision == "approve" then
-    local merge_ready = m_facts.merge_ready_fact(M, comments_for_pr_facts(facts, current_pr), proposal_id, state.version, link.pr_number, current_pr.head_sha)
+    local merge_ready = m_facts.merge_ready_fact(comments_for_pr_facts(facts, current_pr), proposal_id, state.version, link.pr_number, current_pr.head_sha)
     if merge_ready == nil then
       return tools.log_skip(dept, proposal_id, state, "reviewing", "merge-ready", "skip-foreign(merge-ready)", "approve review result is not paired with merge-ready marker")
     end
@@ -348,7 +348,7 @@ local function replay_fixing(dept, issue, state, row, facts, tools)
 end
 
 local function review_meta_decision_fact(facts, current_pr)
-  return m_facts.review_meta_decision_fact(M, comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.state.version)
+  return m_facts.review_meta_decision_fact(comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.state.version)
 end
 
 local function replay_review_meta_result(dept, issue, state, row, facts, tools)
@@ -399,11 +399,11 @@ local function replay_review_meta_result(dept, issue, state, row, facts, tools)
 end
 
 local function merge_ready_marker_fact(facts, current_pr)
-  return facts.merge_ready or facts["merge-ready"] or m_facts.merge_ready_fact(M, comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
+  return facts.merge_ready or facts["merge-ready"] or m_facts.merge_ready_fact(comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.state.version, facts.link.pr_number, current_pr.head_sha)
 end
 
 local function any_merge_ready_marker_fact(facts, current_pr)
-  return facts.merge_ready or facts["merge-ready"] or m_facts.merge_ready_fact(M, comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.state.version, facts.link.pr_number, nil)
+  return facts.merge_ready or facts["merge-ready"] or m_facts.merge_ready_fact(comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.state.version, facts.link.pr_number, nil)
 end
 
 local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
@@ -447,7 +447,7 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
     review_dedup_key = fact.review_dedup_key,
     reviewed_head_sha = fact.head_sha,
   }
-  local approved_ok = m_facts.review_result_approval_matches_event(M, comments, approved)
+  local approved_ok = m_facts.review_result_approval_matches_event(comments, approved)
   if not approved_ok then
     devloop_logging.log_cas_decision(dept, proposal_id, state, "merge-ready", "blocked", "applied(replay)", "merge-ready marker lacks trusted approve review-result")
     return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merge-ready" } }, {})
@@ -465,7 +465,7 @@ local function replay_merge_ready_state(dept, issue, state, row, facts, tools)
 end
 
 local function merging_marker_fact(facts, current_pr)
-  return facts.merging or m_facts.merging_fact(M, comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.link.pr_number, facts.state.version, nil)
+  return facts.merging or m_facts.merging_fact(comments_for_pr_facts(facts, current_pr), facts.proposal_id, facts.link.pr_number, facts.state.version, nil)
 end
 
 raise_reviewing_for_current_head = function(dept, issue, state, proposal_id, link, current_pr, old_head_sha, outcome, reason, tools)
@@ -740,7 +740,7 @@ local function replay_pr_open(dept, issue, state, row, facts, tools)
         head_sha = pr.head_sha,
       })
       local review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, link.pr_number, review_version, pr.head_sha)
-      if m_facts.has_any_review_result_marker(M, facts.snapshot.comments, review_proposal_id, proposal_id) then
+      if m_facts.has_any_review_result_marker(facts.snapshot.comments, review_proposal_id, proposal_id) then
         return tools.log_skip(dept, proposal_id, state, "pr-open", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
       end
       local fields = tools.resolve_payload_fields(row, state, {
@@ -790,7 +790,7 @@ local function replay_reviewing(dept, issue, state, row, facts, tools)
   })
   fields.version = review_version
   local review_proposal_id = devloop_base.pr_review_proposal_id(issue.repo, fields.pr_number, fields.version, current_pr.head_sha)
-  if m_facts.has_any_review_result_marker(M, current_pr.comments, review_proposal_id, proposal_id) then
+  if m_facts.has_any_review_result_marker(current_pr.comments, review_proposal_id, proposal_id) then
     tools.log_skip(dept, proposal_id, state, "reviewing", "reviewing", "skip-idempotent(review result visible)", "review already produced a result")
     return true
   end

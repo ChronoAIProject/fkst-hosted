@@ -52,8 +52,8 @@ return {
     t.eq(v_validate_proposal.validate_proposal(proposal), true)
 
     local marker = m_builders.review_result_marker(id, issue_proposal_id, "approve", "consensus:v1")
-    t.eq(m_facts.has_review_result_marker(core, { marker }, id, issue_proposal_id, "approve", "consensus:v1"), true)
-    t.eq(m_facts.has_any_review_result_marker(core, { marker }, id, issue_proposal_id), true)
+    t.eq(m_facts.has_review_result_marker({ marker }, id, issue_proposal_id, "approve", "consensus:v1"), true)
+    t.eq(m_facts.has_any_review_result_marker({ marker }, id, issue_proposal_id), true)
     local review_v1 = devloop_base.pr_review_proposal_id(repo, 7, version .. "/fix/1", head_sha)
     local reject_marker = m_builders.review_result_marker(review_v1, issue_proposal_id, "reject", "consensus:" .. review_v1 .. "/review", 1, "missing regression guard")
     t.is_true(reject_marker:find('fix_round="1"', 1, true) ~= nil)
@@ -62,7 +62,7 @@ return {
     local meta_comment = "github-devloop review-meta action: fix\n\nReason:\nRun another fix pass."
       .. "\n\n" .. core.state_marker(issue_proposal_id, "fixing", action_version)
       .. "\n" .. m_builders.review_meta_marker(issue_proposal_id, "meta-dedup", "fix", action_version, "missing retry guard")
-    local meta_fact = m_facts.review_meta_fix_fact(core, { meta_comment }, issue_proposal_id, action_version)
+    local meta_fact = m_facts.review_meta_fix_fact({ meta_comment }, issue_proposal_id, action_version)
     t.eq(meta_fact.review_dedup_key, "meta-dedup")
     t.eq(meta_fact.blocking_gap, "missing retry guard")
     t.is_true(meta_fact.review_reason:find("Run another fix pass.", 1, true) ~= nil)

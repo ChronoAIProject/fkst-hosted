@@ -528,7 +528,7 @@ return {
       source_ref = entity_lib.issue_source_ref(repo, issue_number),
       current = { comments = comments },
       current_pr = { comments = {} },
-      ["pr-delegation"] = m_facts.pr_delegation_fact(core, comments, parent, state.version),
+      ["pr-delegation"] = m_facts.pr_delegation_fact(comments, parent, state.version),
       fresh_current_state = state,
       now_seconds = contract_time.iso_timestamp_epoch_seconds("2026-12-01T01:02:03Z"),
     }

@@ -13,7 +13,7 @@ function M.require_evidence(core, repo, comments, merge_ready)
   end
   local paths_digest = nil
   paths_digest = github_risk.github_paths_digest(risk.paths)
-  local fact = m_facts.high_risk_review_evidence_fact(core, 
+  local fact = m_facts.high_risk_review_evidence_fact(
     comments,
     merge_ready.proposal_id,
     merge_ready.version,

@@ -498,7 +498,7 @@ local function run_fix_attempt(plan)
   if add_result.exit_code ~= 0 then
     error("github-devloop: git add failed: " .. tostring(add_result.stderr))
   end
-  local commit_result = devloop_commands.git_commit(worktree, payloads_builders.fix_commit_subject(core,
+  local commit_result = devloop_commands.git_commit(worktree, payloads_builders.fix_commit_subject(
       plan.issue_number,
       require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(plan.repo, plan.issue_number)
     ), 60)
@@ -686,15 +686,15 @@ local function act_fix(event)
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(version-mismatch)", "fix event version does not match canonical issue marker")
       return
     end
-    local reject_fact = m_facts.review_reject_fact(core, current_pr.comments, fix.proposal_id, fix.version)
+    local reject_fact = m_facts.review_reject_fact(current_pr.comments, fix.proposal_id, fix.version)
     local meta_fix_fact = nil
     if reject_fact == nil then
-      meta_fix_fact = m_facts.review_meta_fix_fact(core, current_pr.comments, fix.proposal_id, fix.version)
+      meta_fix_fact = m_facts.review_meta_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
     end
     local merge_gate_fact = nil
     if reject_fact == nil and meta_fix_fact == nil then
-      local merge_gate_candidate = m_facts.merge_gate_fix_fact(core, current_pr.comments, fix.proposal_id, fix.version)
-      merge_gate_fact = m_facts.merge_gate_fix_fact(core, current_pr.comments, fix.proposal_id, fix.version, {
+      local merge_gate_candidate = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version)
+      merge_gate_fact = m_facts.merge_gate_fix_fact(current_pr.comments, fix.proposal_id, fix.version, {
         review_proposal_id = fix.review_proposal_id,
         review_dedup_key = fix.review_dedup_key,
         gate_baseline_sha = fix.gate_baseline_sha,
@@ -737,7 +737,7 @@ local function act_fix(event)
       feedback_reason = merge_gate_fact.review_reason
     end
 
-    local origin = m_facts.pr_origin_fact(core, current_pr.comments)
+    local origin = m_facts.pr_origin_fact(current_pr.comments)
     if origin == nil then
       origin = entity_lib.pr_native_origin(repo, fix.pr_number, current_pr)
     end

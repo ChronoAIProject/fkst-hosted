@@ -42,7 +42,7 @@ local function log_gate(merge_ready, outcome, reason)
 end
 
 local function require_consensus_review_approve(comments, merge_ready)
-  local ok, reason = m_facts.review_result_approval_matches_event(core, comments, merge_ready)
+  local ok, reason = m_facts.review_result_approval_matches_event(comments, merge_ready)
   if ok then
     return true
   end
@@ -189,13 +189,13 @@ local function assert_merge_pr_authority(merge_ready, pr, repo, issue_number, or
     return false, "trusted review-result approve missing", state
   end
 
-  local fact = m_facts.merge_ready_fact(core, pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
+  local fact = m_facts.merge_ready_fact(pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
   local approval_ok, approval_reason = m_facts.merge_ready_approval_matches_event(fact, merge_ready)
   if not approval_ok then
     return false, "merge-ready fact changed: " .. tostring(approval_reason), state
   end
 
-  local current_origin = m_facts.pr_origin_fact(core, pr.comments)
+  local current_origin = m_facts.pr_origin_fact(pr.comments)
   if current_origin == nil then
     current_origin = entity_lib.pr_native_origin(repo, merge_ready.pr_number, pr)
   end
@@ -225,11 +225,11 @@ local function speculative_fix_fact_for_merge(comments, merge_ready)
   if tostring(fix_version or "") == tostring(merge_ready.version or "") then
     return nil
   end
-  local fact = m_facts.merge_gate_fix_fact(core, comments, merge_ready.proposal_id, fix_version)
+  local fact = m_facts.merge_gate_fix_fact(comments, merge_ready.proposal_id, fix_version)
   if fact == nil or fact.predecessor_set == nil then
     return nil
   end
-  if not m_facts.has_fix_marker(core,
+  if not m_facts.has_fix_marker(
     comments,
     merge_ready.proposal_id,
     fact.review_proposal_id,
@@ -300,7 +300,7 @@ local function build_merging_body(merge_ready)
   return requests_bodies.build_merging_comment_body(core, merge_ready)
 end
 local function write_merging_marker(repo, merge_ready, comments)
-  if m_facts.merging_fact(core, comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) ~= nil then
+  if m_facts.merging_fact(comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) ~= nil then
     return
   end
   local path = runtime_files.temp_body_file(repo, merge_ready.pr_number)
@@ -376,7 +376,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   core.log_forged_markers("merge", merge_ready.proposal_id, current_pr.comments)
   local state = require("devloop.entity").current_entity_state(current_pr.comments, merge_ready.proposal_id)
-  if state.state == "merged" and m_facts.has_merged_marker(core, current_pr.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) then
+  if state.state == "merged" and m_facts.has_merged_marker(current_pr.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha) then
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-idempotent(already at to_state)", "merged marker already visible")
     return
   end
@@ -409,7 +409,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(version-mismatch)", "merge-ready event version does not match canonical issue marker")
     return
   end
-  local fact = m_facts.merge_ready_fact(core, current_pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
+  local fact = m_facts.merge_ready_fact(current_pr.comments, merge_ready.proposal_id, merge_ready.version, merge_ready.pr_number, merge_ready.reviewed_head_sha)
   if fact == nil then
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "retry-pending(merge-ready fact marker not visible)", "trusted merge-ready fact marker missing")
     error("github-devloop: merge-ready fact marker not visible for merge; retrying")
@@ -419,7 +419,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merging", "skip-stale(" .. tostring(approval_reason) .. ")", "merge-ready event does not match canonical approval fact marker")
     return
   end
-  local origin = m_facts.pr_origin_fact(core, current_pr.comments)
+  local origin = m_facts.pr_origin_fact(current_pr.comments)
   if origin == nil then
     origin = entity_lib.pr_native_origin(repo, merge_ready.pr_number, current_pr)
   end
@@ -437,7 +437,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
       and tostring(current_pr.head_ref_name or "") == tostring(origin.branch)
       and tostring(current_pr.head_sha or "") == tostring(merge_ready.reviewed_head_sha)
       and require("forge.merge.shared").is_same_repo_pr_head(current_pr, repo) then
-      local merging_fact = m_facts.merging_fact(core, current_pr.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
+      local merging_fact = m_facts.merging_fact(current_pr.comments, merge_ready.proposal_id, merge_ready.pr_number, merge_ready.version, merge_ready.reviewed_head_sha)
       if merging_fact == nil then
         devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, state, "merge-ready", "merged", "skip-external-merge(no-bot-merging-marker)", "PR is already merged without a prior trusted bot merging marker")
         return
@@ -651,7 +651,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     dept = "merge",
     proposal_id = merge_ready.proposal_id,
     validate_rechecked_pr = function(rechecked_pr)
-      local recheck_origin = m_facts.pr_origin_fact(core, rechecked_pr.comments)
+      local recheck_origin = m_facts.pr_origin_fact(rechecked_pr.comments)
       if recheck_origin == nil then
         recheck_origin = entity_lib.pr_native_origin(repo, merge_ready.pr_number, rechecked_pr)
       end

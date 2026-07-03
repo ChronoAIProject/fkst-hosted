@@ -89,7 +89,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-stale(version-mismatch)", "review-meta event version does not match canonical issue marker")
       return
     end
-    if m_facts.has_review_meta_marker(core, current_pr.comments, review_meta.proposal_id, review_meta.dedup_key) then
+    if m_facts.has_review_meta_marker(current_pr.comments, review_meta.proposal_id, review_meta.dedup_key) then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "skip-idempotent(review-meta marker already visible)", "review-meta result marker for incoming version is already visible")
       return
     end

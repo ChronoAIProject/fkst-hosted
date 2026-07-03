@@ -333,7 +333,7 @@ local function pr_delegation_child_state_proposal_id(M, facts, parent_proposal_i
   end
   return fact_child_state_proposal_id(
     M,
-    m_facts.pr_delegation_fact(M, delegation_comments(facts), parent_proposal_id, delegation_version),
+    m_facts.pr_delegation_fact(delegation_comments(facts), parent_proposal_id, delegation_version),
     parent_proposal_id,
     delegation_version
   )

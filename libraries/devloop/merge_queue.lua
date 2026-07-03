@@ -148,7 +148,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     return nil
   end
   local current_head_sha = tostring(pr.head_sha or "")
-  local fact = m_facts.merge_ready_fact(M, pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
+  local fact = m_facts.merge_ready_fact(pr.comments, state.proposal_id or "", merge_ready_version_for_lane_state(M, state), pr_number, current_head_sha)
   if fact == nil then
     for _, comment in ipairs(parsers_misc._trusted_marker_comments(pr.comments)) do
       for marker in parsers_misc._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->") do
@@ -158,7 +158,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
           local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
           if merge_queue_lane_states[candidate_state.state]
             and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then
-            fact = m_facts.merge_ready_fact(M, pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
+            fact = m_facts.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
             state = candidate_state
             break
           end
@@ -536,7 +536,7 @@ function C.wip_admission_classification(M, repo, proposal_id, issue_comments, st
     }
   end
 
-  local link = m_facts.pr_link_fact(M, issue_comments, proposal_id)
+  local link = m_facts.pr_link_fact(issue_comments, proposal_id)
   if link ~= nil and tostring(link.base_branch or "") ~= tostring(integration_branch or "") then
     return {
       counts = false,

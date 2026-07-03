@@ -60,7 +60,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
     return false
   end
   local snapshot = { comments = current.comments or {}, prs = {}, absent_prs = {}, state = state }
-  local delegation = state.state == "awaiting-pr" and m_facts.pr_delegation_fact(core, current.comments, proposal_id, state.version) or nil
+  local delegation = state.state == "awaiting-pr" and m_facts.pr_delegation_fact(current.comments, proposal_id, state.version) or nil
   local current_pr = nil
   if delegation ~= nil then
     local pr_view = devloop_entity_view.fetch_pr_view_origin(repo, delegation.pr_number, nil, {

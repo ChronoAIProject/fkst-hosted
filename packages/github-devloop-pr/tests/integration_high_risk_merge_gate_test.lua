@@ -179,7 +179,7 @@ return {
 
   test_high_risk_evidence_lookup_requires_paths_digest = function()
     local event = merge_ready()
-    local fact = m_facts.high_risk_review_evidence_fact(core, 
+    local fact = m_facts.high_risk_review_evidence_fact(
       merge_comments_with_high_risk_evidence(event),
       event.proposal_id,
       event.version,
@@ -194,7 +194,7 @@ return {
 
   test_high_risk_evidence_lookup_uses_newest_valid_matching_digest = function()
     local event = merge_ready()
-    local fact = m_facts.high_risk_review_evidence_fact(core, 
+    local fact = m_facts.high_risk_review_evidence_fact(
       comments_with_older_matching_evidence_before_newer(event),
       event.proposal_id,
       event.version,

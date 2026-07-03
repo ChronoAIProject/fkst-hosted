@@ -139,7 +139,7 @@ local function reap_orphan_pr(repo, entity)
   if tostring(entity.pr.state or ""):upper() ~= "OPEN" then
     return
   end
-  if m_facts.has_orphan_reaped_marker(core, entity.pr.comments, proposal_id, pr_number) then
+  if m_facts.has_orphan_reaped_marker(entity.pr.comments, proposal_id, pr_number) then
     log.info(orphan_reap_log_line(repo, pr_number, proposal_id, "skip-idempotent", "orphan-reaped-marker-visible"))
     return
   end
