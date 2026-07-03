@@ -1,5 +1,5 @@
 local devloop_base = require("devloop.base")
-local core = require("core")
+local forge_git = require("forge.git").new(function(...) return exec_argv(...) end)
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
 local exec_sync = exec_sync
@@ -45,7 +45,7 @@ function M.remove_stale_worktree(path)
     end
     return
   end
-  local remove_result = core.git.worktree_remove(path, 60)
+  local remove_result = forge_git.worktree_remove(path, 60)
   if remove_result.exit_code ~= 0 then
     error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
   end
