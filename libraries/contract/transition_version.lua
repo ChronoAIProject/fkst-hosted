@@ -1,11 +1,11 @@
--- contract.transition_version: transition version normalization (value-core;
--- depends only on contract.strings for key sanitization + checksum, the same
--- intra-contract value dependency contract.source_ref already uses).
+-- contract.transition_version: transition version normalization and ordering.
 local V = {}
 local strings = require("contract.strings")
+local source_ref = require("contract.source_ref")
 
 local max_version_key_len = 40
 local decimal_checksum = strings.decimal_checksum
+local order_number_width = 12
 
 local slash_suffix_specs = {
   ["review-meta-action"] = { kind = "review_meta_action", numeric = true },
@@ -49,6 +49,20 @@ local timeout_order_states = {
   "fixing",
   "blocked",
 }
+
+local function padded_order_number(value)
+  return string.format("%0" .. tostring(order_number_width) .. "d", tonumber(value) or 0)
+end
+
+local function sign_order(value)
+  if value > 0 then
+    return 1
+  end
+  if value < 0 then
+    return -1
+  end
+  return 0
+end
 
 local function slash_numeric_suffix(parts, pos, spec)
   local n = tonumber(parts[pos + 1])
@@ -218,6 +232,138 @@ local function max_round(value, kind)
   return max_n
 end
 
+local function max_timeout_round_from_parsed(parsed)
+  local max_n = 0
+  for _, state_name in ipairs(timeout_order_states) do
+    local state_max = 0
+    for _, suffix in ipairs(parsed.suffixes or {}) do
+      if suffix.kind == "timeout" and tostring(suffix.state or "") == state_name then
+        local parsed_n = tonumber(suffix.n) or 0
+        if parsed_n > state_max then
+          state_max = parsed_n
+        end
+      end
+    end
+    if state_max > max_n then
+      max_n = state_max
+    end
+  end
+  return max_n
+end
+
+local function comparable_transition_base_from_parsed(parsed)
+  local text = tostring(parsed.base or "")
+  return text:match("^consensus:(.+)$") or text
+end
+
+local function version_updated_at_text(version)
+  local text = tostring(version or "")
+  local updated_at = ""
+  for found in text:gmatch("(%d%d%d%d%-%d%d%-%d%dT%d%d[%-:]%d%d[%-:]%d%dZ)") do
+    updated_at = found:gsub(":", "-")
+  end
+  return updated_at
+end
+
+local function version_primary_key_from_parsed(parsed)
+  if parsed == nil then
+    return 0, ""
+  end
+  local base = comparable_transition_base_from_parsed(parsed)
+  local updated_at = version_updated_at_text(base)
+  if updated_at ~= "" then
+    return 1, updated_at
+  end
+  return 0, source_ref.version_order_key(V.safe_version_segment(base))
+end
+
+local function version_sort_key_from_parsed(parsed, stage_rank)
+  local primary_rank, primary = version_primary_key_from_parsed(parsed)
+  return {
+    primary_rank = primary_rank,
+    primary = primary,
+    loop_n = max_round(parsed, "loop"),
+    fix_n = max_round(parsed, "fix"),
+    reimplement_n = max_round(parsed, "reimplement"),
+    timeout_n = max_timeout_round_from_parsed(parsed),
+    review_loop_n = max_round(parsed, "review_loop"),
+    review_meta_action_n = max_round(parsed, "review_meta_action"),
+    ready_split_n = max_round(parsed, "ready_split"),
+    stage_rank = tonumber(stage_rank) or 0,
+  }
+end
+
+local function compare_version_keys(left, right)
+  if left.primary_rank ~= right.primary_rank then
+    return left.primary_rank > right.primary_rank and 1 or -1
+  end
+  if left.primary ~= right.primary then
+    return left.primary > right.primary and 1 or -1
+  end
+  if left.loop_n ~= right.loop_n then
+    return left.loop_n > right.loop_n and 1 or -1
+  end
+  if left.fix_n ~= right.fix_n then
+    return left.fix_n > right.fix_n and 1 or -1
+  end
+  if left.reimplement_n ~= right.reimplement_n then
+    return left.reimplement_n > right.reimplement_n and 1 or -1
+  end
+  if left.timeout_n ~= right.timeout_n then
+    return left.timeout_n > right.timeout_n and 1 or -1
+  end
+  if left.review_meta_action_n ~= right.review_meta_action_n then
+    return left.review_meta_action_n > right.review_meta_action_n and 1 or -1
+  end
+  if left.review_loop_n ~= right.review_loop_n then
+    return left.review_loop_n > right.review_loop_n and 1 or -1
+  end
+  if left.ready_split_n ~= right.ready_split_n then
+    return left.ready_split_n > right.ready_split_n and 1 or -1
+  end
+  if left.stage_rank ~= right.stage_rank then
+    return left.stage_rank > right.stage_rank and 1 or -1
+  end
+  return 0
+end
+
+local function versions_equivalent(left, right)
+  if left == nil or right == nil then
+    return left == right
+  end
+  if tostring(left) == tostring(right) then
+    return true
+  end
+  return V.safe_version_segment(left) == V.safe_version_segment(right)
+end
+
+local function compare_same_base_transition_versions(left_parsed, right_parsed)
+  local left_key = version_sort_key_from_parsed(left_parsed, 0)
+  local right_key = version_sort_key_from_parsed(right_parsed, 0)
+  if left_key.loop_n ~= right_key.loop_n then
+    return left_key.loop_n > right_key.loop_n and 1 or -1
+  end
+  if left_key.fix_n ~= right_key.fix_n then
+    return left_key.fix_n > right_key.fix_n and 1 or -1
+  end
+  if left_key.reimplement_n ~= right_key.reimplement_n then
+    return left_key.reimplement_n > right_key.reimplement_n and 1 or -1
+  end
+  if left_key.timeout_n ~= right_key.timeout_n then
+    return left_key.timeout_n > right_key.timeout_n and 1 or -1
+  end
+  if left_key.review_meta_action_n ~= right_key.review_meta_action_n then
+    return left_key.review_meta_action_n > right_key.review_meta_action_n and 1 or -1
+  end
+  if left_key.review_loop_n ~= right_key.review_loop_n then
+    return left_key.review_loop_n > right_key.review_loop_n and 1 or -1
+  end
+  if left_key.ready_split_n ~= right_key.ready_split_n then
+    return left_key.ready_split_n > right_key.ready_split_n and 1 or -1
+  end
+  return 0
+end
+
 function V.safe_version_segment(version)
   local safe = strings.sanitize_key(version, false):gsub("[/#]", "-"):gsub("%-+", "-")
   safe = safe:gsub("^%-+", ""):gsub("%-+$", "")
@@ -351,6 +497,53 @@ function V.max_timeout_round(version)
     end
   end
   return max_n
+end
+
+function V.version_order_key(version)
+  return source_ref.version_order_key(version)
+end
+
+function V.updated_at(version)
+  return version_updated_at_text(version)
+end
+
+function V.compare(left, right)
+  if left == right then
+    return 0
+  end
+  if left == nil then
+    return right == nil and 0 or -1
+  end
+  if right == nil then
+    return 1
+  end
+
+  local left_parsed = V.parse(left)
+  local right_parsed = V.parse(right)
+  local left_base = comparable_transition_base_from_parsed(left_parsed)
+  local right_base = comparable_transition_base_from_parsed(right_parsed)
+  if versions_equivalent(left_base, right_base) then
+    return compare_same_base_transition_versions(left_parsed, right_parsed)
+  end
+  return sign_order(compare_version_keys(
+    version_sort_key_from_parsed(left_parsed, 0),
+    version_sort_key_from_parsed(right_parsed, 0)
+  ))
+end
+
+function V.marker_order_key(version, stage_rank)
+  local key = version_sort_key_from_parsed(V.parse(version), stage_rank)
+  return table.concat({
+    tostring(key.primary or ""),
+    padded_order_number(key.loop_n),
+    padded_order_number(key.fix_n),
+    padded_order_number(key.reimplement_n),
+    padded_order_number(key.timeout_n),
+    padded_order_number(key.review_meta_action_n),
+    padded_order_number(key.review_loop_n),
+    padded_order_number(key.ready_split_n),
+    padded_order_number(key.stage_rank),
+  }, "/")
 end
 
 return V

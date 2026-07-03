@@ -77,6 +77,88 @@ local version_shapes = {
   },
 }
 
+local ordering_base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+local ordering_cases = {
+  {
+    name = "newer updated_at wins",
+    left = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z",
+    right = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-05T01-02-03Z",
+    expected = -1,
+  },
+  {
+    name = "timestamped version wins over timestampless fallback",
+    left = "consensus:github-devloop/issue/owner/repo/42/v1",
+    right = "consensus:github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z",
+    expected = -1,
+  },
+  {
+    name = "safe-equivalent slash and hyphen bases tie",
+    left = "ready/consensus/v1",
+    right = "ready-consensus-v1",
+    expected = 0,
+  },
+  {
+    name = "loop round orders within the same base",
+    left = ordering_base .. "/loop/1",
+    right = ordering_base .. "/loop/2",
+    expected = -1,
+  },
+  {
+    name = "fix round orders after the same loop round",
+    left = ordering_base .. "/loop/2",
+    right = ordering_base .. "/loop/2/fix/1",
+    expected = -1,
+  },
+  {
+    name = "fix field outranks later review-meta-action field",
+    left = ordering_base .. "/review-meta-action/9/fix/1",
+    right = ordering_base .. "/fix/2",
+    expected = -1,
+  },
+  {
+    name = "fix field outranks later reimplement field",
+    left = ordering_base .. "/reimplement/9",
+    right = ordering_base .. "/fix/1",
+    expected = -1,
+  },
+  {
+    name = "timeout max round orders across timeout states",
+    left = ordering_base .. "/timeout/ready/1",
+    right = ordering_base .. "/timeout/reviewing/2",
+    expected = -1,
+  },
+  {
+    name = "review-meta-action field outranks review-loop field",
+    left = ordering_base .. "/review-loop/9",
+    right = ordering_base .. "/review-meta-action/1",
+    expected = -1,
+  },
+  {
+    name = "review-loop field outranks ready-split field",
+    left = ordering_base .. "/ready-split/9",
+    right = ordering_base .. "/review-loop/1",
+    expected = -1,
+  },
+  {
+    name = "explicit loop round 0 equals an absent loop suffix (missing is numeric 0)",
+    left = ordering_base .. "/loop/0",
+    right = ordering_base,
+    expected = 0,
+  },
+  {
+    name = "same timeout max round is equal regardless of timeout state",
+    left = ordering_base .. "/timeout/ready/2",
+    right = ordering_base .. "/timeout/reviewing/2",
+    expected = 0,
+  },
+  {
+    name = "higher timeout max round wins regardless of timeout state",
+    left = ordering_base .. "/timeout/ready/3",
+    right = ordering_base .. "/timeout/reviewing/2",
+    expected = 1,
+  },
+}
+
 return {
   test_safe_version_segment_matches_captured_devloop_goldens = function()
     for _, case in ipairs(cases) do
@@ -137,5 +219,23 @@ return {
     t.eq(transition_version.timeout_round(version, "custom-state"), 9)
     t.eq(transition_version.timeout_round(version, "reviewing"), 2)
     t.eq(transition_version.max_timeout_round(version), 2)
+  end,
+
+  test_compare_matches_captured_devloop_transition_order_goldens = function()
+    for _, case in ipairs(ordering_cases) do
+      t.eq(transition_version.compare(case.left, case.right), case.expected, case.name)
+      t.eq(transition_version.compare(case.right, case.left), -case.expected, case.name .. " reverse")
+    end
+  end,
+
+  test_marker_order_key_matches_captured_devloop_stage_rank_goldens = function()
+    t.eq(
+      transition_version.marker_order_key(ordering_base .. "/loop/2/fix/1", 700),
+      "2026-06-04T01-02-03Z/000000000002/000000000001/000000000000/000000000000/000000000000/000000000000/000000000000/000000000700"
+    )
+    t.is_true(
+      transition_version.marker_order_key(ordering_base, 690)
+        < transition_version.marker_order_key(ordering_base, 700)
+    )
   end,
 }

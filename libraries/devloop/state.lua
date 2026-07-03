@@ -5,10 +5,8 @@ local payloads_predicates = require("devloop.payloads.predicates")
 local S = {}
 local C = {}
 local devloop_base = require("devloop.base")
-local source_ref = require("contract.source_ref")
 local transition_version = require("contract.transition_version")
 local m_builders = require("devloop.markers.builders")
-local order_number_width = 12
 
 local label_by_state = { thinking = "fkst-dev:thinking", dependency_wait = "fkst-dev:ready", ready = "fkst-dev:ready", implementing = "fkst-dev:implementing", ["awaiting-pr"] = "fkst-dev:awaiting-pr", ["pr-open"] = "fkst-dev:pr-open", reviewing = "fkst-dev:reviewing", ["merge-ready"] = "fkst-dev:merge-ready", merging = "fkst-dev:merging", merged = "fkst-dev:merged", ["closed-unmerged"] = "fkst-dev:blocked", fixing = "fkst-dev:fixing", ["review-meta"] = "fkst-dev:review-meta", ["impl-failed"] = "fkst-dev:impl-failed", blocked = "fkst-dev:blocked" }
 local state_labels = {}
@@ -25,10 +23,6 @@ local function marker_attrs(marker)
     attrs[key] = value
   end
   return attrs
-end
-
-local function padded_order_number(value)
-  return string.format("%0" .. tostring(order_number_width) .. "d", tonumber(value) or 0)
 end
 
 function C.has_label(labels, expected)
@@ -80,7 +74,7 @@ function C.state_marker(proposal_id, state, version, effects)
 end
 
 function C.version_order_key(version)
-  return source_ref.version_order_key(version)
+  return transition_version.version_order_key(version)
 end
 
 function C.stage_rank(state)
@@ -88,12 +82,7 @@ function C.stage_rank(state)
 end
 
 function C.version_updated_at(version)
-  local text = tostring(version or "")
-  local updated_at = ""
-  for found in text:gmatch("(%d%d%d%d%-%d%d%-%d%dT%d%d[%-:]%d%d[%-:]%d%dZ)") do
-    updated_at = found:gsub(":", "-")
-  end
-  return updated_at
+  return transition_version.updated_at(version)
 end
 
 function C.version_loop_round(version)
@@ -124,10 +113,6 @@ function C.version_ready_split_round(version)
   return transition_version.ready_split_round(version)
 end
 
-local function version_max_timeout_round(version)
-  return transition_version.max_timeout_round(version)
-end
-
 function C.next_fix_version(version)
   local base = tostring(version or "")
   local next_n = C.version_fix_round(base) + 1
@@ -150,53 +135,12 @@ function C.next_review_loop_version(version)
   return base .. "/review-loop/" .. tostring(next_n)
 end
 
-local comparable_transition_base
-
-local function version_primary_key(version)
-  if version == nil then
-    return 0, ""
-  end
-  local base = comparable_transition_base(version)
-  local updated_at = C.version_updated_at(base)
-  if updated_at ~= "" then
-    return 1, updated_at
-  end
-  return 0, source_ref.version_order_key(transition_version.safe_version_segment(base))
-end
-
-local function version_sort_key(version, stage_rank)
-  local primary_rank, primary = version_primary_key(version)
-  return {
-    primary_rank = primary_rank,
-    primary = primary,
-    loop_n = C.version_loop_round(version),
-    fix_n = C.version_fix_round(version),
-    reimplement_n = C.version_reimplement_round(version),
-    timeout_n = version_max_timeout_round(version),
-    review_loop_n = C.version_review_loop_round(version),
-    review_meta_action_n = C.version_review_meta_action_round(version),
-    ready_split_n = C.version_ready_split_round(version),
-    stage_rank = tonumber(stage_rank) or 0,
-  }
-end
-
 function C.marker_order_key(version, state_or_stage_rank)
   local stage_rank = tonumber(state_or_stage_rank)
   if stage_rank == nil then
     stage_rank = C.stage_rank(state_or_stage_rank)
   end
-  local key = version_sort_key(version, stage_rank)
-  return table.concat({
-    tostring(key.primary or ""),
-    padded_order_number(key.loop_n),
-    padded_order_number(key.fix_n),
-    padded_order_number(key.reimplement_n),
-    padded_order_number(key.timeout_n),
-    padded_order_number(key.review_meta_action_n),
-    padded_order_number(key.review_loop_n),
-    padded_order_number(key.ready_split_n),
-    padded_order_number(key.stage_rank),
-  }, "/")
+  return transition_version.marker_order_key(version, stage_rank)
 end
 
 local function marker_stage_rank(marker, state)
@@ -221,40 +165,6 @@ local function state_marker_fact(marker, comment)
   }
 end
 
-local function compare_version_keys(left, right)
-  if left.primary_rank ~= right.primary_rank then
-    return left.primary_rank > right.primary_rank and 1 or -1
-  end
-  if left.primary ~= right.primary then
-    return left.primary > right.primary and 1 or -1
-  end
-  if left.loop_n ~= right.loop_n then
-    return left.loop_n > right.loop_n and 1 or -1
-  end
-  if left.fix_n ~= right.fix_n then
-    return left.fix_n > right.fix_n and 1 or -1
-  end
-  if left.reimplement_n ~= right.reimplement_n then
-    return left.reimplement_n > right.reimplement_n and 1 or -1
-  end
-  if left.timeout_n ~= right.timeout_n then
-    return left.timeout_n > right.timeout_n and 1 or -1
-  end
-  if left.review_meta_action_n ~= right.review_meta_action_n then
-    return left.review_meta_action_n > right.review_meta_action_n and 1 or -1
-  end
-  if left.review_loop_n ~= right.review_loop_n then
-    return left.review_loop_n > right.review_loop_n and 1 or -1
-  end
-  if left.ready_split_n ~= right.ready_split_n then
-    return left.ready_split_n > right.ready_split_n and 1 or -1
-  end
-  if left.stage_rank ~= right.stage_rank then
-    return left.stage_rank > right.stage_rank and 1 or -1
-  end
-  return 0
-end
-
 local function versions_equivalent(left, right)
   if left == nil or right == nil then
     return left == right
@@ -265,60 +175,14 @@ local function versions_equivalent(left, right)
   return transition_version.safe_version_segment(left) == transition_version.safe_version_segment(right)
 end
 
-comparable_transition_base = function(version)
-  local text = transition_version.strip_suffixes(version)
-  return text:match("^consensus:(.+)$") or text
-end
-
 local function strip_latest_fix_version_suffix(version)
   return tostring(version or "")
     :gsub("/fix/%d+$", "")
     :gsub("%-fix%-%d+$", "")
 end
 
-local function compare_same_base_transition_versions(incoming_version, current_version)
-  local incoming_key = version_sort_key(incoming_version, 0)
-  local current_key = version_sort_key(current_version, 0)
-  if incoming_key.loop_n ~= current_key.loop_n then
-    return incoming_key.loop_n > current_key.loop_n and 1 or -1
-  end
-  if incoming_key.fix_n ~= current_key.fix_n then
-    return incoming_key.fix_n > current_key.fix_n and 1 or -1
-  end
-  if incoming_key.reimplement_n ~= current_key.reimplement_n then
-    return incoming_key.reimplement_n > current_key.reimplement_n and 1 or -1
-  end
-  if incoming_key.timeout_n ~= current_key.timeout_n then
-    return incoming_key.timeout_n > current_key.timeout_n and 1 or -1
-  end
-  if incoming_key.review_meta_action_n ~= current_key.review_meta_action_n then
-    return incoming_key.review_meta_action_n > current_key.review_meta_action_n and 1 or -1
-  end
-  if incoming_key.review_loop_n ~= current_key.review_loop_n then
-    return incoming_key.review_loop_n > current_key.review_loop_n and 1 or -1
-  end
-  if incoming_key.ready_split_n ~= current_key.ready_split_n then
-    return incoming_key.ready_split_n > current_key.ready_split_n and 1 or -1
-  end
-  return 0
-end
-
 local function compare_transition_versions(incoming_version, current_version)
-  if incoming_version == current_version then
-    return 0
-  end
-  if incoming_version == nil then
-    return current_version == nil and 0 or -1
-  end
-  if current_version == nil then
-    return 1
-  end
-  local incoming_base = comparable_transition_base(incoming_version)
-  local current_base = comparable_transition_base(current_version)
-  if versions_equivalent(incoming_base, current_base) then
-    return compare_same_base_transition_versions(incoming_version, current_version)
-  end
-  return compare_version_keys(version_sort_key(incoming_version, 0), version_sort_key(current_version, 0))
+  return transition_version.compare(incoming_version, current_version)
 end
 
 local function sign_order(value)
@@ -368,9 +232,9 @@ local function compare_state_marker(a, b)
   if a_stage_rank ~= b_stage_rank then
     return b_stage_rank > a_stage_rank
   end
-  local a_key = version_sort_key(a.version, a.stage_rank)
-  local b_key = version_sort_key(b.version, b.stage_rank)
-  return compare_version_keys(b_key, a_key) > 0
+  local a_key = C.marker_order_key(a.version, a.stage_rank)
+  local b_key = C.marker_order_key(b.version, b.stage_rank)
+  return b_key > a_key
 end
 
 local milestone_domains = {
