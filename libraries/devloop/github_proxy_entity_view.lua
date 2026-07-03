@@ -367,7 +367,7 @@ function C.invalidate_entity_after_write(repo, kind, number)
   end)
 end
 
-function C.fetch_entity_view(M, repo, kind, number, updated_at, opts)
+function C.fetch_entity_view(repo, kind, number, updated_at, opts)
   return fetch_entity_view(repo, kind, number, updated_at, opts)
 end
 
@@ -383,7 +383,7 @@ function C.cached_entity_view(repo, kind, number)
   return success_from_cache(cached)
 end
 
-function C.fetch_issue_view(M, repo, issue_number, updated_at, opts)
+function C.fetch_issue_view(repo, issue_number, updated_at, opts)
   return fetch_entity_view(repo, "issue", issue_number, updated_at, opts)
 end
 
@@ -391,10 +391,10 @@ function C.fetch_pr_view(repo, pr_number, updated_at, opts)
   return fetch_entity_view(repo, "pr", pr_number, updated_at, opts)
 end
 
-function C.fetch_marker_issue_view(M, repo, issue_number, updated_at, opts)
+function C.fetch_marker_issue_view(repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "marker-reader"
-  return C.fetch_issue_view(M, repo, issue_number, updated_at, options)
+  return C.fetch_issue_view(repo, issue_number, updated_at, options)
 end
 
 function C.fetch_marker_pr_view(repo, pr_number, updated_at, opts)
@@ -403,16 +403,16 @@ function C.fetch_marker_pr_view(repo, pr_number, updated_at, opts)
   return C.fetch_pr_view(repo, pr_number, updated_at, options)
 end
 
-function C.fetch_issue_view_state(M, repo, issue_number, updated_at, opts)
+function C.fetch_issue_view_state(repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "observe_issue"
-  return C.fetch_marker_issue_view(M, repo, issue_number, updated_at, options)
+  return C.fetch_marker_issue_view(repo, issue_number, updated_at, options)
 end
 
-function C.fetch_issue_view_open_pr(M, repo, issue_number, updated_at, opts)
+function C.fetch_issue_view_open_pr(repo, issue_number, updated_at, opts)
   local options = opts or {}
   options.consumer = options.consumer or "open_pr"
-  return C.fetch_marker_issue_view(M, repo, issue_number, updated_at, options)
+  return C.fetch_marker_issue_view(repo, issue_number, updated_at, options)
 end
 
 function C.commit_issue_subject_snapshot(repo, issue_number)

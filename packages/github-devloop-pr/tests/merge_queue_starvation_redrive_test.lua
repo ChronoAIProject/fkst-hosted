@@ -180,7 +180,7 @@ return {
       },
     }
 
-    local selected, age = m_mq.merge_queue_starvation_candidate(core, entries, 60, contract_time.iso_timestamp_epoch_seconds("2026-06-03T02:30:00Z"))
+    local selected, age = m_mq.merge_queue_starvation_candidate(entries, 60, contract_time.iso_timestamp_epoch_seconds("2026-06-03T02:30:00Z"))
 
     t.eq(selected.pr_number, 459)
     t.eq(selected.proposal_id, aged.proposal_id)

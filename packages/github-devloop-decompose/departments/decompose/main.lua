@@ -122,7 +122,7 @@ end
 
 local function child_completion_check(child_issues, decompose, index)
   return function()
-    local completed = decompose_lib.decompose_child_issue_fact_indexes(core,
+    local completed = decompose_lib.decompose_child_issue_fact_indexes(
       child_issues,
       decompose.proposal_id,
       decompose.version,
@@ -133,7 +133,7 @@ local function child_completion_check(child_issues, decompose, index)
 end
 
 local function all_children_complete(child_issues, decompose, count)
-  local completed = decompose_lib.decompose_child_issue_fact_indexes(core,
+  local completed = decompose_lib.decompose_child_issue_fact_indexes(
     child_issues,
     decompose.proposal_id,
     decompose.version,
@@ -159,7 +159,7 @@ end
 
 local function heal_missing_children(event, repo, issue_number, decompose, state, decomposed)
   local child_issues = read_decompose_child_issues(repo, decompose.proposal_id)
-  local completed = decompose_lib.decompose_child_issue_fact_indexes(core,
+  local completed = decompose_lib.decompose_child_issue_fact_indexes(
     child_issues,
     decompose.proposal_id,
     decompose.version,
@@ -189,7 +189,7 @@ local function heal_missing_children(event, repo, issue_number, decompose, state
     end
   end
 
-  completed = decompose_lib.decompose_child_issue_fact_indexes(core, child_issues, decompose.proposal_id, decompose.version, decompose.pr_number)
+  completed = decompose_lib.decompose_child_issue_fact_indexes(child_issues, decompose.proposal_id, decompose.version, decompose.pr_number)
   local missing = {}
   for index = 1, decomposed.count do
     if not completed[index] then
@@ -229,7 +229,7 @@ local function write_decomposed_marker(repo, decompose, count)
   devloop_entity_view.invalidate_entity_after_write(repo, "pr", decompose.pr_number)
 
   local confirmed_pr = read_current_pr(repo, decompose.pr_number)
-  if not decompose_lib.has_decomposed_marker(core, confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
+  if not decompose_lib.has_decomposed_marker(confirmed_pr.comments, decompose.proposal_id, decompose.version, decompose.pr_number) then
     error("github-devloop: decomposed marker not yet visible after write; retrying")
   end
   return confirmed_pr
@@ -243,7 +243,7 @@ local function decompose_context(event)
     return context_cache[event]
   end
   local decompose = event.payload or {}
-  if not decompose_lib.is_supported_decompose(core, decompose) then
+  if not decompose_lib.is_supported_decompose(decompose) then
     devloop_logging.log_entry("decompose", event, "unknown", devloop_logging.payload_field(decompose, "dedup_key"))
     devloop_logging.log_cas_decision("decompose", "unknown", { state = nil, version = nil }, "blocked", "decomposed", "skip-foreign(payload)", "unsupported event payload")
     if type(event) == "table" then
@@ -328,7 +328,7 @@ local function decomposed_done(event)
       or tostring(state.version or "") ~= tostring(context.decompose.version) then
       return
     end
-    local decomposed = decompose_lib.decomposed_fact(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
+    local decomposed = decompose_lib.decomposed_fact(current_pr.comments, context.decompose.proposal_id, context.decompose.version, context.decompose.pr_number)
     if decomposed == nil then
       if conv_attempts.has_decompose_exhausted_marker(core, current_pr.comments, context.decompose.proposal_id, context.decompose.version) then
         devloop_logging.log_cas_decision("decompose", context.decompose.proposal_id, state, "blocked", "decomposed",
@@ -374,7 +374,7 @@ local function act_decompose(event)
       devloop_logging.log_cas_decision("decompose", decompose.proposal_id, state, "blocked", "decomposed", "retry-pending(blocked-fix-reconcile-not-visible)", "blocked/fix-reconcile marker is not yet visible")
       error("github-devloop: blocked fix reconcile marker not yet visible for decompose; retrying")
     end
-    local decomposed = decompose_lib.decomposed_fact(core,
+    local decomposed = decompose_lib.decomposed_fact(
       current_pr.comments,
       decompose.proposal_id,
       decompose.version,

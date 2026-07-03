@@ -100,13 +100,13 @@ end
 
 local function blocked_orphan(M, entity, state, facts)
   local link = m_facts.pr_link_fact(entity.comments, entity.proposal_id)
-  local decomposed = decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id, state and state.version, link and link.pr_number)
-    or decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id)
+  local decomposed = decompose_lib.decomposed_fact(entity.comments, entity.proposal_id, state and state.version, link and link.pr_number)
+    or decompose_lib.decomposed_fact(entity.comments, entity.proposal_id)
   if decomposed == nil then
     return false, nil, nil
   end
   local child_issues = type(facts) == "table" and facts.decompose_children or {}
-  local complete, completed_count = decompose_lib.decompose_children_complete(M,
+  local complete, completed_count = decompose_lib.decompose_children_complete(
     entity.comments,
     child_issues,
     entity.proposal_id,
@@ -185,7 +185,7 @@ local function read_repo()
 end
 
 local function fetch_issue_entity(repo, issue)
-  local view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(M, repo, issue.number, issue.updated_at, {
+  local view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(repo, issue.number, issue.updated_at, {
     consumer = "saga_doctor",
   })
   if view.exit_code ~= 0 then
@@ -262,7 +262,7 @@ local function maybe_decompose_children(repo, entity)
   if state == nil or state.state ~= "blocked" then
     return nil
   end
-  if decompose_lib.decomposed_fact(M, entity.comments, entity.proposal_id) == nil then
+  if decompose_lib.decomposed_fact(entity.comments, entity.proposal_id) == nil then
     return nil
   end
   local result = devloop_commands.gh_issue_list_decompose_children(repo, entity.proposal_id, 30)

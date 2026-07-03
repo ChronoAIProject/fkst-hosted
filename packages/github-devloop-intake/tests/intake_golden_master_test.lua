@@ -139,7 +139,7 @@ return {
 
   test_golden_admission_refuses_reintake_without_existing_intake = function()
     local command = trusted_reintake_command("IC_reintake_no_marker")
-    local command_fact = operator_commands.operator_command_fact(core, { command }, "reintake")
+    local command_fact = operator_commands.operator_command_fact({ command }, "reintake")
     h.mock_bot_env()
     mock_repo_env()
     mock_issue({ number = 42, labels = {}, comments = { command } })

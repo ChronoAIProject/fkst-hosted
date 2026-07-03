@@ -218,7 +218,7 @@ local function require_marker_fact(M, facts, family)
     if link == nil then
       return nil
     end
-    return decompose_lib.decomposed_fact(M, facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
+    return decompose_lib.decomposed_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version, link.pr_number)
   end
   if family == "implementing" then
     return m_facts.implementing_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
@@ -828,7 +828,7 @@ local function replay_blocked(M, dept, issue, state, row, facts)
   if decomposed == nil then
     return log_skip(M, dept, proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
   end
-  local complete, completed_count = decompose_lib.decompose_children_complete(M,
+  local complete, completed_count = decompose_lib.decompose_children_complete(
     nil,
     facts.decompose_children or {},
     proposal_id,

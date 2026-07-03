@@ -135,7 +135,7 @@ local function issue_claim_for_origin(origin)
 end
 
 local function replay_pr_local_state(origin, pr_number, current_pr, state, source_ref)
-  if state.state == "blocked" and decompose_lib.decomposed_fact(core, current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
+  if state.state == "blocked" and decompose_lib.decomposed_fact(current_pr.comments, origin.proposal_id, state.version, pr_number) == nil then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked", "decomposed", "skip-foreign(decomposed)", "decomposed marker is not visible")
     return false
   end
@@ -184,11 +184,11 @@ local function is_stalled_reviewing(current_pr, origin, pr_number, state)
 end
 
 local function maybe_apply_rereview_command(origin, pr_number, current_pr, state, source_ref)
-  local command = operator_commands.operator_command_fact(core, current_pr.comments, "rereview")
+  local command = operator_commands.operator_command_fact(current_pr.comments, "rereview")
   if command == nil then
     return false
   end
-  if operator_commands.has_operator_command_response(core, current_pr.comments, command) then
+  if operator_commands.has_operator_command_response(current_pr.comments, command) then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end

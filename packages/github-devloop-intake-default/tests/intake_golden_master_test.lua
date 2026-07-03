@@ -418,7 +418,7 @@ return {
   test_golden_judge_reintake_active_state_refusal = function()
     local command = trusted_reintake_command("IC_reintake_active")
     local base = candidate()
-    local command_fact = operator_commands.operator_command_fact(core, { command }, "reintake")
+    local command_fact = operator_commands.operator_command_fact({ command }, "reintake")
     local payload = candidate({
       effect_id = decision_key(base, nil, command),
       reintake_command_created_at = command.created_at,

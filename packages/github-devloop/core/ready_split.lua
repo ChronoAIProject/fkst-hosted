@@ -272,7 +272,7 @@ local function ready_redrive_round(M, comments, proposal_id, marker_version, row
     marker_version,
     row.from_state
   ) or 0
-  local command_round = operator_commands.operator_command_response_count(M, comments, "reready", "applied", "ready")
+  local command_round = operator_commands.operator_command_response_count(comments, "reready", "applied", "ready")
   return math.max(timeout_round, command_round) + 1
 end
 

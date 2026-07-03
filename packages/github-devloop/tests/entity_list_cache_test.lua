@@ -16,9 +16,9 @@ end
 
 return {
   test_entity_list_cache_key_is_readable_and_scoped_to_exact_poll_key = function()
-    local first = entity_list_cache.entity_list_cache_key(core, "owner/repo", "issue", "open", "2026-06-03T01:02:03Z")
-    local second = entity_list_cache.entity_list_cache_key(core, "owner/repo", "issue", "open", "2026-06-03T01:02:04Z")
-    local missing = entity_list_cache.entity_list_cache_key(core, "owner/repo", "issue", "open", nil)
+    local first = entity_list_cache.entity_list_cache_key("owner/repo", "issue", "open", "2026-06-03T01:02:03Z")
+    local second = entity_list_cache.entity_list_cache_key("owner/repo", "issue", "open", "2026-06-03T01:02:04Z")
+    local missing = entity_list_cache.entity_list_cache_key("owner/repo", "issue", "open", nil)
 
     t.is_true(first:find("^github%-devloop/entity%-list/owner/repo/issue/open/poll%-") ~= nil)
     t.eq(first == second, false)

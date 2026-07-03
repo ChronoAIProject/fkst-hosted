@@ -500,7 +500,7 @@ local function recheck_implementation_write_gate(repo, issue_number, marker_read
   end
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
-    if transition == "pending" and payloads_predicates.is_ready_hand_off(core, accepted_ready_hand_off, marker_ready) then
+    if transition == "pending" and payloads_predicates.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
       devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,
@@ -546,7 +546,7 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
   end
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
   if transition ~= "apply" then
-    if transition == "pending" and payloads_predicates.is_ready_hand_off(core, accepted_ready_hand_off, marker_ready) then
+    if transition == "pending" and payloads_predicates.is_ready_hand_off(accepted_ready_hand_off, marker_ready) then
       devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, {
         state = "ready",
         version = marker_ready.dedup_key,

@@ -637,7 +637,7 @@ function C.state_marker_comment_id(comments, proposal_id, state, version, effect
         and candidate.state == state
         and candidate.version == version
         and tostring(attrs.effects or "") == tostring(effects or "")
-        and payloads_predicates.is_safe_comment_id(devloop_base, comment.id) then
+        and payloads_predicates.is_safe_comment_id(comment.id) then
         return tostring(comment.id)
       end
     end

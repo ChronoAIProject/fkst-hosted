@@ -400,8 +400,8 @@ return {
     t.is_true(zero.dedup_key ~= partial.dedup_key)
     t.is_true(zero.dedup_key:find("/3/0", 1, true) ~= nil)
     t.is_true(partial.dedup_key:find("/3/2", 1, true) ~= nil)
-    t.eq(decompose_lib.is_supported_decompose(core, zero), true)
-    t.eq(decompose_lib.is_supported_decompose(core, partial), true)
+    t.eq(decompose_lib.is_supported_decompose(zero), true)
+    t.eq(decompose_lib.is_supported_decompose(partial), true)
   end,
 
   test_ready_and_implementation_helpers = function()

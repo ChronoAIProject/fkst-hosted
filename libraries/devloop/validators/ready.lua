@@ -20,7 +20,7 @@ function C.is_supported_ready(M, payload)
         and payload.operator_reentry.impl_version == payload.dedup_key))
     and (payload.ready_hand_off == nil
       or (payload.impl_retry_attempt == nil
-        and payloads_predicates.is_own_state_marker_hand_off(M, payload.ready_hand_off, {
+        and payloads_predicates.is_own_state_marker_hand_off(payload.ready_hand_off, {
           proposal_id = payload.proposal_id,
           state = "ready",
           marker_version = payload.ready_hand_off.marker_version,

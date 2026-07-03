@@ -74,7 +74,7 @@ return {
       core.build_issue_create_request("owner/repo", decompose, { title = "One", body = "Body one" }, 1).dedup_key,
       core.build_issue_create_request("owner/repo", decompose, { title = "Two", body = "Body two" }, 2).dedup_key,
     }
-    local completed = decompose_lib.decompose_child_fact_indexes(core, {
+    local completed = decompose_lib.decompose_child_fact_indexes({
       {
         body = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_by_index[1] .. '" issue="101" -->',
         author_login = "fkst-test-bot",
@@ -95,7 +95,7 @@ return {
         state = "OPEN",
       },
     }, proposal_id, version, 7, dedup_by_index)
-    local live_completed = decompose_lib.decompose_child_issue_fact_indexes(core, {
+    local live_completed = decompose_lib.decompose_child_issue_fact_indexes({
       {
         body = decompose_lib.decompose_child_marker(proposal_id, version, 7, 1),
         author_login = "fkst-test-bot",

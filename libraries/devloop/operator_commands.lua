@@ -10,7 +10,7 @@ local devloop_logging = require("devloop.logging")
 
 local ai_sentinel = "⟦AI:FKST⟧"
 
-local function command_key(M, comment, fallback_index)
+local function command_key(comment, fallback_index)
   if type(comment) == "table" and comment.id ~= nil and tostring(comment.id) ~= "" then
     return base_ids.dedup_key({
       "operator-command",
@@ -28,7 +28,7 @@ local function command_key(M, comment, fallback_index)
   })
 end
 
-local function first_command_line(M, body)
+local function first_command_line(body)
   for line in tostring(body or ""):gmatch("[^\r\n]+") do
     local trimmed = strings.trim(line):lower()
     if trimmed ~= "" then
@@ -38,8 +38,8 @@ local function first_command_line(M, body)
   return ""
 end
 
-local function parse_command(M, body)
-  local line = first_command_line(M, body)
+local function parse_command(body)
+  local line = first_command_line(body)
   local command = line:match("^fkst:%s*([%w_-]+)")
   if command == "rereview" or command == "reready" or command == "reintake" or command == "reimplement" then
     return {
@@ -58,18 +58,18 @@ local function parse_command(M, body)
   return nil
 end
 
-function C.operator_command_fact(M, comments, command_name)
+function C.operator_command_fact(comments, command_name)
   if type(comments) ~= "table" then
     return nil
   end
   local latest = nil
   for index, comment in ipairs(comments) do
-    local parsed = parse_command(M, parsers_misc._comment_body(comment))
+    local parsed = parse_command(parsers_misc._comment_body(comment))
     if parsed ~= nil and parsed.command == command_name then
       if parsers_misc._is_trusted_comment(comment) then
         latest = {
           command = parsed.command,
-          key = command_key(M, comment, index),
+          key = command_key(comment, index),
           author_login = parsers_misc._comment_author_login(comment),
           created_at = parsers_misc._comment_created_at(comment),
           body = parsers_misc._comment_body(comment),
@@ -97,7 +97,7 @@ function C.operator_rereview_version(current_version, head_sha)
   return base .. "/review-loop/" .. tostring(next_n) .. "/rereview/" .. tostring(next_n) .. "/" .. tostring(head_sha)
 end
 
-function C.has_operator_command_response(M, comments, command)
+function C.has_operator_command_response(comments, command)
   if type(comments) ~= "table" or type(command) ~= "table" then
     return false
   end
@@ -113,7 +113,7 @@ function C.has_operator_command_response(M, comments, command)
   return false
 end
 
-function C.operator_command_response_count(M, comments, command_name, outcome, reason)
+function C.operator_command_response_count(comments, command_name, outcome, reason)
   if type(comments) ~= "table" then
     return 0
   end

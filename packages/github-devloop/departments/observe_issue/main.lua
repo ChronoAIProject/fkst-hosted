@@ -206,11 +206,11 @@ local function ensure_managed_issue_claim(issue, proposal_id, current, state)
 end
 
 local function maybe_apply_issue_rereview_command(issue, proposal_id, current, state, event_ts)
-  local command = operator_commands.operator_command_fact(core, current.comments, "rereview")
+  local command = operator_commands.operator_command_fact(current.comments, "rereview")
   if command == nil then
     return false
   end
-  if operator_commands.has_operator_command_response(core, current.comments, command) then
+  if operator_commands.has_operator_command_response(current.comments, command) then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
@@ -315,11 +315,11 @@ local function timeout_reconcile_reready_reentry_state(current, proposal_id, sta
 end
 
 local function maybe_apply_issue_reready_command(issue, proposal_id, current, state, link)
-  local command = operator_commands.operator_command_fact(core, current.comments, "reready")
+  local command = operator_commands.operator_command_fact(current.comments, "reready")
   if command == nil then
     return false
   end
-  if operator_commands.has_operator_command_response(core, current.comments, command) then
+  if operator_commands.has_operator_command_response(current.comments, command) then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
@@ -360,11 +360,11 @@ local function has_unmet_blocker(gate, blocker_number)
 end
 
 local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, current, state)
-  local command = operator_commands.operator_command_fact(core, current.comments, "dependency-waiver")
+  local command = operator_commands.operator_command_fact(current.comments, "dependency-waiver")
   if command == nil then
     return false
   end
-  if operator_commands.has_operator_command_response(core, current.comments, command) then
+  if operator_commands.has_operator_command_response(current.comments, command) then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
@@ -433,11 +433,11 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
 end
 
 local function maybe_apply_issue_reimplement_command(issue, proposal_id, current, state, snapshot)
-  local command = operator_commands.operator_command_fact(core, current.comments, "reimplement")
+  local command = operator_commands.operator_command_fact(current.comments, "reimplement")
   if command == nil then
     return false
   end
-  if operator_commands.has_operator_command_response(core, current.comments, command) then
+  if operator_commands.has_operator_command_response(current.comments, command) then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "impl-failed", "implementing", "skip-idempotent(command-response-visible)", "operator command response marker is already visible")
     return false
   end
@@ -509,7 +509,7 @@ local function process_issue_event(event)
   with_lock(lock_key, function()
     devloop_base.assert_trusted_bot_configured()
 
-    local state_view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, issue.repo, issue.number, issue.updated_at, {
+    local state_view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(issue.repo, issue.number, issue.updated_at, {
       force_fresh = true,
     })
     if state_view.exit_code ~= 0 then

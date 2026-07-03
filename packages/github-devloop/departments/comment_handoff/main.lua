@@ -23,7 +23,7 @@ local spec = {
 local function supported_handoff(payload)
   if type(payload) ~= "table"
     or payload.schema ~= "github-proxy.comment-written.v1"
-    or not payloads_predicates.is_safe_comment_id(core, payload.comment_id)
+    or not payloads_predicates.is_safe_comment_id(payload.comment_id)
     or type(payload.handoff) ~= "table" then
     return nil
   end

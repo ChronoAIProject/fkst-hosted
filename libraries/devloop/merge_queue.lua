@@ -1,5 +1,6 @@
 local git_mechanics = require("devloop.git_mechanics")
 local devloop_base = require("devloop.base")
+local devloop_state = require("devloop.state")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local parsers_misc = require("devloop.parsers.misc")
@@ -54,9 +55,9 @@ local function compare_merge_queue_entries(left, right)
   return tonumber(left.pr_number or 0) < tonumber(right.pr_number or 0)
 end
 
-local function entry_age_minutes(M, entry, now_seconds)
+local function entry_age_minutes(entry, now_seconds)
   local version = tostring(entry and entry.version or "")
-  local updated_at = M.version_updated_at(version)
+  local updated_at = devloop_state.version_updated_at(version)
   if updated_at == "" then
     return nil
   end
@@ -220,7 +221,7 @@ function C.merge_queue_head(M, repo, base_branch, current)
   return entries[1], entries
 end
 
-function C.merge_queue_starvation_candidate(M, entries, threshold_minutes, now_seconds)
+function C.merge_queue_starvation_candidate(entries, threshold_minutes, now_seconds)
   local threshold = tonumber(threshold_minutes)
   local current_seconds = tonumber(now_seconds) or now()
   if threshold == nil or threshold < 0 then
@@ -228,7 +229,7 @@ function C.merge_queue_starvation_candidate(M, entries, threshold_minutes, now_s
   end
   local selected = nil
   for _, entry in ipairs(entries or {}) do
-    local age = entry_age_minutes(M, entry, current_seconds)
+    local age = entry_age_minutes(entry, current_seconds)
     if entry.state == "merge-ready" and age ~= nil and age > threshold then
       local candidate = {
         entry = entry,

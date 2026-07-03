@@ -112,8 +112,8 @@ return saga.department(spec, { done = function() return false end, act = functio
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision
     local comment_reached = reached
-    local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(core, reached.blocking_gap)
-    local out_of_contract_reject = reached.decision == "reject" and payloads_predicates.is_out_of_contract_review_gap(core, reached.blocking_gap)
+    local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(reached.blocking_gap)
+    local out_of_contract_reject = reached.decision == "reject" and payloads_predicates.is_out_of_contract_review_gap(reached.blocking_gap)
     if gate_owned_reject or out_of_contract_reject then
       effective_decision = "approve"
     end

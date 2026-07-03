@@ -141,7 +141,7 @@ end
   end
 
   function C.gh_issue_comment_get(repo, comment_id, timeout)
-    if not payloads_predicates.is_safe_comment_id(nil, comment_id) then
+    if not payloads_predicates.is_safe_comment_id(comment_id) then
       error("github-devloop: invalid comment id")
     end
     return support.gh_result(function()

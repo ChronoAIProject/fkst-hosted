@@ -779,7 +779,7 @@ local function queue_starvation_target_entry(cause, entries)
   if target == nil then
     return nil, nil, "target-not-current"
   end
-  local candidate, age_minutes = m_mq.merge_queue_starvation_candidate(core, entries, m_mq._merge_ready_starvation_threshold_minutes, now())
+  local candidate, age_minutes = m_mq.merge_queue_starvation_candidate(entries, m_mq._merge_ready_starvation_threshold_minutes, now())
   if not queue_starvation_cause_matches_entry(cause, candidate) then
     return nil, age_minutes, "target-not-aged-candidate"
   end

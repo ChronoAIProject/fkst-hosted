@@ -335,7 +335,7 @@ return {
   test_reentry_commands_are_supported_by_operator_parser = function()
     for _, row in ipairs(core.restart_transition_table()) do
       for _, command_name in ipairs(row.reentry_commands or {}) do
-        local fact = operator_commands.operator_command_fact(core, {
+        local fact = operator_commands.operator_command_fact({
           {
             id = "IC_" .. tostring(row.from_state) .. "_" .. tostring(command_name),
             body = "fkst: " .. tostring(command_name),

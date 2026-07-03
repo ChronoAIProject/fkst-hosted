@@ -88,8 +88,8 @@ local function terminal_parent_reason(parent_issue, entity)
       successors = successors,
     }
   end
-  local decomposed = decompose_lib.decomposed_fact(core, pr_comments, proposal_id)
-    or decompose_lib.decomposed_fact(core, parent_issue and parent_issue.comments or {}, proposal_id)
+  local decomposed = decompose_lib.decomposed_fact(pr_comments, proposal_id)
+    or decompose_lib.decomposed_fact(parent_issue and parent_issue.comments or {}, proposal_id)
   if decomposed ~= nil
     and tostring(decomposed.pr_number or "") == tostring(entity.pr_number or "")
     and #successors >= decomposed.count then

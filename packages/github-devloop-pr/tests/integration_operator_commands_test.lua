@@ -248,7 +248,7 @@ return {
   test_rereview_command_duplicate_response_is_idempotent = function()
     local impl_version = reviewing().version
     local command = trusted_command("IC_rereview_duplicate")
-    local command_fact = operator_commands.operator_command_fact(core, { command }, "rereview")
+    local command_fact = operator_commands.operator_command_fact({ command }, "rereview")
     local response = requests_review.build_operator_rereview_comment_request("owner/repo",
       7,
       "github-devloop/issue/owner/repo/42",

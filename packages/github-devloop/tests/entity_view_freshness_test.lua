@@ -71,7 +71,7 @@ return {
     })
 
     local ok, result = pcall(function()
-      return require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, "owner/repo", 42, "2026-06-03T01:02:03Z", {
+      return require("devloop.github_proxy_entity_view").fetch_issue_view_state("owner/repo", 42, "2026-06-03T01:02:03Z", {
         timeout = 10,
       })
     end)
@@ -108,7 +108,7 @@ return {
       updated_at = updated_at,
     }), updated_at)
 
-    local second = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue_number, updated_at, {
+    local second = require("devloop.github_proxy_entity_view").fetch_issue_view_state(repo, issue_number, updated_at, {
       consumer = "state-reader",
     })
 
@@ -138,10 +138,10 @@ return {
       register_all_views = true,
       times = 1,
     })
-    local second = require("devloop.github_proxy_entity_view").fetch_issue_view(core, repo, issue_number, "2026-06-03T01:02:04Z", {
+    local second = require("devloop.github_proxy_entity_view").fetch_issue_view(repo, issue_number, "2026-06-03T01:02:04Z", {
       consumer = "second-reader",
     })
-    local third = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue_number, "2026-06-03T01:02:04Z")
+    local third = require("devloop.github_proxy_entity_view").fetch_issue_view_state(repo, issue_number, "2026-06-03T01:02:04Z")
 
     t.eq(second.exit_code, 0)
     t.is_true(second.stdout:find('"After"', 1, true) ~= nil)
@@ -173,11 +173,11 @@ return {
       register_all_views = true,
       times = 1,
     })
-    local forced = require("devloop.github_proxy_entity_view").fetch_issue_view(core, repo, issue_number, updated_at, {
+    local forced = require("devloop.github_proxy_entity_view").fetch_issue_view(repo, issue_number, updated_at, {
       consumer = "claim-gate",
       force_fresh = true,
     })
-    local cached = require("devloop.github_proxy_entity_view").fetch_issue_view_state(core, repo, issue_number, updated_at)
+    local cached = require("devloop.github_proxy_entity_view").fetch_issue_view_state(repo, issue_number, updated_at)
 
     t.eq(forced.exit_code, 0)
     t.is_true(forced.stdout:find('"After"', 1, true) ~= nil)
@@ -211,7 +211,7 @@ return {
       times = 1,
     })
 
-    local after = require("devloop.github_proxy_entity_view").fetch_issue_view(core, repo, issue_number, updated_at, {
+    local after = require("devloop.github_proxy_entity_view").fetch_issue_view(repo, issue_number, updated_at, {
       consumer = "second-reader",
     })
 
