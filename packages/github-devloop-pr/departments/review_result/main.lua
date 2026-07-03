@@ -92,7 +92,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     return
   end
   if reached.decision == "reject"
-    and not strings.is_bounded_string(reached.blocking_gap, core._max_blocking_gap_len) then
+    and not strings.is_bounded_string(reached.blocking_gap, devloop_base._max_blocking_gap_len) then
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
     return
   end
@@ -280,4 +280,4 @@ return saga.department(spec, { done = function() return false end, act = functio
       devloop_logging.log_raise("review_result", origin.proposal_id, "devloop_review_meta", reflection_payload)
     end
   end)
-end, wrap = core.wrap_pipeline_failure, name = "review_result" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "review_result" })
