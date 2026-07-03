@@ -779,4 +779,4 @@ return saga.department(spec, { done = function() return false end, act = functio
     end,
     devloop_observe_issue = process_issue_event,
   })
-end, wrap = core.wrap_pipeline_failure, name = "observe_issue" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "observe_issue" })

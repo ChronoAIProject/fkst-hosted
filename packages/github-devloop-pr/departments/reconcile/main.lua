@@ -462,4 +462,4 @@ return saga.department(spec, { done = function() return false end, act = functio
   if schema == "github-devloop.fix-reconcile.v1" then
     return pipeline_fix(event)
   end
-end, wrap = core.wrap_pipeline_failure, name = "reconcile" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "reconcile" })

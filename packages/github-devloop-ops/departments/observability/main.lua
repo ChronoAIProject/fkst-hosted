@@ -78,7 +78,7 @@ end
 local department = saga.department(spec, { done = function() return false end, act = function(event)
   devloop_logging.log_entry("observability", event, "github-devloop/observability", "tick")
   core.observe_devloop_entities(event)
-end, wrap = core.wrap_pipeline_failure, name = "observability" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "observability" })
 department.spec.graph_json = true
 
 return department

@@ -846,6 +846,6 @@ end
 return saga.department(spec, {
   done = fix_done,
   act = act_fix,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "fix",
 })

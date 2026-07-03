@@ -431,6 +431,6 @@ return saga.department(spec, {
   accept = accepted_decompose,
   done = decomposed_done,
   act = act_decompose,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "decompose",
 })

@@ -93,6 +93,6 @@ return saga.department(spec, {
   done = handoff_done,
   act = act_handoff,
   on_skip_foreign = log_unsupported_handoff,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "comment_handoff",
 })

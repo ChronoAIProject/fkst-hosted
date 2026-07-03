@@ -306,6 +306,6 @@ return saga.department(spec, {
     end
     return pipeline_thinking(event)
   end,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "reconcile",
 })

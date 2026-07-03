@@ -561,4 +561,4 @@ return saga.department(spec, { done = function() return false end, act = functio
     ["github-proxy.github_entity_changed"] = process_pr_event,
     devloop_observe_pr = process_pr_event,
   }, "github-devloop-pr")
-end, wrap = core.wrap_pipeline_failure, name = "observe_pr" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "observe_pr" })

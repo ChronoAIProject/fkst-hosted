@@ -212,7 +212,7 @@ local function make_department(ports)
   local department = saga.department(spec, {
     done = result_done,
     act = act_result,
-    wrap = core.wrap_pipeline_failure,
+    wrap = devloop_logging.wrap_pipeline_failure,
     name = "consensus_result",
   })
   department.pipeline = _G.pipeline

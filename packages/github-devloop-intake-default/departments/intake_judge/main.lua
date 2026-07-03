@@ -353,6 +353,6 @@ end
 return saga.department(spec, {
   done = intake_judge_done,
   act = act_intake_judge,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "intake_judge",
 })
