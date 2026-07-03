@@ -18,6 +18,17 @@ function S.split_repo(repo)
   return owner, name
 end
 
+local function is_repo_segment(value)
+  return type(value) == "string" and value ~= "" and value:find("/", 1, true) == nil
+end
+
+function S.join_repo(owner, name)
+  if not is_repo_segment(owner) or not is_repo_segment(name) then
+    return nil
+  end
+  return owner .. "/" .. name
+end
+
 function S.comment_body(comment)
   if type(comment) == "table" then
     return tostring(comment.body or "")
