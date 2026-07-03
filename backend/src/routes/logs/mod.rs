@@ -23,7 +23,7 @@
 //! [`crate::reconcile::log_authz::is_authorized`] over the session's trigger context,
 //! looked up in the reconciler-maintained [`crate::log_access`] registry (session_id
 //! is a one-way hash, so this reverse map is how the endpoint recovers the author id
-//! + `### Log Access` allow-list). Deny → 403. Unknown session / missing object → 404.
+//! + `### Log Access Allowlist` allow-list). Deny → 403. Unknown session / missing object → 404.
 //!
 //! Secret hygiene: the caller's token and the OAuth client secret are NEVER logged, and
 //! NO presigned S3 URL is ever exposed to the caller — the control plane fetches the

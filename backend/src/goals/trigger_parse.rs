@@ -35,7 +35,7 @@ const HEADING_PACKAGES: &str = "### Packages";
 const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
-const HEADING_LOG_ACCESS: &str = "### Log Access";
+const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -102,7 +102,7 @@ pub struct TriggerSpec {
     /// anything else, blank, or the section is absent. Never a 422 (lenient) so a
     /// pre-v2 trigger issue without the section still parses.
     pub auto_merge: bool,
-    /// The OPTIONAL `### Log Access` allow-list: the GitHub logins or numeric ids
+    /// The OPTIONAL `### Log Access Allowlist`: the GitHub logins or numeric ids
     /// (beyond the issue author + the global admins) permitted to download this
     /// session's redacted logs from the identity-gated `/api/v1/logs/{session_id}`
     /// endpoint. A whitespace/comma/newline-separated list; lenient; default empty.
@@ -172,7 +172,7 @@ fn parse_auto_merge(sections: &[(String, String)]) -> bool {
     })
 }
 
-/// `### Log Access` — OPTIONAL, lenient. Parse the section into the list of GitHub
+/// `### Log Access Allowlist` — OPTIONAL, lenient. Parse the section into the list of GitHub
 /// logins or numeric ids (BEYOND the issue author + the global admins) allowed to
 /// download this session's redacted logs. Tokens are separated by ANY whitespace,
 /// comma, or newline, so an author can list them one-per-line or comma-separated. A

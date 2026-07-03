@@ -88,7 +88,7 @@ async fn api_mode_non_member_is_403() {
 
 #[tokio::test]
 async fn api_mode_per_issue_login_grants() {
-    // Not the author, but listed in the per-issue `### Log Access` allow-list.
+    // Not the author, but listed in the per-issue `### Log Access Allowlist` allow-list.
     let gh = github_user_ok("Bob", 2002).await;
     let (storage, _s) = storage_server(true).await;
     let st = state(

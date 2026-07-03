@@ -5,7 +5,7 @@
 //! carries). But `session_id` is a one-way UUIDv5 over `(installation, owner, repo,
 //! issue)` (see [`crate::session_spec::derive_session_id`]) — it cannot be reversed
 //! to recover the trigger context the authorization check needs (the issue author's
-//! id + the `### Log Access` allow-list).
+//! id + the `### Log Access Allowlist` allow-list).
 //!
 //! This registry is that reverse map. The reconciler already resolves EVERY open
 //! trigger issue into a [`crate::reconcile::desired::SessionRegistration`] on each
@@ -22,7 +22,7 @@
 //! which the endpoint returns 404 rather than serving unauthorized. That fail-closed
 //! behaviour is deliberate.
 //!
-//! Nothing sensitive lives here: the allow-list is the public `### Log Access`
+//! Nothing sensitive lives here: the allow-list is the public `### Log Access Allowlist`
 //! content and the ids are public GitHub numeric ids — never a token or a secret.
 
 use std::collections::HashMap;
@@ -42,7 +42,7 @@ pub struct LogSessionContext {
     pub trigger_issue: i64,
     /// The numeric GitHub id of the trigger issue's author (authz tier 1).
     pub author_id: i64,
-    /// The frozen `### Log Access` allow-list — logins/ids permitted to download the
+    /// The frozen `### Log Access Allowlist` allow-list — logins/ids permitted to download the
     /// logs beyond the author + the global admins (authz tier 2).
     pub log_access: Vec<String>,
 }

@@ -73,7 +73,7 @@ pub fn announce_session_comment(
     }
 
     // The identity-gated log-download link. Static + safe to post: the endpoint
-    // authorizes every request (the session owner, the `### Log Access` list, or an
+    // authorizes every request (the session owner, the `### Log Access Allowlist` list, or an
     // admin), so the bare URL grants nothing. Omitted when no public base URL is set.
     if let Some(url) = log_url {
         body.push_str(&format!(

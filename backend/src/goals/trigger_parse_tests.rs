@@ -131,13 +131,13 @@ fn auto_merge_absent_defaults_false() {
     assert!(!spec.auto_merge, "an absent section defaults off");
 }
 
-// ---- Log Access (optional allow-list; lenient, never a 422) ----
+// ---- Log Access Allowlist (optional allow-list; lenient, never a 422) ----
 
-/// Build a body with the four required sections held valid plus a `### Log Access`
+/// Build a body with the four required sections held valid plus a `### Log Access Allowlist`
 /// section carrying `val`, so a parse's `log_access` reflects only that value.
 fn body_with_log_access(val: &str) -> String {
     format!(
-        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Log Access\n{val}\n"
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Log Access Allowlist\n{val}\n"
     )
 }
 
@@ -146,7 +146,7 @@ fn log_access_absent_defaults_empty() {
     let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
     assert!(
         spec.log_access.is_empty(),
-        "an absent `### Log Access` section defaults to an empty allow-list"
+        "an absent `### Log Access Allowlist` section defaults to an empty allow-list"
     );
 }
 
@@ -172,7 +172,7 @@ fn log_access_blank_section_is_empty() {
     let spec = parse_trigger_issue_body(&body_with_log_access("   \n\n")).expect("parses");
     assert!(
         spec.log_access.is_empty(),
-        "a blank `### Log Access` section yields an empty allow-list"
+        "a blank `### Log Access Allowlist` section yields an empty allow-list"
     );
 }
 

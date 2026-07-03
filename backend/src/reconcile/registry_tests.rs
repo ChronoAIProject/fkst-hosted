@@ -64,7 +64,7 @@ fn valid_body_yields_a_registration() {
     assert!(!reg.auto_merge, "a body with no Auto-merge section is off");
     assert!(
         reg.log_access.is_empty(),
-        "a body with no Log Access section has an empty allow-list"
+        "a body with no Log Access Allowlist section has an empty allow-list"
     );
 
     // The session id + config hash must match the canonical derivations.

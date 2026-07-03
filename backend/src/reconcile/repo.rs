@@ -135,7 +135,7 @@ pub async fn reconcile_repo(
 
     // Record each valid session's log-access context so the identity-gated
     // log-download endpoint can reverse a `session_id` (a one-way hash) to the
-    // author id + `### Log Access` allow-list it authorizes against. Cheap in-memory
+    // author id + `### Log Access Allowlist` allow-list it authorizes against. Cheap in-memory
     // upsert; carries only public metadata (ids + the allow-list), never a token.
     record_log_contexts(ctx, &regs);
 

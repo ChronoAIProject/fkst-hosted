@@ -12,7 +12,7 @@
 //! 1. **Author** — the caller is the trigger issue's author (matched by immutable
 //!    numeric id, never by a renamable login).
 //! 2. **Per-issue allow-list** — the caller matches an entry the author listed in the
-//!    trigger issue's `### Log Access` section (frozen by config-immutability).
+//!    trigger issue's `### Log Access Allowlist` section (frozen by config-immutability).
 //! 3. **Global admins** — the caller matches an operator-configured entry
 //!    (`FKST_LOG_ADMINS`) that may pull ANY session's logs.
 //!
@@ -23,7 +23,7 @@
 
 /// Decide whether the verified caller `(requester_id, requester_login)` may download
 /// the logs of a session whose trigger issue was opened by `issue_author_id` and
-/// whose `### Log Access` allow-list is `per_issue_allow`, given the operator's
+/// whose `### Log Access Allowlist` allow-list is `per_issue_allow`, given the operator's
 /// `global_admins`.
 ///
 /// Returns `true` iff the caller satisfies AT LEAST ONE of the three tiers described
