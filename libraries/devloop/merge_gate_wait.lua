@@ -39,7 +39,7 @@ function C.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sh
     .. '" -->'
 end
 
-function C.build_merge_gate_wait_comment_request(M, repo, merge_ready, reason, kind, source_ref)
+function C.build_merge_gate_wait_comment_request(repo, merge_ready, reason, kind, source_ref)
   local safe_reason = tostring(strings.sanitize_key(reason or "ci-wait", false):gsub("/", "-"))
   local wait_version = C.merge_gate_wait_version_lineage(merge_ready.version)
   local marker = C.merge_gate_wait_marker(merge_ready.proposal_id,

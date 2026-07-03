@@ -210,7 +210,7 @@ local function emit_timeout_attempt_marker(dept, entity, state, row, facts, prop
       and eval.generation_key ~= nil then
       devloop_logging.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, eval.generation_key))
     else
-      devloop_logging.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_comment_request(M, target, proposal_id, state, row, source_ref, attempt))
+      devloop_logging.log_raise(dept, proposal_id, target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request", conv_attempts.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt))
     end
   end
 end
@@ -219,7 +219,7 @@ local function emit_decompose_exhausted_marker(dept, entity, state, facts, propo
   local target = timeout_attempt_target(entity, facts)
   local source_ref = (facts and facts.source_ref) or (entity and entity.source_ref) or (state and state.source_ref)
   if target ~= nil then
-    local request = conv_attempts.build_decompose_exhausted_comment_request(M, target, proposal_id, state, source_ref, attempt)
+    local request = conv_attempts.build_decompose_exhausted_comment_request(target, proposal_id, state, source_ref, attempt)
     devloop_logging.log_apply(dept, proposal_id, nil, nil, { add = {}, remove = {} }, {
       target.kind == "pr" and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request",
     })

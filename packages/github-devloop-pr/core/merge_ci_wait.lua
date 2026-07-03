@@ -6,8 +6,7 @@ local devloop_logging = require("devloop.logging")
 function M.hold(core, merge_ready, repo, current_pr, classification)
   local reason = tostring(classification and classification.reason or "ci-wait")
   local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
-  local comment_request = m_mgw.build_merge_gate_wait_comment_request(core,
-    repo,
+  local comment_request = m_mgw.build_merge_gate_wait_comment_request(repo,
     merge_ready,
     reason,
     classification and classification.kind or "CI_WAIT",

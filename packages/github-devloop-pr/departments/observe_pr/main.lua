@@ -194,9 +194,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if state.state ~= "blocked" and state.state ~= "review-meta" and state.state ~= "reviewing" then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(invalid-state)", "operator rereview precondition failed")
-    local refusal = operator_commands.build_operator_command_refusal_request(
-      core,
-      origin.repo,
+    local refusal = operator_commands.build_operator_command_refusal_request(origin.repo,
       pr_number,
       command,
       "rereview requires blocked, review-meta, or stalled reviewing state",
@@ -207,9 +205,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if state.state == "reviewing" and not is_stalled_reviewing(current_pr, origin, pr_number, state) then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|stalled-reviewing", "reviewing", "refused(active-reviewing)", "operator rereview requires stalled reviewing")
-    local refusal = operator_commands.build_operator_command_refusal_request(
-      core,
-      origin.repo,
+    local refusal = operator_commands.build_operator_command_refusal_request(origin.repo,
       pr_number,
       command,
       "rereview requires blocked, review-meta, or stalled reviewing state",
@@ -220,9 +216,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if tostring(current_pr.state or ""):lower() ~= "open" then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(pr-closed)", "operator rereview requires an open PR")
-    local refusal = operator_commands.build_operator_command_refusal_request(
-      core,
-      origin.repo,
+    local refusal = operator_commands.build_operator_command_refusal_request(origin.repo,
       pr_number,
       command,
       "rereview requires an open PR",
@@ -233,9 +227,7 @@ local function maybe_apply_rereview_command(origin, pr_number, current_pr, state
   end
   if not forge_validators.is_git_sha(current_pr.head_sha) then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "blocked|review-meta|reviewing", "reviewing", "refused(head-missing)", "operator rereview requires a current PR head")
-    local refusal = operator_commands.build_operator_command_refusal_request(
-      core,
-      origin.repo,
+    local refusal = operator_commands.build_operator_command_refusal_request(origin.repo,
       pr_number,
       command,
       "rereview requires a current PR head",

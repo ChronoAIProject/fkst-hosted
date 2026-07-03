@@ -110,7 +110,7 @@ return {
     local review_version = core._strip_latest_fix_version_suffix(issue_version)
     local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
     local review_dedup = "consensus:" .. review_proposal .. "/review"
-    local fresh_payload = payloads_builders.build_devloop_fix_reflection_payload(core, {
+    local fresh_payload = payloads_builders.build_devloop_fix_reflection_payload({
       proposal_id = review_proposal,
       dedup_key = review_dedup,
       source_ref = { kind = "external", ref = "owner/repo#pr/7" },
@@ -135,7 +135,7 @@ return {
     t.eq(fact.review_dedup_key, review_dedup)
     t.eq(fact.dedup_key, fresh_payload.dedup_key)
 
-    local replay_payload = payloads_builders.build_devloop_fix_reflection_payload(core, fact, "github-devloop/issue/owner/repo/42", issue_version, fact.pr_number, fact.fix_round, fact.source_ref)
+    local replay_payload = payloads_builders.build_devloop_fix_reflection_payload(fact, "github-devloop/issue/owner/repo/42", issue_version, fact.pr_number, fact.fix_round, fact.source_ref)
     replay_payload.blocking_gap = fact.blocking_gap
     t.eq(replay_payload.dedup_key, fresh_payload.dedup_key)
     t.eq(replay_payload.review_dedup_key, fresh_payload.review_dedup_key)

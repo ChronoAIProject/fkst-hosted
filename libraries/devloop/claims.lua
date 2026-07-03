@@ -58,7 +58,7 @@ local function issue_author_login(issue)
   return nil
 end
 
-function C.issue_author_login(M, issue)
+function C.issue_author_login(issue)
   return issue_author_login(issue)
 end
 
@@ -144,7 +144,7 @@ function C.is_self_owned_issue(M, ownership, owner)
     return false
   end
   -- Unassigned+self-author is intentional for fork-and-block isolation: a different bot login sees author!=self and skips.
-  local author = C.issue_author_login(M, ownership)
+  local author = C.issue_author_login(ownership)
   if author == nil then
     return false
   end
@@ -172,7 +172,7 @@ function C.read_current_issue_ownership(M, repo, issue_number)
   local decoded = json.decode(view.stdout or "{}")
   return {
     assignees = C.assignee_logins(M, decoded.assignees),
-    author_login = C.issue_author_login(M, decoded),
+    author_login = C.issue_author_login(decoded),
     labels = issue_labels(decoded),
   }
 end
@@ -220,7 +220,7 @@ function C.verify_pr_review_issue_claim(M, dept, repo, issue_number, current_iss
   else
     current_usable = type(current_issue) == "table"
       and current_issue.assignees ~= nil
-      and C.issue_author_login(M, current_issue) ~= nil
+      and C.issue_author_login(current_issue) ~= nil
   end
   if current_usable then
     ownership = current_issue
@@ -286,7 +286,7 @@ function C.claim_issue_for_management(M, dept, repo, issue_number, current, prop
     return false
   end
 
-  local author = C.issue_author_login(M, current)
+  local author = C.issue_author_login(current)
   if author == nil or author == "" then
     log_claim(M, dept, proposal_id, "skip-fork-author-unknown", "issue author is missing or unknown")
     return false

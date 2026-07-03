@@ -135,8 +135,7 @@ return {
         created_at = "2026-06-03T00:00:00Z",
       },
       {
-        body = conv_attempts.timeout_attempt_v2_marker(core,
-          proposal_id,
+        body = conv_attempts.timeout_attempt_v2_marker(proposal_id,
           "implementing",
           "implementing.active",
           eval.generation_key,
@@ -147,8 +146,7 @@ return {
         created_at = "2026-06-03T00:01:00Z",
       },
       {
-        body = conv_attempts.timeout_attempt_v2_marker(core,
-          proposal_id,
+        body = conv_attempts.timeout_attempt_v2_marker(proposal_id,
           "implementing",
           "implementing.active",
           eval.generation_key,

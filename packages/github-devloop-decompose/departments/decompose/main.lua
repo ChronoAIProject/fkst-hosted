@@ -392,8 +392,7 @@ local function act_decompose(event)
       devloop_logging.log_apply("decompose", decompose.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",
       })
-      devloop_logging.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", conv_attempts.build_decompose_exhausted_comment_request(core,
-        { kind = "pr", repo = repo, number = decompose.pr_number },
+      devloop_logging.log_raise("decompose", decompose.proposal_id, "github-proxy.github_pr_comment_request", conv_attempts.build_decompose_exhausted_comment_request({ kind = "pr", repo = repo, number = decompose.pr_number },
         decompose.proposal_id,
         state,
         decompose.source_ref,

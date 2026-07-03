@@ -152,7 +152,7 @@ return {
     local dedup_key = "consensus:github-devloop/issue/owner/repo/42/v1"
     local result = parsers_issue.parse_issue_view_result(core,
       '{"labels":["fkst-dev:ready"],"comments":[{"body":"'
-        .. m_builders.result_marker(core, proposal_id, decision, dedup_key):gsub('"', '\\"')
+        .. m_builders.result_marker(proposal_id, decision, dedup_key):gsub('"', '\\"')
         .. '","author":{"login":"fkst-test-bot"}}]}'
     )
     t.eq(core.has_terminal_label(result.labels), true)

@@ -216,9 +216,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
   end
   if state.state ~= "thinking" then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "thinking", "thinking", "refused(invalid-state)", "operator rereview requires thinking")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       "rereview requires thinking state",
@@ -230,9 +228,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
   if not replayer.has_thinking_converge_replay(core, current, proposal_id, state, issue.source_ref)
     and not thinking_state_budget_exceeded(state) then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "refused(active-thinking)", "operator rereview requires stalled thinking")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       "rereview requires stalled thinking state",
@@ -245,9 +241,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
   local proposal = replayer.build_thinking_replay_proposal(core, issue, proposal_id, state, current, event_ts)
   if proposal == nil then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "stalled-thinking", "thinking", "refused(cannot-rebuild-proposal)", "operator rereview could not rebuild thinking proposal")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       "rereview could not rebuild the current thinking proposal",
@@ -257,9 +251,7 @@ local function maybe_apply_issue_rereview_command(issue, proposal_id, current, s
     return true
   end
 
-  local comment_request = operator_commands.build_operator_issue_rereview_comment_request(
-    core,
-    issue.repo,
+  local comment_request = operator_commands.build_operator_issue_rereview_comment_request(issue.repo,
     issue.number,
     command,
     proposal,
@@ -339,9 +331,7 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
   end
   if replay_state == nil then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "refused(invalid-state)", "operator reready requires ready state")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       refusal_reason or "reready requires ready or dependency_wait state",
@@ -381,9 +371,7 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
   end
   if state.state ~= "dependency_wait" then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "dependency_wait", "ready", "refused(invalid-state)", "operator dependency waiver requires dependency_wait state")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       "dependency-waiver requires dependency_wait state",
@@ -403,9 +391,7 @@ local function maybe_apply_issue_dependency_waiver_command(issue, proposal_id, c
     or gate.reason ~= "dependency-waiver-required"
     or not has_unmet_blocker(gate, blocker_number) then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "ready", "ready", "refused(invalid-dependency-waiver)", "operator dependency waiver requires a matching completed blocker without merged marker")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       "dependency-waiver requires a matching completed blocker without merged marker",
@@ -460,9 +446,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
   local blocked_reentry = state.state == "blocked" and linked_open_pr(snapshot, link and link.pr_number) ~= nil
   if state.state ~= "impl-failed" and not blocked_reentry then
     devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed or blocked state with an open linked PR")
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      issue.repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
       "reimplement requires impl-failed or blocked state with an open linked PR",
@@ -496,9 +480,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
     }
   end
   local payload = payloads_builders.build_devloop_ready_payload(core, payload_source)
-  local comment_request = operator_commands.build_operator_issue_reimplement_comment_request(
-    core,
-    issue.repo,
+  local comment_request = operator_commands.build_operator_issue_reimplement_comment_request(issue.repo,
     issue.number,
     command,
     attempt,

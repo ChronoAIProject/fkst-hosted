@@ -362,7 +362,7 @@ function C.proposal_dedup_key(proposal_id, updated_at)
   return tostring(proposal_id) .. "/" .. C.safe_updated_at(updated_at)
 end
 
-function C.intake_dedup_key(M, proposal_id, updated_at)
+function C.intake_dedup_key(proposal_id, updated_at)
   return dedup_key({
     "intake",
     tostring(proposal_id),
@@ -370,7 +370,7 @@ function C.intake_dedup_key(M, proposal_id, updated_at)
   })
 end
 
-function C.intake_candidate_delivery_dedup_key(M, proposal_id, effect_id, delivery_version)
+function C.intake_candidate_delivery_dedup_key(proposal_id, effect_id, delivery_version)
   return dedup_key({
     "intake-candidate",
     tostring(proposal_id),

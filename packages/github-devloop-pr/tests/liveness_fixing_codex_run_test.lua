@@ -174,8 +174,7 @@ local function timeout_attempt_v2_comment(row, state, comments, round)
     source_ref = entity_lib.pr_source_ref(repo, 7),
   }
   local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, contract_time.iso_timestamp_epoch_seconds("2026-06-03T03:00:00Z"))
-  return trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-    proposal_id,
+  return trusted_comment(conv_attempts.timeout_attempt_v2_marker(proposal_id,
     row.from_state,
     row.liveness_class_id,
     eval.generation_key,

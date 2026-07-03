@@ -249,7 +249,7 @@ local function pipeline_timeout(event)
         devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "blocked", "devloop_decompose", "skip-idempotent(decompose-exhausted)", "blocked decompose output obligation already reached terminal stop")
         return
       end
-      local comment_request = conv_attempts.build_decompose_exhausted_comment_request(core, {
+      local comment_request = conv_attempts.build_decompose_exhausted_comment_request({
         kind = "issue",
         repo = repo,
         number = issue_number,

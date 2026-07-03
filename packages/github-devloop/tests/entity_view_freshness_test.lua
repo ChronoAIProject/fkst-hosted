@@ -53,7 +53,7 @@ local function encode_json_string(value)
 end
 
 local function seed_cached_view(repo, kind, number, stdout, updated_at, producer)
-  cache_set(require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, kind, number), '{"updated_at":"' .. encode_json_string(updated_at)
+  cache_set(require("devloop.github_proxy_entity_view").entity_view_cache_key(repo, kind, number), '{"updated_at":"' .. encode_json_string(updated_at)
     .. '","producer":"' .. encode_json_string(producer or "seed")
     .. '","stdout":"' .. encode_json_string(stdout)
     .. '"}')
@@ -220,7 +220,7 @@ return {
     t.eq(count_calls(view_command), 0)
     t.eq(count_exact_calls(rest_command), 1)
     t.eq(count_exact_calls(comments_command), 1)
-    t.eq(cache_get(require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, "issue", issue_number)) ~= "", true)
+    t.eq(cache_get(require("devloop.github_proxy_entity_view").entity_view_cache_key(repo, "issue", issue_number)) ~= "", true)
   end,
 
   test_no_validator_uses_rest_probe_before_serving_cached_pr_view = function()
@@ -236,7 +236,7 @@ return {
       head_sha = "abc123",
       updated_at = updated_at,
     }), updated_at)
-    t.is_true(tostring(cache_get(require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, "pr", pr_number)) or ""):find('"updated_at"', 1, true) ~= nil)
+    t.is_true(tostring(cache_get(require("devloop.github_proxy_entity_view").entity_view_cache_key(repo, "pr", pr_number)) or ""):find('"updated_at"', 1, true) ~= nil)
     seam.mock_pr_read_forms(t, {
       repo = repo,
       number = pr_number,

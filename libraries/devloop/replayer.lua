@@ -692,7 +692,7 @@ local function replay_review_meta(M, tools, dept, issue, state, row, facts)
   })
   local payload = nil
   if fact.mode == "fix-reflection" then
-    payload = payloads_builders.build_devloop_fix_reflection_payload(M, fact, proposal_id, fields.version, fields.pr_number, fact.fix_round or fact.n, fields.source_ref)
+    payload = payloads_builders.build_devloop_fix_reflection_payload(fact, proposal_id, fields.version, fields.pr_number, fact.fix_round or fact.n, fields.source_ref)
     payload.blocking_gap = fact.blocking_gap
   else
     payload = payloads_builders.build_devloop_review_meta_payload(fact, proposal_id, fields.version, fields.pr_number, fact.n, fields.source_ref)

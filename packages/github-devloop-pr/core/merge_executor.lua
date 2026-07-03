@@ -363,7 +363,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
     return
   end
   if options ~= nil and type(options.queue_starvation_cause) == "table" then
-    local comment_request = requests_lifecycle.build_queue_starvation_reconcile_comment_request(core, repo, merge_ready, options.queue_starvation_cause)
+    local comment_request = requests_lifecycle.build_queue_starvation_reconcile_comment_request(repo, merge_ready, options.queue_starvation_cause)
     devloop_logging.log_raise("merge", merge_ready.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
     raise("github-proxy.github_pr_comment_request", comment_request)
   end

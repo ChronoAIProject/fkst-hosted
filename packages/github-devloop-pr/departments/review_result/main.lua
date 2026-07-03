@@ -242,7 +242,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local comment_request = requests_review.build_review_result_comment_request(core, origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local evidence_request = nil
     if effective_decision == "approve" and #high_risk_paths > 0 then
-      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(core, origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
     end
     local label_request = nil
     if origin.issue_number ~= nil then
@@ -260,7 +260,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     local reflection_payload = nil
     if reflection_checkpoint then
-      reflection_payload = payloads_builders.build_devloop_fix_reflection_payload(core, {
+      reflection_payload = payloads_builders.build_devloop_fix_reflection_payload({
         proposal_id = reached.proposal_id,
         dedup_key = reached.dedup_key,
         source_ref = pr_source_ref,

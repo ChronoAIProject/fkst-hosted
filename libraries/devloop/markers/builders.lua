@@ -348,7 +348,7 @@ function C.pr_base_unmanaged_marker(proposal_id, pr_number, pr_base, integration
     .. '" -->'
 end
 
-function C.result_marker(M, proposal_id, decision, dedup_key)
+function C.result_marker(proposal_id, decision, dedup_key)
   if decision ~= "approve" and decision ~= "reject" then
     error("github-devloop: invalid decision")
   end

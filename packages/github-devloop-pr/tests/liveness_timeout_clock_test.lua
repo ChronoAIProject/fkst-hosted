@@ -61,7 +61,7 @@ local function timeout_attempt_comment(state_name, state_version, round, source_
 end
 
 local function timeout_attempt_v2_comment(row, generation_key, round, source_ref)
-  return trusted_comment(conv_attempts.timeout_attempt_v2_marker(core, proposal_id, row.from_state, row.liveness_class_id, generation_key, round, source_ref), "2026-06-03T00:00:00Z")
+  return trusted_comment(conv_attempts.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, round, source_ref), "2026-06-03T00:00:00Z")
 end
 
 local function implementing_attempt_comment(state_version, started_at, created_at, attempt, exec_ref)

@@ -346,7 +346,7 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   return result
 end
 
-function C.entity_view_cache_key(M, repo, kind, number)
+function C.entity_view_cache_key(repo, kind, number)
   return entity_view_cache_key(repo, kind, number)
 end
 
@@ -371,7 +371,7 @@ function C.fetch_entity_view(M, repo, kind, number, updated_at, opts)
   return fetch_entity_view(repo, kind, number, updated_at, opts)
 end
 
-function C.cached_entity_view(M, repo, kind, number)
+function C.cached_entity_view(repo, kind, number)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
     error("github-devloop: invalid cached entity view kind")

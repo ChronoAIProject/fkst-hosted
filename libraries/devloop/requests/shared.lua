@@ -27,7 +27,7 @@ function C.bounded_neutralized_text(value, limit)
   return text
 end
 
-function C.angle_display_text(M, item)
+function C.angle_display_text(item)
   if type(item) ~= "table" then
     return nil
   end
@@ -56,7 +56,7 @@ function C.build_convergence_display(M, header, unresolved, round)
   local angle_lines = {}
   if type(unresolved) == "table" and type(unresolved.angle_digests) == "table" then
     for _, item in ipairs(unresolved.angle_digests) do
-      local line = C.angle_display_text(M, item)
+      local line = C.angle_display_text(item)
       if line ~= nil then
         table.insert(angle_lines, line)
       end

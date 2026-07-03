@@ -434,7 +434,7 @@ function C.queue_starvation_reconcile_marker(issue_proposal_id, pr_number, versi
     .. '" -->'
 end
 
-function C.merge_ready_payload_from_queue_entry(M, entry, source_ref)
+function C.merge_ready_payload_from_queue_entry(entry, source_ref)
   if type(entry) ~= "table" then
     return nil
   end

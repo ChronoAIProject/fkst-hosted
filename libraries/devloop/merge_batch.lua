@@ -202,7 +202,7 @@ function C.run_merge_batch_window(M, repo, branches, first_merge_ready, queue_en
       "head=" .. tostring(files.head_sha or ""),
       "files=" .. tostring(#files.paths),
     })
-    local merge_ready = m_mq.merge_ready_payload_from_queue_entry(M, entry, entity_lib.pr_source_ref(repo, entry.pr_number))
+    local merge_ready = m_mq.merge_ready_payload_from_queue_entry(entry, entity_lib.pr_source_ref(repo, entry.pr_number))
     if merge_ready == nil then
       log_batch_window(M, entry.proposal_id, {
         "action=stop",

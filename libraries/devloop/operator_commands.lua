@@ -157,7 +157,7 @@ function C.operator_command_marker(command, outcome, reason)
     .. '" -->'
 end
 
-function C.build_operator_issue_rereview_comment_request(M, repo, issue_number, command, proposal, source_ref)
+function C.build_operator_issue_rereview_comment_request(repo, issue_number, command, proposal, source_ref)
   local marker = C.operator_command_marker(command, "applied", "rereview")
   return entity_lib.build_entity_comment_request({
     kind = "issue",
@@ -174,7 +174,7 @@ function C.build_operator_issue_rereview_comment_request(M, repo, issue_number, 
   }), source_ref)
 end
 
-function C.build_operator_issue_reready_comment_request(M, repo, issue_number, command, outcome_reason, source_ref)
+function C.build_operator_issue_reready_comment_request(repo, issue_number, command, outcome_reason, source_ref)
   local marker = C.operator_command_marker(command, "applied", outcome_reason or "reready")
   return entity_lib.build_entity_comment_request({
     kind = "issue",
@@ -191,7 +191,7 @@ function C.build_operator_issue_reready_comment_request(M, repo, issue_number, c
   }), source_ref)
 end
 
-function C.build_operator_issue_reimplement_comment_request(M, repo, issue_number, command, attempt, source_ref)
+function C.build_operator_issue_reimplement_comment_request(repo, issue_number, command, attempt, source_ref)
   local marker = C.operator_command_marker(command, "applied", "reimplement")
   return entity_lib.build_entity_comment_request({
     kind = "issue",
@@ -231,7 +231,7 @@ function C.build_operator_issue_dependency_waiver_comment_request(M, repo, issue
   }), source_ref)
 end
 
-function C.build_operator_issue_reintake_comment_request(M, repo, issue_number, command, candidate, source_ref)
+function C.build_operator_issue_reintake_comment_request(repo, issue_number, command, candidate, source_ref)
   local marker = C.operator_command_marker(command, "applied", "reintake")
   return entity_lib.build_entity_comment_request({
     kind = "issue",
@@ -248,7 +248,7 @@ function C.build_operator_issue_reintake_comment_request(M, repo, issue_number, 
   }), source_ref)
 end
 
-function C.build_operator_command_refusal_request(M, repo, pr_number, command, reason, source_ref)
+function C.build_operator_command_refusal_request(repo, pr_number, command, reason, source_ref)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "invalid command state")
   local marker = C.operator_command_marker(command, "refused", reason)
   return entity_lib.build_entity_comment_request({
@@ -266,7 +266,7 @@ function C.build_operator_command_refusal_request(M, repo, pr_number, command, r
   }), source_ref)
 end
 
-function C.build_operator_issue_command_refusal_request(M, repo, issue_number, command, reason, source_ref)
+function C.build_operator_issue_command_refusal_request(repo, issue_number, command, reason, source_ref)
   local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "invalid command state")
   local marker = C.operator_command_marker(command, "refused", reason)
   return entity_lib.build_entity_comment_request({

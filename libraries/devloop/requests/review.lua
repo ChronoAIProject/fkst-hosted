@@ -249,7 +249,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
   return request
 end
 
-function C.build_high_risk_review_evidence_comment_request(M, repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
+function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
   local marker = m_builders.high_risk_review_evidence_marker(issue_proposal_id,
     issue_version,
     pr_number,

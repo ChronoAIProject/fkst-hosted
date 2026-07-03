@@ -208,7 +208,7 @@ local function mock_linked_pr_state(comments, state, exit_code, times, run_opts)
     exit_code = exit_code or 0,
   }, times or 1)
   if exit_code == nil or exit_code == 0 then
-    t.run_department("departments/test_cache_seed/main.lua", { queue = "cache_seed", payload = { key = require("devloop.github_proxy_entity_view").entity_view_cache_key(core, repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
+    t.run_department("departments/test_cache_seed/main.lua", { queue = "cache_seed", payload = { key = require("devloop.github_proxy_entity_view").entity_view_cache_key(repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
     entity_read_mocks.mock_pr_read_forms(t, {
       repo = repo,
       number = 7,
@@ -281,7 +281,7 @@ end
 
 local function timeout_attempt_v2_comment(row, generation_key, round, created_at)
   return {
-    body = conv_attempts.timeout_attempt_v2_marker(core, proposal_id, row.from_state, row.liveness_class_id, generation_key, round, entity_lib.issue_source_ref(repo, 42)),
+    body = conv_attempts.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, round, entity_lib.issue_source_ref(repo, 42)),
     author_login = "fkst-test-bot",
     created_at = created_at or "2026-06-03T00:00:00Z",
   }

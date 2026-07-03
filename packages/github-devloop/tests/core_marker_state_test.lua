@@ -216,8 +216,7 @@ return {
     t.eq(core.compare_state_marker_order({ state = "merge-ready", version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z" }, "reviewing", review_version), -1)
     t.eq(core.compare_state_marker_order({ state = "pr-open", version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-06T01-02-03Z" }, "reviewing", review_version), 1)
 
-    local marker = m_builders.result_marker(core, 
-      proposal_id,
+    local marker = m_builders.result_marker(proposal_id,
       "approve",
       "consensus:github-devloop/issue/owner/repo/42/v1"
     )

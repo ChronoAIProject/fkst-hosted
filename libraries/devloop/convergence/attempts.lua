@@ -28,7 +28,7 @@ function C.timeout_attempt_marker(proposal_id, issue_version, state_name, round,
     .. '" -->'
 end
 
-function C.timeout_attempt_v2_marker(M, proposal_id, state_name, liveness_class_id, generation_key, round, source_ref)
+function C.timeout_attempt_v2_marker(proposal_id, state_name, liveness_class_id, generation_key, round, source_ref)
   local n = valid_round(round)
   if n == nil or n <= 0 then
     error("github-devloop: invalid timeout attempt round")
@@ -53,7 +53,7 @@ function C.timeout_attempt_latest_marker(proposal_id, state_name, liveness_class
     .. '" -->'
 end
 
-function C.build_timeout_attempt_comment_request(M, target, proposal_id, state, row, source_ref, attempt)
+function C.build_timeout_attempt_comment_request(target, proposal_id, state, row, source_ref, attempt)
   local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.timeout_attempt_marker(proposal_id, state.version, row.from_state, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(proposal_id, row.from_state, "", transition_version.strip_suffixes(state.version))
@@ -79,7 +79,7 @@ end
 
 function C.build_timeout_attempt_v2_comment_request(M, target, proposal_id, state, row, source_ref, attempt, generation_key)
   local normalized = base_ids.normalize_source_ref(source_ref)
-  local marker = C.timeout_attempt_v2_marker(M, proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
+  local marker = C.timeout_attempt_v2_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key, attempt, normalized)
   local latest_marker = C.timeout_attempt_latest_marker(proposal_id, row.from_state, row.liveness_class_id, generation_key)
   return entity_lib.build_entity_comment_request(target, "github-devloop timeout redrive attempt: "
     .. tostring(row.from_state)
@@ -118,7 +118,7 @@ function C.decompose_exhausted_marker(proposal_id, issue_version, round, source_
     .. '" -->'
 end
 
-function C.build_decompose_exhausted_comment_request(M, target, proposal_id, state, source_ref, attempt)
+function C.build_decompose_exhausted_comment_request(target, proposal_id, state, source_ref, attempt)
   local normalized = base_ids.normalize_source_ref(source_ref)
   local marker = C.decompose_exhausted_marker(proposal_id, state.version, attempt, normalized)
   return entity_lib.build_entity_comment_request(target, "github-devloop decompose output obligation exhausted\n\n"

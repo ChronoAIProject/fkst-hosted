@@ -31,7 +31,7 @@ function C.build_observe_comment_request(M, issue, proposal)
   }, issue.source_ref)
 end
 function C.build_result_comment_request(M, repo, issue_number, reached, state_name)
-  local marker = m_builders.result_marker(M, reached.proposal_id, reached.decision, reached.dedup_key)
+  local marker = m_builders.result_marker(reached.proposal_id, reached.decision, reached.dedup_key)
   local canonical_state = state_name or "ready"
   local effects = canonical_state == "ready" and "result-marker,ready-label,devloop-ready" or "result-marker,ready-label,dependency-hold"
   local state_marker = M.state_marker(reached.proposal_id, canonical_state, tostring(reached.effect_version or reached.dedup_key), effects)
@@ -309,7 +309,7 @@ function C.build_impl_failure_comment_request(M, repo, issue_number, ready, reas
   }, ready.source_ref)
 end
 
-function C.build_queue_starvation_reconcile_comment_request(M, repo, merge_ready, cause)
+function C.build_queue_starvation_reconcile_comment_request(repo, merge_ready, cause)
   local attempt_key = cause and cause.attempt_key or "attempt"
   local marker = m_mq.queue_starvation_reconcile_marker(merge_ready.proposal_id,
     merge_ready.pr_number,

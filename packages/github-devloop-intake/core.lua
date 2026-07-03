@@ -13,8 +13,8 @@ M = {
 local base = require("devloop.base")
 local function dept_exec_sync(...) return exec_sync(...) end
 M.safe_updated_at = function(...) return base.safe_updated_at(...) end
-M.intake_dedup_key = function(...) return base.intake_dedup_key(M, ...) end
-M.intake_candidate_delivery_dedup_key = function(...) return base.intake_candidate_delivery_dedup_key(M, ...) end
+M.intake_dedup_key = function(...) return base.intake_dedup_key(...) end
+M.intake_candidate_delivery_dedup_key = function(...) return base.intake_candidate_delivery_dedup_key(...) end
 M.ci_selfheal_once_key = function(...) return base.ci_selfheal_once_key(...) end
 M.ci_missing_status_first_observed_key = function(...) return base.ci_missing_status_first_observed_key(...) end
 M.judgment_worktree_path = base.judgment_worktree_path
@@ -65,7 +65,7 @@ M._is_review_meta_action = base._is_review_meta_action
 require("forge.github_debug_stamp").install(M, require("devloop.base").read_env)
 require("devloop.commands").install(M)
 local github_proxy_entity_view = require("devloop.github_proxy_entity_view")
-M.cached_entity_view = function(...) return github_proxy_entity_view.cached_entity_view(M, ...) end
+M.cached_entity_view = function(...) return github_proxy_entity_view.cached_entity_view(...) end
 M.fetch_pr_view_origin = github_proxy_entity_view.fetch_pr_view_origin
 M.invalidate_entity_after_write = github_proxy_entity_view.invalidate_entity_after_write
 require("devloop.logging").install(M)

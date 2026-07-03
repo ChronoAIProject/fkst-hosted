@@ -26,7 +26,7 @@ function C.issue_state_from_json(M, decoded)
     comments = parsers_misc.comments_from_json(M, decoded.comments),
     state = decoded.state,
     assignees = m_claims.assignee_logins(M, decoded.assignees),
-    author_login = m_claims.issue_author_login(M, decoded),
+    author_login = m_claims.issue_author_login(decoded),
   }
 end
 
@@ -51,7 +51,7 @@ function C.parse_issue_list_intake(M, stdout, limit)
         updated_at = issue.updatedAt or issue.updated_at,
         labels = shared.label_names(M, issue.labels),
         assignees = m_claims.assignee_logins(M, issue.assignees),
-        author_login = m_claims.issue_author_login(M, issue),
+        author_login = m_claims.issue_author_login(issue),
       })
     end
   end)
@@ -172,7 +172,7 @@ function C.parse_issue_view_implement(M, stdout)
   local result = C.parse_issue_view_meta(M, stdout)
   result.body = tostring(decoded.body or "")
   result.state = decoded.state
-  result.author_login = m_claims.issue_author_login(M, decoded)
+  result.author_login = m_claims.issue_author_login(decoded)
   return result
 end
 
@@ -196,7 +196,7 @@ function C.parse_issue_view_review(M, stdout)
   local decoded = json.decode(stdout or "{}")
   local result = C.parse_issue_view_meta(M, stdout)
   result.assignees = m_claims.assignee_logins(M, decoded.assignees)
-  result.author_login = m_claims.issue_author_login(M, decoded)
+  result.author_login = m_claims.issue_author_login(decoded)
   return result
 end
 
@@ -221,7 +221,7 @@ function C.parse_issue_view_review_loop(M, stdout)
   local decoded = json.decode(stdout or "{}")
   local result = C.parse_issue_view_meta(M, stdout)
   result.assignees = m_claims.assignee_logins(M, decoded.assignees)
-  result.author_login = m_claims.issue_author_login(M, decoded)
+  result.author_login = m_claims.issue_author_login(decoded)
   return result
 end
 
@@ -242,7 +242,7 @@ function C.parse_issue_view_observe(M, stdout)
     state_reason = decoded.stateReason or decoded.state_reason,
     comments = parsers_misc.comments_from_json(M, decoded.comments),
     assignees = m_claims.assignee_logins(M, decoded.assignees),
-    author_login = m_claims.issue_author_login(M, decoded),
+    author_login = m_claims.issue_author_login(decoded),
   }
 end
 

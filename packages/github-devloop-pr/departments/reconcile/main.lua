@@ -393,7 +393,7 @@ local function pipeline_timeout(event)
       local target = target_pr_number ~= nil
         and { kind = "pr", repo = repo, number = target_pr_number }
         or { kind = "issue", repo = repo, number = issue_number }
-      local comment_request = conv_attempts.build_decompose_exhausted_comment_request(core, target, reconcile.proposal_id, state, reconcile.source_ref, decision.attempt)
+      local comment_request = conv_attempts.build_decompose_exhausted_comment_request(target, reconcile.proposal_id, state, reconcile.source_ref, decision.attempt)
       local queue = target_pr_number ~= nil and "github-proxy.github_pr_comment_request" or "github-proxy.github_issue_comment_request"
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "blocked", "devloop_decompose", "applied(decompose-exhausted)", "blocked decompose output obligation exhausted")
       devloop_logging.log_apply("reconcile", reconcile.proposal_id, nil, nil, { add = {}, remove = {} }, { queue })

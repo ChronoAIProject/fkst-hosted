@@ -954,7 +954,7 @@ function C.has_result_marker(comments, proposal_id, decision, dedup_key)
   end
   -- Match the FULL marker (proposal + decision + dedup) so a stale opposite/older-version marker
   -- does not suppress writing the current decision's result marker.
-  local needle = m_builders.result_marker(devloop_base, proposal_id, decision, dedup_key)
+  local needle = m_builders.result_marker(proposal_id, decision, dedup_key)
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
     if parsers_misc._comment_body(devloop_base, comment):find(needle, 1, true) ~= nil then
       return true

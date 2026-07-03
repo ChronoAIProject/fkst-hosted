@@ -129,9 +129,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
   local reintake_command = operator_commands.operator_command_fact(core, current.comments, "reintake")
   local has_pending_reintake = reintake_command ~= nil and not operator_commands.has_operator_command_response(core, current.comments, reintake_command)
   if has_pending_reintake and not m_facts.has_intake_decision_marker(core, current.comments, candidate.proposal_id) then
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,
       issue_number,
       reintake_command,
       "reintake requires an existing intake decision",
@@ -142,9 +140,7 @@ local function read_current_for_candidate(repo, issue_number, candidate, event_t
     return nil
   end
   if has_pending_reintake and (devloop_base.is_opted_in(current.labels) or has_devloop_state_label(current.labels)) then
-    local refusal = operator_commands.build_operator_issue_command_refusal_request(
-      core,
-      repo,
+    local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,
       issue_number,
       reintake_command,
       "reintake requires no active devloop state",
@@ -273,7 +269,7 @@ local function act_intake_judge(event)
     local decision_candidate = copy_table(candidate)
     decision_candidate.dedup_key = decision_dedup_key
     local command_comment_request = has_pending_reintake
-      and operator_commands.build_operator_issue_reintake_comment_request(core, repo, issue_number, reintake_command, candidate, candidate.source_ref)
+      and operator_commands.build_operator_issue_reintake_comment_request(repo, issue_number, reintake_command, candidate, candidate.source_ref)
       or nil
     local raised = {
       "github-proxy.github_issue_comment_request",

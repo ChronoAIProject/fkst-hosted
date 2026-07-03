@@ -22,9 +22,7 @@ local spec = {
 }
 
 local function raise_reintake_refusal(repo, issue_number, proposal_id, command, reason, source_ref)
-  local request = operator_commands.build_operator_issue_command_refusal_request(
-    core,
-    repo,
+  local request = operator_commands.build_operator_issue_command_refusal_request(repo,
     tostring(issue_number),
     command,
     reason,

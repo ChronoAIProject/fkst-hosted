@@ -240,7 +240,7 @@ function C.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number,
   })
 end
 
-function C.build_devloop_fix_reflection_payload(M, unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
+function C.build_devloop_fix_reflection_payload(unresolved, issue_proposal_id, issue_version, pr_number, fix_round, source_ref)
   local review_dedup_key = unresolved.review_dedup_key or unresolved.dedup_key
   local payload = C.build_devloop_review_meta_payload({
     proposal_id = unresolved.proposal_id,

@@ -125,8 +125,8 @@ end
 
 return {
   test_comment_template_audit_has_complete_language_table = function()
-    local en = comment_strings.comment_strings(core, "en")
-    local zh = comment_strings.comment_strings(core, "zh")
+    local en = comment_strings.comment_strings("en")
+    local zh = comment_strings.comment_strings("zh")
     local human = 0
     for _, row in ipairs(comment_strings.comment_template_audit()) do
       if row.classification == "human" then
@@ -166,7 +166,7 @@ return {
       {
         body = "lorem ipsum " .. cjk_probe .. "\n"
           .. core.state_marker(issue_proposal_id, "ready", issue_version)
-          .. "\n" .. m_builders.result_marker(core, issue_proposal_id, "approve", "consensus:v1")
+          .. "\n" .. m_builders.result_marker(issue_proposal_id, "approve", "consensus:v1")
           .. "\n" .. core.dependency_wait_marker(issue_proposal_id, issue_version, { 7 }),
         author_login = devloop_base.trusted_bot_login(),
       },

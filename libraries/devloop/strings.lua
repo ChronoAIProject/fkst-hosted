@@ -197,7 +197,7 @@ function C.comment_string(M, key, exec)
   return lang_strings[key] or strings.en[key] or tostring(key)
 end
 
-function C.comment_strings(M, lang)
+function C.comment_strings(lang)
   local normalized = normalize_output_lang(lang)
   return strings[normalized] or strings.en
 end

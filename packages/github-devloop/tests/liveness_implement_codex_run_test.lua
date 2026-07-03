@@ -180,16 +180,14 @@ return {
       local eval = m_rae.actionable_epoch_resolve(core, row, state, facts, facts.now_seconds)
       t.eq(eval.status, "actionable")
       t.eq(eval.signal.reason, "codex-run-deadline-expired")
-      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-        event.proposal_id,
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(event.proposal_id,
         row.from_state,
         row.liveness_class_id,
         eval.generation_key,
         1,
         event.source_ref
       )))
-      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-        event.proposal_id,
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(event.proposal_id,
         row.from_state,
         row.liveness_class_id,
         eval.generation_key,
@@ -310,16 +308,14 @@ return {
       t.eq(eval.reason, "codex run liveness indeterminate over row budget")
       t.eq(eval.signal.reason, "codex-runs-unavailable")
       t.eq(eval.codex_runs_fallback, true)
-      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-        event.proposal_id,
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(event.proposal_id,
         row.from_state,
         row.liveness_class_id,
         eval.generation_key,
         1,
         event.source_ref
       )))
-      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-        event.proposal_id,
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(event.proposal_id,
         row.from_state,
         row.liveness_class_id,
         eval.generation_key,
@@ -409,16 +405,14 @@ return {
       t.eq(eval.reason, "codex run liveness indeterminate over row budget")
       t.eq(eval.signal.reason, "codex-run-deadline-unavailable")
       t.eq(eval.signal.indeterminate, true)
-      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-        event.proposal_id,
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(event.proposal_id,
         row.from_state,
         row.liveness_class_id,
         eval.generation_key,
         1,
         event.source_ref
       )))
-      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(core,
-        event.proposal_id,
+      table.insert(facts.current.comments, trusted_comment(conv_attempts.timeout_attempt_v2_marker(event.proposal_id,
         row.from_state,
         row.liveness_class_id,
         eval.generation_key,
