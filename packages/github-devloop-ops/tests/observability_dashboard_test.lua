@@ -226,7 +226,7 @@ return {
     dashboard_commands.gh_dashboard_issue_create = old_issue_create
 
     t.eq(ok, false)
-    t.is_true(tostring(err):find("dashboard issue list failed: empty output", 1, true) ~= nil)
+    t.is_true(tostring(err):find("dashboard-issue-list-empty: dashboard issue list failed: empty output", 1, true) ~= nil)
     t.eq(create_calls, 0)
   end,
 

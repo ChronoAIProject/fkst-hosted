@@ -63,7 +63,7 @@ local is_path_safe_key = strings.is_path_safe_key
 local function require_bounded_field(payload, name, limit)
   local value = payload_validator.require_field(payload, name, "autochrono")
   if not is_bounded_string(tostring(value), limit) then
-    error("autochrono: invalid " .. name)
+    error("autochrono: payload-field-invalid: invalid " .. name)
   end
   return value
 end
@@ -139,13 +139,13 @@ end
 
 function M.normalize_source_ref(source_ref)
   if type(source_ref) ~= "table" then
-    error("autochrono: invalid source_ref")
+    error("autochrono: source-ref-invalid: invalid source_ref")
   end
   if not is_bounded_string(source_ref.kind, max_key_len) then
-    error("autochrono: invalid source_ref.kind")
+    error("autochrono: source-ref-invalid: invalid source_ref.kind")
   end
   if not is_bounded_string(source_ref.ref, max_key_len) then
-    error("autochrono: invalid source_ref.ref")
+    error("autochrono: source-ref-invalid: invalid source_ref.ref")
   end
   return {
     kind = source_ref.kind,
@@ -193,7 +193,7 @@ end
 
 function M.require_issue_fields(issue)
   if type(issue) ~= "table" then
-    error("autochrono: issue must be a table")
+    error("autochrono: payload-invalid: issue must be a table")
   end
   return {
     repo = require_bounded_field(issue, "repo", max_key_len),
@@ -207,16 +207,16 @@ end
 
 function M.render_template(template, vars)
   if type(template) ~= "string" then
-    error("autochrono: template must be a string")
+    error("autochrono: template-invalid: template must be a string")
   end
   if type(vars) ~= "table" then
-    error("autochrono: template vars must be a table")
+    error("autochrono: template-invalid: template vars must be a table")
   end
 
   return (template:gsub("{{([%w_]+)}}", function(name)
     local value = vars[name]
     if value == nil then
-      error("autochrono: missing template var " .. name)
+      error("autochrono: template-var-missing: missing template var " .. name)
     end
     return tostring(value)
   end))

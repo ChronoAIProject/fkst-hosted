@@ -8,20 +8,20 @@ local error_context = "github-autochrono glue"
 local function require_source_ref(payload)
   local source_ref = require_field(payload, "source_ref", error_context)
   if type(source_ref) ~= "table" or source_ref.kind == nil or source_ref.ref == nil then
-    error("github-autochrono glue: invalid source_ref")
+    error("github-autochrono-glue: source-ref-invalid: invalid source_ref")
   end
   return source_ref
 end
 
 function M.entity_to_issue(payload)
   if type(payload) ~= "table" then
-    error("github-autochrono glue: payload must be a table")
+    error("github-autochrono-glue: payload-invalid: payload must be a table")
   end
   if payload.schema ~= "github-proxy.v1" then
-    error("github-autochrono glue: unsupported entity schema")
+    error("github-autochrono-glue: schema-unsupported: unsupported entity schema")
   end
   if payload.type ~= "issue" then
-    error("github-autochrono glue: entity is not an issue")
+    error("github-autochrono-glue: entity-kind-invalid: entity is not an issue")
   end
 
   return {
@@ -39,10 +39,10 @@ end
 
 function M.reply_to_comment_request(payload)
   if type(payload) ~= "table" then
-    error("github-autochrono glue: payload must be a table")
+    error("github-autochrono-glue: payload-invalid: payload must be a table")
   end
   if payload.schema ~= "autochrono.reply.v1" then
-    error("github-autochrono glue: unsupported reply schema")
+    error("github-autochrono-glue: schema-unsupported: unsupported reply schema")
   end
 
   return {

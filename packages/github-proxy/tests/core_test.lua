@@ -346,7 +346,7 @@ return {
     local result = core.fetch_rest_issue_view("owner/repo", 3)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: REST response is not valid JSON") ~= nil)
+    t.is_true(result.stderr:find("github%-proxy: rest%-json%-invalid: REST response is not valid JSON") ~= nil)
   end,
 
   test_rest_issue_view_fails_closed_on_empty_success_stdout = function()
@@ -364,7 +364,7 @@ return {
     local result = core.fetch_rest_issue_view("owner/repo", 3)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: REST entity response is empty") ~= nil)
+    t.is_true(result.stderr:find("github%-proxy: rest%-entity%-empty: REST entity response is empty") ~= nil)
   end,
 
   test_rest_pr_view_fails_closed_on_malformed_success_stdout = function()
@@ -382,7 +382,7 @@ return {
     local result = core.fetch_rest_pr_view("owner/repo", 7)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: REST response is not valid JSON") ~= nil)
+    t.is_true(result.stderr:find("github%-proxy: rest%-json%-invalid: REST response is not valid JSON") ~= nil)
   end,
 
   test_rest_pr_view_fails_closed_on_empty_success_stdout = function()
@@ -400,7 +400,7 @@ return {
     local result = core.fetch_rest_pr_view("owner/repo", 7)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: REST entity response is empty") ~= nil)
+    t.is_true(result.stderr:find("github%-proxy: rest%-entity%-empty: REST entity response is empty") ~= nil)
   end,
 
   test_rest_issue_view_empty_comments_stdout_uses_empty_comments_fallback = function()

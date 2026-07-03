@@ -32,7 +32,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
     return "exists"
   end
   if not common.command_indicates_not_found(existing) then
-    error("github-devloop: dashboard label get failed: " .. tostring(existing.stderr))
+    error("github-devloop: dashboard-label-get-failed: dashboard label get failed: " .. tostring(existing.stderr))
   end
 
   deferred = dashboard_deferred_if_deadline(deadline); if deferred ~= nil then return deferred end
@@ -49,7 +49,7 @@ local function ensure_dashboard_label(repo, limits, deadline)
   if common.command_indicates_already_exists(created) then
     return "exists"
   end
-  error("github-devloop: dashboard label create failed: " .. tostring(created.stderr))
+  error("github-devloop: dashboard-label-create-failed: dashboard label create failed: " .. tostring(created.stderr))
 end
 
 local function dashboard_input_path(repo, version, hash)
@@ -454,11 +454,11 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
       .. " auth_mode=" .. common.gh_auth_mode(core)
       .. " http_status=" .. common.stderr_http_status(listed.stderr)
       .. " exit_code=" .. tostring(listed.exit_code))
-    error("github-devloop: dashboard issue list failed: " .. tostring(listed.stderr))
+    error("github-devloop: dashboard-issue-list-failed: dashboard issue list failed: " .. tostring(listed.stderr))
   end
   if tostring(listed.stdout or ""):match("^%s*$") then
     log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED locator=label-list label=" .. dashboard_label .. " reason=empty-output")
-    error("github-devloop: dashboard issue list failed: empty output")
+    error("github-devloop: dashboard-issue-list-empty: dashboard issue list failed: empty output")
   end
   for _, issue in ipairs(parsers_misc.parse_dashboard_issue_list(listed.stdout)) do
     -- Normalize both sides so a "<slug>[bot]" author (REST) matches a bare bot login.
@@ -591,7 +591,7 @@ local function publish_observability_dashboard_locked(repo, dashboard, limits, d
         .. " hash=" .. tostring(dashboard.hash))
       return "cas-mismatch"
     end
-    error("github-devloop: dashboard issue update failed: " .. stderr)
+    error("github-devloop: dashboard-issue-update-failed: dashboard issue update failed: " .. stderr)
   end
   log.info("github-devloop dept=observability tag=DASHBOARD_UPDATED issue=" .. tostring(current.number)
     .. " hash=" .. tostring(dashboard.hash))

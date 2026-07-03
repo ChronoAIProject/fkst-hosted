@@ -175,7 +175,7 @@ return {
     local result = run_merge(payload, opts("rollup-merge-malformed", "1"))
     t.is_true(result.exit_code ~= 0)
     t.is_true(tostring(result.error or ""):find(
-      "github-devloop: rollup_merge unsupported devloop_rollup_ready payload",
+      "github-devloop: rollup-ready-payload-invalid: rollup_merge unsupported devloop_rollup_ready payload",
       1,
       true
     ) ~= nil)

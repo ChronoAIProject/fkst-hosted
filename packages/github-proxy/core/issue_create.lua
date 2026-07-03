@@ -83,14 +83,14 @@ end
 
 function M.issue_create_marker(dedup_key)
   if not is_bounded_marker_value(dedup_key, max_dedup_len) then
-    error("github-proxy: invalid issue-create dedup_key")
+    error("github-proxy: issue-create-dedup-key-invalid: invalid issue-create dedup_key")
   end
   return "<!-- fkst:github-proxy:issue-create:" .. tostring(dedup_key) .. " -->"
 end
 
 function M.issue_created_marker(dedup_key, issue_number)
   if not is_bounded_marker_value(dedup_key, max_dedup_len) then
-    error("github-proxy: invalid issue-created dedup_key")
+    error("github-proxy: issue-created-dedup-key-invalid: invalid issue-created dedup_key")
   end
   local issue = tostring(issue_number or "unknown")
   if #issue > max_issue_number_len then
@@ -103,7 +103,7 @@ end
 
 function M.issue_create_intent_marker(dedup_key)
   if not is_bounded_marker_value(dedup_key, max_dedup_len) then
-    error("github-proxy: invalid issue-create intent dedup_key")
+    error("github-proxy: issue-create-intent-key-invalid: invalid issue-create intent dedup_key")
   end
   return '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. tostring(dedup_key)
     .. '" -->'
@@ -389,7 +389,7 @@ local function maybe_raise_post_create_blocked_by(payload, issue_number)
     return
   end
   if not shared.is_positive_integer(issue_number) then
-    error("github-proxy: issue-create post_create_blocked_by missing created issue number")
+    error("github-proxy: created-issue-number-missing: issue-create post_create_blocked_by missing created issue number")
   end
   raise("github_issue_blocked_by_request", {
     schema = "github-proxy.issue-blocked-by.v1",
@@ -440,7 +440,7 @@ function M.write_issue_create_request(payload)
         M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
         local confirm = M.gh_exec(M.gh_issue_create_parent_view_cmd(parent), 30, "GitHub parent issue-create intent confirm")
         if not M.has_trusted_issue_create_intent_marker(M.parse_issue_comments(confirm.stdout), payload.dedup_key, bot_login) then
-          error("github-proxy: issue-create intent marker not visible after write")
+          error("github-proxy: marker-pending: issue-create intent marker not visible after write")
         end
       end
     end

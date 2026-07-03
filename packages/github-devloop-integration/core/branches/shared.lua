@@ -9,14 +9,14 @@ function Shared.install(M)
 
   local function require_safe_branch(name, branch)
     if not forge_validators.is_git_ref_safe(branch) then
-      error("github-devloop: invalid " .. tostring(name))
+      error("github-devloop: git-ref-invalid: invalid " .. tostring(name))
     end
     return tostring(branch)
   end
 
   local function require_safe_sha(name, sha)
     if not forge_validators.is_git_sha(sha) then
-      error("github-devloop: invalid " .. tostring(name))
+      error("github-devloop: git-sha-invalid: invalid " .. tostring(name))
     end
     return tostring(sha)
   end
@@ -24,14 +24,14 @@ function Shared.install(M)
   local function require_safe_repo(repo)
     local value = tostring(repo or "")
     if value == "" or base_ids.safe_repo(value) ~= value then
-      error("github-devloop: invalid branch sync repo")
+      error("github-devloop: repo-invalid: invalid branch sync repo")
     end
     return value
   end
 
   local function require_sync_result(result)
     if result ~= "clean" and result ~= "resolved" then
-      error("github-devloop: invalid branch sync result")
+      error("github-devloop: branch-sync-result-invalid: invalid branch sync result")
     end
     return result
   end
@@ -39,7 +39,7 @@ function Shared.install(M)
   local function runtime_root_path(runtime_root)
     local root = strings.trim(runtime_root)
     if root == "" or root:find("[\r\n]") ~= nil then
-      error("github-devloop: invalid FKST_RUNTIME_ROOT")
+      error("github-devloop: config-invalid: invalid FKST_RUNTIME_ROOT")
     end
     return root:gsub("/+$", "")
   end
@@ -49,7 +49,7 @@ function Shared.install(M)
   local function git()
     if git_handle == nil then
       if type(exec_argv) ~= "function" then
-        error("github-devloop: git adapter requires exec_argv")
+        error("github-devloop: adapter-primitive-missing: git adapter requires exec_argv")
       end
       git_handle = require("forge.git").new(exec_argv)
     end
@@ -64,7 +64,7 @@ function Shared.install(M)
     if type(result_or_error) == "table" and result_or_error.result ~= nil then
       return result_or_error.result
     end
-    error(tostring(label or "git-adapter operation") .. " failed: " .. tostring(result_or_error))
+    error("github-devloop: git-adapter-failed: " .. tostring(label or "git-adapter operation") .. " failed: " .. tostring(result_or_error))
   end
 
   local function run_git_ok(fn, label)
@@ -80,7 +80,7 @@ function Shared.install(M)
       .. base_ids.safe_repo(require_safe_repo(repo))
       .. "/fetch"
     if not strings.is_path_safe_key(key, M._max_key_len) then
-      error("github-devloop: invalid git ref-store lock key")
+      error("github-devloop: lock-key-invalid: invalid git ref-store lock key")
     end
     return key
   end

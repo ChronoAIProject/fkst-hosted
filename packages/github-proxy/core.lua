@@ -55,7 +55,7 @@ end
 
 local function read_env_command(name)
   if not allowed_env[name] then
-    error("env name is not allowed: " .. tostring(name))
+    error("github-proxy: env-name-denied: env name is not allowed: " .. tostring(name))
   end
   return 'printf %s "$' .. name .. '"'
 end
@@ -104,7 +104,7 @@ function M.github_proxy_replay_budget(exec)
   value = tostring(value):gsub("^%s+", ""):gsub("%s+$", "")
   local parsed = tonumber(value)
   if parsed == nil or parsed ~= math.floor(parsed) or parsed < 1 or parsed > 100 then
-    error("github-proxy: invalid FKST_GITHUB_PROXY_REPLAY_BUDGET")
+    error("github-proxy: config-invalid: invalid FKST_GITHUB_PROXY_REPLAY_BUDGET")
   end
   return parsed
 end
@@ -216,7 +216,7 @@ function M.assert_trusted_bot_configured()
   end
 
   if trusted_bot_login == nil then
-    error("github-proxy: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
+    error("github-proxy: config-missing: FKST_GITHUB_BOT_LOGIN is required when FKST_GITHUB_WRITE=1")
   end
   return trusted_bot_login
 end
@@ -379,10 +379,10 @@ end
 
 function M.github_pr_list_head(repo, branch, base_branch, timeout)
   if not is_git_ref_safe(branch) then
-    error("github-proxy: invalid branch")
+    error("github-proxy: git-ref-invalid: invalid branch")
   end
   if base_branch ~= nil and not is_git_ref_safe(base_branch) then
-    error("github-proxy: invalid base branch")
+    error("github-proxy: git-ref-invalid: invalid base branch")
   end
   return M.github().pr_list_head(repo, branch, base_branch, timeout or 30)
 end
@@ -422,24 +422,24 @@ end
 
 function M.git_push_branch(branch, timeout)
   if not is_git_ref_safe(branch) then
-    error("github-proxy: invalid branch")
+    error("github-proxy: git-ref-invalid: invalid branch")
   end
   return M.git().push_branch(branch, timeout or 120)
 end
 
 function M.git_show_ref_branch(branch, timeout)
   if not is_git_ref_safe(branch) then
-    error("github-proxy: invalid branch")
+    error("github-proxy: git-ref-invalid: invalid branch")
   end
   return M.git().show_ref_branch(branch, timeout or 30)
 end
 
 function M.git_is_ancestor(maybe_ancestor_sha, descendant_sha, timeout)
   if not is_git_sha(maybe_ancestor_sha) then
-    error("github-proxy: invalid ancestor sha")
+    error("github-proxy: git-sha-invalid: invalid ancestor sha")
   end
   if not is_git_sha(descendant_sha) then
-    error("github-proxy: invalid descendant sha")
+    error("github-proxy: git-sha-invalid: invalid descendant sha")
   end
   return M.git().is_ancestor(maybe_ancestor_sha, descendant_sha, timeout or 30)
 end
@@ -454,10 +454,10 @@ end
 
 function M.github_pr_create(repo, branch, base_branch, title, body_file, timeout)
   if not is_git_ref_safe(branch) then
-    error("github-proxy: invalid branch")
+    error("github-proxy: git-ref-invalid: invalid branch")
   end
   if base_branch ~= nil and not is_git_ref_safe(base_branch) then
-    error("github-proxy: invalid base branch")
+    error("github-proxy: git-ref-invalid: invalid base branch")
   end
   return M.github().pr_create(repo, branch, base_branch, title, body_file, timeout or 60)
 end
@@ -476,7 +476,7 @@ end
 
 function M.github_pr_view_head_oid(repo, pr_number, timeout)
   if not M.is_positive_integer(pr_number) then
-    error("github-proxy: invalid PR number")
+    error("github-proxy: pr-number-invalid: invalid PR number")
   end
   return M.github().pr_view(repo, pr_number, timeout or 30)
 end
@@ -719,7 +719,7 @@ function M.apply_entity_labels(repo, target_kind, number, add_labels, remove_lab
     end
     edit_context = "pr edit-labels"
   else
-    error("github-proxy: invalid label target kind")
+    error("github-proxy: label-target-kind-invalid: invalid label target kind")
   end
 
   M.gh_exec(

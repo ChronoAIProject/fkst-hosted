@@ -113,7 +113,7 @@ function M.rollup_red_window_minutes(exec)
   end
   local value = tonumber(strings.trim(raw))
   if value == nil or value ~= math.floor(value) or value < 1 or value > 1440 then
-    error("github-devloop: invalid FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES")
+    error("github-devloop: config-invalid: invalid FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES")
   end
   return value
 end

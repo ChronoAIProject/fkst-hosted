@@ -90,7 +90,7 @@ end
 function M.gh_issue_blocked_by_cmd(repo, issue_number)
   local owner, name = forge_strings.split_repo(repo)
   if owner == nil or not shared.is_positive_integer(issue_number) then
-    error("github-proxy: invalid blockedBy query target")
+    error("github-proxy: blocked-by-target-invalid: invalid blockedBy query target")
   end
   local query = M.render_github_graphql_query("blocked_by", {
     owner = owner,
@@ -117,20 +117,20 @@ local function parse_blocked_by(stdout)
   local blocked_by = issue and issue.blockedBy
   local nodes = blocked_by and blocked_by.nodes
   if type(nodes) ~= "table" then
-    error("github-proxy: malformed blockedBy response")
+    error("github-proxy: blocked-by-response-malformed: malformed blockedBy response")
   end
   if (type(blocked_by.totalCount) == "number" and blocked_by.totalCount > #nodes)
     or (type(blocked_by.pageInfo) == "table" and blocked_by.pageInfo.hasNextPage == true) then
-    error("github-proxy: blockedBy response truncated")
+    error("github-proxy: blocked-by-response-truncated: blockedBy response truncated")
   end
   local edges = {}
   for _, node in ipairs(nodes) do
     if type(node) ~= "table" or not shared.is_positive_integer(node.number) then
-      error("github-proxy: malformed blockedBy node")
+      error("github-proxy: blocked-by-node-malformed: malformed blockedBy node")
     end
     local node_repo = node.repository and node.repository.nameWithOwner
     if type(node_repo) ~= "string" or node_repo == "" then
-      error("github-proxy: malformed blockedBy node repository")
+      error("github-proxy: blocked-by-node-malformed: malformed blockedBy node repository")
     end
     table.insert(edges, {
       repo = node_repo,
@@ -154,7 +154,7 @@ function M.blocked_by_marker(dedup_key, blocked_issue_number, blocking_issue_num
   if not is_marker_value(dedup_key)
     or not shared.is_positive_integer(blocked_issue_number)
     or not shared.is_positive_integer(blocking_issue_number) then
-    error("github-proxy: invalid blocked-by marker fields")
+    error("github-proxy: blocked-by-marker-invalid: invalid blocked-by marker fields")
   end
   return '<!-- fkst:github-proxy:blocked-by:v1 dedup="' .. tostring(dedup_key)
     .. '" blocked="' .. tostring(math.floor(tonumber(blocked_issue_number)))
@@ -186,7 +186,7 @@ end
 
 function M.write_issue_blocked_by_request(payload)
   if not M.validate_issue_blocked_by_payload(payload) then
-    error("github-proxy: issue-blocked-by request missing or invalid fields")
+    error("github-proxy: issue-blocked-by-payload-invalid: issue-blocked-by request missing or invalid fields")
   end
   local mode = M.read_env("FKST_GITHUB_WRITE") == "1" and "real" or "dry-run"
   M.log_line("info", "github_issue_blocked_by", "OUTBOUND", {
@@ -214,7 +214,7 @@ function M.write_issue_blocked_by_request(payload)
       local blocked_id = M.parse_issue_node_id(blocked.stdout)
       local blocking_id = M.parse_issue_node_id(blocking.stdout)
       if blocked_id == nil or blocking_id == nil then
-        error("github-proxy: issue node id missing")
+        error("github-proxy: issue-node-id-missing: issue node id missing")
       end
       M.gh_exec(M.gh_add_blocked_by_cmd(blocked_id, blocking_id), 30, "GitHub addBlockedBy")
     end

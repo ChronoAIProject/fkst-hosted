@@ -26,7 +26,7 @@ local github_handle
 local function require_repo(repo)
   local value = tostring(repo or "")
   if value == "" or base_ids.safe_repo(value) ~= value then
-    error("github-devloop: FKST_GITHUB_REPO is required for substrate-ref scan")
+    error("github-devloop: config-missing: FKST_GITHUB_REPO is required for substrate-ref scan")
   end
   return value
 end
@@ -53,13 +53,13 @@ local function run_adapter(fn, label)
   if type(result_or_error) == "table" and result_or_error.result ~= nil then
     return result_or_error.result
   end
-  error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result_or_error))
+  error("github-devloop: adapter-operation-failed: " .. tostring(label) .. " failed: " .. tostring(result_or_error))
 end
 
 local function run_cmd(fn, label)
   local result = run_adapter(fn, label)
   if result.exit_code ~= 0 then
-    error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
+    error("github-devloop: command-failed: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
   end
   return result
 end
@@ -82,7 +82,7 @@ end
 local function run_gh(fn, label)
   local result = run_adapter(fn, label)
   if result.exit_code ~= 0 then
-    error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
+    error("github-devloop: gh-command-failed: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
   end
   return result
 end
@@ -93,7 +93,7 @@ local function read_runtime_root()
   end, "runtime root read")
   local root = strings.trim(result.stdout)
   if root == "" or root:find("[\r\n]") ~= nil then
-    error("github-devloop: FKST_RUNTIME_ROOT is required for substrate-ref bump")
+    error("github-devloop: config-missing: FKST_RUNTIME_ROOT is required for substrate-ref bump")
   end
   return root:gsub("/+$", "")
 end
@@ -110,11 +110,11 @@ local function read_pin()
     return nil
   end
   if result.exit_code ~= 0 then
-    error("github-devloop: substrate-ref pin read failed: " .. tostring(result.stderr))
+    error("github-devloop: substrate-ref-pin-read-failed: substrate-ref pin read failed: " .. tostring(result.stderr))
   end
   local pin = strings.trim(result.stdout)
   if not forge_validators.is_git_sha(pin) then
-    error("github-devloop: invalid .fkst/substrate-ref pin")
+    error("github-devloop: substrate-ref-pin-invalid: invalid .fkst/substrate-ref pin")
   end
   return pin:lower()
 end
@@ -136,7 +136,7 @@ local function fetch_substrate_dev_head()
   )
   local sha = parse_ls_remote(result.stdout)
   if sha == nil then
-    error("github-devloop: substrate upstream head read returned an invalid dev head")
+    error("github-devloop: substrate-dev-head-invalid: substrate upstream head read returned an invalid dev head")
   end
   return sha
 end
@@ -241,7 +241,7 @@ local function existing_bump_pr(repo)
   end, "substrate-ref PR list")
   local prs = parse_pr_list(result.stdout)
   if #prs > 1 then
-    error("github-devloop: multiple open substrate-ref bump PRs found")
+    error("github-devloop: substrate-ref-pr-ambiguous: multiple open substrate-ref bump PRs found")
   end
   return prs[1]
 end
@@ -267,7 +267,7 @@ local function ensure_parent_dir(path)
   local parent = value:gsub("/+$", ""):match("^(.*)/[^/]+$") or "."
   local result = run_argv({ "mkdir", "-p", parent }, 30, "substrate-ref directory create")
   if result.exit_code ~= 0 then
-    error("github-devloop: substrate-ref directory create failed: " .. tostring(result.stderr))
+    error("github-devloop: directory-create-failed: substrate-ref directory create failed: " .. tostring(result.stderr))
   end
 end
 
@@ -279,7 +279,7 @@ local function remove_worktree_if_present(worktree)
   end
   local remove = M.git.worktree_remove(value, 60)
   if remove.exit_code ~= 0 then
-    error("github-devloop: git stale substrate-ref worktree remove failed: " .. tostring(remove.stderr))
+    error("github-devloop: worktree-remove-failed: git stale substrate-ref worktree remove failed: " .. tostring(remove.stderr))
   end
 end
 
@@ -316,7 +316,7 @@ local function fetch_bump_branch_head()
   end, "substrate-ref bump branch head")
   local sha = strings.trim(head.stdout)
   if not forge_validators.is_git_sha(sha) then
-    error("github-devloop: invalid substrate-ref bump branch head")
+    error("github-devloop: branch-head-invalid: invalid substrate-ref bump branch head")
   end
   return sha:lower()
 end
@@ -343,7 +343,7 @@ local function remove_existing_branch_worktree(branch)
     return git().worktree_list(30)
   end, "substrate-ref worktree list")
   if list.exit_code ~= 0 then
-    error("github-devloop: substrate-ref worktree list failed exit="
+    error("github-devloop: worktree-list-failed: substrate-ref worktree list failed exit="
       .. tostring(list.exit_code)
       .. " stderr="
       .. tostring(list.stderr))
@@ -352,7 +352,7 @@ local function remove_existing_branch_worktree(branch)
   if existing ~= nil then
     local remove = M.git.worktree_remove(existing, 60)
     if remove.exit_code ~= 0 then
-      error("github-devloop: stale substrate-ref branch worktree remove failed: " .. tostring(remove.stderr))
+      error("github-devloop: worktree-remove-failed: stale substrate-ref branch worktree remove failed: " .. tostring(remove.stderr))
     end
   end
 end
@@ -366,7 +366,7 @@ local function pin_delta_state(worktree)
     return "empty"
   end
   if name ~= substrate_ref_path then
-    error("github-devloop: substrate-ref bump changed unexpected paths")
+    error("github-devloop: unexpected-diff-path: substrate-ref bump changed unexpected paths")
   end
   return "pin-only"
 end
@@ -375,7 +375,7 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
   local old_branch_head = fetch_bump_branch_head()
   local base_head = git_mechanics.current_base_head(M.git, base_branch)
   if base_head == nil then
-    error("github-devloop: unable to read base branch head for substrate-ref bump")
+    error("github-devloop: base-head-missing: unable to read base branch head for substrate-ref bump")
   end
   if old_branch_head ~= nil and remote_bump_branch_pin(old_branch_head) == target_sha then
     local ancestry = git_mechanics.git_is_ancestor(M.git, base_head, old_branch_head, 30)
@@ -411,19 +411,19 @@ local function create_or_update_branch(repo, base_branch, current_pin, target_sh
     if old_branch_head == nil then
       local push = git_mechanics.git_push_worktree_branch_update(M.git, worktree, bump_branch, 120)
       if push.exit_code ~= 0 then
-        error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
+        error("github-devloop: git-push-failed: substrate-ref push failed: " .. tostring(push.stderr))
       end
     else
       local push = git().git_push_worktree_branch_update_with_lease(worktree, bump_branch, old_branch_head, 120)
       if push.exit_code ~= 0 then
-        error("github-devloop: substrate-ref push failed: " .. tostring(push.stderr))
+        error("github-devloop: git-push-failed: substrate-ref push failed: " .. tostring(push.stderr))
       end
     end
   end)
   if added then
     local remove = M.git.worktree_remove(worktree, 60)
     if ok and remove.exit_code ~= 0 then
-      error("github-devloop: substrate-ref worktree remove failed: " .. tostring(remove.stderr))
+      error("github-devloop: worktree-remove-failed: substrate-ref worktree remove failed: " .. tostring(remove.stderr))
     end
   end
   if not ok then
@@ -501,7 +501,7 @@ end
 
 local function substrate_ref_merge_marker(pr, target_sha, outcome, reason)
   if not forge_validators.is_positive_pr_number(pr and pr.number) or not forge_validators.is_git_sha(pr and pr.head_sha) or not forge_validators.is_git_sha(target_sha) then
-    error("github-devloop: invalid substrate-ref merge marker")
+    error("github-devloop: substrate-ref-merge-marker-invalid: invalid substrate-ref merge marker")
   end
   return '<!-- fkst:github-devloop:substrate-ref-merge:v1 pr="' .. tostring(pr.number)
     .. '" head_sha="' .. tostring(pr.head_sha)

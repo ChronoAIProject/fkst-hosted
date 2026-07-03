@@ -17,12 +17,12 @@ local function decode_json(stdout)
   if ok and type(decoded) == "table" then
     return decoded
   end
-  error("github-proxy: REST response is not valid JSON")
+  error("github-proxy: rest-json-invalid: REST response is not valid JSON")
 end
 
 local function decode_entity_json(stdout)
   if stdout == nil or stdout == "" then
-    error("github-proxy: REST entity response is empty")
+    error("github-proxy: rest-entity-empty: REST entity response is empty")
   end
   return decode_json(stdout)
 end
@@ -115,7 +115,7 @@ function M.rest_pr_to_view_json(pr_stdout, comments_stdout)
   local head_name_with_owner = repo_name_with_owner(head_repo)
   local base_name_with_owner = repo_name_with_owner(base_repo)
   if head_name_with_owner == nil or base_name_with_owner == nil then
-    error("github-proxy: REST PR view missing repository facts")
+    error("github-proxy: rest-pr-repository-facts-missing: REST PR view missing repository facts")
   end
   local is_cross_repository = tostring(head_name_with_owner):lower() ~= tostring(base_name_with_owner):lower()
   local comment_source = comments_stdout

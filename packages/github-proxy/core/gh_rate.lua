@@ -14,7 +14,7 @@ local git_handle = nil
 local function production_github()
   if github_handle == nil then
     if type(exec_argv) ~= "function" then
-      error("github-proxy: gh adapter requires exec_argv")
+      error("github-proxy: adapter-primitive-missing: gh adapter requires exec_argv")
     end
     github_handle = require("forge.github").new(exec_argv)
   end
@@ -24,7 +24,7 @@ end
 local function production_git()
   if git_handle == nil then
     if type(exec_argv) ~= "function" then
-      error("github-proxy: git adapter requires exec_argv")
+      error("github-proxy: adapter-primitive-missing: git adapter requires exec_argv")
     end
     git_handle = require("forge.git").new(exec_argv)
   end
@@ -74,7 +74,7 @@ local function shell_words(command)
     index = index + 1
   end
   if quote ~= nil then
-    error("github-proxy: unterminated command quote")
+    error("github-proxy: command-quote-unterminated: unterminated command quote")
   end
   if #current > 0 then
     table.insert(words, table.concat(current))

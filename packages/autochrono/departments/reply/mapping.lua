@@ -4,7 +4,7 @@ local M = {}
 
 function M.build_reply(reached, repo, issue_number)
   if type(reached) ~= "table" then
-    error("autochrono: consensus_reached must be a table")
+    error("autochrono: payload-invalid: consensus_reached must be a table")
   end
 
   return {

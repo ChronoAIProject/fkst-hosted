@@ -438,7 +438,7 @@ function M.write_comment_request(payload, target)
     end, 30, target.comment_label)
     local written = parse_written_comment(created.stdout)
     if written == nil then
-      error("github-proxy: comment create did not return a valid comment id")
+      error("github-proxy: comment-id-missing: comment create did not return a valid comment id")
     end
     written_comment = written
     M.invalidate_entity_after_write(repo, target.kind, target.number)

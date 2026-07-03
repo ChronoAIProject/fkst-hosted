@@ -30,7 +30,7 @@ local allowed_env = {
 
 local function read_env_command(name)
   if not allowed_env[name] then
-    error("consensus: env name is not allowed")
+    error("consensus: env-name-denied: env name is not allowed")
   end
   return 'printf %s "$' .. name .. '"'
 end
@@ -90,7 +90,7 @@ end
 local function assert_manifest_files_readable(manifest)
   local paths = manifest_paths(manifest)
   if #paths == 0 then
-    error("consensus: runtime context manifest has no readable file paths")
+    error("consensus: context-manifest-invalid: runtime context manifest has no readable file paths")
   end
   local has_notice = false
   for _, path in ipairs(paths) do
@@ -101,12 +101,12 @@ local function assert_manifest_files_readable(manifest)
     end
     local handle = io.open(path, "r")
     if handle == nil then
-      error("consensus: error_class=" .. stale_generation_context_error_class .. " runtime context manifest file is unreadable")
+      error("consensus: stale-generation-context: error_class=" .. stale_generation_context_error_class .. " runtime context manifest file is unreadable")
     end
     handle:close()
   end
   if not has_notice then
-    error("consensus: runtime context manifest notice is missing")
+    error("consensus: context-manifest-invalid: runtime context manifest notice is missing")
   end
 end
 
@@ -129,14 +129,14 @@ local function resolve_content_manifest(content_fetch)
     return value
   end
   if not is_path_safe_key(key, max_key_len) then
-    error("consensus: invalid runtime context cache key")
+    error("consensus: context-cache-key-invalid: invalid runtime context cache key")
   end
   local manifest = cache_get(key)
   if type(manifest) ~= "string" or manifest == "" then
-    error("consensus: error_class=" .. stale_generation_context_error_class .. " runtime context cache miss")
+    error("consensus: stale-generation-context: error_class=" .. stale_generation_context_error_class .. " runtime context cache miss")
   end
   if #manifest > max_content_fetch_len then
-    error("consensus: runtime context manifest is overlong")
+    error("consensus: context-manifest-invalid: runtime context manifest is overlong")
   end
   assert_manifest_files_readable(manifest)
   return manifest
@@ -184,7 +184,7 @@ end
 local function runtime_root_path(runtime_root)
   local root = trim(runtime_root)
   if root == "" or root:find("[\r\n]") ~= nil then
-    error("consensus: invalid FKST_RUNTIME_ROOT")
+    error("consensus: config-invalid: invalid FKST_RUNTIME_ROOT")
   end
   return root:gsub("/+$", "")
 end
@@ -313,16 +313,16 @@ end
 
 function M.render_template(template, vars)
   if type(template) ~= "string" then
-    error("consensus: template must be a string")
+    error("consensus: template-invalid: template must be a string")
   end
   if type(vars) ~= "table" then
-    error("consensus: template vars must be a table")
+    error("consensus: template-invalid: template vars must be a table")
   end
 
   return (template:gsub("{{([%w_]+)}}", function(name)
     local value = vars[name]
     if value == nil then
-      error("consensus: missing template var " .. name)
+      error("consensus: template-var-missing: missing template var " .. name)
     end
     return tostring(value)
   end))
@@ -338,7 +338,7 @@ end
 
 local function locale_text(key, vars)
   if type(t) ~= "function" then
-    error("consensus: i18n catalog primitive t is unavailable")
+    error("consensus: i18n-primitive-missing: i18n catalog primitive t is unavailable")
   end
   return t(key, vars)
 end
@@ -368,7 +368,7 @@ end
 -- proposal re-derives consensus instead of being silently skipped.
 function M.reached_cache_key(dedup_key)
   if not is_path_safe_key(dedup_key, max_key_len) then
-    error("consensus: invalid dedup_key")
+    error("consensus: dedup-key-invalid: invalid dedup_key")
   end
   return "consensus/reached/" .. tostring(dedup_key)
 end
@@ -388,7 +388,7 @@ M.judgment_codex_opts = codex.judgment_codex_opts
 function M.mkdir_p_cmd(path)
   local value = tostring(path or "")
   if value == "" or value:find("[\r\n]") ~= nil then
-    error("consensus: invalid directory path")
+    error("consensus: directory-path-invalid: invalid directory path")
   end
   return "mkdir -p " .. shell_single_quote(value)
 end
@@ -662,7 +662,7 @@ end
 
 function M.build_reached_payload(proposal, decision, angle_results, framing)
   if type(proposal) ~= "table" then
-    error("consensus: proposal must be a table")
+    error("consensus: proposal-invalid: proposal must be a table")
   end
   local clean_decision = decision
   local decision_meta = nil
@@ -671,10 +671,10 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
     decision_meta = decision
   end
   if clean_decision ~= "approve" and clean_decision ~= "reject" then
-    error("consensus: invalid decision")
+    error("consensus: decision-invalid: invalid decision")
   end
   if not has_source_ref(proposal.source_ref) then
-    error("consensus: missing source_ref")
+    error("consensus: source-ref-missing: missing source_ref")
   end
 
   local clean_results = {}
@@ -692,11 +692,11 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
     clean_gaps = {}
     for _, gap in ipairs(decision_meta.blocking_gaps) do
       if not is_bounded_string(gap, max_gap_len) then
-        error("consensus: invalid blocking gap")
+        error("consensus: blocking-gap-invalid: invalid blocking gap")
       end
       table.insert(clean_gaps, bounded(gap, max_gap_len))
       if #clean_gaps > max_gaps then
-        error("consensus: too many blocking gaps")
+        error("consensus: blocking-gap-limit-exceeded: too many blocking gaps")
       end
     end
     if #clean_gaps == 0 then
@@ -753,10 +753,10 @@ end
 
 function M.build_converge_payload(proposal, narrowed_question, angle_results)
   if type(proposal) ~= "table" then
-    error("consensus: proposal must be a table")
+    error("consensus: proposal-invalid: proposal must be a table")
   end
   if not has_source_ref(proposal.source_ref) then
-    error("consensus: missing source_ref")
+    error("consensus: source-ref-missing: missing source_ref")
   end
 
   local payload = {

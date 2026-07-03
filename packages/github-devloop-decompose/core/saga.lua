@@ -4,16 +4,16 @@ local S = {}
 function S.install(M)
 local function validate_effect_once_opts(opts)
   if type(opts) ~= "table" then
-    error("github-devloop: saga.effect_once requires opts")
+    error("github-devloop: saga-option-invalid: saga.effect_once requires opts")
   end
   if not strings.is_bounded_string(opts.effect_id, M._max_dedup_len) then
-    error("github-devloop: saga.effect_once requires a stable effect_id")
+    error("github-devloop: saga-option-invalid: saga.effect_once requires a stable effect_id")
   end
   if type(opts.completion_check) ~= "function" then
-    error("github-devloop: saga.effect_once requires completion_check")
+    error("github-devloop: saga-option-invalid: saga.effect_once requires completion_check")
   end
   if type(opts.perform) ~= "function" then
-    error("github-devloop: saga.effect_once requires perform")
+    error("github-devloop: saga-option-invalid: saga.effect_once requires perform")
   end
 end
 

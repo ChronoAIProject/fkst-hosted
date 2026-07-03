@@ -67,7 +67,7 @@ end
 function M.require_observe_repo(core)
   local repo = devloop_base.read_env("FKST_GITHUB_REPO")
   if repo == nil or base_ids.safe_repo(repo) ~= tostring(repo) then
-    error("github-devloop: FKST_GITHUB_REPO is required for observability")
+    error("github-devloop: config-missing: FKST_GITHUB_REPO is required for observability")
   end
   return repo
 end
@@ -75,7 +75,7 @@ end
 function M.require_observe_bot(core)
   local login = devloop_base.assert_trusted_bot_configured()
   if login == nil or tostring(login) == "" then
-    error("github-devloop: FKST_GITHUB_BOT_LOGIN is required for observability")
+    error("github-devloop: config-missing: FKST_GITHUB_BOT_LOGIN is required for observability")
   end
 end
 

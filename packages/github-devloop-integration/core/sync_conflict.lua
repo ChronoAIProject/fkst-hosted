@@ -53,7 +53,7 @@ function M.sync_conflict_attempt_key(conflict, fingerprint)
     .. "/"
     .. suffix
   if not strings.is_path_safe_key(key, M._max_dedup_len) then
-    error("github-devloop: invalid sync conflict attempt key")
+    error("github-devloop: sync-conflict-key-invalid: invalid sync conflict attempt key")
   end
   return key
 end
@@ -74,7 +74,7 @@ end
 function M.record_sync_conflict_attempt(conflict, fingerprint, attempt)
   local n = tonumber(attempt)
   if n == nil or n < 1 or n ~= math.floor(n) then
-    error("github-devloop: invalid sync conflict attempt")
+    error("github-devloop: sync-conflict-attempt-invalid: invalid sync conflict attempt")
   end
   cache_set(M.sync_conflict_attempt_key(conflict, fingerprint), tostring(n))
   return n

@@ -225,7 +225,7 @@ end
 
 function M.build_failure_triage_issue_create_request(fact, count)
   if type(fact) ~= "table" then
-    error("github-devloop: failure triage fact is required")
+    error("github-devloop: failure-triage-fact-missing: failure triage fact is required")
   end
   return {
     schema = "github-proxy.issue-create.v1",

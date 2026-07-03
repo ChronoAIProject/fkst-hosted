@@ -19,7 +19,7 @@ function BranchTrain.install(M, shared)
       .. "/"
       .. require_safe_branch("integration branch", integration)
     if not strings.is_path_safe_key(key, M._max_key_len) then
-      error("github-devloop: invalid branch sync lock key")
+      error("github-devloop: lock-key-invalid: invalid branch sync lock key")
     end
     return key
   end
@@ -32,7 +32,7 @@ function BranchTrain.install(M, shared)
       .. "/"
       .. require_safe_branch("integration branch", integration)
     if not strings.is_path_safe_key(key, M._max_key_len) then
-      error("github-devloop: invalid rollup lock key")
+      error("github-devloop: lock-key-invalid: invalid rollup lock key")
     end
     return key
   end

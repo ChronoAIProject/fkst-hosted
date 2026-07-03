@@ -12,7 +12,7 @@ local spec = {
 local function read_runtime_root()
   local result = exec_sync({ cmd = core.read_runtime_root_cmd(), timeout = 30 })
   if result.exit_code ~= 0 then
-    error("consensus: FKST_RUNTIME_ROOT read failed: " .. tostring(result.stderr))
+    error("consensus: runtime-root-read-failed: FKST_RUNTIME_ROOT read failed: " .. tostring(result.stderr))
   end
   return result.stdout
 end
@@ -20,7 +20,7 @@ end
 local function prepare_judgment_worktree(path)
   local result = exec_sync({ cmd = core.mkdir_p_cmd(path), timeout = 30 })
   if result.exit_code ~= 0 then
-    error("consensus: judgment scratch directory setup failed: " .. tostring(result.stderr))
+    error("consensus: scratch-directory-setup-failed: judgment scratch directory setup failed: " .. tostring(result.stderr))
   end
   return path
 end
@@ -176,7 +176,7 @@ local function act_decide(event)
       raise_converge(proposal, result.angle_results, result.narrowed_question)
       return
     end
-    error("consensus: unknown decision result")
+    error("consensus: decision-result-invalid: unknown decision result")
   end)
 end
 

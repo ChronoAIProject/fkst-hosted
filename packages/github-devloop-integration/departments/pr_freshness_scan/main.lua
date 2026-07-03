@@ -31,7 +31,7 @@ local blocked_by_skew_label = "fkst-dev:blocked-by-skew"
 local function require_repo(repo)
   local value = tostring(repo or "")
   if value == "" or base_ids.safe_repo(value) ~= value then
-    error("github-devloop: FKST_GITHUB_REPO is required for PR freshness")
+    error("github-devloop: config-missing: FKST_GITHUB_REPO is required for PR freshness")
   end
   return value
 end
@@ -193,13 +193,13 @@ local function push_if_real(repo, branch, branch_sha, worktree)
   end
   local merge_head = trim_stdout(git_mechanics.run_required(git("github-devloop").git_head_sha(worktree, 30), "PR freshness head"))
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
-    error("github-devloop: unsafe PR freshness merge head")
+    error("github-devloop: unsafe-head-sha: unsafe PR freshness merge head")
   end
   git_mechanics.run_required(git("github-devloop").git_push_worktree_branch_update_with_lease(worktree, branch, branch_sha, 120), "PR freshness push")
   git_mechanics.fetch_branches(core.git, repo, { branch }, "PR freshness fetch")
   local pushed_head = git_mechanics.remote_head(core.git, branch, "PR freshness remote head", "unsafe PR freshness branch head")
   if pushed_head ~= merge_head then
-    error("github-devloop: PR freshness push verification failed")
+    error("github-devloop: push-verification-mismatch: PR freshness push verification failed")
   end
   devloop_logging.log_apply("pr_freshness_scan", "pr-freshness", "refreshed", merge_head, {}, {})
 end
@@ -259,13 +259,13 @@ local function process_pr(repo, branches, listed_pr)
       end
       local unmerged = core.git.unmerged_paths(worktree, 30)
       if unmerged.exit_code ~= 0 then
-        error("github-devloop: PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
+        error("github-devloop: unmerged-path-check-failed: PR freshness unmerged path check failed: " .. tostring(unmerged.stderr))
       end
       if tostring(unmerged.stdout or "") ~= "" then
         raise_conflict(repo, pr.head_ref_name, branches.integration, branch_sha, integration_sha, listed_pr.number)
         return
       end
-      error("github-devloop: PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
+      error("github-devloop: merge-conflict-state-missing: PR freshness merge failed without conflicts: " .. tostring(merge_result.stderr))
     end)
   end)
 end

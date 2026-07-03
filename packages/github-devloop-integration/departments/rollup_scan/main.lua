@@ -22,7 +22,7 @@ end
 local function require_repo(repo)
   local value = tostring(repo or "")
   if value == "" or base_ids.safe_repo(value) ~= value then
-    error("github-devloop: FKST_GITHUB_REPO is required for rollup scan")
+    error("github-devloop: config-missing: FKST_GITHUB_REPO is required for rollup scan")
   end
   return value
 end
@@ -36,7 +36,7 @@ local function ahead_count(upstream, integration)
   local text = trim_stdout(result)
   local count = tonumber(text)
   if count == nil or count < 0 then
-    error("github-devloop: invalid rollup ahead count")
+    error("github-devloop: ahead-count-invalid: invalid rollup ahead count")
   end
   return count
 end
@@ -49,7 +49,7 @@ local function has_content_diff(upstream, integration)
   if result.exit_code == 1 then
     return true
   end
-  error("github-devloop: rollup content diff failed: " .. tostring(result.stderr))
+  error("github-devloop: rollup-diff-failed: rollup content diff failed: " .. tostring(result.stderr))
 end
 
 local function list_open_pr(repo, integration, upstream)
@@ -91,7 +91,7 @@ local function create_rollup_pr(repo, upstream, integration, head_sha, ahead, pu
   if is_no_commits_between_error(result.stderr, upstream, integration) then
     return false
   end
-  error("github-devloop: rollup PR create failed: " .. tostring(result.stderr))
+  error("github-devloop: gh-pr-create-failed: rollup PR create failed: " .. tostring(result.stderr))
 end
 
 local function act(event)
@@ -145,7 +145,7 @@ local function act(event)
       end
       pr = list_open_pr(repo, branches.integration, branches.upstream)
       if pr == nil then
-        error("github-devloop: rollup PR create/list did not return an open PR")
+        error("github-devloop: rollup-pr-missing: rollup PR create/list did not return an open PR")
       end
     end
 

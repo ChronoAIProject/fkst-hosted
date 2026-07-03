@@ -84,7 +84,7 @@ local function commit_resolution(worktree, runtime, conflict)
   git_mechanics.run_required(devloop_commands.git_add_all(worktree, 30), "stage conflict resolution")
   local unmerged = git_mechanics.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check before commit")
   if tostring(unmerged.stdout or "") ~= "" then
-    error("github-devloop: sync conflict remains unresolved before commit")
+    error("github-devloop: sync-conflict-unresolved: sync conflict remains unresolved before commit")
   end
   git_mechanics.run_required(git_mechanics.git_diff_cached_check(core.git, worktree, 30), "cached diff check before commit")
   local message_file = core.branch_sync_message_file(
@@ -133,13 +133,13 @@ local function push_if_real(conflict, worktree)
 
   local merge_head = trim_stdout(git_mechanics.run_required(git("github-devloop").git_head_sha(worktree, 30), "resolved sync head"))
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
-    error("github-devloop: unsafe resolved branch sync head")
+    error("github-devloop: unsafe-head-sha: unsafe resolved branch sync head")
   end
   git_mechanics.run_required(git_mechanics.git_push_worktree_branch_update(core.git, worktree, conflict.integration_branch, 120), "resolved branch sync push")
   git_mechanics.fetch_branches(core.git, conflict.repo, { conflict.integration_branch }, "branch fetch")
   local pushed_head = git_mechanics.remote_head(core.git, conflict.integration_branch, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
-    error("github-devloop: resolved branch sync push verification failed")
+    error("github-devloop: push-verification-mismatch: resolved branch sync push verification failed")
   end
   devloop_logging.log_apply("sync_conflict", "branch-sync", "synced", conflict.upstream_sha, {}, {})
 end
@@ -184,11 +184,11 @@ local function act(event)
     with_temp_worktree(active_conflict, function(worktree, runtime)
       local merge_result = git_mechanics.git_merge_no_ff(core.git, worktree, active_conflict.upstream_sha, 120)
       if merge_result.exit_code == 0 then
-        error("github-devloop: sync conflict event replayed without merge conflict")
+        error("github-devloop: sync-conflict-stale: sync conflict event replayed without merge conflict")
       end
       local unmerged = git_mechanics.run_required(core.git.unmerged_paths(worktree, 30), "unmerged path check")
       if tostring(unmerged.stdout or "") == "" then
-        error("github-devloop: sync conflict merge failed without unmerged paths")
+        error("github-devloop: merge-conflict-state-missing: sync conflict merge failed without unmerged paths")
       end
       local active_fingerprint = core.sync_conflict_fingerprint(active_conflict, tostring(unmerged.stdout or ""))
       local prior_attempts = core.sync_conflict_attempt_count(active_conflict, active_fingerprint)
@@ -215,7 +215,7 @@ local function act(event)
           source_ref = conflict.source_ref,
           terminal = false,
         })
-        error("github-devloop: sync conflict codex failed: " .. tostring(stderr))
+        error("github-devloop: sync-conflict-codex-failed: sync conflict codex failed: " .. tostring(stderr))
       end
       local resolved, remaining_unmerged = require_clean_resolution(worktree)
       if not resolved then

@@ -26,7 +26,7 @@ local function log_skip(payload, reason)
 end
 
 local function unsupported_payload_error(payload, reason)
-  return "github-devloop: rollup_merge unsupported devloop_rollup_ready payload: dedup_key="
+  return "github-devloop: rollup-ready-payload-invalid: rollup_merge unsupported devloop_rollup_ready payload: dedup_key="
     .. tostring(devloop_logging.payload_field(payload, "dedup_key"))
     .. " reason="
     .. tostring(reason)
@@ -68,7 +68,7 @@ local function act(event)
 
     local viewed = github("github-devloop-integration.rollup_merge").gh_pr_view_merge(payload.repo, payload.pr_number, 30)
     if viewed.exit_code ~= 0 then
-      error("github-devloop: gh rollup PR view failed: " .. tostring(viewed.stderr))
+      error("github-devloop: gh-pr-view-failed: gh rollup PR view failed: " .. tostring(viewed.stderr))
     end
     local pr = parsers_pr.parse_pr_view_merge(viewed.stdout)
     if tostring(pr.head_ref_name or "") ~= tostring(payload.integration_branch or "") then

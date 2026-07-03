@@ -80,14 +80,14 @@ end
 function M.normalize_release_notes(stdout)
   local body = normalize_lines(strip_sentinel(devloop_base._neutralize_fkst_markers(stdout)))
   if body == "" then
-    error("github-devloop: release notes body is empty")
+    error("github-devloop: release-notes-body-empty: release notes body is empty")
   end
   local suffix = "\n" .. ai_sentinel
   local limit = max_release_notes_len - #suffix
   body = bounded(body, limit)
   body = body:gsub("%s+$", "")
   if body == "" then
-    error("github-devloop: release notes body is empty")
+    error("github-devloop: release-notes-body-empty: release notes body is empty")
   end
   return body .. suffix
 end
@@ -107,7 +107,7 @@ end
 
 function M.release_notes_publish_policy(cfg)
   if type(cfg) ~= "table" then
-    error("github-devloop: release notes publish policy requires config")
+    error("github-devloop: release-notes-policy-invalid: release notes publish policy requires config")
   end
   return {
     allow_fallback = cfg.allow_release_notes_fallback == true,
@@ -116,15 +116,15 @@ function M.release_notes_publish_policy(cfg)
 end
 
 function M.gh_pr_create_body_cmd(repo, head, base, title, body)
-  error("github-devloop: release notes PR create uses forge.github adapter")
+  error("github-devloop: adapter-only: release notes PR create uses forge.github adapter")
 end
 
 function M.gh_pr_create_body(repo, head, base, title, body, timeout)
   if not forge_validators.is_git_ref_safe(head) then
-    error("github-devloop: invalid PR head branch")
+    error("github-devloop: git-ref-invalid: invalid PR head branch")
   end
   if not forge_validators.is_git_ref_safe(base) then
-    error("github-devloop: invalid PR base branch")
+    error("github-devloop: git-ref-invalid: invalid PR base branch")
   end
   local normalized_body = M.normalize_release_notes(body)
   normalized_body = M.with_github_debug_stamp(normalized_body, {
@@ -147,7 +147,7 @@ end
 function M.draft_release_notes(args)
   local policy = args.publish_policy
   if type(policy) ~= "table" then
-    error("github-devloop: release notes publish policy is required")
+    error("github-devloop: release-notes-policy-missing: release notes publish policy is required")
   end
   local result = spawn_codex_sync({
     prompt = M.build_release_notes_prompt(
@@ -164,7 +164,7 @@ function M.draft_release_notes(args)
       return M.release_notes_fallback_body(args.upstream_branch, args.integration_branch, args.ahead), "fallback"
     end
     local stderr = type(result) == "table" and result.stderr or "missing codex result"
-    error("github-devloop: release notes codex failed: " .. tostring(stderr))
+    error("github-devloop: release-notes-codex-failed: release notes codex failed: " .. tostring(stderr))
   end
   local ok, normalized = pcall(M.normalize_release_notes, result.stdout)
   if not ok then

@@ -94,7 +94,7 @@ end
 local function fetch_entity_view(repo, kind, number, updated_at, opts)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
-    error("github-proxy: invalid entity view kind")
+    error("github-proxy: entity-kind-invalid: invalid entity view kind")
   end
   local options = opts or {}
   local freshness = tostring(updated_at or "")
@@ -136,7 +136,7 @@ end
 function M.invalidate_entity_after_write(repo, kind, number)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
-    error("github-proxy: invalid post-write invalidation kind")
+    error("github-proxy: entity-kind-invalid: invalid post-write invalidation kind")
   end
   local entity_key = M.entity_cache_key(repo, selected_kind, number)
   local generation_key = entity_view_generation_key(repo, selected_kind, number)
@@ -158,7 +158,7 @@ end
 function M.gh_entity_updated_at_cmd(repo, kind, number)
   local selected_kind = tostring(kind or "")
   if selected_kind ~= "issue" and selected_kind ~= "pr" then
-    error("github-proxy: invalid entity updatedAt kind")
+    error("github-proxy: entity-kind-invalid: invalid entity updatedAt kind")
   end
   return function()
     return fetch_entity_updated_at(repo, selected_kind, number)

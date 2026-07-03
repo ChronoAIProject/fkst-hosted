@@ -61,7 +61,7 @@ function M.observability_run_cmd(cmd_or_opts, limits, deadline, error_class, exe
     return result
   end
   if result.exit_code ~= 0 then
-    error("github-devloop: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
+    error("github-devloop: observability-command-failed: " .. tostring(label) .. " failed: " .. tostring(result.stderr))
   end
   return result
 end

@@ -109,7 +109,7 @@ end
 local function read_current_for_candidate(repo, issue_number, candidate, event_ts, expected_decision_dedup_key)
   local view = devloop_commands.gh_issue_view_intake_judge(repo, issue_number, 30)
   if view.exit_code ~= 0 then
-    error("github-devloop: gh issue intake judge view failed: " .. tostring(view.stderr))
+    error("github-devloop: gh-issue-view-failed: gh issue intake judge view failed: " .. tostring(view.stderr))
   end
   local current = parsers_issue.parse_issue_view_intake_judge(core, view.stdout)
   current.repo, current.number = repo, issue_number
@@ -242,7 +242,7 @@ local function act_intake_judge(event)
       source_ref = candidate.source_ref,
       terminal = false,
     })
-    error("github-devloop: intake codex failed: " .. tostring(stderr))
+    error("github-devloop: intake-codex-failed: intake codex failed: " .. tostring(stderr))
   end
 
   local parsed = core.parse_intake_action(result.stdout)

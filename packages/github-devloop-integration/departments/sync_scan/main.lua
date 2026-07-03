@@ -25,7 +25,7 @@ end
 local function require_repo(repo)
   local value = tostring(repo or "")
   if value == "" or base_ids.safe_repo(value) ~= value then
-    error("github-devloop: FKST_GITHUB_REPO is required for branch sync")
+    error("github-devloop: config-missing: FKST_GITHUB_REPO is required for branch sync")
   end
   return value
 end
@@ -42,7 +42,7 @@ local function trees_equal(sha_a, sha_b)
   if result.exit_code == 1 then
     return false
   end
-  error("github-devloop: tree compare failed: " .. tostring(result.stderr))
+  error("github-devloop: tree-compare-failed: tree compare failed: " .. tostring(result.stderr))
 end
 
 local function cleanup_worktree(worktree)
@@ -119,13 +119,13 @@ local function push_if_real(repo, upstream, integration, upstream_sha, integrati
 
   local merge_head = trim_stdout(git_mechanics.run_required(git("github-devloop").git_head_sha(worktree, 30), "sync head"))
   if not require("devloop.pr_safety").is_safe_head_sha(merge_head) then
-    error("github-devloop: unsafe branch sync merge head")
+    error("github-devloop: unsafe-head-sha: unsafe branch sync merge head")
   end
   git_mechanics.run_required(git_mechanics.git_push_worktree_branch_update(core.git, worktree, integration, 120), "branch sync push")
   git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
   local pushed_head = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= merge_head then
-    error("github-devloop: branch sync push verification failed")
+    error("github-devloop: push-verification-mismatch: branch sync push verification failed")
   end
   devloop_logging.log_apply("sync_scan", "branch-sync", "synced", upstream_sha, {}, {})
 end
@@ -167,7 +167,7 @@ local function converge_integration_to_upstream(repo, upstream, integration, ups
   git_mechanics.fetch_branches(core.git, repo, { integration }, "branch fetch")
   local pushed_head = git_mechanics.remote_head(core.git, integration, "remote branch head", "unsafe remote branch head")
   if pushed_head ~= upstream_sha then
-    error("github-devloop: branch sync converge verification failed")
+    error("github-devloop: converge-verification-mismatch: branch sync converge verification failed")
   end
   devloop_logging.log_apply("sync_scan", "branch-sync", "converged", upstream_sha, {}, {})
 end
@@ -220,13 +220,13 @@ local function act(event)
 
       local unmerged = core.git.unmerged_paths(worktree, 30)
       if unmerged.exit_code ~= 0 then
-        error("github-devloop: unmerged path check failed: " .. tostring(unmerged.stderr))
+        error("github-devloop: unmerged-path-check-failed: unmerged path check failed: " .. tostring(unmerged.stderr))
       end
       if tostring(unmerged.stdout or "") ~= "" then
         raise_conflict(repo, branches.upstream, branches.integration, upstream_sha, integration_sha)
         return
       end
-      error("github-devloop: sync merge failed without conflicts: " .. tostring(merge_result.stderr))
+      error("github-devloop: merge-conflict-state-missing: sync merge failed without conflicts: " .. tostring(merge_result.stderr))
     end)
   end)
 end

@@ -127,7 +127,7 @@ return {
         if expects_non_table_payload_fail_closed(case.dept) then
           t.is_true(result.exit_code ~= 0)
           t.is_true(tostring(result.error or ""):find(
-            "github-devloop: rollup_merge unsupported devloop_rollup_ready payload",
+            "github-devloop: rollup-ready-payload-invalid: rollup_merge unsupported devloop_rollup_ready payload",
             1,
             true
           ) ~= nil)

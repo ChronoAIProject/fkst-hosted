@@ -113,7 +113,7 @@ end
 
 local function normalize_queue(queue)
   if not bounded_string(queue, M._max_key_len) then
-    error("github-devloop: error fact queue is required")
+    error("github-devloop: error-fact-queue-missing: error fact queue is required")
   end
   return queue
 end
@@ -121,7 +121,7 @@ end
 local function normalize_attempt(attempt)
   local number = tonumber(attempt)
   if number == nil or number < 1 or number % 1 ~= 0 then
-    error("github-devloop: invalid error fact attempt")
+    error("github-devloop: error-fact-attempt-invalid: invalid error fact attempt")
   end
   return number
 end
@@ -157,7 +157,7 @@ end
 
 function M.error_fact_fingerprint(fields)
   if type(fields) ~= "table" then
-    error("github-devloop: error fact fingerprint fields are required")
+    error("github-devloop: error-fact-fields-missing: error fact fingerprint fields are required")
   end
   local queue = normalize_queue(fields.queue)
   local error_class
@@ -177,7 +177,7 @@ end
 
 function M.build_error_fact(opts)
   if type(opts) ~= "table" then
-    error("github-devloop: error fact options are required")
+    error("github-devloop: error-fact-options-missing: error fact options are required")
   end
   local queue = normalize_queue(opts.queue)
   local error_class
@@ -206,7 +206,7 @@ function M.build_error_fact(opts)
   end
   if opts.terminal ~= nil then
     if type(opts.terminal) ~= "boolean" then
-      error("github-devloop: invalid error fact terminal")
+      error("github-devloop: error-fact-terminal-invalid: invalid error fact terminal")
     end
     fact.terminal = opts.terminal
   end

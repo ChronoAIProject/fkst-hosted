@@ -139,14 +139,14 @@ end
 function M.fetch_recent_closed_intake_class_issues(repo)
   local listed = devloop_commands.gh_issue_list_recent_closed(repo, 30, 30)
   if listed.exit_code ~= 0 then
-    error("github-devloop: gh issue intake class sibling lookup failed: " .. tostring(listed.stderr))
+    error("github-devloop: gh-issue-list-failed: gh issue intake class sibling lookup failed: " .. tostring(listed.stderr))
   end
   return parsers_issue.parse_issue_list_intake(M, listed.stdout)
 end
 
 function M.intake_class_carrier_marker(class_key)
   if class_key == nil or tostring(class_key) == "" then
-    error("github-devloop: invalid intake class key")
+    error("github-devloop: intake-class-key-invalid: invalid intake class key")
   end
   return '<!-- fkst:github-devloop:intake-class-carrier:v1 class_key="' .. tostring(class_key) .. '" -->'
 end
@@ -166,7 +166,7 @@ function M.find_open_intake_class_carrier(repo, issue_number, current, class_key
   local fallback_title = M.intake_class_issue_title(current, issue_number)
   local listed = devloop_commands.gh_issue_list_intake(repo, 100, 30)
   if listed.exit_code ~= 0 then
-    error("github-devloop: gh issue intake class lookup failed: " .. tostring(listed.stderr))
+    error("github-devloop: gh-issue-list-failed: gh issue intake class lookup failed: " .. tostring(listed.stderr))
   end
   for _, issue in ipairs(parsers_issue.parse_issue_list_intake(M, listed.stdout)) do
     if tostring(issue.number) ~= tostring(issue_number)
@@ -181,10 +181,10 @@ end
 
 function M.intake_class_followup_marker(proposal_id, carrier_number, outcome, dedup_key)
   if outcome ~= "folded" and outcome ~= "carrier" then
-    error("github-devloop: invalid intake class follow-up outcome")
+    error("github-devloop: intake-class-followup-invalid: invalid intake class follow-up outcome")
   end
   if carrier_number == nil or tostring(carrier_number) == "" then
-    error("github-devloop: invalid intake class follow-up carrier")
+    error("github-devloop: intake-class-followup-invalid: invalid intake class follow-up carrier")
   end
   return '<!-- fkst:github-devloop:intake-class-followup:v1 proposal="' .. tostring(proposal_id)
     .. '" carrier="' .. tostring(carrier_number)

@@ -40,7 +40,7 @@ local canonical_labels = {
 local function require_repo(repo)
   local value = tostring(repo or "")
   if value == "" or base_ids.safe_repo(value) ~= value then
-    error("github-devloop: FKST_GITHUB_REPO is required for ensure_repo")
+    error("github-devloop: config-missing: FKST_GITHUB_REPO is required for ensure_repo")
   end
   return value
 end
@@ -48,7 +48,7 @@ end
 local function run_gh(fn, timeout, error_class)
   local result = fn(timeout or 30)
   if result.exit_code ~= 0 then
-    error("github-devloop: " .. tostring(error_class) .. " failed: " .. tostring(result.stderr))
+    error("github-devloop: gh-command-failed: " .. tostring(error_class) .. " failed: " .. tostring(result.stderr))
   end
   return result
 end

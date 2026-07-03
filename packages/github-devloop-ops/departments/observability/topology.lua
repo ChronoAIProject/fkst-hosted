@@ -9,13 +9,13 @@ local renderable_kinds = {
 
 local function require_graph(graph)
   if type(graph) ~= "table" then
-    error("github-devloop: topology: graph must be a table")
+    error("github-devloop: topology-graph-invalid: graph must be a table")
   end
   if graph.schema ~= "fkst.graph.v1" then
-    error("github-devloop: topology: graph schema must be fkst.graph.v1")
+    error("github-devloop: topology-schema-invalid: graph schema must be fkst.graph.v1")
   end
   if type(graph.nodes) ~= "table" or type(graph.edges) ~= "table" then
-    error("github-devloop: topology: graph requires nodes and edges")
+    error("github-devloop: topology-graph-invalid: graph requires nodes and edges")
   end
 end
 
@@ -95,14 +95,14 @@ function M.validate_graph(graph)
   for _, node in ipairs(graph.nodes) do
     if renderable_kinds[node.kind] then
       if node_package(node) == nil then
-        error("github-devloop: topology: renderable node missing package: " .. tostring(node.id or ""))
+        error("github-devloop: topology-node-invalid: renderable node missing package: " .. tostring(node.id or ""))
       end
       if canonical_from_node(node) == nil then
-        error("github-devloop: topology: renderable node missing canonical name: " .. tostring(node.id or ""))
+        error("github-devloop: topology-node-invalid: renderable node missing canonical name: " .. tostring(node.id or ""))
       end
     elseif node.kind == "queue" then
       if tostring(node.id or "") == "" then
-        error("github-devloop: topology: queue node missing id")
+        error("github-devloop: topology-node-invalid: queue node missing id")
       end
     end
   end
