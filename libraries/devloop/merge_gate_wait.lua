@@ -71,8 +71,8 @@ function C.merge_gate_wait_fact(M, comments, issue_proposal_id, issue_version, p
   end
   local wait_version = C.merge_gate_wait_version_lineage(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate%-wait:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
@@ -93,7 +93,7 @@ function C.merge_gate_wait_fact(M, comments, issue_proposal_id, issue_version, p
           head_sha = marker_head_sha,
           kind = marker_kind,
           reason = marker_reason,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end

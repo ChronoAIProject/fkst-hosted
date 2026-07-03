@@ -27,7 +27,7 @@ function F.managed_fork_trust_set(core, bot_login, managed)
 end
 
 local function is_trusted_fork_marker_author(core, comment, trust_set)
-  return parsers_misc._is_trusted_comment(core, comment, trust_set)
+  return parsers_misc._is_trusted_comment(comment, trust_set)
 end
 
 local function safe_marker_attr(value)
@@ -64,7 +64,7 @@ function F.has_trusted_issue_create_parent_marker(core, comments, dedup_key, bot
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(comments) do
     if is_trusted_fork_marker_author(core, comment, trust_set) then
-      local body = parsers_misc.comment_body(core, comment)
+      local body = parsers_misc.comment_body(comment)
       for marker in body:gmatch(create_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
           return true
@@ -88,7 +88,7 @@ function F.trusted_issue_created_number(core, comments, dedup_key, bot_login, ma
   local created_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
   for _, comment in ipairs(comments) do
     if is_trusted_fork_marker_author(core, comment, trust_set) then
-      local body = parsers_misc.comment_body(core, comment)
+      local body = parsers_misc.comment_body(comment)
       for marker in body:gmatch(created_pattern) do
         if marker:match('dedup="([^"]+)"') == tostring(dedup_key) then
           local issue_number = tonumber(marker:match('issue="(%d+)"'))
@@ -158,8 +158,8 @@ function F.fork_origin_fact(core, entity, managed)
       return body_fact
     end
   end
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, entity.comments, trust_set)) do
-    local comment_fact = fork_origin_fact_from_text(core, parsers_misc.comment_body(core, comment))
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(entity.comments, trust_set)) do
+    local comment_fact = fork_origin_fact_from_text(core, parsers_misc.comment_body(comment))
     if comment_fact ~= nil then
       return comment_fact
     end

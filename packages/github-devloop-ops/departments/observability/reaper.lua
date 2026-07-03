@@ -50,8 +50,8 @@ local function successor_issue_numbers(comments, proposal_id)
   local seen = {}
   local dedup_prefix = "decompose/" .. tostring(proposal_id) .. "/"
   local marker_pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments or {})) do
-    for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments or {})) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local dedup = marker:match('dedup="([^"]+)"')
       local issue = marker:match('issue="([^"]+)"')
       if tostring(dedup or ""):sub(1, #dedup_prefix) == dedup_prefix

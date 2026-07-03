@@ -714,7 +714,7 @@ local function process_pr_event(event)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: observe-issue-pr-view-failed: " .. tostring(pr_view.stderr))
   end
-  local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
   current_pr.number = pr.number
   current_pr.force_fresh = true
   local origin = m_facts.pr_origin_fact(core, current_pr.comments)

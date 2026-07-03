@@ -2,14 +2,14 @@ local C = {}
 local shared = require("devloop.parsers.shared")
 local parsers_misc = require("devloop.parsers.misc")
 
-function C.parse_pr_list_observe(M, stdout)
-  return shared.parse_numbered_list(M, stdout)
+function C.parse_pr_list_observe(stdout)
+  return shared.parse_numbered_list(stdout)
 end
 
-function C.parse_pr_list_freshness(M, stdout)
+function C.parse_pr_list_freshness(stdout)
   local decoded = json.decode(stdout or "[]")
   local prs = {}
-  shared.each_paginated_item(M, decoded, function(pr)
+  shared.each_paginated_item(decoded, function(pr)
     if type(pr) == "table" and tonumber(pr.number) ~= nil then
       table.insert(prs, {
         number = tonumber(pr.number),
@@ -25,17 +25,17 @@ function C.parse_pr_list_freshness(M, stdout)
   return prs
 end
 
-function C.parse_pr_list_merge_queue(M, stdout)
-  return C.parse_pr_list_head_base(M, stdout)
+function C.parse_pr_list_merge_queue(stdout)
+  return C.parse_pr_list_head_base(stdout)
 end
 
-function C.parse_pr_list_recent_merged(M, stdout)
+function C.parse_pr_list_recent_merged(stdout)
   local decoded = json.decode(stdout or "[]")
   local prs = {}
   if type(decoded) ~= "table" then
     return prs
   end
-  shared.each_paginated_item(M, decoded, function(pr)
+  shared.each_paginated_item(decoded, function(pr)
     local number = type(pr) == "table" and tonumber(pr.number) or nil
     if number ~= nil then
       table.insert(prs, {
@@ -77,7 +77,7 @@ local function repository_name_with_owner(head_repository, head_repository_owner
   return nil
 end
 
-function C.parse_pr_view_origin(M, stdout)
+function C.parse_pr_view_origin(stdout)
   local decoded = json.decode(stdout or "{}")
   local head_repo = repository_name_with_owner(
     decoded.headRepository or decoded.head_repository,
@@ -102,7 +102,7 @@ function C.parse_pr_view_origin(M, stdout)
       or decoded.mergeCommitOid
       or decoded.merge_commit_oid
       or decoded.merge_commit_sha,
-    labels = shared.label_names(M, decoded.labels),
+    labels = shared.label_names(decoded.labels),
     comments = parsers_misc.comments_from_json(decoded.comments),
     head_repository = head_repo,
     is_cross_repository = is_cross_repository,
@@ -111,8 +111,8 @@ function C.parse_pr_view_origin(M, stdout)
   }
 end
 
-function C.parse_pr_view_fix(M, stdout)
-  return C.parse_pr_view_origin(M, stdout)
+function C.parse_pr_view_fix(stdout)
+  return C.parse_pr_view_origin(stdout)
 end
 
 local function status_rollup_entries(value)
@@ -125,9 +125,9 @@ local function status_rollup_entries(value)
   return value
 end
 
-function C.parse_pr_view_merge(M, stdout)
+function C.parse_pr_view_merge(stdout)
   local decoded = json.decode(stdout or "{}")
-  local result = C.parse_pr_view_origin(M, stdout)
+  local result = C.parse_pr_view_origin(stdout)
   result.is_draft = decoded.isDraft
   if result.is_draft == nil then
     result.is_draft = decoded.is_draft
@@ -136,17 +136,17 @@ function C.parse_pr_view_merge(M, stdout)
   result.merge_state_status = decoded.mergeStateStatus or decoded.merge_state_status
   result.status_check_rollup = status_rollup_entries(decoded.statusCheckRollup or decoded.status_check_rollup)
   result.merged_at = decoded.mergedAt or decoded.merged_at
-  result.labels = shared.label_names(M, decoded.labels)
+  result.labels = shared.label_names(decoded.labels)
   return result
 end
 
-function C.parse_pr_list_head_base(M, stdout)
+function C.parse_pr_list_head_base(stdout)
   local decoded = json.decode(stdout or "[]")
   local prs = {}
   if type(decoded) ~= "table" then
     return prs
   end
-  shared.each_paginated_item(M, decoded, function(pr)
+  shared.each_paginated_item(decoded, function(pr)
     local number = type(pr) == "table" and tonumber(pr.number) or nil
     if number ~= nil then
       local head_ref_name = pr.headRefName or pr.head_ref_name
@@ -171,7 +171,7 @@ function C.parse_pr_list_head_base(M, stdout)
   return prs
 end
 
-function C.parse_pr_view_head_state(_M, stdout)
+function C.parse_pr_view_head_state(stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     head_ref_name = decoded.headRefName or decoded.head_ref_name,

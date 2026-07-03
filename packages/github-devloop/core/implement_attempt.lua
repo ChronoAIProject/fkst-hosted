@@ -35,8 +35,8 @@ function M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-attempt:v1.-%-%->"
   local latest = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local attempt = tonumber(marker:match('attempt="(%d+)"'))
@@ -97,8 +97,8 @@ function M.latest_implement_version_mismatch_fact(comments, proposal_id, expecte
   local expected_key = devloop_base.implement_version_mismatch_key(expected_version, current_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-version%-mismatch:v1.-%-%->"
   local latest = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_key = marker:match('key="([^"]+)"')
       local attempt = tonumber(marker:match('attempt="(%d+)"'))

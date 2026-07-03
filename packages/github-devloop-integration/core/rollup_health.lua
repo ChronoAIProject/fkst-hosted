@@ -206,7 +206,7 @@ function M.observe_rollup_health(repo, upstream, integration, pr, now_seconds, t
     return { action = "suppress", reason = "red-window", age_minutes = age }
   end
 
-  local failing_check = parsers_misc.pr_rollup_failure_summary(M, pr)
+  local failing_check = parsers_misc.pr_rollup_failure_summary(pr)
   if failing_check == "" then
     failing_check = "rollup-red"
   end

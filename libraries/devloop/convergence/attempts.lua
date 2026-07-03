@@ -143,8 +143,8 @@ function C.timeout_attempt_round(M, comments, proposal_id, issue_version, state_
   local max_seen = 0
   local lineage_version = transition_version.strip_suffixes(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-attempt:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and transition_version.strip_suffixes(attr(marker, "version")) == lineage_version
         and attr(marker, "state") == tostring(state_name) then
@@ -164,8 +164,8 @@ function C.timeout_attempt_v2_round(M, comments, proposal_id, row, generation_ke
   end
   local max_seen = 0
   local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-attempt:v2.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and attr(marker, "state") == tostring(row and row.from_state)
         and attr(marker, "liveness_class_id") == tostring(row and row.liveness_class_id)
@@ -186,8 +186,8 @@ function C.has_decompose_exhausted_marker(M, comments, proposal_id, issue_versio
   end
   local lineage_version = transition_version.strip_suffixes(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:decompose%-exhausted:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if attr(marker, "proposal") == tostring(proposal_id)
         and transition_version.strip_suffixes(attr(marker, "version")) == lineage_version then
         return true

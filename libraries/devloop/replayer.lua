@@ -153,7 +153,7 @@ local function fetch_child_state_fact(M, facts)
     if view.exit_code ~= 0 then
       error("github-devloop: child-state PR view failed: " .. tostring(view.stderr))
     end
-    facts.current_pr = parsers_pr.parse_pr_view_origin(M, view.stdout)
+    facts.current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
     facts.current_pr.number, facts.current_pr.force_fresh = delegation.pr_number, true
   end
   facts.child_state = require("devloop.entity").current_entity_state(facts.current_pr.comments, delegation.proposal_id)

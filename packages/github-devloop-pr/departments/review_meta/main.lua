@@ -57,7 +57,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if view.exit_code ~= 0 then
       error("github-devloop: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
-    local current_pr = parsers_pr.parse_pr_view_origin(core, view.stdout)
+    local current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
     local current_issue = {
       title = "PR #" .. tostring(review_meta.pr_number),
       body = "(PR-only review-meta context; issue backing is absent)",

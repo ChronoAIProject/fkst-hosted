@@ -99,8 +99,8 @@ local function marker_attr(marker, name)
 end
 
 local function merged_fact_from_issue(M, issue)
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, issue and issue.comments or {})) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch("<!%-%- fkst:github%-devloop:merged:v1.-%-%->") do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(issue and issue.comments or {})) do
+    for marker in parsers_misc._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:merged:v1.-%-%->") do
       local proposal_id = marker_attr(marker, "proposal")
       local pr_number = marker_attr(marker, "pr")
       local version = marker_attr(marker, "version")
@@ -116,7 +116,7 @@ local function merged_fact_from_issue(M, issue)
           head_sha = head_sha,
           closed_at = issue.closed_at,
           issue_number = issue.number,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end
@@ -161,7 +161,7 @@ function C.queue_starvation_recent_closed_merged_issues(M, repo, limits, deadlin
   if M.observability_result_deferred(listed) then
     return nil, nil, "deadline"
   end
-  local issues = parsers_issue.parse_issue_list_recent_closed(M, listed.stdout)
+  local issues = parsers_issue.parse_issue_list_recent_closed(listed.stdout)
   local merged = {}
   for _, issue in ipairs(issues) do
     local fact = nil

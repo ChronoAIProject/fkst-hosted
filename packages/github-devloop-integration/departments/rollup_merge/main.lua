@@ -70,7 +70,7 @@ local function act(event)
     if viewed.exit_code ~= 0 then
       error("github-devloop: gh rollup PR view failed: " .. tostring(viewed.stderr))
     end
-    local pr = parsers_pr.parse_pr_view_merge(core, viewed.stdout)
+    local pr = parsers_pr.parse_pr_view_merge(viewed.stdout)
     if tostring(pr.head_ref_name or "") ~= tostring(payload.integration_branch or "") then
       log_skip(payload, "head-branch-mismatch")
       return

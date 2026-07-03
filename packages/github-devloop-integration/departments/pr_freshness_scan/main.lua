@@ -71,8 +71,8 @@ local function has_trusted_text(comments, needle)
   if type(comments) ~= "table" then
     return false
   end
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
-    if parsers_misc._comment_body(core, comment):find(needle, 1, true) ~= nil then
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    if parsers_misc._comment_body(comment):find(needle, 1, true) ~= nil then
       return true
     end
   end
@@ -84,8 +84,8 @@ local function has_approval_marker(comments, issue_proposal_id, pr_number, head_
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
-    for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local review_proposal = marker:match('proposal="([^"]+)"')
       local _, reviewed_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
       if marker:match('decision="([^"]+)"') == "approve"
@@ -141,12 +141,12 @@ end
 
 local function load_current_pr(repo, pr_number)
   local viewed = git_mechanics.run_required(devloop_commands.gh_pr_view_freshness(repo, pr_number, 30), "PR freshness view")
-  return parsers_pr.parse_pr_view_merge(core, viewed.stdout)
+  return parsers_pr.parse_pr_view_merge(viewed.stdout)
 end
 
 local function list_open_prs(repo)
   local listed = git_mechanics.run_required(devloop_commands.gh_pr_list_freshness(repo, 30), "PR freshness list")
-  return parsers_pr.parse_pr_list_freshness(core, listed.stdout)
+  return parsers_pr.parse_pr_list_freshness(listed.stdout)
 end
 
 local function raise_conflict(repo, branch, integration, branch_sha, integration_sha, pr_number)

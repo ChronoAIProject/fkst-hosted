@@ -777,8 +777,7 @@ return {
     -- Real gh form (observed via dogfood): a merged / branch-deleted PR returns
     -- headRepository.nameWithOwner as an empty string; fall back to owner/name so
     -- the same-repo check is not fooled into treating it as cross-repo.
-    local origin = parsers_pr.parse_pr_view_origin(core,
-      '{"headRefName":"b","headRefOid":"ABC123","state":"MERGED","headRepository":{"name":"fkst-packages","nameWithOwner":""},"headRepositoryOwner":{"login":"ChronoAIProject"},"isCrossRepository":false,"comments":[]}'
+    local origin = parsers_pr.parse_pr_view_origin('{"headRefName":"b","headRefOid":"ABC123","state":"MERGED","headRepository":{"name":"fkst-packages","nameWithOwner":""},"headRepositoryOwner":{"login":"ChronoAIProject"},"isCrossRepository":false,"comments":[]}'
     )
     t.eq(origin.head_repository, "ChronoAIProject/fkst-packages")
     t.eq(origin.is_cross_repository, false)

@@ -5,7 +5,7 @@ local contract_time = require("contract.time")
 local C = {}
 
 local function comment_created_ms(M, comment)
-  local seconds = contract_time.iso_timestamp_epoch_seconds(parsers_misc._comment_created_at(M, comment))
+  local seconds = contract_time.iso_timestamp_epoch_seconds(parsers_misc._comment_created_at(comment))
   if seconds == nil then
     return nil
   end
@@ -59,9 +59,9 @@ local function matching_live_defer_marker(M, row, state, facts)
   local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
   local version = signal_version(M, row, state)
   local newest = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
     local created_ms = comment_created_ms(M, comment)
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern(family)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern(family)) do
       if marker_attr(marker, "proposal") == tostring(proposal_id)
         and marker_attr(marker, "version") == tostring(version or "") then
         if newest == nil or (created_ms ~= nil and newest.created_ms ~= nil and created_ms > newest.created_ms) then
@@ -69,7 +69,7 @@ local function matching_live_defer_marker(M, row, state, facts)
             id = family .. ":v1:" .. tostring(proposal_id) .. ":" .. tostring(version or ""),
             family = family,
             marker = marker,
-            comment_created_at = parsers_misc._comment_created_at(M, comment),
+            comment_created_at = parsers_misc._comment_created_at(comment),
             created_ms = created_ms,
             updated_ms = created_ms,
           }

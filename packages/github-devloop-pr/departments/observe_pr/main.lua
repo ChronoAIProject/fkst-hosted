@@ -441,7 +441,7 @@ local function process_pr_event(event)
     error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end
 
-  local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
   local origin, has_issue_origin = origin_from_pr(pr.repo, pr.number, current_pr)
   if origin.branch == nil or origin.base_branch == nil then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "reviewing", "skip-foreign(pr)", "PR branch facts missing")

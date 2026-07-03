@@ -38,7 +38,7 @@ local function find_linked_pr(repo, pr_number)
   if view.exit_code ~= 0 then
     error("github-devloop: pr-child handoff PR view failed: " .. tostring(view.stderr))
   end
-  local current_pr = parsers_pr.parse_pr_view_origin(core, view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
   if type(current_pr.comments) ~= "table" then
     error("github-devloop: pr-child handoff PR view malformed")
   end

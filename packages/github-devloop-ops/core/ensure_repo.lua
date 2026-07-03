@@ -364,11 +364,10 @@ function M.ensure_repo()
   if cfg.write_mode == "real" then
     devloop_base.assert_trusted_bot_configured()
   end
-  local repo_labels = parsers_misc.parse_repo_labels(M, run_gh(function(timeout)
+  local repo_labels = parsers_misc.parse_repo_labels(run_gh(function(timeout)
     return labels.gh_repo_labels_list(repo, timeout)
   end, 30, "gh label list").stdout)
-  local dashboard_issues = parsers_misc.parse_dashboard_issue_list(M,
-    run_gh(function(timeout)
+  local dashboard_issues = parsers_misc.parse_dashboard_issue_list(run_gh(function(timeout)
       return dashboard.gh_dashboard_issue_all_open(repo, timeout)
     end, 30, "gh dashboard issue list").stdout
   )

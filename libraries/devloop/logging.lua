@@ -156,13 +156,13 @@ function C.log_forged_markers(dept, proposal_id, comments)
 
   local marker_pattern = "<!%-%- fkst:github%-devloop:([%w%-]+):v1.-%-%->"
   for _, comment in ipairs(comments) do
-    if not parsers_misc._is_trusted_comment(devloop_base, comment) then
-      for marker, marker_kind in parsers_misc._comment_body(devloop_base, comment):gmatch("(" .. marker_pattern .. ")") do
+    if not parsers_misc._is_trusted_comment(comment) then
+      for marker, marker_kind in parsers_misc._comment_body(comment):gmatch("(" .. marker_pattern .. ")") do
         local marker_proposal = marker:match('proposal="([^"]+)"')
         if marker_proposal == proposal_id then
           C.log_line("warn", dept, proposal_id, "FORGE", {
             "marker_kind=" .. tostring(marker_kind),
-            "ignored_author=" .. tostring(parsers_misc._comment_author_login(devloop_base, comment) or ""),
+            "ignored_author=" .. tostring(parsers_misc._comment_author_login(comment) or ""),
             "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
           })
         end

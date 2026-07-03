@@ -73,7 +73,7 @@ local function should_reinject_issue(repo, issue, limits, deadline)
       end
       error("github-devloop: liveness-scan-awaiting-pr-view-failed: " .. tostring(pr_view.stderr))
     end
-    current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
+    current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
     current_pr.number = delegation.pr_number
     current_pr.force_fresh = true
     snapshot.comments = current.comments or {}

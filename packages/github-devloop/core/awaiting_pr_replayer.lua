@@ -75,7 +75,7 @@ local function read_delegated_child_pr(dept, issue, delegation)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: awaiting-pr-child-view-failed: " .. tostring(pr_view.stderr))
   end
-  local current_pr = parsers_pr.parse_pr_view_origin(M, pr_view.stdout)
+  local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
   current_pr.number, current_pr.force_fresh = delegation.pr_number, true
   return current_pr
 end

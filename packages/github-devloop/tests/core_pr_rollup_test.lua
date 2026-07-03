@@ -49,7 +49,7 @@ return {
     t.eq(pending_reason, "rollup-pending")
   end,
   test_ci_rollup_failure_summary_lists_failed_checks = function()
-    local summary = parsers_misc.pr_rollup_failure_summary(core, {
+    local summary = parsers_misc.pr_rollup_failure_summary({
       status_check_rollup = {
         { name = "test", state = "COMPLETED", conclusion = "FAILURE" },
         { context = "lint", state = "ERROR", conclusion = "" },
@@ -70,7 +70,7 @@ return {
         conclusion = "FAILURE",
       })
     end
-    local summary = parsers_misc.pr_rollup_failure_summary(core, { status_check_rollup = entries })
+    local summary = parsers_misc.pr_rollup_failure_summary({ status_check_rollup = entries })
     t.is_true(#summary <= parsers_misc.max_rollup_failure_summary_len)
     t.is_true(summary:find("%c") == nil)
     t.is_true(summary:find("<!-- fkst:", 1, true) == nil)

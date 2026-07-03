@@ -73,7 +73,7 @@ local function read_current_pr(repo, pr_number)
   if pr_view.exit_code ~= 0 then
     error("github-devloop: gh pr decompose view failed: " .. tostring(pr_view.stderr))
   end
-  return parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
+  return parsers_pr.parse_pr_view_origin(pr_view.stdout)
 end
 
 local function read_decompose_issue(repo, issue_number)

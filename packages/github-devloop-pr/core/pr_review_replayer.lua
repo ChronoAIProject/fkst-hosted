@@ -578,7 +578,7 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
       { queue = M.pr_package_queue("devloop_merge_ready"), payload = payload },
     })
   end
-  if parsers_misc.is_ci_red_reason(M, ci_reason) then
+  if parsers_misc.is_ci_red_reason(ci_reason) then
     local fix_version = devloop_state.fix_version_from_review_version(state.version)
     local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
     local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, ci_reason, current_pr.base_ref_oid, source_ref)

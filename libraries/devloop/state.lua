@@ -302,7 +302,7 @@ local function state_marker_fact(marker, comment)
     state = marker_state,
     version = marker_version,
     stage_rank = marker_stage_rank(marker, marker_state),
-    marker_created_at = parsers_misc._comment_created_at(devloop_base, comment),
+    marker_created_at = parsers_misc._comment_created_at(comment),
   }
 end
 
@@ -519,7 +519,7 @@ end
 function C.comment_bodies(comments)
   local bodies = {}
   for _, comment in ipairs(comments or {}) do
-    table.insert(bodies, parsers_misc._comment_body(devloop_base, comment))
+    table.insert(bodies, parsers_misc._comment_body(comment))
   end
   return bodies
 end
@@ -531,8 +531,8 @@ function C.current_state(comments, proposal_id)
 
   local current = nil
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
-    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       if candidate ~= nil and candidate.proposal_id == proposal_id then
         candidate = {
@@ -589,8 +589,8 @@ function C.reached(comments, proposal_id, milestone, opts)
   validate_milestone_domain(domain, milestone)
 
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
-    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       if candidate ~= nil
         and candidate.proposal_id == proposal_id
@@ -609,8 +609,8 @@ function C.has_state_marker(comments, proposal_id, state, version)
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
-    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       if candidate ~= nil
         and candidate.proposal_id == proposal_id
@@ -628,8 +628,8 @@ function C.state_marker_comment_id(comments, proposal_id, state, version, effect
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
-    for marker in parsers_misc._comment_body(devloop_base, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local candidate = state_marker_fact(marker, comment)
       local attrs = marker_attrs(marker)
       if candidate ~= nil
@@ -954,8 +954,8 @@ function C.has_result_marker(comments, proposal_id, decision, dedup_key)
   -- Match the FULL marker (proposal + decision + dedup) so a stale opposite/older-version marker
   -- does not suppress writing the current decision's result marker.
   local needle = m_builders.result_marker(proposal_id, decision, dedup_key)
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(devloop_base, comments)) do
-    if parsers_misc._comment_body(devloop_base, comment):find(needle, 1, true) ~= nil then
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    if parsers_misc._comment_body(comment):find(needle, 1, true) ~= nil then
       return true
     end
   end

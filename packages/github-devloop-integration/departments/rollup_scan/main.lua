@@ -54,7 +54,7 @@ end
 
 local function list_open_pr(repo, integration, upstream)
   local listed = git_mechanics.run_required(devloop_commands.gh_pr_list_head_base(repo, integration, upstream, 30), "rollup PR list")
-  local prs = parsers_pr.parse_pr_list_head_base(core, listed.stdout)
+  local prs = parsers_pr.parse_pr_list_head_base(listed.stdout)
   if #prs == 0 then
     return nil
   end
@@ -63,7 +63,7 @@ end
 
 local function fetch_rollup_pr(repo, pr_number)
   local viewed = git_mechanics.run_required(github("github-devloop-integration.rollup_scan").gh_pr_view_merge(repo, pr_number, 30), "rollup PR view")
-  local pr = parsers_pr.parse_pr_view_merge(core, viewed.stdout)
+  local pr = parsers_pr.parse_pr_view_merge(viewed.stdout)
   pr.number = tonumber(pr_number)
   return pr
 end

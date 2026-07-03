@@ -34,8 +34,8 @@ local function review_result_fact_from_marker(M, marker, comment, issue_proposal
       review_dedup_key = review_dedup,
       reviewed_head_sha = reviewed_head_sha,
       decision = decision,
-      review_reason = parsers_misc._comment_body(M, comment),
-      comment_created_at = parsers_misc._comment_created_at(M, comment),
+      review_reason = parsers_misc._comment_body(comment),
+      comment_created_at = parsers_misc._comment_created_at(comment),
     }
     if decision == "reject" then
       local marker_fix_round = valid_round(marker_attr(marker, "fix_round"))
@@ -63,8 +63,8 @@ function C.intake_decision_fact(M, comments, issue_proposal_id)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:intake%-decision:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local decision = marker:match('decision="([^"]+)"')
       local service_class = marker:match('class="([^"]+)"')
@@ -78,7 +78,7 @@ function C.intake_decision_fact(M, comments, issue_proposal_id)
           decision = decision,
           service_class = shared.normalize_intake_service_class(service_class),
           dedup_key = dedup,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end
@@ -95,8 +95,8 @@ function C.review_reject_fact(M, comments, issue_proposal_id, issue_version)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local fact = review_result_fact_from_marker(M, marker, comment, issue_proposal_id, issue_version, "reject")
       if fact ~= nil then
         return fact
@@ -111,8 +111,8 @@ function C.review_result_fact(M, comments, issue_proposal_id, issue_version, exp
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local fact = review_result_fact_from_marker(M, marker, comment, issue_proposal_id, issue_version, expected_decision)
       if fact ~= nil then
         return fact
@@ -157,15 +157,15 @@ function C.review_prior_round_ledger(M, comments, issue_proposal_id, issue_versi
   local latest_fix = nil
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
   local rejected_fix_version = M._strip_latest_fix_version_suffix(issue_version)
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    local body = parsers_misc._comment_body(M, comment)
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    local body = parsers_misc._comment_body(comment)
     for marker in body:gmatch(marker_pattern) do
       local fact = review_result_fact_from_marker(M, marker, comment, issue_proposal_id, rejected_fix_version, "reject")
       if fact ~= nil and (latest_reject == nil or fact.fix_round > latest_reject.fix_round) then
         latest_reject = {
           gap = fact.blocking_gap,
           fix_round = fact.fix_round,
-          created_at = parsers_misc._comment_created_at(M, comment),
+          created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end
@@ -178,7 +178,7 @@ function C.review_prior_round_ledger(M, comments, issue_proposal_id, issue_versi
       latest_fix = {
         summary = fix_summary,
         fix_round = fix_summary_round,
-        created_at = parsers_misc._comment_created_at(M, comment),
+        created_at = parsers_misc._comment_created_at(comment),
       }
     end
   end
@@ -203,8 +203,8 @@ function C.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local action = marker:match('action="([^"]+)"')
@@ -221,7 +221,7 @@ function C.review_meta_fix_fact(M, comments, issue_proposal_id, issue_version)
           review_proposal_id = review_proposal,
           review_dedup_key = marker_dedup,
           reviewed_head_sha = reviewed_head_sha,
-          review_reason = parsers_misc._comment_body(M, comment),
+          review_reason = parsers_misc._comment_body(comment),
           blocking_gap = gap,
         }
       end
@@ -236,8 +236,8 @@ function C.review_meta_decision_fact(M, comments, issue_proposal_id, issue_versi
   end
   local expected_lineage = transition_version.strip_suffixes(issue_version)
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker_attr(marker, "proposal")
       local marker_dedup = marker_attr(marker, "dedup")
       local action = marker_attr(marker, "action")
@@ -260,9 +260,9 @@ function C.review_meta_decision_fact(M, comments, issue_proposal_id, issue_versi
             reviewed_head_sha = reviewed_head_sha,
             action = action,
             version = version,
-            review_reason = parsers_misc._comment_body(M, comment),
+            review_reason = parsers_misc._comment_body(comment),
             blocking_gap = gap,
-            comment_created_at = parsers_misc._comment_created_at(M, comment),
+            comment_created_at = parsers_misc._comment_created_at(comment),
           }
         end
       end
@@ -288,8 +288,8 @@ function C.merge_gate_fix_fact(M, comments, issue_proposal_id, issue_version, op
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-gate:v1.-%-%->"
   local first_fact = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       local marker_review_proposal = marker:match('review_proposal="([^"]+)"')
@@ -313,7 +313,7 @@ function C.merge_gate_fix_fact(M, comments, issue_proposal_id, issue_version, op
           gate_baseline_sha = marker_gate_baseline_sha,
           predecessor_set = marker_predecessor_set,
           reason = marker_reason,
-          review_reason = parsers_misc._comment_body(M, comment),
+          review_reason = parsers_misc._comment_body(comment),
         }
         if first_fact == nil then
           first_fact = fact
@@ -337,8 +337,8 @@ function C.merge_ready_fact(M, comments, issue_proposal_id, issue_version, pr_nu
   local marker_pattern = "<!%-%- fkst:github%-devloop:merge%-ready:v1.-%-%->"
   local best = nil
   local best_seconds = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
@@ -360,7 +360,7 @@ function C.merge_ready_fact(M, comments, issue_proposal_id, issue_version, pr_nu
           review_dedup_key = marker_review_dedup,
           head_sha = marker_head_sha,
           reviewed_head_sha = marker_head_sha,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
         local candidate_seconds = contract_time.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
         if best == nil or candidate_seconds >= best_seconds then
@@ -383,8 +383,8 @@ function C.high_risk_review_evidence_fact(M, comments, issue_proposal_id, issue_
   local marker_pattern = "<!%-%- fkst:github%-devloop:high%-risk%-review%-evidence:v1.-%-%->"
   local best = nil
   local best_seconds = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker_attr(marker, "proposal")
       local marker_version = marker_attr(marker, "version")
       local marker_pr = marker_attr(marker, "pr")
@@ -424,7 +424,7 @@ function C.high_risk_review_evidence_fact(M, comments, issue_proposal_id, issue_
           verdict = marker_verdict,
           paths_digest = marker_paths_digest,
           angle_digest = marker_angle_digest,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
         local candidate_seconds = contract_time.iso_timestamp_epoch_seconds(candidate.comment_created_at) or 0
         if best == nil or candidate_seconds >= best_seconds then
@@ -442,8 +442,8 @@ function C.review_result_approval_matches_event(M, comments, merge_ready)
     return false, "missing-review-result-approve"
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local review_proposal = marker:match('proposal="([^"]+)"')
       local issue_proposal = marker:match('issue_proposal="([^"]+)"')
       local decision = marker:match('decision="([^"]+)"')
@@ -512,8 +512,8 @@ function C.merging_fact(M, comments, issue_proposal_id, pr_number, version, head
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:merging:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
@@ -528,7 +528,7 @@ function C.merging_fact(M, comments, issue_proposal_id, pr_number, version, head
           pr_number = tonumber(marker_pr),
           version = marker_version,
           head_sha = marker_head_sha,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end
@@ -541,8 +541,8 @@ function C.merged_fact(M, comments, issue_proposal_id, pr_number, version)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:merged:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_issue = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
@@ -561,7 +561,7 @@ function C.merged_fact(M, comments, issue_proposal_id, pr_number, version)
           version = marker_version,
           head_sha = marker_head_sha,
           autonomy_result = autonomy_result,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end
@@ -579,8 +579,8 @@ function C.has_review_result_marker(M, comments, review_proposal_id, issue_propo
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if marker_attr(marker, "proposal") == tostring(review_proposal_id)
         and marker_attr(marker, "issue_proposal") == tostring(issue_proposal_id)
         and marker_attr(marker, "decision") == tostring(decision)
@@ -598,8 +598,8 @@ function C.has_review_meta_marker(M, comments, issue_proposal_id, dedup_key)
   end
 
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       if marker_proposal == tostring(issue_proposal_id) and marker_dedup == tostring(dedup_key) then
@@ -615,8 +615,8 @@ function C.has_fix_marker(M, comments, issue_proposal_id, review_proposal_id, re
     return false
   end
   local needle = m_builders.fix_marker(issue_proposal_id, review_proposal_id, review_dedup_key, old_head_sha, new_head_sha)
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    if parsers_misc._comment_body(M, comment):find(needle, 1, true) ~= nil then
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    if parsers_misc._comment_body(comment):find(needle, 1, true) ~= nil then
       return true
     end
   end
@@ -628,8 +628,8 @@ function C.has_any_review_result_marker(M, comments, review_proposal_id, issue_p
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if marker:match('proposal="([^"]+)"') == tostring(review_proposal_id)
         and marker:match('issue_proposal="([^"]+)"') == tostring(issue_proposal_id) then
         return true
@@ -643,8 +643,8 @@ local function has_versioned_marker(comments, marker)
   if type(comments) ~= "table" then
     return false
   end
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    if parsers_misc._comment_body(M, comment):find(marker, 1, true) ~= nil then
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    if parsers_misc._comment_body(comment):find(marker, 1, true) ~= nil then
       return true
     end
   end
@@ -656,8 +656,8 @@ function C.has_implementing_marker(M, comments, proposal_id, dedup_key)
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:implementing:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
         and marker:match('dedup="([^"]*)"') == tostring(dedup_key) then
         return true
@@ -672,8 +672,8 @@ function C.implementing_fact(M, comments, proposal_id, dedup_key)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:implementing:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_dedup = marker:match('dedup="([^"]*)"')
       local marker_branch = marker:match('branch="([^"]+)"')
@@ -705,8 +705,8 @@ function C.pr_link_fact(M, comments, proposal_id)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-link:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
       local marker_branch = marker:match('branch="([^"]+)"')
@@ -735,8 +735,8 @@ function C.pr_delegation_fact(M, comments, proposal_id, version, delegation)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-delegation:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_pr_proposal = marker:match('pr_proposal="([^"]+)"')
       local marker_pr = marker:match('pr="([^"]+)"')
@@ -758,7 +758,7 @@ function C.pr_delegation_fact(M, comments, proposal_id, version, delegation)
           pr_number = tonumber(marker_pr),
           version = marker_version,
           delegation = marker_delegation,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end
@@ -771,8 +771,8 @@ function C.pr_origin_fact(M, comments)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:pr%-origin:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_issue = marker:match('issue="([^"]+)"')
       local marker_branch = marker:match('branch="([^"]+)"')
@@ -820,8 +820,8 @@ function C.has_orphan_reaped_marker(M, comments, proposal_id, pr_number)
     return false
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:orphan%-reaped:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       if marker:match('proposal="([^"]+)"') == tostring(proposal_id)
         and tostring(marker:match('pr="([^"]+)"')) == tostring(pr_number) then
         return true

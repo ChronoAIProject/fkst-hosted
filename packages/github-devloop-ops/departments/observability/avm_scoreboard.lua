@@ -263,7 +263,7 @@ local function log_marker_rejection(tag, reason, comment, marker)
   end
   log.warn("github-devloop dept=observability tag=" .. tostring(tag)
     .. " reason=" .. safe_segment(reason)
-    .. " author=" .. safe_segment(parsers_misc.comment_author_login(core, comment))
+    .. " author=" .. safe_segment(parsers_misc.comment_author_login(comment))
     .. marker_context)
 end
 
@@ -273,7 +273,7 @@ local function append_comment_facts(facts, comments, now_seconds)
     trust_set = nil
   end
   for _, comment in ipairs(comments or {}) do
-    local body = parsers_misc._comment_body(core, comment)
+    local body = parsers_misc._comment_body(comment)
     local function append_marker(marker)
       local fact, reason = fact_from_marker(marker, comment)
       if fact ~= nil then
@@ -282,7 +282,7 @@ local function append_comment_facts(facts, comments, now_seconds)
         log_marker_rejection("AVM_MARKER_REJECTED", reason or "parse_nil", comment, marker)
       end
     end
-    if parsers_misc._is_trusted_comment(core, comment, trust_set) then
+    if parsers_misc._is_trusted_comment(comment, trust_set) then
       for marker in body:gmatch("<!%-%- fkst:github%-devloop:autonomy%-result:v1.-%-%->") do
         append_marker(marker)
       end
@@ -378,7 +378,7 @@ function core.collect_recent_merged_prs(repo, limits, deadline)
     return nil
   end
   local prs = {}
-  for _, item in ipairs(parsers_pr.parse_pr_list_recent_merged(core, listed.stdout)) do
+  for _, item in ipairs(parsers_pr.parse_pr_list_recent_merged(listed.stdout)) do
     if not core.observability_has_budget(deadline) then
       log.warn("github-devloop dept=observability tag=AVM_FALSE_CONSENSUS_DEFERRED reason=deadline processed_prs=" .. tostring(#prs))
       break
@@ -392,7 +392,7 @@ function core.collect_recent_merged_prs(repo, limits, deadline)
       log.warn("github-devloop dept=observability tag=AVM_FALSE_CONSENSUS_DEFERRED reason=deadline processed_prs=" .. tostring(#prs))
       break
     end
-    table.insert(prs, recent_merged_pr_view(parsers_pr.parse_pr_view_origin(core, view.stdout), item))
+    table.insert(prs, recent_merged_pr_view(parsers_pr.parse_pr_view_origin(view.stdout), item))
   end
   return prs
 end
@@ -412,7 +412,7 @@ function core.collect_recent_merged_issues(repo, limits, deadline)
     return nil
   end
   local issues = {}
-  for _, item in ipairs(parsers_issue.parse_issue_list_recent_closed(core, listed.stdout)) do
+  for _, item in ipairs(parsers_issue.parse_issue_list_recent_closed(listed.stdout)) do
     if not core.observability_has_budget(deadline) then
       log.warn("github-devloop dept=observability tag=AVM_SCOREBOARD_DEFERRED reason=deadline processed_issues=" .. tostring(#issues))
       break

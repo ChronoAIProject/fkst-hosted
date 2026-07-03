@@ -15,11 +15,11 @@ function M.decompose_package_queue()
 end
 
 function M.parse_pr_view_merge(stdout)
-  return parsers_pr.parse_pr_view_merge(M, stdout)
+  return parsers_pr.parse_pr_view_merge(stdout)
 end
 
 function M.rollup_failure_gate_sha(pr)
-  return parsers_misc.rollup_failure_gate_sha(M, pr)
+  return parsers_misc.rollup_failure_gate_sha(pr)
 end
 
 local base = require("devloop.base")

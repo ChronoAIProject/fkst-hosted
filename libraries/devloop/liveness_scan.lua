@@ -154,7 +154,7 @@ function C.liveness_scan_list_open_issues(M, repo, timeout, poll_key)
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-issue-list-failed: " .. tostring(list.stderr))
   end
-  return parsers_issue.parse_issue_list_observe(M, list.stdout)
+  return parsers_issue.parse_issue_list_observe(list.stdout)
 end
 
 function C.liveness_scan_list_open_prs(M, repo, timeout, poll_key)
@@ -165,7 +165,7 @@ function C.liveness_scan_list_open_prs(M, repo, timeout, poll_key)
   if list.exit_code ~= 0 then
     error("github-devloop: liveness-scan-pr-list-failed: " .. tostring(list.stderr))
   end
-  return parsers_pr.parse_pr_list_observe(M, list.stdout)
+  return parsers_pr.parse_pr_list_observe(list.stdout)
 end
 
 local function sort_by_number(items)

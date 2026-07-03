@@ -84,7 +84,7 @@ return {
       table.insert(pages[3], { number = i + 200, state = "open" })
     end
     local calls = {}
-    local function parse(_core, stdout)
+    local function parse(stdout)
       return pages[tonumber(tostring(stdout):match("page:(%d+)"))] or {}
     end
     local original_parse = parsers_issue.parse_issue_list_observe

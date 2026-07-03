@@ -49,8 +49,8 @@ function M.impl_failure_fact(comments, proposal_id, dedup_key)
   end
   local best = nil
   local marker_pattern = "<!%-%- fkst:github%-devloop:impl%-failure:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker_attr(marker, "proposal")
       local marker_dedup = marker_attr(marker, "dedup")
       local reason = marker_attr(marker, "reason")
@@ -64,7 +64,7 @@ function M.impl_failure_fact(comments, proposal_id, dedup_key)
           dedup_key = marker_dedup,
           reason = reason,
           attempt = attempt,
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
         if best == nil or fact.attempt > best.attempt then
           best = fact

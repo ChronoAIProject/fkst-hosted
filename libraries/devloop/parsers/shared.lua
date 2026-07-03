@@ -2,11 +2,11 @@ local strings = require("contract.strings")
 local github_view = require("forge.github_view")
 local C = {}
 
-function C.label_names(_M, labels)
+function C.label_names(labels)
   return github_view.label_names(labels)
 end
 
-function C.each_paginated_item(_M, decoded, callback)
+function C.each_paginated_item(decoded, callback)
   if type(decoded) ~= "table" then
     return
   end
@@ -23,10 +23,10 @@ function C.each_paginated_item(_M, decoded, callback)
   end
 end
 
-function C.parse_numbered_list(M, stdout)
+function C.parse_numbered_list(stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
-  C.each_paginated_item(M, decoded, function(item)
+  C.each_paginated_item(decoded, function(item)
     if type(item) == "table" and tonumber(item.number) ~= nil then
       table.insert(items, {
         number = tonumber(item.number),

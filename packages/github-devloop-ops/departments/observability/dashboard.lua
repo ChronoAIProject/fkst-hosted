@@ -460,7 +460,7 @@ local function trusted_dashboard_issue(repo, bot_login, limits, deadline)
     log.warn("github-devloop dept=observability tag=DASHBOARD_LOCATOR_FAILED locator=label-list label=" .. dashboard_label .. " reason=empty-output")
     error("github-devloop: dashboard issue list failed: empty output")
   end
-  for _, issue in ipairs(parsers_misc.parse_dashboard_issue_list(core, listed.stdout)) do
+  for _, issue in ipairs(parsers_misc.parse_dashboard_issue_list(listed.stdout)) do
     -- Normalize both sides so a "<slug>[bot]" author (REST) matches a bare bot login.
     if devloop_base.strip_bot_login_suffix(issue.author_login) == devloop_base.strip_bot_login_suffix(bot_login)
       and tostring(issue.body or ""):find(dashboard_marker_prefix, 1, true) ~= nil then

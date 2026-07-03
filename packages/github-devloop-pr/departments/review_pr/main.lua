@@ -79,7 +79,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if pr_view.exit_code ~= 0 then
       error("github-devloop: gh pr review head view failed: " .. tostring(pr_view.stderr))
     end
-    local current_pr = parsers_pr.parse_pr_view_origin(core, pr_view.stdout)
+    local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
     devloop_logging.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
     local state = require("devloop.entity").current_entity_state(current_pr.comments, reviewing.proposal_id)
     local transition = reviewing_transition_status(state, reviewing.version)

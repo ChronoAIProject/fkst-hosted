@@ -212,7 +212,7 @@ local function fetch_pr_entity(repo, pr)
   if view.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-view-failed: " .. tostring(view.stderr))
   end
-  local current = parsers_pr.parse_pr_view_origin(M, view.stdout)
+  local current = parsers_pr.parse_pr_view_origin(view.stdout)
   local origin = m_facts.pr_origin_fact(M, current.comments)
   local proposal_id = origin and origin.proposal_id or entity_lib.pr_proposal_id(repo, pr.number)
   return {
@@ -235,7 +235,7 @@ local function list_open_issues(repo, poll_key)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-issue-list-failed: " .. tostring(result.stderr))
   end
-  return parsers_issue.parse_issue_list_observe(M, result.stdout)
+  return parsers_issue.parse_issue_list_observe(result.stdout)
 end
 
 local function list_open_prs(repo, poll_key)
@@ -246,7 +246,7 @@ local function list_open_prs(repo, poll_key)
   if result.exit_code ~= 0 then
     error("github-devloop: saga-doctor-pr-list-failed: " .. tostring(result.stderr))
   end
-  return parsers_pr.parse_pr_list_observe(M, result.stdout)
+  return parsers_pr.parse_pr_list_observe(result.stdout)
 end
 
 local function open_pr_number_set(prs)

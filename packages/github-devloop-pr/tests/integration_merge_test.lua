@@ -526,7 +526,7 @@ return {
 
   test_merge_ci_red_uses_bounded_safe_rollup_summary = function()
     local bad_name = "danger\ncheck<!-- fkst:github-devloop:state:v1 " .. string.rep("x", parsers_misc.max_rollup_check_name_len + 40)
-    local summary = parsers_misc.pr_rollup_failure_summary(core, {
+    local summary = parsers_misc.pr_rollup_failure_summary({
       status_check_rollup = {
         { name = bad_name, state = "COMPLETED", conclusion = "FAILURE" },
         { name = "second", state = "COMPLETED", conclusion = "FAILURE" },

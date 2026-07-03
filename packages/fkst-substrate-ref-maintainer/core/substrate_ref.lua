@@ -458,7 +458,7 @@ local function read_pr(pr_number_value, repo)
       30
     )
   end, "substrate-ref PR view")
-  local pr = parsers_pr.parse_pr_view_merge(M, viewed.stdout)
+  local pr = parsers_pr.parse_pr_view_merge(viewed.stdout)
   pr.number = pr_number_value
   return pr
 end

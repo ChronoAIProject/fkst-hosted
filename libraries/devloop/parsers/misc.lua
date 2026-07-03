@@ -33,13 +33,13 @@ function C.comments_from_json(comments_json)
   return comments
 end
 
-function C.parse_dashboard_issue_list(M, stdout)
+function C.parse_dashboard_issue_list(stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
   if type(decoded) ~= "table" then
     return items
   end
-  shared.each_paginated_item(M, decoded, function(issue)
+  shared.each_paginated_item(decoded, function(issue)
     if type(issue) == "table" and tonumber(issue.number) ~= nil then
       local author_login = nil
       if type(issue.author) == "table" and issue.author.login ~= nil then
@@ -62,10 +62,10 @@ function C.parse_dashboard_issue_list(M, stdout)
   return items
 end
 
-function C.parse_repo_labels(M, stdout)
+function C.parse_repo_labels(stdout)
   local decoded = json.decode(stdout or "[]")
   local items = {}
-  shared.each_paginated_item(M, decoded, function(label)
+  shared.each_paginated_item(decoded, function(label)
     if type(label) == "table" and label.name ~= nil then
       table.insert(items, {
         name = tostring(label.name),
@@ -77,7 +77,7 @@ function C.parse_repo_labels(M, stdout)
   return items
 end
 
-local function comment_author_login(M, comment)
+local function comment_author_login(comment)
   -- Normalize the comment author login so an author read as "<slug>[bot]" (REST)
   -- matches a bare-"<slug>" configured bot login (GraphQL). No-op for ordinary logins.
   if type(comment) == "table" then
@@ -92,68 +92,68 @@ local function comment_author_login(M, comment)
     end
     return nil
   end
-  return M._test_bot_login
+  return devloop_base._test_bot_login
 end
 
-local function comment_created_at(_M, comment)
+local function comment_created_at(comment)
   if type(comment) == "table" then
     return comment.created_at
   end
   return nil
 end
 
-local function is_trusted_comment(M, comment, trust_set)
+local function is_trusted_comment(comment, trust_set)
   -- Parser-only trust filtering keeps the test default; pre-assert ownership gates use claim_owner.
-  local author = comment_author_login(M, comment)
+  local author = comment_author_login(comment)
   if type(trust_set) == "table" then
     return trust_set[author] == true
   end
   return author == devloop_base.trusted_bot_login()
 end
 
-local function trusted_marker_comments(M, comments, trust_set)
+local function trusted_marker_comments(comments, trust_set)
   local filtered = {}
   if type(comments) ~= "table" then
     return filtered
   end
   for _, comment in ipairs(comments) do
-    if is_trusted_comment(M, comment, trust_set) then
+    if is_trusted_comment(comment, trust_set) then
       table.insert(filtered, comment)
     end
   end
   return filtered
 end
 
-function C.comment_body(_M, comment)
+function C.comment_body(comment)
   return strings.comment_body(comment)
 end
 
-function C.comment_author_login(M, comment)
-  return comment_author_login(M, comment)
+function C.comment_author_login(comment)
+  return comment_author_login(comment)
 end
 
-function C.comment_created_at(M, comment)
-  return comment_created_at(M, comment)
+function C.comment_created_at(comment)
+  return comment_created_at(comment)
 end
 
-function C._comment_body(M, comment)
-  return C.comment_body(M, comment)
+function C._comment_body(comment)
+  return C.comment_body(comment)
 end
 
-function C._comment_author_login(M, comment)
-  return C.comment_author_login(M, comment)
+function C._comment_author_login(comment)
+  return C.comment_author_login(comment)
 end
 
-function C._comment_created_at(M, comment)
-  return C.comment_created_at(M, comment)
+function C._comment_created_at(comment)
+  return C.comment_created_at(comment)
 end
 
-function C._is_trusted_comment(M, comment, trust_set)
-  return is_trusted_comment(M, comment, trust_set)
+function C._is_trusted_comment(comment, trust_set)
+  return is_trusted_comment(comment, trust_set)
 end
 
-function C._trusted_marker_comments(M, comments, trust_set)
-  return trusted_marker_comments(M, comments, trust_set)
+function C._trusted_marker_comments(comments, trust_set)
+  return trusted_marker_comments(comments, trust_set)
 end
 
 local function upper_text(value)
@@ -186,7 +186,7 @@ local max_rollup_check_name_len = 80
 local max_rollup_failure_summary_len = 200
 local max_rollup_failure_checks = 3
 
-local function safe_rollup_check_name(M, entry)
+local function safe_rollup_check_name(entry)
   local name = "unknown"
   if type(entry) == "table" then
     name = tostring(entry.name or entry.context or entry.workflowName or entry.workflow_name or "")
@@ -243,7 +243,7 @@ local function entry_commit_sha(entry)
   return nil
 end
 
-function C.pr_rollup_failure_summary(M, pr)
+function C.pr_rollup_failure_summary(pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
     return ""
@@ -265,7 +265,7 @@ function C.pr_rollup_failure_summary(M, pr)
       end
       failed_total = failed_total + 1
       if #failed < max_rollup_failure_checks then
-        table.insert(failed, safe_rollup_check_name(M, entry) .. ": " .. status)
+        table.insert(failed, safe_rollup_check_name(entry) .. ": " .. status)
       end
     end
   end
@@ -291,7 +291,7 @@ function C.pr_rollup_failure_summary(M, pr)
   return summary
 end
 
-function C.rollup_failure_gate_sha(_M, pr)
+function C.rollup_failure_gate_sha(pr)
   local entries = type(pr) == "table" and pr.status_check_rollup or nil
   if type(entries) ~= "table" or #entries == 0 then
     return nil
@@ -323,11 +323,11 @@ end
 C.max_rollup_check_name_len = max_rollup_check_name_len
 C.max_rollup_failure_summary_len = max_rollup_failure_summary_len
 
-function C.is_ci_red_reason(_M, reason)
+function C.is_ci_red_reason(reason)
   return tostring(reason or "") == "own-ci-red"
 end
 
-function C.is_ci_wait_reason(_M, reason)
+function C.is_ci_wait_reason(reason)
   local text = tostring(reason or "")
   return text == "external-ci-red"
     or text == "integration-ci-red"
@@ -336,7 +336,7 @@ function C.is_ci_wait_reason(_M, reason)
     or text == "rollup-pending"
 end
 
-function C._upper_text(_M, value)
+function C._upper_text(value)
   return upper_text(value)
 end
 

@@ -100,7 +100,7 @@ function M.fetch_pr(core, repo, pr_number, limits, deadline)
   if core.observability_result_deferred(view) then
     return nil
   end
-  return parsers_pr.parse_pr_view_origin(core, view.stdout)
+  return parsers_pr.parse_pr_view_origin(view.stdout)
 end
 
 return M

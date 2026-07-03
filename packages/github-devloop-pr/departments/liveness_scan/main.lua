@@ -50,7 +50,7 @@ local function should_reinject_pr(repo, pr, limits, deadline)
     error("github-devloop: liveness-scan-pr-view-failed: " .. tostring(state_view.stderr))
   end
 
-  local current = parsers_pr.parse_pr_view_origin(core, state_view.stdout)
+  local current = parsers_pr.parse_pr_view_origin(state_view.stdout)
   current.number = pr.number
   local origin = m_facts.pr_origin_fact(core, current.comments)
   local proposal_id = origin and origin.proposal_id or entity_lib.pr_proposal_id(repo, pr.number)

@@ -77,11 +77,11 @@ local function merge_wait_timeout_reason_class(reconcile, state, comments, curre
   end
   local reason_class = core.merge_gate_reason_class(wait.reason)
   local wait_kind = tostring(wait.kind or "")
-  if parsers_misc.is_ci_red_reason(core, reason_class) or check_runs.is_not_mergeable_reason(reason_class) then
+  if parsers_misc.is_ci_red_reason(reason_class) or check_runs.is_not_mergeable_reason(reason_class) then
     return "state-output-obligation-timeout"
   end
   if reason_class == "ci-wait"
-    or parsers_misc.is_ci_wait_reason(core, reason_class)
+    or parsers_misc.is_ci_wait_reason(reason_class)
     or wait_kind == "CI_WAIT"
     or wait_kind == "CHECKS_PENDING"
     or wait_kind == "CI_UNKNOWN"
@@ -170,7 +170,7 @@ local function pipeline_review(event)
       error("github-devloop: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
+    local current = parsers_pr.parse_pr_view_origin(view.stdout)
     devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = require("devloop.entity").current_entity_state(current.comments, reconcile.proposal_id)
     if conv_reconcile.has_review_reconcile_marker(core, current.comments, reconcile.proposal_id, reconcile.issue_version, reconcile.round) then
@@ -246,7 +246,7 @@ local function pipeline_fix(event)
       error("github-devloop: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
 
-    local current = parsers_pr.parse_pr_view_origin(core, view.stdout)
+    local current = parsers_pr.parse_pr_view_origin(view.stdout)
     devloop_logging.log_forged_markers("reconcile", reconcile.proposal_id, current.comments)
     local state = require("devloop.entity").current_entity_state(current.comments, reconcile.proposal_id)
     local version = conv_reconcile.fix_reconcile_state_version(reconcile.issue_version)
@@ -320,7 +320,7 @@ local function pipeline_timeout(event)
         target_pr_number = nil
         current_issue, current_pr, comments, snapshot = load_timeout_issue_surface(repo, issue_number, reconcile.proposal_id, reconcile.state)
       else
-        current_pr = parsers_pr.parse_pr_view_origin(core, view.stdout)
+        current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
         comments = current_pr.comments
       end
     else

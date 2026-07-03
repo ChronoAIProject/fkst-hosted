@@ -17,8 +17,8 @@ function M.dependency_wait_fact(comments, proposal_id)
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:dependency%-wait:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(core, comments)) do
-    for marker in parsers_misc._comment_body(core, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local marker_proposal = marker:match('proposal="([^"]+)"')
       local marker_version = marker:match('version="([^"]*)"')
       if marker_proposal == tostring(proposal_id)
@@ -26,7 +26,7 @@ function M.dependency_wait_fact(comments, proposal_id)
         return {
           proposal_id = marker_proposal,
           version = marker_version,
-          comment_created_at = parsers_misc._comment_created_at(core, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
     end

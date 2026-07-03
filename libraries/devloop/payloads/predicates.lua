@@ -159,18 +159,18 @@ local function state_marker_comment_verified(M, repo, hand_off)
   local comment = {
     id = decoded.databaseId or decoded.database_id or decoded.id,
     body = decoded.body,
-    author_login = parsers_misc._comment_author_login(M, decoded),
+    author_login = parsers_misc._comment_author_login(decoded),
     created_at = decoded.createdAt or decoded.created_at,
   }
   if comment.id ~= nil and tostring(comment.id) ~= tostring(hand_off.comment_id) then
     return false, "comment-id-mismatch"
   end
-  if not parsers_misc._is_trusted_comment(M, comment) then
+  if not parsers_misc._is_trusted_comment(comment) then
     return false, "comment-author-untrusted"
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
   local saw_proposal_marker = false
-  for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
     local marker_proposal = marker:match('proposal="([^"]+)"')
     local marker_state = marker:match('state="([^"]+)"')
     local marker_version = marker:match('version="([^"]*)"')

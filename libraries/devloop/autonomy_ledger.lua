@@ -171,7 +171,7 @@ local function comment_evidence(M, comment)
   return {
     comment_id = type(comment) == "table" and comment.id or nil,
     comment_url = type(comment) == "table" and comment.url or nil,
-    comment_created_at = parsers_misc._comment_created_at(M, comment),
+    comment_created_at = parsers_misc._comment_created_at(comment),
   }
 end
 
@@ -249,8 +249,8 @@ end
 local function collect_autonomy_claim_events(M, comments, proposal_id, repo, issue_number, events, sequence)
   local seen = {}
   local marker_pattern = "<!%-%- fkst:github%-devloop:implement%-attempt:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    local body = parsers_misc._comment_body(M, comment)
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    local body = parsers_misc._comment_body(comment)
     for marker in body:gmatch(marker_pattern) do
       sequence = sequence + 1
       local marker_proposal = marker_attr(marker, "proposal")
@@ -275,7 +275,7 @@ local function collect_autonomy_claim_events(M, comments, proposal_id, repo, iss
             version = dedup_key,
             claim_attempt = attempt,
             started_at = started_at,
-            comment_created_at = parsers_misc._comment_created_at(M, comment),
+            comment_created_at = parsers_misc._comment_created_at(comment),
             evidence = comment_evidence(M, comment),
             sequence = sequence,
           })
@@ -297,8 +297,8 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
   local terminals = {}
   local state_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
   local merged_pattern = "<!%-%- fkst:github%-devloop:merged:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    local body = parsers_misc._comment_body(M, comment)
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    local body = parsers_misc._comment_body(comment)
     for marker in body:gmatch(state_pattern) do
       sequence = sequence + 1
       local marker_proposal = marker_attr(marker, "proposal")
@@ -315,7 +315,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
           terminal_state = state,
           version = version,
           stage_rank = M.stage_rank(state),
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
           evidence = comment_evidence(M, comment),
           sequence = sequence,
         })
@@ -347,7 +347,7 @@ local function collect_autonomy_terminal_events(M, comments, proposal_id, events
           autonomy_result = autonomy_result,
           valid_autonomous_merge = autonomy_result and autonomy_result.valid_autonomous_merge or nil,
           stage_rank = M.stage_rank("merged"),
-          comment_created_at = parsers_misc._comment_created_at(M, comment),
+          comment_created_at = parsers_misc._comment_created_at(comment),
           evidence = comment_evidence(M, comment),
           sequence = sequence,
         })
@@ -690,7 +690,7 @@ function C.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_n
     codex_calls = codex_calls,
     gates = gates,
     valid_autonomous_merge = C.autonomy_valid_autonomous_merge(gates),
-    comment_created_at = parsers_misc._comment_created_at(M, comment),
+    comment_created_at = parsers_misc._comment_created_at(comment),
   }
 end
 
@@ -699,8 +699,8 @@ function C.autonomy_result_fact(M, comments, proposal_id, pr_number, version, he
     return nil
   end
   local marker_pattern = "<!%-%- fkst:github%-devloop:autonomy%-result:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch(marker_pattern) do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
       local fact = C.autonomy_result_record_from_marker(marker, comment, proposal_id, pr_number, version, head_sha)
       if fact ~= nil then
         return fact

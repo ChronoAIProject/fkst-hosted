@@ -17,14 +17,14 @@ local function command_key(M, comment, fallback_index)
       tostring(comment.id),
     })
   end
-  local created = parsers_misc._comment_created_at(M, comment) or "unknown-time"
-  local author = parsers_misc._comment_author_login(M, comment) or "unknown-author"
+  local created = parsers_misc._comment_created_at(comment) or "unknown-time"
+  local author = parsers_misc._comment_author_login(comment) or "unknown-author"
   return base_ids.dedup_key({
     "operator-command",
     tostring(author),
     tostring(created),
     tostring(fallback_index or 0),
-    parsers_misc._comment_body(M, comment),
+    parsers_misc._comment_body(comment),
   })
 end
 
@@ -64,22 +64,22 @@ function C.operator_command_fact(M, comments, command_name)
   end
   local latest = nil
   for index, comment in ipairs(comments) do
-    local parsed = parse_command(M, parsers_misc._comment_body(M, comment))
+    local parsed = parse_command(M, parsers_misc._comment_body(comment))
     if parsed ~= nil and parsed.command == command_name then
-      if parsers_misc._is_trusted_comment(M, comment) then
+      if parsers_misc._is_trusted_comment(comment) then
         latest = {
           command = parsed.command,
           key = command_key(M, comment, index),
-          author_login = parsers_misc._comment_author_login(M, comment),
-          created_at = parsers_misc._comment_created_at(M, comment),
-          body = parsers_misc._comment_body(M, comment),
+          author_login = parsers_misc._comment_author_login(comment),
+          created_at = parsers_misc._comment_created_at(comment),
+          body = parsers_misc._comment_body(comment),
           blocker_number = parsed.blocker_number,
         }
       else
         devloop_logging.log_line("info", "operator_command", "IGNORED", {
           "command=" .. tostring(parsed.command),
           "reason=untrusted-author",
-          "ignored_author=" .. tostring(parsers_misc._comment_author_login(M, comment) or ""),
+          "ignored_author=" .. tostring(parsers_misc._comment_author_login(comment) or ""),
           "trusted_bot=" .. tostring(devloop_base.trusted_bot_login()),
         })
       end
@@ -105,8 +105,8 @@ function C.has_operator_command_response(M, comments, command)
     .. tostring(command.command)
     .. '" key="' .. tostring(command.key)
     .. '"'
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    if parsers_misc._comment_body(M, comment):find(marker, 1, true) ~= nil then
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    if parsers_misc._comment_body(comment):find(marker, 1, true) ~= nil then
       return true
     end
   end
@@ -125,8 +125,8 @@ function C.operator_command_response_count(M, comments, command_name, outcome, r
   local reason_attr = reason ~= nil
     and ('reason="' .. strings.sanitize_key(reason, false):gsub("/", "-") .. '"')
     or nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(M, comments)) do
-    for marker in parsers_misc._comment_body(M, comment):gmatch("<!%-%- fkst:github%-devloop:operator%-command:v1.-%-%->") do
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch("<!%-%- fkst:github%-devloop:operator%-command:v1.-%-%->") do
       if marker:find(prefix, 1, true) ~= nil
         and (outcome_attr == nil or marker:find(outcome_attr, 1, true) ~= nil)
         and (reason_attr == nil or marker:find(reason_attr, 1, true) ~= nil) then
