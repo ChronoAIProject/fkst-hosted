@@ -177,7 +177,7 @@ end
 
 local dedup_key = base_ids.dedup_key
 
-function C.safe_updated_at(M, updated_at)
+function C.safe_updated_at(updated_at)
   local safe = strings.sanitize_key(updated_at, max_key_len):sub(1, max_update_key_len):gsub("/+$", "")
   if safe == "" then
     return "empty"
@@ -359,14 +359,14 @@ function C.is_safe_pr_review_result_ref(proposal_id, dedup_key)
 end
 
 function C.proposal_dedup_key(proposal_id, updated_at)
-  return tostring(proposal_id) .. "/" .. C.safe_updated_at(M, updated_at)
+  return tostring(proposal_id) .. "/" .. C.safe_updated_at(updated_at)
 end
 
 function C.intake_dedup_key(M, proposal_id, updated_at)
   return dedup_key({
     "intake",
     tostring(proposal_id),
-    C.safe_updated_at(M, updated_at or "unknown"),
+    C.safe_updated_at(updated_at or "unknown"),
   })
 end
 
@@ -375,7 +375,7 @@ function C.intake_candidate_delivery_dedup_key(M, proposal_id, effect_id, delive
     "intake-candidate",
     tostring(proposal_id),
     tostring(effect_id),
-    C.safe_updated_at(M, delivery_version or "unknown"),
+    C.safe_updated_at(delivery_version or "unknown"),
   })
 end
 
@@ -405,7 +405,7 @@ function C.intake_decision_dedup_key(proposal_id, current, reintake_command)
   })
 end
 
-function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
+function C.ci_selfheal_once_key(repo, pr_number, head_sha)
   return dedup_key({
     "github-devloop",
     "ci-selfheal",
@@ -416,7 +416,7 @@ function C.ci_selfheal_once_key(M, repo, pr_number, head_sha)
   })
 end
 
-function C.ci_missing_status_first_observed_key(M, repo, pr_number, head_sha)
+function C.ci_missing_status_first_observed_key(repo, pr_number, head_sha)
   return dedup_key({
     "github-devloop",
     "ci-missing-status-observed",
@@ -573,7 +573,7 @@ function C.judgment_worktree_with_exec(exec_sync_fn, role, identity)
 end
 
 
-function C.max_body_len(M)
+function C.max_body_len()
   return max_body_len
 end
 
@@ -633,7 +633,7 @@ function C.neutralize_untrusted_prompt_text(text)
   return table.concat(output)
 end
 
-function C.quote_untrusted_prompt_text(M, text)
+function C.quote_untrusted_prompt_text(text)
   local value = neutralize_fkst_markers(text)
   local output = {}
   local start = 1
@@ -679,7 +679,7 @@ function C.neutralize_untrusted_comment_text(text)
   return table.concat(output)
 end
 
-function C.gh_exec_opts(M, cmd_or_opts, timeout)
+function C.gh_exec_opts(cmd_or_opts, timeout)
   local opts = {}
   if type(cmd_or_opts) == "table" then
     for key, value in pairs(cmd_or_opts) do
