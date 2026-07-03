@@ -103,7 +103,7 @@ function C.parse_pr_view_origin(M, stdout)
       or decoded.merge_commit_oid
       or decoded.merge_commit_sha,
     labels = shared.label_names(M, decoded.labels),
-    comments = parsers_misc.comments_from_json(M, decoded.comments),
+    comments = parsers_misc.comments_from_json(decoded.comments),
     head_repository = head_repo,
     is_cross_repository = is_cross_repository,
     mergeable = decoded.mergeable,

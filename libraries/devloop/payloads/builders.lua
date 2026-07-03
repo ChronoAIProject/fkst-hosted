@@ -125,7 +125,7 @@ function C.build_current_head_reviewing_payload(M, origin, pr_number, current_pr
   }, pr_number, source_ref, state.version)
 end
 
-function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, source_ref)
+function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_ref)
   local version = origin.impl_version
   if review_fact.fix_version ~= nil then
     version = review_fact.fix_version
@@ -151,7 +151,7 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
   if framing ~= nil then
     payload.framing = framing
   end
-  local blocking_gap = shared.bounded_control_text(review_fact.blocking_gap, M._max_blocking_gap_len)
+  local blocking_gap = shared.bounded_control_text(review_fact.blocking_gap, devloop_base._max_blocking_gap_len)
   if blocking_gap ~= nil then
     payload.blocking_gap = blocking_gap
   end
@@ -162,7 +162,7 @@ function C.build_devloop_fixing_payload(M, origin, pr_number, review_fact, sourc
     payload.gate_baseline_sha = tostring(review_fact.gate_baseline_sha)
   end
   if review_fact.predecessor_set ~= nil then
-    if not strings.is_path_safe_key(review_fact.predecessor_set, M._max_dedup_len) then
+    if not strings.is_path_safe_key(review_fact.predecessor_set, devloop_base._max_dedup_len) then
       error("github-devloop: invalid predecessor set")
     end
     payload.predecessor_set = tostring(review_fact.predecessor_set)
@@ -185,7 +185,7 @@ local function replay_fact_sha(value, fallback)
 end
 
 function C.build_replayed_fixing_payload(M, origin, pr_number, feedback, source_ref)
-  local payload = C.build_devloop_fixing_payload(M, origin, pr_number, {
+  local payload = C.build_devloop_fixing_payload(origin, pr_number, {
     review_proposal_id = feedback.review_proposal_id,
     review_dedup_key = feedback.review_dedup_key,
     reviewed_head_sha = feedback.reviewed_head_sha,

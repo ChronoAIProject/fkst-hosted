@@ -5,7 +5,7 @@ local shared = require("devloop.parsers.shared")
 local strings = require("forge.strings")
 local C = {}
 
-function C.comments_from_json(M, comments_json)
+function C.comments_from_json(comments_json)
   local comments = {}
   for _, comment in ipairs(comments_json or {}) do
     if type(comment) == "table" and comment.body ~= nil then
@@ -26,7 +26,7 @@ function C.comments_from_json(M, comments_json)
     elseif type(comment) == "string" then
       table.insert(comments, {
         body = comment,
-        author_login = M._test_bot_login,
+        author_login = devloop_base._test_bot_login,
       })
     end
   end

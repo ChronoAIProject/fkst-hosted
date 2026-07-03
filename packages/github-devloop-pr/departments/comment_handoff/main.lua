@@ -108,7 +108,7 @@ local function emit_merge_ready(payload, handoff)
 end
 
 local function emit_fixing(payload, handoff)
-  local fixing = payloads_builders.build_devloop_fixing_payload(core, {
+  local fixing = payloads_builders.build_devloop_fixing_payload({
     proposal_id = handoff.proposal_id,
     impl_version = handoff.version,
   }, handoff.pr_number, {

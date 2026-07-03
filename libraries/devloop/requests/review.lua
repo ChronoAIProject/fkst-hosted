@@ -39,7 +39,7 @@ function C.attach_blocked_handoff(request, proposal_id, pr_number, version, sour
 end
 
 function C.attach_fixing_handoff(M, request, proposal_id, pr_number, version, review_fact, source_ref)
-  local normalized = payloads_builders.build_devloop_fixing_payload(M, {
+  local normalized = payloads_builders.build_devloop_fixing_payload({
     proposal_id = proposal_id,
     impl_version = version,
   }, pr_number, review_fact, source_ref)

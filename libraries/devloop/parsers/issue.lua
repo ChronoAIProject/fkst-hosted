@@ -23,7 +23,7 @@ function C.issue_state_from_json(M, decoded)
     created_at = decoded.createdAt or decoded.created_at,
     updated_at = decoded.updatedAt or decoded.updated_at,
     labels = labels,
-    comments = parsers_misc.comments_from_json(M, decoded.comments),
+    comments = parsers_misc.comments_from_json(decoded.comments),
     state = decoded.state,
     assignees = m_claims.assignee_logins(M, decoded.assignees),
     author_login = m_claims.issue_author_login(decoded),
@@ -240,7 +240,7 @@ function C.parse_issue_view_observe(M, stdout)
     created_at = decoded.createdAt or decoded.created_at,
     state = decoded.state,
     state_reason = decoded.stateReason or decoded.state_reason,
-    comments = parsers_misc.comments_from_json(M, decoded.comments),
+    comments = parsers_misc.comments_from_json(decoded.comments),
     assignees = m_claims.assignee_logins(M, decoded.assignees),
     author_login = m_claims.issue_author_login(decoded),
   }

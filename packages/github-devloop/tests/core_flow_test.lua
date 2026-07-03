@@ -723,7 +723,7 @@ return {
   end,
 
   test_fixing_payload_carries_agreed_framing = function()
-    local fix = payloads_builders.build_devloop_fixing_payload(core, {
+    local fix = payloads_builders.build_devloop_fixing_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
       impl_version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z",
     }, 7, {

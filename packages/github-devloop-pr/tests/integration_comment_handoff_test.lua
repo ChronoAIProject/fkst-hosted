@@ -220,7 +220,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 2)
     local fixing = find_raise(result.raises, "devloop_fixing").payload
-    local expected = payloads_builders.build_devloop_fixing_payload(core, {
+    local expected = payloads_builders.build_devloop_fixing_payload({
       proposal_id = proposal_id,
       impl_version = version,
     }, 7, {
