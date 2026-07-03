@@ -1,4 +1,4 @@
-local core, saga = require("core"), require("workflow.saga")
+local saga = require("workflow.saga")
 local devloop_logging = require("devloop.logging")
 local merge_executor = require("core.merge_executor")
 local queue = require("devloop.queue")

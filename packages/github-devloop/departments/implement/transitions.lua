@@ -1,4 +1,3 @@
-local core = require("core")
 local devloop_state = require("devloop.state")
 
 local M = {}

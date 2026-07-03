@@ -1,4 +1,3 @@
-local core = require("core")
 local git_adapter = require("forge.git")
 local forge_validators = require("devloop.forge_validators")
 local devloop_logging = require("devloop.logging")
