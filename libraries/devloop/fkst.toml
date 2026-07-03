@@ -107,6 +107,7 @@ public = [
   "devloop.restart.issue.transitions.ready",
   "devloop.restart.issue.transitions.thinking",
   "devloop.restart.issue_lifecycle",
+  "devloop.restart.pr_review_replay_facts",
   "devloop.restart_actionable_epoch",
   "devloop.restart_responsibility_contract",
   "devloop.rounds",
