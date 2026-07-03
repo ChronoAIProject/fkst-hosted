@@ -266,6 +266,6 @@ return {
     t.is_nil(proposal.content_fetch)
     t.eq(proposal.dedup_key, "github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z")
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
-    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
   end,
 }

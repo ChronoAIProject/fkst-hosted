@@ -700,7 +700,7 @@ local function process_issue_event(event)
       tick = event.ts,
     })
     local proposal = payloads_builders.build_board_proposal(core, issue, event.ts)
-    if not v_validate_proposal.validate_proposal(core, proposal) then
+    if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=observe_issue proposal_id=" .. tostring(proposal_id) .. " tag=SKIP reason=cannot-build-valid-proposal")
       return
     end

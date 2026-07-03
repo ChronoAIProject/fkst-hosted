@@ -49,7 +49,7 @@ return {
     t.is_true(proposal.content_fetch:find("/tmp/ctx/issue.json", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("/tmp/ctx/diff.patch", 1, true) ~= nil)
     t.is_nil(proposal.content_fetch:find("gh ", 1, true))
-    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
 
     local marker = m_builders.review_result_marker(id, issue_proposal_id, "approve", "consensus:v1")
     t.eq(m_facts.has_review_result_marker(core, { marker }, id, issue_proposal_id, "approve", "consensus:v1"), true)
@@ -123,7 +123,7 @@ return {
       { kind = "external", ref = repo .. "#pr/7" }
     )
     t.is_true(#proposal.proposal_id <= 200)
-    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
   end,
   test_pr_review_proposal_uses_fetch_instruction_when_issue_body_is_long = function()
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
@@ -149,6 +149,6 @@ return {
     t.is_true(proposal.content_fetch:find("/tmp/ctx/issue.json", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("/tmp/ctx/diff.patch", 1, true) ~= nil)
     t.is_nil(proposal.content_fetch:find("gh ", 1, true))
-    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
   end,
 }

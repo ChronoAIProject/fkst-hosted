@@ -524,7 +524,7 @@ return {
     t.is_nil(proposal.body:find("+return true", 1, true))
     t.is_true(proposal.body:find("Reviewed PR head: def456", 1, true) ~= nil)
     t.is_true(proposal.content_fetch:find("runtime-cache:", 1, true) == 1)
-    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
     t.eq(count_calls("gh pr diff"), 2)
   end,
 
@@ -672,7 +672,7 @@ return {
     local proposal = result.raises[1].payload
     t.is_true(#proposal.proposal_id <= 200)
     t.eq(proposal.proposal_id, devloop_base.pr_review_proposal_id(repo, 7, version, "def456"))
-    t.eq(v_validate_proposal.validate_proposal(core, proposal), true)
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
   end,
 
   test_review_pr_long_issue_body_does_not_grow_payload = function()

@@ -405,7 +405,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
       narrowed_question = latest.narrowed_question,
       angle_digests = latest.angle_digests,
     }, event_ts, content_fetch, next_dedup)
-    return v_validate_proposal.validate_proposal(M, proposal) and proposal or nil
+    return v_validate_proposal.validate_proposal(proposal) and proposal or nil
   end
 
   local replay_issue = {}
@@ -425,7 +425,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   })
   local proposal = payloads_builders.build_board_proposal(M, replay_issue, event_ts)
   proposal.dedup_key = replay_dedup
-  return v_validate_proposal.validate_proposal(M, proposal) and proposal or nil
+  return v_validate_proposal.validate_proposal(proposal) and proposal or nil
 end
 
 function C.build_thinking_replay_proposal(M, issue, proposal_id, state, current, event_ts)

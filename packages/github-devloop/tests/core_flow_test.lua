@@ -809,7 +809,7 @@ return {
     t.eq(#thinking.prior_round_digests, 2)
     t.eq(thinking.prior_round_digests[2].verdict, "abstain")
     t.is_true(thinking.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(v_validate_proposal.validate_proposal(core, thinking))
+    t.is_true(v_validate_proposal.validate_proposal(thinking))
 
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local review = payloads_builders.build_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
@@ -821,7 +821,7 @@ return {
     t.eq(review.convergence_question, converge.narrowed_question)
     t.eq(#review.prior_round_digests, 2)
     t.is_true(review.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(v_validate_proposal.validate_proposal(core, review))
+    t.is_true(v_validate_proposal.validate_proposal(review))
 
     local function context_fetch_returns_high_risk()
       return "runtime-cache:github-devloop/context-bundle-manifest/pr-review-owner-repo-7", true
@@ -832,7 +832,7 @@ return {
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, {}, context_fetch_returns_high_risk())
     t.eq(table.concat(high_risk_review.angles, ","), "minimal,structural,delete,high-risk")
     t.is_true(high_risk_review.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(v_validate_proposal.validate_proposal(core, high_risk_review))
+    t.is_true(v_validate_proposal.validate_proposal(high_risk_review))
 
     local high_risk_board_review = payloads_builders.build_board_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",
@@ -840,7 +840,7 @@ return {
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, "2026-06-08T00:00:00Z", {}, context_fetch_returns_high_risk())
     t.eq(table.concat(high_risk_board_review.angles, ","), "minimal,structural,delete,high-risk")
     t.is_true(high_risk_board_review.dedup_key:find("/loop/2", 1, true) ~= nil)
-    t.is_true(v_validate_proposal.validate_proposal(core, high_risk_board_review))
+    t.is_true(v_validate_proposal.validate_proposal(high_risk_board_review))
 
     -- Without a converge carry the proposal stays valid and blind-compatible: the round is
     -- still tracked, but no convergence_question / prior_round_digests are injected.
@@ -853,6 +853,6 @@ return {
     t.eq(blind.verdict_mode, "converge")
     t.eq(blind.convergence_question, nil)
     t.eq(blind.prior_round_digests, nil)
-    t.is_true(v_validate_proposal.validate_proposal(core, blind))
+    t.is_true(v_validate_proposal.validate_proposal(blind))
   end,
 }

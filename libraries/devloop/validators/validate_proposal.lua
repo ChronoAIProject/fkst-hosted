@@ -18,7 +18,7 @@ function C.is_intake_hand_off(hand_off, proposal)
     and tostring(hand_off.source_ref.ref or "") == tostring(proposal.source_ref.ref or "")
 end
 
-function C.validate_proposal(M, proposal)
+function C.validate_proposal(proposal)
   if type(proposal) ~= "table" then
     return false
   end

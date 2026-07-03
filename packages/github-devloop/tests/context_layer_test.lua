@@ -401,7 +401,7 @@ return {
       t.is_true(proposal.body:find("BEGIN UNTRUSTED ISSUE DATA", 1, true) ~= nil)
       t.is_true(proposal.body:find("Open items snapshot:", 1, true) ~= nil)
       t.is_true(proposal.body:find("Recent closed issues for recurrence judgment:", 1, true) ~= nil)
-      t.is_true(v_validate_proposal.validate_proposal(core, proposal))
+      t.is_true(v_validate_proposal.validate_proposal(proposal))
     end
     t.eq(loop.round, 2)
     t.eq(review_loop.round, 3)

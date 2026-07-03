@@ -240,7 +240,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
     }, event.ts, current_pr.comments, content_fetch, high_risk, next_dedup)
-    if not v_validate_proposal.validate_proposal(core, proposal) then
+    if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_loop proposal_id=" .. tostring(origin.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-loop-proposal")
       return
     end

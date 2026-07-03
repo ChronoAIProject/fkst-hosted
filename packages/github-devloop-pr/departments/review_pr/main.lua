@@ -162,7 +162,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local content_fetch = context_fetch[1]
     local high_risk = context_fetch[2]
     local proposal = payloads_builders.build_board_pr_review_proposal(core, repo, issue_number, reviewing.pr_number, reviewing.version, current_pr.head_sha, current_issue, pr_source_ref, event.ts, current_pr.comments, content_fetch, high_risk)
-    if not v_validate_proposal.validate_proposal(core, proposal) then
+    if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=review_pr proposal_id=" .. tostring(reviewing.proposal_id) .. " tag=SKIP reason=cannot-build-valid-review-proposal")
       return
     end

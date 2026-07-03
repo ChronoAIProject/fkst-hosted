@@ -77,7 +77,7 @@ function E.build_execution_start_proposal(core, repo, issue_number, request, cur
   proposal.dedup_key = request.dedup_key
   proposal.effect_version = request.dedup_key
   proposal.intake_hand_off = E.execution_intake_hand_off(request)
-  return v_validate_proposal.validate_proposal(core, proposal) and proposal or nil
+  return v_validate_proposal.validate_proposal(proposal) and proposal or nil
 end
 
 function E.build_execution_start_effects(core, repo, issue_number, request, current, event_ts, dept)
