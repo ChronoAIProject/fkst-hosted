@@ -79,9 +79,11 @@ async fn oauth_callback_rejects_a_tampered_state() {
 }
 
 #[tokio::test]
-async fn oauth_callback_happy_path_redirects_to_the_presigned_url() {
+async fn oauth_callback_happy_path_streams_the_bundle_as_a_download() {
     // One mock server serves BOTH the OAuth token exchange and `/user`; storage is a
-    // second. A valid signed state + code round-trips to a 302 at the presigned URL.
+    // second. A valid signed state + code round-trips to the bundle streamed as an
+    // attachment THROUGH the control plane (not a 302 to storage) — so a browser on a
+    // different machine than the cluster saves it reliably without reaching S3 itself.
     let gh = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/login/oauth/access_token"))
@@ -118,8 +120,26 @@ async fn oauth_callback_happy_path_redirects_to_the_presigned_url() {
         None,
     )
     .await;
-    assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(location(&response), PRESIGNED_URL);
+    assert_eq!(response.status(), StatusCode::OK);
+    let cd = response
+        .headers()
+        .get(header::CONTENT_DISPOSITION)
+        .expect("content-disposition present")
+        .to_str()
+        .unwrap();
+    assert!(cd.starts_with("attachment;"), "must be an attachment: {cd}");
+    assert!(
+        cd.contains(&format!("fkst-logs-{SESSION_ID}.tar.gz")),
+        "attachment filename carries the session id: {cd}"
+    );
+    let ct = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert_eq!(ct, "application/gzip");
+    assert_eq!(body_bytes(response).await, BUNDLE_BYTES);
 }
 
 // ---- Secret hygiene: the caller's token never reaches the logs --------------

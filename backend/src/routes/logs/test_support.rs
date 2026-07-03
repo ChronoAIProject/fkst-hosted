@@ -14,7 +14,7 @@ use http_body_util::BodyExt;
 use secrecy::SecretString;
 use serde_json::Value;
 use tower::ServiceExt;
-use wiremock::matchers::{method, path, query_param};
+use wiremock::matchers::{method, path, query_param, query_param_is_missing};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::config::Config;
@@ -28,6 +28,10 @@ use crate::storage::{ChronoStorageClient, ChronoStorageConfig};
 pub(crate) const SESSION_ID: &str = "sess-abc-123";
 pub(crate) const AUTHOR_ID: i64 = 1001;
 pub(crate) const PRESIGNED_URL: &str = "https://cdn.example/signed/logs.tar.gz?sig=abc";
+/// The mock path the browser-mode `download` presign points back at, plus the exact bytes
+/// it serves — asserted verbatim by the streaming happy-path test.
+pub(crate) const OBJECT_PATH: &str = "/signed-object/logs.tar.gz";
+pub(crate) const BUNDLE_BYTES: &[u8] = b"\x1f\x8b\x08\x00fkst-log-bundle";
 
 fn repo() -> RepoRef {
     RepoRef {
@@ -123,21 +127,42 @@ pub(crate) async fn storage_server(present: bool) -> (Arc<ChronoStorageClient>, 
         })))
         .mount(&server)
         .await;
-    let presign = Mock::given(method("GET"))
-        .and(path("/api/buckets/logs/presigned-url"))
-        .and(query_param(
-            "key",
-            format!("logs/{SESSION_ID}/latest.tar.gz"),
-        ));
+    let key = format!("logs/{SESSION_ID}/latest.tar.gz");
     if present {
-        presign
+        // API mode requests a TTL'd presign (`expiresIn=900`) → the external CDN URL,
+        // echoed back verbatim in the JSON the API caller receives.
+        Mock::given(method("GET"))
+            .and(path("/api/buckets/logs/presigned-url"))
+            .and(query_param("key", key.clone()))
+            .and(query_param("expiresIn", "900"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "data": { "presignedUrl": PRESIGNED_URL, "expiresAt": "2999-01-01T00:00:00Z" }
             })))
             .mount(&server)
             .await;
+        // Browser mode streams via `download`, whose presign omits `expiresIn`; point that
+        // one back at THIS mock so the follow-on fetch returns the bundle bytes.
+        Mock::given(method("GET"))
+            .and(path("/api/buckets/logs/presigned-url"))
+            .and(query_param("key", key.clone()))
+            .and(query_param_is_missing("expiresIn"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {
+                    "presignedUrl": format!("{}{OBJECT_PATH}", server.uri()),
+                    "expiresAt": "2999-01-01T00:00:00Z"
+                }
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(OBJECT_PATH))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(BUNDLE_BYTES.to_vec()))
+            .mount(&server)
+            .await;
     } else {
-        presign
+        Mock::given(method("GET"))
+            .and(path("/api/buckets/logs/presigned-url"))
+            .and(query_param("key", key))
             .respond_with(ResponseTemplate::new(404))
             .mount(&server)
             .await;
@@ -188,6 +213,17 @@ pub(crate) async fn body_json(response: axum::response::Response) -> Value {
         .expect("collect body")
         .to_bytes();
     serde_json::from_slice(&bytes).expect("json body")
+}
+
+/// Collect a response body as raw bytes (for the streamed-attachment assertion).
+pub(crate) async fn body_bytes(response: axum::response::Response) -> Vec<u8> {
+    response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes()
+        .to_vec()
 }
 
 /// The `Location` header of a redirect response.

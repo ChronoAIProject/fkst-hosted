@@ -203,8 +203,8 @@ async fn oauth_callback(
     if let Err(err) = authorize(&state, &session_id, &user) {
         return browser_error(err);
     }
-    match presign(&state, &session_id).await {
-        Ok(url) => redirect_302(&url),
+    match stream_download(&state, &session_id).await {
+        Ok(response) => response,
         Err(err) => browser_error(err),
     }
 }
@@ -315,6 +315,49 @@ async fn presign(state: &AppState, session_id: &str) -> Result<String, AppError>
             Err(AppError::Upstream("log storage error".to_string()))
         }
     }
+}
+
+/// Fetch the session's bundle from chrono-storage (server-side) and return it as an
+/// `attachment` download. Serving it THROUGH the control plane — rather than 302-ing the
+/// browser to the presigned S3 URL — means the caller only ever talks to THIS host (robust
+/// for a browser on a different machine/network than the cluster), and the explicit
+/// `Content-Disposition: attachment` makes the browser SAVE the bundle rather than fetch it
+/// into the void (a cross-origin nav to an `application/gzip` URL lacking that header is
+/// silently discarded by some browsers). API (Bearer) callers still receive a presigned URL.
+async fn stream_download(state: &AppState, session_id: &str) -> Result<Response, AppError> {
+    let Some(storage) = state.storage.as_ref() else {
+        return Err(AppError::Unavailable(
+            "log storage is not configured".to_string(),
+        ));
+    };
+    let key = log_object_key(session_id);
+    let bytes = match storage.download(&key).await {
+        Ok(bytes) => bytes,
+        Err(StorageError::Status { status: 404 }) => {
+            return Err(AppError::NotFound("no logs available yet".to_string()));
+        }
+        Err(err) => {
+            tracing::warn!(session_id = %session_id, error = %err, "log download failed");
+            return Err(AppError::Upstream("log storage error".to_string()));
+        }
+    };
+    let disposition = format!("attachment; filename=\"fkst-logs-{session_id}.tar.gz\"");
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/gzip"),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&disposition)
+                    .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 // ---- Small helpers ----------------------------------------------------------
