@@ -40,6 +40,7 @@
 {"path":"libraries/devloop/replayer.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/requests.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/restart.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/restart/pr_review_replay_facts.lua","owner":"shared","reason":"PR-review replay facts are injected by github-devloop and github-devloop-pr wiring while kept outside the generic restart kernel."}
 {"path":"libraries/devloop/restart/issue/pr_partition_contract.lua","owner":"shared","reason":"declares inert issue/PR partition contract data."}
 {"path":"libraries/devloop/restart/issue/transitions/awaiting_pr.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}
 {"path":"libraries/devloop/restart/issue/transitions/blocked.lua","owner":"issue","reason":"transition row belongs to the parent issue saga authority."}

@@ -1,15 +1,8 @@
-local devloop_base = require("devloop.base")
-local entity_lib = require("devloop.entity")
-local base_ids = require("devloop.base_ids")
-local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
-local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
-local m_facts = require("devloop.markers.facts")
 local S = {}
 local convergence_shared = require("devloop.convergence.shared")
 local registry = require("workflow.registry")
-local forge_validators = require("devloop.forge_validators")
 local transition_version = require("contract.transition_version")
 
 local source_ref_derivations = {
@@ -118,6 +111,18 @@ local transition_helpers = {
 local function restart_deps(M, resolved)
   resolved = resolved or {}
   local package_name = M.restart_package_name or "github-devloop"
+  local ops = {
+    version_fix_round = M.version_fix_round,
+    fixing_version_matches_link = M.fixing_version_matches_link,
+    latest_complete_converge_round = M.latest_complete_converge_round,
+    liveness_heartbeat_version = M.liveness_heartbeat_version,
+    liveness_signal_producer_contract = M.liveness_signal_producer_contract,
+    stage_rank = M.stage_rank,
+    decompose_package_queue = M.decompose_package_queue,
+  }
+  for key, value in pairs(resolved.ops or {}) do
+    ops[key] = value
+  end
   return {
     config = {
       registry_package_name = package_name,
@@ -136,18 +141,7 @@ local function restart_deps(M, resolved)
         replay_payload_fields = resolved.replay_payload_fields,
       },
     },
-    ops = {
-      version_fix_round = M.version_fix_round,
-      fixing_replay_feedback_fact = M.fixing_replay_feedback_fact,
-      fixing_version_matches_link = M.fixing_version_matches_link,
-      latest_complete_converge_round = M.latest_complete_converge_round,
-      liveness_heartbeat_version = M.liveness_heartbeat_version,
-      liveness_signal_producer_contract = M.liveness_signal_producer_contract,
-      review_meta_replay_fact = M.review_meta_replay_fact,
-      review_meta_replay_fact_from_state = M.review_meta_replay_fact_from_state,
-      stage_rank = M.stage_rank,
-      decompose_package_queue = M.decompose_package_queue,
-    },
+    ops = ops,
   }
 end
 
@@ -347,149 +341,6 @@ function M.latest_complete_converge_round(comments, proposal_id, base_version, s
     end
   end
   return latest
-end
-
-local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
-  if type(comments) ~= "table" then
-    return nil
-  end
-  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-converge%-round:v1.-%-%->"
-  local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
-  local best = nil
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
-    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
-      local marker_issue = marker:match('issue_proposal="([^"]+)"')
-      local marker_version = marker:match('version="([^"]*)"')
-      local review_proposal = marker:match('proposal="([^"]+)"')
-      local consensus_dedup = marker:match('dedup="([^"]*)"')
-      local round = tonumber(marker:match('round="(%d+)"'))
-      local _, pr_number, review_version = devloop_base.parse_pr_review_proposal_id(review_proposal)
-      local repo = base_ids.parse_proposal_id(issue_proposal_id)
-      if marker_issue == tostring(issue_proposal_id)
-        and marker_version == tostring(heartbeat_version)
-        and review_version == tostring(heartbeat_version)
-        and repo ~= nil
-        and forge_validators.is_positive_pr_number(pr_number)
-        and strings.is_path_safe_key(review_proposal, M._max_key_len)
-        and strings.is_bounded_string(consensus_dedup, M._max_dedup_len)
-        and (best == nil or (round or 0) > (best.n or 0)) then
-        best = {
-          proposal_id = review_proposal,
-          dedup_key = consensus_dedup,
-          source_ref = entity_lib.pr_source_ref(repo, pr_number),
-          pr_number = tonumber(pr_number),
-          n = (round or 0) + 1,
-        }
-      end
-    end
-  end
-  return best
-end
-
-function M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, n)
-  local repo = base_ids.parse_proposal_id(issue_proposal_id)
-  if repo == nil
-    or not forge_validators.is_positive_pr_number(pr_number)
-    or not forge_validators.is_git_sha(head_sha)
-    or not strings.is_bounded_string(issue_version, M._max_dedup_len) then
-    return nil
-  end
-  local marker_pattern = "<!%-%- fkst:github%-devloop:review%-meta:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
-    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
-      local marker_issue = marker:match('proposal="([^"]+)"')
-      local marker_dedup = marker:match('dedup="([^"]*)"')
-      local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
-      local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
-      if marker_issue == tostring(issue_proposal_id)
-        and tostring(review_pr_number or "") == tostring(pr_number)
-        and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
-        and tostring(reviewed_head_sha or "") == tostring(head_sha)
-        and devloop_base.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
-        return {
-          proposal_id = review_proposal,
-          dedup_key = marker_dedup,
-          source_ref = entity_lib.pr_source_ref(repo, pr_number),
-          pr_number = tonumber(pr_number),
-          n = tonumber(n) or 0,
-        }
-      end
-    end
-  end
-  marker_pattern = "<!%-%- fkst:github%-devloop:fix%-reflection:v1.-%-%->"
-  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
-    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
-      local marker_issue = marker:match('proposal="([^"]+)"')
-      local marker_dedup = marker:match('dedup="([^"]*)"')
-      local verdict = marker:match('verdict="([^"]+)"')
-      local marker_version = marker:match('version="([^"]*)"')
-      local round = tonumber(marker:match('fix_round="(%d+)"'))
-      local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
-      local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
-      if marker_issue == tostring(issue_proposal_id)
-        and verdict == "checkpoint"
-        and marker_version == tostring(issue_version)
-        and tostring(review_pr_number or "") == tostring(pr_number)
-        and review_version == transition_version.safe_version_segment(M._strip_latest_fix_version_suffix(issue_version))
-        and tostring(reviewed_head_sha or "") == tostring(head_sha)
-        and devloop_base.is_safe_pr_review_result_ref(review_proposal, marker_dedup) then
-        local reject_fact = m_facts.review_reject_fact(comments, issue_proposal_id, issue_version)
-        if reject_fact == nil
-          or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
-          or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
-          or not strings.is_bounded_string(reject_fact.blocking_gap, M._max_blocking_gap_len) then
-          return nil
-        end
-        local reflection_dedup = payloads_builders.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, marker_dedup)
-        return {
-          proposal_id = review_proposal,
-          dedup_key = reflection_dedup,
-          review_dedup_key = marker_dedup,
-          source_ref = entity_lib.pr_source_ref(repo, pr_number),
-          pr_number = tonumber(pr_number),
-          n = tonumber(n) or 0,
-          mode = "fix-reflection",
-          fix_round = round,
-          blocking_gap = reject_fact.blocking_gap,
-        }
-      end
-    end
-  end
-  local reject_fact = m_facts.review_reject_fact(comments, issue_proposal_id, issue_version)
-  local _, reject_pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reject_fact and reject_fact.review_proposal_id)
-  if reject_fact ~= nil
-    and tostring(reject_pr_number or "") == tostring(pr_number)
-    and tostring(reviewed_head_sha or "") == tostring(head_sha)
-    and devloop_base.is_safe_pr_review_result_ref(reject_fact.review_proposal_id, reject_fact.review_dedup_key) then
-    return {
-      proposal_id = reject_fact.review_proposal_id,
-      dedup_key = reject_fact.review_dedup_key,
-      source_ref = entity_lib.pr_source_ref(repo, pr_number),
-      pr_number = tonumber(pr_number),
-      n = tonumber(n) or 0,
-    }
-  end
-  return nil
-end
-
-function M.review_meta_replay_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha)
-  local converge_fact = review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
-  if converge_fact ~= nil then
-    return converge_fact
-  end
-  return M.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, pr_number, head_sha, 0)
-end
-
-function M.fixing_replay_feedback_fact(comments, issue_proposal_id, issue_version)
-  local reject_fact = m_facts.review_reject_fact(comments, issue_proposal_id, issue_version)
-  if reject_fact ~= nil then
-    return reject_fact
-  end
-  local meta_fix_fact = m_facts.review_meta_fix_fact(comments, issue_proposal_id, issue_version)
-  if meta_fix_fact ~= nil then
-    return meta_fix_fact
-  end
-  return m_facts.merge_gate_fix_fact(comments, issue_proposal_id, issue_version)
 end
 
 function M.fixing_version_matches_link(issue_version, link_version)

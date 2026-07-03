@@ -144,6 +144,45 @@ return {
     t.eq(replay_payload.blocking_gap, fresh_payload.blocking_gap)
   end,
 
+  test_pr_review_replay_facts_installed_ops_preserve_golden_facts = function()
+    local issue_proposal_id = "github-devloop/issue/owner/repo/42"
+    local review_version = reflection_review_version()
+    local issue_version = core.fix_version_from_review_version(review_version)
+    local review_proposal = devloop_base.pr_review_proposal_id("owner/repo", 7, review_version, "def456")
+    local review_dedup = "consensus:" .. review_proposal .. "/review"
+    local ops = require("devloop.restart.pr_review_replay_facts").install(core)
+    local comments = {
+      {
+        author_login = core._test_bot_login,
+        body = table.concat({
+          core.state_marker(issue_proposal_id, "review-meta", issue_version),
+          m_builders.review_result_marker(review_proposal, issue_proposal_id, "reject", review_dedup, 3, "missing regression guard"),
+          m_builders.fix_reflection_marker(issue_proposal_id, review_dedup, "checkpoint", issue_version, 3),
+        }, "\n"),
+        created_at = "2026-06-03T01:02:03Z",
+      },
+    }
+
+    local state_fact = ops.review_meta_replay_fact_from_state(comments, issue_proposal_id, issue_version, 7, "def456", 4)
+    local replay_fact = ops.review_meta_replay_fact(comments, issue_proposal_id, issue_version, 7, "def456")
+    local feedback_fact = ops.fixing_replay_feedback_fact(comments, issue_proposal_id, issue_version)
+
+    t.eq(ops.review_meta_replay_fact_from_state, core.review_meta_replay_fact_from_state)
+    t.eq(ops.review_meta_replay_fact, core.review_meta_replay_fact)
+    t.eq(ops.fixing_replay_feedback_fact, core.fixing_replay_feedback_fact)
+    t.eq(state_fact.proposal_id, review_proposal)
+    t.eq(state_fact.review_dedup_key, review_dedup)
+    t.eq(state_fact.mode, "fix-reflection")
+    t.eq(state_fact.fix_round, 3)
+    t.eq(state_fact.blocking_gap, "missing regression guard")
+    t.eq(state_fact.n, 4)
+    t.eq(replay_fact.n, 0)
+    t.eq(replay_fact.dedup_key, state_fact.dedup_key)
+    t.eq(feedback_fact.review_proposal_id, review_proposal)
+    t.eq(feedback_fact.review_dedup_key, review_dedup)
+    t.eq(feedback_fact.blocking_gap, "missing regression guard")
+  end,
+
   test_fix_reflection_spec_gap_blocks_without_spawning_intake_issue = function()
     local event = reflection_meta_event()
     mock_reflection_context(event, "Round ledger: latest gap diverges from stated acceptance.")

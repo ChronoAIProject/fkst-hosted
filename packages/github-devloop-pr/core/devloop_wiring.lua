@@ -1,5 +1,6 @@
 local W = {}
 local registry = require("workflow.registry")
+local pr_review_replay_facts = require("devloop.restart.pr_review_replay_facts")
 
 local package_name = "github-devloop-pr"
 
@@ -32,7 +33,9 @@ end
 function W.restart(M)
   local transitions_base = "core.restart.transitions"
   local transitions_index = require(index_module(transitions_base))
+  local replay_ops = pr_review_replay_facts.install(M)
   return {
+    ops = replay_ops,
     marker_fields = pr_registry_map("core.restart.marker_fields", "family", M),
     replay_payload_fields = pr_registry_map("core.restart.required_replay_payload_fields", "state", M),
     transitions_index = transitions_index,
