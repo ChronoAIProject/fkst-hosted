@@ -115,12 +115,85 @@ local transition_helpers = {
   responsibility_signature = responsibility_signature, span_contract = responsibility_signature,
 }
 
+local function restart_deps(M, resolved)
+  resolved = resolved or {}
+  local package_name = M.restart_package_name or "github-devloop"
+  return {
+    config = {
+      registry_package_name = package_name,
+      restart_package_name = package_name,
+      restart_consumer_sources = M.restart_consumer_sources,
+      limits = {
+        _max_blocking_gap_len = M._max_blocking_gap_len,
+        _max_dedup_len = M._max_dedup_len,
+        _max_key_len = M._max_key_len,
+      },
+      spec = {
+        transitions_label = resolved.transitions_label,
+        transitions_index = assert(resolved.transitions_index, package_name .. ": missing resolved restart transitions_index"),
+        transitions = assert(resolved.transitions, package_name .. ": missing resolved restart transitions"),
+        marker_fields = resolved.marker_fields,
+        replay_payload_fields = resolved.replay_payload_fields,
+      },
+    },
+    ops = {
+      version_fix_round = M.version_fix_round,
+      fixing_replay_feedback_fact = M.fixing_replay_feedback_fact,
+      fixing_version_matches_link = M.fixing_version_matches_link,
+      latest_complete_converge_round = M.latest_complete_converge_round,
+      liveness_heartbeat_version = M.liveness_heartbeat_version,
+      liveness_signal_producer_contract = M.liveness_signal_producer_contract,
+      review_meta_replay_fact = M.review_meta_replay_fact,
+      review_meta_replay_fact_from_state = M.review_meta_replay_fact_from_state,
+      stage_rank = M.stage_rank,
+      decompose_package_queue = M.decompose_package_queue,
+    },
+  }
+end
+
+function S.build_kernel(deps)
+  local config = assert(deps and deps.config, "restart kernel missing config")
+  local ops = assert(deps.ops, "restart kernel missing ops")
+  local limits = config.limits or {}
+  local spec = assert(config.spec, "restart kernel missing spec")
+  local build_env = {
+    version_fix_round = ops.version_fix_round,
+    fixing_replay_feedback_fact = ops.fixing_replay_feedback_fact,
+    fixing_version_matches_link = ops.fixing_version_matches_link,
+    latest_complete_converge_round = ops.latest_complete_converge_round,
+    liveness_heartbeat_version = ops.liveness_heartbeat_version,
+    liveness_signal_producer_contract = ops.liveness_signal_producer_contract,
+    review_meta_replay_fact = ops.review_meta_replay_fact,
+    review_meta_replay_fact_from_state = ops.review_meta_replay_fact_from_state,
+    stage_rank = ops.stage_rank,
+    decompose_package_queue = ops.decompose_package_queue,
+    _max_blocking_gap_len = limits._max_blocking_gap_len,
+    _max_dedup_len = limits._max_dedup_len,
+    _max_key_len = limits._max_key_len,
+    restart_package_name = config.restart_package_name,
+    restart_consumer_sources = config.restart_consumer_sources,
+  }
+  local transition_table = registry.build_indexed_array(
+    spec.transitions_label or "restart.transitions",
+    spec.transitions_index,
+    spec.transitions,
+    "from_state",
+    build_env,
+    transition_helpers,
+    config.registry_package_name
+  )
+  return {
+    transition_table = transition_table,
+    marker_fields = spec.marker_fields,
+    replay_payload_fields = spec.replay_payload_fields,
+    restart_transition_table = function()
+      return transition_table
+    end,
+  }
+end
+
 function S.transition_table(M, resolved)
-resolved = resolved or {}
-local package_name = M.restart_package_name or "github-devloop"
-local transition_index = assert(resolved.transitions_index, package_name .. ": missing resolved restart transitions_index")
-local transition_entries = assert(resolved.transitions, package_name .. ": missing resolved restart transitions")
-return registry.build_indexed_array(resolved.transitions_label or "restart.transitions", transition_index, transition_entries, "from_state", M, transition_helpers, package_name)
+return S.build_kernel(restart_deps(M, resolved)).transition_table
 end
 
 function S.install(M, resolved)
@@ -129,49 +202,11 @@ resolved = resolved or {}
 local package_name = M.restart_package_name or "github-devloop"
 local default_consumer_sources = M.restart_consumer_sources or {}
 
-local marker_fields = assert(resolved.marker_fields, package_name .. ": missing resolved restart marker_fields")
-
-local required_replay_payload_fields = assert(resolved.replay_payload_fields, package_name .. ": missing resolved restart replay_payload_fields")
-
-local transition_table = S.transition_table(M, resolved)
-
+local kernel = nil
+local transition_table = nil
+local marker_fields = nil
+local required_replay_payload_fields = nil
 local audit_by_state = {}
-for _, row in ipairs(transition_table) do
-  audit_by_state[row.from_state] = row
-end
-
-function M.restart_completeness_audit()
-  local rows = {}
-  for _, row in ipairs(transition_table) do
-    table.insert(rows, {
-      state = row.from_state,
-      marker_facts = row.marker_facts,
-      kickoff = row.kickoff,
-      replay = row.replay,
-    })
-  end
-  return rows
-end
-
-function M.restart_completeness_audit_for_state(state)
-  return audit_by_state[state]
-end
-
-function M.restart_transition_table()
-  return transition_table
-end
-
-function M.restart_durable_marker_fields()
-  return marker_fields
-end
-
-function M.restart_source_ref_derivations()
-  return source_ref_derivations
-end
-
-function M.restart_required_replay_payload_fields()
-  return required_replay_payload_fields
-end
 
 local function field_reference_error(reference)
   local marker_family, attr = tostring(reference or ""):match("^marker:([^%.]+)%.(.+)$")
@@ -423,6 +458,49 @@ function M.fixing_version_matches_link(issue_version, link_version)
     return false
   end
   return transition_version.safe_version_segment(current_base) == transition_version.safe_version_segment(linked_base)
+end
+
+local deps = restart_deps(M, resolved)
+kernel = S.build_kernel(deps)
+transition_table = kernel.transition_table
+marker_fields = assert(kernel.marker_fields, package_name .. ": missing resolved restart marker_fields")
+required_replay_payload_fields = assert(kernel.replay_payload_fields, package_name .. ": missing resolved restart replay_payload_fields")
+
+for _, row in ipairs(transition_table) do
+  audit_by_state[row.from_state] = row
+end
+
+function M.restart_completeness_audit()
+  local rows = {}
+  for _, row in ipairs(transition_table) do
+    table.insert(rows, {
+      state = row.from_state,
+      marker_facts = row.marker_facts,
+      kickoff = row.kickoff,
+      replay = row.replay,
+    })
+  end
+  return rows
+end
+
+function M.restart_completeness_audit_for_state(state)
+  return audit_by_state[state]
+end
+
+function M.restart_transition_table()
+  return kernel.restart_transition_table()
+end
+
+function M.restart_durable_marker_fields()
+  return marker_fields
+end
+
+function M.restart_source_ref_derivations()
+  return source_ref_derivations
+end
+
+function M.restart_required_replay_payload_fields()
+  return required_replay_payload_fields
 end
 
 end
