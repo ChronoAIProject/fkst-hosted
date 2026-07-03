@@ -1,4 +1,5 @@
 local core, saga = require("core"), require("workflow.saga")
+local devloop_logging = require("devloop.logging")
 local merge_executor = require("core.merge_executor")
 local queue = require("devloop.queue")
 
@@ -19,4 +20,4 @@ return saga.department(spec, { done = function() return false end, act = functio
   queue.dispatch_consumed_queue("merge", spec, event, {
     devloop_merge_ready = merge_executor.process_merge_ready_event,
   }, "github-devloop-pr")
-end, wrap = core.wrap_pipeline_failure, name = "merge" })
+end, wrap = devloop_logging.wrap_pipeline_failure, name = "merge" })

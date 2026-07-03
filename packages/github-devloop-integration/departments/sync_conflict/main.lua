@@ -247,6 +247,6 @@ end
 return saga.department(spec, {
   done = done,
   act = act,
-  wrap = core.wrap_pipeline_failure,
+  wrap = devloop_logging.wrap_pipeline_failure,
   name = "sync_conflict",
 })
