@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
 LINE_LIMIT = 1000
 # Soft-split threshold is 900 (LINE_LIMIT - 100): warn early so files split at ~900 by
 # stable responsibility rather than being forced at the 1000-line hard limit, where any
@@ -775,16 +775,14 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
             )
 
 
-def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
-    for packages, path in package_lua_files(root):
-        if not path.is_file() or "tests" in path.relative_to(packages).parts:
-            continue
-        for line in unclassified_error_call_lines(read_text(path)):
-            add(
-                warnings,
-                "G7",
-                f"{rel(root, path)}:{line} production error(...) string lacks a greppable class prefix",
-            )
+def check_error_class_prefixes(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
+    current = check_repo_error_class.current_sites(root, package_lua_files, read_text, rel, unclassified_error_call_lines)
+    allowlist = check_repo_error_class.load_allowlist(allowlist_path(root, check_repo_error_class.ALLOWLIST, allowlist_dir))
+    base_status, base_allowlist = check_repo_error_class.allowlist_at_dev_base(root) if enforce_base else ("absent", None)
+    if base_status == "unresolved":
+        add(violations, "G7", "cannot resolve dev base allowlist to enforce shrink-only error-class ratchet; ensure CI provides the dev ref")
+    for message in check_repo_error_class.ratchet_messages(current, allowlist, base_allowlist):
+        add(violations, "G7", message)
 
 
 def check_ownership_gate_claim_owner(root: Path, violations: list[str]) -> None:

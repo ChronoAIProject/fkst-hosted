@@ -109,7 +109,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     c.check_line_limit(root, violations, warnings); c.check_test_shape(root, violations, warnings)
     c.check_helper_reachability(root, violations); c.check_graphql_connection_guards(root, warnings)
     c.check_rest_pagination_guards(root, warnings); c.check_hidden_text_encoded_literals(root, violations)
-    c.check_gh_rate_pool_sizing(root, violations); c.check_error_class_prefixes(root, warnings)
+    c.check_gh_rate_pool_sizing(root, violations); c.check_error_class_prefixes(root, violations, allowlists, enforce_base)
     c.check_persistence_classes(root, violations); c.check_cross_package_require(root, violations)
     for package_root in c.package_roots(root):
         for message in c.check_repo_ingress.scoped_file_watch_ingress_messages(root, package_root, c.read_text, c.rel):
