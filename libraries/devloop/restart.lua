@@ -151,28 +151,73 @@ local function restart_deps(M, resolved)
   }
 end
 
+local REQUIRED_OPS = {
+  "version_fix_round",
+  "fixing_replay_feedback_fact",
+  "fixing_version_matches_link",
+  "latest_complete_converge_round",
+  "liveness_heartbeat_version",
+  "liveness_signal_producer_contract",
+  "review_meta_replay_fact",
+  "review_meta_replay_fact_from_state",
+  "stage_rank",
+  "decompose_package_queue",
+}
+
+local function required_op_set()
+  local set = {}
+  for _, key in ipairs(REQUIRED_OPS) do
+    set[key] = true
+  end
+  return set
+end
+
+local RESTART_OP_KEYS = required_op_set()
+
+local function assert_restart_ops_table(ops)
+  if type(ops) ~= "table" then
+    error("restart kernel: ops must be a table")
+  end
+end
+
+local function validate_restart_ops(ops, used_ops)
+  for _, key in ipairs(REQUIRED_OPS) do
+    if used_ops[key] and ops[key] == nil then
+      error("restart kernel: missing op " .. key)
+    end
+  end
+end
+
+local function restart_build_env(values, ops, used_ops)
+  return setmetatable({}, {
+    __index = function(_, key)
+      if RESTART_OP_KEYS[key] then
+        used_ops[key] = true
+        if ops[key] == nil then
+          error("restart kernel: missing op " .. key)
+        end
+        return ops[key]
+      end
+      return values[key]
+    end,
+  })
+end
+
 function S.build_kernel(deps)
   local config = assert(deps and deps.config, "restart kernel missing config")
   local ops = assert(deps.ops, "restart kernel missing ops")
+  assert_restart_ops_table(ops)
   local limits = config.limits or {}
   local spec = assert(config.spec, "restart kernel missing spec")
-  local build_env = {
-    version_fix_round = ops.version_fix_round,
-    fixing_replay_feedback_fact = ops.fixing_replay_feedback_fact,
-    fixing_version_matches_link = ops.fixing_version_matches_link,
-    latest_complete_converge_round = ops.latest_complete_converge_round,
-    liveness_heartbeat_version = ops.liveness_heartbeat_version,
-    liveness_signal_producer_contract = ops.liveness_signal_producer_contract,
-    review_meta_replay_fact = ops.review_meta_replay_fact,
-    review_meta_replay_fact_from_state = ops.review_meta_replay_fact_from_state,
-    stage_rank = ops.stage_rank,
-    decompose_package_queue = ops.decompose_package_queue,
+  local build_values = {
     _max_blocking_gap_len = limits._max_blocking_gap_len,
     _max_dedup_len = limits._max_dedup_len,
     _max_key_len = limits._max_key_len,
     restart_package_name = config.restart_package_name,
     restart_consumer_sources = config.restart_consumer_sources,
   }
+  local used_ops = {}
+  local build_env = restart_build_env(build_values, ops, used_ops)
   local transition_table = registry.build_indexed_array(
     spec.transitions_label or "restart.transitions",
     spec.transitions_index,
@@ -182,6 +227,7 @@ function S.build_kernel(deps)
     transition_helpers,
     config.registry_package_name
   )
+  validate_restart_ops(ops, used_ops)
   return {
     transition_table = transition_table,
     marker_fields = spec.marker_fields,

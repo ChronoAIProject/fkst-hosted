@@ -11,6 +11,7 @@ local core = h.core
 local t = h.t
 local replay_fields = require("devloop.replay_fields")
 local devloop_logging = require("devloop.logging")
+local restart_kernel = require("devloop.restart")
 
 local function restart_transition_row(state_name)
   return replay_fields.restart_transition_row(core.restart_transition_table(), state_name)
@@ -179,6 +180,44 @@ local function synthetic_heartbeat_row()
 end
 
 return {
+  test_restart_kernel_reports_missing_ops_at_build_time = function()
+    local function noop() end
+    local ops = {
+      fixing_replay_feedback_fact = noop,
+      fixing_version_matches_link = noop,
+      latest_complete_converge_round = noop,
+      liveness_heartbeat_version = noop,
+      liveness_signal_producer_contract = noop,
+      review_meta_replay_fact = noop,
+      review_meta_replay_fact_from_state = noop,
+      stage_rank = noop,
+      decompose_package_queue = noop,
+    }
+    local ok, err = pcall(restart_kernel.build_kernel, {
+      config = {
+        restart_package_name = "test-restart",
+        registry_package_name = "test-restart",
+        spec = {
+          transitions_label = "test.restart.transitions",
+          transitions_index = { "needs-version-fix-round" },
+          transitions = {
+            function(M)
+              M.version_fix_round("ready/fix/1")
+              return {
+                from_state = "needs-version-fix-round",
+                terminal = true,
+                to_states = {},
+              }
+            end,
+          },
+        },
+      },
+      ops = ops,
+    })
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("restart kernel: missing op version_fix_round", 1, true) ~= nil, tostring(err))
+  end,
+
   test_executable_restart_table_covers_non_terminal_states = function()
     local expected = { "thinking", "dependency_wait", "ready", "implementing", "awaiting-pr", "impl-failed", "blocked", "merged" }
     local by_state = table_by_state()
