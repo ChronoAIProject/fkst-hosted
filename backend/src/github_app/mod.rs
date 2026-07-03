@@ -487,6 +487,25 @@ impl GithubAppTokens {
             .await
     }
 
+    /// List `owner/repo`'s issue `number` comment BODIES as the App (author order).
+    /// Used by the config-immutability check to recover the original `full_config_hash`
+    /// the one-time announcement latched (as a hidden marker). A 404 yields an empty
+    /// list. Mirrors [`Self::get_issue_labels`].
+    pub async fn list_issue_comments(
+        &self,
+        owner_repo: &str,
+        number: u64,
+    ) -> Result<Vec<String>, GithubAppError> {
+        let (owner, repo) = owner_repo
+            .split_once('/')
+            .ok_or(GithubAppError::InvalidRepoRef)?;
+        let token = self.token_for_repo(owner_repo, None).await?;
+        self.inner
+            .api
+            .list_issue_comments(&token, owner, repo, number)
+            .await
+    }
+
     /// List `owner/repo`'s OPEN pull requests as the App (auto-merge step). Minted
     /// with the least-privilege [`auto_merge_permissions`] set (never logged).
     pub async fn list_open_pull_requests(

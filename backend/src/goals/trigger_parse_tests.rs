@@ -75,6 +75,7 @@ prod-env
             work_label: "fkst-cloud".to_string(),
             environment: Some("prod-env".to_string()),
             auto_merge: false,
+            log_access: vec![],
         }
     );
 }
@@ -128,6 +129,51 @@ fn auto_merge_absent_defaults_false() {
     // The minimal body carries no `### Auto-merge` section at all.
     let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
     assert!(!spec.auto_merge, "an absent section defaults off");
+}
+
+// ---- Log Access Allowlist (optional allow-list; lenient, never a 422) ----
+
+/// Build a body with the four required sections held valid plus a `### Log Access Allowlist`
+/// section carrying `val`, so a parse's `log_access` reflects only that value.
+fn body_with_log_access(val: &str) -> String {
+    format!(
+        "### Session Name\nsess\n### Packages\n{VALID_PKG}\n### Work Label\nlabel\n### Log Access Allowlist\n{val}\n"
+    )
+}
+
+#[test]
+fn log_access_absent_defaults_empty() {
+    let spec = parse_trigger_issue_body(&body_with_package(VALID_PKG)).expect("parses");
+    assert!(
+        spec.log_access.is_empty(),
+        "an absent `### Log Access Allowlist` section defaults to an empty allow-list"
+    );
+}
+
+#[test]
+fn log_access_parses_comma_whitespace_and_newline_separated_tokens() {
+    // A mix of commas, spaces, and newlines all separate tokens; a leading `@` is
+    // stripped; numeric ids are kept verbatim.
+    let spec = parse_trigger_issue_body(&body_with_log_access("@alice, bob   carol\n12345"))
+        .expect("parses");
+    assert_eq!(
+        spec.log_access,
+        vec![
+            "alice".to_string(),
+            "bob".to_string(),
+            "carol".to_string(),
+            "12345".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn log_access_blank_section_is_empty() {
+    let spec = parse_trigger_issue_body(&body_with_log_access("   \n\n")).expect("parses");
+    assert!(
+        spec.log_access.is_empty(),
+        "a blank `### Log Access Allowlist` section yields an empty allow-list"
+    );
 }
 
 #[test]

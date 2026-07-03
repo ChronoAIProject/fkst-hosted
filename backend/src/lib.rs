@@ -15,6 +15,15 @@ pub mod github_app;
 // that keys the per-user environment/secret store.
 pub mod github_identity;
 pub mod goals;
+// In-memory `session_id -> log-access context` registry: the reverse map the
+// identity-gated `/api/v1/logs/{session_id}` endpoint needs (session_id is a one-way
+// hash) but cannot itself yield. The reconciler writes it each sweep; the endpoint
+// reads it.
+pub mod log_access;
+// On-demand session-log download config knobs (`FKST_LOG_ADMINS`,
+// `FKST_PUBLIC_BASE_URL`, `FKST_GITHUB_OAUTH_*`): the global-admin allow-list, the
+// public base URL the announce comment links, and the browser-mode OAuth creds.
+pub mod log_config;
 // Shared in-pod install-command runner + the `validate-env` subcommand (issue
 // #338 §3.2/§3.4): runs an environment's ordered install commands and emits a
 // machine-readable verdict frame. Reused by the env-validation pod (wired here)
@@ -40,6 +49,11 @@ pub mod k8s;
 pub mod openapi;
 pub mod router;
 pub mod routes;
+// Optional chrono-storage object-store client + its NyxID service-account token
+// provider (log-streaming Wave 1). Self-contained + wiremock-tested; disabled
+// (resolves to `None`) unless the `FKST_STORAGE_*` / `FKST_NYXID_*` vars are set.
+// No in-pod wiring yet — this is the client library only.
+pub mod storage;
 // In-pod `run-substrate` subcommand (Model B, issue #359 §5): the long-lived
 // substrate-session entrypoint that fetches packages + the target repo, wires the
 // rotating GitHub token into git + gh, renders the codex config, and execs

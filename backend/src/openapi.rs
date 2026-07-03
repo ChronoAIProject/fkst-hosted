@@ -41,7 +41,8 @@ use crate::state::AppState;
     tags(
         (name = "users", description = "Per-user environment + secret store (GitHub-token authenticated)."),
         (name = "system", description = "Liveness and Prometheus metrics (public)."),
-        (name = "webhooks", description = "Inbound GitHub App webhook (signature-verified, public).")
+        (name = "webhooks", description = "Inbound GitHub App webhook (signature-verified, public)."),
+        (name = "logs", description = "Identity-gated session-log download (GitHub token or browser OAuth; self-authorizing).")
     )
 )]
 pub struct ApiDoc;

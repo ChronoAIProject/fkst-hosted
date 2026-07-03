@@ -35,6 +35,7 @@ const HEADING_PACKAGES: &str = "### Packages";
 const HEADING_WORK_LABEL: &str = "### Work Label";
 const HEADING_ENVIRONMENT: &str = "### Environment";
 const HEADING_AUTO_MERGE: &str = "### Auto-merge";
+const HEADING_LOG_ACCESS: &str = "### Log Access Allowlist";
 
 /// GitHub caps a label name at 50 characters; the Work Label must fit so the
 /// launcher can apply it verbatim.
@@ -101,6 +102,13 @@ pub struct TriggerSpec {
     /// anything else, blank, or the section is absent. Never a 422 (lenient) so a
     /// pre-v2 trigger issue without the section still parses.
     pub auto_merge: bool,
+    /// The OPTIONAL `### Log Access Allowlist`: the GitHub logins or numeric ids
+    /// (beyond the issue author + the global admins) permitted to download this
+    /// session's redacted logs from the identity-gated `/api/v1/logs/{session_id}`
+    /// endpoint. A whitespace/comma/newline-separated list; lenient; default empty.
+    /// FROZEN by config-immutability (it is part of `full_config_hash`) so it cannot
+    /// be edited AFTER the session registers to grant access retroactively.
+    pub log_access: Vec<String>,
 }
 
 /// Parse the `fkst-substrate-trigger` issue body into a [`TriggerSpec`].
@@ -129,6 +137,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
     };
 
     let auto_merge = parse_auto_merge(&sections);
+    let log_access = parse_log_access(&sections);
 
     Ok(TriggerSpec {
         name,
@@ -136,6 +145,7 @@ pub fn parse_trigger_issue_body(body: &str) -> Result<TriggerSpec, AppError> {
         work_label,
         environment,
         auto_merge,
+        log_access,
     })
 }
 
@@ -160,6 +170,32 @@ fn parse_auto_merge(sections: &[(String, String)]) -> bool {
             "true" | "yes" | "on" | "enabled" | "1"
         )
     })
+}
+
+/// `### Log Access Allowlist` — OPTIONAL, lenient. Parse the section into the list of GitHub
+/// logins or numeric ids (BEYOND the issue author + the global admins) allowed to
+/// download this session's redacted logs. Tokens are separated by ANY whitespace,
+/// comma, or newline, so an author can list them one-per-line or comma-separated. A
+/// leading `@` on a login is stripped (`@alice` ≡ `alice`); empty tokens are
+/// dropped. Absent/blank → empty. Never errors: this is an allow-list, not a
+/// validated field. The tokens are NOT resolved to real accounts here — the
+/// authorization check ([`crate::reconcile::log_authz::is_authorized`]) matches a
+/// requester against each entry by numeric id AND by case-insensitive login, so an
+/// entry that names no real account simply never matches.
+fn parse_log_access(sections: &[(String, String)]) -> Vec<String> {
+    let block = match sections
+        .iter()
+        .find(|(heading, _)| heading == HEADING_LOG_ACCESS)
+    {
+        Some((_, content)) => content.as_str(),
+        None => return Vec::new(),
+    };
+    block
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .map(|token| token.trim().trim_start_matches('@'))
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// `### Session Name` — required; EXACTLY ONE non-empty line that satisfies the

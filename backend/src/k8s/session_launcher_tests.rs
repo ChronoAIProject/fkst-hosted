@@ -149,6 +149,50 @@ fn build_session_pod_injects_the_section_5_2_env() {
 }
 
 #[test]
+fn build_session_pod_injects_the_log_streaming_env_unconditionally() {
+    // Streaming is always on: every session carries the log env + downward refs.
+    let pod = build_session_pod(&spec(), &config()).expect("pod builds");
+    let env = pod.spec.unwrap().containers.remove(0).env.unwrap();
+
+    // The session id is the collector's bundle key; the retired FKST_LOG_BRANCH /
+    // FKST_LOG_STREAMING enable-flag are gone.
+    assert_eq!(env_value(&env, "FKST_SESSION_ID"), Some("abc123"));
+    assert!(env.iter().all(|e| e.name != "FKST_LOG_BRANCH"));
+    assert!(env.iter().all(|e| e.name != "FKST_LOG_STREAMING"));
+    assert_eq!(env_value(&env, "FKST_TRIGGER_ISSUE"), Some("7"));
+    assert_eq!(env_value(&env, "FKST_CONFIG_HASH"), Some("cfg-deadbeef"));
+
+    // The pod UID/name ride the downward API (a fieldRef), never a literal value —
+    // and NO storage credential is added to the env (it rides the Secret).
+    let uid = env
+        .iter()
+        .find(|e| e.name == "FKST_POD_UID")
+        .expect("uid env");
+    assert_eq!(
+        uid.value, None,
+        "uid must come from the downward API, not a literal"
+    );
+    assert_eq!(
+        uid.value_from
+            .as_ref()
+            .and_then(|s| s.field_ref.as_ref())
+            .map(|f| f.field_path.as_str()),
+        Some("metadata.uid")
+    );
+    let name = env
+        .iter()
+        .find(|e| e.name == "FKST_POD_NAME")
+        .expect("name env");
+    assert_eq!(
+        name.value_from
+            .as_ref()
+            .and_then(|s| s.field_ref.as_ref())
+            .map(|f| f.field_path.as_str()),
+        Some("metadata.name")
+    );
+}
+
+#[test]
 fn build_session_pod_joins_empty_package_roots_to_a_blank_string() {
     let mut spec = spec();
     spec.package_roots = Vec::new();
@@ -244,6 +288,7 @@ fn build_session_secret_carries_creds_with_the_userenv_prefix_and_owner() {
         r#"{"token":"ghs_xyz","expires_at":"2026-01-01T00:00:00Z"}"#,
         &SecretString::from("sk-test"),
         &user_env,
+        None,
         Some(owner),
     );
 
@@ -273,12 +318,40 @@ fn build_session_secret_without_user_env_carries_only_the_base_creds() {
         &SecretString::from("sk-test"),
         &BTreeMap::new(),
         None,
+        None,
     );
     let data = secret.string_data.as_ref().expect("string data");
     assert!(data.contains_key("github-token"));
     assert!(data.contains_key("llm-api-key"));
     assert_eq!(data.len(), 2);
     assert!(secret.metadata.owner_references.is_none());
+}
+
+#[test]
+fn build_session_secret_carries_the_write_only_sa_when_configured() {
+    let storage = StorageWriterCreds {
+        client_id: "writer-client",
+        client_secret: "writer-secret",
+        token_url: "https://nyx.example/oauth/token",
+        base_url: "https://storage.example/proxy",
+        bucket: "fkst-logs",
+    };
+    let secret = build_session_secret(
+        &spec(),
+        "ghs_json",
+        &SecretString::from("sk-test"),
+        &BTreeMap::new(),
+        Some(storage),
+        None,
+    );
+    let data = secret.string_data.as_ref().expect("string data");
+    // Base creds + the five write-only storage-* files, nothing else.
+    assert_eq!(data["storage-client-id"], "writer-client");
+    assert_eq!(data["storage-client-secret"], "writer-secret");
+    assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");
+    assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
+    assert_eq!(data["storage-bucket"], "fkst-logs");
+    assert_eq!(data.len(), 7);
 }
 
 #[test]

@@ -48,6 +48,7 @@ pub(super) fn reg(session_id: &str, trigger_issue: i64, config_hash: &str) -> Se
         session_id: session_id.to_string(),
         config_hash: config_hash.to_string(),
         auto_merge: false,
+        log_access: vec![],
     }
 }
 
@@ -101,6 +102,13 @@ pub(super) fn pending(entries: &[(&str, bool)]) -> HashMap<String, bool> {
 
 pub(super) fn latched(issues: &[i64]) -> HashSet<i64> {
     issues.iter().copied().collect()
+}
+
+/// A `trigger_issue -> original full_config_hash` map, the `latched_config_hash`
+/// planner input. `config_hashes(&[])` is the empty (no-original-latched) default the
+/// pod-lifecycle rows pass so the config-immutability check is a no-op for them.
+pub(super) fn config_hashes(entries: &[(i64, &str)]) -> HashMap<i64, String> {
+    entries.iter().map(|(k, v)| (*k, v.to_string())).collect()
 }
 
 pub(super) fn pkg(owner: &str, repo: &str, git_ref: &str, path: &str) -> PackageRef {

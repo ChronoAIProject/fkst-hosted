@@ -16,24 +16,20 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{ExitCode, Stdio};
 
-use nix::sys::signal::Signal;
-use nix::unistd::Pid;
 use secrecy::{ExposeSecret, SecretString};
 use tokio::process::Command;
-use tokio::signal::unix::{signal, SignalKind};
 
 use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::creds::CredsLayout;
 
 use super::codex::render_codex_config;
 use super::creds_helper::{git_config_entries, materialize_helper_script, GitConfigEntry};
+use super::log_stream::collector::{collector_config_from_env, spawn_collector};
 use super::plan::{
-    build_supervise_args, exit_status_to_code, plan_clones, read_substrate_env,
-    substrate_child_env, SubstrateEnv,
+    build_supervise_args, plan_clones, read_substrate_env, substrate_child_env, SubstrateEnv,
 };
+use super::supervise::{exec_supervise, FRAMEWORK_BIN};
 
-/// The bundled substrate binary the session execs (image-baked, §Dockerfile).
-const FRAMEWORK_BIN: &str = "/usr/local/bin/fkst-framework";
 /// The `gh` PATH shim source, materialized at runtime early on PATH so a bare `gh`
 /// reads the rotating token (§5.2). Never overwrites the real `/usr/bin/gh`.
 const GH_SHIM_SCRIPT: &str = include_str!("gh-shim.sh");
@@ -192,8 +188,40 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     // Prepend the shim dir so our `gh` wins over /usr/bin/gh on PATH.
     prepend_path(&mut child_env, &shim_dir);
 
-    // 7. exec supervise, forwarding SIGTERM to its group for a graceful drain.
-    exec_supervise(args, child_env).await
+    // 6b. Log streaming: spawn the in-pod collector BEFORE supervise so it captures
+    //     the whole run. Streaming is unconditional — the collector redacts every
+    //     record and uploads a `tar.gz` bundle to chrono-storage as the mounted
+    //     write-only SA (or, absent that SA, captures without uploading). It reads
+    //     only the mounted creds it already has and adds no new credential. The
+    //     collector runs on its own thread; a failure inside it can never crash or
+    //     block supervise.
+    let log_stream = spawn_collector(collector_config_from_env(
+        env.repo.clone(),
+        plan.platform_repo.git_ref.clone(),
+        runtime_root.to_path_buf(),
+        Path::new(&env.codex_home).to_path_buf(),
+        Path::new(&env.creds_dir).to_path_buf(),
+    ));
+    let log_sender = Some(log_stream.sender());
+    tracing::info!("run-substrate: in-pod log streaming enabled");
+    // Seed `fkst-hosted/driver.log` with the driver's own launch record (the engine
+    // ref + repo it is about to supervise) so the bundle captures the fkst-hosted
+    // side of the run, not only the supervise/codex output.
+    log_stream.emit_driver(format!(
+        "run-substrate: supervising {} at engine ref {}",
+        env.repo, plan.platform_repo.git_ref
+    ));
+
+    // 7. exec supervise, forwarding SIGTERM to its group for a graceful drain, and
+    //    (when streaming) tee'ing its stdout/stderr into the collector.
+    let code = exec_supervise(args, child_env, log_sender).await;
+
+    // 7b. Record the exit into driver.log, then signal end-of-stream + wait (bounded)
+    //     for the collector's final flush so a revived pod does not race the last
+    //     upload. Non-fatal regardless of `code`.
+    log_stream.emit_driver("run-substrate: supervise exited; finalizing logs");
+    log_stream.shutdown().await;
+    code
 }
 
 /// Create `dir` (and parents) idempotently — an existing dir is not an error and
@@ -330,74 +358,6 @@ async fn git_clone(
     }
     tracing::info!(url = %url, dest = %dest.display(), "run-substrate: cloned");
     Ok(())
-}
-
-/// Spawn `fkst-framework supervise` with the built argv + env in its OWN process
-/// group and supervise it, forwarding SIGTERM/SIGINT to the child's group so the
-/// reconciler's pod-delete (SIGTERM) drains supervise + its descendants (codex,
-/// git) gracefully. Returns the child's exit code as this process's [`ExitCode`].
-async fn exec_supervise(args: Vec<String>, env: Vec<(String, String)>) -> Result<ExitCode, String> {
-    let mut command = Command::new(FRAMEWORK_BIN);
-    command
-        .args(&args)
-        // The child env is the FULL environment (built from `std::env::vars()` +
-        // overrides), so clear-then-set makes it deterministic and drops nothing
-        // unexpected.
-        .env_clear()
-        .envs(env)
-        .stdin(Stdio::null())
-        // stdout/stderr inherit (default) so the agent output flows to pod logs.
-        // A new process group (pgid == child pid) lets us signal the whole tree.
-        .process_group(0)
-        .kill_on_drop(false);
-    tracing::info!(bin = FRAMEWORK_BIN, args = ?args, "run-substrate: exec supervise");
-
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("spawn {FRAMEWORK_BIN}: {error}"))?;
-    let pid = child
-        .id()
-        .ok_or_else(|| "supervise child exited before yielding a pid".to_string())?;
-
-    let mut sigterm = signal(SignalKind::terminate())
-        .map_err(|error| format!("install SIGTERM handler: {error}"))?;
-    let mut sigint = signal(SignalKind::interrupt())
-        .map_err(|error| format!("install SIGINT handler: {error}"))?;
-
-    let status = loop {
-        tokio::select! {
-            // biased: always check child exit first so a race between exit and a
-            // signal never re-signals a dead group.
-            biased;
-            result = child.wait() => break result.map_err(|error| format!("await supervise: {error}"))?,
-            _ = sigterm.recv() => forward_signal(pid, Signal::SIGTERM),
-            _ = sigint.recv() => forward_signal(pid, Signal::SIGTERM),
-        }
-    };
-
-    let code = exit_status_to_code(status.code());
-    tracing::info!(code, "run-substrate: supervise exited");
-    Ok(ExitCode::from(code))
-}
-
-/// Send `signal` to the whole process group `pgid` (relocated from the deleted
-/// `engine::process`).
-fn signal_group(pgid: i32, signal: Signal) -> Result<(), nix::Error> {
-    nix::sys::signal::killpg(Pid::from_raw(pgid), signal)
-}
-
-/// Forward `signal` to the supervise child's process GROUP (it is
-/// `process_group(0)`, so pgid == pid). `ESRCH` (already gone) is a benign no-op.
-fn forward_signal(pid: u32, signal: Signal) {
-    match signal_group(pid as i32, signal) {
-        Ok(()) => tracing::info!(
-            pid,
-            ?signal,
-            "run-substrate: forwarded signal to supervise group"
-        ),
-        Err(nix::Error::ESRCH) => {}
-        Err(error) => tracing::warn!(pid, %error, "run-substrate: could not forward signal"),
-    }
 }
 
 /// Insert-or-replace `key` in the ordered env vec.

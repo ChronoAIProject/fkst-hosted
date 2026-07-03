@@ -62,6 +62,10 @@ fn valid_body_yields_a_registration() {
     assert_eq!(reg.def.work_label, "fkst-demo");
     assert_eq!(reg.def.environment, None);
     assert!(!reg.auto_merge, "a body with no Auto-merge section is off");
+    assert!(
+        reg.log_access.is_empty(),
+        "a body with no Log Access Allowlist section has an empty allow-list"
+    );
 
     // The session id + config hash must match the canonical derivations.
     let want_id = derive_session_id(INSTALLATION_ID, "acme", "site", 7);

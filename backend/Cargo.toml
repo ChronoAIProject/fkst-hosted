@@ -18,7 +18,7 @@ axum = "0.7"
 # 0.1 targets axum 0.7 (0.2+ moved to axum 0.8); both track utoipa 5.
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-axum = "0.1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "fs"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "net", "process", "time", "sync", "io-util", "io-std", "fs"] }
 tokio-util = "0.7"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors", "timeout", "request-id", "util"] }
@@ -36,6 +36,12 @@ hmac = "0.12"
 # in-memory `SessionRepo` CAS round-trip (`bson::to_document`).
 bson = "2"
 regex = "1"
+# Multi-pattern substring search for the session log-stream redactor: one
+# automaton scans every known-secret plaintext (and its base64/base64url/
+# percent-encoded/URL-composed derived forms) over each log line in a single pass,
+# so exact-secret redaction stays linear regardless of how many secrets a session
+# injects. `regex` (already present) covers the pattern-denylist + entropy layers.
+aho-corasick = "1"
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
@@ -63,6 +69,12 @@ kube = { version = "0.96", default-features = false, features = ["client", "conf
 k8s-openapi = { version = "0.23", features = ["latest"] }
 # `zip` unpacks Ornn skill packages into the per-session CODEX_HOME (engine).
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# The in-pod log collector bundles the redacted log tree into a single
+# `tar.gz` before uploading it to chrono-storage. `tar` builds the archive and
+# `flate2` gzip-compresses it (both are widely-used, well-maintained crates;
+# `flate2` was already present transitively).
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

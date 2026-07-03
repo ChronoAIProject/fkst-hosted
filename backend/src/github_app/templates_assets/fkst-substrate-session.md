@@ -52,3 +52,15 @@ values: true / yes / on / enabled / 1 (case-insensitive). Anything else, or
 deleting this section, leaves auto-merge OFF (the default).
 -->
 false
+
+### Log Access Allowlist
+
+<!--
+Optional ALLOW-LIST (not a switch). Log streaming is ALWAYS on for every session;
+this section only WIDENS who may DOWNLOAD this session's redacted logs. List extra
+GitHub logins or numeric user ids — one per line, or comma/space separated — that may
+download the logs IN ADDITION to you (the issue author) and the global admins, who
+always can. A leading `@` is fine. Frozen once the session registers. Delete this
+whole section for author + admins only (the default).
+-->
+

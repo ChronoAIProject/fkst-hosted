@@ -24,13 +24,15 @@ use crate::k8s::session_launcher::{
     ANNOTATION_REPO, ANNOTATION_TRIGGER_ISSUE, ANNOTATION_WORK_LABEL, COMPONENT_LABEL_KEY,
     COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
 };
+use crate::log_access::LogSessionContext;
 use crate::models::RepoRef;
-use crate::reconcile::desired::{plan_repo, LivePod, PodLiveness};
+use crate::reconcile::announce::parse_config_hash_marker;
+use crate::reconcile::desired::{plan_repo, LivePod, PodLiveness, SessionRegistration};
 use crate::reconcile::execute::{execute, ReconcileCtx};
 use crate::reconcile::pending::{LabelCountPending, PendingWork};
 use crate::reconcile::registry::parse_registration;
 
-use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_INVALID_LABEL};
+use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
 
 /// Reconcile ONE repository against its open trigger issues + live pods.
 pub async fn reconcile_repo(
@@ -72,6 +74,7 @@ pub async fn reconcile_repo(
     let mut invalid: Vec<(i64, String)> = Vec::new();
     let mut latched_invalid: HashSet<i64> = HashSet::new();
     let mut latched_announced: HashSet<i64> = HashSet::new();
+    let mut latched_config_rejected: HashSet<i64> = HashSet::new();
     for issue in &issues {
         if issue.labels.iter().any(|l| l == SUBSTRATE_INVALID_LABEL) {
             latched_invalid.insert(issue.number);
@@ -79,9 +82,49 @@ pub async fn reconcile_repo(
         if issue.labels.iter().any(|l| l == SUBSTRATE_ANNOUNCED_LABEL) {
             latched_announced.insert(issue.number);
         }
+        if issue
+            .labels
+            .iter()
+            .any(|l| l == SUBSTRATE_CONFIG_REJECTED_LABEL)
+        {
+            latched_config_rejected.insert(issue.number);
+        }
         match parse_registration(installation_id, repo, issue) {
             Ok(reg) => regs.push(reg),
             Err(marker) => invalid.push(marker),
+        }
+    }
+
+    // Config immutability: for each ANNOUNCED trigger, recover the ORIGINAL
+    // full_config_hash latched (as a hidden marker) in its announcement comment so the
+    // planner can reject a later edit. Bounded to announced triggers (a pre-announce
+    // trigger has no marker yet — this also caps the added API cost), and best-effort:
+    // a comment-list failure just skips that trigger this cycle (retried next
+    // reconcile) rather than aborting the whole repo — this additive check must never
+    // wedge the core pod reconcile.
+    let mut latched_config_hash: HashMap<i64, String> = HashMap::new();
+    for reg in &regs {
+        if !latched_announced.contains(&reg.trigger_issue) {
+            continue;
+        }
+        match ctx
+            .github
+            .list_issue_comments(&owner_repo, reg.trigger_issue as u64)
+            .await
+        {
+            Ok(comments) => {
+                if let Some(original) = parse_config_hash_marker(&comments) {
+                    latched_config_hash.insert(reg.trigger_issue, original);
+                }
+            }
+            Err(error) => {
+                tracing::warn!(
+                    owner_repo = %owner_repo,
+                    issue = reg.trigger_issue,
+                    error = %error,
+                    "reconcile: config-hash marker fetch failed; skipping immutability check this cycle"
+                );
+            }
         }
     }
 
@@ -89,6 +132,12 @@ pub async fn reconcile_repo(
     // it while it has ≥1 registration (closes the first-spawn/search-lag gap); drop
     // it when the last trigger issue is gone so idle repos don't churn the sweep.
     set_active(ctx, installation_id, repo, !regs.is_empty());
+
+    // Record each valid session's log-access context so the identity-gated
+    // log-download endpoint can reverse a `session_id` (a one-way hash) to the
+    // author id + `### Log Access Allowlist` allow-list it authorizes against. Cheap in-memory
+    // upsert; carries only public metadata (ids + the allow-list), never a token.
+    record_log_contexts(ctx, &regs);
 
     // Best-effort, non-failing: if ANY registered session on this repo opted into
     // auto-merge (`### Auto-merge`), merge the App bot's mergeable open PRs. Mirrors
@@ -137,6 +186,8 @@ pub async fn reconcile_repo(
         &pending,
         &latched_invalid,
         &latched_announced,
+        &latched_config_hash,
+        &latched_config_rejected,
         Utc::now(),
         cfg,
     );
@@ -152,6 +203,25 @@ pub async fn reconcile_repo(
         execute(action, repo, ctx).await;
     }
     Ok(())
+}
+
+/// Upsert every valid registration's [`LogSessionContext`] into the shared registry
+/// the log-download endpoint authorizes against. Called every sweep so the map stays
+/// current (a re-registration with an edited allow-list overwrites the old context);
+/// carries only public metadata, never a token.
+fn record_log_contexts(ctx: &ReconcileCtx, regs: &[SessionRegistration]) {
+    for reg in regs {
+        ctx.log_registry.upsert(
+            reg.session_id.clone(),
+            LogSessionContext {
+                installation_id: reg.installation_id,
+                repo: reg.repo.clone(),
+                trigger_issue: reg.trigger_issue,
+                author_id: reg.trigger_author_id,
+                log_access: reg.log_access.clone(),
+            },
+        );
+    }
 }
 
 /// Insert or remove `(installation, repo)` in the shared active-repos set (present

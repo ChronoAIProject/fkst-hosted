@@ -1,8 +1,12 @@
 //! Shared application state passed to every handler.
 
+use std::sync::Arc;
+
 use crate::config::Config;
 use crate::github_app::GithubAppTokens;
+use crate::log_access::LogAccessRegistry;
 use crate::reconcile::ReconcileHandle;
+use crate::storage::ChronoStorageClient;
 
 /// Clonable state shared across the router. The control plane is API-only and
 /// datastore-free: a session IS a Kubernetes Job (read/stopped via the K8s API
@@ -27,4 +31,13 @@ pub struct AppState {
     /// enqueue repos through it at the PR6 flip; today nothing reads it (Model A
     /// is unchanged), so it defaults to `None`.
     pub reconciler: Option<ReconcileHandle>,
+    /// chrono-storage object client for minting presigned GET URLs on the log
+    /// download endpoint (READ-scoped SA). `None` when log storage is unconfigured
+    /// (`FKST_STORAGE_*` unset) — the endpoint then reports the feature disabled.
+    /// Shared behind an `Arc` (the client holds a connection pool + token cache).
+    pub storage: Option<Arc<ChronoStorageClient>>,
+    /// The in-memory `session_id -> log-access context` registry: the reverse map
+    /// the identity-gated `/api/v1/logs/{session_id}` endpoint authorizes against.
+    /// Populated by the reconciler each sweep; a cheap `Arc`-backed handle.
+    pub log_registry: LogAccessRegistry,
 }

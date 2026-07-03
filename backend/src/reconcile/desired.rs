@@ -14,13 +14,15 @@
 use std::collections::{HashMap, HashSet};
 
 use k8s_openapi::chrono::{DateTime, Duration, Utc};
-use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::goals::trigger_parse::PackageRef;
 use crate::models::RepoRef;
 use crate::reconcile::reachability;
 use crate::reconcile_config::ReconcileConfig;
+
+// The pure content hashes live in the sibling `hashing` module; re-exported here so
+// the planner (and its attached test modules) reach them as `desired::…` unchanged.
+pub use crate::reconcile::hashing::{config_hash, full_config_hash};
 
 /// The launch inputs one substrate session needs, distilled from a parsed trigger
 /// issue. This is the non-identifying "what to run" half of a
@@ -64,6 +66,13 @@ pub struct SessionRegistration {
     /// of `config_hash` — a pod runs identically regardless, so toggling it never
     /// respawns the pod; it only gates the reconcile-side merge step.
     pub auto_merge: bool,
+    /// Per-session log-download allow-list (from the trigger issue's `### Log
+    /// Access`): the GitHub logins/ids permitted to pull this session's redacted
+    /// logs, IN ADDITION to the issue author + the global admins. Like the two
+    /// opt-ins it is NOT part of `config_hash` (a pod runs identically regardless),
+    /// but it IS part of [`full_config_hash`] so config-immutability FREEZES it — the
+    /// allow-list cannot be edited after registration to grant access retroactively.
+    pub log_access: Vec<String>,
 }
 
 /// The lifecycle phase of a live session pod, as the reconciler observes it. This
@@ -155,6 +164,9 @@ pub enum ReconcileAction {
     /// queued work yet.
     AnnounceSession {
         trigger_issue: i64,
+        /// The deterministic session id, so the executor can build the identity-gated
+        /// log-download link (`<base>/api/v1/logs/<session_id>`) the comment carries.
+        session_id: String,
         /// The session name (`### Session Name`).
         session_name: String,
         /// The GitHub work label whose open issues queue this session's work.
@@ -165,47 +177,17 @@ pub enum ReconcileAction {
         environment: Option<String>,
         /// Whether this trigger opted into reconcile-side PR auto-merge.
         auto_merge: bool,
+        /// The registration's [`full_config_hash`], latched as a hidden marker in the
+        /// announcement comment so a later config edit can be detected + rejected.
+        full_config_hash: String,
     },
-}
-
-/// A stable content hash over a session's launch inputs: its ordered package
-/// references, its work label, and its optional environment. Mirrors
-/// [`crate::k8s::env_store_meta::content_hash`] (canonical JSON → SHA-256 hex) so a
-/// live pod's recorded hash can be compared for drift. Stable and, for a fixed
-/// package ORDER, deterministic (packages are author-ordered, so order is part of
-/// the identity).
-pub fn config_hash(packages: &[PackageRef], work_label: &str, environment: Option<&str>) -> String {
-    // A borrow-only projection of each package so `PackageRef` need not itself be
-    // `Serialize`; the field set + order is the canonical package identity.
-    #[derive(Serialize)]
-    struct CanonPackage<'a> {
-        owner: &'a str,
-        repo: &'a str,
-        git_ref: &'a str,
-        path: &'a str,
-    }
-    #[derive(Serialize)]
-    struct Canonical<'a> {
-        packages: Vec<CanonPackage<'a>>,
-        work_label: &'a str,
-        environment: Option<&'a str>,
-    }
-    let canonical = Canonical {
-        packages: packages
-            .iter()
-            .map(|p| CanonPackage {
-                owner: &p.owner,
-                repo: &p.repo,
-                git_ref: &p.git_ref,
-                path: &p.path,
-            })
-            .collect(),
-        work_label,
-        environment,
-    };
-    let json = serde_json::to_vec(&canonical).expect("canonical config-hash json is infallible");
-    let digest = Sha256::digest(&json);
-    digest.iter().map(|b| format!("{b:02x}")).collect()
+    /// Reject an attempted config change on an already-triggered issue (config is
+    /// immutable once a session exists). Emitted ONCE per change transition — the
+    /// executor comments "config changes aren't accepted; close + reopen to change"
+    /// and latches [`crate::reconcile::SUBSTRATE_CONFIG_REJECTED_LABEL`] so it never
+    /// re-comments. The edit is separately prevented from respawning the pod (see
+    /// [`plan_repo`]); this action is purely the user-facing feedback.
+    RejectConfigChange { trigger_issue: i64 },
 }
 
 /// Decide whether a live, non-pending pod is due for an idle-kill.
@@ -229,6 +211,25 @@ fn config_drifted(pod: &LivePod, reg: &SessionRegistration) -> bool {
     matches!(&pod.config_hash, Some(h) if h != &reg.config_hash)
 }
 
+/// True when a registration's CURRENT [`full_config_hash`] differs from the ORIGINAL
+/// hash latched (in the announcement marker) for its trigger issue — i.e. the author
+/// edited some config after the session was triggered. Config is immutable once a
+/// session exists, so such an edit is rejected.
+///
+/// A trigger with no latched original (`latched_config_hash` has no entry) is
+/// PRE-announce: it has never been announced, so there is nothing to change against
+/// yet — never a rejection. This bounds the check to already-triggered issues, and it
+/// is why [`crate::reconcile::repo`] fetches comments only for announced triggers.
+fn config_change_rejected(
+    reg: &SessionRegistration,
+    latched_config_hash: &HashMap<i64, String>,
+) -> bool {
+    match latched_config_hash.get(&reg.trigger_issue) {
+        Some(original) => &full_config_hash(reg) != original,
+        None => false,
+    }
+}
+
 /// Plan the reconciliation of ONE repository: diff the desired registrations
 /// against the observed pods and invalid-flag state, returning the ordered actions
 /// that reconcile them. Pure and deterministic — the output depends only on the
@@ -236,6 +237,15 @@ fn config_drifted(pod: &LivePod, reg: &SessionRegistration) -> bool {
 ///
 /// Precedence for a live pod: a config-drift kill takes priority over an idle kill;
 /// a `Terminating` pod is always left alone; a `Terminal` pod is always cleaned up.
+///
+/// CONFIG IMMUTABILITY: config is immutable once a session is triggered. When a
+/// registration's CURRENT [`full_config_hash`] differs from the ORIGINAL latched for
+/// its trigger (`latched_config_hash`), the edit is REJECTED: the planner (a) treats
+/// the registration's pod-affecting state as UNCHANGED — it suppresses the Spawn and
+/// the `Kill { ConfigChanged }` the edit would otherwise cause, so the running pod is
+/// left serving its original config and is never respawned on the edit — and (b)
+/// emits a one-time [`ReconcileAction::RejectConfigChange`] (deduped by
+/// `latched_config_rejected`) so the author is told the edit was ignored.
 // Each argument is one distinct axis of the desired/observed snapshot the planner
 // diffs; bundling them into a struct would only rename the same fields at every
 // call site (the tests drive this directly) without reducing the real input set.
@@ -247,6 +257,8 @@ pub fn plan_repo(
     pending: &HashMap<String, bool>,
     latched_invalid: &HashSet<i64>,
     latched_announced: &HashSet<i64>,
+    latched_config_hash: &HashMap<i64, String>,
+    latched_config_rejected: &HashSet<i64>,
     now: DateTime<Utc>,
     cfg: &ReconcileConfig,
 ) -> Vec<ReconcileAction> {
@@ -263,20 +275,30 @@ pub fn plan_repo(
         let pod = live_by_session.get(reg.session_id.as_str()).copied();
         let liveness = pod.map(|p| p.liveness).unwrap_or(PodLiveness::Absent);
         let is_pending = pending.get(&reg.session_id).copied().unwrap_or(false);
+        // A rejected config edit must not drive any pod change: the pod keeps running
+        // its ORIGINAL config and is never respawned on the edit. We gate the two
+        // edit-driven actions (Spawn a new pod, Kill { ConfigChanged } to respawn) on
+        // this so the immutability guarantee holds regardless of what the edit touched.
+        let rejected = config_change_rejected(reg, latched_config_hash);
 
         match liveness {
             // Desired but no pod: spawn only once the session reports pending
             // (the pending signal is what turns a registration into a live need).
+            // A rejected edit suppresses the spawn — we cannot spawn the ORIGINAL
+            // config (only its hash is latched) and must not spawn the edited one, so
+            // the session stays frozen until the author closes + reopens it.
             PodLiveness::Absent => {
-                if is_pending {
+                if is_pending && !rejected {
                     actions.push(ReconcileAction::Spawn(reg.clone()));
                 }
             }
             // A running/starting pod: drift beats idle; pending refreshes the
-            // clock; otherwise idle-kill once both clocks pass.
+            // clock; otherwise idle-kill once both clocks pass. A rejected edit
+            // suppresses the drift kill (treat the pod as un-drifted) so the running
+            // pod keeps serving; it still touches-pending / idle-kills normally.
             PodLiveness::Starting | PodLiveness::Live => {
                 let pod = pod.expect("Starting/Live liveness implies a pod is present");
-                if config_drifted(pod, reg) {
+                if config_drifted(pod, reg) && !rejected {
                     actions.push(ReconcileAction::Kill {
                         session_id: reg.session_id.clone(),
                         reason: KillReason::ConfigChanged,
@@ -312,6 +334,7 @@ pub fn plan_repo(
         if !latched_announced.contains(&reg.trigger_issue) {
             actions.push(ReconcileAction::AnnounceSession {
                 trigger_issue: reg.trigger_issue,
+                session_id: reg.session_id.clone(),
                 session_name: reg.def.name.clone(),
                 work_label: reg.def.work_label.clone(),
                 packages: reg
@@ -322,6 +345,23 @@ pub fn plan_repo(
                     .collect(),
                 environment: reg.def.environment.clone(),
                 auto_merge: reg.auto_merge,
+                full_config_hash: full_config_hash(reg),
+            });
+        }
+    }
+
+    // --- 1c. Reject config edits on already-triggered issues -> comment once ---
+    // Config is immutable once a session exists. A registration whose CURRENT full
+    // config hash differs from the ORIGINAL latched for its trigger has been edited;
+    // emit the one-time rejection feedback (the pod actions above already ignored the
+    // edit). Deduped by the durable `fkst-config-rejected` latch so it comments only
+    // on the transition, mirroring the invalid-flag latch.
+    for reg in regs {
+        if config_change_rejected(reg, latched_config_hash)
+            && !latched_config_rejected.contains(&reg.trigger_issue)
+        {
+            actions.push(ReconcileAction::RejectConfigChange {
+                trigger_issue: reg.trigger_issue,
             });
         }
     }
@@ -394,6 +434,12 @@ pub fn plan_repo(
 #[cfg(test)]
 #[path = "desired_announce_tests.rs"]
 mod desired_announce_tests;
+#[cfg(test)]
+#[path = "desired_config_reject_tests.rs"]
+mod desired_config_reject_tests;
+#[cfg(test)]
+#[path = "desired_full_hash_tests.rs"]
+mod desired_full_hash_tests;
 #[cfg(test)]
 #[path = "desired_hash_tests.rs"]
 mod desired_hash_tests;

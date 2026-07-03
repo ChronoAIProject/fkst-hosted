@@ -28,12 +28,46 @@ pub const LLM_API_KEY_FILE: &str = "llm-api-key";
 /// Kubernetes Secret data key (`[-._a-zA-Z0-9]+`).
 pub const USER_ENV_PREFIX: &str = "userenv.";
 
+/// The write-only chrono-storage SA client id the in-pod log uploader mints its
+/// OAuth2 token with. Non-secret (an OAuth client identifier), mounted alongside
+/// the secret below. Present only when the control plane configured a write-only
+/// SA; absent otherwise (the uploader then produces no bundle — fail-closed).
+pub const STORAGE_CLIENT_ID_FILE: &str = "storage-client-id";
+/// The write-only chrono-storage SA client secret (SECRET). Mounted 0400.
+pub const STORAGE_CLIENT_SECRET_FILE: &str = "storage-client-secret";
+/// The NyxID OAuth2 token endpoint the in-pod uploader mints against.
+pub const STORAGE_TOKEN_URL_FILE: &str = "storage-token-url";
+/// The proxied chrono-storage base URL (non-secret).
+pub const STORAGE_BASE_URL_FILE: &str = "storage-base-url";
+/// The chrono-storage bucket the log bundle is written to (non-secret).
+pub const STORAGE_BUCKET_FILE: &str = "storage-bucket";
+
 /// Default mount path of the per-session credential Secret volume inside the pod.
 pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
 
+/// The write-only chrono-storage SA creds injected into a session Secret so the
+/// in-pod log uploader can PUT its bundle. All borrowed `&str` (the caller exposes
+/// its own secret before calling), keeping this module free of a `secrecy`
+/// dependency. Present only when the control plane configured a write-only SA.
+#[derive(Debug, Clone, Copy)]
+pub struct StorageWriterCreds<'a> {
+    /// The write-only SA client id (non-secret).
+    pub client_id: &'a str,
+    /// The write-only SA client secret (SECRET; the caller exposed it).
+    pub client_secret: &'a str,
+    /// The NyxID OAuth2 token endpoint the in-pod uploader mints against.
+    pub token_url: &'a str,
+    /// The proxied chrono-storage base URL (non-secret).
+    pub base_url: &'a str,
+    /// The bucket the log bundle is written to (non-secret).
+    pub bucket: &'a str,
+}
+
 /// Assemble the credential data keys carried by a per-session Kubernetes Secret:
-/// the rotating [`GITHUB_TOKEN_FILE`], the static [`LLM_API_KEY_FILE`], and one
-/// [`USER_ENV_PREFIX`]`<KEY>` entry per injected per-user env var.
+/// the rotating [`GITHUB_TOKEN_FILE`], the static [`LLM_API_KEY_FILE`], one
+/// [`USER_ENV_PREFIX`]`<KEY>` entry per injected per-user env var, and — when a
+/// write-only chrono-storage SA is configured — the five `storage-*` files the
+/// in-pod log uploader reads.
 ///
 /// The session-Pod Secret builder builds on top of this map — the Model-B
 /// session Secret carries only these creds — so the credential layout lives in
@@ -43,12 +77,32 @@ pub fn credential_secret_data<'a>(
     github_token: &str,
     llm_api_key: &str,
     user_env: impl IntoIterator<Item = (&'a str, &'a str)>,
+    storage: Option<StorageWriterCreds<'_>>,
 ) -> BTreeMap<String, String> {
     let mut data = BTreeMap::new();
     data.insert(GITHUB_TOKEN_FILE.to_string(), github_token.to_string());
     data.insert(LLM_API_KEY_FILE.to_string(), llm_api_key.to_string());
     for (key, value) in user_env {
         data.insert(format!("{USER_ENV_PREFIX}{key}"), value.to_string());
+    }
+    if let Some(storage) = storage {
+        data.insert(
+            STORAGE_CLIENT_ID_FILE.to_string(),
+            storage.client_id.to_string(),
+        );
+        data.insert(
+            STORAGE_CLIENT_SECRET_FILE.to_string(),
+            storage.client_secret.to_string(),
+        );
+        data.insert(
+            STORAGE_TOKEN_URL_FILE.to_string(),
+            storage.token_url.to_string(),
+        );
+        data.insert(
+            STORAGE_BASE_URL_FILE.to_string(),
+            storage.base_url.to_string(),
+        );
+        data.insert(STORAGE_BUCKET_FILE.to_string(), storage.bucket.to_string());
     }
     data
 }
@@ -83,6 +137,31 @@ impl CredsLayout {
     /// Path to the static LLM API key file.
     pub fn llm_api_key(&self) -> PathBuf {
         self.base.join(LLM_API_KEY_FILE)
+    }
+
+    /// Path to the write-only chrono-storage SA client id (non-secret).
+    pub fn storage_client_id(&self) -> PathBuf {
+        self.base.join(STORAGE_CLIENT_ID_FILE)
+    }
+
+    /// Path to the write-only chrono-storage SA client secret (SECRET).
+    pub fn storage_client_secret(&self) -> PathBuf {
+        self.base.join(STORAGE_CLIENT_SECRET_FILE)
+    }
+
+    /// Path to the NyxID OAuth2 token endpoint the uploader mints against.
+    pub fn storage_token_url(&self) -> PathBuf {
+        self.base.join(STORAGE_TOKEN_URL_FILE)
+    }
+
+    /// Path to the proxied chrono-storage base URL (non-secret).
+    pub fn storage_base_url(&self) -> PathBuf {
+        self.base.join(STORAGE_BASE_URL_FILE)
+    }
+
+    /// Path to the chrono-storage bucket the log bundle is written to.
+    pub fn storage_bucket(&self) -> PathBuf {
+        self.base.join(STORAGE_BUCKET_FILE)
     }
 
     /// List the mounted per-user env files (PR4b): every entry directly under
@@ -133,6 +212,31 @@ mod tests {
     }
 
     #[test]
+    fn storage_creds_compose_the_expected_paths() {
+        let layout = CredsLayout::new("/mnt/creds");
+        assert_eq!(
+            layout.storage_client_id(),
+            Path::new("/mnt/creds/storage-client-id")
+        );
+        assert_eq!(
+            layout.storage_client_secret(),
+            Path::new("/mnt/creds/storage-client-secret")
+        );
+        assert_eq!(
+            layout.storage_token_url(),
+            Path::new("/mnt/creds/storage-token-url")
+        );
+        assert_eq!(
+            layout.storage_base_url(),
+            Path::new("/mnt/creds/storage-base-url")
+        );
+        assert_eq!(
+            layout.storage_bucket(),
+            Path::new("/mnt/creds/storage-bucket")
+        );
+    }
+
+    #[test]
     fn user_env_files_lists_only_prefixed_entries_with_the_key_stripped() {
         let dir = tempfile::tempdir().expect("dir");
         std::fs::write(dir.path().join("userenv.FOO"), "foo").expect("write FOO");
@@ -167,7 +271,7 @@ mod tests {
     #[test]
     fn credential_secret_data_carries_the_base_creds_and_user_env() {
         let user_env = [("FOO", "foo-val"), ("API_TOKEN", "tok-val")];
-        let data = credential_secret_data("ghs_json", "sk-key", user_env);
+        let data = credential_secret_data("ghs_json", "sk-key", user_env, None);
         assert_eq!(data["github-token"], "ghs_json");
         assert_eq!(data["llm-api-key"], "sk-key");
         assert_eq!(data["userenv.FOO"], "foo-val");
@@ -178,9 +282,30 @@ mod tests {
 
     #[test]
     fn credential_secret_data_with_no_user_env_carries_only_the_base_creds() {
-        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty());
+        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), None);
         assert_eq!(data.len(), 2);
         assert!(data.contains_key("github-token"));
         assert!(data.contains_key("llm-api-key"));
+        // No write-only SA configured → no storage-* keys.
+        assert!(!data.contains_key("storage-client-secret"));
+    }
+
+    #[test]
+    fn credential_secret_data_carries_the_write_only_sa_when_present() {
+        let storage = StorageWriterCreds {
+            client_id: "writer-client",
+            client_secret: "writer-secret",
+            token_url: "https://nyx.example/oauth/token",
+            base_url: "https://storage.example/proxy",
+            bucket: "fkst-logs",
+        };
+        let data = credential_secret_data("ghs_json", "sk-key", std::iter::empty(), Some(storage));
+        assert_eq!(data["storage-client-id"], "writer-client");
+        assert_eq!(data["storage-client-secret"], "writer-secret");
+        assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");
+        assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
+        assert_eq!(data["storage-bucket"], "fkst-logs");
+        // Two base creds + the five storage keys.
+        assert_eq!(data.len(), 7);
     }
 }

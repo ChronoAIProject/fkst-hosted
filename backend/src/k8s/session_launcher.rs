@@ -19,7 +19,8 @@ use std::collections::BTreeMap;
 use std::time::SystemTime;
 
 use k8s_openapi::api::core::v1::{
-    Container, EnvVar, Pod, PodSpec, Secret, SecretVolumeSource, Volume, VolumeMount,
+    Container, EnvVar, EnvVarSource, ObjectFieldSelector, Pod, PodSpec, Secret, SecretVolumeSource,
+    Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference};
 use k8s_openapi::chrono::{DateTime, Utc};
@@ -28,7 +29,10 @@ use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::PodConfig;
 use crate::models::RepoRef;
-use crate::session_spec::creds::{credential_secret_data, DEFAULT_CREDS_DIR};
+use crate::session_pod::log_stream::{
+    ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
+};
+use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds, DEFAULT_CREDS_DIR};
 
 /// Errors launching a substrate-session Pod (relocated from the deleted Model-A
 /// Job launcher, trimmed to the variants the Pod path actually raises).
@@ -174,10 +178,42 @@ fn env_var(name: &str, value: impl Into<String>) -> EnvVar {
     }
 }
 
+/// A downward-API [`EnvVar`] whose value the kubelet fills from `field_path` (e.g.
+/// `metadata.uid`). No API token is involved — the field rides on the pod object —
+/// so this is safe inside the #338 hard-isolation box.
+fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
+    EnvVar {
+        name: name.to_string(),
+        value_from: Some(EnvVarSource {
+            field_ref: Some(ObjectFieldSelector {
+                field_path: field_path.to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
+/// The log-streaming env, injected on EVERY session (streaming is unconditional).
+/// Carries the session id (the collector's bundle key `logs/<id>/latest.tar.gz`),
+/// the trigger issue + config-hash (for the `meta.json`), and the downward-API pod
+/// UID/name (for the instance id). It adds NO storage credential — the write-only
+/// SA creds ride the per-session Secret (see [`build_session_secret`]), never env.
+fn log_streaming_env(spec: &SessionPodSpec) -> Vec<EnvVar> {
+    vec![
+        env_var(ENV_SESSION_ID, spec.session_id.clone()),
+        env_var(ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
+        env_var(ENV_CONFIG_HASH, spec.config_hash.clone()),
+        downward_env_var(ENV_POD_UID, "metadata.uid"),
+        downward_env_var(ENV_POD_NAME, "metadata.name"),
+    ]
+}
+
 /// The §5.2 non-secret env injected into the session Pod. Order is stable so the
 /// rendered Pod is deterministic (aids tests + drift detection).
 fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
-    vec![
+    let mut env = vec![
         env_var(
             GITHUB_REPO_ENV,
             format!("{}/{}", spec.repo.owner, spec.repo.name),
@@ -197,7 +233,11 @@ fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
         env_var(GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
         env_var(SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
         env_var(SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
-    ]
+    ];
+    // Log streaming is unconditional: every session carries the (non-secret) log
+    // env + downward-API refs. The write-only storage creds ride the Secret.
+    env.extend(log_streaming_env(spec));
+    env
 }
 
 /// Labels the NetworkPolicy + reconciler select on. `substrate-session` is the
@@ -312,8 +352,10 @@ pub fn build_session_pod(spec: &SessionPodSpec, config: &PodConfig) -> Result<Po
 }
 
 /// Build the per-session creds Secret (pure; no API calls). Carries the rotating
-/// `github-token` (the `{token, expires_at}` JSON), the static `llm-api-key`, and
-/// one `userenv.<KEY>` per injected per-user env entry — via the shared
+/// `github-token` (the `{token, expires_at}` JSON), the static `llm-api-key`, one
+/// `userenv.<KEY>` per injected per-user env entry, and — when `storage` is
+/// provided (the control plane configured a write-only chrono-storage SA) — the
+/// five `storage-*` files the in-pod log uploader reads. All via the shared
 /// [`credential_secret_data`] helper so the layout never diverges from the
 /// Model-A Job Secret. Owner-referenced to the Pod (when `owner` is provided) so
 /// K8s cascade-deletes it on Pod GC.
@@ -322,6 +364,7 @@ pub fn build_session_secret(
     github_token_json: &str,
     llm_api_key: &SecretString,
     user_env: &BTreeMap<String, String>,
+    storage: Option<StorageWriterCreds<'_>>,
     owner: Option<OwnerReference>,
 ) -> Secret {
     let data = credential_secret_data(
@@ -330,6 +373,7 @@ pub fn build_session_secret(
         user_env
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str())),
+        storage,
     );
 
     Secret {

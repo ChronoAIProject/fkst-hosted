@@ -69,7 +69,13 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // `GithubUser` extractor, not middleware. Session query/stop are NOT a REST
     // surface — a session is controlled solely through its GitHub issue (the
     // `/status` + `/stop` issue comments, authorized by sender == issue author).
-    let api_routes = routes::environments::router();
+    //
+    // The identity-gated log-download endpoint (`/api/v1/logs/*`) is merged into the
+    // same `/api/v1` subtree. It is likewise open at the app layer (it authorizes
+    // in-handler via a GitHub token or OAuth). It shares this subtree's timeout,
+    // which is a comfortable upper bound — its own presign + `/user` round-trips are
+    // each independently bounded well below it.
+    let api_routes = routes::environments::router().merge(routes::logs::router());
 
     // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
     // but signature-verified inside the handler over the raw body. It lives at

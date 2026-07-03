@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use crate::goals::package_ref::{parse_package_ref, PackageRef};
-use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
+use crate::reserved_env::{is_reserved_env_key, GIT_TRACE_SILENCING_ENV, LLM_ENV_KEY};
 
 use super::creds_helper::GitConfigEntry;
 
@@ -233,6 +233,10 @@ pub fn build_supervise_args(
 /// LAST so they always win. `LLM_API_KEY` is NOT in the reserved table, so this
 /// last-writer-wins step is what guarantees a `userenv.LLM_API_KEY` can never
 /// shadow the real key.
+///
+/// The same last-writer-wins step force-sets the [`GIT_TRACE_SILENCING_ENV`] toggles
+/// to `"0"` (Layer 0 log hardening) so git/GCM never trace `Authorization:`/`password`
+/// lines into the streamed pod log, and a user `env_profile` cannot re-enable them.
 pub fn substrate_child_env(
     base: Vec<(String, String)>,
     user_env: &BTreeMap<String, String>,
@@ -266,6 +270,12 @@ pub fn substrate_child_env(
     env.insert(CODEX_HOME_ENV.to_string(), codex_home.to_string());
     env.insert(DURABLE_ROOT_ENV.to_string(), durable_root.to_string());
     env.insert(RUNTIME_ROOT_ENV.to_string(), runtime_root.to_string());
+
+    // Layer 0: silence git/GCM tracing so a rotating token never trace-leaks into the
+    // streamed pod log. Written last so a user `env_profile` value can never win.
+    for (key, value) in GIT_TRACE_SILENCING_ENV {
+        env.insert((*key).to_string(), (*value).to_string());
+    }
 
     env.into_iter().collect()
 }

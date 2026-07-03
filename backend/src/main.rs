@@ -153,6 +153,22 @@ async fn main() -> ExitCode {
     let sweep_namespace = config.pod.namespace.clone();
     let sweep_deadline = config.env.validate_deadline_secs;
 
+    // The shared `session_id -> log-access context` registry the reconciler writes
+    // each sweep and the log-download endpoint reads. Built here so ONE registry is
+    // shared between the background loops and the API router.
+    let log_registry = fkst_control_plane::log_access::LogAccessRegistry::new();
+
+    // The chrono-storage client the log-download endpoint mints presigned GET URLs
+    // with. Built from the already-parsed + validated `config.storage` (None when
+    // the feature is unconfigured); shared behind an `Arc`.
+    let storage = config
+        .storage
+        .clone()
+        .map(|c| std::sync::Arc::new(fkst_control_plane::storage::client_from_config(c)));
+    if storage.is_some() {
+        tracing::info!("log-download endpoint enabled (chrono-storage configured)");
+    }
+
     // Model B reconciler (issue #359, PR5b): when pod dispatch is on AND the GitHub
     // App + a cluster are available, spawn the reconcile queue consumer + the two
     // producer loops (sweep, full-resync) + the token-rotation loop, and hand the
@@ -161,7 +177,7 @@ async fn main() -> ExitCode {
     // harmless idle set of loops. Runs BEFORE build_router so the handle rides on
     // AppState.
     let reconciler = if pod_dispatch {
-        spawn_reconciler(&config, github_app.clone()).await
+        spawn_reconciler(&config, github_app.clone(), log_registry.clone()).await
     } else {
         None
     };
@@ -171,6 +187,8 @@ async fn main() -> ExitCode {
         github_app,
         github_app_webhook_secret,
         reconciler,
+        storage,
+        log_registry,
     }) {
         Ok(router) => router,
         Err(error) => {
@@ -237,6 +255,7 @@ async fn main() -> ExitCode {
 async fn spawn_reconciler(
     config: &Config,
     github_app: Option<fkst_control_plane::github_app::GithubAppTokens>,
+    log_registry: fkst_control_plane::log_access::LogAccessRegistry,
 ) -> Option<ReconcileHandle> {
     let Some(github) = github_app else {
         tracing::warn!("pod dispatch on but github app not configured; reconciler not started");
@@ -278,6 +297,7 @@ async fn spawn_reconciler(
         config: config.clone(),
         active_repos: fkst_control_plane::reconcile::new_active_repos(),
         ensured_templates: fkst_control_plane::reconcile::new_ensured_templates(),
+        log_registry,
     };
 
     let (handle, rx) = reconcile_channel(1024);
