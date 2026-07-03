@@ -55,7 +55,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local view = devloop_commands.gh_pr_view_origin(repo, review_meta.pr_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: gh pr review-meta view failed: " .. tostring(view.stderr))
+      error("github-devloop: gh-pr-review-meta-view-failed: gh pr review-meta view failed: " .. tostring(view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_origin(view.stdout)
     local current_issue = {
@@ -66,7 +66,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if issue_number ~= nil then
       local issue_view = devloop_commands.gh_issue_view_fix(repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
-        error("github-devloop: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
+        error("github-devloop: gh-issue-review-meta-view-failed: gh issue review-meta view failed: " .. tostring(issue_view.stderr))
       end
       local parsed_issue = parsers_issue.parse_issue_view_fix(core, issue_view.stdout)
       if parsed_issue.title ~= nil and parsed_issue.title ~= "" then
@@ -79,7 +79,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local transition = devloop_state.cyclic_transition_status(state, { "review-meta" }, "fixing", review_meta.version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "retry-pending(from-state marker not yet visible)", "review-meta state marker not yet visible")
-      error("github-devloop: review-meta state marker not yet visible; retrying")
+      error("github-devloop: review-meta-marker-missing: review-meta state marker not yet visible; retrying")
     end
     if state.state ~= "review-meta" or transition == "stale" then
       devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", devloop_state.cas_outcome(state, transition, review_meta.version), "current marker is no longer review-meta")
@@ -121,7 +121,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         source_ref = review_meta.source_ref,
         terminal = false,
       })
-      error("github-devloop: review-meta codex failed: " .. tostring(stderr))
+      error("github-devloop: review-meta-codex-failed: review-meta codex failed: " .. tostring(stderr))
     end
     local parsed = core.parse_review_meta_action(result.stdout)
     if parsed == nil then

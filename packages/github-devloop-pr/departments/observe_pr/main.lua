@@ -122,7 +122,7 @@ local function issue_reviewing_for_origin(origin)
   end
   local issue_view = devloop_commands.gh_issue_view_reviewing(origin.repo, origin.issue_number, 30)
   if issue_view.exit_code ~= 0 then
-    error("github-devloop: gh issue reviewing view failed: " .. tostring(issue_view.stderr))
+    error("github-devloop: gh-issue-reviewing-view-failed: gh issue reviewing view failed: " .. tostring(issue_view.stderr))
   end
   return parsers_issue.parse_issue_view_reviewing(core, issue_view.stdout)
 end
@@ -438,7 +438,7 @@ local function process_pr_event(event)
   local branches = config.branch_config()
   local pr_view = devloop_entity_view.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at)
   if pr_view.exit_code ~= 0 then
-    error("github-devloop: gh pr origin view failed: " .. tostring(pr_view.stderr))
+    error("github-devloop: gh-pr-origin-view-failed: gh pr origin view failed: " .. tostring(pr_view.stderr))
   end
 
   local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)

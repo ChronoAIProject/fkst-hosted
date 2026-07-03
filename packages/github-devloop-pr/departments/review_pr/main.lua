@@ -77,7 +77,7 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local pr_view = devloop_commands.gh_pr_view_origin(repo, reviewing.pr_number, 30)
     if pr_view.exit_code ~= 0 then
-      error("github-devloop: gh pr review head view failed: " .. tostring(pr_view.stderr))
+      error("github-devloop: gh-pr-review-head-view-failed: gh pr review head view failed: " .. tostring(pr_view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
     devloop_logging.log_forged_markers("review_pr", reviewing.proposal_id, current_pr.comments)
@@ -111,7 +111,7 @@ return saga.department(spec, { done = function() return false end, act = functio
           return
         end
         devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "retry-pending(reviewing marker not yet visible)", "reviewing state marker not yet visible")
-        error("github-devloop: reviewing state marker not yet visible for PR review; retrying")
+        error("github-devloop: pr-review-marker-missing: reviewing state marker not yet visible for PR review; retrying")
       end
     end
     if transition == "stale" then
@@ -125,7 +125,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
 
     if not require("devloop.pr_safety").is_safe_head_sha(current_pr.head_sha) then
-      error("github-devloop: gh pr review head view returned unsafe head sha")
+      error("github-devloop: pr-review-head-unsafe: gh pr review head view returned unsafe head sha")
     end
     if tostring(current_pr.state or ""):lower() ~= "open" then
       devloop_logging.log_cas_decision("review_pr", reviewing.proposal_id, state, "reviewing", "review-proposal", "skip-stale(pr-closed)", "re-derived PR is not open")
@@ -141,7 +141,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if issue_number ~= nil then
       local issue_view = devloop_commands.gh_issue_view_review(repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
-        error("github-devloop: gh issue review view failed: " .. tostring(issue_view.stderr))
+        error("github-devloop: gh-issue-review-view-failed: gh issue review view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = parsers_issue.parse_issue_view_review(core, issue_view.stdout)
     end

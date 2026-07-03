@@ -167,7 +167,7 @@ local function pipeline_review(event)
 
     local view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: gh pr review reconcile view failed: " .. tostring(view.stderr))
+      error("github-devloop: gh-pr-review-reconcile-view-failed: gh pr review reconcile view failed: " .. tostring(view.stderr))
     end
 
     local current = parsers_pr.parse_pr_view_origin(view.stdout)
@@ -183,7 +183,7 @@ local function pipeline_review(event)
     end
     if state.state == nil then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "pending", "reviewing state marker not yet visible")
-      error("github-devloop: reviewing state marker not yet visible for review reconcile; retrying")
+      error("github-devloop: review-reconcile-marker-missing: reviewing state marker not yet visible for review reconcile; retrying")
     end
     if state.state ~= "reviewing" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", "skip-stale(state-advanced)", "current marker advanced beyond reviewing")
@@ -193,7 +193,7 @@ local function pipeline_review(event)
     local transition = devloop_state.versioned_transition_status(state, { "reviewing" }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
-      error("github-devloop: reviewing state marker not yet visible for review reconcile; retrying")
+      error("github-devloop: review-reconcile-marker-missing: reviewing state marker not yet visible for review reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be reconciled from reviewing")
@@ -243,7 +243,7 @@ local function pipeline_fix(event)
 
     local view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
     if view.exit_code ~= 0 then
-      error("github-devloop: gh pr fix reconcile view failed: " .. tostring(view.stderr))
+      error("github-devloop: gh-pr-fix-reconcile-view-failed: gh pr fix reconcile view failed: " .. tostring(view.stderr))
     end
 
     local current = parsers_pr.parse_pr_view_origin(view.stdout)
@@ -262,7 +262,7 @@ local function pipeline_fix(event)
     local transition = devloop_state.versioned_transition_status(state, { "reviewing" }, "blocked", version)
     if state.state == nil or transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, "reviewing", "blocked", devloop_state.cas_outcome(state, transition, version), "reviewing state marker not yet visible")
-      error("github-devloop: reviewing state marker not yet visible for fix reconcile; retrying")
+      error("github-devloop: fix-reconcile-marker-missing: reviewing state marker not yet visible for fix reconcile; retrying")
     end
     if state.state ~= "reviewing"
       or transition_version.safe_version_segment(tostring(state.version or "")) ~= transition_version.safe_version_segment(tostring(reconcile.issue_version)) then
@@ -314,7 +314,7 @@ local function pipeline_timeout(event)
       local view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
       if view.exit_code ~= 0 then
         if not command_indicates_not_found(view) then
-          error("github-devloop: gh pr timeout reconcile view failed: " .. tostring(view.stderr))
+          error("github-devloop: gh-pr-timeout-reconcile-view-failed: gh pr timeout reconcile view failed: " .. tostring(view.stderr))
         end
         devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, { state = reconcile.state, version = reconcile.issue_version }, reconcile.state, "blocked", "pr-surface-gone-fallback", "PR source disappeared before timeout reconcile; falling back to issue surface")
         target_pr_number = nil
@@ -340,7 +340,7 @@ local function pipeline_timeout(event)
     end
     if state.state == nil then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "pending", "state marker not yet visible for timeout reconcile")
-      error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
+      error("github-devloop: timeout-reconcile-marker-missing: state marker not yet visible for timeout reconcile; retrying")
     end
     if state.state ~= reconcile.state then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", "skip-stale(state-advanced)", "current marker advanced beyond timeout reconcile state")
@@ -405,7 +405,7 @@ local function pipeline_timeout(event)
     local transition = devloop_state.versioned_transition_status(state, { reconcile.state }, "blocked", version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "state marker not yet visible for timeout reconcile")
-      error("github-devloop: state marker not yet visible for timeout reconcile; retrying")
+      error("github-devloop: timeout-reconcile-marker-missing: state marker not yet visible for timeout reconcile; retrying")
     end
     if transition == "idempotent" or transition == "stale" then
       devloop_logging.log_cas_decision("reconcile", reconcile.proposal_id, state, reconcile.state, "blocked", devloop_state.cas_outcome(state, transition, version), "current marker cannot be timeout reconciled")

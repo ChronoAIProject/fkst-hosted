@@ -40,19 +40,19 @@ end
 local function branch_worktree(repo, issue_number, version, branch)
   local runtime_result = exec_sync({ cmd = devloop_commands.read_runtime_root_cmd(), timeout = 30 })
   if runtime_result.exit_code ~= 0 then
-    error("github-devloop: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
+    error("github-devloop: runtime-root-read-failed: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
   local runtime_root = runtime_result.stdout
   local worktree = devloop_base.implement_worktree_path(runtime_root, repo, issue_number, version)
   local list_result = devloop_commands.git_worktree_list(30)
   if list_result.exit_code ~= 0 then
-    error("github-devloop: git worktree list failed: " .. tostring(list_result.stderr))
+    error("github-devloop: git-worktree-list-failed: git worktree list failed: " .. tostring(list_result.stderr))
   end
   local existing = devloop_commands.find_worktree_for_branch(list_result.stdout, branch)
   if existing ~= nil then
     local dir_result = exec_sync({ cmd = devloop_commands.path_is_directory_cmd(existing), timeout = 30 })
     if dir_result.exit_code ~= 0 and dir_result.exit_code ~= 1 then
-      error("github-devloop: git worktree path check failed: " .. tostring(dir_result.stderr))
+      error("github-devloop: worktree-path-check-failed: git worktree path check failed: " .. tostring(dir_result.stderr))
     end
     if dir_result.exit_code == 0 and devloop_base.path_under_runtime_root(runtime_root, existing) then
       return existing
@@ -60,23 +60,23 @@ local function branch_worktree(repo, issue_number, version, branch)
     if dir_result.exit_code == 1 then
       local prune_result = devloop_commands.git_worktree_prune(60)
       if prune_result.exit_code ~= 0 then
-        error("github-devloop: git worktree prune failed: " .. tostring(prune_result.stderr))
+        error("github-devloop: git-worktree-prune-failed: git worktree prune failed: " .. tostring(prune_result.stderr))
       end
     else
       local remove_result = core.git.worktree_remove(existing, 60)
       if remove_result.exit_code ~= 0 then
-        error("github-devloop: git worktree remove failed: " .. tostring(remove_result.stderr))
+        error("github-devloop: git-worktree-remove-failed: git worktree remove failed: " .. tostring(remove_result.stderr))
       end
     end
   end
 
   local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
   if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git PR head branch fetch failed: " .. tostring(fetch_result.stderr))
+    error("github-devloop: git-pr-head-branch-fetch-failed: git PR head branch fetch failed: " .. tostring(fetch_result.stderr))
   end
   local add_result = devloop_commands.git_worktree_add_remote_branch(worktree, "origin", branch, existing ~= nil, 60)
   if add_result.exit_code ~= 0 then
-    error("github-devloop: git worktree add failed: " .. tostring(add_result.stderr))
+    error("github-devloop: git-worktree-add-failed: git worktree add failed: " .. tostring(add_result.stderr))
   end
   return worktree
 end
@@ -87,15 +87,15 @@ local function fetch_expected_pr_merge_product(pr_number, expected_baseline_sha)
   end
   local fetch_result = devloop_commands.git_fetch_pr_merge_ref("origin", pr_number, 60)
   if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
+    error("github-devloop: git-pr-merge-ref-fetch-failed: git PR merge ref fetch failed: " .. tostring(fetch_result.stderr))
   end
   local head_result = devloop_commands.git_fetch_head_commit(30)
   if head_result.exit_code ~= 0 then
-    error("github-devloop: git PR merge ref head failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-pr-merge-ref-head-failed: git PR merge ref head failed: " .. tostring(head_result.stderr))
   end
   local merge_product_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if merge_product_sha ~= expected_baseline_sha then
-    error("github-devloop: PR merge ref head does not match merge-gate baseline")
+    error("github-devloop: merge-ref-baseline-mismatch: PR merge ref head does not match merge-gate baseline")
   end
   return merge_product_sha
 end
@@ -108,16 +108,16 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   if base_head == nil then
     local fetch_result = devloop_commands.git_fetch_branch("origin", integration_branch, 60)
     if fetch_result.exit_code ~= 0 then
-      error("github-devloop: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
+      error("github-devloop: git-integration-branch-fetch-failed: git integration branch fetch failed: " .. tostring(fetch_result.stderr))
     end
     local base_result = devloop_commands.git_remote_branch_head("origin", integration_branch, 30)
     if base_result.exit_code ~= 0 then
-      error("github-devloop: git integration branch head failed: " .. tostring(base_result.stderr))
+      error("github-devloop: git-integration-branch-head-failed: git integration branch head failed: " .. tostring(base_result.stderr))
     end
     base_head = tostring(base_result.stdout or ""):gsub("%s+$", "")
   end
   if not require("devloop.pr_safety").is_safe_head_sha(base_head) then
-    error("github-devloop: unsafe integration head")
+    error("github-devloop: integration-head-unsafe: unsafe integration head")
   end
   local result = {
     target_branch = integration_branch,
@@ -129,10 +129,10 @@ local function merge_integration_for_fix(worktree, pr_number, integration_branch
   if merge_result.exit_code ~= 0 then
     local unmerged_result = core.git.unmerged_paths(worktree, 30)
     if unmerged_result.exit_code ~= 0 then
-      error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+      error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
     end
     if tostring(unmerged_result.stdout or "") == "" then
-      error("github-devloop: git integration merge failed: " .. tostring(merge_result.stderr))
+      error("github-devloop: git-integration-merge-failed: git integration merge failed: " .. tostring(merge_result.stderr))
     end
     result.conflicted = true
     result.unmerged_paths = tostring(unmerged_result.stdout or "")
@@ -171,10 +171,10 @@ local function merge_sha_for_fix(worktree, sha, context, log_values)
   end
   local unmerged_result = core.git.unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
-    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
   if tostring(unmerged_result.stdout or "") == "" then
-    error("github-devloop: git target merge failed: " .. tostring(merge_result.stderr))
+    error("github-devloop: git-target-merge-failed: git target merge failed: " .. tostring(merge_result.stderr))
   end
   context.conflicted = true
   context.unmerged_paths = append_unmerged_paths(context.unmerged_paths, unmerged_result.stdout)
@@ -185,15 +185,15 @@ end
 local function fetch_verified_pr_head(pr_number, expected_head_sha)
   local fetch_result = devloop_commands.git_fetch_pr_head_ref("origin", pr_number, 60)
   if fetch_result.exit_code ~= 0 then
-    error("github-devloop: git PR head ref fetch failed: " .. tostring(fetch_result.stderr))
+    error("github-devloop: git-pr-head-ref-fetch-failed: git PR head ref fetch failed: " .. tostring(fetch_result.stderr))
   end
   local head_result = devloop_commands.git_fetch_head_commit(30)
   if head_result.exit_code ~= 0 then
-    error("github-devloop: git PR head ref head failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-pr-head-ref-head-failed: git PR head ref head failed: " .. tostring(head_result.stderr))
   end
   local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if head_sha ~= tostring(expected_head_sha) then
-    error("github-devloop: PR head ref does not match merge queue predecessor")
+    error("github-devloop: pr-head-predecessor-mismatch: PR head ref does not match merge queue predecessor")
   end
   return head_sha
 end
@@ -226,7 +226,7 @@ local function merge_speculative_predecessors_for_fix(worktree, repo, integratio
   local context = merge_result_context("speculative:" .. integration_branch, current_set)
   for _, predecessor in ipairs(predecessors) do
     if not require("devloop.pr_safety").is_safe_head_sha(predecessor.head_sha) then
-      error("github-devloop: unsafe speculative predecessor head")
+      error("github-devloop: speculative-predecessor-head-unsafe: unsafe speculative predecessor head")
     end
     local predecessor_head = fetch_verified_pr_head(predecessor.pr_number, predecessor.head_sha)
     context = merge_sha_for_fix(worktree, predecessor_head, context, {
@@ -242,10 +242,10 @@ end
 local function assert_no_unmerged_paths(worktree)
   local unmerged_result = core.git.unmerged_paths(worktree, 30)
   if unmerged_result.exit_code ~= 0 then
-    error("github-devloop: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
+    error("github-devloop: git-unmerged-path-check-failed: git unmerged path check failed: " .. tostring(unmerged_result.stderr))
   end
   if tostring(unmerged_result.stdout or "") ~= "" then
-    error("github-devloop: fix left target merge conflicts unresolved")
+    error("github-devloop: unresolved-merge-conflicts: fix left target merge conflicts unresolved")
   end
 end
 
@@ -255,9 +255,9 @@ local function assert_no_conflict_markers(worktree)
     return
   end
   if markers_result.exit_code == 0 then
-    error("github-devloop: fix left conflict markers unresolved")
+    error("github-devloop: unresolved-conflict-markers: fix left conflict markers unresolved")
   end
-  error("github-devloop: git conflict marker check failed: " .. tostring(markers_result.stderr))
+  error("github-devloop: git-conflict-marker-check-failed: git conflict marker check failed: " .. tostring(markers_result.stderr))
 end
 
 local function bounded_fix_summary(value)
@@ -373,7 +373,7 @@ end
 local function branch_head_if_ahead(base_head_sha, branch)
   local ahead_result = devloop_commands.git_branch_ahead_count(base_head_sha, branch, 30)
   if ahead_result.exit_code ~= 0 then
-    error("github-devloop: git branch ahead check failed: " .. tostring(ahead_result.stderr))
+    error("github-devloop: git-branch-ahead-check-failed: git branch ahead check failed: " .. tostring(ahead_result.stderr))
   end
   local ahead_count = tonumber(tostring(ahead_result.stdout or ""):match("%d+"))
   if ahead_count == nil or ahead_count <= 0 then
@@ -381,11 +381,11 @@ local function branch_head_if_ahead(base_head_sha, branch)
   end
   local head_result = devloop_commands.git_branch_head(branch, 30)
   if head_result.exit_code ~= 0 then
-    error("github-devloop: git branch head check failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-branch-head-check-failed: git branch head check failed: " .. tostring(head_result.stderr))
   end
   local branch_head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if not require("devloop.pr_safety").is_safe_head_sha(branch_head_sha) then
-    error("github-devloop: unsafe deterministic branch head sha")
+    error("github-devloop: deterministic-branch-head-unsafe: unsafe deterministic branch head sha")
   end
   if branch_head_sha == base_head_sha then
     return nil
@@ -462,7 +462,7 @@ local function run_fix_attempt(plan)
 
   local status = devloop_commands.git_status(worktree, 30)
   if status.exit_code ~= 0 then
-    error("github-devloop: git status failed: " .. tostring(status.stderr))
+    error("github-devloop: git-status-failed: git status failed: " .. tostring(status.stderr))
   end
   if tostring(status.stdout or "") == "" then
     local existing_head_sha = branch_head_if_ahead(plan.fix.reviewed_head_sha, plan.branch)
@@ -496,29 +496,29 @@ local function run_fix_attempt(plan)
 
   local add_result = devloop_commands.git_add_all(worktree, 30)
   if add_result.exit_code ~= 0 then
-    error("github-devloop: git add failed: " .. tostring(add_result.stderr))
+    error("github-devloop: git-add-failed: git add failed: " .. tostring(add_result.stderr))
   end
   local commit_result = devloop_commands.git_commit(worktree, payloads_builders.fix_commit_subject(
       plan.issue_number,
       require("devloop.github_proxy_entity_view").commit_issue_subject_snapshot(plan.repo, plan.issue_number)
     ), 60)
   if commit_result.exit_code ~= 0 then
-    error("github-devloop: git commit failed: " .. tostring(commit_result.stderr))
+    error("github-devloop: git-commit-failed: git commit failed: " .. tostring(commit_result.stderr))
   end
   local branch_result = devloop_commands.git_current_branch(worktree, 30)
   if branch_result.exit_code ~= 0 then
-    error("github-devloop: git branch fact failed: " .. tostring(branch_result.stderr))
+    error("github-devloop: git-branch-fact-failed: git branch fact failed: " .. tostring(branch_result.stderr))
   end
   if tostring(branch_result.stdout or ""):gsub("%s+$", "") ~= plan.branch then
-    error("github-devloop: PR origin fix branch mismatch")
+    error("github-devloop: fix-branch-mismatch: PR origin fix branch mismatch")
   end
   local head_result = git("github-devloop").git_head_sha(worktree, 30)
   if head_result.exit_code ~= 0 then
-    error("github-devloop: git head fact failed: " .. tostring(head_result.stderr))
+    error("github-devloop: git-head-fact-failed: git head fact failed: " .. tostring(head_result.stderr))
   end
   local new_head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
   if not require("devloop.pr_safety").is_safe_head_sha(new_head_sha) then
-    error("github-devloop: unsafe fix head_sha")
+    error("github-devloop: fix-head-unsafe: unsafe fix head_sha")
   end
   if new_head_sha == plan.fix.reviewed_head_sha then
     return {
@@ -555,7 +555,7 @@ local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_pr
     local outcome = fail_closed and "fail-closed(write-gate)" or "skip-stale(write-gate)"
     devloop_logging.log_cas_decision("fix", fix.proposal_id, rechecked_state, "fixing", "reviewing|review-meta", outcome, tostring(reason_prefix) .. " PR fact changed or head repository missing")
     if fail_closed then
-      error("github-devloop: write-time PR fact changed or head repository missing")
+      error("github-devloop: write-time-pr-fact-changed: write-time PR fact changed or head repository missing")
     end
     return nil
   end
@@ -565,7 +565,7 @@ end
 local function recheck_fix_write_gate(repo, fix, branch)
   local pr_recheck = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
   if pr_recheck.exit_code ~= 0 then
-    error("github-devloop: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
+    error("github-devloop: gh-pr-fix-recheck-failed: gh pr fix recheck failed: " .. tostring(pr_recheck.stderr))
   end
   local rechecked_pr = parsers_pr.parse_pr_view_fix(pr_recheck.stdout)
   return validate_fix_write_gate_snapshot(repo, fix, branch, rechecked_pr, "write-time", true)
@@ -574,7 +574,7 @@ end
 local function precheck_fix_write_gate(repo, fix, branch)
   local pr_precheck = devloop_commands.gh_pr_view_fix_precheck(repo, fix.pr_number, 30)
   if pr_precheck.exit_code ~= 0 then
-    error("github-devloop: gh pr fix precheck failed: " .. tostring(pr_precheck.stderr))
+    error("github-devloop: gh-pr-fix-precheck-failed: gh pr fix precheck failed: " .. tostring(pr_precheck.stderr))
   end
   local prechecked_pr = parsers_pr.parse_pr_view_fix(pr_precheck.stdout)
   if validate_fix_write_gate_snapshot(repo, fix, branch, prechecked_pr, "pre-spawn", false) == nil then
@@ -604,23 +604,23 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     return
   end
   if outcome.kind ~= "reviewing" then
-    error("github-devloop: unknown fix outcome")
+    error("github-devloop: fix-outcome-unknown: unknown fix outcome")
   end
 
   local push = devloop_commands.git_push_branch(branch, 120)
   if push.exit_code ~= 0 then
-    error("github-devloop: git push failed: " .. tostring(push.stderr))
+    error("github-devloop: git-push-failed: git push failed: " .. tostring(push.stderr))
   end
   local pushed_view = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
   if pushed_view.exit_code ~= 0 then
-    error("github-devloop: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
+    error("github-devloop: gh-pr-pushed-head-view-failed: gh pr pushed head view failed: " .. tostring(pushed_view.stderr))
   end
   local pushed_pr = parsers_pr.parse_pr_view_fix(pushed_view.stdout)
   if tostring(pushed_pr.state or ""):lower() ~= "open"
     or tostring(pushed_pr.head_ref_name or "") ~= branch
     or tostring(pushed_pr.head_sha or "") ~= outcome.new_head_sha
     or not require("forge.merge.shared").is_same_repo_pr_head(pushed_pr, repo) then
-    error("github-devloop: pushed PR head verification failed")
+    error("github-devloop: pushed-pr-head-mismatch: pushed PR head verification failed")
   end
 
   raise_reviewing(repo, issue_number, fix, outcome.old_head_sha, outcome.new_head_sha, outcome.reason, outcome.summary)
@@ -659,7 +659,7 @@ local function act_fix(event)
 
     local pr_view = devloop_commands.gh_pr_view_fix(repo, fix.pr_number, 30)
     if pr_view.exit_code ~= 0 then
-      error("github-devloop: gh pr fix view failed: " .. tostring(pr_view.stderr))
+      error("github-devloop: gh-pr-fix-view-failed: gh pr fix view failed: " .. tostring(pr_view.stderr))
     end
     local current_pr = parsers_pr.parse_pr_view_fix(pr_view.stdout)
     devloop_logging.log_forged_markers("fix", fix.proposal_id, current_pr.comments)
@@ -672,7 +672,7 @@ local function act_fix(event)
     local transition = devloop_state.cyclic_transition_status(state, { "fixing" }, "reviewing", fix.version, reviewing_version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", devloop_state.cas_outcome(state, transition, fix.version), "fixing state marker not yet visible")
-      error("github-devloop: fixing state marker not yet visible for fix; retrying")
+      error("github-devloop: fixing-marker-missing: fixing state marker not yet visible for fix; retrying")
     end
     if transition == "idempotent" then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", devloop_state.cas_outcome(state, transition, fix.version), "reviewing state marker for fix already visible")
@@ -706,7 +706,7 @@ local function act_fix(event)
     end
     if reject_fact == nil and meta_fix_fact == nil and merge_gate_fact == nil then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(fix feedback marker not visible)", "reject review marker or review-meta fix marker missing")
-      error("github-devloop: fix feedback marker not visible for fix; retrying")
+      error("github-devloop: fix-feedback-marker-missing: fix feedback marker not visible for fix; retrying")
     end
     local feedback_reason = nil
     if reject_fact ~= nil then
@@ -756,17 +756,17 @@ local function act_fix(event)
     end
     if not require("forge.merge.shared").is_same_repo_pr_head(current_pr, repo) then
       devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "fail-closed(head-repository)", "PR head repository is missing or not the target repository")
-      error("github-devloop: PR head repository is missing or not the target repository")
+      error("github-devloop: pr-head-repository-invalid: PR head repository is missing or not the target repository")
     end
     if tostring(current_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha) then
       local branch_head = devloop_commands.git_branch_head(branch, 30)
       if branch_head.exit_code ~= 0 then
         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "retry-pending(head-advanced)", "PR head changed and deterministic branch head is not readable")
-        error("github-devloop: PR head changed before fix marker and deterministic branch head is not readable")
+        error("github-devloop: pr-head-advanced: PR head changed before fix marker and deterministic branch head is not readable")
       end
       local intended_head_sha = tostring(branch_head.stdout or ""):gsub("%s+$", "")
       if not require("devloop.pr_safety").is_safe_head_sha(intended_head_sha) then
-        error("github-devloop: unsafe PR origin branch head sha")
+        error("github-devloop: pr-origin-branch-head-unsafe: unsafe PR origin branch head sha")
       end
       if tostring(current_pr.head_sha or "") == intended_head_sha
         and tostring(current_pr.head_sha or "") ~= tostring(fix.reviewed_head_sha) then
@@ -789,7 +789,7 @@ local function act_fix(event)
     if issue_number ~= nil then
       local issue_view = devloop_commands.gh_issue_view_fix(repo, issue_number, 30)
       if issue_view.exit_code ~= 0 then
-        error("github-devloop: gh issue fix view failed: " .. tostring(issue_view.stderr))
+        error("github-devloop: gh-issue-fix-view-failed: gh issue fix view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = parsers_issue.parse_issue_view_fix(core, issue_view.stdout)
     end

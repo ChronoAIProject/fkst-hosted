@@ -35,7 +35,7 @@ function M.assert_evidence(core, log_gate, repo, comments, merge_ready)
     return
   end
   log_gate(merge_ready, "dry-run", reason)
-  error("github-devloop: high-risk review evidence marker not visible for merge; retrying")
+  error("github-devloop: high-risk-review-evidence-missing: high-risk review evidence marker not visible for merge; retrying")
 end
 
 return M

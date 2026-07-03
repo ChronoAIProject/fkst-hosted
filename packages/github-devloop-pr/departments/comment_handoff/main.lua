@@ -275,13 +275,13 @@ maybe_raise_pr_label = function(payload, handoff)
     repo = select(1, devloop_base.parse_pr_source_ref(handoff.source_ref))
   end
   if repo == nil then
-    error("github-devloop: PR label handoff missing repo")
+    error("github-devloop: pr-label-handoff-missing-repo: PR label handoff missing repo")
   end
   local verified_state, reason = verified_pr_state(repo, handoff, payload.comment_id, state)
   if verified_state == nil then
     if retryable_visibility_reason(reason) then
       devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "retry-pending(" .. tostring(state) .. " marker not visible)", tostring(state) .. " marker comment write was acknowledged but exact marker is not visible")
-      error("github-devloop: " .. tostring(state) .. " marker not visible for PR label handoff; retrying")
+      error("github-devloop: pr-label-marker-missing: " .. tostring(state) .. " marker not visible for PR label handoff; retrying")
     end
     devloop_logging.log_cas_decision("comment_handoff", handoff.proposal_id, { state = nil, version = nil }, "comment-written", "github-proxy.github_issue_label_request", "skip-stale(" .. tostring(reason) .. ")", "state marker handoff no longer matches PR label precondition")
     return

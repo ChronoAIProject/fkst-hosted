@@ -103,7 +103,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local branches = config.branch_config()
   local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
-    error("github-devloop: gh pr origin view failed for review loop: " .. tostring(pr_view.stderr))
+    error("github-devloop: gh-pr-review-loop-view-failed: gh pr origin view failed for review loop: " .. tostring(pr_view.stderr))
   end
   local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
   local origin = m_facts.pr_origin_fact(current_pr.comments)
@@ -144,7 +144,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local transition = reviewing_segment_transition_status(state, review_version)
     if transition == "pending" then
       devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", devloop_state.cas_outcome(state, "pending", review_version), "reviewing state marker not yet visible")
-      error("github-devloop: reviewing marker not yet visible for review loop; retrying")
+      error("github-devloop: review-loop-marker-missing: reviewing marker not yet visible for review loop; retrying")
     end
     if transition == "stale" then
       devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing|blocked", "skip-stale(reviewing-version)", "issue is not currently reviewing at this version")
@@ -219,7 +219,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     if origin.issue_number ~= nil then
       local issue_view = devloop_commands.gh_issue_view_review_loop(origin.repo, origin.issue_number, 30)
       if issue_view.exit_code ~= 0 then
-        error("github-devloop: gh issue review loop view failed: " .. tostring(issue_view.stderr))
+        error("github-devloop: gh-issue-review-loop-view-failed: gh issue review loop view failed: " .. tostring(issue_view.stderr))
       end
       current_issue = parsers_issue.parse_issue_view_review_loop(core, issue_view.stdout)
     end

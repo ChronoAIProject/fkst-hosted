@@ -58,7 +58,7 @@ return saga.department(spec, { done = function() return false end, act = functio
   local branches = config.branch_config()
   local pr_view = devloop_commands.gh_pr_view_origin(repo, pr_number, 30)
   if pr_view.exit_code ~= 0 then
-    error("github-devloop: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
+    error("github-devloop: gh-pr-review-result-view-failed: gh pr origin view failed for review result: " .. tostring(pr_view.stderr))
   end
   local current_pr = parsers_pr.parse_pr_view_origin(pr_view.stdout)
   local origin = m_facts.pr_origin_fact(current_pr.comments)
@@ -128,7 +128,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       high_risk_paths = risk.high_risk_paths or {}
       if risk.known == false then
         devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", "merge-ready", "retry-pending(high-risk-review-evidence:" .. tostring(risk.reason or "unknown") .. ")", "review diff risk is undecidable")
-        error("github-devloop: review diff risk is undecidable; retrying")
+        error("github-devloop: review-diff-risk-undecidable: review diff risk is undecidable; retrying")
       elseif risk.high_risk == true then
         local high_risk_approved = false
         if type(reached.angle_results) == "table" then
@@ -179,7 +179,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
     if transition == "pending" then
       devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "reviewing state marker not yet visible")
-      error("github-devloop: reviewing marker not yet visible for review result; retrying")
+      error("github-devloop: review-result-marker-missing: reviewing marker not yet visible for review result; retrying")
     end
 
     if tostring(current_review_version) ~= tostring(reviewed_issue_version) then
