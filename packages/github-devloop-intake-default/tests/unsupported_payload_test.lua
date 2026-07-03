@@ -38,7 +38,7 @@ end
 
 local function payload_for_queue(queue)
   local payloads = {
-    ["github-devloop-intake.devloop_intake_candidate"] = payloads_builders.build_devloop_intake_candidate_payload(core, "owner/repo", "42", "2026-06-03T01:02:03Z"),
+    ["github-devloop-intake.devloop_intake_candidate"] = payloads_builders.build_devloop_intake_candidate_payload("owner/repo", "42", "2026-06-03T01:02:03Z"),
   }
   local payload = payloads[queue]
   if payload == nil then

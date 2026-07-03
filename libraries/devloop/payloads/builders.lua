@@ -297,16 +297,16 @@ function C.build_devloop_decompose_payload(fix_reconcile)
   }
 end
 
-function C.build_devloop_intake_candidate_payload(M, repo, issue_number, updated_at, options)
+function C.build_devloop_intake_candidate_payload(repo, issue_number, updated_at, options)
   local opts = options or {}
   local proposal_id = base_ids.proposal_id(repo, issue_number)
   local source_ref = {
     kind = "external",
     ref = tostring(repo) .. "#issue/" .. tostring(issue_number),
   }
-  local effect_id = opts.effect_id or M.intake_dedup_key(proposal_id, updated_at)
+  local effect_id = opts.effect_id or devloop_base.intake_dedup_key(proposal_id, updated_at)
   local dedup_key = opts.dedup_key
-    or (opts.effect_id ~= nil and M.intake_candidate_delivery_dedup_key(proposal_id, effect_id, opts.delivery_version))
+    or (opts.effect_id ~= nil and devloop_base.intake_candidate_delivery_dedup_key(proposal_id, effect_id, opts.delivery_version))
     or effect_id
   return {
     schema = "github-devloop.intake-candidate.v1",

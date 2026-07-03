@@ -31,7 +31,7 @@ local function source_ref()
 end
 
 local function candidate()
-  return payloads_builders.build_devloop_intake_candidate_payload(core, "owner/repo", 42, "2026-06-03T01:02:03Z")
+  return payloads_builders.build_devloop_intake_candidate_payload("owner/repo", 42, "2026-06-03T01:02:03Z")
 end
 
 local function initial_event()

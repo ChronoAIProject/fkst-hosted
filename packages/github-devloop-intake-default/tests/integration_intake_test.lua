@@ -276,7 +276,7 @@ local function assert_intake_judgment_call()
 end
 
 local function candidate(extra)
-  local value = payloads_builders.build_devloop_intake_candidate_payload(core, "owner/repo", 42, "2026-06-03T01:02:03Z")
+  local value = payloads_builders.build_devloop_intake_candidate_payload("owner/repo", 42, "2026-06-03T01:02:03Z")
   for key, field in pairs(extra or {}) do
     value[key] = field
   end

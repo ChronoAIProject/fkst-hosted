@@ -41,7 +41,7 @@ function M.build_intake_admission_candidate(repo, issue, command, delivery_versi
     title = issue.title,
     body = issue.body,
   }, command)
-  return payloads_builders.build_devloop_intake_candidate_payload(M, repo, tostring(issue.number), updated_at, {
+  return payloads_builders.build_devloop_intake_candidate_payload(repo, tostring(issue.number), updated_at, {
     effect_id = effect_id,
     delivery_version = delivery_version,
     reintake_command_created_at = command and command.created_at or nil,
