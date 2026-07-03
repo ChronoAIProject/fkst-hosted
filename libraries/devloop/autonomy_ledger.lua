@@ -147,8 +147,9 @@ function C.autonomy_valid_autonomous_merge(gates)
   return "true"
 end
 
-function C.autonomy_merge_rounds(M, version)
-  return M.version_loop_round(version) + M.version_fix_round(version)
+function C.autonomy_merge_rounds(version)
+  local devloop_state = require("devloop.state")
+  return devloop_state.version_loop_round(version) + devloop_state.version_fix_round(version)
 end
 
 function C.autonomy_post_merge_probe_gate(M, pr, opts)
@@ -497,7 +498,7 @@ function C.autonomy_result_record(M, repo, issue_number, merge_ready, issue, pos
     task_class = C.autonomy_task_class(issue),
     human_touch_count = human_touch_count,
     pre_merge_ci = gates.pre_merge_ci,
-    rounds = C.autonomy_merge_rounds(M, merge_ready.version),
+    rounds = C.autonomy_merge_rounds(merge_ready.version),
     retry_count = M.version_fix_round(merge_ready.version),
     codex_calls = nil,
     gates = gates,
