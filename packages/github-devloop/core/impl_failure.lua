@@ -2,6 +2,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local m_facts = require("devloop.markers.facts")
 local S = {}
 local strings = require("contract.strings")
+local transition_version = require("contract.transition_version")
 
 local max_impl_auto_retry_attempts = 2
 local max_impl_retry_attempts = 100000
@@ -128,7 +129,7 @@ function M.implementation_attempt_version(version, attempt)
   if n ~= math.floor(n) or n > max_impl_retry_attempts then
     error("github-devloop: invalid implementation attempt version")
   end
-  return base .. "/reimplement/" .. tostring(n)
+  return transition_version.reimplement_at(base, n)
 end
 
 function M.has_implementation_fact_marker(comments, proposal_id, dedup_key)

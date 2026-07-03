@@ -114,9 +114,7 @@ function C.version_ready_split_round(version)
 end
 
 function C.next_fix_version(version)
-  local base = tostring(version or "")
-  local next_n = C.version_fix_round(base) + 1
-  return base .. "/fix/" .. tostring(next_n)
+  return transition_version.next_fix(version)
 end
 
 function C.fix_version_from_review_version(version)
@@ -124,15 +122,11 @@ function C.fix_version_from_review_version(version)
 end
 
 function C.next_review_meta_action_version(version)
-  local base = tostring(version or "")
-  local next_n = C.version_review_meta_action_round(base) + 1
-  return base .. "/review-meta-action/" .. tostring(next_n)
+  return transition_version.next_review_meta_action(version)
 end
 
 function C.next_review_loop_version(version)
-  local base = tostring(version or "")
-  local next_n = C.version_review_loop_round(base) + 1
-  return base .. "/review-loop/" .. tostring(next_n)
+  return transition_version.next_review_loop(version)
 end
 
 function C.marker_order_key(version, state_or_stage_rank)

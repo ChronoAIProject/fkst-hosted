@@ -7,6 +7,7 @@ local shared = require("devloop.convergence.shared")
 local C = {}
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
+local transition_version = require("contract.transition_version")
 
 local source_refs = shared.source_refs
 local valid_round = shared.valid_round
@@ -138,7 +139,7 @@ function C.build_timeout_reconcile_comment_request(repo, issue_number, reconcile
 end
 
 function C.review_reconcile_state_version(issue_version, round)
-  return tostring(issue_version) .. "/review-loop/" .. tostring(round)
+  return transition_version.review_loop_at(issue_version, round)
 end
 
 function C.reconcile_terminal_state_version(current_version, round)
@@ -150,7 +151,7 @@ function C.reconcile_terminal_state_version(current_version, round)
   if n > next_n then
     next_n = n
   end
-  return tostring(current_version) .. "/loop/" .. tostring(next_n)
+  return transition_version.loop_at(current_version, next_n)
 end
 
 function C.review_reconcile_terminal_state_version(current_version, round)
@@ -162,7 +163,7 @@ function C.review_reconcile_terminal_state_version(current_version, round)
   if n > next_n then
     next_n = n
   end
-  return tostring(current_version) .. "/review-loop/" .. tostring(next_n)
+  return transition_version.review_loop_at(current_version, next_n)
 end
 
 function C.fix_reconcile_state_version(issue_version)
@@ -232,7 +233,7 @@ function C.is_supported_timeout_reconcile(M, payload)
 end
 
 function C.reconcile_state_version(base_version, round)
-  return tostring(base_version) .. "/loop/" .. tostring(round)
+  return transition_version.loop_at(base_version, round)
 end
 
 function C.reconcile_marker(proposal_id, base_version, round, action)

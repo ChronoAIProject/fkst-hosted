@@ -238,4 +238,41 @@ return {
         < transition_version.marker_order_key(ordering_base, 700)
     )
   end,
+
+  test_next_constructors_preserve_recorded_transition_version_shapes = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+    local expected = {
+      transition_version.next_loop(base),
+      transition_version.next_fix(base .. "/loop/2"),
+      transition_version.next_fix(base .. "/loop/2/fix/1"),
+      transition_version.next_review_loop(base .. "/fix/2"),
+      transition_version.next_review_meta_action(base .. "/review-loop/3"),
+      transition_version.next_ready_split(base .. "/loop/2/fix/1"),
+      transition_version.next_reimplement(base .. "/ready-split/5"),
+      transition_version.next_timeout(base .. "/timeout/reviewing/2", "reviewing"),
+      transition_version.next_rereview(base .. "/review-loop/3", "feedface"),
+    }
+
+    t.eq(expected[1], base .. "/loop/1")
+    t.eq(expected[2], base .. "/loop/2/fix/1")
+    t.eq(expected[3], base .. "/loop/2/fix/1/fix/2")
+    t.eq(expected[4], base .. "/fix/2/review-loop/1")
+    t.eq(expected[5], base .. "/review-loop/3/review-meta-action/1")
+    t.eq(expected[6], base .. "/ready-split/1")
+    t.eq(expected[7], base .. "/ready-split/5/reimplement/1")
+    t.eq(expected[8], base .. "/timeout/reviewing/3")
+    t.eq(expected[9], base .. "/review-loop/3/review-loop/4/rereview/4/feedface")
+    for _, value in ipairs(expected) do
+      t.eq(transition_version.render(transition_version.parse(value)), value)
+    end
+  end,
+
+  test_devloop_state_builders_delegate_to_byte_exact_transition_constructors = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+
+    t.eq(core.next_fix_version(base .. "/loop/2"), base .. "/loop/2/fix/1")
+    t.eq(core.next_fix_version(base .. "/loop/2/fix/1"), base .. "/loop/2/fix/1/fix/2")
+    t.eq(core.next_review_loop_version(base .. "/fix/2"), base .. "/fix/2/review-loop/1")
+    t.eq(core.next_review_meta_action_version(base .. "/review-loop/3"), base .. "/review-loop/3/review-meta-action/1")
+  end,
 }

@@ -649,10 +649,7 @@ function M.ready_split_canonicalized_fact(comments, proposal_id, from_version)
 end
 
 function M.ready_split_version(version)
-  local core = root()
-  local base = transition_version.strip_suffixes(version)
-  local next_n = devloop_state.version_ready_split_round(version) + 1
-  return tostring(base) .. "/ready-split/" .. tostring(next_n)
+  return transition_version.next_ready_split(version)
 end
 
 function M.delegated_blocker_merged(repo, blocker_number, blocker_proposal_id, current, state)

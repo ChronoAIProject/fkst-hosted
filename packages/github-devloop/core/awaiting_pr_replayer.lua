@@ -33,9 +33,7 @@ local function raise_effects(dept, proposal_id, apply_state, version, label_chan
 end
 
 local function next_reimplementation_version(version)
-  local base = tostring(version or "")
-  local next_n = devloop_state.version_reimplement_round(base) + 1
-  return base .. "/reimplement/" .. tostring(next_n)
+  return transition_version.next_reimplement(version)
 end
 
 local function parent_state_for_child_terminal(state, child_state)

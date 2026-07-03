@@ -10,6 +10,7 @@ local source_refs = require("contract.source_ref")
 local replay_fields = require("devloop.replay_fields")
 local replayer = require("devloop.replayer")
 local devloop_logging = require("devloop.logging")
+local transition_version = require("contract.transition_version")
 
 function S.install(M, shared)
 local max_timeout_attempts = shared.max_timeout_attempts
@@ -51,18 +52,11 @@ end
 
 function M.next_liveness_timeout_version(row, state, facts)
   local from = tostring(row.from_state)
-  local escaped = from:gsub("%-", "%%-")
-  local base = tostring(state and state.version or "")
   -- Replace, not stack, the trailing timeout segment for this state so the version
   -- stays bounded as attempts climb: V -> V/timeout/<state>/1 -> V/timeout/<state>/2.
   -- The attempt count itself is read from the full (pre-strip) version, so it keeps
   -- advancing across sweeps even though the suffix never accumulates.
-  local previous = nil
-  while previous ~= base do
-    previous = base
-    base = base:gsub("/timeout/" .. escaped .. "/%d+$", "")
-  end
-  return base .. "/timeout/" .. from .. "/" .. tostring(M.liveness_timeout_attempt(row, state, facts) + 1)
+  return transition_version.timeout_at(state and state.version, from, M.liveness_timeout_attempt(row, state, facts) + 1)
 end
 
 function M.liveness_timeout_due(row, state, now_seconds)

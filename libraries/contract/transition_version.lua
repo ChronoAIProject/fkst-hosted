@@ -499,6 +499,75 @@ function V.max_timeout_round(version)
   return max_n
 end
 
+function V.next_loop(version)
+  local base = tostring(version or "")
+  return base .. "/loop/" .. tostring(V.loop_round(base) + 1)
+end
+
+function V.loop_at(version, round)
+  return tostring(version or "") .. "/loop/" .. tostring(round)
+end
+
+function V.next_fix(version)
+  local base = tostring(version or "")
+  return base .. "/fix/" .. tostring(V.fix_round(base) + 1)
+end
+
+function V.next_review_loop(version)
+  local base = tostring(version or "")
+  return base .. "/review-loop/" .. tostring(V.review_loop_round(base) + 1)
+end
+
+function V.review_loop_at(version, round)
+  return tostring(version or "") .. "/review-loop/" .. tostring(round)
+end
+
+function V.rereview_at(version, round, head_sha)
+  return V.review_loop_at(version, round) .. "/rereview/" .. tostring(round) .. "/" .. tostring(head_sha or "")
+end
+
+function V.next_rereview(version, head_sha)
+  local base = tostring(version or "")
+  local next_n = V.review_loop_round(base) + 1
+  return V.rereview_at(base, next_n, head_sha)
+end
+
+function V.next_review_meta_action(version)
+  local base = tostring(version or "")
+  return base .. "/review-meta-action/" .. tostring(V.review_meta_action_round(base) + 1)
+end
+
+function V.next_ready_split(version)
+  local base = V.strip_suffixes(version)
+  return tostring(base) .. "/ready-split/" .. tostring(V.ready_split_round(version) + 1)
+end
+
+function V.next_reimplement(version)
+  local base = tostring(version or "")
+  return base .. "/reimplement/" .. tostring(V.reimplement_round(base) + 1)
+end
+
+function V.reimplement_at(version, round)
+  return tostring(version or "") .. "/reimplement/" .. tostring(round)
+end
+
+function V.timeout_at(version, state, round)
+  local base = tostring(version or "")
+  local state_name = tostring(state or "")
+  local escaped = state_name:gsub("%-", "%%-")
+  local previous = nil
+  while previous ~= base do
+    previous = base
+    base = base:gsub("/timeout/" .. escaped .. "/%d+$", "")
+  end
+  return base .. "/timeout/" .. state_name .. "/" .. tostring(round)
+end
+
+function V.next_timeout(version, state)
+  local state_name = tostring(state or "")
+  return V.timeout_at(version, state_name, V.timeout_round(version, state_name) + 1)
+end
+
 function V.version_order_key(version)
   return source_ref.version_order_key(version)
 end

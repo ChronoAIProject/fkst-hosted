@@ -32,8 +32,7 @@ end
 function M.orphaned_pr_ready_version(state)
   local version = tostring(state and state.version or "")
   local lineage_version = transition_version.strip_suffixes(version)
-  local next_n = devloop_state.version_reimplement_round(lineage_version) + 1
-  return lineage_version .. "/reimplement/" .. tostring(next_n)
+  return transition_version.next_reimplement(lineage_version)
 end
 
 end
