@@ -267,6 +267,21 @@ return {
     end
   end,
 
+  test_suffix_strippers_preserve_requested_scope = function()
+    local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
+
+    t.eq(transition_version.strip_timeout_suffixes(base .. "/fix/1/timeout/reviewing/2"), base .. "/fix/1")
+    t.eq(transition_version.strip_timeout_suffixes(base .. "/fix/1/timeout/reviewing/2/timeout/ready/3"), base .. "/fix/1")
+    t.eq(transition_version.strip_trailing_loop(base .. "/loop/2"), base)
+    t.eq(transition_version.strip_trailing_loop(base .. "/loop/2/fix/1"), base .. "/loop/2/fix/1")
+    t.eq(transition_version.strip_trailing_reimplement(base .. "/ready-split/5/reimplement/2"), base .. "/ready-split/5")
+    t.eq(transition_version.trailing_reimplement_round(base .. "/ready-split/5/reimplement/2"), 2)
+    t.eq(transition_version.trailing_reimplement_round(base .. "/reimplement/2/fix/1"), 0)
+    t.eq(transition_version.has_review_loop(base .. "/fix/2"), false)
+    t.eq(transition_version.has_review_loop(base .. "/fix/2/review-loop/3/review-meta-action/1"), true)
+    t.eq(transition_version.strip_before_review_loop(base .. "/fix/2/review-loop/3/review-meta-action/1"), base .. "/fix/2")
+  end,
+
   test_devloop_state_builders_delegate_to_byte_exact_transition_constructors = function()
     local base = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-04T01-02-03Z"
 

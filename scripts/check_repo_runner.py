@@ -22,6 +22,7 @@ import check_repo_namespaced_queue
 import check_repo_producer_liveness
 import check_repo_saga_head
 import check_repo_saga_split
+import check_repo_version_suffix
 
 
 def check_content_truncation(c, root, violations, allowlist_dir=None, enforce_base=True) -> None:
@@ -39,6 +40,11 @@ def check_content_truncation(c, root, violations, allowlist_dir=None, enforce_ba
         c.add(violations, "G-CONTENT-TRUNCATION", "cannot resolve dev base allowlist to enforce shrink-only ratchet; ensure CI provides the dev ref")
     for message in check_repo_content_truncation.ratchet_messages(current, allowlist, base_allowlist):
         c.add(violations, "G-CONTENT-TRUNCATION", message)
+
+
+def check_version_suffix(c, root, violations, allowlist_dir=None, enforce_base=True) -> None:
+    for message in check_repo_version_suffix.repository_messages(root, allowlist_dir, enforce_base):
+        c.add(violations, "G-VERSION-SUFFIX", message)
 
 
 def check_producer_liveness(c, root, violations, allowlist_dir=None, enforce_base=True) -> None:
@@ -113,6 +119,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     c.check_shell_out_to_self_ratchet(root, violations, allowlists)
     c.check_code_dedup_ratchet(root, violations, allowlists, enforce_base)
     check_content_truncation(c, root, violations, allowlists, enforce_base)
+    check_version_suffix(c, root, violations, allowlists, enforce_base)
     for message in check_repo_coverage.repository_messages(root):
         c.add(violations, "G-COVERAGE", message)
     integration_allowlist = None

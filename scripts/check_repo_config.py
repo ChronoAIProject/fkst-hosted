@@ -19,6 +19,7 @@ GENERIC_RATCHETS = (
     "ingress",
     "monotone-gate",
     "content-truncation",
+    "version-suffix",
     "coverage",
     "saga-head/free-form-saga",
     "namespaced-queue",

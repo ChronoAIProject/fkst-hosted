@@ -4,17 +4,7 @@ local transition_version = require("contract.transition_version")
 local installed = setmetatable({}, { __mode = "k" })
 
 local function strip_liveness_timeout_suffixes(version)
-  local text = tostring(version or "")
-  local previous = nil
-  while previous ~= text do
-    previous = text
-    text = text
-      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
-      :gsub("/timeout/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
-  end
-  return text
+  return transition_version.strip_timeout_suffixes(version)
 end
 
 local function liveness_heartbeat_version(version, contract)

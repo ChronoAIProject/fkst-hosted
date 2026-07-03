@@ -170,9 +170,7 @@ local function versions_equivalent(left, right)
 end
 
 local function strip_latest_fix_version_suffix(version)
-  return tostring(version or "")
-    :gsub("/fix/%d+$", "")
-    :gsub("%-fix%-%d+$", "")
+  return transition_version.strip_trailing_fix(version)
 end
 
 local function compare_transition_versions(incoming_version, current_version)

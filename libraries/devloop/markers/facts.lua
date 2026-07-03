@@ -469,10 +469,10 @@ local function review_proposal_version_matches_merge_ready(review_version, merge
   if tostring(review_version or "") == transition_version.safe_version_segment(merge_text) then
     return true
   end
-  local base = merge_text:match("^(.-)/review%-loop/%d+")
-  if base == nil then
+  if not transition_version.has_review_loop(merge_text) then
     return false
   end
+  local base = transition_version.strip_before_review_loop(merge_text)
   return tostring(review_dedup_key or ""):find("review%-meta", 1) ~= nil
     and tostring(review_version or "") == transition_version.safe_version_segment(base)
     and merge_text:find("/review%-meta%-action/", 1) ~= nil

@@ -4,6 +4,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local C = {}
 local strings = require("contract.strings")
 local forge_validators = require("devloop.forge_validators")
+local transition_version = require("contract.transition_version")
 
 local wait_bucket_seconds = 1800
 
@@ -13,17 +14,7 @@ local function wait_bucket(now_seconds)
 end
 
 function C.merge_gate_wait_version_lineage(version)
-  local text = tostring(version or "")
-  local previous = nil
-  while previous ~= text do
-    previous = text
-    text = text
-      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
-      :gsub("/timeout/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
-  end
-  return text
+  return transition_version.strip_timeout_suffixes(version)
 end
 
 function C.merge_gate_wait_marker(issue_proposal_id, pr_number, version, head_sha, reason, kind)

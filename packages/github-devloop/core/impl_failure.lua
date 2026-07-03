@@ -94,11 +94,11 @@ function M.next_impl_retry_attempt(fact)
 end
 
 function M.implementation_base_version(version)
-  return tostring(version or ""):gsub("/reimplement/%d+$", "")
+  return transition_version.strip_trailing_reimplement(version)
 end
 
 function M.implementation_retry_attempt(version)
-  return valid_attempt(tostring(version or ""):match("/reimplement/(%d+)$"))
+  return valid_attempt(transition_version.trailing_reimplement_round(version))
 end
 
 -- The `implementing` marker version is the ALREADY-wrapped ready dedup_key

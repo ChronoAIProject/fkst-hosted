@@ -43,17 +43,7 @@ local function emit_blocked_reconcile(proposal_id, state, version, action, reaso
 end
 
 local function strip_timeout_transition_suffixes(version)
-  local text = tostring(version or "")
-  local previous = nil
-  while previous ~= text do
-    previous = text
-    text = text
-      :gsub("/timeout%-reconcile/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-reconcile%-[%w%-]+%-%d+$", "")
-      :gsub("/timeout/[%w%-]+/%d+$", "")
-      :gsub("%-timeout%-[%w%-]+%-%d+$", "")
-  end
-  return text
+  return transition_version.strip_timeout_suffixes(version)
 end
 
 local function maybe_adopt_open_implementation_pr(repo, issue_number, reconcile, current, state)

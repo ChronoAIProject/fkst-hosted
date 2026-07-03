@@ -9,6 +9,7 @@ local C = {}
 local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.payloads.shared")
 local board = require("devloop.payloads.board")
+local transition_version = require("contract.transition_version")
 
 local function commit_subject_title(current)
   if type(current) ~= "table" then
@@ -375,7 +376,7 @@ function C.build_loop_proposal(repo, issue_number, current, source_ref, n, conve
     content_fetch = content_fetch,
   }
   local proposal = C.build_proposal(issue)
-  proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
+  proposal.dedup_key = dedup_key or transition_version.loop_at(proposal.dedup_key, n)
   return apply_converge_fields(proposal, n, converge)
 end
 
@@ -448,7 +449,7 @@ end
 
 function C.build_pr_review_loop_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, n, converge, pr_comments, content_fetch, high_risk, dedup_key)
   local proposal = C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, head_sha, current_issue, source_ref, pr_comments, content_fetch, high_risk)
-  proposal.dedup_key = dedup_key or (proposal.dedup_key .. "/loop/" .. tostring(n))
+  proposal.dedup_key = dedup_key or transition_version.loop_at(proposal.dedup_key, n)
   return apply_converge_fields(proposal, n, converge)
 end
 

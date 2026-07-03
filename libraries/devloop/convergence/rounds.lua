@@ -1,6 +1,7 @@
 local parsers_misc = require("devloop.parsers.misc")
 local devloop_base = require("devloop.base")
 local shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 local C = {}
 
 local valid_round = shared.valid_round
@@ -76,7 +77,7 @@ function C.append_converge_round_fact(facts, round, narrowed_question, angle_dig
 end
 
 function C.converge_base_version(consensus_dedup)
-  return (tostring(consensus_dedup or ""):gsub("/loop/%d+$", ""))
+  return transition_version.strip_trailing_loop(consensus_dedup)
 end
 
 function C.converge_proposal_base_dedup(consensus_dedup)

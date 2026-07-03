@@ -224,7 +224,7 @@ return saga.department(spec, { done = function() return false end, act = functio
       current_issue = parsers_issue.parse_issue_view_review_loop(core, issue_view.stdout)
     end
     local next_n = round + 1
-    local next_dedup = conv_rounds.converge_proposal_base_dedup(unresolved.dedup_key) .. "/loop/" .. tostring(next_n)
+    local next_dedup = transition_version.loop_at(conv_rounds.converge_proposal_base_dedup(unresolved.dedup_key), next_n)
     local context_fetch = { context_bundle.context_fetch_ref_from_bundle(core, {
       dept = "review_loop",
       repo = repo,

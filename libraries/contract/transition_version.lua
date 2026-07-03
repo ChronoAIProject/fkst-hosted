@@ -412,6 +412,63 @@ function V.strip_suffixes(version)
   return text
 end
 
+function V.strip_timeout_suffixes(version)
+  local parsed = V.parse(version)
+  while #parsed.suffixes > 0 do
+    local suffix = parsed.suffixes[#parsed.suffixes]
+    if suffix.kind ~= "timeout" and suffix.kind ~= "timeout_reconcile" then
+      break
+    end
+    table.remove(parsed.suffixes)
+  end
+  return V.render(parsed)
+end
+
+function V.strip_trailing_fix(version)
+  local parsed = V.parse(version)
+  if #parsed.suffixes > 0 and parsed.suffixes[#parsed.suffixes].kind == "fix" then
+    table.remove(parsed.suffixes)
+  end
+  return V.render(parsed)
+end
+
+function V.strip_trailing_loop(version)
+  local parsed = V.parse(version)
+  if #parsed.suffixes > 0 and parsed.suffixes[#parsed.suffixes].kind == "loop" then
+    table.remove(parsed.suffixes)
+  end
+  return V.render(parsed)
+end
+
+function V.strip_trailing_reimplement(version)
+  local parsed = V.parse(version)
+  if #parsed.suffixes > 0 and parsed.suffixes[#parsed.suffixes].kind == "reimplement" then
+    table.remove(parsed.suffixes)
+  end
+  return V.render(parsed)
+end
+
+function V.trailing_reimplement_round(version)
+  local suffixes = V.parse(version).suffixes or {}
+  if #suffixes == 0 or suffixes[#suffixes].kind ~= "reimplement" then
+    return 0
+  end
+  return tonumber(suffixes[#suffixes].n) or 0
+end
+
+function V.strip_before_review_loop(version)
+  local parsed = V.parse(version)
+  local keep = {}
+  for _, suffix in ipairs(parsed.suffixes or {}) do
+    if suffix.kind == "review_loop" then
+      break
+    end
+    table.insert(keep, suffix)
+  end
+  parsed.suffixes = keep
+  return V.render(parsed)
+end
+
 function V.parse(version)
   local parsed = parse_slash_version(tostring(version or ""))
   return parse_hyphen_suffixes(parsed)
@@ -457,6 +514,15 @@ end
 
 function V.review_loop_round(version)
   return max_round(version, "review_loop")
+end
+
+function V.has_review_loop(version)
+  for _, suffix in ipairs(ensure_parsed(version).suffixes or {}) do
+    if suffix.kind == "review_loop" then
+      return true
+    end
+  end
+  return false
 end
 
 function V.review_meta_action_round(version)

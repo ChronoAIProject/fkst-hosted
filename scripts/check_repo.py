@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_namespaced_queue, check_repo_perm, check_repo_producer_liveness, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
 LINE_LIMIT = 1000
 # Soft-split threshold is 900 (LINE_LIMIT - 100): warn early so files split at ~900 by
 # stable responsibility rather than being forced at the 1000-line hard limit, where any
@@ -54,8 +54,6 @@ GH_RATE_POOL_FUNCTION_RE = re.compile(
     r"\bfunction\b[^\n]*\bgh_rate_pool\b|\bgh_rate_pool\b\s*=\s*function\b"
 )
 GH_RATE_POOL_SIZING_FIELD_RE = re.compile(r"\b(?:burst|refill_per_(?:hour|minute))\b")
-OWNERSHIP_GATE_RE = re.compile(r"(?ms)^\s*function\s+M\s*\.\s*verify_pr_review_issue_claim\s*\([^)]*\).*?(?=^\s*function\s+M\s*\.|\Z)")
-OWNERSHIP_GATE_CLAIMS_PATH = Path("libraries/devloop/claims.lua")
 # Declaration presence + valid value moved to the engine manifest schema
 # (`persistence_class` in fkst.toml + the `engine.persistence-class` conformance
 # check, the single authority). This regex reads that authoritative field only to
@@ -428,11 +426,7 @@ def hidden_text_encoded_literal_lines(text: str) -> list[int]:
 
 
 def ownership_gate_defaulting_bot_login_lines(text: str) -> list[int]:
-    stripped = strip_lua_comments_and_strings(text)
-    gate = OWNERSHIP_GATE_RE.search(stripped)
-    return [] if gate is None else [
-        text.count("\n", 0, gate.start() + m.start()) + 1
-        for m in re.finditer(r"\bM\s*\.\s*trusted_bot_login\s*\(", gate.group(0))]
+    return check_repo_ownership_gate.defaulting_bot_login_lines(text, strip_lua_comments_and_strings)
 
 
 def line_warning_threshold() -> int:
@@ -794,9 +788,9 @@ def check_error_class_prefixes(root: Path, warnings: list[str]) -> None:
 
 
 def check_ownership_gate_claim_owner(root: Path, violations: list[str]) -> None:
-    path = root / OWNERSHIP_GATE_CLAIMS_PATH
+    path = root / check_repo_ownership_gate.CLAIMS_PATH
     if not path.exists():
-        add(violations, "G8", f"{OWNERSHIP_GATE_CLAIMS_PATH.as_posix()} is missing; ownership gate guard cannot run")
+        add(violations, "G8", f"{check_repo_ownership_gate.CLAIMS_PATH.as_posix()} is missing; ownership gate guard cannot run")
         return
     for line in ownership_gate_defaulting_bot_login_lines(read_text(path)):
         add(
@@ -839,52 +833,13 @@ def check_persistence_classes(root: Path, violations: list[str]) -> None:
                     )
 
 
-REQUIRE_RE = re.compile(
-    r"""\brequire\s*(?:\(\s*)?(?:"([A-Za-z0-9_.\-]+)"|'([A-Za-z0-9_.\-]+)'|\[(=*)\[([A-Za-z0-9_.\-]+)\]\3\])"""
-)
-SAGA_REQUIRE_RE = re.compile(r"""\brequire\s*(?:\(\s*)?["']workflow\.saga["']""")
-SAGA_DEPARTMENT_RE = re.compile(r"\.\s*department\s*[({]")
-FREE_FORM_PIPELINE_RE = re.compile(r"(?m)^\s*(?:function\s+pipeline\s*\(|pipeline\s*=\s*function\b)")
-
-
-def cross_package_require_names(
-    source: str, package_names: set[str], current_pkg: str
-) -> list[str]:
-    """Top-level require names in `source` that name a sibling package."""
-    hits: set[str] = set()
-    stripped = strip_lua_comments_and_strings(source)
-    for match in REQUIRE_RE.finditer(source):
-        group = 1 if match.group(1) is not None else 2 if match.group(2) is not None else 4
-        string_start = match.start(group) - 1
-        string_end = match.end(group) + 1
-        if group == 4:
-            string_end += 1 + len(match.group(3))
-        if not (is_unmasked_range(source, stripped, match.start(), string_start) and is_unmasked_range(source, stripped, string_end, match.end())):
-            continue
-        name = next(group for group in (match.group(1), match.group(2), match.group(4)) if group is not None)
-        top = name.split(".")[0]
-        if top in package_names and top != current_pkg:
-            hits.add(top)
-    return sorted(hits)
+def cross_package_require_names(source: str, package_names: set[str], current_pkg: str) -> list[str]:
+    return check_repo_cross_package.require_names(source, package_names, current_pkg, strip_lua_comments_and_strings, is_unmasked_range)
 
 
 def check_cross_package_require(root: Path, violations: list[str]) -> None:
-    pkgs = package_dirs(root)
-    names = {pkg.name for pkg in pkgs}
-    for pkg in pkgs:
-        for path in sorted(pkg.rglob("*.lua")):
-            if not path.is_file():
-                continue
-            parts = path.relative_to(pkg).parts
-            # Skip package-local external library symlink trees if a host repo has them.
-            if parts and parts[0] in {"std", "libraries"}:
-                continue
-            for name in cross_package_require_names(read_text(path), names, pkg.name):
-                add(
-                    violations,
-                    "G9",
-                    f"{rel(root, path)} peer cross-package require of {name!r}; share via workspace libraries (peer cross-package require is forbidden)",
-                )
+    for message in check_repo_cross_package.messages(root, package_dirs, read_text, rel, strip_lua_comments_and_strings, is_unmasked_range):
+        add(violations, "G9", message)
 
 def check_gh_git_adapter_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None) -> None:
     sources = {}
@@ -912,40 +867,19 @@ def check_code_dedup_ratchet(root: Path, violations: list[str], allowlist_dir: P
     for message in check_repo_dedup.ratchet_messages(source_map, allowlist, base_allowlist):
         add(violations, "G-DEDUP", message)
 
+def check_version_suffix_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
+    for message in check_repo_version_suffix.repository_messages(root, allowlist_dir, enforce_base):
+        add(violations, "G-VERSION-SUFFIX", message)
+
 def check_std_dependency_model(root: Path, violations: list[str], warnings: list[str]) -> None: check_repo_std_dependency_model.check_std_dependency_model(root, violations, warnings, packages=package_dirs(root), read_text=read_text, rel=rel, add=add, strip_lua_comments_and_strings=strip_lua_comments_and_strings, is_unmasked_range=is_unmasked_range)
 def check_no_permission_control(root: Path, violations: list[str]) -> None: check_repo_perm.check_no_permission_control(root, violations, read_text=read_text, rel=rel)
 
-def is_saga_handler_source(source: str) -> bool:
-    return SAGA_REQUIRE_RE.search(source) is not None and SAGA_DEPARTMENT_RE.search(strip_lua_comments_and_strings(source)) is not None
-
-def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]:
-    violations: list[str] = []
-    for path, source in sorted(sources.items()):
-        saga_shaped = is_saga_handler_source(source)
-        if saga_shaped and path in allowlist:
-            violations.append(f"G10: {path} saga-shaped department remains on saga-handler allowlist; remove it")
-        if saga_shaped and FREE_FORM_PIPELINE_RE.search(strip_lua_comments_and_strings(source)) is not None:
-            violations.append(f"G10: {path} saga-shaped department still defines free-form top-level pipeline")
-        if not saga_shaped and path not in allowlist:
-            violations.append(f"G10: {path} free-form department not on saga-handler allowlist; migrate to workflow.saga.department or (only for pre-existing) keep listed")
-    for path in sorted(allowlist - set(sources)):
-        violations.append(f"G10: {path} listed in saga-handler allowlist but does not exist")
-    if base_allowlist is not None:
-        violations.extend(f"G10: {path} grows saga-handler allowlist relative to dev; migrate instead" for path in sorted(allowlist - base_allowlist))
-    return violations
-
-def saga_allowlist_at_dev_base(root: Path) -> tuple[str, set[str] | None]:
-    try:
-        status, shown = ratchet_base.file_at_base(root, "migration/saga-handler.allowlist")
-        if status != "present":
-            return status, None
-        assert shown is not None
-        return "present", {line.strip() for line in shown.splitlines() if line.strip() and not line.lstrip().startswith("#")}
-    except Exception:
-        return "unresolved", None
+def is_saga_handler_source(source: str) -> bool: return check_repo_saga_handler.is_saga_handler_source(source, strip_lua_comments_and_strings)
+def saga_handler_ratchet_violations(sources: dict[str, str], allowlist: set[str], base_allowlist: set[str] | None = None) -> list[str]: return check_repo_saga_handler.ratchet_violations(sources, allowlist, strip_lua_comments_and_strings, base_allowlist)
+def saga_allowlist_at_dev_base(root: Path) -> tuple[str, set[str] | None]: return check_repo_saga_handler.allowlist_at_dev_base(root)
 
 def check_saga_handler_ratchet(root: Path, violations: list[str], warnings: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
-    allow_path = allowlist_path(root, "migration/saga-handler.allowlist", allowlist_dir)
+    allow_path = allowlist_path(root, check_repo_saga_handler.ALLOWLIST, allowlist_dir)
     allowlist = set() if not allow_path.exists() else {line.strip() for line in read_text(allow_path).splitlines() if line.strip() and not line.lstrip().startswith("#")}
     sources = {rel(root, path): read_text(path) for packages in package_roots(root) for path in sorted(packages.glob("*/departments/*/main.lua")) if path.is_file()}
     base_status, base_allowlist = saga_allowlist_at_dev_base(root) if enforce_base else ("absent", None)
@@ -960,6 +894,5 @@ def main(argv: list[str] | None = None) -> int:
         print("repository check failed:", file=sys.stderr)
         for violation in violations: print(f"  {violation}", file=sys.stderr)
         return 1
-    print("OK: repository checks passed")
-    return 0
+    print("OK: repository checks passed"); return 0
 if __name__ == "__main__": raise SystemExit(main())

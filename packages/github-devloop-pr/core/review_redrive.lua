@@ -16,10 +16,7 @@ function M.review_redrive_version(state, pr)
   if review_round > 0 or review_round >= max_review_redrive_rounds then
     return version
   end
-  local escaped_state = state_name:gsub("%-", "%%-")
-  local lineage_version = version
-    :gsub("/timeout/" .. escaped_state .. "/%d+$", "")
-    :gsub("%-timeout%-" .. escaped_state .. "%-%d+$", "")
+  local lineage_version = transition_version.strip_timeout_suffixes(version)
   local next_version = devloop_state.next_review_loop_version(lineage_version)
   local current_review_id = devloop_base.pr_review_proposal_id(pr.repo, pr.number, lineage_version, pr.head_sha)
   local next_review_id = devloop_base.pr_review_proposal_id(pr.repo, pr.number, next_version, pr.head_sha)

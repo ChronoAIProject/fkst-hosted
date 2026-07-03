@@ -1,0 +1,20 @@
+# Existing non-transition-version suffix-shaped debt.
+# Format: path:line # why=<one-line reason>
+# New entries fail CI after this ratchet lands. Remove entries only when the
+# suffix-shaped string is migrated to contract.transition_version or proven not
+# needed.
+libraries/contract/source_ref.lua:41 # why=source_ref ordering key parser is below transition_version and cannot require it without a cycle
+libraries/contract/source_ref.lua:42 # why=source_ref ordering key parser is below transition_version and cannot require it without a cycle
+libraries/contract/source_ref.lua:43 # why=source_ref ordering key render is below transition_version and cannot require it without a cycle
+libraries/devloop/convergence/reconcile.lua:22 # why=reconcile dedup-key namespace is not a state transition version
+libraries/devloop/convergence/reconcile.lua:50 # why=reconcile dedup-key validation mirrors the non-version reconcile namespace
+libraries/devloop/convergence/reconcile.lua:65 # why=review-reconcile dedup-key namespace is not a state transition version
+libraries/devloop/convergence/reconcile.lua:191 # why=review-reconcile dedup-key validation mirrors the non-version reconcile namespace
+libraries/devloop/convergence/reconcile.lua:251 # why=reconcile marker stores a non-version dedup key
+libraries/devloop/convergence/reconcile.lua:267 # why=review-reconcile marker stores a non-version dedup key
+libraries/devloop/hidden_state_conformance.lua:540 # why=hidden-state conformance fixture records replay dedup shape
+libraries/devloop/hidden_state_conformance.lua:576 # why=hidden-state conformance fixture records converge marker dedup shape
+libraries/devloop/hidden_state_conformance.lua:641 # why=hidden-state conformance fixture records review converge marker versions
+libraries/devloop/hidden_state_conformance.lua:662 # why=hidden-state conformance fixture records converge marker versions
+libraries/devloop/hidden_state_conformance.lua:666 # why=hidden-state conformance fixture records converge marker versions
+libraries/devloop/replay_thinking_convergence.lua:27 # why=replay true-stall payload uses reconcile dedup-key namespace, not transition version

@@ -226,9 +226,7 @@ local function require_marker_fact(M, facts, family)
   if family == "implement-attempt" then
     local attempt_version = facts.state.version
     if facts.state.state == "implementing" then
-      attempt_version = tostring(attempt_version or "")
-        :gsub("/timeout/implementing/%d+$", "")
-        :gsub("%-timeout%-implementing%-%d+$", "")
+      attempt_version = transition_version.strip_timeout_suffixes(attempt_version)
     end
     return M.latest_implement_attempt_fact(facts.snapshot.comments, facts.proposal_id, attempt_version)
   end
@@ -389,7 +387,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   if latest ~= nil then
     local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
     local next_n = latest.round + 1
-    local next_dedup = base_version .. "/loop/" .. tostring(next_n)
+    local next_dedup = transition_version.loop_at(base_version, next_n)
     local content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
       dept = "observe_issue",
       repo = issue.repo,
