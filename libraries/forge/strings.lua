@@ -36,6 +36,25 @@ function S.comment_body(comment)
   return tostring(comment or "")
 end
 
+function S.count(s, sub)
+  local haystack = tostring(s or "")
+  local needle = tostring(sub or "")
+  if needle == "" then
+    return 0
+  end
+
+  local total = 0
+  local pos = 1
+  while true do
+    local start_pos, end_pos = haystack:find(needle, pos, true)
+    if start_pos == nil then
+      return total
+    end
+    total = total + 1
+    pos = end_pos + 1
+  end
+end
+
 function S.is_git_ref_safe(value)
   local max_branch_len = 160
   if not contract_strings.is_bounded_string(value, max_branch_len) then

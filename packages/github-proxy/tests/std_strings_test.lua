@@ -61,6 +61,16 @@ return {
     t.eq(forge_strings.comment_body(nil), "")
   end,
 
+  test_count_counts_non_overlapping_plain_substrings = function()
+    t.eq(forge_strings.count("aaa", "a"), 3)
+    t.eq(forge_strings.count("ababab", "ab"), 3)
+    t.eq(forge_strings.count("aaaa", "aa"), 2)
+    t.eq(forge_strings.count("hello", "z"), 0)
+    t.eq(forge_strings.count("hello", ""), 0)
+    t.eq(forge_strings.count("", "a"), 0)
+    t.eq(forge_strings.count("a.b.c", "."), 2)
+  end,
+
   test_empty_string_helpers_return_empty = function()
     t.eq(strings.trim(""), "")
     t.eq(forge_strings.strip_bot_login_suffix(""), "")
