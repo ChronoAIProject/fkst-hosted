@@ -8,11 +8,9 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_library_layering, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
 LINE_LIMIT = 1000
-# Soft-split threshold is 900 (LINE_LIMIT - 100): warn early so files split at ~900 by
-# stable responsibility rather than being forced at the 1000-line hard limit, where any
-# small later change (even one new require alias) tips them over and blocks unrelated PRs.
+# Warn before the hard limit so files split by stable responsibility, not last-minute churn.
 LINE_WARNING_MARGIN = 100
 SOURCE_SUFFIXES = {".lua", ".sh", ".py", ".rs"}
 TEST_DEF_RE = re.compile(
@@ -840,6 +838,9 @@ def cross_package_require_names(source: str, package_names: set[str], current_pk
 def check_cross_package_require(root: Path, violations: list[str]) -> None:
     for message in check_repo_cross_package.messages(root, package_dirs, read_text, rel, strip_lua_comments_and_strings, is_unmasked_range):
         add(violations, "G9", message)
+
+def check_library_layering(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
+    for message in check_repo_library_layering.messages(root, package_dirs, read_text, rel, strip_lua_comments_and_strings, is_unmasked_range, allowlist_dir, enforce_base): add(violations, "G-LIB-LAYERING", message)
 
 def check_gh_git_adapter_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None) -> None:
     sources = {}

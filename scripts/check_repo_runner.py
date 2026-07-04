@@ -111,6 +111,7 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     c.check_rest_pagination_guards(root, warnings); c.check_hidden_text_encoded_literals(root, violations)
     c.check_gh_rate_pool_sizing(root, violations); c.check_error_class_prefixes(root, violations, allowlists, enforce_base)
     c.check_persistence_classes(root, violations); c.check_cross_package_require(root, violations)
+    c.check_library_layering(root, violations, allowlists, enforce_base)
     for package_root in c.package_roots(root):
         for message in c.check_repo_ingress.scoped_file_watch_ingress_messages(root, package_root, c.read_text, c.rel):
             c.add(violations, "G13", message)
