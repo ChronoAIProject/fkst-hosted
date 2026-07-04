@@ -444,7 +444,9 @@ def line_warning_threshold() -> int:
 
 def check_line_limit(root: Path, violations: list[str], warnings: list[str]) -> None:
     warning_threshold = line_warning_threshold()
-    for scan_root in (*package_roots(root), root / "scripts"):
+    # Scan libraries/ too, not just packages+scripts: the enumerated list once
+    # omitted it, letting a library file reach 1001 lines unnoticed.
+    for scan_root in (*package_roots(root), root / "libraries", root / "scripts"):
         if not scan_root.exists():
             continue
         for path in sorted(scan_root.rglob("*")):

@@ -58,6 +58,7 @@ public = [
   "devloop.github_proxy_entity_view",
   "devloop.github_risk",
   "devloop.hidden_state_conformance",
+  "devloop.hidden_state_conformance.declarations",
   "devloop.hidden_state_conformance.poll_fakes",
   "devloop.liveness",
   "devloop.liveness.signal",
