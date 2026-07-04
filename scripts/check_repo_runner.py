@@ -6,6 +6,7 @@ from __future__ import annotations
 import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
+import check_repo_dependency_cycle
 import check_repo_devloop_godlib
 import check_repo_devloop_decouple
 import check_repo_devloop_installer
@@ -112,6 +113,8 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     c.check_gh_rate_pool_sizing(root, violations); c.check_error_class_prefixes(root, violations, allowlists, enforce_base)
     c.check_persistence_classes(root, violations); c.check_cross_package_require(root, violations)
     c.check_library_layering(root, violations, allowlists, enforce_base)
+    for message in check_repo_dependency_cycle.messages(root, c.read_text, c.strip_lua_comments_and_strings, c.is_unmasked_range, allowlists, enforce_base):
+        c.add(violations, "G-DEPENDENCY-CYCLE", message)
     for package_root in c.package_roots(root):
         for message in c.check_repo_ingress.scoped_file_watch_ingress_messages(root, package_root, c.read_text, c.rel):
             c.add(violations, "G13", message)

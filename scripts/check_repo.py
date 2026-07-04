@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_library_layering, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_dependency_cycle, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_library_layering, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
 LINE_LIMIT = 1000
 # Warn before the hard limit so files split by stable responsibility, not last-minute churn.
 LINE_WARNING_MARGIN = 100
@@ -841,7 +841,7 @@ def check_cross_package_require(root: Path, violations: list[str]) -> None:
 
 def check_library_layering(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
     for message in check_repo_library_layering.messages(root, package_dirs, read_text, rel, strip_lua_comments_and_strings, is_unmasked_range, allowlist_dir, enforce_base): add(violations, "G-LIB-LAYERING", message)
-
+def check_dependency_cycle(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None: violations.extend(f"G-DEPENDENCY-CYCLE: {message}" for message in check_repo_dependency_cycle.messages(root, read_text, strip_lua_comments_and_strings, is_unmasked_range, allowlist_dir, enforce_base))
 def check_gh_git_adapter_ratchet(root: Path, violations: list[str], allowlist_dir: Path | None = None) -> None:
     sources = {}
     for packages in package_roots(root):
