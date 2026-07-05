@@ -339,6 +339,7 @@ return {
     handle.label_create("owner/repo", "adapter-ready", "0E8A16", 26)
     handle.issue_edit_labels("owner/repo", 42, { "adapter-ready" }, { "adapter-thinking" }, 27)
     handle.pr_edit_labels("owner/repo", 7, { "review" }, { "draft" }, 28)
+    handle.issue_list_open_assigned("owner/repo", "fkst-test-bot", 29)
 
     assert_argv_equal(
       calls[1].argv,
@@ -425,6 +426,11 @@ return {
       calls[18].argv,
       { "gh", "pr", "edit", "7", "--repo", "owner/repo", "--add-label", "review", "--remove-label", "draft" },
       "pr_edit_labels"
+    )
+    assert_argv_equal(
+      calls[19].argv,
+      { "gh", "issue", "list", "--repo", "owner/repo", "--state", "open", "--assignee", "fkst-test-bot", "--limit", "100", "--json", "number,title,assignees" },
+      "issue_list_open_assigned"
     )
     for index, call in ipairs(calls) do
       assert(call.timeout == index + 10, "github method timeout mismatch for call " .. tostring(index))
