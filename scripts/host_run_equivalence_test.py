@@ -120,6 +120,21 @@ def run_git(args: list[str], cwd: Path, env: dict[str, str]) -> None:
         raise AssertionError(f"git {' '.join(args)} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
 
 
+def git_stdout(args: list[str], cwd: Path, env: dict[str, str]) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+    return result.stdout.strip()
+
+
 class DogfoodLayout:
     def __init__(
         self,
@@ -146,6 +161,10 @@ class DogfoodLayout:
         make_fake_tools(self.bin_dir)
         make_fake_bin(self.fake_bin)
         write_executable(self.script, dogfood_script)
+        shutil.copy2(
+            REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "workspace_manifest.py",
+            self.skill_dir / "workspace_manifest.py",
+        )
         (self.skill_dir / "dogfood.platform-packages").write_text(platform_package_list, encoding="utf-8")
         (self.skill_dir / "dogfood.platform-packages.website").write_text(
             website_platform_package_list,
@@ -561,6 +580,242 @@ class HostRunEquivalenceTest(unittest.TestCase):
             self.assertIn("packages: pkg-stale -> auto-restart", result.stdout)
             self.assertIn("FAILED to start", result.stdout)
             self.assertIn("startup error: schema validation failed", result.stdout)
+
+    def test_platform_manifest_sync_keeps_semantic_match_byte_stable(self) -> None:
+        new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = DogfoodLayout(
+                Path(tmp) / "byte-stable",
+                new_script,
+                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
+            )
+            workspace = layout.dogfood_root / "website-dogfood" / "site" / "fkst.workspace.toml"
+            packages = WEBSITE_PLATFORM_PACKAGES.split()
+            committed_style = textwrap.dedent(
+                f"""\
+                [workspace]
+                units = [".fkst/local-packages/*"]
+
+                [[external_sources]]
+                id = "fkst-packages-platform"
+                git = {json.dumps(str(layout.dogfood_root / "website-dogfood" / "pkgs"))}
+                packages = [
+                {''.join(f'  {json.dumps(package)},\n' for package in packages)}]
+                """
+            )
+            workspace.write_text(committed_style, encoding="utf-8")
+
+            result = layout.run_start("website")
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(workspace.read_text(encoding="utf-8"), committed_style)
+
+    def test_sync_restores_generated_workspace_scratch_before_forward_merge(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self._git_env()
+            script = self._copy_dogfood_skill(root)
+            dogfood_root = root / "dogfood"
+            pkgs = dogfood_root / "substrate-dogfood" / "pkgs"
+            host = dogfood_root / "substrate-dogfood" / "sub"
+            packages_remote = self._create_branch_remote(root, "packages-remote", {"README.md": "packages\n"})
+            host_remote = self._create_host_remote(root, "host-remote")
+            self._clone_branch(packages_remote, pkgs, env)
+            self._clone_branch(host_remote, host, env)
+            base_text = self._base_workspace_text(root / "platform")
+            (host / "fkst.workspace.toml").write_text(
+                self._generated_workspace_text(root / "platform", PLATFORM_PACKAGES.split()),
+                encoding="utf-8",
+            )
+            self.assertNotEqual((host / "fkst.workspace.toml").read_text(encoding="utf-8"), base_text)
+
+            result = self._run_dogfood_sync(script, root, "substrate")
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("merged + pushed", result.stdout)
+            self.assertNotIn("does not merge cleanly", result.stdout)
+            dev_head = git_stdout(["rev-parse", "origin/dev"], cwd=host, env=env)
+            integration_head = git_stdout(["rev-parse", "origin/integration-test"], cwd=host, env=env)
+            self.assertEqual(integration_head, dev_head)
+            self.assertEqual(git_stdout(["status", "--porcelain"], cwd=host, env=env), "")
+
+    def test_sync_conflict_remains_for_real_workspace_edit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env = self._git_env()
+            script = self._copy_dogfood_skill(root)
+            dogfood_root = root / "dogfood"
+            pkgs = dogfood_root / "substrate-dogfood" / "pkgs"
+            host = dogfood_root / "substrate-dogfood" / "sub"
+            packages_remote = self._create_branch_remote(root, "packages-remote", {"README.md": "packages\n"})
+            host_remote = self._create_host_remote(root, "host-remote")
+            self._clone_branch(packages_remote, pkgs, env)
+            self._clone_branch(host_remote, host, env)
+            real_edit = self._base_workspace_text(root / "platform").replace(
+                'id = "fkst-packages-platform"\n',
+                'id = "fkst-packages-platform"\nrev = "human-edit"\n',
+            )
+            (host / "fkst.workspace.toml").write_text(real_edit, encoding="utf-8")
+
+            result = self._run_dogfood_sync(script, root, "substrate")
+
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("does not merge cleanly", result.stdout)
+            dev_head = git_stdout(["rev-parse", "origin/dev"], cwd=host, env=env)
+            integration_head = git_stdout(["rev-parse", "origin/integration-test"], cwd=host, env=env)
+            self.assertNotEqual(integration_head, dev_head)
+
+    def _git_env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env.update(
+            {
+                "GIT_AUTHOR_NAME": "Dogfood Sync Test",
+                "GIT_AUTHOR_EMAIL": "dogfood-sync-test@example.invalid",
+                "GIT_COMMITTER_NAME": "Dogfood Sync Test",
+                "GIT_COMMITTER_EMAIL": "dogfood-sync-test@example.invalid",
+                "GIT_AUTHOR_DATE": "2001-09-09T01:46:40Z",
+                "GIT_COMMITTER_DATE": "2001-09-09T01:46:40Z",
+            }
+        )
+        return env
+
+    def _copy_dogfood_skill(self, root: Path) -> Path:
+        skill_dir = root / "skill"
+        skill_dir.mkdir()
+        script = skill_dir / "dogfood.sh"
+        shutil.copy2(REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh", script)
+        script.chmod(0o755)
+        shutil.copy2(
+            REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "workspace_manifest.py",
+            skill_dir / "workspace_manifest.py",
+        )
+        shutil.copy2(PLATFORM_PACKAGES_PATH, skill_dir / "dogfood.platform-packages")
+        shutil.copy2(WEBSITE_PLATFORM_PACKAGES_PATH, skill_dir / "dogfood.platform-packages.website")
+        return script
+
+    def _run_dogfood_sync(self, script: Path, root: Path, target: str) -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env.update(
+            {
+                "DOGFOOD_ROOT": str(root / "dogfood"),
+                "DOGFOOD_REPOS": target,
+                "DOGFOOD_CONFIG": str(root / "missing-config.sh"),
+                "SUBSTRATE_SRC": str(root / "not-a-substrate-checkout"),
+                "BIN": str(root / "missing-framework"),
+                "BOT": "test-bot",
+                "GH_ORG": "ExampleOrg",
+                "UPSTREAM_BRANCH": "dev",
+                "INTEGRATION_BRANCH": "integration-test",
+                "FKST_DEVLOOP_UPSTREAM_BRANCH": "dev",
+                "FKST_DEVLOOP_INTEGRATION_BRANCH": "integration-test",
+                "ROLLUP_MERGE": "auto",
+                "RATE_POOL": str(root / "rate-pools"),
+                "LOGDIR": str(root / "dogfood"),
+            }
+        )
+        return subprocess.run(
+            [str(script), "sync", target],
+            cwd=root,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def _create_branch_remote(self, root: Path, name: str, files: dict[str, str]) -> Path:
+        env = self._git_env()
+        source = root / f"{name}-source"
+        source.mkdir()
+        run_git(["init", "-q"], cwd=source, env=env)
+        for rel, content in files.items():
+            path = source / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        run_git(["add", "."], cwd=source, env=env)
+        run_git(["commit", "-q", "-m", "seed"], cwd=source, env=env)
+        run_git(["branch", "dev"], cwd=source, env=env)
+        run_git(["branch", "integration-test"], cwd=source, env=env)
+        remote = root / name
+        run_git(["init", "--bare", "-q", str(remote)], cwd=root, env=env)
+        run_git(["remote", "add", "origin", str(remote)], cwd=source, env=env)
+        run_git(["push", "-q", "origin", "dev", "integration-test"], cwd=source, env=env)
+        return remote
+
+    def _create_host_remote(self, root: Path, name: str) -> Path:
+        env = self._git_env()
+        source = root / f"{name}-source"
+        source.mkdir()
+        run_git(["init", "-q"], cwd=source, env=env)
+        (root / "platform").mkdir()
+        (source / "fkst.workspace.toml").write_text(self._base_workspace_text(root / "platform"), encoding="utf-8")
+        run_git(["add", "fkst.workspace.toml"], cwd=source, env=env)
+        run_git(["commit", "-q", "-m", "integration base"], cwd=source, env=env)
+        run_git(["branch", "integration-test"], cwd=source, env=env)
+        (source / "fkst.workspace.toml").write_text(self._dev_workspace_text(root / "platform"), encoding="utf-8")
+        run_git(["add", "fkst.workspace.toml"], cwd=source, env=env)
+        run_git(["commit", "-q", "-m", "advance dev workspace"], cwd=source, env=env)
+        run_git(["branch", "dev"], cwd=source, env=env)
+        remote = root / name
+        run_git(["init", "--bare", "-q", str(remote)], cwd=root, env=env)
+        run_git(["remote", "add", "origin", str(remote)], cwd=source, env=env)
+        run_git(["push", "-q", "origin", "dev", "integration-test"], cwd=source, env=env)
+        return remote
+
+    def _clone_branch(self, remote: Path, checkout: Path, env: dict[str, str]) -> None:
+        checkout.parent.mkdir(parents=True, exist_ok=True)
+        run_git(["clone", "-q", "--branch", "integration-test", str(remote), str(checkout)], cwd=checkout.parent, env=env)
+
+    def _base_workspace_text(self, platform: Path) -> str:
+        return textwrap.dedent(
+            f"""\
+            [workspace]
+            units = []
+
+            [[external_sources]]
+            id = "fkst-packages-platform"
+            git = {json.dumps(str(platform))}
+            packages = [
+              "github-devloop",
+              "github-proxy",
+              "consensus",
+            ]
+            """
+        )
+
+    def _generated_workspace_text(self, platform: Path, packages: list[str] | None = None) -> str:
+        packages = packages or ["github-devloop", "github-proxy", "consensus"]
+        return textwrap.dedent(
+            f"""\
+            [workspace]
+            units = []
+
+            [[external_sources]]
+            id = "fkst-packages-platform"
+            git = {json.dumps(str(platform))}
+            packages = {json.dumps(packages)}
+            """
+        )
+
+    def _dev_workspace_text(self, platform: Path) -> str:
+        return textwrap.dedent(
+            f"""\
+            [workspace]
+            units = ["packages/*"]
+
+            [[external_sources]]
+            id = "fkst-packages-platform"
+            git = {json.dumps(str(platform))}
+            packages = [
+              "github-devloop",
+              "github-proxy",
+              "consensus",
+            ]
+            """
+        )
 
 
 if __name__ == "__main__":
