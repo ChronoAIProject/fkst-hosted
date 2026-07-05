@@ -26,7 +26,7 @@ The design converged on two planes plus one cross-cutting diagnosis control loop
 - Plane 2: fkst run/ops policy for this dogfood deployment.
 - Diagnosis: a control loop that observes facts, detects errors or stalls, and feeds Plane 1 with repair issues or bounded redrive.
 
-The P0 harness is clarity-first and reversible. Classify by effect/action, not by filename and not by the data touched. 中文补充：P0 只让边界可见、可 grep，不移动代码、不改行为。
+The P0 harness is clarity-first and reversible. Classify by effect/action, not by filename and not by the data touched. P0 only makes boundaries visible and grepable; it does not move code or change behavior.
 
 ## NOT in P0 / Deferred to P1/P2
 
@@ -50,7 +50,7 @@ The P0 harness is clarity-first and reversible. Classify by effect/action, not b
 
 - [ ] **Step 1: Write `docs/dev/capability-boundary-map.md`**
 
-Create the document in English-primary form with brief Chinese auxiliary notes. Keep it under 1000 lines and end it with `⟦AI:FKST⟧`.
+Create the document in English-only form. Keep it under 1000 lines and end it with `⟦AI:FKST⟧`.
 
 Required structure:
 
@@ -59,7 +59,7 @@ Required structure:
 
 > Status: P0 operational map. Rationale lives in `docs/superpowers/specs/2026-06-15-capability-layering-design.md`.
 > Scope: `github-devloop` P0 annotations plus repo command-surface wording.
-> 中文摘要：本文是执行边界图，不替代设计说明；P0 只做注释和文档清晰化。
+> This is the execution boundary map, not a replacement for the design rationale. P0 only clarifies comments and documentation.
 
 ## Context / Why
 ## Model: Two Planes + Diagnosis Control Loop

@@ -29,7 +29,4 @@ Docs are split by audience:
 The authoritative engine↔package contract lives in fkst-substrate's `docs/package-repo-contract.md`;
 repo conventions and commands are in this repo's top-level `README.md`.
 
-（中文：本仓文档按受众分区——`user/` 给装/跑系统的运维者，`dev/` 给改系统的开发者。引擎↔包契约权威在
-fkst-substrate 的 `docs/package-repo-contract.md`，包约定与命令在仓根 `README.md`。）
-
 ⟦AI:FKST⟧

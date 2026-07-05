@@ -2,11 +2,15 @@
 
 Status: design. Produced by sshx deep-adversarial consensus over `libraries/devloop` (103 files / 21,621 LOC). Constructive (minimal/structural/delete) + 3 adversarial refuters (behavior / m-table / boundary) + ChatGPT Pro oracle + the prior audit `2026-06-23-libs-redecomposition-design.md`.
 
-## 0. The adversarial finding that reframed the goal (实事求是)
+## 0. The Adversarial Finding That Reframed the Goal (Evidence First)
 
 The literal framing — "relocate devloop out to a ~20-file kernel" — is **REFUTED** by converging evidence:
 
-1. **Prior audit already judged devloop a cohesive single-product kernel, NOT a god-lib** (`docs/superpowers/specs/2026-06-23-libs-redecomposition-design.md:15`): "devloop (20k): mostly REFUTED as a problem — a large cohesive single-product kernel (one consumer family). Deeper splits (merge, autonomy_ledger, commands, schema/policy) DEFERRED until a real trigger (no current non-devloop consumer)." The named triggers (三次法则) have not fired.
+1. **Prior audit already judged devloop a cohesive single-product kernel, NOT a god-lib**
+   (`docs/superpowers/specs/2026-06-23-libs-redecomposition-design.md:15`): "devloop (20k):
+   mostly REFUTED as a problem — a large cohesive single-product kernel (one consumer family).
+   Deeper splits (merge, autonomy_ledger, commands, schema/policy) DEFERRED until a real trigger
+   (no current non-devloop consumer)." The named Rule-of-Three triggers have not fired.
 2. **Relocate-out violates G9**: `git_mechanics` is required (via lib_deps) by 5 packages, `github_proxy_entity_view` by 8. Moving either into one sibling forces the others to peer-require that sibling — G9 forbids it.
 3. **Demote-to-forge/workflow games the metric + leaks policy**: `git_mechanics` (`github-devloop:` lock keys/validation), `github_proxy_entity_view` (devloop cache/marker-read authority policy), `context_bundle` (github-devloop issue/PR/diff/risk), `autonomy_ledger` (trusted devloop markers + version ordering), `prompts` (devloop actor/review semantics) are **product-policy modules**. Moving them to generic libs just relocates the god-lib boundary (workflow's no-policy-string ratchet forbids it anyway).
 4. **The hard coupling is the mutable late-bound `M` + ordered installers, NOT file placement** (m-table refuter). File movement reduces line count while preserving full `M` access = big-bang rewrite disguised as relocation.
@@ -27,7 +31,7 @@ The literal framing — "relocate devloop out to a ~20-file kernel" — is **REF
 |---|---|
 | version/CAS state ordering, state-marker grammar, restart table, liveness/replay contract, convergence facts, comment_handoff, lifecycle conformance, merge/decompose/autonomy/prompts/context_bundle | **STAY in devloop**, converted to typed modules (no install(M)). Cohesive single-product kernel. |
 | the ONE confirmed generic leak: generic liveness/restart validator (no `github-devloop` strings; markers/queues injected as data) | → **workflow** (per prior audit; fixes archaudit→devloop). Verify if already landed on dev. |
-| merge subsystem, autonomy_ledger, commands→forge, schema/policy splits | **DEFERRED** behind the prior audit's named triggers (三次法则; no non-devloop consumer yet). |
+| merge subsystem, autonomy_ledger, commands→forge, schema/policy splits | **DEFERRED** behind the prior audit's named triggers (Rule of Three; no non-devloop consumer yet). |
 | relocate to sibling packages | **REJECTED** for shared modules (G9). |
 
 ## 3. Mechanism: dissolve shared-M install → typed modules (incremental, behavior-preserving)

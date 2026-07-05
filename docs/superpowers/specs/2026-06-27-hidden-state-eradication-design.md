@@ -4,7 +4,12 @@ Status: design (sshx high-adversarial: audit triplet + design triplet unanimous 
 
 ## Problem (user-as-oracle: "hidden state")
 
-A **hidden state** is a lifecycle transition whose advancing condition is a **durable, re-derivable fact** (GitHub marker / git / external fact) but is consulted **only on a transient event path** with **no level-triggered poll re-derive** — so a missed event strands the state forever (liveness-blind: zero error facts). The known-good shape is `dependency_wait`: poll-driven, re-reads the durable fact every round, idempotent; the event callback is a hint, the poll re-derive is the safety net (CLAUDE.md «信任契约»).
+A **hidden state** is a lifecycle transition whose advancing condition is a **durable, re-derivable
+fact** (GitHub marker / git / external fact) but is consulted **only on a transient event path** with
+**no level-triggered poll re-derive** — so a missed event strands the state forever (liveness-blind:
+zero error facts). The known-good shape is `dependency_wait`: poll-driven, re-reads the durable fact
+every round, idempotent; the event callback is a hint, the poll re-derive is the safety net from the
+`CLAUDE.md` trust-contract doctrine.
 
 ## Honest correction (the review triplet, grounded in the current checkout, caught stale audit premises)
 

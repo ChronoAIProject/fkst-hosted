@@ -5,7 +5,7 @@ Companion spec: `2026-06-14-saga-harness-design.md` (the harness is `std`'s firs
 
 ---
 
-## 1. Problem (实证)
+## 1. Problem (Evidence)
 
 Cross-package Lua duplication is already bleeding. A scan of the three real
 `core.lua` libraries shows the same infrastructure re-implemented per package:
@@ -22,8 +22,8 @@ read_env / read_env_command × 2
 carry overlapping low-level helpers. There is no place to share them, because
 **the engine forbids cross-package `require`**:
 
-> `docs/package-repo-contract.md:225` — "每个 graph root 用 fresh Lua state，package
-> owner 只看自己的 root … `--package-root` 不是跨包 `require` 授权。"
+> `docs/package-repo-contract.md:225` — each graph root uses a fresh Lua state, and the package
+> owner sees only its own root. `--package-root` is not authorization for cross-package `require`.
 
 The engine sets each owner's `package.path` to **its own package root only**
 (`mlua_init.rs` owner-scoped `package.path`; contract `:244` lists
@@ -32,8 +32,8 @@ ways to "share" code are (a) duplicate it per package, or (b) push it into the
 Rust engine. Both are wrong for repo-level Lua helpers: (a) drifts, (b)
 crystallizes an unproven, fast-moving authoring lib into the slow-stable engine.
 
-We need a third thing the user named directly: **"一种库，不在引擎，但在包之间共享"**
-— a *repo-level shared library*.
+We need the third thing the user named directly: a library that is not in the engine, but is shared
+between packages — a *repo-level shared library*.
 
 ## 2. Goal / Non-goals
 
@@ -66,9 +66,9 @@ now, while keeping Tier S in a form that can move to the engine later.
 
 ## 4. Doctrine revision (explicit — requires user sign-off)
 
-This design **consciously revises** CLAUDE.md, which currently says
-"只做包内共享——不跨包 require、不建 `fkst/` 目录". The revision splits one
-prohibition into two distinct cases:
+This design **consciously revises** `CLAUDE.md`, which currently allows only package-local sharing
+and forbids cross-package `require` or a `fkst/` directory. The revision splits one prohibition into
+two distinct cases:
 
 | Form | Direction | Verdict |
 |---|---|---|
@@ -81,10 +81,12 @@ shared *code* lib is the symmetric analog at the code level. The prohibition
 becomes: *no peer cross-package require; a single blessed shared-lib root is
 allowed.*
 
-Proposed CLAUDE.md edit (replaces the "包内共享库" paragraph's prohibition):
-> 包内共享库放 package-root `core.lua`；跨包共享放 repo-root `std/`（单向、分层，
-> 由装配投影进各包根，见 std spec）。**禁 peer 跨包 require（A→B 内部）**；
-> **允许唯一 blessed 共享库根（all→std）**。`std` 不是 manifest/版本解析。
+Proposed `CLAUDE.md` edit, replacing the package-local shared-library paragraph's prohibition:
+> Package-local shared libraries live at package root as `core.lua`; cross-package sharing lives at
+> repo-root `std/`, one-way and layered, projected into package roots by assembly as described in the
+> std spec. **Peer cross-package require, such as A requiring B internals, is forbidden.** The single
+> blessed shared library root, all packages requiring `std`, is allowed. `std` is not a manifest or
+> version resolver.
 
 ## 5. Architecture (now: Lua, zero engine)
 
