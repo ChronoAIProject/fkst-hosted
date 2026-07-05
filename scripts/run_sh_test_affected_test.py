@@ -182,7 +182,7 @@ class RunShTestAffectedTest(unittest.TestCase):
     def test_runs_full_for_dogfood_operator_paths(self) -> None:
         h = TestAffectedHarness()
         try:
-            h._write(".claude/skills/dogfood-github-devloop/dogfood.platform-packages", "github-devloop\n")
+            h._write(".claude/skills/dogfood-github-devloop/dogfood.sh", "#!/usr/bin/env bash\n")
 
             result = h.run()
 

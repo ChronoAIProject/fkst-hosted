@@ -39,11 +39,10 @@
 # A machine that only dogfoods two of the three repos lists just those.
 # DOGFOOD_REPOS="packages substrate website"
 
-# The github-devloop PLATFORM packages each supervise loads + runs from PKGSRC/packages/. The DEFAULT
-# (auto-audit DISABLED) lives in dogfood.platform-packages; least-privilege host defaults may live in
-# dogfood.platform-packages.<target> (for example, website excludes substrate-only agents). You do NOT
-# set it here unless THIS machine genuinely differs. Precedence: env DEVLOOP_PKGS > this file >
-# dogfood.platform-packages.<target> > dogfood.platform-packages.
+# The github-devloop PLATFORM packages each supervise loads + runs from PKGSRC/packages/ come from the
+# target host's fkst.workspace.toml. Non-self hosts declare them in
+# external_sources(id=fkst-packages-platform).packages; the self fkst-packages dogfood declares its
+# narrower run set as explicit workspace [[package]] entries.
 #   WHERE TO LOOK (what packages exist + each one's role): PKGSRC/packages/<pkg>/ — `fkst.toml` gives
 #     its `kind` (package | package.composed) and `[event_deps]`; `departments/<d>/main.lua` gives each
 #     dept's `consumes`/`produces` (its event contract). That is the source of truth, not this list.
@@ -56,10 +55,8 @@
 #     WOULD fight github-devloop over the same issues and must run as its OWN separate supervise, not here.
 #   AUTO-AUDIT is DISABLED: the archaudit audit-producer agent is NOT loaded on any target (archaudit
 #     auto-filed engine SDK changes the pipeline could not safely develop). idle-detector remains loaded
-#     because website site-board consumes idle-detector.system_idle. Re-enable audit by adding
-#     `archaudit` to dogfood.platform-packages if ever wanted.
-#   OVERRIDE the whole platform list only if this host differs from the dogfood.sh default, e.g.:
-#       # DEVLOOP_PKGS="github-devloop github-devloop-pr github-devloop-integration github-proxy consensus"
+#     because website site-board consumes idle-detector.system_idle. Re-enable audit by adding it to the
+#     host's fkst.workspace.toml platform package selection if ever wanted.
 
 # STABLE durable roots — the redb persistent delivery store, REUSED across restarts so
 # in-flight events resume. NEVER point these at a fresh path on a normal restart (that wipes
