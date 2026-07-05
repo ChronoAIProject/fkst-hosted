@@ -1,8 +1,9 @@
 local core = require("core")
+local claim_identity = require("forge.github.claim_identity")
 local t = fkst.test
 
 local function identity()
-  local value, err = core.claim_identity_from_values("owner/repo", "fkst-test-bot[bot]")
+  local value, err = claim_identity.from_values("owner/repo", "fkst-test-bot[bot]")
   if err ~= nil then
     error(err.why or "unexpected identity error", 0)
   end
@@ -11,7 +12,7 @@ end
 
 return {
   test_claim_identity_normalizes_repo_and_bot_login = function()
-    local value, err = core.claim_identity_from_values(" owner/repo ", " fkst-test-bot[bot] ")
+    local value, err = claim_identity.from_values(" owner/repo ", " fkst-test-bot[bot] ")
 
     t.is_nil(err)
     t.eq(value.repo, "owner/repo")
@@ -27,11 +28,30 @@ return {
       { repo = "owner/repo", bot = "", why = "missing FKST_GITHUB_BOT_LOGIN" },
       { repo = "owner/repo", bot = "bad login", why = "malformed FKST_GITHUB_BOT_LOGIN" },
     }) do
-      local value, err = core.claim_identity_from_values(case.repo, case.bot)
+      local value, err = claim_identity.from_values(case.repo, case.bot)
       t.is_nil(value)
-      t.eq(err.error_class, "idle-claim-identity-unverified")
+      t.eq(err.error_class, "github-claim-identity-unverified")
       t.is_true(err.why:find(case.why, 1, true) ~= nil)
     end
+  end,
+
+  test_claim_identity_is_shared_forge_boundary_not_idle_local = function()
+    local value, err = claim_identity.read(function(name)
+      if name == "FKST_GITHUB_REPO" then
+        return "owner/repo"
+      end
+      if name == "FKST_GITHUB_BOT_LOGIN" then
+        return "fkst-test-bot[bot]"
+      end
+      return nil
+    end)
+
+    t.is_nil(err)
+    t.eq(value.repo, "owner/repo")
+    t.eq(value.bot_login, "fkst-test-bot")
+    t.eq(value.source_ref.ref, "owner/repo#issues?state=open&assignee=fkst-test-bot")
+    t.is_nil(core.claim_identity_from_values)
+    t.is_nil(core.claim_identity)
   end,
 
   test_assigned_issue_count_counts_verified_query_rows = function()
@@ -82,6 +102,20 @@ return {
     t.eq(verdict.ok, false)
     t.eq(verdict.error_class, "idle-assignee-query-malformed")
     t.is_true(verdict.why:find("malformed self-assigned issue query", 1, true) ~= nil)
+  end,
+
+  test_assigned_issue_count_fails_closed_on_missing_query_stdout = function()
+    local github = {
+      issue_list_open_assigned = function()
+        return { stderr = "", exit_code = 0 }
+      end,
+    }
+
+    local verdict = core.self_assigned_open_issue_verdict(github, identity())
+
+    t.eq(verdict.ok, false)
+    t.eq(verdict.error_class, "idle-assignee-query-malformed")
+    t.is_true(verdict.why:find("missing self-assigned issue query stdout", 1, true) ~= nil)
   end,
 
   test_system_idle_payload_is_small_and_source_ref_backed = function()

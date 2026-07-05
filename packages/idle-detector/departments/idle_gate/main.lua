@@ -1,6 +1,7 @@
 local core = require("core")
 local env = require("workflow.env")
 local error_facts = require("contract.error_facts")
+local claim_identity = require("forge.github.claim_identity")
 local ports_lib = require("forge.ports")
 local saga = require("workflow.saga")
 
@@ -107,7 +108,7 @@ local function make_department(ports)
       return
     end
 
-    local identity, identity_err = core.claim_identity(read_env)
+    local identity, identity_err = claim_identity.read(read_env)
     if identity_err ~= nil then
       log_skip(identity_err.why, event)
       return
