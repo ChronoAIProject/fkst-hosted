@@ -14,7 +14,7 @@ The stdlib split produced `contract` / `devloop` / `std`(forge). The audit confi
 
 `devloop` (20k lines): mostly REFUTED as a problem — a large cohesive single-product kernel (one consumer family), not a god-lib. The only confirmed leak is the generic liveness validation (problem 3). Deeper devloop splits (merge subsystem, autonomy_ledger, commands, schema/policy) are DEFERRED until a real trigger (no current non-devloop consumer).
 
-## Target decomposition (converged 忠于本质 shape: 5 libraries)
+## Target Decomposition (Converged Essence-Faithful Shape: 5 Libraries)
 
 Positive definitions, by change-reason; dependency DAG depends toward stability:
 
@@ -74,4 +74,6 @@ Publish ONLY `contract` (source_ref/payload/error_facts/slim strings). fkst-webs
 ## DEFER (with triggers)
 
 - devloop internal splits — `merge` subsystem (trigger: a non-devloop merge consumer / 3 independent merge lanes), `autonomy_ledger` (trigger: AVM consumed outside devloop), `commands`→forge (trigger: a 2nd non-devloop caller), `devloop.contract` schemas vs impl (trigger: another package family consumes the schemas without devloop policy).
-- the oracle's finer granularity (`substrate` vs `workflow`, `forge_testkit`, `devloop_protocol`) — adopt only if a concrete consumer need appears (三次法则); the 5-lib shape is the conservative converged core.
+- the oracle's finer granularity (`substrate` vs `workflow`, `forge_testkit`, `devloop_protocol`) —
+  adopt only if a concrete consumer need appears under the Rule of Three; the 5-lib shape is the
+  conservative converged core.

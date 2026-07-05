@@ -7,9 +7,6 @@ devloop system into its `.fkst/` directory and keeps that install current as the
 and packages evolve. It was vetted by an sshx thinking triplet (minimal / structural / delete) →
 meta-judge `meta-layer convergence`; the worker conclusions are the basis for the decisions below.
 
-（中文摘要：本 spec 定义"域无关的宿主产品仓如何把 fkst 自治 devloop 装进自己的 `.fkst/`，并随上游引擎与
-包演进保持更新"，覆盖脚手架/安装、脚手架升级、包引用更新三面。结论经 sshx 三角度共识收敛。）
-
 ---
 
 ## 1. Problem & goal
@@ -83,9 +80,6 @@ package pin on top of an already-inconsistent engine-pin surface doubles the con
 canonical location** (recommended: everything under `.fkst/` — `.fkst/substrate-ref`) and migrate
 `init-package-repo`, the CI template, and `fkst-website` to it. This is a substrate + tooling
 change and is **sub-project SP0** (§8), blocking the rest.
-
-（中文：动包 pin 之前，先把 `.fkst-substrate-ref`(根) 与 `.fkst/substrate-ref`(内) 两处落点统一成一个
-canonical 位置，推荐都收进 `.fkst/`。不先解会把不一致翻倍。）
 
 ---
 

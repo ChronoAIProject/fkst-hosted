@@ -33,7 +33,7 @@ hand-build / inject.
   NOT substitute a synthetic payload for the real source emission.
 - **Test pyramid**: `run_department`/`mock_command` are the UNIT layer (department logic given an event);
   the producer-liveness `fire_raiser` test is the INTEGRATION layer (the real source→route→consume edge).
-- **Conformance-as-prevention** (CLAUDE.md «Harness 的本质», «discover→harness-ify»): make the masking
+- **Conformance-as-prevention** (`CLAUDE.md` harness essence and discover-to-harness doctrine): make the masking
   structurally impossible, not merely test-able.
 
 ## 3. Design principle (the converged invariant)
@@ -92,7 +92,7 @@ Only the consumer's EXTERNAL DEPENDENCIES (observe/gh/codex) are mocked. So a gr
 about the producer→consumer edge; at worst a mocked dep is unrealistic, which is the existing
 contract-test/ports-fake concern, orthogonal to the wiring guarantee.
 
-## 6. Scope boundary (do NOT over-apply — «模式服务当前问题»)
+## 6. Scope Boundary (Do NOT Over-Apply: Pattern Serves the Current Problem)
 
 - `run_department` + `mock_command` **STAY** for UNIT-level tests (department logic given an event) and
   adapter-contract tests. They are the base of the pyramid.

@@ -4,8 +4,6 @@
 Contributions should change Lua packages, tests, scripts, or documentation in this repository only.
 Engine Rust changes belong in `fkst-substrate`.
 
-中文补注：本仓只维护 package 行为层；引擎能力和 Rust 实现属于 `fkst-substrate`。
-
 ## Development Setup
 
 1. Build or obtain a local `fkst-framework` binary from `fkst-substrate`.
@@ -36,8 +34,8 @@ facts are unset. `run` never sets `FKST_GITHUB_WRITE`. Real GitHub writes happen
 - Use branch names of the form `<type>/<kebab-topic>`, where `<type>` is one of `feat`, `fix`,
   `docs`, `chore`, `refactor`, or `test`.
 - Keep each commit to one coherent logical change.
-- Use English-primary commit messages, PR titles, and PR bodies. Chinese may be added as auxiliary
-  context, but the English text is authoritative.
+- Use English-only commit messages, PR titles, and PR bodies. Do not append auxiliary restatements in
+  another language.
 - PR bodies should include motivation, changes, and test evidence with commands and results.
 - Merge with squash after CI is green.
 - AI-generated PR bodies or change notes should end with `⟦AI:FKST⟧`.
@@ -75,8 +73,8 @@ UTF-8 target-language strings only when they are explicit localization resources
 and grep-friendly.
 
 Outward artifacts such as documentation, issues, PRs, comments, commit messages, and change notes
-are English-primary. Chinese may be included as auxiliary context. Code identifiers, paths, crate
-names, command names, protocol names, test assertions, and quoted source text stay verbatim.
+are English-only. Code identifiers, paths, crate names, command names, protocol names, test
+assertions, and quoted source text stay verbatim.
 
 ## Design Rules
 

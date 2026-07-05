@@ -20,13 +20,12 @@
 > - Any **physical move of the merge heart**.
 >
 > ### Seam discovery (honest coverage)
-> lifecycle↔diagnosis coupling is **pervasive** (observe departments *are* diagnosis hooks; observe-view commands are shared). This spec does **not** pre-enumerate every edge; it provides the target + the **dependency-inversion seam pattern** + proven examples + the orchestrator tier + the per-slice equivalence proof + a conformance guard that checks **leaf purity** (not orchestrators). Remaining edges are discovered and cut **compiler/test-guided during implementation** (strangler-fig). This is the repo's *先找 harness* doctrine: the right tool for a pervasively-coupled module is compiler-guided seam discovery, not exhaustive upfront enumeration.
+> lifecycle↔diagnosis coupling is **pervasive** (observe departments *are* diagnosis hooks; observe-view commands are shared). This spec does **not** pre-enumerate every edge; it provides the target + the **dependency-inversion seam pattern** + proven examples + the orchestrator tier + the per-slice equivalence proof + a conformance guard that checks **leaf purity** (not orchestrators). Remaining edges are discovered and cut **compiler/test-guided during implementation** (strangler-fig). This is the repo's harness-first doctrine: the right tool for a pervasively-coupled module is compiler-guided seam discovery, not exhaustive upfront enumeration.
 
 
 Status: decomposition spec accepted · Date: 2026-06-16 · Repo: fkst-packages
 Expands: [Capability Layering: generic dev mechanism / fkst run-ops / self-diagnosis](./2026-06-15-capability-layering-design.md), specifically P1 god-package decomposition.
-Scope: behavior-equivalent refactor of `packages/github-devloop`; `github-proxy` protocol/queue contract cleanup is a named follow-up; staged package extraction is recorded as Option 2 but deferred.
-中文摘要：本规格把已接受的 P1 分层设计展开成可逐 PR 落地的拆分方案。每个 slice 都必须保持行为、队列、schema、marker、dedup、source_ref 与 CAS 语义不变；`github-proxy` contract cleanup 已移出为后续规格。
+Scope: behavior-equivalent refactor of `packages/github-devloop`; `github-proxy` protocol/queue contract cleanup is a named follow-up; staged package extraction is recorded as Option 2 but deferred. This spec expands the accepted P1 layering design into a PR-by-PR decomposition plan. Every slice must preserve behavior, queues, schemas, markers, dedup, `source_ref`, and CAS semantics unchanged; `github-proxy` contract cleanup has moved to a later spec.
 
 ---
 
@@ -129,7 +128,8 @@ Old mixed files in the physical split allowlist are deleted as their functions m
 
 Full physical relocation of cohesive modules into `core/{foundation,lifecycle,ops,diagnosis}` is a named follow-up, `github-devloop full capability-directory relocation`, and is out of scope for these slices.
 
-中文补充：本规格只允许 shrink-only 拆分混合职责文件；单一职责文件本轮只在 `core.lua` 安装注释中分组，不搬家。
+This spec allows only shrink-only splitting of mixed-responsibility files. Single-responsibility
+files are grouped only by install comments in `core.lua` in this round; they do not move.
 
 ## 4. Per-module split
 

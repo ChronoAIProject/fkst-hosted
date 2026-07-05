@@ -12,8 +12,6 @@ develop feature branch
 
 `<device>` is the stable identity for that machine: the bot login used by that host, such as `ElonSG` or `loning`. The branch name is therefore `integration-<bot-login>`, for example `integration-ElonSG`.
 
-中文补充：每台机器使用自己的 `integration-<device>` 测试分支，`<device>` 等于该机器的 bot login；`dev` 仍是受保护的最终集成分支。
-
 ## Host Config
 
 The package does not derive or create the integration branch. Host env supplies the topology:
@@ -71,7 +69,5 @@ The `integration-<device>` branch must already exist before launch. By design, `
 ## Transition Note
 
 Keep the shared `integration` branch while any in-flight PR still targets it. Deleting a base branch closes its open PRs on GitHub, so check PR bases and other branch dependencies before deleting or changing any remote branch.
-
-中文补充：迁移期间不要删除共享 `integration` 分支；先确认没有 open PR 以它为 base。
 
 ⟦AI:FKST⟧
