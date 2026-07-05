@@ -142,175 +142,8 @@ sync_platform_manifest_to_devloop_pkgs() { # $1 name
   # The packages target is the platform repository itself: its workspace enumerates
   # available packages, not the narrower dogfood run composition.
   [ "$HOST" = "$PKGSRC" ] && return 0
-  output="$(python3 - "$name" "$HOST" "$DEVLOOP_PKGS" <<'PY'
-import json
-import re
-import sys
-import tomllib
-from pathlib import Path
-
-
-def fail(message: str) -> None:
-    print(f"error: {message}")
-    raise SystemExit(1)
-
-
-def table_array(data: dict[str, object], key: str) -> list[dict[str, object]]:
-    value = data.get(key, [])
-    if isinstance(value, dict):
-        value = [value]
-    if not isinstance(value, list):
-        fail(f"fkst.workspace.toml {key} must be a table array")
-    rows: list[dict[str, object]] = []
-    for item in value:
-        if not isinstance(item, dict):
-            fail(f"fkst.workspace.toml {key} entries must be tables")
-        rows.append(item)
-    return rows
-
-
-def package_list(value: object, field: str) -> list[str]:
-    if not isinstance(value, list):
-        fail(f"fkst.workspace.toml {field} must be a string array")
-    out: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item:
-            fail(f"fkst.workspace.toml {field} must contain only non-empty strings")
-        out.append(item)
-    return out
-
-
-def reject_duplicates(values: list[str], field: str) -> None:
-    seen: set[str] = set()
-    duplicates: list[str] = []
-    for value in values:
-        if value in seen and value not in duplicates:
-            duplicates.append(value)
-        seen.add(value)
-    if duplicates:
-        fail(f"{field} contains duplicate package names: {' '.join(duplicates)}")
-
-
-def external_source_blocks(lines: list[str]) -> list[tuple[int, int]]:
-    blocks: list[tuple[int, int]] = []
-    for index, line in enumerate(lines):
-        if line.strip() != "[[external_sources]]":
-            continue
-        end = len(lines)
-        for cursor in range(index + 1, len(lines)):
-            stripped = lines[cursor].strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                end = cursor
-                break
-        blocks.append((index, end))
-    return blocks
-
-
-def block_id(lines: list[str], start: int, end: int) -> object:
-    try:
-        data = tomllib.loads("".join(lines[start:end]))
-    except tomllib.TOMLDecodeError as exc:
-        fail(f"invalid external_sources block in fkst.workspace.toml: {exc}")
-    sources = table_array(data, "external_sources")
-    if len(sources) != 1:
-        fail("external_sources block parser expected exactly one source")
-    return sources[0].get("id")
-
-
-def package_assignment_range(lines: list[str], start: int, end: int) -> tuple[int, int, str] | None:
-    pattern = re.compile(r"^(\s*)packages\s*=")
-    for index in range(start + 1, end):
-        match = pattern.match(lines[index])
-        if not match:
-            continue
-        cursor = index + 1
-        rhs = lines[index].split("=", 1)[1]
-        depth = rhs.count("[") - rhs.count("]")
-        while depth > 0 and cursor < end:
-            depth += lines[cursor].count("[") - lines[cursor].count("]")
-            cursor += 1
-        return index, cursor, match.group(1)
-    return None
-
-
-def insertion_point(lines: list[str], start: int, end: int) -> tuple[int, str]:
-    pattern = re.compile(r"^(\s*)git\s*=")
-    for index in range(start + 1, end):
-        match = pattern.match(lines[index])
-        if match:
-            return index + 1, match.group(1)
-    return end, ""
-
-
-name = sys.argv[1]
-host = Path(sys.argv[2])
-requested = [item for item in sys.argv[3].split() if item]
-reject_duplicates(requested, "DEVLOOP_PKGS")
-
-workspace_path = host / "fkst.workspace.toml"
-if not workspace_path.is_file():
-    fail(f"{name}: target fkst.workspace.toml is required for dogfood platform sync: {workspace_path}")
-try:
-    text = workspace_path.read_text(encoding="utf-8")
-    workspace = tomllib.loads(text)
-except tomllib.TOMLDecodeError as exc:
-    fail(f"{name}: invalid target fkst.workspace.toml: {workspace_path}: {exc}")
-if not isinstance(workspace, dict):
-    fail(f"{name}: target fkst.workspace.toml must be a TOML table")
-
-platform_source = None
-for source in table_array(workspace, "external_sources"):
-    if source.get("id") == "fkst-packages-platform":
-        platform_source = source
-        break
-if platform_source is None:
-    fail(f"{name}: target fkst.workspace.toml must declare external_sources(id=fkst-packages-platform)")
-
-lines = text.splitlines(keepends=True)
-target_block = None
-for start, end in external_source_blocks(lines):
-    if block_id(lines, start, end) == "fkst-packages-platform":
-        target_block = (start, end)
-        break
-if target_block is None:
-    fail(f"{name}: could not locate external_sources(id=fkst-packages-platform) in fkst.workspace.toml")
-
-start, end = target_block
-new_line = f"{json.dumps(requested)}\n"
-assignment = package_assignment_range(lines, start, end)
-if assignment is None:
-    insert_at, indent = insertion_point(lines, start, end)
-    replacement = f"{indent}packages = {new_line}"
-    new_lines = lines[:insert_at] + [replacement] + lines[insert_at:]
-else:
-    package_start, package_end, indent = assignment
-    replacement = f"{indent}packages = {new_line}"
-    new_lines = lines[:package_start] + [replacement] + lines[package_end:]
-
-new_text = "".join(new_lines)
-if new_text != text:
-    tmp_path = workspace_path.with_name(workspace_path.name + ".tmp")
-    tmp_path.write_text(new_text, encoding="utf-8")
-    tmp_path.replace(workspace_path)
-
-try:
-    synced = tomllib.loads(new_text)
-except tomllib.TOMLDecodeError as exc:
-    fail(f"{name}: synced fkst.workspace.toml is invalid: {exc}")
-for source in table_array(synced, "external_sources"):
-    if source.get("id") == "fkst-packages-platform":
-        declared = package_list(
-            source.get("packages", []),
-            "external_sources(id=fkst-packages-platform).packages",
-        )
-        reject_duplicates(declared, "external_sources(id=fkst-packages-platform).packages")
-        if declared != requested:
-            fail(f"{name}: synced platform package list does not match DEVLOOP_PKGS")
-        break
-else:
-    fail(f"{name}: synced fkst.workspace.toml lost external_sources(id=fkst-packages-platform)")
-PY
-)" || { printf '%s\n' "$output" >&2; return 1; }
+  output="$(python3 "$_self_dir/workspace_manifest.py" sync "$name" "$HOST" "$DEVLOOP_PKGS")" \
+    || { printf '%s\n' "$output" >&2; return 1; }
 }
 
 pidof_df() { pgrep -f -- "supervise --project-root ${HOST} " 2>/dev/null; }
@@ -429,6 +262,15 @@ ensure_run_checkout() { # $1 checkout dir, $2 org/repo slug
     || { echo "    ERROR: failed to clone $slug into $dir"; return 1; }
 }
 
+restore_generated_workspace_scratch() { # $1 worktree dir
+  local wt="$1"
+  [ -f "$wt/fkst.workspace.toml" ] || return 0
+  git -C "$wt" diff --quiet -- fkst.workspace.toml 2>/dev/null && return 0
+  python3 "$_self_dir/workspace_manifest.py" is-generated-scratch "$wt" "$DEVLOOP_PKGS" >/dev/null || return 0
+  echo "    restoring generated fkst.workspace.toml scratch before branch sync"
+  git -C "$wt" checkout -q -- fkst.workspace.toml 2>/dev/null
+}
+
 sync_to_run_branch() { # $1 worktree dir
   git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || { echo "  ! $1 is not a git worktree"; return 1; }
   git -C "$1" fetch origin "$INTEGRATION_BRANCH" -q 2>/dev/null
@@ -477,8 +319,10 @@ ensure_integration_caught_up() { # $1 checkout dir
   local behind; behind=$(git -C "$wt" rev-list --count "origin/$INTEGRATION_BRANCH..origin/$UPSTREAM_BRANCH" 2>/dev/null || echo 0)
   [ "${behind:-0}" -eq 0 ] && return 0
   echo "  $INTEGRATION_BRANCH is $behind behind $UPSTREAM_BRANCH in $(basename "$wt") -> merging $UPSTREAM_BRANCH forward"
+  restore_generated_workspace_scratch "$wt"
   git -C "$wt" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>/dev/null \
     || { echo "    WARN: could not checkout $INTEGRATION_BRANCH — leaving for sync_scan"; return 0; }
+  restore_generated_workspace_scratch "$wt"
   if git -C "$wt" merge --no-edit "origin/$UPSTREAM_BRANCH" >/dev/null 2>&1; then
     if git -C "$wt" push origin "HEAD:$INTEGRATION_BRANCH" >/dev/null 2>&1; then
       echo "    merged + pushed: $INTEGRATION_BRANCH -> $(git -C "$wt" rev-parse --short HEAD)"
