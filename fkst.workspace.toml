@@ -7,3 +7,73 @@ libraries = ["libraries/*"]
 
 [registries]
 workspace = "workspace"
+
+[[package]]
+name = "github-devloop"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-pr"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-integration"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-intake"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-workflow"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-decompose"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-devloop-ops"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-proxy"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "consensus"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-external-pr-intake"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "github-ratchet-migration-slicer"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "fkst-substrate-ref-maintainer"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "integration-coverage-producer"
+source = "workspace"
+version = "workspace"
+
+[[package]]
+name = "idle-detector"
+source = "workspace"
+version = "workspace"

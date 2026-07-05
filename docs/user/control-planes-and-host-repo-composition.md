@@ -56,9 +56,9 @@ It does NOT vendor or copy the platform; it **composes** it and **pins** version
 ```
 
 The host supervise resolves the requested platform package names against the target
-`fkst.workspace.toml`, hydrates only the external source IDs that own those packages from `fkst.lock`, and
-loads those package roots from `<HOST>/.fkst/run/<id>/packages/<pkg>`. For external platform sources, the
-target manifest and lock must match the trusted `--platform-root` git URL/path and `HEAD` before hydration;
+`fkst.workspace.toml` and validates the external source IDs that own those packages against `fkst.lock`.
+For external platform sources, the target manifest and lock must match the trusted `--platform-root` git
+URL/path and `HEAD` before execution;
 target files select package ownership but cannot redirect executable platform provenance. Target `workspace`
 packages can supply platform packages only when the target root is the trusted platform root itself. Host-owned
 packages still come from `.fkst/local-packages/`, all on the same engine BIN — see

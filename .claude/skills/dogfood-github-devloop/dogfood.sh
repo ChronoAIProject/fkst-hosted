@@ -65,48 +65,12 @@ DOGFOOD_REPOS="${DOGFOOD_REPOS:-packages substrate website}"             # repos
 # (root stays website source) — so platform packages come from `$PKGSRC/packages/<pkg>`, a host's own package
 # from `$HOST/.fkst/local-packages/<pkg>`. (`.fkst/` is a tracked+ignored runtime INTERFACE dir, not
 # "all runtime": host repos commit their own Lua there. See fkst-website CLAUDE.md.)
-# Platform packages every dogfood supervise LOADS + RUNS from PKGSRC/packages/. The DEFAULT list lives
-# in dogfood.platform-packages; a least-privilege host default may live in
-# dogfood.platform-packages.<target> when that host genuinely differs. A host OVERRIDES it only when it
-# genuinely differs (env DEVLOOP_PKGS > dogfood.config.sh > host/default manifest). The supervise loads only the platform (not every package in
-# packages/) because it RUNS packages (raisers fire); co-loading independent agents would fight over
-# the same repo's issues. (`test` loads all to validate the graph.) Auto-audit is DISABLED: the
-# archaudit audit AGENT is NOT loaded on any target (re-add it here to re-enable). archaudit auditing
-# the engine repo produced Rust SDK changes the pipeline cannot safely auto-develop (engine↔package
-# contract, e.g. the proposal_id→dedup_key revert #174). idle-detector IS loaded though: it is NOT an
-# audit agent but a shared PRODUCER the website's site-board depends on (board_scan consumes
-# `idle-detector.system_idle`), so excluding it breaks the website supervise ("unknown namespace
-# idle-detector" graph-scan failure); on packages/substrate it just produces an unconsumed
-# system_idle with no consumer (harmless).
-# integration-coverage-producer is in the default set for package-repo dogfood: a co-run-safe
-# issue-producer scoped to Lua-package run_graph coverage gaps (idle-gated + dedup'd +
-# Lua-coverage-only, never engine). Hosts that do not need it use a least-privilege host default.
-load_devloop_pkgs_file() {
-  local list_file="$1" line pkgs=()
-  [ -f "$list_file" ] || { echo "missing default platform package list: $list_file" >&2; return 1; }
-  while IFS= read -r line || [ -n "$line" ]; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    [ -n "$line" ] || continue
-    pkgs+=("$line")
-  done < "$list_file"
-  [ "${#pkgs[@]}" -gt 0 ] || { echo "empty default platform package list: $list_file" >&2; return 1; }
-  printf '%s\n' "${pkgs[*]}"
-}
-load_default_devloop_pkgs() {
-  load_devloop_pkgs_file "$_self_dir/dogfood.platform-packages"
-}
-load_host_default_devloop_pkgs() {
-  local name="$1" host_list
-  host_list="$_self_dir/dogfood.platform-packages.$name"
-  if [ -f "$host_list" ]; then
-    load_devloop_pkgs_file "$host_list"
-  else
-    load_default_devloop_pkgs
-  fi
-}
-DEVLOOP_PKGS_OVERRIDE="${DEVLOOP_PKGS:-}"
+# Platform packages every dogfood supervise LOADS + RUNS from PKGSRC/packages/ are selected by the
+# target host's `fkst.workspace.toml`. Non-self hosts use
+# `external_sources(id=fkst-packages-platform).packages`; the self host uses explicit workspace
+# `[[package]]` entries. `dogfood.sh` only derives the launch argument from that manifest and never
+# rewrites it, so a drift between committed composition and launch composition fails closed in the
+# host-run contract instead of being masked.
 DEVLOOP_PKGS=""
 
 # cfg <name> -> REPO HOST PKGSRC DUR LOCAL_PKGS. Worktree paths derive from $DOGFOOD_ROOT (uniform
@@ -130,20 +94,13 @@ cfg() {
       DUR="${DUR_WEBSITE:-$DOGFOOD_ROOT/dogfood-durable-website}"; LOCAL_PKGS="site-board" ;;
     *) echo "unknown dogfood: $1 (packages|substrate|website)" >&2; return 1 ;;
   esac
-  if [ -n "$DEVLOOP_PKGS_OVERRIDE" ]; then
-    DEVLOOP_PKGS="$DEVLOOP_PKGS_OVERRIDE"
-  else
-    DEVLOOP_PKGS="$(load_host_default_devloop_pkgs "$1")" || return 1
-  fi
 }
 
-sync_platform_manifest_to_devloop_pkgs() { # $1 name
+derive_devloop_pkgs_from_workspace() { # $1 name
   local name="$1" output
-  # The packages target is the platform repository itself: its workspace enumerates
-  # available packages, not the narrower dogfood run composition.
-  [ "$HOST" = "$PKGSRC" ] && return 0
-  output="$(python3 "$_self_dir/workspace_manifest.py" sync "$name" "$HOST" "$DEVLOOP_PKGS")" \
+  output="$(python3 "$_self_dir/workspace_manifest.py" platform-packages "$name" "$HOST" "$PKGSRC")" \
     || { printf '%s\n' "$output" >&2; return 1; }
+  DEVLOOP_PKGS="$output"
 }
 
 pidof_df() { pgrep -f -- "supervise --project-root ${HOST} " 2>/dev/null; }
@@ -398,9 +355,9 @@ launch_one() { # $1 name, $2 restart flag (0|1)
   local name="$1" restart="${2:-0}" ts log rt args=()
   ts=$(date +%s); log="$LOGDIR/${name}-sv-${ts}.log"; rt="$LOGDIR/dogfood-rt-${name}.${ts}"
   clean_stale_runtime_worktrees "$name" "$rt"
-  [ -n "$DEVLOOP_PKGS" ] || { echo "[$name] DEVLOOP_PKGS unset — set the platform packages to load in dogfood.config.sh (see dogfood.config.example.sh)"; return 1; }
+  derive_devloop_pkgs_from_workspace "$name" || return 1
+  [ -n "$DEVLOOP_PKGS" ] || { echo "[$name] no platform packages declared in fkst.workspace.toml"; return 1; }
   [ -x "$PKGSRC/scripts/run.sh" ] || { echo "[$name] missing host-run contract: $PKGSRC/scripts/run.sh"; return 1; }
-  sync_platform_manifest_to_devloop_pkgs "$name" || return 1
 
   args=(
     "$PKGSRC/scripts/run.sh" supervise
@@ -455,6 +412,7 @@ restart_one() {
   echo "[$1] sync to origin/$INTEGRATION_BRANCH (run branch; rollup target stays $UPSTREAM_BRANCH):"
   ensure_run_checkout "$PKGSRC" "$GH_ORG/fkst-packages"              # re-clone if DOGFOOD_ROOT cleanup rotted the checkout
   [ "$HOST" != "$PKGSRC" ] && ensure_run_checkout "$HOST" "$REPO"
+  derive_devloop_pkgs_from_workspace "$1" || return 1
   ensure_integration_caught_up "$PKGSRC"                              # keep run branch (integration) >= dev so operator fixes deploy
   [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
   sync_to_run_branch "$PKGSRC"
@@ -489,6 +447,7 @@ _proc_stale() {
   cfg "$1" || { echo unknown; return; }
   local p log procpkg proceng pdev sdev; p=$(pidof_df); log=$(latest_log "$1")
   [ -z "$p" ] && { echo stopped; return; }
+  derive_devloop_pkgs_from_workspace "$1" >/dev/null || { echo config-error; return; }
   git -C "$PKGSRC" fetch origin "$INTEGRATION_BRANCH" -q 2>/dev/null
   git -C "$SUBSTRATE_SRC" fetch origin "$UPSTREAM_BRANCH" -q 2>/dev/null
   pdev=$(git -C "$PKGSRC" rev-parse "origin/$INTEGRATION_BRANCH" 2>/dev/null)
@@ -506,6 +465,7 @@ _proc_stale() {
 doctor_one() {
   cfg "$1" || return 1
   local p log panic st procpkg proceng verdict; p=$(pidof_df); log=$(latest_log "$1")
+  derive_devloop_pkgs_from_workspace "$1" >/dev/null || { printf '  %-9s CONFIG-ERROR (target %s)\n' "$1" "$REPO"; return 0; }
   panic=$(grep -ac panicked "$log" 2>/dev/null); panic=${panic:-0}
   if [ -z "$p" ]; then printf '  %-9s STOPPED (target %s)\n' "$1" "$REPO"; return 0; fi
   st=$(_proc_stale "$1")   # also fetches origin/dev for $PKGSRC + $SUBSTRATE_SRC
@@ -606,6 +566,7 @@ cmd_sync() {
     cfg "$n" || continue
     ensure_run_checkout "$PKGSRC" "$GH_ORG/fkst-packages"              # re-clone if DOGFOOD_ROOT cleanup rotted the checkout (else _proc_stale misreads "skew" and fixes never deploy)
     [ "$HOST" != "$PKGSRC" ] && ensure_run_checkout "$HOST" "$REPO"
+    derive_devloop_pkgs_from_workspace "$n" || { echo "  $n: config-error"; failed=1; continue; }
     ensure_integration_caught_up "$PKGSRC"                              # keep run branch (integration) >= dev so operator fixes deploy
     [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
     st=$(_proc_stale "$n")
@@ -656,9 +617,16 @@ cmd_config() {
   printf '  %-18s %s\n' DOGFOOD_ROOT "$DOGFOOD_ROOT" SUBSTRATE_SRC "$SUBSTRATE_SRC" BIN "$BIN" \
     BOT "$BOT" GH_ORG "$GH_ORG" UPSTREAM_BRANCH "$UPSTREAM_BRANCH" INTEGRATION_BRANCH "$INTEGRATION_BRANCH" \
     ROLLUP_MERGE "$ROLLUP_MERGE" RATE_POOL "$RATE_POOL" LOGDIR "$LOGDIR" DOGFOOD_REPOS "$DOGFOOD_REPOS"
-  echo "platform pkgs resolve per repo (DEVLOOP_PKGS override: ${DEVLOOP_PKGS_OVERRIDE:-<none>})"
+  echo "platform pkgs resolve per repo from fkst.workspace.toml"
   echo "per-repo (HOST | PKGSRC | DURABLE | local pkgs | platform pkgs):"
-  local n; for n in $DOGFOOD_REPOS; do cfg "$n" && printf '  %-9s %s | %s | %s | %s | %s\n' "$n" "$HOST" "$PKGSRC" "$DUR" "${LOCAL_PKGS:--}" "$DEVLOOP_PKGS"; done
+  local n
+  for n in $DOGFOOD_REPOS; do
+    if cfg "$n" && derive_devloop_pkgs_from_workspace "$n" 2>/dev/null; then
+      printf '  %-9s %s | %s | %s | %s | %s\n' "$n" "$HOST" "$PKGSRC" "$DUR" "${LOCAL_PKGS:--}" "$DEVLOOP_PKGS"
+    else
+      printf '  %-9s %s | %s | %s | %s | %s\n' "$n" "$HOST" "$PKGSRC" "$DUR" "${LOCAL_PKGS:--}" "CONFIG-ERROR"
+    fi
+  done
 }
 
 cmd_board() {
