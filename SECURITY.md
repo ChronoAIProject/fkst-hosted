@@ -9,8 +9,6 @@ Engine runtime, SDK primitive, delivery-store, sandbox, or Rust implementation i
 separate `fkst-substrate` repository unless the vulnerable behavior is caused by package code in this
 repository.
 
-中文补注：本仓安全范围是 package 行为层；引擎运行时与 Rust 实现问题应归 `fkst-substrate`。
-
 ## Reporting a Vulnerability
 
 Use GitHub private vulnerability reporting for this repository when available:

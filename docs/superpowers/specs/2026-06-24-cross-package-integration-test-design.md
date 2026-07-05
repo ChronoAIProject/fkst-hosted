@@ -14,7 +14,7 @@ The system has three test layers, all package-local or single-hop:
 
 This is exactly where locally-correct handlers compose incorrectly. The recent ②③④ refactor regressions (lost write-time guard, wrong version ordering, fail-open vs fail-closed) **passed all unit/department tests + CI green** and were caught only by adversarial code review + live dogfood. That is the class this harness must catch deterministically.
 
-## Design (converged 忠于本质 shape)
+## Design (Converged Essence-Faithful Shape)
 
 An **engine-owned, deterministic "run the event graph to quiescence" test runtime** that reuses the REAL production machinery — a *controlled mode of substrate*, NOT a second router. Prior art: Temporal's test framework (real workers + test service + time-skipping) and FoundationDB's deterministic simulation (whole system in one process under synchronized simulated time). Borrow the principles at this system's much smaller scale.
 

@@ -94,7 +94,9 @@ Two precise corrections the review forced:
   secretly scan source (the Round-1 trap).
 - **Published API vs private consumption**: consuming declared, versioned artifacts is clean; reaching into a
   repo's private `scripts/check_repo.py` by filesystem path is not.
-- CLAUDE.md «守住包边界 / published seam»·«分层归属»·«Harness本质 PREVENT>DETECT»·«通用>枚举»·«迁移=inventory ratchet»·«DRY 单一真相源»·«禁 god-package».
+- `CLAUDE.md` doctrines: package boundaries / published seams; layering ownership; harness
+  essence, PREVENT > DETECT; generic over enumerated; migration as inventory ratchet; DRY single
+  source of truth; no god-package.
 
 ## 3. Tiers by ownership (the stable frame; tier-2 execution contract is Part B)
 

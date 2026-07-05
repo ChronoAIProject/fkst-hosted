@@ -6,7 +6,12 @@ Status: design (sshx adversarial consensus, 1 fix pass after review-triplet reje
 
 **Do NOT build a new "split" package.** The decompose saga lives in the *existing* `github-devloop-decompose` package, reached only through its published `devloop_decompose` seam. **PR-split is out of scope** — an oversized/stuck PR is already decomposed *through the backing issue* when the fix loop / merge gate exhausts (`github-devloop-pr/departments/review_result/main.lua:130-147` and `core/merge_executor.lua:65-84` raise `fix_reconcile` + `devloop_decompose`). A separate PR-split saga would be over-split.
 
-This is what 模式服务当前问题 + 三次法则 + 守包边界 + 包间走前门 + the over-split guard force. But — **this spec is an EXTENSION/migration, not "the existing decompose already does it"**: the review triplet (grounded in the code) showed the existing decompose covers only ONE of the three triggers and lacks native sub-issues, the parent gate, and a parent-close rule. The sections below separate **what exists today** from **what this spec adds**, so the work is honest and implementable.
+This is what pattern-serves-the-current-problem, the Rule of Three, package-boundary discipline,
+front-door package seams, and the over-split guard force. But — **this spec is an EXTENSION/migration,
+not "the existing decompose already does it"**: the review triplet (grounded in the code) showed the
+existing decompose covers only ONE of the three triggers and lacks native sub-issues, the parent
+gate, and a parent-close rule. The sections below separate **what exists today** from **what this
+spec adds**, so the work is honest and implementable.
 
 ## What exists today (verified against code — the baseline)
 
@@ -30,7 +35,11 @@ No autonomous text-length splitter (over-split disease). Missing evidence ⇒ **
 
 ### 2. Native sub-issue child model (does not exist)
 
-- Add a **`github-proxy` public seam for native sub-issue creation** (decompose must NOT reach `forge.github issue_add_sub_issue` directly — 守包边界). Children are created as GitHub **native sub-issues** of the **parent issue** (today `parent_comment_target` is the PR — must change to the parent issue), idempotent via `dedup_key = (parent source_ref, child slot)` (intent-before-create).
+- Add a **`github-proxy` public seam for native sub-issue creation**. Decompose must NOT reach
+  `forge.github issue_add_sub_issue` directly; it must respect the package boundary. Children are
+  created as GitHub **native sub-issues** of the **parent issue** (today `parent_comment_target` is
+  the PR and must change to the parent issue), idempotent via
+  `dedup_key = (parent source_ref, child slot)` (intent-before-create).
 - Populate `post_create_blocked_by` so inter-child ordering (if the manifest declares it) is a native edge.
 
 ### 3. Parent terminal / close rule (the materially-wrong claim — CORRECTED)

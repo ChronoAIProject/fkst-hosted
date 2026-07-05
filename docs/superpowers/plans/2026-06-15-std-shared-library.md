@@ -114,7 +114,7 @@ git commit -m "feat(std): repo-level shared lib + per-package symlink + resoluti
 ### Task 2: Doctrine edit + peer-require guard
 
 **Files:**
-- Modify: `CLAUDE.md` (the "包结构约定 / 包内共享库" paragraph)
+- Modify: `CLAUDE.md` (the package-structure / package-local shared-library paragraph)
 - Modify: `scripts/check_repo.py` (add `check_cross_package_require`)
 - Test: `scripts/check_repo_test.py`
 
@@ -145,11 +145,13 @@ Expected: PASS.
 
 - [ ] **Step 5: Edit CLAUDE.md doctrine**
 
-Replace the prohibition in the "包内共享库放 package-root" paragraph with:
-> 包内共享库放 package-root `core.lua`;跨包共享放 repo-root `std/`(单向、分层,
-> 经 `packages/<pkg>/std -> ../../std` 符号链接引入,`require("std.<m>")`)。
-> **禁 peer 跨包 require(A→B 内部);允许唯一 blessed 共享库根(all→std)。**
-> `std` 不是 manifest / 版本解析。
+Replace the prohibition in the package-local shared-library paragraph with:
+> Package-local shared libraries live at package root as `core.lua`; cross-package sharing lives at
+> repo-root `std/`, one-way and layered, introduced through the `packages/<pkg>/std -> ../../std`
+> symlink and `require("std.<m>")`.
+> **Peer cross-package require, such as A requiring B internals, is forbidden. The single blessed
+> shared library root, all packages requiring `std`, is allowed.**
+> `std` is not a manifest or version resolver.
 
 - [ ] **Step 6: Run full check + commit**
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make "来了就做，做过就不做" the only writable department shape by lifting the existing `core/saga.lua` `effect_once` from per-effect to per-department, with an auto-applied idempotency+progress oracle and a shrink-only ratchet that forces migration.
+**Goal:** Make "handle arrivals, skip completed work" the only writable department shape by lifting the existing `core/saga.lua` `effect_once` from per-effect to per-department, with an auto-applied idempotency+progress oracle and a shrink-only ratchet that forces migration.
 
 **Architecture:** `std/saga.lua` exposes `department{consumes, done, act, ...}` — the framework owns the `if done(e) then skip else act(e)` control flow; the author fills only `done`/`act`. A shared test helper drives the ①②③ oracle (deliver once → progress; deliver twice + restart → no-op; near-key new → not-done) against a stateful external-truth fake. A `check_repo.py` ratchet + `migration/saga-handler.allowlist` forbids new free-form departments and drains the old ones one PR at a time.
 
@@ -70,7 +70,7 @@ local function validate(opts)
 end
 
 -- Lift effect_once from per-effect to per-department: done == completion_check,
--- act == perform. "来了就做，做过就不做".
+-- act == perform. Handle arrivals and skip completed work.
 function S.department(opts)
   validate(opts)
   local spec = {

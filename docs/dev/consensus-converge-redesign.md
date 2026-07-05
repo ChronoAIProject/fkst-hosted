@@ -1,69 +1,133 @@
-# Consensus 收敛重设计：从「盲循环 + 拆分」到「meta-judge 收敛 + 真停滞调和」
+# Consensus Convergence Redesign: From Blind Loops and Splitting to Meta-Judge Convergence and True-Stall Reconciliation
 
-> **状态（2026-06）：本重设计的 Phase 1 + Phase 2a 已全部实现并合并（PR #44–#49）。** 下文「当前（错）」一节描述的是重设计**之前**的状态；当前态权威见 `README.md`（consensus / github-devloop 段）与 `CLAUDE.md`。Phase 2b（共识透明化，把三角度 + meta-judge 决定 post 成评论，覆盖 #11/#15）见下文分期。
+> **Status (2026-06): Phase 1 and Phase 2a of this redesign have been fully implemented and merged
+> (PRs #44-#49).** The "previous state" section below describes the system before the redesign. The
+> current authoritative state is in `README.md` (the consensus / `github-devloop` sections) and
+> `CLAUDE.md`. Phase 2b, which makes consensus transparent by posting the three angles plus the
+> meta-judge decision as comments and covers #11/#15, is described in the staging section.
 
-## 动机
+## Motivation
 
-dogfood 暴露 + maintainer 指出：当前 no-consensus 处理「拆分太多、不正确」。参考已长期运行的 `consensus-rnd`（sshx / codex-refactor-loop 的源设计），其 **meta-judge 收敛** 模型才是正解：分歧只收敛到固定出口（达成 / 收敛中 / 真停滞），真停滞才进 meta-layer 调和，**绝不把 proposal 拆成子 proposal，绝不直接升级人**。
+Dogfood findings plus maintainer review showed that the prior no-consensus handling split too much
+and was not correct. The long-running `consensus-rnd` design from `sshx` / `codex-refactor-loop`
+has the right shape: a **meta-judge convergence** model where disagreement converges only to fixed
+exits (reached / converging / true stall), and only true stall enters a meta-layer reconciliation.
+It must **never split a proposal into child proposals and never directly escalate to a human**.
 
-### 当前（错）
+### Previous State
 
-- `packages/consensus/decide`：3 角度并发 + **unanimity 聚合**（全 approve/全 reject→`consensus_reached`，否则 `consensus_unresolved`）。**没有第 4 个 meta-judge**，不保留三角度输出给 arbiter，不收窄问题。
-- `github-devloop/review_loop`、`loop`：收到 `consensus_unresolved` 后**盲重跑**——只改 dedup `/loop/N`、重建~同一个 proposal，**不收窄问题**；到 `loop_budget=3` 进 `devloop_stuck` / `devloop_review_meta`。
-- 失败终局：thinking 侧 `meta` 单 codex 选 implement/**split**/block（`split`=「拆分」核心，落 `blocked`+"Suggested split"）；PR 侧 `review_meta` 单 codex 选 fix/accept/block。
+- `packages/consensus/decide`: three angles ran concurrently and used **unanimity aggregation**
+  (all approve / all reject -> `consensus_reached`; otherwise `consensus_unresolved`). There was
+  **no fourth meta-judge**, no preserved three-angle output for an arbiter, and no narrowed question.
+- `github-devloop/review_loop` and `loop`: on `consensus_unresolved`, they **blindly reran** nearly
+  the same proposal, changing only the `/loop/N` dedup segment and not narrowing the question. At
+  `loop_budget=3`, they entered `devloop_stuck` / `devloop_review_meta`.
+- Failure terminal path: the thinking-side `meta` single-codex path selected
+  implement / **split** / block (`split` was the core problem, producing `blocked` plus
+  "Suggested split"); the PR-side `review_meta` single-codex path selected fix / accept / block.
 
-### 目标（consensus-rnd 模型）
+### Target: The `consensus-rnd` Model
 
-```
+```text
 proposal(round R, [narrowed_question])
-  → 3 角度并发(peer-invisible，看到 narrowed_question 但看不到彼此输出)
-  → meta-judge(第4 codex，读3角度) 判：
-       reached:<framing>           → consensus_reached（达成即决定）
-       converge:<narrowed_question> → consensus_converge（带收窄问题 + bounded 角度 digest）
-  → 消费者(router) 收到 converge：以 round R+1 + narrowed_question 重发 proposal，回到 consensus
-  → 直到 reached，或 router 判 true-stall（round ≥ 3 且角度立场连续无收窄/无变化）
-  → true-stall → reconcile：drop(no-actionable-framing) / re-design(有具体新 directive) / re-cluster
-                 —— 不 split，不直接 label 人
+  -> 3 angles concurrently (peer-invisible, see narrowed_question but not one another)
+  -> meta-judge (4th codex, reads the 3 angles) decides:
+       reached:<framing>             -> consensus_reached (reached is final)
+       converge:<narrowed_question>  -> consensus_converge (narrowed question + bounded angle digest)
+  -> consumer router receives converge:
+       resend proposal with round R+1 + narrowed_question, back to consensus
+  -> repeat until reached, or until the router detects true stall
+       (round >= 3 and angle positions show no narrowing or change across consecutive rounds)
+  -> true stall -> reconcile:
+       drop(no-actionable-framing) / re-design(concrete new directive) / re-cluster
+       without split and without directly labeling a human
 ```
 
-**职责划分**（保持 consensus 为 source-agnostic flat package）：
-- `packages/consensus`：每个 proposal 跑「角度 → meta-judge」，只出 `consensus_reached` 或 `consensus_converge`。无状态、不持轮次。
-- `github-devloop`（composed router）：拥有收敛**轮次**、真停滞**判据**、**reconcile**。轮次/digest 记在 GitHub trusted-bot marker（marker-as-fact + version-CAS）。
+**Responsibility split** that keeps `consensus` a source-agnostic flat package:
 
-## 事件契约变更（packages/consensus，flat 包，改契约就改完整）
+- `packages/consensus`: for each proposal, run "angles -> meta-judge" and produce only
+  `consensus_reached` or `consensus_converge`. It holds no state and no round counter.
+- `github-devloop` as the composed router: owns convergence **rounds**, the true-stall
+  **predicate**, and **reconciliation**. Rounds and digests are recorded in GitHub trusted-bot
+  markers (marker-as-fact plus version CAS).
 
-- `proposal`（consumed）：新增 `round`（默认 0）、可选 `convergence_question`（本轮收窄问题）、可选 `prior_round_digests`（bounded 上轮角度摘要，受 64KiB payload 界约束，只 verdict + 短 reply + digest，**不暴露上轮 peer 全文**保持 peer-invisibility）。
-- `consensus_reached`（produced）：不变，唯一「达成」出口。
-- **`consensus_unresolved` → 替换为 `consensus_converge`**（produced）：payload `proposal_id`、`round`、`narrowed_question`、bounded `angle_digests`、`source_ref`、`dedup_key`。（改契约：删 `consensus_unresolved`，旧形态从当前态删除。）
+## Event Contract Changes (`packages/consensus`, Flat Package)
 
-## 部门变更
+- `proposal` (consumed): add `round` (default `0`), optional `convergence_question` for this round's
+  narrowed question, and optional `prior_round_digests` with bounded prior-angle summaries. The
+  digests respect the 64 KiB payload boundary and carry only verdict + short reply + digest; they
+  **do not expose full prior peer text**, preserving peer invisibility.
+- `consensus_reached` (produced): unchanged, and remains the only "reached" exit.
+- **Replace `consensus_unresolved` with `consensus_converge`** (produced): payload contains
+  `proposal_id`, `round`, `narrowed_question`, bounded `angle_digests`, `source_ref`, and
+  `dedup_key`. This is a complete contract replacement: remove `consensus_unresolved` from the
+  current state.
 
-### packages/consensus
-- `decide/main.lua`：3 角度并发后**不再直接 unanimity 聚合**；新增（或拆 `judge/main.lua`）**meta-judge 第 4 codex**（prompt `prompts/meta_judge.lua`），读三角度输出 → 输出 `reached:<framing>` 或 `converge:<narrowed_question>`，分别 raise `consensus_reached` / `consensus_converge`。meta-judge **看不到下一轮**，只生成收窄问题摘要。
+## Department Changes
 
-### github-devloop
-- `review_loop`、`loop`：从「盲 budget 重跑」改为**消费 `consensus_converge` → 以 `round+1` + `narrowed_question` 重发 `proposal`**，并写 converge-round marker（`proposal`/`round`/`dedup`/`question`/角度 digest）。
-- **true-stall 判据**（router 式）：读 trusted marker，绑定同 proposal/source_ref/version/head，`round ≥ 3` 且连续无收窄/角度文本无实质变化 → raise `devloop_review_reconcile` / `devloop_reconcile`。**round 1/2 不可能 stalled**。
-- **新增 reconciler dept**（消费 reconcile，第 4 codex 或确定性判）：出 `drop` / `re-design` / `re-cluster`。`drop` → 终态 `blocked`（无 actionable framing），但语义是「放弃这个框架」非「拆分」。
+### `packages/consensus`
 
-## 删除（改契约就删干净）
+- `decide/main.lua`: after the three concurrent angles, do **not** directly aggregate unanimity.
+  Add, or split into `judge/main.lua`, a fourth-codex **meta-judge** using `prompts/meta_judge.lua`.
+  It reads the three angle outputs and emits either `reached:<framing>` or
+  `converge:<narrowed_question>`, raising `consensus_reached` or `consensus_converge`. The
+  meta-judge does **not** see the next round; it only generates the narrowed-question summary.
 
-- 删 `meta` 的 `split` action；**放弃 #31/#35「让 meta split 执行」方向**——这是错的「拆分」。`meta`（thinking 侧 stuck）从 implement/split/block 改为对接 true-stall → reconciler（implement 保留作 reached 出口的执行）。
-- 删 `consensus_unresolved` 队列 + `review_loop`/`loop` 的盲 budget 重跑路径 + 相关常量/helper/测试。
-- PR 侧 `review_meta accept` 不作 converge 替代。**保留** merge gate 必须独立可信 `review-result approve` / `merge-ready` fact（accept 不足以 merge）。
+### `github-devloop`
 
-## 分期（每期 sshx 全流程：thinking→meta→impl→review→PR→CI→merge）
+- `review_loop` and `loop`: change from blind budget rerun to consuming `consensus_converge`,
+  resending `proposal` with `round+1` and `narrowed_question`, and writing a converge-round marker
+  (`proposal` / `round` / `dedup` / `question` / angle digest).
+- **True-stall predicate** as router logic: read trusted markers bound to the same
+  proposal / `source_ref` / version / head. If `round >= 3` and consecutive rounds show no
+  meaningful narrowing or angle-text change, raise `devloop_review_reconcile` /
+  `devloop_reconcile`. Rounds 1 and 2 cannot be stalled.
+- **New reconciler department** consuming reconcile events: produce `drop` / `re-design` /
+  `re-cluster`. `drop` writes terminal `blocked` with no actionable framing, but the semantics are
+  "abandon this framing", not "split".
 
-- **Phase 1 — consensus 引擎**：`decide` 加 meta-judge（角度→judge→reached|converge）；`consensus_unresolved`→`consensus_converge`（带 narrowed_question + bounded digest）；`proposal` schema 加 round/convergence_question/prior_digests；consensus 单测 + conformance。下游暂兼容（github-devloop 先把 `consensus_converge` 当旧 unresolved 触发既有 loop，行为不变）以便分期。
-- **Phase 2 — github-devloop 收敛 wiring**：`review_loop`/`loop` 消费 `consensus_converge` → 带 narrowed_question 重发；converge-round marker；true-stall → reconcile；新增 reconciler dept；**删 `meta` split + 盲 budget 重跑**。
-- **Phase 3 — 清理**：删死码/旧形态/#31/#35 痕迹；更新 `docs/dev/devloop-design.md` 与相关 memory。
+## Deletions
 
-## 风险 / 约束（sshx 三角度指出）
+- Remove the `meta` `split` action. Abandon the #31/#35 direction of "make meta split execute";
+  that was the wrong splitting model. The thinking-side stuck path changes from
+  implement / split / block to the true-stall reconciler. The implement exit remains a reached
+  consensus path.
+- Remove the `consensus_unresolved` queue, the `review_loop` / `loop` blind budget-rerun path, and
+  related constants, helpers, and tests.
+- Do not use PR-side `review_meta accept` as a convergence substitute. **Keep** the merge gate's
+  requirement for independent trusted `review-result approve` / `merge-ready` facts; `accept` is
+  insufficient to merge.
 
-- **peer-invisibility 必须保**：meta-judge 不能把上轮原始 peer 全文喂下轮角度，只能给它生成的**收窄问题摘要**。
-- **64KiB payload 界**：`prior_round_digests` 只带 verdict + 短 reply + digest。
-- **PR-diff 的「收窄问题」要定义清楚**：不是「再审整个 diff」，而是「只判上轮分歧点 X 是否阻断 merge / 是否需 fix」——否则仍是盲循环。
-- **无硬轮次 cap，但要成本 guard**：guard 只触发 true-stall/reconciler，不直接 block/split。
-- 大 issue **decompose** 是单独刻意机制（如 consensus-rnd #403：epic→子设计 issue，gated），**不是**共识自动拆分；本重设计不引入自动 decompose。
+## Staging
+
+Each stage should go through the full `sshx` flow: thinking -> meta -> implementation -> review ->
+PR -> CI -> merge.
+
+- **Phase 1 — consensus engine**: add the meta-judge to `decide` (angles -> judge ->
+  reached|converge); replace `consensus_unresolved` with `consensus_converge` carrying
+  `narrowed_question` + bounded digest; add `round`, `convergence_question`, and `prior_digests` to
+  proposal schema; update consensus unit tests and conformance. Downstream remains temporarily
+  compatible by treating `consensus_converge` like the old unresolved event in `github-devloop`, so
+  behavior is unchanged during staging.
+- **Phase 2 — `github-devloop` convergence wiring**: `review_loop` / `loop` consume
+  `consensus_converge`, resend with `narrowed_question`, write converge-round markers, route true
+  stall to reconcile, add the reconciler department, and **remove `meta` split plus blind budget
+  rerun**.
+- **Phase 3 — cleanup**: remove dead code and old #31/#35 traces; update
+  `docs/dev/devloop-design.md` and related memory.
+
+## Risks and Constraints From the `sshx` Three-Angle Review
+
+- **Peer invisibility must be preserved**: the meta-judge must not feed full prior peer text to the
+  next round's angles; it may give only the narrowed question summary that it generated.
+- **64 KiB payload boundary**: `prior_round_digests` carries only verdict + short reply + digest.
+- **The PR-diff narrowed question must be precise**: it is not "review the whole diff again"; it is
+  "judge only whether prior disagreement point X blocks merge or requires a fix". Otherwise the
+  loop remains blind.
+- **No hard round cap, but keep a cost guard**: the guard triggers only true-stall reconciliation,
+  not direct block / split.
+- Large-issue **decomposition** is a separate intentional mechanism, such as `consensus-rnd` #403
+  epic -> child design issues, with gates. It is **not** automatic consensus splitting; this redesign
+  does not introduce automatic decomposition.
 
 ⟦AI:FKST⟧

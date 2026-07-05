@@ -117,7 +117,7 @@ Four consequences drive every decision below:
    namespace/table. This is level ④ capability-restriction. A conformance scan
    (`state_marker(issue,"merge-ready")` → CI-red) is level ① DETECT and is kept
    **only** as the migration backstop, shrinking to a structural guarantee as the
-   extraction completes. CLAUDE.md 铁律: a contract expressible as ②③④ must not
+   extraction completes. `CLAUDE.md` hard rule: a contract expressible as ②③④ must not
    stay at ① scan.
 4. **Decompose the god-package (SRP).** issue-lifecycle and PR-lifecycle have
    independent reasons to change; splitting corrects the over-merge and bounds blast
@@ -126,7 +126,7 @@ Four consequences drive every decision below:
    is **four** bounded contexts (§4); this spec implements **only the first ratchet**
    — extracting `github-devloop-pr` — because that is the desync root-cause path.
    intake and integration are real but independent seams, each its own later ratchet.
-   One migration changes one thing (behavior-preserving + 绝不大爆改).
+   One migration changes one thing: behavior-preserving, no big-bang rewrite.
 
 ## 4. Package topology
 
@@ -136,7 +136,7 @@ The sshx clustering triplet (§16) converged on four packages, each earning its
 boundary by an independent reason-to-change, executed as **three independent
 ratchets** so each migration changes one thing:
 
-| Package | departments | independent 变更原因 (the seam) | ratchet |
+| Package | departments | independent change reason (the seam) | ratchet |
 |---|---|---|---|
 | **`github-devloop`** (issue) | `consensus_result, loop, observe_issue, decompose, implement` | the managed-issue parent saga | residual parent |
 | **`github-devloop-pr`** | `open_pr, observe_pr, review_*, fix, merge` | PR comment stream = sole PR-phase authority (the desync class) | **R1 (this spec)** |
@@ -503,9 +503,9 @@ oracle, meta-judged; then **operator review (user-as-oracle)**.
 - **operator review (user-as-oracle)**: upgraded the partition from a conformance
   *scan* within one package to a **package boundary** (two packages). Rationale: the
   partition is expressible at level ④ capability-restriction (disjoint namespaces),
-  and CLAUDE.md 铁律 forbids leaving an expressible structural contract at level ①
+  and a `CLAUDE.md` hard rule forbids leaving an expressible structural contract at level ①
   scan; the move also decomposes a 30-department over-merged god-package along its
-  true SRP seam. Same `美 = 真理探测器` pattern the operator has caught before — the
+  true SRP seam. Same "beauty is a truth detector" pattern the operator has caught before — the
   AI optimized a proxy (the scan) when a structural solution (the boundary) was
   available.
 
@@ -515,7 +515,7 @@ structural's "full new sub-saga layer" vs. minimal/delete/oracle's "delete the
 duplication + smallest join" — resolves to: the two-package split **is** the
 structural invariant achieved with least machinery (the PR entity already owns a
 state machine via #7; reuse `std.saga.department`), satisfying BEAUTY GATE
-(删无可删 of the scan, illegal states unrepresentable) and structural integrity at
+(nothing left to delete from the scan, illegal states unrepresentable) and structural integrity at
 once.
 
 ### Round 2 — clustering triplet (how many packages, where the seams)

@@ -8,7 +8,7 @@ Builds on (read these first):
 
 ---
 
-## 1. Problem (实证)
+## 1. Problem (Evidence)
 
 The system programs **directly against concrete commands**. Business logic and the
 `gh`/`git` command bridge are tangled in the same files: a department that decides
@@ -17,8 +17,9 @@ The system programs **directly against concrete commands**. Business logic and t
 a branch name. CLAUDE.md already names the cure as doctrine and the code already
 violates it:
 
-> CLAUDE.md(边界模式固定): "外部系统接入优先用 Adapter，把 `gh`、`codex exec`、文件和网络
-> 形态转成包内稳定结构；副作用边界集中，业务函数保持可单测。"
+> `CLAUDE.md` boundary-pattern doctrine: external systems should be integrated through adapters that
+> turn `gh`, `codex exec`, files, and network shapes into stable in-package structures; side-effect
+> boundaries are centralized, and business functions stay unit-testable.
 
 **Census of the violation** (scan of `packages/`, 2026-06-15):
 
@@ -52,8 +53,9 @@ violates it:
    tests. This is the standing brittleness tracked as **#633** ("harness over-couples
    to exact gh-command counts"); #678's worktree fix already broke four tests this way.
 
-The user's north star for the whole repo: **"脚本可以用最简单的代码（没有重复代码）来表达
-业务逻辑，框架把公共部分做好做稳定。"** Business should read like *domain decisions*; the
+The user's north star for the whole repo: scripts should express business logic in the simplest code
+without duplication, while the framework makes the common parts solid and stable. Business should
+read like *domain decisions*; the
 "common, stable part" (the `gh`/`git` mechanics) belongs in one solid, shared place.
 
 ## 2. Goal / Non-goals
@@ -96,7 +98,7 @@ intent boundary instead of literal shell strings.
   std-shared-library  ──  the shelf + the doctrine (peer-require forbidden, std allowed)
         │                 (Tier S / Tier R; symlink vendoring; verified)
         ├── saga-harness  ── department CONTROL-FLOW shape:  std.department{done, act}
-        │                    "来了就做，做过就不做";  ①②③ oracle
+        │                    "handle arrivals, skip completed work";  ①②③ oracle
         └── ports-adapters ── EXTERNAL-WORLD boundary: neutral gh/git adapters,
    (THIS spec)               package write intents, package marker/CAS guards
 ```
@@ -326,7 +328,7 @@ The refactor is **behavior-preserving** only if it changes *how a command is bui
 parsed*, never *which path carries the effect*. Concretely:
 
 - **Reads** were already synchronous in-process; they stay synchronous. The S1 operation
-  wraps build+exec+parse. This realizes "回源 derive 真相" cleanly (the adapter fetches,
+  wraps build+exec+parse. This realizes "fetch from source to derive truth" cleanly (the adapter fetches,
   business decides) with no payload-staleness.
 - **GitHub mutations** that go through `github-proxy.v1` durable requests today still do
   — the executor calls S1 after S3 accepts the write. Reliable delivery, idempotent
@@ -628,7 +630,7 @@ must be amended from "write-class command multiset from `fkst.test.command_calls
 write-intents." Adapter contract tests may still use command calls locally, because
 command spelling is the product there.
 
-This directly serves "让问题都在测试解决": business tests become readable behavioral
+This directly serves the goal of making problems resolved in tests: business tests become readable behavioral
 assertions, the restart oracle remains generic, and command spelling is pinned only
 where command spelling is the product.
 
@@ -637,7 +639,7 @@ where command spelling is the product.
 `codex`, filesystem, network, and record-replay hardening can adopt the same adapter
 shape later; this plan emits no tasks for them.
 
-## 8. Conformance teeth (the "严格约束" — make the boundary permanent)
+## 8. Conformance Teeth (Strict Constraints: Make the Boundary Permanent)
 
 A new `scripts/check_repo.py` G-gate uses the same ratchet mechanism as the
 saga-harness allowlist, but it must be **context-aware**:

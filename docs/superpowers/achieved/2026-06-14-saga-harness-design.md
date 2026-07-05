@@ -1,19 +1,19 @@
-# Design: SAGA harness — force "来了就做，做过就不做" as the only writable shape
+# Design: SAGA Harness: Force "Handle Arrivals, Skip Completed Work" as the Only Writable Shape
 
 Status: proposal · Date: 2026-06-14 · Repo: fkst-packages
 Depends on: `2026-06-14-std-shared-library-design.md` (this harness lives in `std/saga.lua`).
 
 ---
 
-## 1. Problem (实证)
+## 1. Problem (Evidence)
 
 The system constrains queues and departments precisely to make complex things
 simple. The core contract is **at-least-once delivery + idempotent processing**:
-"消息来了就处理，处理过了就不处理". The engine already guarantees "delivered ≥1
-time"; the package must guarantee **idempotency**.
+"handle the message when it arrives; do not handle it again after it is already processed". The
+engine already guarantees "delivered ≥1 time"; the package must guarantee **idempotency**.
 
-Empirically, **almost every dogfood bug is the same bug: the "处理过了" predicate
-is wrong.** Classifying ~130 recent dogfood fixes: `never 6 · stall 5 · liveness
+Empirically, **almost every dogfood bug is the same bug: the "already processed" predicate is
+wrong.** Classifying ~130 recent dogfood fixes: `never 6 · stall 5 · liveness
 5 · restart 4+1 · starvation 3 · resync 3 · unbounded 1 · park 1 · forever 1` —
 overwhelmingly *liveness* ("the good thing never happened"), and 215/258 fix
 touches landed in `github-devloop`. **None** were engine-delivery defects; the
@@ -36,7 +36,7 @@ directly, **bypassing the router**, and runs **one clean pass**. It cannot
 reproduce the delivery dynamics where the bugs live (duplication, restart,
 dedup-collision, multi-round, budget). The error-handling net is blind too,
 because a liveness violation ("good thing never happened") produces **no error
-fact** (CLAUDE.md 活性⟂安全).
+fact** (the `CLAUDE.md` liveness-versus-safety doctrine).
 
 ## 2. The shape already exists in embryo (build, don't invent)
 
@@ -48,10 +48,10 @@ level**:
 ```lua
 -- core/saga.lua (existing)
 function M.effect_once(opts)            -- opts = { effect_id, completion_check, perform }
-  if opts.completion_check() then       -- completion_check == "done"  ("做过就不做")
+  if opts.completion_check() then       -- completion_check == "done"; skip completed work
     return { action = "skip" }
   end
-  return { action = "perform", result = opts.perform() }  -- perform == "act" ("来了就做")
+  return { action = "perform", result = opts.perform() }  -- perform == "act"; handle arrivals
 end
 ```
 
@@ -64,7 +64,7 @@ promotion to a class-level primitive is justified, not premature.
 
 ## 3. Goal / Non-goals
 
-**Goal.** Make "来了就做，做过就不做" the **only writable department shape**, with
+**Goal.** Make "handle arrivals, skip completed work" the **only writable department shape**, with
 the failure modes above caught by a **mechanically-generated, mandatory gate** an
 AI (Claude / codex / the autonomous devloop) must pass to merge.
 
@@ -77,7 +77,7 @@ AI (Claude / codex / the autonomous devloop) must pass to merge.
 
 ## 4. The three teeth
 
-### Tooth 1 — Forced shape (必须这么写 / 禁止其他写法)
+### Tooth 1 — Forced Shape (Required Form / Other Forms Forbidden)
 
 `std/saga.lua` exposes the **only** legal way to define a department. The author
 fills two holes; the framework owns control flow:
@@ -87,10 +87,10 @@ fills two holes; the framework owns control flow:
 return std.department {
   consumes = { "devloop_ready" },
 
-  -- "做过就不做": durable, re-derived from the fact source (git/gh/marker). Pure, read-only.
+  -- Skip completed work: durable, re-derived from the fact source (git/gh/marker). Pure, read-only.
   done = function(event) return <work for this event is an established fact?> end,
 
-  -- "来了就做": runs only when not done. Effects only via primitives (raise/spawn/gh-write/marker-write).
+  -- Handle arrivals: runs only when not done. Effects only via primitives (raise/spawn/gh-write/marker-write).
   act  = function(event) ... end,
 
   -- optional: spec fields the department still owns
@@ -125,7 +125,7 @@ invariant to be framework-derived from `consumes`).
 > `done = "this entity already in target state?"`, `act = reconcile`. #582's class
 > is absorbed by the shape itself.
 
-### Tooth 2 — Forced property (必须过的测试，引擎/框架自动生成)
+### Tooth 2 — Forced Property (Mandatory, Engine / Framework Generated)
 
 Once the shape is fixed, the only thing left to get wrong is the `done`
 predicate. So `std/saga.lua` **auto-generates** this test per department from
@@ -139,7 +139,7 @@ predicate. So `std/saga.lua` **auto-generates** this test per department from
 `done` missing → ② red; `done` not durable → ② red; `done` too wide → ③ red;
 routing wrong → ① red.
 
-**Idempotency 判等 (the precise oracle).** "External mutating effect" = the set of
+**Idempotency equality (the precise oracle).** "External mutating effect" = the set of
 *write-class* external commands + marker writes recorded by
 `fkst.test.command_calls`. Read-class commands (`gh issue view`, `gh pr diff`)
 may repeat freely; write-class (`gh issue comment`, `gh pr merge`, label writes,
@@ -151,12 +151,12 @@ has no cross-call memory, so calling `run_department` twice *is* a clean restart
 replay — **except** the second call must see the *external truth the first call
 wrote*. `std` therefore ships a **stateful external-truth fake**: a small
 in-memory model of gh/marker state that records delivery 1's writes and serves
-them as delivery 2's reads. This is the "外部真相模型，写一次共享" — it lives in
+them as delivery 2's reads. This is the "external truth model, write once and share" fixture. It lives in
 `std` (shared test infra), not per test. ③'s "near-key new event" is generated
 per queue from a queue-declared "what counts as new" key projection (e.g. loop
 round / head sha), so the probe is mechanical, not hand-written per department.
 
-### Tooth 3 — Forced gate (强制必须这样)
+### Tooth 3 — Forced Gate (Mandatory Form)
 
 - Teeth 1 + 2 become **required** conformance results (the engine's
   `fkst.test.report.v1` already drives the G5 file-coverage gate; these become
@@ -169,7 +169,7 @@ round / head sha), so the probe is mechanical, not hand-written per department.
 
 ## 5. Migration — strangler fig + ratchet (gradual, non-breaking, self-terminating)
 
-Reconciles "慢慢迁、不破坏现有代码" with the no-compat doctrine: the dual-shape
+Reconciles "migrate gradually without breaking existing code" with the no-compat doctrine: the dual-shape
 window is **finite and self-deleting**, not a permanent compat layer.
 
 - **Phase 0 — define in `std` (additive, zero breakage).** Add
@@ -193,7 +193,7 @@ window is **finite and self-deleting**, not a permanent compat layer.
   them. End state: only `std.department` exists. (Phase 3's engine-side loader
   rejection + the dynamic-delivery property tests are the substrate's job — see §8.)
 
-## 6. Layering (per 分层归属 doctrine)
+## 6. Layering (per the Layering Ownership Doctrine)
 
 | Thing | Home | Phase |
 |---|---|---|
