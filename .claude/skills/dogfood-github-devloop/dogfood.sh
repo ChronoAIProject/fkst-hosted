@@ -98,97 +98,8 @@ cfg() {
 
 derive_devloop_pkgs_from_workspace() { # $1 name
   local name="$1" output
-  output="$(python3 - "$name" "$HOST" "$PKGSRC" <<'PY'
-import sys
-import tomllib
-from pathlib import Path
-
-
-def fail(message: str) -> None:
-    print(f"error: {message}")
-    raise SystemExit(1)
-
-
-def table_array(data: dict[str, object], key: str) -> list[dict[str, object]]:
-    value = data.get(key, [])
-    if isinstance(value, dict):
-        value = [value]
-    if not isinstance(value, list):
-        fail(f"fkst.workspace.toml {key} must be a table array")
-    rows: list[dict[str, object]] = []
-    for item in value:
-        if not isinstance(item, dict):
-            fail(f"fkst.workspace.toml {key} entries must be tables")
-        rows.append(item)
-    return rows
-
-
-def string_list(value: object, field: str) -> list[str]:
-    if not isinstance(value, list):
-        fail(f"fkst.workspace.toml {field} must be a string array")
-    out: list[str] = []
-    for item in value:
-        if not isinstance(item, str) or not item:
-            fail(f"fkst.workspace.toml {field} must contain only non-empty strings")
-        out.append(item)
-    return out
-
-
-def reject_duplicates(values: list[str], field: str) -> None:
-    seen: set[str] = set()
-    duplicates: list[str] = []
-    for value in values:
-        if value in seen and value not in duplicates:
-            duplicates.append(value)
-        seen.add(value)
-    if duplicates:
-        fail(f"{field} contains duplicate package names: {' '.join(duplicates)}")
-
-
-name = sys.argv[1]
-host = Path(sys.argv[2])
-pkgsrc = Path(sys.argv[3])
-
-workspace_path = host / "fkst.workspace.toml"
-if not workspace_path.is_file():
-    fail(f"{name}: target fkst.workspace.toml is required for dogfood platform package selection: {workspace_path}")
-try:
-    workspace = tomllib.loads(workspace_path.read_text(encoding="utf-8"))
-except tomllib.TOMLDecodeError as exc:
-    fail(f"{name}: invalid target fkst.workspace.toml: {workspace_path}: {exc}")
-if not isinstance(workspace, dict):
-    fail(f"{name}: target fkst.workspace.toml must be a TOML table")
-
-if host.resolve() == pkgsrc.resolve():
-    packages: list[str] = []
-    for package in table_array(workspace, "package"):
-        name_value = package.get("name")
-        source = package.get("source", "workspace")
-        if isinstance(name_value, str) and source == "workspace":
-            packages.append(name_value)
-    reject_duplicates(packages, "package.name")
-    if not packages:
-        fail(f"{name}: self-host fkst.workspace.toml must declare dogfood platform packages as [[package]] entries")
-    print(" ".join(packages))
-else:
-    matched: list[list[str]] = []
-    for source in table_array(workspace, "external_sources"):
-        if source.get("id") == "fkst-packages-platform":
-            declared = string_list(
-                source.get("packages", []),
-                "external_sources(id=fkst-packages-platform).packages",
-            )
-            reject_duplicates(declared, "external_sources(id=fkst-packages-platform).packages")
-            matched.append(declared)
-    if not matched:
-        fail(f"{name}: target fkst.workspace.toml must declare external_sources(id=fkst-packages-platform)")
-    if len(matched) > 1:
-        fail(f"{name}: target fkst.workspace.toml declares external_sources(id=fkst-packages-platform) more than once")
-    if not matched[0]:
-        fail(f"{name}: external_sources(id=fkst-packages-platform).packages must not be empty")
-    print(" ".join(matched[0]))
-PY
-)" || { printf '%s\n' "$output" >&2; return 1; }
+  output="$(python3 "$_self_dir/workspace_manifest.py" platform-packages "$name" "$HOST" "$PKGSRC")" \
+    || { printf '%s\n' "$output" >&2; return 1; }
   DEVLOOP_PKGS="$output"
 }
 
@@ -308,6 +219,15 @@ ensure_run_checkout() { # $1 checkout dir, $2 org/repo slug
     || { echo "    ERROR: failed to clone $slug into $dir"; return 1; }
 }
 
+restore_generated_workspace_scratch() { # $1 worktree dir
+  local wt="$1"
+  [ -f "$wt/fkst.workspace.toml" ] || return 0
+  git -C "$wt" diff --quiet -- fkst.workspace.toml 2>/dev/null && return 0
+  python3 "$_self_dir/workspace_manifest.py" is-generated-scratch "$wt" "$DEVLOOP_PKGS" >/dev/null || return 0
+  echo "    restoring generated fkst.workspace.toml scratch before branch sync"
+  git -C "$wt" checkout -q -- fkst.workspace.toml 2>/dev/null
+}
+
 sync_to_run_branch() { # $1 worktree dir
   git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || { echo "  ! $1 is not a git worktree"; return 1; }
   git -C "$1" fetch origin "$INTEGRATION_BRANCH" -q 2>/dev/null
@@ -356,8 +276,10 @@ ensure_integration_caught_up() { # $1 checkout dir
   local behind; behind=$(git -C "$wt" rev-list --count "origin/$INTEGRATION_BRANCH..origin/$UPSTREAM_BRANCH" 2>/dev/null || echo 0)
   [ "${behind:-0}" -eq 0 ] && return 0
   echo "  $INTEGRATION_BRANCH is $behind behind $UPSTREAM_BRANCH in $(basename "$wt") -> merging $UPSTREAM_BRANCH forward"
+  restore_generated_workspace_scratch "$wt"
   git -C "$wt" checkout -q -B "$INTEGRATION_BRANCH" "origin/$INTEGRATION_BRANCH" 2>/dev/null \
     || { echo "    WARN: could not checkout $INTEGRATION_BRANCH — leaving for sync_scan"; return 0; }
+  restore_generated_workspace_scratch "$wt"
   if git -C "$wt" merge --no-edit "origin/$UPSTREAM_BRANCH" >/dev/null 2>&1; then
     if git -C "$wt" push origin "HEAD:$INTEGRATION_BRANCH" >/dev/null 2>&1; then
       echo "    merged + pushed: $INTEGRATION_BRANCH -> $(git -C "$wt" rev-parse --short HEAD)"
@@ -490,6 +412,7 @@ restart_one() {
   echo "[$1] sync to origin/$INTEGRATION_BRANCH (run branch; rollup target stays $UPSTREAM_BRANCH):"
   ensure_run_checkout "$PKGSRC" "$GH_ORG/fkst-packages"              # re-clone if DOGFOOD_ROOT cleanup rotted the checkout
   [ "$HOST" != "$PKGSRC" ] && ensure_run_checkout "$HOST" "$REPO"
+  derive_devloop_pkgs_from_workspace "$1" || return 1
   ensure_integration_caught_up "$PKGSRC"                              # keep run branch (integration) >= dev so operator fixes deploy
   [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
   sync_to_run_branch "$PKGSRC"
@@ -643,6 +566,7 @@ cmd_sync() {
     cfg "$n" || continue
     ensure_run_checkout "$PKGSRC" "$GH_ORG/fkst-packages"              # re-clone if DOGFOOD_ROOT cleanup rotted the checkout (else _proc_stale misreads "skew" and fixes never deploy)
     [ "$HOST" != "$PKGSRC" ] && ensure_run_checkout "$HOST" "$REPO"
+    derive_devloop_pkgs_from_workspace "$n" || { echo "  $n: config-error"; failed=1; continue; }
     ensure_integration_caught_up "$PKGSRC"                              # keep run branch (integration) >= dev so operator fixes deploy
     [ "$HOST" != "$PKGSRC" ] && ensure_integration_caught_up "$HOST"
     st=$(_proc_stale "$n")
