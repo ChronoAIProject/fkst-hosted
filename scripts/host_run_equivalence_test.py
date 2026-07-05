@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import textwrap
 import time
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -17,22 +18,41 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_PATH = REPO_ROOT / "scripts" / "host_run_equivalence_golden.json"
 TARGETS = ("packages", "substrate", "website")
-PLATFORM_PACKAGES_PATH = REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.platform-packages"
-PLATFORM_PACKAGES = " ".join(
-    line.split("#", 1)[0].strip()
-    for line in PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8").splitlines()
-    if line.split("#", 1)[0].strip()
-)
-WEBSITE_PLATFORM_PACKAGES_PATH = (
-    REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.platform-packages.website"
-)
 WEBSITE_PLATFORM_PACKAGES = " ".join(
-    line.split("#", 1)[0].strip()
-    for line in WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8").splitlines()
-    if line.split("#", 1)[0].strip()
+    (
+        "github-devloop",
+        "github-devloop-pr",
+        "github-devloop-integration",
+        "github-devloop-intake",
+        "github-devloop-workflow",
+        "github-devloop-decompose",
+        "github-devloop-ops",
+        "github-proxy",
+        "consensus",
+        "github-external-pr-intake",
+        "github-ratchet-migration-slicer",
+        "idle-detector",
+    )
 )
 STALE_WEBSITE_PACKAGES = "github-devloop github-devloop-pr github-devloop-integration"
 FIXED_TS = "1760000000"
+
+
+def self_workspace_platform_packages() -> str:
+    workspace = tomllib.loads((REPO_ROOT / "fkst.workspace.toml").read_text(encoding="utf-8"))
+    packages: list[str] = []
+    for package in workspace.get("package", []):
+        if isinstance(package, dict) and package.get("source", "workspace") == "workspace":
+            name = package.get("name")
+            if isinstance(name, str) and name:
+                packages.append(name)
+    if not packages:
+        raise AssertionError("fkst.workspace.toml must declare self-host dogfood platform packages")
+    return " ".join(packages)
+
+
+PLATFORM_PACKAGES = self_workspace_platform_packages()
+ALL_PLATFORM_PACKAGES = sorted(set(PLATFORM_PACKAGES.split()) | set(WEBSITE_PLATFORM_PACKAGES.split()))
 
 
 def write_executable(path: Path, content: str) -> None:
@@ -125,8 +145,6 @@ class DogfoodLayout:
         self,
         root: Path,
         dogfood_script: str,
-        platform_package_list: str,
-        website_platform_package_list: str,
         *,
         stale_website_manifest: bool = False,
     ) -> None:
@@ -146,11 +164,6 @@ class DogfoodLayout:
         make_fake_tools(self.bin_dir)
         make_fake_bin(self.fake_bin)
         write_executable(self.script, dogfood_script)
-        (self.skill_dir / "dogfood.platform-packages").write_text(platform_package_list, encoding="utf-8")
-        (self.skill_dir / "dogfood.platform-packages.website").write_text(
-            website_platform_package_list,
-            encoding="utf-8",
-        )
         self.stale_website_manifest = stale_website_manifest
         self.platform_revs: dict[Path, str] = {}
         self._populate_repos()
@@ -171,7 +184,7 @@ class DogfoodLayout:
             self.dogfood_root / "website-dogfood" / "pkgs",
         )
         for platform in platform_roots:
-            for package in PLATFORM_PACKAGES.split():
+            for package in ALL_PLATFORM_PACKAGES:
                 (platform / "packages" / package).mkdir(parents=True, exist_ok=True)
                 (platform / "packages" / package / "fkst.toml").write_text(
                     f'kind = "package"\nname = "{package}"\n',
@@ -399,8 +412,6 @@ class HostRunEquivalenceTest(unittest.TestCase):
             new_layout = DogfoodLayout(
                 tmp_root / "new",
                 new_script,
-                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
-                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
             )
 
             for target in TARGETS:
@@ -430,7 +441,7 @@ class HostRunEquivalenceTest(unittest.TestCase):
                     if target in hydrated_roots:
                         self.assertFalse(hydrated_roots[target].exists())
 
-    def test_website_start_syncs_stale_manifest_before_supervise(self) -> None:
+    def test_website_start_uses_manifest_without_rewriting_it(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
             encoding="utf-8"
         )
@@ -438,8 +449,6 @@ class HostRunEquivalenceTest(unittest.TestCase):
             layout = DogfoodLayout(
                 Path(tmp) / "stale-website",
                 new_script,
-                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
-                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
                 stale_website_manifest=True,
             )
 
@@ -449,11 +458,36 @@ class HostRunEquivalenceTest(unittest.TestCase):
             self.assertTrue(layout.capture.exists())
             workspace = layout.dogfood_root / "website-dogfood" / "site" / "fkst.workspace.toml"
             self.assertIn(
-                f"packages = {json.dumps(WEBSITE_PLATFORM_PACKAGES.split())}",
+                f"packages = {json.dumps(STALE_WEBSITE_PACKAGES.split())}",
                 workspace.read_text(encoding="utf-8"),
             )
             self.assertNotIn("fkst-substrate-ref-maintainer", workspace.read_text(encoding="utf-8"))
             self.assertNotIn("integration-coverage-producer", workspace.read_text(encoding="utf-8"))
+            capture = json.loads(layout.capture.read_text(encoding="utf-8"))
+            argv = " ".join(capture["argv"])
+            self.assertNotIn("github-devloop-intake", argv)
+            self.assertNotIn("github-ratchet-migration-slicer", argv)
+
+    def test_non_self_host_without_platform_source_fails_before_launch(self) -> None:
+        new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
+            encoding="utf-8"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            layout = DogfoodLayout(
+                Path(tmp) / "missing-platform",
+                new_script,
+            )
+            workspace = layout.dogfood_root / "website-dogfood" / "site" / "fkst.workspace.toml"
+            workspace.write_text('[workspace]\nunits = [".fkst/local-packages/*"]\n', encoding="utf-8")
+
+            result = layout.run_start("website")
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "target fkst.workspace.toml must declare external_sources(id=fkst-packages-platform)",
+                result.stderr + result.stdout,
+            )
+            self.assertFalse(layout.capture.exists())
 
     def test_dogfood_start_fails_when_supervise_exits_before_readiness(self) -> None:
         new_script = (REPO_ROOT / ".claude" / "skills" / "dogfood-github-devloop" / "dogfood.sh").read_text(
@@ -463,8 +497,6 @@ class HostRunEquivalenceTest(unittest.TestCase):
             layout = DogfoodLayout(
                 Path(tmp) / "failed",
                 new_script,
-                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
-                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
             )
             write_executable(
                 layout.fake_bin,
@@ -495,8 +527,6 @@ class HostRunEquivalenceTest(unittest.TestCase):
             layout = DogfoodLayout(
                 Path(tmp) / "sync-failed",
                 new_script,
-                PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
-                WEBSITE_PLATFORM_PACKAGES_PATH.read_text(encoding="utf-8"),
             )
             (layout.dogfood_root / "stable-durable-packages").mkdir(parents=True, exist_ok=True)
             (layout.dogfood_root / "stable-durable-packages" / ".fkst-supervise.pid").write_text(
