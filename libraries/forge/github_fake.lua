@@ -1,6 +1,8 @@
 local M = {}
 local issue = require("forge.github.issue")
 local argv_render = require("forge.argv")
+local forge_strings = require("forge.strings")
+local github_view = require("forge.github_view")
 
 local function copy(value)
   if type(value) ~= "table" then
@@ -42,6 +44,45 @@ function M.new(model)
   require("forge.github.entities").install(handle)
   require("forge.github.comments").install(handle)
   require("forge.github.workflows").install(handle)
+  function handle.issue_list_open_assigned(repo, assignee, timeout)
+    table.insert(model.writes, {
+      kind = "issue_list_open_assigned",
+      repo = tostring(repo),
+      assignee = tostring(assignee),
+      timeout = timeout,
+    })
+    local normalized_assignee = forge_strings.strip_bot_login_suffix(assignee)
+    local rows = {}
+    for ref, fixture in pairs(model.issues or {}) do
+      local issue_repo = fixture.repo or tostring(ref):match("^([^#]+)#issue/%d+$")
+      local state = tostring(fixture.state or "OPEN"):upper()
+      if issue_repo == tostring(repo) and state == "OPEN" then
+        for _, login in ipairs(fixture.assignees or {}) do
+          local candidate = type(login) == "table" and login.login or login
+          if forge_strings.strip_bot_login_suffix(candidate) == normalized_assignee then
+            table.insert(rows, fixture)
+            break
+          end
+        end
+      end
+    end
+    table.sort(rows, function(left, right)
+      return tonumber(left.number or 0) < tonumber(right.number or 0)
+    end)
+    local rendered = {}
+    for _, item in ipairs(rows) do
+      table.insert(rendered, "{"
+        .. '"number":' .. github_view.json_value(item.number)
+        .. ',"title":' .. github_view.json_value(item.title or "")
+        .. ',"assignees":' .. github_view.assignees_json(item.assignees)
+        .. "}")
+    end
+    return {
+      stdout = "[" .. table.concat(rendered, ",") .. "]",
+      stderr = "",
+      exit_code = 0,
+    }
+  end
   function handle.issue_view(repo, issue_number, fields, timeout)
     return handle._exec({
       "gh",

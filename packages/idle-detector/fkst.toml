@@ -6,7 +6,7 @@ persistence_class = "stateless_adapter"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "testkit"]
+libraries = ["contract", "workflow", "testkit", "forge"]
 
 # Package-owned conformance: these rules travel WITH this package. The engine
 # (fkst-framework conformance) runs them whenever idle-detector is an active
