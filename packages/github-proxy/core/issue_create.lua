@@ -96,17 +96,22 @@ function M.issue_created_marker(dedup_key, issue_number)
   if #issue > max_issue_number_len then
     issue = issue:sub(1, max_issue_number_len)
   end
-  return '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. tostring(dedup_key)
+  local marker = '<!-- fkst:github-proxy:issue-created:v1 dedup="' .. tostring(dedup_key)
     .. '" issue="' .. issue
     .. '" -->'
+  if issue:match("^%d+$") ~= nil then
+    return "Opened sub-issue #" .. issue .. " for this task.\n\n" .. marker
+  end
+  return "Opened a sub-issue for this task.\n\n" .. marker
 end
 
 function M.issue_create_intent_marker(dedup_key)
   if not is_bounded_marker_value(dedup_key, max_dedup_len) then
     error("github-proxy: issue-create-intent-key-invalid: invalid issue-create intent dedup_key")
   end
-  return '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. tostring(dedup_key)
+  local marker = '<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. tostring(dedup_key)
     .. '" -->'
+  return "Preparing to open a sub-issue for this task.\n\n" .. marker
 end
 
 function M.issue_create_lock_key(dedup_key)
@@ -318,6 +323,21 @@ local function write_parent_created_marker(parent, dedup_key, issue_number)
   M.invalidate_entity_after_write(parent.repo, parent.kind, parent.number)
 end
 
+local function maybe_add_parent_sub_issue(payload, issue_number)
+  if payload.parent == nil then
+    return
+  end
+  if not shared.is_positive_integer(payload.parent) then
+    error("github-proxy: issue-create-parent-invalid: issue-create parent sub-issue target is invalid")
+  end
+  if not shared.is_positive_integer(issue_number) then
+    error("github-proxy: issue-create-child-missing: issue-create child issue number missing for sub-issue link")
+  end
+  M.gh_exec(function(timeout)
+    return M.github().issue_add_sub_issue(payload.repo, payload.parent, issue_number, timeout or 30)
+  end, 30, "GitHub add native sub-issue")
+end
+
 function M.validate_issue_create_payload(payload)
   if type(payload) ~= "table" then
     return false
@@ -361,6 +381,9 @@ function M.validate_issue_create_payload(payload)
         return false
       end
     end
+  end
+  if payload.parent ~= nil and not shared.is_positive_integer(payload.parent) then
+    return false
   end
   if payload.post_create_blocked_by ~= nil then
     local post = payload.post_create_blocked_by
@@ -418,6 +441,9 @@ function M.write_issue_create_request(payload)
   })
   if mode ~= "real" then
     log.info("github-proxy dry-run: would create issue in " .. tostring(repo))
+    if payload.parent ~= nil then
+      log.info("github-proxy dry-run: would link created issue as native sub-issue of #" .. tostring(payload.parent))
+    end
     return
   end
 
@@ -430,6 +456,7 @@ function M.write_issue_create_request(payload)
       local existing_created_issue = M.trusted_issue_created_number(parent_comments, payload.dedup_key, bot_login)
       if existing_created_issue ~= nil then
         log.info("github-proxy: skip-idempotent issue-create parent marker already present")
+        maybe_add_parent_sub_issue(payload, existing_created_issue)
         maybe_raise_post_create_blocked_by(payload, existing_created_issue)
         return
       end
@@ -451,6 +478,7 @@ function M.write_issue_create_request(payload)
       if parent ~= nil then
         write_parent_created_marker(parent, payload.dedup_key, searched_issue_number)
       end
+      maybe_add_parent_sub_issue(payload, searched_issue_number)
       maybe_raise_post_create_blocked_by(payload, searched_issue_number)
       return
     end
@@ -480,6 +508,7 @@ function M.write_issue_create_request(payload)
       if parent ~= nil then
         write_parent_created_marker(parent, payload.dedup_key, issue_number)
       end
+      maybe_add_parent_sub_issue(payload, issue_number)
       maybe_raise_post_create_blocked_by(payload, issue_number)
       cache_set(once_key, "1")
     end

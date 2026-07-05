@@ -1,0 +1,19 @@
+{
+  "schema": "fkst.package-topology-policy-slots.v1",
+  "policy_slots": [
+    {
+      "name": "intake-policy",
+      "consumer_queue": "github-devloop-intake.devloop_intake_candidate",
+      "implementations": [
+        {
+          "package": "github-devloop-intake-default",
+          "topology": "default"
+        },
+        {
+          "package": "github-devloop-workflow",
+          "topology": "workflow"
+        }
+      ]
+    }
+  ]
+}

@@ -63,6 +63,7 @@ class LibraryDependencyModelGuardTest(unittest.TestCase):
             or [
                 "github-devloop",
                 "github-devloop-decompose",
+                "github-devloop-workflow",
                 "github-devloop-intake-default",
                 "github-devloop-intake",
                 "github-devloop-integration",

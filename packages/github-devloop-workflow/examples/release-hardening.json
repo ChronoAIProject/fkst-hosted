@@ -1,0 +1,29 @@
+{
+  "schema": "fkst.workflow.v1",
+  "id": "release-hardening",
+  "version": "1",
+  "summary": "Harden a release: API surface first, then docs generated from the merged API change.",
+  "applies_when": "The issue asks to harden or ship a release spanning API changes and documentation.",
+  "selector": {
+    "labels_any": ["release"],
+    "title_contains_any": ["harden", "release"]
+  },
+  "steps": [
+    {
+      "id": "api",
+      "title": "Harden the release API surface",
+      "content": {
+        "kind": "static",
+        "intent": "Audit and harden the public API surface for the release: validate inputs, tighten error handling, and add the missing tests for the changed endpoints."
+      }
+    },
+    {
+      "id": "docs",
+      "title": "Update docs for the hardened API",
+      "content": {
+        "kind": "generated",
+        "generator": "Read the merged PR from the previous step (its diff and the backing issue) and produce a docs-update issue covering exactly the API changes that landed: the endpoints, parameters, and error semantics that changed. Do not restate unchanged API."
+      }
+    }
+  ]
+}

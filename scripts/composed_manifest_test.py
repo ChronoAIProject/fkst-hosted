@@ -233,5 +233,85 @@ class ComposedManifestTest(unittest.TestCase):
             h.close()
 
 
+class ComposedConformancePolicyTopologyTest(unittest.TestCase):
+    def run_helper(self, body: str, bin_path: str = "/bin/echo") -> subprocess.CompletedProcess[str]:
+        env = os.environ.copy()
+        env["BIN"] = bin_path
+        return subprocess.run(
+            ["/bin/bash", "-c", body],
+            cwd=REPO_ROOT,
+            env=env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def test_csv_contains_matches_exact_items(self) -> None:
+        result = self.run_helper(
+            textwrap.dedent(
+                """\
+                set -euo pipefail
+                source scripts/composed_conformance.sh
+                csv_contains 'github-devloop-workflow,other' github-devloop-workflow && echo yes
+                if csv_contains 'github-devloop-workflow-extra' github-devloop-workflow; then
+                  echo bad
+                else
+                  echo no
+                fi
+                """
+            )
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["yes", "no"])
+
+    def test_topology_manifest_rows_are_default_and_workflow(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                "-B",
+                "scripts/check_repo_intake_routing.py",
+                "--topology-rows",
+                str(REPO_ROOT),
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "default\tgithub-devloop-workflow",
+                "workflow\tgithub-devloop-intake-default",
+            ],
+        )
+
+    def test_topology_assertion_rejects_loading_both_intake_policies(self) -> None:
+        result = subprocess.run(
+            [
+                "python3",
+                "-B",
+                "scripts/check_repo_intake_routing.py",
+                "--assert-topology",
+                str(REPO_ROOT),
+                "--packages",
+                "github-devloop-intake-default",
+                "github-devloop-workflow",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("policy slot 'intake-policy'", result.stdout)
+        self.assertIn("github-devloop-intake-default", result.stdout)
+        self.assertIn("github-devloop-workflow", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

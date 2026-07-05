@@ -136,6 +136,16 @@ local function gh_issue_add_sub_issue_argv(repo, parent_issue_number, sub_issue_
   }
 end
 
+local function gh_issue_sub_issues_argv(repo, parent_issue_number)
+  return {
+    "gh",
+    "api",
+    "--paginate",
+    "--slurp",
+    "repos/" .. tostring(repo) .. "/issues/" .. tostring(parent_issue_number) .. "/sub_issues?per_page=100",
+  }
+end
+
 local function assignee_logins(assignees)
   local logins = {}
   for _, assignee in ipairs(assignees or {}) do
@@ -209,6 +219,61 @@ local function issue_database_id(stdout, context)
     error("forge.github: " .. tostring(context) .. " response is missing issue id")
   end
   return id
+end
+
+local function maybe_duplicate_sub_issue_error(err)
+  local result = type(err) == "table" and err.result or nil
+  local stderr = type(result) == "table" and tostring(result.stderr or ""):lower() or ""
+  if stderr == "" then
+    return false
+  end
+  local mentions_sub_issue = stderr:find("sub%-issue", 1, false) ~= nil
+    or stderr:find("sub issue", 1, true) ~= nil
+    or stderr:find("sub_issue", 1, true) ~= nil
+  if not mentions_sub_issue then
+    return false
+  end
+  if stderr:find("422", 1, true) == nil and stderr:find("validation failed", 1, true) == nil then
+    return false
+  end
+  if stderr:find("another parent", 1, true) ~= nil
+    or stderr:find("different parent", 1, true) ~= nil
+    or stderr:find("another object", 1, true) ~= nil then
+    return false
+  end
+  return stderr:find("already linked", 1, true) ~= nil
+    or stderr:find("already a sub%-issue", 1, false) ~= nil
+    or stderr:find("already a sub issue", 1, true) ~= nil
+    or stderr:find("already exists", 1, true) ~= nil
+    or stderr:find("duplicate", 1, true) ~= nil
+end
+
+local function append_sub_issue_nodes(nodes, value)
+  if type(value) ~= "table" then
+    return
+  end
+  if value.id ~= nil or value.node_id ~= nil or value.number ~= nil then
+    table.insert(nodes, value)
+  end
+  for _, child in ipairs(value) do
+    append_sub_issue_nodes(nodes, child)
+  end
+end
+
+local function parent_has_sub_issue_id(stdout, child_id)
+  local ok, decoded = pcall(json.decode, stdout or "")
+  if not ok then
+    return false
+  end
+  local nodes = {}
+  append_sub_issue_nodes(nodes, decoded)
+  local expected = tostring(child_id)
+  for _, node in ipairs(nodes) do
+    if tostring(node.id or "") == expected then
+      return true
+    end
+  end
+  return false
 end
 
 local function comments_json(comments)
@@ -377,11 +442,26 @@ function M.install(handle)
 
   function handle.issue_add_sub_issue(repo, parent_issue_number, sub_issue_number, timeout)
     local child = handle._exec(gh_issue_rest_argv(repo, sub_issue_number), timeout, "gh issue REST view")
-    return handle._exec(
-      gh_issue_add_sub_issue_argv(repo, parent_issue_number, issue_database_id(child.stdout, "sub-issue")),
-      timeout,
-      "gh issue add sub-issue"
-    )
+    local child_id = issue_database_id(child.stdout, "sub-issue")
+    local ok, result = pcall(function()
+      return handle._exec(
+        gh_issue_add_sub_issue_argv(repo, parent_issue_number, child_id),
+        timeout,
+        "gh issue add sub-issue"
+      )
+    end)
+    if ok then
+      return result
+    end
+    if maybe_duplicate_sub_issue_error(result) then
+      local parent_ok, parent = pcall(function()
+        return handle._exec(gh_issue_sub_issues_argv(repo, parent_issue_number), timeout, "gh issue list sub-issues")
+      end)
+      if parent_ok and parent_has_sub_issue_id(parent.stdout, child_id) then
+        return { stdout = "", stderr = result.result and result.result.stderr or "", exit_code = 0, idempotent = true }
+      end
+    end
+    error(result)
   end
 
   function handle.entity_updated_at(repo, kind, number, timeout)

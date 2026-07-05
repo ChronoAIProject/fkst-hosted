@@ -80,6 +80,36 @@ local function mock_issue_create()
   })
 end
 
+local function mock_child_issue_rest_view(issue_number, child_id)
+  t.mock_command("gh api repos/owner/x/issues/" .. tostring(issue_number or 99), {
+    stdout = '{"id":' .. tostring(child_id or 987654321) .. ',"number":' .. tostring(issue_number or 99) .. "}\n",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function mock_issue_add_sub_issue(parent_number, child_id, exit_code, stderr)
+  t.mock_command(
+    "gh api --method POST repos/owner/x/issues/" .. tostring(parent_number or 42) .. "/sub_issues -F sub_issue_id=" .. tostring(child_id or 987654321),
+    {
+      stdout = "",
+      stderr = stderr or "",
+      exit_code = exit_code or 0,
+    }
+  )
+end
+
+local function mock_parent_sub_issues(parent_number, child_id)
+  t.mock_command(
+    "gh api --paginate --slurp repos/owner/x/issues/" .. tostring(parent_number or 42) .. "/sub_issues?per_page=100",
+    {
+      stdout = '[[{"id":' .. tostring(child_id or 987654321) .. ',"number":99}]]\n',
+      stderr = "",
+      exit_code = 0,
+    }
+  )
+end
+
 local function mock_parent_pr_comments(comments)
   h.mock_pr_comment_view(comments or {})
 end
@@ -111,6 +141,31 @@ local function first_call_index(needle)
 end
 
 return {
+  test_issue_create_parent_ledger_markers_have_visible_text_and_parse = function()
+    local dedup_key = event().payload.dedup_key
+    local created = core.issue_created_marker(dedup_key, "99")
+    local intent = core.issue_create_intent_marker(dedup_key)
+
+    t.is_true(created:find("Opened sub-issue #99 for this task.\n\n", 1, true) == 1)
+    t.is_true(created:find('<!-- fkst:github-proxy:issue-created:v1 dedup="' .. dedup_key .. '" issue="99" -->', 1, true) ~= nil)
+    t.is_true(intent:find("Preparing to open a sub-issue for this task.\n\n", 1, true) == 1)
+    t.is_true(intent:find('<!-- fkst:github-proxy:issue-create-intent:v1 dedup="' .. dedup_key .. '" -->', 1, true) ~= nil)
+    t.eq(core.has_trusted_issue_created_marker({
+      {
+        body = created,
+        author_login = "fkst-test-bot",
+      },
+    }, dedup_key, "fkst-test-bot"), true)
+    t.eq(core.has_trusted_issue_create_intent_marker({
+      {
+        body = intent,
+        author_login = "fkst-test-bot",
+      },
+    }, dedup_key, "fkst-test-bot"), true)
+    t.eq(core.issue_created_marker(dedup_key, "99"), created)
+    t.eq(core.issue_create_intent_marker(dedup_key), intent)
+  end,
+
   test_issue_create_request_dry_run_does_not_search_or_create = function()
     mock_write_env("")
 
@@ -119,6 +174,21 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(count_calls("gh issue list"), 0)
     t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("/sub_issues"), 0)
+  end,
+
+  test_issue_create_request_dry_run_with_parent_does_not_link_native_sub_issue = function()
+    mock_write_env("")
+
+    local result = t.run_department("departments/github_issue_create/main.lua", event({
+      parent = 42,
+    }), opts("issue-create-dry-run-native-sub-issue"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue list"), 0)
+    t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/99"), 0)
+    t.eq(count_calls("/sub_issues"), 0)
   end,
 
   test_issue_create_request_missing_fields_fail_closed = function()
@@ -375,7 +445,7 @@ return {
     t.eq(result.raises[1].payload.blocking_issue_number, 99)
   end,
 
-  test_issue_create_request_real_write_records_parent_ledger_marker = function()
+  test_issue_create_request_parent_comment_target_only_records_parent_ledger_marker_without_sub_issue_link = function()
     local payload = event().payload
     mock_write_env("1")
     mock_bot_env()
@@ -402,6 +472,8 @@ return {
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 1)
     t.eq(count_calls("gh pr comment"), 2)
+    t.eq(count_calls("gh api repos/owner/x/issues/99"), 0)
+    t.eq(count_calls("/sub_issues"), 0)
     t.eq(count_calls("fkst-github-proxy-intent"), 1)
     t.eq(count_calls("fkst-github-proxy-created"), 1)
     t.eq(core.has_trusted_issue_created_marker({
@@ -410,6 +482,71 @@ return {
         author_login = "fkst-test-bot",
       },
     }, payload.dedup_key, "fkst-test-bot"), true)
+  end,
+
+  test_issue_create_request_parent_only_links_native_sub_issue_without_parent_ledger = function()
+    local payload = event().payload
+    payload.parent = 42
+    payload.parent_comment_target = nil
+    mock_write_env("1")
+    mock_bot_env()
+    mock_issue_create_search("[]\n")
+    mock_issue_create()
+    mock_child_issue_rest_view(99, 987654321)
+    mock_issue_add_sub_issue(42, 987654321)
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-native-sub-issue", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue create"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 0)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/comments?per_page=100"), 0)
+    t.eq(count_calls("fkst-github-proxy-created"), 0)
+    t.eq(count_calls("gh issue comment 42 --repo owner/x"), 0)
+    t.eq(count_calls("gh pr comment"), 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/99"), 1)
+    t.eq(count_calls("gh api --method POST repos/owner/x/issues/42/sub_issues -F sub_issue_id=987654321"), 1)
+  end,
+
+  test_issue_create_request_with_parent_relinks_existing_child_on_redelivery = function()
+    local payload = event({
+      parent = 42,
+    }).payload
+    mock_write_env("1")
+    mock_bot_env()
+    mock_parent_pr_comments({
+      {
+        body = core.issue_created_marker(payload.dedup_key, "99"),
+        author_login = "fkst-test-bot",
+      },
+    })
+    mock_child_issue_rest_view(99, 987654321)
+    mock_issue_add_sub_issue(
+      42,
+      987654321,
+      1,
+      "HTTP 422: Validation Failed (already linked as a sub-issue)"
+    )
+    mock_parent_sub_issues(42, 987654321)
+    mock_issue_create()
+
+    local result = t.run_department("departments/github_issue_create/main.lua", {
+      queue = "github_issue_create_request",
+      payload = payload,
+    }, opts("issue-create-native-sub-issue-redelivery", {
+      FKST_GITHUB_WRITE = "1",
+    }))
+
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("gh api repos/owner/x/issues/99"), 1)
+    t.eq(count_calls("gh api --method POST repos/owner/x/issues/42/sub_issues -F sub_issue_id=987654321"), 1)
+    t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/42/sub_issues?per_page=100"), 1)
   end,
 
   test_issue_create_request_second_delivery_same_dedup_skips_create = function()
@@ -481,5 +618,6 @@ return {
     t.eq(count_calls("gh api --paginate --slurp repos/owner/x/issues/7/comments?per_page=100"), 0)
     t.eq(count_calls("gh issue list"), 1)
     t.eq(count_calls("gh issue create"), 0)
+    t.eq(count_calls("/sub_issues"), 0)
   end,
 }

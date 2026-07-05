@@ -134,6 +134,92 @@ local function build_resume_comment_request(issue, state, next_state, child_stat
   }), source_ref)
 end
 
+local function build_awaiting_pr_canonicalization_comment_request(issue, state, delegation)
+  local source_ref = issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
+  local child_proposal = delegation.pr_proposal_id or delegation.pr_proposal
+  local body = "github-devloop canonicalized delegated PR handoff after child merge"
+    .. "\n\nDelegated PR: #" .. tostring(delegation.pr_number)
+    .. "\n\n" .. devloop_state.state_marker(delegation.proposal_id, "awaiting-pr", state.version)
+    .. "\n" .. m_builders.pr_delegation_marker(delegation.proposal_id,
+      child_proposal,
+      delegation.pr_number,
+      state.version,
+      delegation.delegation
+    )
+  return entity_lib.build_entity_comment_request({
+    kind = "issue",
+    repo = issue.repo,
+    number = issue.number,
+  }, body, base_ids.dedup_key({
+    "awaiting-pr",
+    "canonicalize",
+    "implementing",
+    tostring(delegation.proposal_id),
+    tostring(state.version),
+    tostring(delegation.pr_number),
+    tostring(delegation.delegation),
+  }), source_ref)
+end
+
+function M.implementing_to_awaiting_pr_transition_status(state)
+  return devloop_state.versioned_transition_status(state, { "implementing" }, "awaiting-pr", state and state.version)
+end
+
+function M.canonicalize_implementing_merged_delegated_pr(dept, issue, state, facts)
+  local proposal_id = facts.proposal_id
+  local transition = M.implementing_to_awaiting_pr_transition_status(state)
+  if transition ~= "apply" and transition ~= "idempotent" then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", devloop_state.cas_outcome(state, transition, state and state.version), "merged delegated PR canonicalization requires implementing state")
+  end
+  local delegation = facts["pr-delegation"] or facts.pr_delegation
+  if delegation == nil then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-foreign(pr-delegation-missing)", "implementing parent has no visible delegated PR marker")
+  end
+  if tostring(delegation.proposal_id or "") ~= tostring(proposal_id or "")
+    or tostring(delegation.version or "") ~= tostring(state.version or "") then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-stale(pr-delegation-version)", "pr-delegation proposal or version does not match implementing state")
+  end
+  local pr_repo, pr_number = entity_lib.parse_pr_proposal_id(delegation.pr_proposal_id or delegation.pr_proposal)
+  if pr_repo ~= issue.repo or tostring(pr_number or "") ~= tostring(delegation.pr_number or "") then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-stale(pr-delegation-child)", "pr-delegation child identity is malformed or cross-repo")
+  end
+  local current_pr = facts.current_pr
+  if type(current_pr) ~= "table" or current_pr.force_fresh ~= true then
+    current_pr = read_delegated_child_pr(dept, issue, delegation)
+  end
+  local canonical_merged_state = canonical_merged_child_state(issue, state, delegation, current_pr)
+  if canonical_merged_state == nil then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-pending(canonical-child-pr-merged-missing)", "delegated child PR is not canonically merged by GitHub")
+  end
+  if transition == "idempotent" then
+    return log_skip(dept, proposal_id, state, "implementing", "awaiting-pr", "skip-idempotent(already at to_state)", "parent issue already has awaiting-pr marker")
+  end
+
+  local source_ref = issue.source_ref or entity_lib.issue_source_ref(issue.repo, issue.number)
+  local comment_request = build_awaiting_pr_canonicalization_comment_request(issue, state, delegation)
+  local label_request = requests_labels.build_state_label_request(issue.repo,
+    issue.number,
+    "awaiting-pr",
+    base_ids.dedup_key({
+      "awaiting-pr",
+      "canonicalize",
+      "implementing",
+      "label",
+      tostring(proposal_id),
+      tostring(state.version),
+      tostring(delegation.pr_number),
+      tostring(delegation.delegation),
+    }),
+    source_ref
+  )
+  local add_labels, remove_labels = devloop_state.state_label_changes("awaiting-pr")
+  devloop_logging.log_cas_decision(dept, proposal_id, state, "implementing", "awaiting-pr", "applied(merged-delegated-pr-canonicalized)", "canonical merged PR child made missing parent handoff visible")
+  return raise_effects(dept, proposal_id, "awaiting-pr", state.version, { add = add_labels, remove = remove_labels }, {
+    { queue = "github-proxy.github_issue_comment_request", payload = comment_request },
+    { queue = "github-proxy.github_issue_label_request", payload = label_request },
+  })
+end
+
 function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   local proposal_id = facts.proposal_id
   if state.state ~= "awaiting-pr" then
@@ -282,6 +368,8 @@ end
 
 return {
   ["awaiting-pr"] = M.replay_awaiting_pr_state,
+  implementing_to_awaiting_pr_transition_status = M.implementing_to_awaiting_pr_transition_status,
+  canonicalize_implementing_merged_delegated_pr = M.canonicalize_implementing_merged_delegated_pr,
 }
 end
 

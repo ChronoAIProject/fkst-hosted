@@ -60,9 +60,6 @@
 {"path":"libraries/devloop/strings.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/sweep_bounds.lua","owner":"shared","reason":"sweep budget helpers are shared by issue and PR liveness scans after extraction."}
 {"path":"libraries/devloop/validators.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
-{"path":"packages/github-devloop-intake-default/core/devloop_wiring.lua","owner":"intake","reason":"core module resolves default intake route package-private prompt modules."}
-{"path":"packages/github-devloop-intake-default/core/intake_class.lua","owner":"intake","reason":"core module owns default intake enable policy."}
-{"path":"packages/github-devloop-intake-default/core/intake_service_class.lua","owner":"intake","reason":"core module owns default intake service-class policy."}
 {"path":"packages/github-devloop-intake-default/departments/intake_judge/main.lua","owner":"intake","reason":"owns default intake route enable and decline policy."}
 {"path":"packages/github-devloop-intake/core/admission.lua","owner":"intake","reason":"core module owns event-driven unmanaged issue admission."}
 {"path":"packages/github-devloop-intake/departments/admission/main.lua","owner":"intake","reason":"owns event-driven unmanaged issue admission."}
@@ -143,6 +140,9 @@
 {"path":"packages/github-devloop-pr/departments/review_meta/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/review_pr/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
 {"path":"packages/github-devloop-pr/departments/review_result/main.lua","owner":"pr","reason":"github-devloop-pr owns PR saga authority after extraction."}
+{"path":"packages/github-devloop-intake-default/core/devloop_wiring.lua","owner":"intake","reason":"intake-default package-private wiring resolves intake prompt modules after the DI intake refactor."}
+{"path":"packages/github-devloop-intake-default/core/intake_class.lua","owner":"intake","reason":"intake-default owns recurring-class intake follow-through helpers after the DI intake refactor."}
+{"path":"packages/github-devloop-intake-default/core/intake_service_class.lua","owner":"intake","reason":"intake-default owns service-class intake label helpers after the DI intake refactor."}
 {"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/dependencies.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}

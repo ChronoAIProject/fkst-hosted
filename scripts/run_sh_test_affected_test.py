@@ -31,6 +31,9 @@ class TestAffectedHarness:
             "host_run.sh",
             "host_entry.sh",
             "composed_manifest.sh",
+            "composed_conformance.sh",
+            "check_repo_intake_routing.py",
+            "intake_policy_slots.json",
         ):
             shutil.copy2(REPO_ROOT / "scripts" / name, self.scripts / name)
         test_affected = REPO_ROOT / "scripts" / "test_affected.sh"

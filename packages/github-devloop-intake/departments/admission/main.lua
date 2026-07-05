@@ -17,7 +17,7 @@ local spec = {
     "github-proxy.github_issue_comment_request",
     "github-proxy.github_issue_create_request",
   },
-  fanout = { "github-proxy.github_entity_changed" },
+  fanout = { "github-proxy.github_entity_changed", "devloop_intake_candidate" },
   stall_window = "30s",
 }
 

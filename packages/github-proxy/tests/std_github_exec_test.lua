@@ -181,7 +181,12 @@ return {
 
     handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
 
-    assert_argv_equal(calls[1].argv, { "gh", "api", "repos/owner/repo/issues/120" }, "sub_issue_rest_view")
+    assert(#calls == 2, "issue_add_sub_issue must resolve the child REST id internally")
+    assert_argv_equal(
+      calls[1].argv,
+      { "gh", "api", "repos/owner/repo/issues/120" },
+      "sub_issue_rest_view"
+    )
     assert_argv_equal(
       calls[2].argv,
       { "gh", "api", "--method", "POST", "repos/owner/repo/issues/979/sub_issues", "-F", "sub_issue_id=987654321" },
@@ -189,6 +194,119 @@ return {
     )
     assert(calls[1].timeout == 31)
     assert(calls[2].timeout == 31)
+  end,
+
+  test_github_issue_add_sub_issue_treats_same_parent_duplicate_link_as_success = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      if #calls == 1 then
+        return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
+      end
+      if #calls == 3 then
+        return { stdout = '[[{"id":987654321,"number":120}]]\n', stderr = "", exit_code = 0 }
+      end
+      return {
+        stdout = "",
+        stderr = "HTTP 422: Validation Failed (already linked as a sub-issue)",
+        exit_code = 1,
+      }
+    end)
+
+    local result = handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
+
+    assert(#calls == 3, "duplicate sub-issue handling must verify the current parent before swallowing")
+    assert(result.exit_code == 0, "duplicate sub-issue link must be idempotent success")
+    assert(result.idempotent == true, "duplicate sub-issue link must be marked idempotent")
+    assert_argv_equal(
+      calls[1].argv,
+      { "gh", "api", "repos/owner/repo/issues/120" },
+      "sub_issue_rest_view_duplicate"
+    )
+    assert_argv_equal(
+      calls[2].argv,
+      { "gh", "api", "--method", "POST", "repos/owner/repo/issues/979/sub_issues", "-F", "sub_issue_id=987654321" },
+      "issue_add_sub_issue_duplicate"
+    )
+    assert_argv_equal(
+      calls[3].argv,
+      { "gh", "api", "--paginate", "--slurp", "repos/owner/repo/issues/979/sub_issues?per_page=100" },
+      "issue_add_sub_issue_duplicate_verify_parent"
+    )
+  end,
+
+  test_github_issue_add_sub_issue_keeps_unrelated_errors_fail_closed = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      if #calls == 1 then
+        return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
+      end
+      return { stdout = "", stderr = "HTTP 500: upstream unavailable", exit_code = 1 }
+    end)
+
+    local ok, err = pcall(function()
+      return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
+    end)
+
+    assert(ok == false)
+    assert(err.class == "gh-command-failed")
+  end,
+
+  test_github_issue_add_sub_issue_requires_duplicate_error_to_mention_sub_issue = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      if #calls == 1 then
+        return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
+      end
+      return { stdout = "", stderr = "HTTP 422: Validation Failed (already linked to another object)", exit_code = 1 }
+    end)
+
+    local ok, err = pcall(function()
+      return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
+    end)
+
+    assert(ok == false)
+    assert(err.class == "gh-command-failed")
+  end,
+
+  test_github_issue_add_sub_issue_does_not_swallow_other_sub_issue_already_errors = function()
+    local calls = {}
+    local handle = gh.new(function(opts)
+      table.insert(calls, opts)
+      if #calls == 1 then
+        return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
+      end
+      return { stdout = "", stderr = "HTTP 422: Validation Failed (sub-issue already has another parent)", exit_code = 1 }
+    end)
+
+    local ok, err = pcall(function()
+      return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
+    end)
+
+    assert(ok == false)
+    assert(err.class == "gh-command-failed")
+  end,
+
+  test_github_issue_add_sub_issue_does_not_swallow_duplicate_when_parent_list_lacks_child = function()
+    local sub_issues_path = "repos/owner/repo/issues/979/sub_issues?" .. table.concat({ "per", "page=100" }, "_")
+    local handle = gh.new(function(opts)
+      if opts.argv[3] == "repos/owner/repo/issues/120" then
+        return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
+      end
+      if opts.argv[5] == sub_issues_path then
+        return { stdout = '[[{"id":111111111,"number":121}]]\n', stderr = "", exit_code = 0 }
+      end
+      return { stdout = "", stderr = "HTTP 422: Validation Failed (already linked as a sub-issue)", exit_code = 1 }
+    end)
+
+    local ok, err = pcall(function()
+      return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
+    end)
+
+    assert(ok == false)
+    assert(err.class == "gh-command-failed")
   end,
 
   test_github_entity_methods_build_argv = function()

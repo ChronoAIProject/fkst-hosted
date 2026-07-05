@@ -143,6 +143,12 @@ class Violation:
             path = "packages/github-devloop-pr/core/merge_executor.lua"
         if path == "packages/github-devloop-intake-default/departments/intake_judge/main.lua":
             path = "packages/github-devloop-intake/departments/intake_judge/main.lua"
+        # 2b-2a stdlib move: the default-intake engine (intake_judge:read_current_for_candidate)
+        # moved into the shared devloop library. Canonicalize the moved cursor-read to the same
+        # dev-base debt so the no-growth check sees a MOVE, not new growth (the debt count is
+        # unchanged). Remove once this move has landed on dev.
+        if path == "libraries/devloop/intake/default_intake.lua":
+            path = "packages/github-devloop-intake/departments/intake_judge/main.lua"
         return path, self.canonical_surface(), self.kind, self.canonical_token()
 
     def canonical_surface(self) -> str:

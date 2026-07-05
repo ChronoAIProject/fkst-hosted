@@ -15,7 +15,7 @@ local function merge_ci_selfheal_worktree(repo, pr_number, head_sha)
   if runtime_result.exit_code ~= 0 then
     error("forge.merge: FKST_RUNTIME_ROOT read failed: " .. tostring(runtime_result.stderr))
   end
-  local runtime_root = M._trim(runtime_result.stdout)
+  local runtime_root = strings.trim(runtime_result.stdout)
   if runtime_root == "" or runtime_root:find("[\r\n]") ~= nil then
     error("forge.merge: invalid FKST_RUNTIME_ROOT")
   end

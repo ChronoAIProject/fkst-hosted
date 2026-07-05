@@ -3,13 +3,18 @@
 
 from __future__ import annotations
 
+import argparse
+import itertools
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 
 
 INTAKE_PACKAGE = "github-devloop-intake"
-CANDIDATE_QUEUE = "github-devloop-intake.devloop_intake_candidate"
+POLICY_SLOT_MANIFEST = Path("scripts/intake_policy_slots.json")
+POLICY_SLOT_SCHEMA = "fkst.package-topology-policy-slots.v1"
+INTAKE_POLICY_SLOT = "intake-policy"
 LIFECYCLE_FORWARD_QUEUES = {
     "devloop_ready",
     "devloop_reviewing",
@@ -43,6 +48,122 @@ class Source:
         if len(parts) >= 2 and parts[0] == "packages":
             return parts[1]
         return None
+
+
+@dataclass(frozen=True)
+class PolicyImplementation:
+    package: str
+    topology: str
+
+
+@dataclass(frozen=True)
+class PolicySlot:
+    name: str
+    consumer_queue: str
+    implementations: tuple[PolicyImplementation, ...]
+
+    @property
+    def packages(self) -> set[str]:
+        return {implementation.package for implementation in self.implementations}
+
+
+@dataclass(frozen=True)
+class LegalTopology:
+    name: str
+    excluded_packages: tuple[str, ...]
+
+
+def load_policy_slots(root: Path) -> list[PolicySlot]:
+    path = root / POLICY_SLOT_MANIFEST
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if raw.get("schema") != POLICY_SLOT_SCHEMA:
+        raise ValueError(f"{POLICY_SLOT_MANIFEST} schema must be {POLICY_SLOT_SCHEMA!r}")
+    slots_raw = raw.get("policy_slots")
+    if not isinstance(slots_raw, list) or not slots_raw:
+        raise ValueError(f"{POLICY_SLOT_MANIFEST} policy_slots must be a non-empty list")
+    slots: list[PolicySlot] = []
+    seen_slot_names: set[str] = set()
+    for slot_raw in slots_raw:
+        if not isinstance(slot_raw, dict):
+            raise ValueError(f"{POLICY_SLOT_MANIFEST} policy_slots entries must be objects")
+        name = required_string(slot_raw, "name")
+        if name in seen_slot_names:
+            raise ValueError(f"{POLICY_SLOT_MANIFEST} duplicate policy slot {name!r}")
+        seen_slot_names.add(name)
+        consumer_queue = required_string(slot_raw, "consumer_queue")
+        implementations_raw = slot_raw.get("implementations")
+        if not isinstance(implementations_raw, list) or len(implementations_raw) < 2:
+            raise ValueError(f"{POLICY_SLOT_MANIFEST} slot {name!r} must declare at least two implementations")
+        implementations: list[PolicyImplementation] = []
+        seen_packages: set[str] = set()
+        seen_topologies: set[str] = set()
+        for implementation_raw in implementations_raw:
+            if not isinstance(implementation_raw, dict):
+                raise ValueError(f"{POLICY_SLOT_MANIFEST} slot {name!r} implementation entries must be objects")
+            package = required_string(implementation_raw, "package")
+            topology = required_string(implementation_raw, "topology")
+            if package in seen_packages:
+                raise ValueError(f"{POLICY_SLOT_MANIFEST} slot {name!r} duplicate package {package!r}")
+            if topology in seen_topologies:
+                raise ValueError(f"{POLICY_SLOT_MANIFEST} slot {name!r} duplicate topology {topology!r}")
+            seen_packages.add(package)
+            seen_topologies.add(topology)
+            implementations.append(PolicyImplementation(package=package, topology=topology))
+        slots.append(PolicySlot(name=name, consumer_queue=consumer_queue, implementations=tuple(implementations)))
+    return slots
+
+
+def required_string(raw: dict[str, object], key: str) -> str:
+    value = raw.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{POLICY_SLOT_MANIFEST} {key} must be a non-empty string")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", value):
+        raise ValueError(f"{POLICY_SLOT_MANIFEST} {key} has invalid value {value!r}")
+    return value
+
+
+def policy_slot_messages(root: Path) -> list[str]:
+    try:
+        slots = load_policy_slots(root)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        return [f"{POLICY_SLOT_MANIFEST}: invalid policy-slot manifest: {exc}"]
+    if not any(slot.name == INTAKE_POLICY_SLOT for slot in slots):
+        return [f"{POLICY_SLOT_MANIFEST}: missing required policy slot {INTAKE_POLICY_SLOT!r}"]
+    return []
+
+
+def intake_policy_slot(root: Path) -> PolicySlot:
+    for slot in load_policy_slots(root):
+        if slot.name == INTAKE_POLICY_SLOT:
+            return slot
+    raise ValueError(f"{POLICY_SLOT_MANIFEST} missing required policy slot {INTAKE_POLICY_SLOT!r}")
+
+
+def legal_topologies(root: Path) -> list[LegalTopology]:
+    slots = load_policy_slots(root)
+    topologies: list[LegalTopology] = []
+    for selected in itertools.product(*(slot.implementations for slot in slots)):
+        name_parts: list[str] = []
+        excluded: set[str] = set()
+        for slot, selected_implementation in zip(slots, selected):
+            name_parts.append(selected_implementation.topology)
+            for implementation in slot.implementations:
+                if implementation.package != selected_implementation.package:
+                    excluded.add(implementation.package)
+        topologies.append(LegalTopology(name="+".join(name_parts), excluded_packages=tuple(sorted(excluded))))
+    return topologies
+
+
+def topology_exclusivity_messages(root: Path, loaded_packages: set[str]) -> list[str]:
+    messages: list[str] = []
+    for slot in load_policy_slots(root):
+        loaded = sorted(slot.packages & loaded_packages)
+        if len(loaded) != 1:
+            messages.append(
+                f"topology must load exactly one implementation of policy slot {slot.name!r}; "
+                f"loaded {loaded or 'none'} from {sorted(slot.packages)}"
+            )
+    return messages
 
 
 def _mask(chars: list[str], start: int, end: int) -> None:
@@ -199,7 +320,7 @@ def static_messages(all_sources: list[Source]) -> list[str]:
     return messages
 
 
-def candidate_consuming_packages(all_sources: list[Source]) -> dict[str, list[str]]:
+def candidate_consuming_packages(all_sources: list[Source], candidate_queue: str) -> dict[str, list[str]]:
     consumers: dict[str, list[str]] = {}
     for source in all_sources:
         if not is_production_department(source):
@@ -208,14 +329,17 @@ def candidate_consuming_packages(all_sources: list[Source]) -> dict[str, list[st
         if package is None:
             continue
         for queue in spec_queues(source.text, "consumes"):
-            if queue == CANDIDATE_QUEUE:
+            if queue == candidate_queue:
                 consumers.setdefault(package, []).append(source.relpath)
     return consumers
 
 
-def candidate_consumer_messages(all_sources: list[Source]) -> list[str]:
-    consumers = candidate_consuming_packages(all_sources)
-    if len(consumers) == 1:
+def candidate_consumer_messages(all_sources: list[Source], policy_slot: PolicySlot) -> list[str]:
+    consumers = candidate_consuming_packages(all_sources, policy_slot.consumer_queue)
+    consumer_packages = set(consumers)
+    expected_packages = policy_slot.packages
+    unexpected = consumer_packages - expected_packages
+    if consumers and not unexpected:
         return []
     if not consumers:
         found = "found none"
@@ -224,10 +348,39 @@ def candidate_consumer_messages(all_sources: list[Source]) -> list[str]:
             f"{package} ({', '.join(paths)})" for package, paths in sorted(consumers.items())
         )
     return [
-        f"expected exactly one package to consume {CANDIDATE_QUEUE}; {found}"
+        f"expected candidate-consuming production packages to be a non-empty subset of "
+        f"{sorted(expected_packages)} for {policy_slot.consumer_queue}; {found}"
     ]
 
 
 def repository_messages(root: Path) -> list[str]:
     all_sources = sources(root)
-    return static_messages(all_sources) + candidate_consumer_messages(all_sources)
+    messages = static_messages(all_sources)
+    slot_messages = policy_slot_messages(root)
+    messages.extend(slot_messages)
+    if not slot_messages:
+        messages.extend(candidate_consumer_messages(all_sources, intake_policy_slot(root)))
+    return messages
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--topology-rows", metavar="ROOT")
+    parser.add_argument("--assert-topology", metavar="ROOT")
+    parser.add_argument("--packages", nargs="*", default=[])
+    args = parser.parse_args()
+    if args.topology_rows:
+        for topology in legal_topologies(Path(args.topology_rows)):
+            print(f"{topology.name}\t{','.join(topology.excluded_packages)}")
+        return 0
+    if args.assert_topology:
+        messages = topology_exclusivity_messages(Path(args.assert_topology), set(args.packages))
+        for message in messages:
+            print(message)
+        return 1 if messages else 0
+    parser.error("expected --topology-rows or --assert-topology")
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

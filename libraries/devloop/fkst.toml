@@ -143,5 +143,6 @@ allow = [
   "github-devloop-integration",
   "github-devloop-ops",
   "github-devloop-pr",
+  "github-devloop-workflow",
   "fkst-substrate-ref-maintainer",
 ]

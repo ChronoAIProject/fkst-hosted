@@ -40,10 +40,6 @@
       }
     },
     "forge": {
-      "_trim": {
-        "route": "contract",
-        "owner": "contract-strings"
-      },
       "ci_missing_status_first_observed_key": {
         "route": "forge",
         "owner": "forge-merge"
