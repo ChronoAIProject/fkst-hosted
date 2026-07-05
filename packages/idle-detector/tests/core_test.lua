@@ -1,205 +1,130 @@
 local core = require("core")
+local claim_identity = require("forge.github.claim_identity")
 local t = fkst.test
 
-local function observe_idle()
-  return {
-    schema_version = 1,
-    generated_at_ms = 1781830860000,
-    source = {
-      durable_root = "/tmp/fkst-durable",
-      database = "/tmp/fkst-durable/delivery.redb",
-      read_semantics = "single read transaction",
-      history_semantics = "delivery queue snapshot only",
-    },
-    limits = { max_deliveries = 500, max_dead_letters = 500 },
-    truncated = { deliveries = false, dead_letters = false },
-    queues = {
-      { queue = "idle_tick", depth = 0, pending = 0, in_flight = 0, retrying = 0, oldest_pending_age_ms = nil },
-      { queue = "github_poll_tick", depth = 0, pending = 0, in_flight = 0, retrying = 0, oldest_pending_age_ms = nil },
-    },
-    deliveries = json.decode("[]"),
-    dead_letters = json.decode("[]"),
-  }
+local function identity()
+  local value, err = claim_identity.from_values("owner/repo", "fkst-test-bot[bot]")
+  if err ~= nil then
+    error(err.why or "unexpected identity error", 0)
+  end
+  return value
 end
 
 return {
-  test_idle_predicate_accepts_real_zero_snapshot = function()
-    local idle, why = core.is_idle_observe(observe_idle())
-    t.eq(idle, true)
-    t.is_nil(why)
+  test_claim_identity_normalizes_repo_and_bot_login = function()
+    local value, err = claim_identity.from_values(" owner/repo ", " fkst-test-bot[bot] ")
+
+    t.is_nil(err)
+    t.eq(value.repo, "owner/repo")
+    t.eq(value.bot_login, "fkst-test-bot")
+    t.eq(value.source_ref.kind, "github-assignee-query")
+    t.eq(value.source_ref.ref, "owner/repo#issues?state=open&assignee=fkst-test-bot")
   end,
 
-  test_idle_predicate_fails_closed_on_missing_required_real_fields = function()
-    for _, field in ipairs({
-      "schema_version",
-      "generated_at_ms",
-      "source",
-      "limits",
-      "truncated",
-      "queues",
-      "deliveries",
-      "dead_letters",
+  test_claim_identity_fails_closed_on_missing_or_malformed_scope = function()
+    for _, case in ipairs({
+      { repo = "", bot = "fkst-test-bot", why = "missing FKST_GITHUB_REPO" },
+      { repo = "owner", bot = "fkst-test-bot", why = "malformed FKST_GITHUB_REPO" },
+      { repo = "owner/repo", bot = "", why = "missing FKST_GITHUB_BOT_LOGIN" },
+      { repo = "owner/repo", bot = "bad login", why = "malformed FKST_GITHUB_BOT_LOGIN" },
     }) do
-      local facts = observe_idle()
-      facts[field] = nil
-      t.raises(function() core.is_idle_observe(facts) end)
+      local value, err = claim_identity.from_values(case.repo, case.bot)
+      t.is_nil(value)
+      t.eq(err.error_class, "github-claim-identity-unverified")
+      t.is_true(err.why:find(case.why, 1, true) ~= nil)
     end
   end,
 
-  test_idle_predicate_fails_closed_on_unknown_schema_version = function()
-    local facts = observe_idle()
-    facts.schema_version = 2
-    t.raises(function() core.is_idle_observe(facts) end)
-  end,
-
-  test_idle_predicate_fails_closed_on_malformed_top_level = function()
-    t.raises(function() core.is_idle_observe("not facts") end)
-    local facts = observe_idle()
-    facts.queues = "not a table"
-    t.raises(function() core.is_idle_observe(facts) end)
-    facts = observe_idle()
-    facts.generated_at_ms = "1781830860000"
-    t.raises(function() core.is_idle_observe(facts) end)
-    facts = observe_idle()
-    facts.source = "not a table"
-    t.raises(function() core.is_idle_observe(facts) end)
-    facts = observe_idle()
-    facts.limits.max_deliveries = 1.5
-    t.raises(function() core.is_idle_observe(facts) end)
-    facts = observe_idle()
-    facts.limits.max_dead_letters = "500"
-    t.raises(function() core.is_idle_observe(facts) end)
-    facts = observe_idle()
-    facts.truncated.deliveries = "false"
-    t.raises(function() core.is_idle_observe(facts) end)
-    facts = observe_idle()
-    facts.truncated.dead_letters = 0
-    t.raises(function() core.is_idle_observe(facts) end)
-  end,
-
-  test_idle_predicate_fails_closed_on_non_dense_observe_lists = function()
-    for _, list_name in ipairs({ "queues", "deliveries", "dead_letters" }) do
-      local keyed = observe_idle()
-      keyed[list_name] = { keyed = {} }
-      t.raises(function() core.is_idle_observe(keyed) end)
-
-      local sparse = observe_idle()
-      sparse[list_name] = {}
-      sparse[list_name][1] = {}
-      sparse[list_name][3] = {}
-      t.raises(function() core.is_idle_observe(sparse) end)
-    end
-  end,
-
-  test_idle_predicate_rejects_real_busy_queue_dimensions = function()
-    for _, field in ipairs({ "depth", "pending", "in_flight", "retrying" }) do
-      local facts = observe_idle()
-      facts.queues[1][field] = 1
-      local idle, why = core.is_idle_observe(facts)
-      t.eq(idle, false)
-      t.is_true(why:find(field, 1, true) ~= nil)
-    end
-  end,
-
-  test_idle_predicate_fails_closed_on_missing_each_real_queue_dimension = function()
-    for _, field in ipairs({ "depth", "pending", "in_flight", "retrying" }) do
-      local facts = observe_idle()
-      facts.queues[1][field] = nil
-      t.raises(function() core.is_idle_observe(facts) end)
-    end
-  end,
-
-  test_idle_predicate_fails_closed_on_malformed_queue_rows = function()
-    local facts = observe_idle()
-    facts.queues[1] = "bad"
-    t.raises(function() core.is_idle_observe(facts) end)
-
-    facts = observe_idle()
-    facts.queues[1].queue = ""
-    t.raises(function() core.is_idle_observe(facts) end)
-
-    facts = observe_idle()
-    facts.queues[1].pending = -1
-    t.raises(function() core.is_idle_observe(facts) end)
-  end,
-
-  test_idle_predicate_rejects_deliveries_and_dead_letters = function()
-    local facts = observe_idle()
-    facts.deliveries = { { delivery_id = "d1", queue = "q", dept = "d", status = "pending", attempt = 1 } }
-    local idle, why = core.is_idle_observe(facts)
-    t.eq(idle, false)
-    t.is_true(why:find("deliveries=1", 1, true) ~= nil)
-
-    facts = observe_idle()
-    facts.dead_letters = { { delivery_id = "dead", queue = "q", dept = "d", attempts = 1, replayable = true, permanent = false } }
-    idle, why = core.is_idle_observe(facts)
-    t.eq(idle, false)
-    t.is_true(why:find("dead_letters=1", 1, true) ~= nil)
-  end,
-
-  test_idle_predicate_rejects_truncated_observe_lists_as_not_idle = function()
-    local facts = observe_idle()
-    facts.truncated.deliveries = true
-    local idle, why = core.is_idle_observe(facts)
-    t.eq(idle, false)
-    t.is_true(why:find("truncated deliveries", 1, true) ~= nil)
-
-    facts = observe_idle()
-    facts.truncated.dead_letters = true
-    idle, why = core.is_idle_observe(facts)
-    t.eq(idle, false)
-    t.is_true(why:find("truncated dead_letters", 1, true) ~= nil)
-  end,
-
-  test_observe_now_seconds_uses_generated_at_ms = function()
-    t.eq(core.observe_now_seconds(observe_idle()), 1781830860)
-  end,
-
-  test_observe_wrapper_consumes_injected_snapshot = function()
-    t.mock_observe(observe_idle())
-    local observed = core.observe()
-    t.eq(observed.schema_version, 1)
-    t.eq(observed.generated_at_ms, 1781830860000)
-  end,
-
-  test_observe_wrapper_fails_closed_on_unknown_schema_version = function()
-    local facts = observe_idle()
-    facts.schema_version = 2
-    t.mock_observe(facts)
-    t.raises(function()
-      core.observe()
+  test_claim_identity_is_shared_forge_boundary_not_idle_local = function()
+    local value, err = claim_identity.read(function(name)
+      if name == "FKST_GITHUB_REPO" then
+        return "owner/repo"
+      end
+      if name == "FKST_GITHUB_BOT_LOGIN" then
+        return "fkst-test-bot[bot]"
+      end
+      return nil
     end)
+
+    t.is_nil(err)
+    t.eq(value.repo, "owner/repo")
+    t.eq(value.bot_login, "fkst-test-bot")
+    t.eq(value.source_ref.ref, "owner/repo#issues?state=open&assignee=fkst-test-bot")
+    t.is_nil(core.claim_identity_from_values)
+    t.is_nil(core.claim_identity)
   end,
 
-  test_observe_wrapper_rejects_malformed_snapshot = function()
-    t.mock_observe("not facts")
-    t.raises(function()
-      core.observe()
-    end)
+  test_assigned_issue_count_counts_verified_query_rows = function()
+    local calls = {}
+    local github = {
+      issue_list_open_assigned = function(repo, assignee, timeout)
+        table.insert(calls, { repo = repo, assignee = assignee, timeout = timeout })
+        return {
+          stdout = '[{"number":42,"title":"Work","assignees":[{"login":"fkst-test-bot"}]}]',
+          stderr = "",
+          exit_code = 0,
+        }
+      end,
+    }
+
+    local verdict = core.self_assigned_open_issue_verdict(github, identity())
+
+    t.eq(verdict.ok, true)
+    t.eq(verdict.count, 1)
+    t.eq(verdict.source_ref.kind, "github-assignee-query")
+    t.eq(calls[1].repo, "owner/repo")
+    t.eq(calls[1].assignee, "fkst-test-bot")
   end,
 
-  test_observe_wrapper_reports_malformed_snapshot_error_class = function()
-    t.mock_observe("not facts")
-    local ok, err = pcall(function()
-      core.observe()
-    end)
-    t.eq(ok, false)
-    t.is_true(tostring(err):find("idle-detector: malformed-observe-facts", 1, true) ~= nil)
+  test_assigned_issue_count_fails_closed_on_query_failure = function()
+    local github = {
+      issue_list_open_assigned = function()
+        error("synthetic gh failure", 0)
+      end,
+    }
+
+    local verdict = core.self_assigned_open_issue_verdict(github, identity())
+
+    t.eq(verdict.ok, false)
+    t.eq(verdict.error_class, "idle-assignee-query-failed")
+    t.is_true(verdict.why:find("self-assigned issue query failed", 1, true) ~= nil)
   end,
 
-  test_observe_wrapper_accepts_generic_options = function()
-    t.mock_observe(observe_idle())
-    local observed = core.observe({ limit = 10 })
-    t.eq(observed.schema_version, 1)
-    t.eq(#observed.queues, 2)
+  test_assigned_issue_count_fails_closed_on_malformed_query_json = function()
+    local github = {
+      issue_list_open_assigned = function()
+        return { stdout = "not json", stderr = "", exit_code = 0 }
+      end,
+    }
+
+    local verdict = core.self_assigned_open_issue_verdict(github, identity())
+
+    t.eq(verdict.ok, false)
+    t.eq(verdict.error_class, "idle-assignee-query-malformed")
+    t.is_true(verdict.why:find("malformed self-assigned issue query", 1, true) ~= nil)
+  end,
+
+  test_assigned_issue_count_fails_closed_on_missing_query_stdout = function()
+    local github = {
+      issue_list_open_assigned = function()
+        return { stderr = "", exit_code = 0 }
+      end,
+    }
+
+    local verdict = core.self_assigned_open_issue_verdict(github, identity())
+
+    t.eq(verdict.ok, false)
+    t.eq(verdict.error_class, "idle-assignee-query-malformed")
+    t.is_true(verdict.why:find("missing self-assigned issue query stdout", 1, true) ~= nil)
   end,
 
   test_system_idle_payload_is_small_and_source_ref_backed = function()
-    local payload = core.build_system_idle_payload("2026-06-19T01:00:00Z", "idle_tick/2026-06-19T01:00:00Z", "2026-06-19T01:10:00Z")
+    local payload = core.build_system_idle_payload("2026-06-19T01:00:00Z", identity().source_ref, "2026-06-19T01:10:00Z")
+
     t.eq(payload.schema, "idle-detector.system-idle.v1")
     t.eq(payload.detected_at, "2026-06-19T01:00:00Z")
-    t.eq(payload.source_ref.kind, "host-observe")
-    t.eq(payload.source_ref.ref, "idle_tick/2026-06-19T01:00:00Z")
+    t.eq(payload.source_ref.kind, "github-assignee-query")
+    t.eq(payload.source_ref.ref, "owner/repo#issues?state=open&assignee=fkst-test-bot")
     t.eq(payload.expires_at, "2026-06-19T01:10:00Z")
     t.is_nil(payload.queues)
     t.is_nil(payload.metrics)
@@ -222,10 +147,10 @@ return {
 
   test_skip_fact_fields_are_pure_and_structured = function()
     for _, case in ipairs({
-      { why = "busy queue=proposal pending=1" },
-      { why = "busy dead_letters=1" },
-      { why = "unreadable observe facts: observe failed" },
-      { why = "malformed observe facts: malformed generated_at_ms" },
+      { why = "busy self_assigned_open_issues=1" },
+      { why = "missing FKST_GITHUB_BOT_LOGIN" },
+      { why = "self-assigned issue query failed: gh unavailable" },
+      { why = "malformed or missing idle_tick slot" },
       { why = "stale idle_tick slot" },
     }) do
       local fact = core.skip_fact("idle_gate", {

@@ -28,6 +28,24 @@ local function issue_list_cli_argv(repo, state, limit, fields)
   }
 end
 
+local function issue_list_open_assigned_argv(repo, assignee)
+  return {
+    "gh",
+    "issue",
+    "list",
+    "--repo",
+    tostring(repo),
+    "--state",
+    "open",
+    "--assignee",
+    tostring(assignee),
+    "--limit",
+    "100",
+    "--json",
+    "number,title,assignees",
+  }
+end
+
 local function pr_list_cli_argv(repo, state, limit, fields)
   return {
     "gh",
@@ -308,6 +326,10 @@ function M.install(handle)
 
   function handle.issue_list_cli(repo, state, limit, fields, timeout)
     return handle._exec(issue_list_cli_argv(repo, state, limit, fields), timeout, "gh issue list")
+  end
+
+  function handle.issue_list_open_assigned(repo, assignee, timeout)
+    return handle._exec(issue_list_open_assigned_argv(repo, assignee), timeout, "gh issue list open assigned")
   end
 
   function handle.issue_list_intake(repo, limit, timeout)
