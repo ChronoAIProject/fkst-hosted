@@ -175,6 +175,41 @@ def sync(name: str, host: Path, requested: list[str]) -> None:
         fail(f"{name}: synced platform package list does not match DEVLOOP_PKGS")
 
 
+def platform_packages(name: str, host: Path, pkgsrc: Path) -> list[str]:
+    workspace_path = host / "fkst.workspace.toml"
+    if not workspace_path.is_file():
+        fail(f"{name}: target fkst.workspace.toml is required for dogfood platform package selection: {workspace_path}")
+    workspace = parse_workspace(workspace_path.read_text(encoding="utf-8"), workspace_path, name)
+    if host.resolve() == pkgsrc.resolve():
+        packages: list[str] = []
+        for package in table_array(workspace, "package"):
+            name_value = package.get("name")
+            source = package.get("source", "workspace")
+            if isinstance(name_value, str) and source == "workspace":
+                packages.append(name_value)
+        reject_duplicates(packages, "package.name")
+        if not packages:
+            fail(f"{name}: self-host fkst.workspace.toml must declare dogfood platform packages as [[package]] entries")
+        return packages
+
+    matched: list[list[str]] = []
+    for source in table_array(workspace, "external_sources"):
+        if source.get("id") == "fkst-packages-platform":
+            declared = package_list(
+                source.get("packages", []),
+                "external_sources(id=fkst-packages-platform).packages",
+            )
+            reject_duplicates(declared, "external_sources(id=fkst-packages-platform).packages")
+            matched.append(declared)
+    if not matched:
+        fail(f"{name}: target fkst.workspace.toml must declare external_sources(id=fkst-packages-platform)")
+    if len(matched) > 1:
+        fail(f"{name}: target fkst.workspace.toml declares external_sources(id=fkst-packages-platform) more than once")
+    if not matched[0]:
+        fail(f"{name}: external_sources(id=fkst-packages-platform).packages must not be empty")
+    return matched[0]
+
+
 def is_generated_scratch(worktree: Path, requested: list[str]) -> bool:
     current_path = worktree / "fkst.workspace.toml"
     if not current_path.is_file():
@@ -193,12 +228,17 @@ def is_generated_scratch(worktree: Path, requested: list[str]) -> bool:
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
-        fail("usage: workspace_manifest.py {sync|is-generated-scratch} ...")
+        fail("usage: workspace_manifest.py {sync|platform-packages|is-generated-scratch} ...")
     cmd = argv[1]
     if cmd == "sync":
         if len(argv) != 5:
             fail("usage: workspace_manifest.py sync <name> <host> <packages>")
         sync(argv[2], Path(argv[3]), [item for item in argv[4].split() if item])
+        return 0
+    if cmd == "platform-packages":
+        if len(argv) != 5:
+            fail("usage: workspace_manifest.py platform-packages <name> <host> <pkgsrc>")
+        print(" ".join(platform_packages(argv[2], Path(argv[3]), Path(argv[4]))))
         return 0
     if cmd == "is-generated-scratch":
         if len(argv) != 4:
