@@ -5,7 +5,7 @@ github-devloop
 github-devloop-pr
 github-devloop-integration
 github-devloop-intake
-github-devloop-intake-default
+github-devloop-workflow
 github-devloop-decompose
 github-devloop-ops
 github-proxy
