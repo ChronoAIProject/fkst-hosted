@@ -5,8 +5,6 @@ separate `fkst-substrate` engine. The repository contains behavior-layer package
 package documentation; it does not contain engine Rust code and does not store host application
 state.
 
-中文补注：本仓是 `fkst` 的官方包库（库 B），只放运行在 `fkst-substrate` 引擎上的 Lua 行为层 package。
-
 ## Project Status
 
 - License: Apache-2.0, see [`LICENSE`](LICENSE).
@@ -123,26 +121,52 @@ generated runtime, durable, and board-cache state goes under `.fkst/run/`.
 
 ## Package Catalog
 
-Flat packages:
+The catalog below is grouped by each package manifest's `kind` field. Flat packages are
+self-contained package roots. Composed packages declare sibling package roots in `[event_deps]` and
+are tested as composed graphs.
 
-- `github-proxy`: bridges GitHub issue and PR facts into fkst events, and handles dry-run-by-default
-  outbound GitHub comments, labels, PR creation, and related requests.
-- `github-external-pr-intake`: detects third-party PRs and materializes exactly one normal
-  devloop-ready bridge issue per PR, leaving implementation, review, and merge authority in
-  `github-devloop`.
+Flat packages (`kind = "package"`):
+
 - `consensus`: source-agnostic multi-angle `codex` consensus over abstract `proposal` events,
   producing `consensus_reached` or bounded `consensus_converge` events.
+- `github-external-pr-intake`: detects third-party pull requests and creates one normal bridge
+  issue for `github-devloop` to process.
+- `github-proxy`: bridges GitHub issue and PR facts into fkst events, and handles dry-run-by-default
+  outbound GitHub comments, labels, issue creation, and related requests.
+- `github-ratchet-migration-slicer`: slices code-owned ratchet allowlist migration work into
+  deterministic child issue requests.
+- `idle-detector`: reads engine observe facts on a schedule and emits `system_idle` fanout signals
+  when the supervised system is quiet.
 
-Composed packages:
+Composed packages (`kind = "package.composed"`):
 
+- `archaudit`: runs repository architecture audits during idle windows and files bounded GitHub
+  issue requests for findings.
 - `autochrono`: maps its own `issue` protocol into `consensus.proposal` and maps reached consensus
   back into its own `reply` protocol.
-- `github-autochrono`: composes `github-proxy` and `autochrono` as a GitHub issue-to-reply adapter.
-- `github-devloop`: composes `github-proxy` and `consensus` into the autonomous GitHub issue to PR
-  loop, using trusted GitHub marker facts, version-CAS state transitions, head-bound PR review, and
-  deterministic merge gates.
+- `fkst-substrate-ref-maintainer`: scans package-repository state for substrate reference updates
+  and raises GitHub PR comment requests when needed.
 - `frontend-devloop`: declares the UI-application host profile for composing the existing GitHub
   devloop package family with frontend host scripts and source-ref-only UI artifact handoff.
+- `github-autochrono`: composes `github-proxy` and `autochrono` as a GitHub issue-to-reply adapter.
+- `github-devloop`: owns the issue-side autonomous development lifecycle from GitHub issue facts
+  through consensus, implementation start, issue liveness, and issue-level reconciliation.
+- `github-devloop-decompose`: decomposes approved GitHub issue work into the next actionable unit
+  for the devloop family.
+- `github-devloop-intake`: owns the admission seam that turns GitHub issue facts into devloop
+  intake candidates.
+- `github-devloop-intake-default`: provides the default intake judgment policy for the devloop
+  admission seam.
+- `github-devloop-integration`: owns integration branch synchronization, rollup scanning, rollup
+  merge, freshness scanning, and conflict handling for the devloop topology.
+- `github-devloop-ops`: owns operational checks such as doctor, repository setup, observability,
+  and dead-letter handling for the devloop package family.
+- `github-devloop-pr`: owns PR-side review, fix, merge, merge-queue, comment handoff, PR liveness,
+  and PR reconciliation.
+- `github-devloop-workflow`: layers bounded multi-step workflow selection and child-issue
+  materialization on top of the stable devloop atom.
+- `integration-coverage-producer`: scans integration-edge coverage gaps and files bounded issue
+  requests for uncovered edges.
 
 ## Architecture Overview
 
@@ -182,8 +206,13 @@ Useful commands:
 scripts/run.sh check
 scripts/run.sh test
 scripts/run.sh test github-proxy
+scripts/run.sh test-affected
 scripts/run.sh test-composed
+scripts/run.sh run <package> <department> '{"payload":{}}'
+scripts/run.sh supervise <package>
+scripts/run.sh health
 scripts/run.sh doctor
+scripts/run.sh build
 ```
 
 Static guards include the 1000-line hard limit for `.lua`, `.sh`, `.py`, and `.rs` source files
