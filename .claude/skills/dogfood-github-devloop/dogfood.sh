@@ -42,6 +42,7 @@ set -uo pipefail
 # Every value has a generic default below, so an unconfigured host still works. Precedence is
 # env var > config file > default. See dogfood.config.example.sh for the template.
 _self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_repo_root="$(git -C "$_self_dir" rev-parse --show-toplevel 2>/dev/null || true)"
 _cfg="${DOGFOOD_CONFIG:-$_self_dir/dogfood.config.sh}"
 [ -f "$_cfg" ] && . "$_cfg"
 
@@ -184,6 +185,29 @@ issue_recency_class() { # $1 issue-number, $2 labels, $3 state, $4 age-hours, $5
       ;;
     *) return 1 ;;
   esac
+}
+
+workflow_board_fact_tool() {
+  local tool="$PKGSRC/packages/github-devloop-workflow/tools/workflow_board_fact.py"
+  if [ -f "$tool" ]; then
+    printf '%s\n' "$tool"
+    return 0
+  fi
+  tool="$_repo_root/packages/github-devloop-workflow/tools/workflow_board_fact.py"
+  [ -f "$tool" ] && printf '%s\n' "$tool"
+}
+
+workflow_board_fact() { # $1 issue-number
+  local num="$1" origin comments fact tool
+  origin="github-devloop/issue/$REPO/$num"
+  tool="$(workflow_board_fact_tool)" || return 1
+  [ -n "$tool" ] || return 1
+  comments=$(gh api --paginate "repos/$REPO/issues/$num/comments?per_page=100" 2>/dev/null) || return 1
+  fact=$(printf '%s' "$comments" | python3 "$tool" \
+    --origin "$origin" \
+    --bot-login "$BOT" 2>/dev/null) || return 1
+  [ -n "$fact" ] || return 1
+  printf '%s\n' "$fact"
 }
 
 # Sync a dogfood RUN checkout (behavior PKGSRC + target HOST) to the machine's
@@ -600,10 +624,15 @@ board_one() { # $1 name, $2 stale_hours
   echo "── issues (by fkst-dev state) ──"
   gh api "repos/$REPO/issues?state=open&per_page=100" --jq '.[]|select(.pull_request==null)|([.labels[].name]|map(select(startswith("fkst-dev:")and .!="fkst-dev:enabled"))) as $labels|"\(.number)\t\(.updated_at)\t\(if ($labels|length)==0 then "__fkst_stateless__" else ($labels|join(",")) end)\t\(.title[0:38])"' 2>/dev/null | \
   while IFS=$'\t' read -r num upd label title; do
-    local a st cls; a=$(( (now - $(epoch_utc "$upd")) / 3600 )); st="$(issue_primary_state "$label")"
+    local a st cls workflow_fact; a=$(( (now - $(epoch_utc "$upd")) / 3600 )); st="$(issue_primary_state "$label")"
     if [ -z "$label" ] || [ "$label" = "__fkst_stateless__" ]; then
-      st="stateless"
-      if [ "$a" -ge "$stale" ]; then cls="⚠ STRANDED stateless ${a}h"; else cls="✓ waiting intake ${a}h"; fi
+      if workflow_fact=$(workflow_board_fact "$num"); then
+        st="${workflow_fact%%$'\t'*}"
+        cls="${workflow_fact#*$'\t'}"
+      else
+        st="stateless"
+        if [ "$a" -ge "$stale" ]; then cls="⚠ STRANDED stateless ${a}h"; else cls="✓ waiting intake ${a}h"; fi
+      fi
     else
       cls="$(issue_recency_class "$num" "$label" "$st" "$a" "$stale" "$openpr")" || continue
     fi
@@ -636,7 +665,7 @@ cmd_board() {
   [ -z "$target" ] && target="$DOGFOOD_REPOS" || target=$(expand "$target")
   for n in $target; do board_one "$n" "$stale"; done
   echo "✓ flowing / tracking / parked = ok   ·   ⚠ STUCK/STRANDED/CI-RED/NO-CI = needs attention (stale=${stale}h)"
-  echo "(label-based fast view; for authoritative state cross-check the issue's state:v1 marker / the linked PR)"
+  echo "(label/marker-based fast view; for authoritative state cross-check the issue's state:v1 marker / workflow marker / linked PR)"
 }
 
 cmd="${1:-status}"; arg2="${2:-}"; arg3="${3:-}"
