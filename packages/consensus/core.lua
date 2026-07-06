@@ -216,6 +216,7 @@ end
 
 local function is_verdict_path(value)
   return value == "post-rebuttal-unanimity"
+    or value == "synthesis"
 end
 
 local function clean_verdict_vector(value)
@@ -622,78 +623,6 @@ function M.angle_digests(angle_results)
     })
   end
   return digests
-end
-
-function M.parse_meta_judge_output(stdout, verdict_mode)
-  local text = tostring(stdout or "")
-  local mode = verdict_mode == "gate" and "gate" or "converge"
-  local parsed = nil
-  local count = 0
-  for line in (text .. "\n"):gmatch("(.-)\n") do
-    local kind, value = line:match("^%s*([Rr][Ee][Aa][Cc][Hh][Ee][Dd])%s*:%s*(.+)%s*$")
-    if kind == nil then
-      kind, value = line:match("^%s*([Cc][Oo][Nn][Vv][Ee][Rr][Gg][Ee])%s*:%s*(.+)%s*$")
-    end
-    if kind == nil then
-      kind, value = line:match("^%s*(⟦FKST:PLAN⟧)%s+(.+)%s*$")
-    end
-    if kind ~= nil then
-      value = bounded(value, max_narrowed_question_len)
-      if value ~= "" then
-        count = count + 1
-        local lowered = kind:lower()
-        if lowered == "reached" then
-          -- decision must be an EXACT whitespace-delimited `approve`
-          -- token followed by a non-empty framing; `approve/reject`,
-          -- `approve-ish`, or a bare `approve` (no framing) fail closed to
-          -- nil so the caller converges instead of fabricating a reached.
-          local first, framing = value:match("^(%S+)%s+(.+)$")
-          local decision = first and first:lower() or nil
-          if (decision == "approve" or (mode == "gate" and decision == "reject"))
-            and framing ~= nil and framing ~= "" then
-            parsed = {
-              kind = "reached",
-              decision = decision,
-              framing = value,
-            }
-          else
-            parsed = nil
-          end
-        else
-          if kind == "⟦FKST:PLAN⟧" then
-            parsed = {
-              kind = "plan",
-              plan = value,
-              narrowed_question = value,
-            }
-          else
-            parsed = {
-              kind = "converge",
-              narrowed_question = value,
-            }
-          end
-        end
-      end
-    end
-  end
-
-  if count ~= 1 then
-    return nil
-  end
-  return parsed
-end
-
-function M.default_narrowed_question(proposal, angle_results)
-  local parts = {}
-  for _, item in ipairs(M.angle_digests(angle_results)) do
-    table.insert(parts, tostring(item.angle) .. "=" .. tostring(item.verdict))
-  end
-  local question = "Resolve the concrete disagreement for proposal " .. tostring(proposal.proposal_id)
-    .. " and decide whether the current framing can be approved."
-  if #parts > 0 then
-    question = question .. " Angle verdicts: " .. table.concat(parts, ", ") .. "."
-  end
-  return bounded(question, max_narrowed_question_len)
 end
 
 function M.build_reached_payload(proposal, decision, angle_results, framing, provenance)
