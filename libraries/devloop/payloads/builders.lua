@@ -386,7 +386,7 @@ end
 
 local function apply_high_risk_angles(proposal, high_risk)
   if high_risk == true then
-    proposal.angles = { "minimal", "structural", "delete", "high-risk" }
+    proposal.angles = { "teleology", "parsimony", "fidelity", "high-risk" }
   end
   return proposal
 end
