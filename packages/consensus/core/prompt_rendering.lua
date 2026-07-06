@@ -7,6 +7,7 @@ local function neutralizer(labels)
       if line:match("^%s*" .. labels.verdict .. "%s*") ~= nil
         or line:match("^%s*" .. labels.reply .. "%s*") ~= nil
         or line:match("^%s*" .. labels.gap .. "%s*") ~= nil
+        or (labels.stance ~= nil and line:match("^%s*" .. labels.stance .. "%s*") ~= nil)
         or line:match("^%s*⟦FKST:PLAN⟧%s*") ~= nil
         or line:match("^%s*[Rr][Ee][Aa][Cc][Hh][Ee][Dd]%s*:") ~= nil
         or line:match("^%s*[Cc][Oo][Nn][Vv][Ee][Rr][Gg][Ee]%s*:") ~= nil then
@@ -64,6 +65,27 @@ local function render_angle_outputs(core, neutralize, angle_results)
   return table.concat(lines, "\n")
 end
 
+local function render_full_angle_output(neutralize, item)
+  return table.concat({
+    "Angle: " .. neutralize(item and item.angle),
+    "P1 verdict: " .. tostring(item and item.verdict or "invalid"),
+    "P1 full output:",
+    neutralize(item and item.stdout or ""),
+  }, "\n")
+end
+
+local function render_peer_outputs(neutralize, peer_results)
+  local lines = {}
+  for _, item in ipairs(peer_results or {}) do
+    table.insert(lines, render_full_angle_output(neutralize, item))
+    table.insert(lines, "")
+  end
+  if #lines > 0 then
+    table.remove(lines)
+  end
+  return table.concat(lines, "\n")
+end
+
 local function angle_mode_contract(verdict_mode, angle)
   local lines = {}
   if angle ~= "high-risk" then
@@ -95,6 +117,7 @@ function M.install(core, deps)
     verdict = deps.verdict_label,
     reply = deps.reply_label,
     gap = deps.gap_label,
+    stance = deps.stance_label,
   })
 
   function core.build_angle_prompt(proposal, angle)
@@ -161,6 +184,41 @@ function M.install(core, deps)
       reached_options = verdict_mode == "gate"
         and "- reached:approve <short framing> when the angles support approving the current framing.\n- reached:reject <short framing> when the angles support rejecting the current framing."
         or "- reached:approve <short framing> when the angles support approving the current framing.",
+    }, proposal)
+  end
+
+  function core.build_rebuttal_prompt(proposal, own_result, peer_results)
+    if type(proposal) ~= "table" then
+      error("consensus: invalid-proposal: proposal must be a table")
+    end
+    if type(own_result) ~= "table" then
+      error("consensus: invalid-rebuttal-seat: own result must be a table")
+    end
+    local prompt = require("prompts.rebuttal")
+    local context_block = ""
+    if proposal.context ~= nil and proposal.context ~= "" then
+      context_block = "Context:\n" .. neutralize(proposal.context)
+    end
+    local convergence_block = ""
+    if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
+      convergence_block = "Current convergence question:\n" .. neutralize(proposal.convergence_question)
+    end
+    local verdict_mode = core.verdict_mode(proposal)
+
+    return core.render_prompt_template(prompt.template, {
+      angle = neutralize(own_result.angle),
+      title = neutralize(proposal.title),
+      body = neutralize(proposal.body),
+      content_fetch_block = render_content_fetch_block(proposal, deps, neutralize),
+      body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
+      context_block = context_block,
+      convergence_block = convergence_block,
+      own_output = render_full_angle_output(neutralize, own_result),
+      peer_outputs = render_peer_outputs(neutralize, peer_results),
+      verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
+      readiness_instruction = verdict_mode == "gate"
+        and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
+        or "If this seat is still not ready to approve, abstain and state the concrete concern in the reply.",
     }, proposal)
   end
 end

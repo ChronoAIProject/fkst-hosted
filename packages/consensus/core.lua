@@ -24,6 +24,7 @@ local stale_generation_context_error_class = "stale_generation_context"
 local verdict_label = "⟦FKST:VERDICT⟧"
 local reply_label = "⟦FKST:REPLY⟧"
 local gap_label = "⟦FKST:GAP⟧"
+local stance_label = "⟦FKST:STANCE⟧"
 local allowed_env = {
   FKST_OUTPUT_LANG = true,
 }
@@ -210,6 +211,36 @@ local function is_verdict(value)
     or value == "reject"
     or value == "abstain"
     or value == "invalid"
+end
+
+local function is_verdict_path(value)
+  return value == "post-rebuttal-unanimity"
+end
+
+local function clean_verdict_vector(value)
+  if value == nil then
+    return nil
+  end
+  if type(value) ~= "table" then
+    error("consensus: verdict-vector-invalid: verdict vector must be a table")
+  end
+  local vector = {}
+  for _, item in ipairs(value) do
+    if type(item) ~= "table" then
+      error("consensus: verdict-vector-invalid: verdict vector item must be a table")
+    end
+    if not is_bounded_string(item.angle, max_key_len) or tostring(item.angle):find("%c") ~= nil then
+      error("consensus: verdict-vector-invalid: invalid verdict vector angle")
+    end
+    if not is_verdict(item.verdict) then
+      error("consensus: verdict-vector-invalid: invalid verdict vector verdict")
+    end
+    table.insert(vector, {
+      angle = tostring(item.angle),
+      verdict = item.verdict,
+    })
+  end
+  return vector
 end
 
 local function valid_digest_item(item)
@@ -660,7 +691,7 @@ function M.default_narrowed_question(proposal, angle_results)
   return bounded(question, max_narrowed_question_len)
 end
 
-function M.build_reached_payload(proposal, decision, angle_results, framing)
+function M.build_reached_payload(proposal, decision, angle_results, framing, provenance)
   if type(proposal) ~= "table" then
     error("consensus: proposal-invalid: proposal must be a table")
   end
@@ -748,6 +779,29 @@ function M.build_reached_payload(proposal, decision, angle_results, framing)
     payload.blocking_gaps = clean_gaps
     payload.blocking_gap = clean_gaps[1]
   end
+  if type(provenance) == "table" then
+    if provenance.verdict_path ~= nil then
+      if not is_verdict_path(provenance.verdict_path) then
+        error("consensus: verdict-path-invalid: invalid verdict path")
+      end
+      payload.verdict_path = provenance.verdict_path
+    end
+    if provenance.verified_moves ~= nil then
+      local verified_moves = tonumber(provenance.verified_moves)
+      if verified_moves == nil or verified_moves < 0 or verified_moves ~= math.floor(verified_moves) then
+        error("consensus: verified-moves-invalid: verified moves must be a non-negative integer")
+      end
+      payload.verified_moves = verified_moves
+    end
+    local p1 = clean_verdict_vector(provenance.p1_verdicts)
+    local p2 = clean_verdict_vector(provenance.p2_verdicts)
+    if p1 ~= nil then
+      payload.p1_verdicts = p1
+    end
+    if p2 ~= nil then
+      payload.p2_verdicts = p2
+    end
+  end
   return payload
 end
 
@@ -781,11 +835,14 @@ require("core.prompt_rendering").install(M, {
   verdict_label = verdict_label,
   reply_label = reply_label,
   gap_label = gap_label,
+  stance_label = stance_label,
   max_key_len = max_key_len,
   max_digest_len = max_digest_len,
   is_bounded_string = is_bounded_string,
   has_content_fetch = has_content_fetch,
   resolve_content_manifest = resolve_content_manifest,
 })
+
+M.stance_label = stance_label
 
 return M
