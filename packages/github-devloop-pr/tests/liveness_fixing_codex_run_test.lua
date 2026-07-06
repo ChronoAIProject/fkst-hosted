@@ -8,6 +8,7 @@ local h = require("tests.devloop_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_attempts = require("devloop.convergence.attempts")
 local m_rae = require("devloop.restart_actionable_epoch")
+local dispatch_live_run = require("devloop.dispatch_live_run")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -243,6 +244,17 @@ local function with_codex_runs(running, fn)
   if not ok then
     error(err)
   end
+end
+
+local function dispatch_liveness()
+  return {
+    restart_transition_table = function()
+      return core.restart_transition_table()
+    end,
+    restart_row_receiver_liveness = function(...)
+      return core.restart_row_receiver_liveness(...)
+    end,
+  }
 end
 
 local function mock_repo_and_empty_issue_list()
@@ -489,6 +501,66 @@ return {
     t.eq(count_calls("git worktree remove --force"), 0)
     t.eq(count_calls("git worktree prune"), 0)
     t.eq(count_calls("merge --no-edit"), 0)
+  end,
+
+  test_fixing_dispatch_dedup_uses_shared_codex_run_liveness = function()
+    local event = fixing()
+    local state = fixing_state(event)
+    local facts = timeout_facts(event, state, fixing_comments(event))
+    facts.now_seconds = now()
+    local liveness = dispatch_liveness()
+    with_codex_runs({
+      {
+        run_id = "fix-live",
+        role = "fix",
+        proposal_id = event.proposal_id,
+        dedup_key = event.version,
+        status = "running",
+        lease_expires_at_ms = (now() + 3600) * 1000,
+      },
+    }, function()
+      t.eq(dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", event.proposal_id, event.version, facts), true)
+    end)
+    with_codex_runs({
+      {
+        run_id = "fix-expired",
+        role = "fix",
+        proposal_id = event.proposal_id,
+        dedup_key = event.version,
+        status = "running",
+        lease_expires_at_ms = (now() - 60) * 1000,
+      },
+    }, function()
+      t.eq(dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", event.proposal_id, event.version, facts), false)
+    end)
+  end,
+
+  test_fixing_dispatch_with_expired_codex_run_deadline_starts_one_replacement = function()
+    local event = fixing()
+    local branch = devloop_base.implement_branch(repo, "42", event.version)
+    local rejection = reject_comment(event)
+    local run_opts = opts("fixing-dispatch-expired-run-starts", {
+      FKST_GITHUB_WRITE = "1",
+    })
+    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.version, {
+      lease_expires_at_ms = (now() - 60) * 1000,
+      timeout_seconds = 1,
+    })
+    mock_fix_dispatch_context(event, branch, rejection)
+    t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
+    mock_existing_fix_worktree(branch, event.reviewed_head_sha)
+    mock_implement_codex(0, "replacement fix applied")
+    mock_git_status(" M packages/github-devloop/core.lua\n")
+    mock_git_commit("feedface", branch)
+    mock_write_env("1")
+    mock_fix_dispatch_context(event, branch, rejection)
+    mock_git_push(branch)
+    mock_pr_fix({ m_builders.pr_origin_marker(event.proposal_id, "42", branch, event.version, "dev") }, branch, "feedface")
+
+    local result = run_fix(event, run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    t.eq(count_calls("git push origin"), 1)
   end,
 
   test_fixing_codex_run_match_preserves_fix_suffix = function()

@@ -14,6 +14,15 @@ local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local m_mq = require("devloop.merge_queue")
 
+local dispatch_liveness = {
+  restart_transition_table = function(...)
+    return core.restart_transition_table(...)
+  end,
+  restart_row_receiver_liveness = function(...)
+    return core.restart_row_receiver_liveness(...)
+  end,
+}
+
 local payloads_builders = require("devloop.payloads.builders")
 local v_fixing = require("devloop.validators.fixing")
 local m_facts = require("devloop.markers.facts")
@@ -559,7 +568,7 @@ local function validate_fix_write_gate_snapshot(repo, fix, branch, pr, reason_pr
     end
     return nil
   end
-  return pr
+  return pr, rechecked_state
 end
 
 local function recheck_fix_write_gate(repo, fix, branch)
@@ -577,10 +586,11 @@ local function precheck_fix_write_gate(repo, fix, branch)
     error("github-devloop: gh-pr-fix-precheck-failed: gh pr fix precheck failed: " .. tostring(pr_precheck.stderr))
   end
   local prechecked_pr = parsers_pr.parse_pr_view_fix(pr_precheck.stdout)
-  if validate_fix_write_gate_snapshot(repo, fix, branch, prechecked_pr, "pre-spawn", false) == nil then
-    return false
+  local prechecked, prechecked_state = validate_fix_write_gate_snapshot(repo, fix, branch, prechecked_pr, "pre-spawn", false)
+  if prechecked == nil then
+    return nil
   end
-  return true
+  return prechecked, prechecked_state
 end
 
 local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
@@ -819,8 +829,14 @@ local function act_fix(event)
   end
   local pre_spawn_gate_ok = false
   with_lock(lock_key, function()
-    pre_spawn_gate_ok = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
-    if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup("fix", fix.proposal_id, fix.version) then
+    local prechecked_pr, prechecked_state = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
+    pre_spawn_gate_ok = prechecked_pr ~= nil
+    if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "fix", fix.proposal_id, fix.version, {
+      state = prechecked_state,
+      current_pr = prechecked_pr,
+      proposal_id = fix.proposal_id,
+      now_seconds = now(),
+    }) then
       devloop_logging.log_cas_decision(
         "fix",
         fix.proposal_id,

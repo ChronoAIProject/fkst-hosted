@@ -9,10 +9,6 @@ function M.implement_exec_ref(proposal_id, dedup_key)
   return dispatch_live_run.dispatch_live_run_exec_ref("implement", proposal_id, dedup_key)
 end
 
-function M.implement_exec_ref_running(exec_ref, status)
-  return dispatch_live_run.dispatch_live_run_exec_ref_running("implement", exec_ref, status)
-end
-
 function M.implement_attempt_marker(proposal_id, dedup_key, attempt, started_at, exec_ref)
   local n = tonumber(attempt)
   if n == nil or n < 1 or n ~= math.floor(n) then
@@ -58,20 +54,6 @@ function M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
     end
   end
   return latest
-end
-
-function M.implement_attempt_exec_live_fact(comments, proposal_id, dedup_key)
-  local attempt = M.latest_implement_attempt_fact(comments, proposal_id, dedup_key)
-  if attempt == nil then
-    return nil, "missing-implement-attempt"
-  end
-  if type(attempt.exec_ref) ~= "string" or attempt.exec_ref == "" then
-    return attempt, "missing-exec-ref"
-  end
-  if M.implement_exec_ref_running(attempt.exec_ref) then
-    return attempt, "running"
-  end
-  return attempt, "not-running"
 end
 
 function M.implement_attempt_count(comments, proposal_id, dedup_key)
