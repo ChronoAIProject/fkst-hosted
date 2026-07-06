@@ -25,10 +25,30 @@ local function valid_json(id)
   }]]
 end
 
+local function valid_toml(id)
+  return [=[
+schema = "fkst.workflow.v1"
+id = "]=] .. id .. [=["
+version = "2026-07-02"
+summary = "A bounded workflow."
+applies_when = "The origin issue asks for this workflow."
+
+[[steps]]
+id = "first"
+title = "First step"
+
+[steps.content]
+kind = "static"
+intent = "Do the first bounded step."
+]=]
+end
+
 local function cleanup(root)
   os.remove(root .. "/alpha.json")
   os.remove(root .. "/bad.json")
+  os.remove(root .. "/bad.toml")
   os.remove(root .. "/dup-a.json")
+  os.remove(root .. "/gamma.toml")
   os.remove(root .. "/ignored.txt")
   os.remove(root .. "/nested/beta.json")
   os.remove(root .. "/nested/dup-b.json")
@@ -126,6 +146,36 @@ local tests = {
       t.is_true(duplicate ~= nil)
       t.eq(duplicate.error.meta.id, "dup")
       t.eq(#duplicate.error.meta.peers, 2)
+    end)
+  end,
+
+  test_load_catalog_accepts_toml_files_through_shared_validator = function()
+    with_temp_root(function(root)
+      mkdir_p(root)
+      file.write(root .. "/gamma.toml", valid_toml("gamma"))
+
+      local loaded = catalog.load_catalog(root)
+
+      t.eq(#loaded.errors, 0)
+      t.eq(#loaded.duplicates, 0)
+      t.eq(loaded.valid.gamma.blueprint.id, "gamma")
+      t.is_true(loaded.valid.gamma.path:sub(-10) == "gamma.toml")
+      t.eq(loaded.valid.gamma.blueprint.steps[1].content.kind, "static")
+      t.eq(loaded.valid.gamma.blueprint.steps[1].content.intent, "Do the first bounded step.")
+    end)
+  end,
+
+  test_invalid_toml_catalog_file_fails_closed = function()
+    with_temp_root(function(root)
+      mkdir_p(root)
+      file.write(root .. "/bad.toml", "schema = [")
+
+      local loaded = catalog.load_catalog(root)
+
+      t.eq(#loaded.errors, 1)
+      t.eq(loaded.errors[1].path, root .. "/bad.toml")
+      t.eq(loaded.errors[1].error.code, "invalid_toml")
+      assert_contains(loaded.errors[1].error.message, "TOML")
     end)
   end,
 

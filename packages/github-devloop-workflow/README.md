@@ -57,8 +57,8 @@ devloop unless the origin issue title/body unambiguously matches exactly one flo
 first child step is the feasibility gate; no-changes is fatal and blocks the origin with a WHY.
 
 Additional host-authored workflows can be placed under
-`FKST_WORKFLOW_CATALOG_ROOT` as `**/*.json` files (one workflow per file; JSON today, TOML is a
-possible future UX choice). Schema `fkst.workflow.v1`:
+`FKST_WORKFLOW_CATALOG_ROOT` as `**/*.json` or `**/*.toml` files (one workflow per file). Schema
+`fkst.workflow.v1`:
 
 ```json
 {

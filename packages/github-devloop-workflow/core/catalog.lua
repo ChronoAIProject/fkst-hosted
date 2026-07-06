@@ -13,8 +13,16 @@ local function empty_result()
   }
 end
 
-local function is_json_path(path)
-  return type(path) == "string" and path:sub(-5) == ".json"
+local function path_extension(path)
+  if type(path) ~= "string" then
+    return nil
+  end
+  return path:match("%.([^./]+)$")
+end
+
+local function is_catalog_path(path)
+  local ext = path_extension(path)
+  return ext == "json" or ext == "toml"
 end
 
 local function add_error(result, path, why)
@@ -55,9 +63,35 @@ local function parse_json_blueprint(source)
   return decoded, nil
 end
 
--- Shared JSON→blueprint decode used by BOTH the file source (collect_file_records)
--- and the built-in default source (default_catalog), so host and non-host catalogs
--- are authored in one JSON writing style and flow through one decode + validator.
+local function parse_toml_blueprint(source)
+  if type(source) ~= "string" then
+    return nil, fail("blueprint_toml", "not_string", "must be a string")
+  end
+  local ok, decoded = pcall(toml.decode, source)
+  if not ok then
+    return nil, fail("blueprint_toml", "invalid_toml", "invalid TOML", {
+      error = tostring(decoded),
+    })
+  end
+  return decoded, nil
+end
+
+local function parse_file_blueprint(path, source)
+  local ext = path_extension(path)
+  if ext == "json" then
+    return parse_json_blueprint(source)
+  end
+  if ext == "toml" then
+    return parse_toml_blueprint(source)
+  end
+  return nil, fail("blueprint", "unsupported_catalog_file", "must end with .json or .toml", {
+    path = tostring(path),
+  })
+end
+
+-- Shared JSON→blueprint decode used by the built-in default source
+-- (default_catalog). Host file records may be JSON or TOML, but every decoded
+-- record flows through the same catalog.validate_records validator.
 M.parse_json_blueprint = parse_json_blueprint
 
 function M.collect_file_records(root_dir)
@@ -75,29 +109,29 @@ function M.collect_file_records(root_dir)
     return collection
   end
 
-  local json_paths = {}
+  local catalog_paths = {}
   for _, path in ipairs(listed) do
-    if is_json_path(path) then
-      table.insert(json_paths, path)
+    if is_catalog_path(path) then
+      table.insert(catalog_paths, path)
     end
   end
-  table.sort(json_paths)
-  if #json_paths > M.MAX_CATALOG_FILES then
+  table.sort(catalog_paths)
+  if #catalog_paths > M.MAX_CATALOG_FILES then
     add_error(collection, root_dir, fail("catalog", "too_many_files", "catalog exceeds MAX_CATALOG_FILES", {
       max_count = M.MAX_CATALOG_FILES,
-      actual_count = #json_paths,
+      actual_count = #catalog_paths,
     }))
     return collection
   end
 
-  for _, path in ipairs(json_paths) do
+  for _, path in ipairs(catalog_paths) do
     local read_ok, source = pcall(file.read, path)
     if not read_ok then
       add_error(collection, path, fail("file", "file_read_failed", "file.read failed", {
         error = tostring(source),
       }))
     else
-      local decoded, why = parse_json_blueprint(source)
+      local decoded, why = parse_file_blueprint(path, source)
       if decoded == nil then
         add_error(collection, path, why)
       else
