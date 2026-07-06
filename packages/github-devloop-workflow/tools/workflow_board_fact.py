@@ -26,6 +26,7 @@ MATERIALIZATION_STATE_RANK = {
 TERMINAL_STATES = {"done", "blocked", "error"}
 
 MARKER_RE = re.compile(r"<!--\s*fkst:github-devloop-workflow:(blueprint|materialization|terminal):v1\b(.*?)-->")
+DEVLOOP_MARKER_RE = re.compile(r"<!--\s*fkst:github-devloop:[A-Za-z0-9_-]+:v1\b")
 INTAKE_DECISION_RE = re.compile(r"<!--\s*fkst:github-devloop:intake-decision:v1\b(.*?)-->")
 DEBUG_STAMP_RE = re.compile(r"\s*<!--\s*fkst:debug-stamp:v1\b.*?-->\s*$", re.DOTALL)
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
@@ -98,6 +99,21 @@ def trusted_comments(comments: list[Any], bot_login: str) -> list[dict[str, Any]
         if isinstance(body, str):
             trusted.append({"body": body})
     return trusted
+
+
+def first_foreign_marker_login(comments: list[Any], bot_login: str) -> str | None:
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        login = login_for(comment)
+        if login == "" or login == bot_login:
+            continue
+        body = comment.get("body")
+        if not isinstance(body, str):
+            continue
+        if MARKER_RE.search(body) or DEVLOOP_MARKER_RE.search(body):
+            return login
+    return None
 
 
 def decimal_checksum(value: str) -> str:
@@ -284,6 +300,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     fact = board_fact(collect_facts(trusted_comments(comments, args.bot_login), args.origin))
+    if fact is None:
+        peer_login = first_foreign_marker_login(comments, args.bot_login)
+        if peer_login is not None:
+            fact = ("stateless", f"peer-managed({peer_login})")
     if fact is None:
         return 1
     print(f"{fact[0]}\t{fact[1]}")
