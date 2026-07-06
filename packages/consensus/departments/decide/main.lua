@@ -1,11 +1,17 @@
 local core = require("core")
+local rebuttal = require("departments.decide.rebuttal")
 local saga = require("workflow.saga")
+
+local aggregate = core.aggregate
+local build_reached_payload = core.build_reached_payload
+local judgment_scratch_worktree = core.judgment_scratch_worktree
+local parse_angle_output = core.parse_angle_output
+local reached_cache_key = core.reached_cache_key
 
 local spec = {
   consumes = { "proposal" },
   published_seam = { "proposal" },
   produces = { "consensus_reached", "consensus_converge" },
-  published_seam = { "proposal" },
   stall_window = "2m",
 }
 
@@ -36,7 +42,7 @@ end
 local function spawn_angle(proposal, angle, runtime_root)
   local prompt = core.build_angle_prompt(proposal, angle)
   local worktree = prepare_judgment_worktree(
-    core.judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
+    judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
   return spawn_codex(codex_opts(proposal, prompt, worktree, "consensus"))
 end
@@ -44,7 +50,7 @@ end
 local function spawn_meta_judge(proposal, angle_results, runtime_root)
   local prompt = core.build_meta_judge_prompt(proposal, angle_results)
   local worktree = prepare_judgment_worktree(
-    core.judgment_scratch_worktree(runtime_root, "meta-judge", proposal.dedup_key)
+    judgment_scratch_worktree(runtime_root, "meta-judge", proposal.dedup_key)
   )
   return spawn_codex_sync(codex_opts(proposal, prompt, worktree, "consensus"))
 end
@@ -72,7 +78,7 @@ local function decide(proposal)
     local parsed = nil
     local result = results[index]
     if type(result) == "table" and result.exit_code == 0 then
-      parsed = core.parse_angle_output(result.stdout, verdict_mode)
+      parsed = parse_angle_output(result.stdout, verdict_mode)
     end
     table.insert(angle_results, {
       angle = angle,
@@ -84,13 +90,47 @@ local function decide(proposal)
     })
   end
 
-  local decision = core.aggregate(angle_results, verdict_mode)
+  local decision = aggregate(angle_results, verdict_mode)
   if decision ~= nil then
     return {
       queue = "consensus_reached",
-      payload = core.build_reached_payload(proposal, decision, angle_results),
+      payload = build_reached_payload(proposal, decision, angle_results),
       cache = true,
     }
+  end
+
+  if rebuttal.can_run(angle_results) then
+    local rebuttal_handles = rebuttal.spawn_all({
+      proposal = proposal,
+      angle_results = angle_results,
+      runtime_root = runtime_root,
+      prepare_judgment_worktree = prepare_judgment_worktree,
+      codex_opts = codex_opts,
+      build_rebuttal_prompt = function(target_proposal, own_result, peer_results)
+        return core.build_rebuttal_prompt(target_proposal, own_result, peer_results)
+      end,
+      judgment_scratch_worktree = function(root, kind, identity)
+        return judgment_scratch_worktree(root, kind, identity)
+      end,
+      spawn_codex = spawn_codex,
+    })
+    local rebuttal_outputs = await_all(rebuttal_handles)
+    local rebuttal_results = rebuttal.collect(angle_results, rebuttal_outputs, verdict_mode, {
+      parse_angle_output = function(stdout, mode)
+        return parse_angle_output(stdout, mode)
+      end,
+    })
+    local rebuttal_reached = rebuttal.post_rebuttal_reached(proposal, angle_results, rebuttal_results, verdict_mode, {
+      aggregate = function(items, mode)
+        return aggregate(items, mode)
+      end,
+      build_reached_payload = function(target_proposal, decision, results, framing, provenance)
+        return build_reached_payload(target_proposal, decision, results, framing, provenance)
+      end,
+    })
+    if rebuttal_reached ~= nil then
+      return rebuttal_reached
+    end
   end
 
   local meta_result = spawn_meta_judge(proposal, angle_results, runtime_root)
@@ -101,7 +141,7 @@ local function decide(proposal)
   if parsed ~= nil and parsed.kind == "reached" and core.all_angles_succeeded(angle_results) then
     return {
       queue = "consensus_reached",
-      payload = core.build_reached_payload(
+      payload = build_reached_payload(
         proposal,
         parsed.decision,
         angle_results,
@@ -135,7 +175,7 @@ local function decision_done(event)
     return true
   end
 
-  local cache_key = core.reached_cache_key(proposal.dedup_key)
+  local cache_key = reached_cache_key(proposal.dedup_key)
   local already_reached = false
   with_lock(cache_key, function()
     already_reached = cache_get(cache_key) ~= nil
@@ -145,7 +185,7 @@ end
 
 local function act_decide(event)
   local proposal = event.payload or {}
-  local cache_key = core.reached_cache_key(proposal.dedup_key)
+  local cache_key = reached_cache_key(proposal.dedup_key)
 
   local ok, result = pcall(decide, proposal)
   if not ok then
