@@ -50,21 +50,6 @@ local function render_content_fetch_block(proposal, deps, neutralize)
   }, "\n")
 end
 
-local function render_angle_outputs(core, neutralize, angle_results)
-  local lines = {}
-  for _, item in ipairs(core.angle_digests(angle_results)) do
-    table.insert(lines, "Angle: " .. neutralize(item.angle))
-    table.insert(lines, "Verdict: " .. item.verdict)
-    table.insert(lines, "Reply: " .. neutralize(item.reply))
-    table.insert(lines, "Digest: " .. neutralize(item.digest))
-    table.insert(lines, "")
-  end
-  if #lines > 0 then
-    table.remove(lines)
-  end
-  return table.concat(lines, "\n")
-end
-
 local function render_full_angle_output(neutralize, item)
   return table.concat({
     "Angle: " .. neutralize(item and item.angle),
@@ -158,35 +143,6 @@ function M.install(core, deps)
     }, proposal)
   end
 
-  function core.build_meta_judge_prompt(proposal, angle_results)
-    if type(proposal) ~= "table" then
-      error("consensus: invalid-proposal: proposal must be a table")
-    end
-    local prompt = require("prompts.meta_judge")
-    local context_block = ""
-    if proposal.context ~= nil and proposal.context ~= "" then
-      context_block = "Context:\n" .. neutralize(proposal.context)
-    end
-    local convergence_block = ""
-    if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
-      convergence_block = "Current convergence question:\n" .. neutralize(proposal.convergence_question)
-    end
-    local verdict_mode = core.verdict_mode(proposal)
-
-    return core.render_prompt_template(prompt.template, {
-      title = neutralize(proposal.title),
-      body = neutralize(proposal.body),
-      content_fetch_block = render_content_fetch_block(proposal, deps, neutralize),
-      body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
-      context_block = context_block,
-      convergence_block = convergence_block,
-      angle_outputs = render_angle_outputs(core, neutralize, angle_results),
-      reached_options = verdict_mode == "gate"
-        and "- reached:approve <short framing> when the angles support approving the current framing.\n- reached:reject <short framing> when the angles support rejecting the current framing."
-        or "- reached:approve <short framing> when the angles support approving the current framing.",
-    }, proposal)
-  end
-
   function core.build_rebuttal_prompt(proposal, own_result, peer_results)
     if type(proposal) ~= "table" then
       error("consensus: invalid-proposal: proposal must be a table")
@@ -220,6 +176,50 @@ function M.install(core, deps)
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or "If this seat is still not ready to approve, abstain and state the concrete concern in the reply.",
     }, proposal)
+  end
+
+  function core.build_synthesis_prompt(proposal, p1_results, p2_results, options)
+    if type(proposal) ~= "table" then
+      error("consensus: invalid-proposal: proposal must be a table")
+    end
+    local synthesis = require("departments.decide.synthesis")
+    return synthesis.build_prompt({
+      proposal = proposal,
+      render_prompt_template = function(template, vars, target_proposal)
+        return core.render_prompt_template(template, vars, target_proposal)
+      end,
+      vars = function(repair, prior_result)
+        local context_block = ""
+        if proposal.context ~= nil and proposal.context ~= "" then
+          context_block = "Context:\n" .. neutralize(proposal.context)
+        end
+        local convergence_block = ""
+        if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
+          convergence_block = "Current convergence question:\n" .. neutralize(proposal.convergence_question)
+        end
+        local verdict_mode = core.verdict_mode(proposal)
+        local repair_instruction = "This is the first synthesis attempt."
+        if repair then
+          local stdout = type(prior_result) == "table" and prior_result.stdout or ""
+          repair_instruction = "Repair attempt: the previous synthesis output failed the parser. Emit one valid outcome line and do not rerun Phase B or Phase R. Previous output:\n" .. neutralize(stdout)
+        end
+        return {
+          title = neutralize(proposal.title),
+          body = neutralize(proposal.body),
+          content_fetch_block = render_content_fetch_block(proposal, deps, neutralize),
+          body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
+          context_block = context_block,
+          convergence_block = convergence_block,
+          reached_options = verdict_mode == "gate"
+            and "- reached:approve <bounded framing>\n- reached:reject <bounded framing>"
+            or "- reached:approve <bounded framing>",
+          repair_instruction = repair_instruction,
+          verified_move_candidates = synthesis.verified_move_candidates(p2_results),
+          p1_transcripts = synthesis.full_transcript_lines(neutralize, "Phase B transcripts:", p1_results),
+          p2_transcripts = synthesis.full_transcript_lines(neutralize, "Phase R transcripts:", p2_results),
+        }
+      end,
+    }, options and options.repair, options and options.prior_result)
   end
 end
 
