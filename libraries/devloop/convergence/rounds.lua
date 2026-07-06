@@ -12,6 +12,8 @@ local safe_attr = shared.safe_attr
 local decode_attr = shared.decode_attr
 local decode_angle_replay = shared.decode_angle_replay
 local encode_angle_replay = shared.encode_angle_replay
+local decode_findings_record = shared.decode_findings_record
+local encode_findings_record = shared.encode_findings_record
 local converge_question_digest = shared.converge_question_digest
 local converge_verdicts_digest = shared.converge_verdicts_digest
 local converge_angles_digest = shared.converge_angles_digest
@@ -34,6 +36,7 @@ local function converge_record_map(comments, kind, matches)
       local dedup = attr(marker, "dedup")
       local narrowed_question = decode_attr(attr(marker, "narrowed_question"))
       local angle_digests = decode_angle_replay(attr(marker, "angle_digests"))
+      local findings_record = decode_findings_record(attr(marker, "findings_record"))
       local version = attr(marker, "version")
       if round ~= nil
         and matches(marker)
@@ -48,6 +51,7 @@ local function converge_record_map(comments, kind, matches)
           version = version,
           narrowed_question = narrowed_question,
           angle_digests = angle_digests,
+          findings_record = findings_record,
         }
       end
     end
@@ -62,7 +66,7 @@ local function converge_record_map(comments, kind, matches)
   end)
   return facts
 end
-function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key)
+function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key, findings_record)
   local copied = {}
   for _, fact in ipairs(facts or {}) do
     table.insert(copied, fact)
@@ -72,6 +76,7 @@ function C.append_converge_round_fact(facts, round, narrowed_question, angle_dig
     question = converge_question_digest(narrowed_question),
     verdicts = converge_verdicts_digest(angle_digests),
     dedup = dedup_key,
+    findings_record = shared.normalize_findings_record(findings_record),
   })
   return copied
 end
@@ -84,7 +89,7 @@ function C.converge_proposal_base_dedup(consensus_dedup)
   local base_version = C.converge_base_version(consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end
-function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
+function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid converge round")
@@ -99,9 +104,10 @@ function C.converge_round_marker(proposal_id, base_version, source_ref_digest, r
     .. '" angles="' .. converge_angles_digest(angle_digests)
     .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
+    .. '" findings_record="' .. encode_findings_record(findings_record)
     .. '" -->'
 end
-function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests)
+function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review converge round")
@@ -119,6 +125,7 @@ function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id
     .. '" angles="' .. converge_angles_digest(angle_digests)
     .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
+    .. '" findings_record="' .. encode_findings_record(findings_record)
     .. '" -->'
 end
 

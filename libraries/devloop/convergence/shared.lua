@@ -6,6 +6,8 @@ local valid_round = require("devloop.rounds").valid_round
 local max_digest_len = 64
 local max_attr_len = 240
 local max_question_len = 2000
+local findings_component_len = 700
+local findings_record_len = 1500
 
 local function normalize_text(value)
   return tostring(value or ""):gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -83,6 +85,94 @@ local function decode_angle_replay(value)
   return items
 end
 
+local function normalize_findings_line(value)
+  if value == nil then
+    return nil
+  end
+  local text = tostring(value):gsub("%c", " "):gsub("%s+", " ")
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then
+    return nil
+  end
+  if #text > findings_component_len then
+    text = text:sub(1, findings_component_len)
+  end
+  return text
+end
+
+local function normalize_findings_text(value)
+  if value == nil then
+    return nil
+  end
+  local lines = {}
+  local text = tostring(value):gsub("\r\n", "\n"):gsub("\r", "\n")
+  for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    local normalized = normalize_findings_line(line)
+    if normalized ~= nil then
+      local label, rest = normalized:match("^([%a_]+):%s+(.+)$")
+      if (label == "settled" or label == "open") and rest ~= "" then
+        table.insert(lines, label .. ":")
+        table.insert(lines, rest)
+      else
+        table.insert(lines, normalized)
+      end
+    end
+  end
+  if #lines == 0 then
+    return nil
+  end
+  local normalized = table.concat(lines, "\n")
+  if #normalized > findings_record_len then
+    normalized = normalized:sub(1, findings_record_len)
+  end
+  return normalized
+end
+
+local function normalize_findings_record(record)
+  if record == nil then
+    return nil
+  end
+  if type(record) ~= "table" then
+    return normalize_findings_text(record)
+  end
+
+  local lines = {}
+  local settled = normalize_findings_line(record.settled)
+  local open = normalize_findings_line(record.open)
+  if settled ~= nil then
+    table.insert(lines, "settled:")
+    table.insert(lines, settled)
+  end
+  if open ~= nil then
+    table.insert(lines, "open:")
+    table.insert(lines, open)
+  end
+  local text = table.concat(lines, "\n")
+  if text == "" then
+    return nil
+  end
+  if #text > findings_record_len then
+    text = text:sub(1, findings_record_len)
+  end
+  return text
+end
+
+local function encode_findings_record(record)
+  local text = normalize_findings_record(record)
+  if text == nil then
+    return ""
+  end
+  return safe_attr(text:gsub("%%", "%%25"):gsub("\n", "%%0A"), findings_record_len)
+end
+
+local function decode_findings_record(value)
+  local text = decode_attr(value)
+  if text == nil then
+    return nil
+  end
+  return normalize_findings_text(text:gsub("%%0[Aa]", "\n"):gsub("%%25", "%%"))
+end
+
 function sorted_angle_items(angle_digests)
   local items = {}
   if type(angle_digests) ~= "table" then
@@ -126,7 +216,9 @@ local Shared = {
   max_digest_len = max_digest_len,
   max_attr_len = max_attr_len,
   max_question_len = max_question_len,
+  findings_record_len = findings_record_len,
   normalize_text = normalize_text,
+  normalize_findings_record = normalize_findings_record,
   digest = digest,
   safe_attr = safe_attr,
   decode_attr = decode_attr,
@@ -134,6 +226,8 @@ local Shared = {
   decode_component = decode_component,
   encode_angle_replay = encode_angle_replay,
   decode_angle_replay = decode_angle_replay,
+  encode_findings_record = encode_findings_record,
+  decode_findings_record = decode_findings_record,
   sorted_angle_items = sorted_angle_items,
   attr = attr,
   is_digest = is_digest,
