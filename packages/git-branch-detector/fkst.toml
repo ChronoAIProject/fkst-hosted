@@ -1,0 +1,12 @@
+kind = "package"
+name = "git-branch-detector"
+persistence_class = "stateless_adapter"
+
+[code]
+root = "."
+
+[lib_deps]
+libraries = ["contract", "workflow", "testkit", "forge"]
+
+[conformance]
+pack = "conformance/pack.toml"
