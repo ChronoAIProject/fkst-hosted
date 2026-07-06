@@ -1,8 +1,7 @@
 local M = {}
 
--- Built-in catalogs are authored in the SAME JSON shape a host provides an
--- external catalog under FKST_WORKFLOW_CATALOG_ROOT/*.json -- ONE writing style
--- for host and non-host. Embedded as JSON strings (not bundled files) because
+-- Built-in catalogs are authored in the same schema shape a host provides under
+-- FKST_WORKFLOW_CATALOG_ROOT. Embedded as JSON strings (not bundled files) because
 -- core cannot locate its own package root at runtime (debug is forbidden, file
 -- is runtime-relative). Each entry decodes LAZILY via json.decode in records();
 -- decoded records flow through the SAME catalog.validate_records as file
