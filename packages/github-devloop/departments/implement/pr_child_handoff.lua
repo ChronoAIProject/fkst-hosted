@@ -86,6 +86,13 @@ function H.raise_awaiting_pr_from_fact(dept, repo, issue_number, ready, current,
     issue.pr_comments = current_pr.comments
   end
   local child = core.ensure_pr_child(issue, ready.dedup_key, core.implementation_retry_attempt(ready.dedup_key) or 1)
+  if child == nil then
+    devloop_logging.log_cas_decision(dept, ready.proposal_id, {
+      state = "implementing",
+      version = ready.dedup_key,
+    }, "implementing", "awaiting-pr", "skip-idempotent(terminal-child-lineage)", "delegated PR child lineage is already terminal")
+    return
+  end
   devloop_logging.log_cas_decision(dept, ready.proposal_id, {
     state = "implementing",
     version = ready.dedup_key,

@@ -5,16 +5,23 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local requests_labels = require("devloop.requests.labels")
 local parsers_pr = require("devloop.parsers.pr")
+local parsers_misc = require("devloop.parsers.misc")
 local m_facts = require("devloop.markers.facts")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
 local S = {}
 local config = require("devloop.config")
+local transition_version = require("contract.transition_version")
+local pr_partition_contract = require("devloop.restart.issue.pr_partition_contract")
 
 function S.install(M)
 local gate = require("devloop.gate")
 local m_builders = require("devloop.markers.builders")
 local child_start_visible_gate = nil
+local pr_terminal_states = {}
+for _, state in ipairs(pr_partition_contract.pr_terminal_states()) do
+  pr_terminal_states[state] = true
+end
 
 local function load_child_start_visible_gate()
   if child_start_visible_gate == nil then
@@ -241,6 +248,42 @@ local function child_start_bindings(issue_proposal_id, issue_number, impl_versio
   }
 end
 
+local function version_is_same_lineage_or_descendant(version, lineage)
+  local candidate = tostring(version or "")
+  local base = tostring(lineage or "")
+  if transition_version.strip_suffixes(candidate) == transition_version.strip_suffixes(base) then
+    return true
+  end
+  return base ~= "" and (candidate == base or candidate:sub(1, #base + 1) == base .. "/")
+end
+
+local function terminal_child_matches_lineage(comments, issue_proposal_id, issue_number, impl_version, branch, base_branch)
+  local origin = m_facts.pr_origin_fact(comments)
+  if origin == nil
+    or origin.pr_native == true
+    or tostring(origin.proposal_id or "") ~= tostring(issue_proposal_id or "")
+    or tostring(origin.issue_number or "") ~= tostring(issue_number or "")
+    or not version_is_same_lineage_or_descendant(origin.impl_version, impl_version)
+    or tostring(origin.branch or "") ~= tostring(branch or "")
+    or tostring(origin.base_branch or "") ~= tostring(base_branch or "") then
+    return false
+  end
+  local marker_pattern = "<!%-%- fkst:github%-devloop:state:v1.-%-%->"
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments or {})) do
+    for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
+      local marker_proposal = marker:match('proposal="([^"]+)"')
+      local marker_state = marker:match('state="([^"]+)"')
+      local marker_version = marker:match('version="([^"]*)"')
+      if marker_proposal == tostring(issue_proposal_id or "")
+        and pr_terminal_states[tostring(marker_state or "")] == true
+        and version_is_same_lineage_or_descendant(marker_version, impl_version) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 function M.build_pr_delegation_open_comment_request(repo, pr_number, issue_proposal_id, pr_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, source_ref, delegation)
   return build_pr_open_comment_request(repo, pr_number, pr_proposal_id, issue_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, source_ref, delegation)
 end
@@ -277,6 +320,8 @@ local function child_from_pr(issue, impl_version, generation, pr, repo, issue_nu
       queue = "github-proxy.github_pr_comment_request",
       payload = build_pr_open_comment_request(repo, pr_number, pr_proposal_id, issue_proposal_id, issue_number, impl_version, branch, base_branch, head_sha, pr_source_ref, delegation),
     })
+  elseif terminal_child_matches_lineage(issue.pr_comments or {}, issue_proposal_id, issue_number, impl_version, branch, base_branch) then
+    return nil
   end
   local delegation_fact = existing_delegation(issue, issue_proposal_id, delegation)
   local issue_delegation_visible = delegation_fact ~= nil
