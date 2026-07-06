@@ -100,8 +100,11 @@ local function parse_verified_move(line)
 end
 
 function M.parse_output(stdout, verdict_mode)
-  local text = tostring(stdout or "")
+  local text = trim(tostring(stdout or ""))
   if text:find("⟦FKST:PLAN⟧", 1, true) ~= nil then
+    return nil
+  end
+  if text == "" then
     return nil
   end
 
@@ -131,6 +134,8 @@ function M.parse_output(stdout, verdict_mode)
           return nil
         end
       elseif line:match("^%s*verified%-move:") ~= nil then
+        return nil
+      else
         return nil
       end
     end

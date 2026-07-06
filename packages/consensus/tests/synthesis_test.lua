@@ -87,6 +87,11 @@ return {
     t.is_nil(synthesis.parse_output("converge: disagreement without evidence"))
     t.is_nil(synthesis.parse_output("converge: disagreement + "))
     t.is_nil(synthesis.parse_output("⟦FKST:PLAN⟧ merge"))
+    t.is_nil(synthesis.parse_output("reached:approve ok\nThis narrative must not pass."))
+    t.is_nil(synthesis.parse_output("Preamble\nconverge: disagreement + evidence"))
+    t.is_nil(synthesis.parse_output("reached:approve ok\n\nverified-move: angle=parsimony phase=P2 citation=claim"))
+    t.is_nil(synthesis.parse_output("reached:approve ok\n⟦FKST:VERDICT⟧ approve"))
+    t.is_nil(synthesis.parse_output("reached:approve ok\nreached: approve duplicate sentinel"))
   end,
 
   test_parse_output_rejects_bad_or_duplicate_verified_moves = function()
