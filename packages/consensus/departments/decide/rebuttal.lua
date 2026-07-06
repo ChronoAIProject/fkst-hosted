@@ -1,15 +1,5 @@
 local M = {}
-
-local function verdict_vector(results)
-  local vector = {}
-  for _, item in ipairs(results or {}) do
-    table.insert(vector, {
-      angle = tostring(item.angle or "unknown"),
-      verdict = item.verdict or "invalid",
-    })
-  end
-  return vector
-end
+local provenance = require("departments.decide.provenance")
 
 local function unanimous_verdict(results)
   local first = nil
@@ -136,8 +126,8 @@ function M.post_rebuttal_reached(proposal, p1_results, p2_results, verdict_mode,
     queue = "consensus_reached",
     payload = caps.build_reached_payload(proposal, decision, p2_results, nil, {
       verdict_path = "post-rebuttal-unanimity",
-      p1_verdicts = verdict_vector(p1_results),
-      p2_verdicts = verdict_vector(p2_results),
+      p1_verdicts = provenance.verdict_vector(p1_results),
+      p2_verdicts = provenance.verdict_vector(p2_results),
       verified_moves = 0,
     }),
     cache = true,

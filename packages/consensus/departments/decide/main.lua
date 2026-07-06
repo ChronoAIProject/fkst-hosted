@@ -1,5 +1,6 @@
 local core = require("core")
 local rebuttal = require("departments.decide.rebuttal")
+local synthesis = require("departments.decide.synthesis")
 local saga = require("workflow.saga")
 
 local aggregate = core.aggregate
@@ -47,14 +48,6 @@ local function spawn_angle(proposal, angle, runtime_root)
   return spawn_codex(codex_opts(proposal, prompt, worktree, "consensus"))
 end
 
-local function spawn_meta_judge(proposal, angle_results, runtime_root)
-  local prompt = core.build_meta_judge_prompt(proposal, angle_results)
-  local worktree = prepare_judgment_worktree(
-    judgment_scratch_worktree(runtime_root, "meta-judge", proposal.dedup_key)
-  )
-  return spawn_codex_sync(codex_opts(proposal, prompt, worktree, "consensus"))
-end
-
 local function raise_converge(proposal, angle_results, narrowed_question)
   raise(
     "consensus_converge",
@@ -99,6 +92,7 @@ local function decide(proposal)
     }
   end
 
+  local rebuttal_results = angle_results
   if rebuttal.can_run(angle_results) then
     local rebuttal_handles = rebuttal.spawn_all({
       proposal = proposal,
@@ -115,7 +109,7 @@ local function decide(proposal)
       spawn_codex = spawn_codex,
     })
     local rebuttal_outputs = await_all(rebuttal_handles)
-    local rebuttal_results = rebuttal.collect(angle_results, rebuttal_outputs, verdict_mode, {
+    rebuttal_results = rebuttal.collect(angle_results, rebuttal_outputs, verdict_mode, {
       parse_angle_output = function(stdout, mode)
         return parse_angle_output(stdout, mode)
       end,
@@ -133,36 +127,32 @@ local function decide(proposal)
     end
   end
 
-  local meta_result = spawn_meta_judge(proposal, angle_results, runtime_root)
-  local parsed = nil
-  if type(meta_result) == "table" and meta_result.exit_code == 0 then
-    parsed = core.parse_meta_judge_output(meta_result.stdout, verdict_mode)
-  end
-  if parsed ~= nil and parsed.kind == "reached" and core.all_angles_succeeded(angle_results) then
-    return {
-      queue = "consensus_reached",
-      payload = build_reached_payload(
-        proposal,
-        parsed.decision,
-        angle_results,
-        parsed.framing
-      ),
-      cache = true,
-    }
-  end
-  if parsed ~= nil and (parsed.kind == "converge" or parsed.kind == "plan") then
-    return {
-      queue = "consensus_converge",
-      angle_results = angle_results,
-      narrowed_question = parsed.narrowed_question,
-    }
-  end
-
-  return {
-    queue = "consensus_converge",
-    angle_results = angle_results,
-    narrowed_question = core.default_narrowed_question(proposal, angle_results),
-  }
+  local parsed = synthesis.parse_or_retry({
+    verdict_mode = verdict_mode,
+    p1_results = angle_results,
+    p2_results = rebuttal_results,
+    build_prompt = function(repair, prior_result)
+      return core.build_synthesis_prompt(proposal, angle_results, rebuttal_results, {
+        repair = repair,
+        prior_result = prior_result,
+      })
+    end,
+    spawn_sync = function(_kind, prompt)
+      local repair = _kind == "synthesis-repair"
+      local worktree = prepare_judgment_worktree(
+        judgment_scratch_worktree(runtime_root, repair and "synthesis-repair" or "synthesis", proposal.dedup_key)
+      )
+      return spawn_codex_sync(codex_opts(proposal, prompt, worktree, "consensus"))
+    end,
+  })
+  return synthesis.to_decision_result(proposal, angle_results, rebuttal_results, parsed, {
+    all_angles_succeeded = function(results)
+      return core.all_angles_succeeded(results)
+    end,
+    build_reached_payload = function(target_proposal, decision, results, framing, provenance)
+      return build_reached_payload(target_proposal, decision, results, framing, provenance)
+    end,
+  })
 end
 
 local function decision_done(event)
