@@ -511,6 +511,21 @@ return {
     end
   end,
 
+  test_replay_timeout_classification_defers_live_exec_ref = function()
+    local previous = replayer.replay_from_table
+    replayer.replay_from_table = function()
+      replayer.replay_log_skip(core, "test", nil, { state = "thinking" }, "thinking", "consensus.proposal", "skip-idempotent(live-exec-ref)", "deferred")
+      return false
+    end
+    local ok, classified = pcall(function()
+      return replayer.replay_from_table_classified(core, "test", {}, { state = "thinking" }, restart_transition_row("thinking"), {})
+    end)
+    replayer.replay_from_table = previous
+    if not ok then error(classified) end
+    t.eq(classified.kind, "deferred")
+    t.eq(classified.outcome, "skip-idempotent(live-exec-ref)")
+  end,
+
   test_live_thinking_codex_run_defers_timeout_count = function()
     local row = table_by_state().thinking
     local version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"

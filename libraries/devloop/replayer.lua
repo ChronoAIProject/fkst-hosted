@@ -377,32 +377,42 @@ local function log_skip(M, dept, proposal_id, state, from_state, to_state, outco
   return false
 end
 
+local function latest_thinking_converge_round(M, comments, proposal_id, state_version, source_ref)
+  local base_version = transition_version.strip_suffixes(state_version)
+  local latest = M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
+  local consensus_latest = M.latest_complete_converge_round(comments, proposal_id, "consensus:" .. tostring(base_version):gsub("^consensus:", ""), source_ref)
+  if latest == nil or (consensus_latest ~= nil and consensus_latest.round > latest.round) then
+    return consensus_latest
+  end
+  return latest
+end
+
 function C.replay_log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
   return log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
 end
 
 local function build_thinking_replay_proposal(M, issue, proposal_id, state, current, event_ts)
-  local stable_version = transition_version.strip_suffixes(state.version)
-  local latest = M.latest_complete_converge_round(current.comments, proposal_id, stable_version, issue.source_ref)
+  local latest = latest_thinking_converge_round(M, current.comments, proposal_id, state.version, issue.source_ref)
   if latest ~= nil then
     local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
-    local next_n = latest.round + 1
-    local next_dedup = transition_version.loop_at(base_version, next_n)
+    local replay_n = latest.round + 1
+    local replay_dedup = transition_version.loop_at(base_version, replay_n)
     local content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
       dept = "observe_issue",
       repo = issue.repo,
       issue_number = issue.number,
       proposal_id = proposal_id,
-      version = next_dedup,
+      version = replay_dedup,
       tick = event_ts,
     })
     local proposal = payloads_builders.build_board_loop_proposal(M, issue.repo, issue.number, {
       title = issue.title,
       updated_at = issue.updated_at,
-    }, issue.source_ref, next_n, {
+    }, issue.source_ref, replay_n, {
       narrowed_question = latest.narrowed_question,
       angle_digests = latest.angle_digests,
-    }, event_ts, content_fetch, next_dedup)
+      findings_record = latest.findings_record,
+    }, event_ts, content_fetch, replay_dedup)
     return v_validate_proposal.validate_proposal(proposal) and proposal or nil
   end
 
@@ -973,6 +983,9 @@ function C.replay_from_table_classified(M, dept, entity, state, table_row, facts
   if not ok then error(issued) end
   if issued then
     return { kind = "issued", issued = true }
+  end
+  if capture.outcome == "skip-idempotent(live-exec-ref)" then
+    return { kind = "deferred", issued = false, outcome = capture.outcome, reason = capture.reason }
   end
   return { kind = "stuck", issued = false, outcome = capture.outcome, reason = capture.reason }
 end
