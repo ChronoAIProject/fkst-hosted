@@ -9,6 +9,7 @@ local replay_fields = require("devloop.replay_fields")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
 local devloop_logging = require("devloop.logging")
+local replayer = require("devloop.replayer")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -474,6 +475,56 @@ return {
     t.is_true(resume ~= nil)
     t.is_true(resume.payload.body:find('state="blocked"', 1, true) ~= nil)
     t.is_true(resume.payload.body:find("child-pr-blocked", 1, true) ~= nil)
+  end,
+
+  test_child_blocked_replay_is_idempotent_when_target_marker_is_visible = function()
+    local blocked_version = version .. "/blocked/child-pr-blocked"
+    local comments = parent_comments()
+    table.insert(comments, comment(core.state_marker(parent, "blocked", blocked_version), core._test_bot_login, "2026-06-03T01:05:03Z"))
+    local state = {
+      state = "awaiting-pr",
+      version = version,
+      proposal_id = parent,
+      marker_created_at = "2026-06-03T01:02:03Z",
+    }
+    local child = {
+      number = pr_number,
+      comments = child_comments("blocked"),
+      force_fresh = true,
+      head_ref_name = "devloop-owner-repo-42-01HY",
+      base_ref_name = integration_branch,
+      state = "OPEN",
+      head_sha = head_sha,
+    }
+    local raised = {}
+    local original_log_raise = devloop_logging.log_raise
+    devloop_logging.log_raise = function(_, _, queue, payload)
+      table.insert(raised, { queue = queue, payload = payload })
+    end
+    local ok, err = pcall(function()
+      t.eq(replayer.replay_from_table(core, "observe_issue", {
+        repo = repo,
+        number = issue_number,
+        source_ref = entity_lib.issue_source_ref(repo, issue_number),
+        comments = comments,
+      }, state, restart_transition_row("awaiting-pr"), {
+        proposal_id = parent,
+        current = { comments = comments },
+        current_pr = child,
+        snapshot = {
+          comments = comments,
+          prs = { { number = pr_number, current = child } },
+          state = state,
+        },
+      }), false)
+    end)
+    devloop_logging.log_raise = original_log_raise
+    if not ok then
+      error(err)
+    end
+
+    t.eq(count_raises(raised, "github-proxy.github_issue_comment_request"), 0)
+    t.eq(count_raises(raised, "github-proxy.github_issue_label_request"), 0)
   end,
 
   test_child_nonterminal_defers_without_parent_cas = function()
