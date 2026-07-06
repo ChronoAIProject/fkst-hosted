@@ -36,9 +36,8 @@ local function is_git_ref_poll_tick(event)
   return queue == "git_ref_poll_tick" or queue == "git-branch-detector.git_ref_poll_tick"
 end
 
-local function log_skip(reason, event)
-  local caps = ref_detect_caps
-  log.warn(caps.skip_fact("ref_detect", event, reason, true))
+local function log_lookup_failure(caps, event, target, error_class, reason)
+  log.warn(caps.lookup_failure_fact("ref_detect", event, target, error_class, reason))
 end
 
 local function wrap_pipeline_failure(dept, fn)
@@ -77,17 +76,18 @@ local function make_department(ports)
 
     local targets = caps.parse_watch_refs(read_env("FKST_GIT_WATCH_REFS"))
     if #targets == 0 then
-      log_skip("missing FKST_GIT_WATCH_REFS", event)
       return
     end
 
     local observed_at = caps.observed_at(now_value())
     for _, target in ipairs(targets) do
-      local sha = caps.lookup_remote_branch_sha(git, target)
-      if sha == nil then
-        log_skip("remote branch not found: " .. target.ref, event)
+      local ok, sha_or_error = pcall(caps.lookup_remote_branch_sha, git, target)
+      if not ok then
+        log_lookup_failure(caps, event, target, caps.lookup_error_class(sha_or_error), sha_or_error)
+      elseif sha_or_error == nil then
+        log_lookup_failure(caps, event, target, "git-ref-branch-not-found", "remote branch not found: " .. target.ref)
       else
-        raise("git_ref_changed", caps.git_ref_changed_payload(target, sha, observed_at))
+        raise("git_ref_changed", caps.git_ref_changed_payload(target, sha_or_error, observed_at))
       end
     end
   end
