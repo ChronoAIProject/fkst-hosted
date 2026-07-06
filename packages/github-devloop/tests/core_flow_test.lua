@@ -829,7 +829,7 @@ return {
       title = "Converge narrowing",
       body = "Body",
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, {}, context_fetch_returns_high_risk())
-    t.eq(table.concat(high_risk_review.angles, ","), "minimal,structural,delete,high-risk")
+    t.eq(table.concat(high_risk_review.angles, ","), "teleology,parsimony,fidelity,high-risk")
     t.is_true(high_risk_review.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(v_validate_proposal.validate_proposal(high_risk_review))
 
@@ -837,7 +837,7 @@ return {
       title = "Converge narrowing",
       body = "Body",
     }, { kind = "external", ref = "owner/repo#pr/7" }, 2, converge, "2026-06-08T00:00:00Z", {}, context_fetch_returns_high_risk())
-    t.eq(table.concat(high_risk_board_review.angles, ","), "minimal,structural,delete,high-risk")
+    t.eq(table.concat(high_risk_board_review.angles, ","), "teleology,parsimony,fidelity,high-risk")
     t.is_true(high_risk_board_review.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(v_validate_proposal.validate_proposal(high_risk_board_review))
 

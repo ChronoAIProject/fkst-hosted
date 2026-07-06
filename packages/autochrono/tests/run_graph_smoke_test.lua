@@ -28,7 +28,7 @@ local function mock_consensus_approval()
     stderr = "",
     exit_code = 0,
   })
-  for _, angle in ipairs({ "minimal", "structural", "delete" }) do
+  for _, angle in ipairs({ "teleology", "parsimony", "fidelity" }) do
     t.mock_command("mkdir -p", {
       stdout = "",
       stderr = "",
@@ -75,7 +75,7 @@ return {
       return raised.payload.schema == "autochrono.reply.v1"
         and raised.payload.repo == "owner/repo"
         and raised.payload.issue_number == "42"
-        and raised.payload.body:find("minimal approves.", 1, true) ~= nil
+        and raised.payload.body:find("teleology approves.", 1, true) ~= nil
         and raised.payload.source_ref.ref == "owner/repo#issue/42"
     end)
   end,

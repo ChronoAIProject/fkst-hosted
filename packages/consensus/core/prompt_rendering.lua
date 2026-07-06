@@ -64,6 +64,32 @@ local function render_angle_outputs(core, neutralize, angle_results)
   return table.concat(lines, "\n")
 end
 
+local function angle_mode_contract(verdict_mode, angle)
+  local lines = {}
+  if angle ~= "high-risk" then
+    table.insert(lines, "1. ESSENCE: independently derive the problem essence before engaging the proposal's own story.")
+    table.insert(lines, "2. IDEAL: sketch the most faithful solution, unconstrained by the proposal.")
+    table.insert(lines, "3. Six-smell comparison: compare the proposal against that ideal using the full BEAUTY-GATE smell rubric: magic numbers, proxy-over-truth, symptom branches, narrative-over-verification, missing-inevitability, and skipped-purpose.")
+  else
+    table.insert(lines, "Assess the diff under the high-risk security threat model, outside the BEAUTY-GATE philosopher seats.")
+  end
+  if verdict_mode == "gate" then
+    if angle == "high-risk" then
+      table.insert(lines, "Gate calibration: every blocking claim must name an evidenced high-risk security gap and cite the diff through the existing ⟦FKST:GAP⟧ line. Advisory observations are comment.")
+    else
+      table.insert(lines, "Gate calibration: the IDEAL section is context only, never a rejection ground. Good-enough-and-clean is approvable. Ugliness must be evidenced against the six smells, never inferred from \"not my ideal\". Every blocking claim must name an evidenced smell and cite the diff through the existing ⟦FKST:GAP⟧ line.")
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+local function weakest_instruction(angle)
+  if angle == "high-risk" then
+    return ""
+  end
+  return "After the required sentinel lines, write WEAKEST: followed by the weakest assumption in your judgment."
+end
+
 function M.install(core, deps)
   local neutralize = neutralizer({
     verdict = deps.verdict_label,
@@ -100,10 +126,12 @@ function M.install(core, deps)
       body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
       context_block = context_block,
       convergence_block = convergence_block,
+      mode_contract = angle_mode_contract(verdict_mode, angle),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
       readiness_instruction = verdict_mode == "gate"
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or "If this angle is not ready to approve, abstain and state the concrete concern in the reply.",
+      weakest_instruction = weakest_instruction(angle),
     }, proposal)
   end
 
