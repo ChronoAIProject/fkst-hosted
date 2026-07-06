@@ -86,9 +86,10 @@ return saga.department(spec, { done = function() return false end, act = functio
       round,
       unresolved.dedup_key,
       unresolved.narrowed_question,
-      unresolved.angle_digests
+      unresolved.angle_digests,
+      unresolved.findings_record
     )
-    local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key)
+    local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record)
     local budget_round = math.max(round, conv_rounds.converge_boundary_budget_round(current.comments, unresolved.proposal_id, unresolved.narrowed_question, unresolved.angle_digests))
     local hit_round_cap = budget_round >= config.max_converge_rounds()
     if hit_round_cap or conv_rounds.is_true_stall(facts_with_current, round) then
@@ -123,6 +124,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local proposal = payloads_builders.build_board_loop_proposal(core, repo, issue_number, current, unresolved.source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
+      findings_record = facts_with_current[#facts_with_current] and facts_with_current[#facts_with_current].findings_record,
     }, event.ts, content_fetch, next_dedup)
     if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")

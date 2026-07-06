@@ -50,6 +50,13 @@ local function render_content_fetch_block(proposal, deps, neutralize)
   }, "\n")
 end
 
+local function render_findings_record_block(proposal, neutralize)
+  if proposal.findings_record == nil or proposal.findings_record == "" then
+    return ""
+  end
+  return "Prior findings/facts:\n" .. neutralize(proposal.findings_record)
+end
+
 local function render_full_angle_output(neutralize, item)
   return table.concat({
     "Angle: " .. neutralize(item and item.angle),
@@ -123,6 +130,7 @@ function M.install(core, deps)
     if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
       convergence_block = "Convergence question:\n" .. neutralize(proposal.convergence_question)
     end
+    local findings_record_block = render_findings_record_block(proposal, neutralize)
 
     local safe_angle = neutralize(angle)
     return core.render_prompt_template(prompt.template, {
@@ -134,6 +142,7 @@ function M.install(core, deps)
       body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
       context_block = context_block,
       convergence_block = convergence_block,
+      findings_record_block = findings_record_block,
       mode_contract = angle_mode_contract(verdict_mode, angle),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
       readiness_instruction = verdict_mode == "gate"
@@ -159,6 +168,7 @@ function M.install(core, deps)
     if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
       convergence_block = "Current convergence question:\n" .. neutralize(proposal.convergence_question)
     end
+    local findings_record_block = render_findings_record_block(proposal, neutralize)
     local verdict_mode = core.verdict_mode(proposal)
 
     return core.render_prompt_template(prompt.template, {
@@ -169,6 +179,7 @@ function M.install(core, deps)
       body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
       context_block = context_block,
       convergence_block = convergence_block,
+      findings_record_block = findings_record_block,
       own_output = render_full_angle_output(neutralize, own_result),
       peer_outputs = render_peer_outputs(neutralize, peer_results),
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
@@ -197,6 +208,7 @@ function M.install(core, deps)
         if proposal.convergence_question ~= nil and proposal.convergence_question ~= "" then
           convergence_block = "Current convergence question:\n" .. neutralize(proposal.convergence_question)
         end
+        local findings_record_block = render_findings_record_block(proposal, neutralize)
         local verdict_mode = core.verdict_mode(proposal)
         local repair_instruction = "This is the first synthesis attempt."
         if repair then
@@ -210,6 +222,7 @@ function M.install(core, deps)
           body_label = deps.has_content_fetch(proposal) and "Brief (not complete; read full context below):" or "Body:",
           context_block = context_block,
           convergence_block = convergence_block,
+          findings_record_block = findings_record_block,
           reached_options = verdict_mode == "gate"
             and "- reached:approve <bounded framing>\n- reached:reject <bounded framing>"
             or "- reached:approve <bounded framing>",

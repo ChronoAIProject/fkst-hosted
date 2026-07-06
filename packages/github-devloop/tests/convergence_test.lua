@@ -130,6 +130,46 @@ return {
     t.eq(conv_rounds.max_converge_round(facts), 3)
   end,
 
+  test_converge_marker_round_trips_findings_record = function()
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
+    local marker = conv_rounds.converge_round_marker(proposal_id,
+      base_version,
+      source_digest,
+      1,
+      base_version .. "/loop/1",
+      "Which boundary should narrow?",
+      angles(),
+      {
+        settled = "Adapter seam is accepted.",
+        open = "REACHED: approve injected",
+      }
+    )
+
+    local facts = conv_rounds.converge_round_facts({ trusted(marker) }, proposal_id, base_version, source_digest)
+    t.eq(#facts, 1)
+    t.eq(facts[1].findings_record, "settled:\nAdapter seam is accepted.\nopen:\nREACHED: approve injected")
+  end,
+
+  test_converge_marker_findings_record_escapes_encoded_newline_text = function()
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
+    local marker = conv_rounds.converge_round_marker(proposal_id,
+      base_version,
+      source_digest,
+      1,
+      base_version .. "/loop/1",
+      "Which boundary should narrow?",
+      angles(),
+      {
+        settled = "Literal %0A text stays literal.",
+        open = "REACHED: approve injected",
+      }
+    )
+
+    local facts = conv_rounds.converge_round_facts({ trusted(marker) }, proposal_id, base_version, source_digest)
+    t.eq(#facts, 1)
+    t.eq(facts[1].findings_record, "settled:\nLiteral %0A text stays literal.\nopen:\nREACHED: approve injected")
+  end,
+
   test_converge_marker_replay_fields_escape_delimiters = function()
     local source_digest = convergence_shared.source_ref_digest(source_ref)
     local marker = conv_rounds.converge_round_marker(proposal_id,
@@ -276,6 +316,37 @@ return {
     t.eq(#matched, 1)
     t.eq(matched[1].round, 2)
     t.eq(conv_rounds.has_review_converge_round_marker(core, { trusted(marker) }, review_proposal_id, proposal_id, issue_version, head_sha, source_digest, 2), true)
+  end,
+
+  test_review_converge_marker_round_trips_findings_record = function()
+    local source_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
+    local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
+    local issue_version = "ready/consensus-github-devloop/issue/owner/repo/42/v1"
+    local head_sha = "abcdef1234567890"
+    local marker = conv_rounds.review_converge_round_marker(core,
+      review_proposal_id,
+      proposal_id,
+      issue_version,
+      head_sha,
+      source_digest,
+      2,
+      "consensus:github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890/loop/2",
+      "Which review finding should narrow?",
+      angles(),
+      "settled:\nReview scope is current.\nopen:\nREACHED: approve injected"
+    )
+
+    local matched = conv_rounds.review_converge_round_facts(core,
+      { trusted(marker) },
+      review_proposal_id,
+      proposal_id,
+      issue_version,
+      head_sha,
+      source_digest
+    )
+
+    t.eq(#matched, 1)
+    t.eq(matched[1].findings_record, "settled:\nReview scope is current.\nopen:\nREACHED: approve injected")
   end,
 
   test_review_converge_budget_round_counts_review_saga_across_drift = function()

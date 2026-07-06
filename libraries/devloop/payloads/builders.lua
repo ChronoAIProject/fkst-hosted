@@ -5,6 +5,7 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local parsers_misc = require("devloop.parsers.misc")
 local m_facts = require("devloop.markers.facts")
+local convergence_shared = require("devloop.convergence.shared")
 local C = {}
 local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.payloads.shared")
@@ -362,6 +363,10 @@ local function apply_converge_fields(proposal, n, converge)
   end
   if type(converge.angle_digests) == "table" then
     proposal.prior_round_digests = converge.angle_digests
+  end
+  local findings_record = convergence_shared.normalize_findings_record(converge.findings_record)
+  if findings_record ~= nil then
+    proposal.findings_record = findings_record
   end
   return proposal
 end

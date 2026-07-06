@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
+local convergence_shared = require("devloop.convergence.shared")
 
 local C = {}
 function C.is_intake_hand_off(hand_off, proposal)
@@ -52,6 +53,9 @@ function C.validate_proposal(proposal)
     return false
   end
   if proposal.effect_version ~= nil and not strings.is_bounded_string(proposal.effect_version, devloop_base._max_dedup_len) then
+    return false
+  end
+  if proposal.findings_record ~= nil and not strings.is_bounded_string(proposal.findings_record, convergence_shared.findings_record_len) then
     return false
   end
   return proposal.intake_hand_off == nil or C.is_intake_hand_off(proposal.intake_hand_off, proposal)

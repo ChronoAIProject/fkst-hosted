@@ -22,6 +22,7 @@ Response contract:
 Proposal:
 Title: {{title}}
 {{convergence_block}}
+{{findings_record_block}}
 {{body_label}}
 {{body}}
 {{content_fetch_block}}
