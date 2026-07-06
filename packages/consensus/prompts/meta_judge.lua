@@ -17,6 +17,7 @@ Respond with exactly one line and no other text.
 Proposal:
 Title: {{title}}
 {{convergence_block}}
+{{findings_record_block}}
 {{body_label}}
 {{body}}
 {{content_fetch_block}}

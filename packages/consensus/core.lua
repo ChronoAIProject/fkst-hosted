@@ -19,6 +19,7 @@ local max_gaps = 4
 local max_narrowed_question_len = 2000
 local max_digest_len = 600
 local max_prior_round_digests = 12
+local findings_record_len = 1500
 local max_scratch_slug_len = 120
 local stale_generation_context_error_class = "stale_generation_context"
 local verdict_label = "⟦FKST:VERDICT⟧"
@@ -330,6 +331,10 @@ function M.is_eligible(proposal)
   end
   if proposal.convergence_question ~= nil
     and not is_bounded_string(proposal.convergence_question, max_narrowed_question_len) then
+    return false
+  end
+  if proposal.findings_record ~= nil
+    and not is_bounded_string(proposal.findings_record, findings_record_len) then
     return false
   end
   if not valid_prior_round_digests(proposal.prior_round_digests) then
@@ -828,6 +833,9 @@ function M.build_converge_payload(proposal, narrowed_question, angle_results)
   if proposal.effect_version ~= nil then
     payload.effect_version = tostring(proposal.effect_version)
   end
+  if proposal.findings_record ~= nil and proposal.findings_record ~= "" then
+    payload.findings_record = bounded(proposal.findings_record, findings_record_len)
+  end
   return payload
 end
 
@@ -838,6 +846,7 @@ require("core.prompt_rendering").install(M, {
   stance_label = stance_label,
   max_key_len = max_key_len,
   max_digest_len = max_digest_len,
+  findings_record_len = findings_record_len,
   is_bounded_string = is_bounded_string,
   has_content_fetch = has_content_fetch,
   resolve_content_manifest = resolve_content_manifest,

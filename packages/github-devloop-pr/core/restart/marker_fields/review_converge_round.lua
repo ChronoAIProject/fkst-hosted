@@ -11,4 +11,5 @@ return {
       dedup = true,
       narrowed_question = true,
       angle_digests = true,
+      findings_record = true,
 }
