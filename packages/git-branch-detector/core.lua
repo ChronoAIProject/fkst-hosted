@@ -90,6 +90,27 @@ function M.lookup_remote_branch_sha(git, target)
   return M.parse_ls_remote_branch_sha(result.stdout, target)
 end
 
+function M.lookup_error_class(message)
+  local class = tostring(message or ""):match("git%-branch%-detector:%s*([%w%-]+):")
+  if class ~= nil and class ~= "" then
+    return class
+  end
+  return "git-ref-lookup-failed"
+end
+
+function M.lookup_failure_fact(dept, event, target, error_class, message)
+  local why = tostring(message or "")
+  local fields = error_facts.error_fact_fields(error_class, type(event) == "table" and event.queue or nil, dept, why, {
+    source_ref = {
+      kind = "git-ref",
+      ref = target_ref(target),
+    },
+    terminal = true,
+  })
+  table.insert(fields, "WHY=" .. error_facts.one_line(why))
+  return "git-branch-detector dept=" .. tostring(dept) .. " tag=FAIL_CLOSED " .. table.concat(fields, " ")
+end
+
 function M.observed_at(value)
   local numeric = tonumber(value)
   if numeric ~= nil then
@@ -124,15 +145,6 @@ function M.git_ref_changed_payload(target, sha, observed_at)
     observed_at = tostring(observed_at),
     dedup_key = M.changed_dedup_key(target, safe_sha),
   }
-end
-
-function M.skip_fact(dept, event, why, terminal)
-  local fields = error_facts.error_fact_fields("terminal-skip", type(event) == "table" and event.queue or nil, dept, why, {
-    source_ref = error_facts.event_source_ref(event),
-    terminal = terminal,
-  })
-  table.insert(fields, "WHY=" .. error_facts.one_line(why))
-  return "git-branch-detector dept=" .. tostring(dept) .. " tag=SKIP " .. table.concat(fields, " ")
 end
 
 return M
