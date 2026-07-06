@@ -77,3 +77,8 @@ version = "workspace"
 name = "idle-detector"
 source = "workspace"
 version = "workspace"
+
+[[package]]
+name = "git-branch-detector"
+source = "workspace"
+version = "workspace"
