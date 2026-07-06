@@ -83,8 +83,8 @@ local function angle_mode_contract(verdict_mode, angle)
   return table.concat(lines, "\n")
 end
 
-local function weakest_instruction(angle)
-  if angle == "high-risk" then
+local function weakest_instruction(verdict_mode, angle)
+  if verdict_mode == "gate" or angle == "high-risk" then
     return ""
   end
   return "After the required sentinel lines, write WEAKEST: followed by the weakest assumption in your judgment."
@@ -131,7 +131,7 @@ function M.install(core, deps)
       readiness_instruction = verdict_mode == "gate"
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
         or "If this angle is not ready to approve, abstain and state the concrete concern in the reply.",
-      weakest_instruction = weakest_instruction(angle),
+      weakest_instruction = weakest_instruction(verdict_mode, angle),
     }, proposal)
   end
 

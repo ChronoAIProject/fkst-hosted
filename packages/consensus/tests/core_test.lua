@@ -319,6 +319,7 @@ return {
     t.is_true(gate_prompt:find("never inferred from \"not my ideal\"", 1, true) ~= nil)
     t.is_true(gate_prompt:find("Every blocking claim must name an evidenced smell", 1, true) ~= nil)
     t.is_true(gate_prompt:find("Context manifest:", 1, true) ~= nil)
+    t.is_nil(gate_prompt:find("WEAKEST:", 1, true))
     t.is_nil(gate_prompt:find("If you cannot fetch the source", 1, true))
     t.is_nil(gate_prompt:find("If this angle is not ready to approve", 1, true))
   end,
