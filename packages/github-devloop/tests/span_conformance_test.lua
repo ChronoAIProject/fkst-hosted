@@ -606,7 +606,7 @@ end
 
 precheck_fix_write_gate(repo, fix, branch)
 local dispatch_live_run = require("devloop.dispatch_live_run")
-if dispatch_live_run.dispatch_live_run_dedup(core, "fix", attempt_plan.fix.proposal_id, attempt_plan.fix.version) then
+if dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", attempt_plan.fix.proposal_id, attempt_plan.fix.version) then
   return
 end
 local outcome = run_fix_attempt(attempt_plan)

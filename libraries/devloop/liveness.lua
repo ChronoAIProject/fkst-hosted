@@ -23,9 +23,6 @@ local function devloop_liveness_policy()
         ["dependency-cycle"] = true,
         ["dependency-unresolvable"] = true,
       },
-      ["implement-attempt"] = {
-        ["implement-attempt"] = true,
-      },
       ["merge-gate-wait"] = {
         ["merge-gate-wait"] = true,
       },
@@ -40,9 +37,7 @@ local function devloop_liveness_policy()
       ["issue-comment-stream"] = true,
       ["pr-comment-stream"] = true,
     },
-    signal_max_age_optional_resolvers = {
-      ["implement-attempt"] = true,
-    },
+    signal_max_age_optional_resolvers = {},
   }
 end
 

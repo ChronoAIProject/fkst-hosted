@@ -163,7 +163,6 @@
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua","owner":"shared","reason":"liveness signal producer is shared by issue wait boundaries."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
-{"path":"packages/github-devloop/core/restart/liveness_signal_producers/implement_attempt.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/index.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/merge_gate_wait.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
 {"path":"packages/github-devloop/core/restart/liveness_signal_producers/review_converge_round.lua","owner":"issue","reason":"liveness signal producer belongs to the parent issue saga."}
