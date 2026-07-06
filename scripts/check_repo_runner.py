@@ -7,6 +7,7 @@ import check_repo_config
 import check_repo_content_truncation
 import check_repo_coverage
 import check_repo_dependency_cycle
+import check_repo_dead_letter
 import check_repo_devloop_godlib
 import check_repo_devloop_decouple
 import check_repo_devloop_installer
@@ -142,6 +143,8 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
     for package_root in c.package_roots(root):
         for message in check_repo_namespaced_queue.repository_messages(root, package_root, c.read_text, c.rel, c.strip_lua_comments_and_strings, c.is_unmasked_range):
             c.add(violations, "G-NAMESPACED-QUEUE", message)
+    for message in check_repo_dead_letter.repository_messages(root, c.read_text):
+        c.add(violations, "G-DEAD-LETTER", message)
     check_monotone_gate(c, root, violations, allowlists, enforce_base)
     c.check_saga_handler_ratchet(root, violations, warnings, allowlists, enforce_base)
     sources = {c.rel(root, path): c.read_text(path) for package_root in c.package_roots(root) for path in sorted(package_root.glob("*/departments/*/main.lua")) if path.is_file()}

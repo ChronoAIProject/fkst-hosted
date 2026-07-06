@@ -143,6 +143,10 @@
 {"path":"packages/github-devloop-intake-default/core/devloop_wiring.lua","owner":"intake","reason":"intake-default package-private wiring resolves intake prompt modules after the DI intake refactor."}
 {"path":"packages/github-devloop-intake-default/core/intake_class.lua","owner":"intake","reason":"intake-default owns recurring-class intake follow-through helpers after the DI intake refactor."}
 {"path":"packages/github-devloop-intake-default/core/intake_service_class.lua","owner":"intake","reason":"intake-default owns service-class intake label helpers after the DI intake refactor."}
+{"path":"packages/github-devloop-intake-default/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"package-local runtime DLQ logging surface for reliable delivery failures."}
+{"path":"packages/github-devloop-intake/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"package-local runtime DLQ logging surface for reliable delivery failures."}
+{"path":"packages/github-devloop-integration/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"package-local runtime DLQ logging surface for reliable delivery failures."}
+{"path":"packages/github-devloop-pr/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"package-local runtime DLQ logging surface for reliable delivery failures."}
 {"path":"packages/github-devloop/core/awaiting_pr_replayer.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/dependencies.lua","owner":"issue","reason":"core module belongs to the parent issue saga authority."}
 {"path":"packages/github-devloop/core/devloop_wiring.lua","owner":"issue","reason":"core module resolves parent issue package-private restart and prompt modules."}
@@ -194,6 +198,7 @@
 {"path":"packages/github-devloop/core/span_conformance.lua","owner":"cross-cutting","reason":"package-owned conformance for github-devloop span source-shape ratchet."}
 {"path":"packages/github-devloop/departments/comment_handoff/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/consensus_result/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
+{"path":"packages/github-devloop/departments/dead_letter/main.lua","owner":"cross-cutting","reason":"package-local runtime DLQ logging surface for reliable delivery failures."}
 {"path":"packages/github-devloop/departments/execute_start/main.lua","owner":"issue","reason":"owns the public execution-start seam into the parent issue lifecycle."}
 {"path":"packages/github-devloop/departments/implement/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}
 {"path":"packages/github-devloop/departments/liveness_scan/main.lua","owner":"issue","reason":"owns or supports the parent issue lifecycle path."}

@@ -41,6 +41,16 @@ local function payload_for_queue(queue)
       key = "github-devloop-integration/test-cache-seed",
       value = "1",
     },
+    dead_letter = {
+      delivery_id = "delivery/v1/raised/queue/github-devloop-integration.devloop_branch_tick/dept/github-devloop-integration.sync_scan/01HY",
+      queue = "github-devloop-integration.devloop_branch_tick",
+      dept = "github-devloop-integration.sync_scan",
+      error_class = "namespaced-dispatch-test",
+      dedup_key = "namespaced-dispatch/dead-letter",
+      attempt = 1,
+      error = "namespaced dispatch test error",
+      source_ref = core.branch_sync_source_ref("owner/repo", "dev", "integration/dev"),
+    },
     devloop_branch_tick = { schema = "github-devloop.branch-tick.v1" },
     devloop_rollup_ready = core.rollup_ready_payload("owner/repo", "dev", "integration/dev", 7, "def456"),
     devloop_sync_conflict = {
