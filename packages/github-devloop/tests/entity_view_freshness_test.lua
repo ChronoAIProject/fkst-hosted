@@ -118,6 +118,74 @@ return {
     t.eq(count_calls(probe_command), 0)
   end,
 
+  test_validator_match_can_coalesce_explicit_force_fresh = function()
+    local repo = "owner/legacy-force-fresh"
+    local issue_number = 4246
+    local updated_at = "2026-06-03T01:02:03Z"
+    local rest_command = issue_rest_command(repo, issue_number)
+    local comments_command = comments_rest_command(repo, issue_number)
+    seed_cached_view(repo, "issue", issue_number, seam.issue_view_stdout({
+      repo = repo,
+      number = issue_number,
+      title = "Cached",
+      updated_at = updated_at,
+    }), updated_at)
+    seam.mock_issue_read_forms(t, {
+      repo = repo,
+      number = issue_number,
+      title = "After",
+      updated_at = updated_at,
+      register_all_views = true,
+      times = 1,
+    })
+
+    local observed = require("devloop.github_proxy_entity_view").fetch_issue_view_state(repo, issue_number, updated_at, {
+      consumer = "observe_issue",
+      force_fresh = true,
+      allow_cached_validator = true,
+    })
+
+    t.eq(observed.exit_code, 0)
+    t.is_true(observed.stdout:find('"Cached"', 1, true) ~= nil)
+    t.eq(count_exact_calls(rest_command), 0)
+    t.eq(count_exact_calls(comments_command), 0)
+  end,
+
+  test_observe_validator_match_can_coalesce_legacy_pr_force_fresh = function()
+    local repo = "owner/legacy-pr-force-fresh"
+    local pr_number = 4247
+    local updated_at = "2026-06-03T01:02:03Z"
+    local rest_command = pr_rest_command(repo, pr_number)
+    local comments_command = comments_rest_command(repo, pr_number)
+    seed_cached_view(repo, "pr", pr_number, seam.pr_view_stdout({
+      repo = repo,
+      number = pr_number,
+      head = "cached-branch",
+      head_sha = "abc123",
+      updated_at = updated_at,
+    }), updated_at)
+    seam.mock_pr_read_forms(t, {
+      repo = repo,
+      number = pr_number,
+      head = "fresh-branch",
+      head_sha = "def456",
+      updated_at = updated_at,
+      register_all_views = true,
+      times = 1,
+    })
+
+    local observed = devloop_entity_view.fetch_pr_view_origin(repo, pr_number, updated_at, {
+      consumer = "observe_pr",
+      force_fresh = true,
+      allow_cached_validator = true,
+    })
+
+    t.eq(observed.exit_code, 0)
+    t.is_true(observed.stdout:find('"cached-branch"', 1, true) ~= nil)
+    t.eq(count_exact_calls(rest_command), 0)
+    t.eq(count_exact_calls(comments_command), 0)
+  end,
+
   test_validator_mismatch_fetches_rest_issue_view_and_recaches = function()
     local repo = "owner/cache-miss"
     local issue_number = 4243

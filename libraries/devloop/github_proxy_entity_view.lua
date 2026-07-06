@@ -312,7 +312,7 @@ local function fetch_entity_view(repo, kind, number, updated_at, opts)
   local consumer = tostring(options.consumer or "")
   local timeout = tonumber(options.timeout) or 30
   local key = entity_view_cache_key(repo, selected_kind, number)
-  if options.force_fresh == true then
+  if options.force_fresh == true and not (validator ~= "" and options.allow_cached_validator == true) then
     local result = rest_entity_view_result(repo, selected_kind, number, timeout)
     cache_successful_view(key, result, consumer)
     return result
