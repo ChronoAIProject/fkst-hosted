@@ -26,6 +26,7 @@ MATERIALIZATION_STATE_RANK = {
 TERMINAL_STATES = {"done", "blocked", "error"}
 
 MARKER_RE = re.compile(r"<!--\s*fkst:github-devloop-workflow:(blueprint|materialization|terminal):v1\b(.*?)-->")
+DEVLOOP_MARKER_RE = re.compile(r"<!--\s*fkst:github-devloop:[A-Za-z0-9_-]+:v1\b")
 INTAKE_DECISION_RE = re.compile(r"<!--\s*fkst:github-devloop:intake-decision:v1\b(.*?)-->")
 DEBUG_STAMP_RE = re.compile(r"\s*<!--\s*fkst:debug-stamp:v1\b.*?-->\s*$", re.DOTALL)
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
@@ -35,6 +36,7 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     result.add_argument("--origin", required=True, help="Origin proposal id.")
     result.add_argument("--bot-login", required=True, help="Trusted workflow marker author login.")
+    result.add_argument("--managed-bot-logins", default="", help="Comma or whitespace separated managed peer bot logins.")
     return result
 
 
@@ -64,6 +66,21 @@ def login_for(comment: dict[str, Any]) -> str:
         if isinstance(raw, dict) and isinstance(raw.get("login"), str):
             return raw["login"]
     return ""
+
+
+def normalized_login(login: str) -> str:
+    if login.endswith("[bot]"):
+        return login[:-5]
+    return login
+
+
+def managed_bot_login_set(raw: str) -> set[str]:
+    logins = set()
+    for entry in re.split(r"[,\s]+", raw):
+        login = normalized_login(entry.strip())
+        if login != "":
+            logins.add(login)
+    return logins
 
 
 def read_comments() -> tuple[list[Any] | None, str | None]:
@@ -98,6 +115,23 @@ def trusted_comments(comments: list[Any], bot_login: str) -> list[dict[str, Any]
         if isinstance(body, str):
             trusted.append({"body": body})
     return trusted
+
+
+def first_foreign_marker_login(comments: list[Any], bot_login: str, managed_logins: set[str]) -> str | None:
+    for comment in comments:
+        if not isinstance(comment, dict):
+            continue
+        login = login_for(comment)
+        if login == "" or login == bot_login:
+            continue
+        if normalized_login(login) not in managed_logins:
+            continue
+        body = comment.get("body")
+        if not isinstance(body, str):
+            continue
+        if MARKER_RE.search(body) or DEVLOOP_MARKER_RE.search(body):
+            return login
+    return None
 
 
 def decimal_checksum(value: str) -> str:
@@ -284,6 +318,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     fact = board_fact(collect_facts(trusted_comments(comments, args.bot_login), args.origin))
+    if fact is None:
+        peer_login = first_foreign_marker_login(comments, args.bot_login, managed_bot_login_set(args.managed_bot_logins))
+        if peer_login is not None:
+            fact = ("stateless", f"peer-managed({peer_login})")
     if fact is None:
         return 1
     print(f"{fact[0]}\t{fact[1]}")
