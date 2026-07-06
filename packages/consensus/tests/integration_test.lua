@@ -176,9 +176,18 @@ local function mock_rebuttal_defend(angle, verdict, reply)
   mock_rebuttal(angle, "defend", verdict, reply)
 end
 
-local function mock_meta(line, exit_code)
+local function mock_synthesis(line, exit_code)
   mock_judgment_dir()
-  t.mock_command("meta-judge", {
+  t.mock_command("consensus-synthesis-proposal", {
+    stdout = tostring(line or "") .. "\n",
+    stderr = "",
+    exit_code = exit_code or 0,
+  })
+end
+
+local function mock_synthesis_repair(line, exit_code)
+  mock_judgment_dir()
+  t.mock_command("consensus-synthesis-repair-proposal", {
     stdout = tostring(line or "") .. "\n",
     stderr = "",
     exit_code = exit_code or 0,
@@ -344,17 +353,17 @@ return {
     mock_rebuttal_defend("teleology", "abstain", "Teleology still needs narrower scope.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs clearer boundaries.")
     mock_rebuttal_defend("fidelity", "abstain", "Fidelity still needs proof the scope is necessary.")
-    mock_meta("converge: What concrete evidence would make the narrowed scope approvable?")
+    mock_synthesis("converge: narrowed scope remains unresolved + inspect the requested scope evidence")
 
-    local result = run_decide(proposal(), opts("all-abstain"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/all-abstain" }), opts("all-abstain"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(result.raises[1].payload.narrowed_question, "What concrete evidence would make the narrowed scope approvable?")
+    t.eq(result.raises[1].payload.narrowed_question, "narrowed scope remains unresolved + inspect the requested scope evidence")
     t.eq(#codex_calls(), 7)
   end,
 
-  test_split_verdicts_spawn_meta_and_raise_consensus_converge = function()
+  test_split_verdicts_spawn_synthesis_and_raise_consensus_converge = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle needs one blocker resolved.")
@@ -362,17 +371,17 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs one blocker resolved.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("converge: Should parsimony concerns block this proposal?")
+    mock_synthesis("converge: parsimony concern remains unresolved + inspect the retry-boundary evidence")
 
-    local result = run_decide(proposal(), opts("split"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/split" }), opts("split"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
     t.eq(result.raises[1].payload.schema, "consensus.consensus_converge.v1")
     t.eq(result.raises[1].payload.proposal_id, "proposal-42")
-    t.eq(result.raises[1].payload.dedup_key, "consensus:proposal-42-v1")
+    t.eq(result.raises[1].payload.dedup_key, "consensus:proposal-42-v1/split")
     t.eq(result.raises[1].payload.round, 0)
-    t.eq(result.raises[1].payload.narrowed_question, "Should parsimony concerns block this proposal?")
+    t.eq(result.raises[1].payload.narrowed_question, "parsimony concern remains unresolved + inspect the retry-boundary evidence")
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)
@@ -383,10 +392,11 @@ return {
     t.is_nil(result.raises[1].payload.decision)
     local calls = codex_calls()
     t.eq(#calls, 7)
-    local meta_call = judgment_call("meta-judge")
-    assert_judgment_worktree(meta_call, "meta-judge")
-    t.is_true(meta_call.stdin:find("Angle outputs:", 1, true) ~= nil)
-    t.is_true(meta_call.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
+    local synthesis_call = judgment_call("synthesis")
+    assert_judgment_worktree(synthesis_call, "synthesis")
+    t.is_true(synthesis_call.stdin:find("Phase B transcripts:", 1, true) ~= nil)
+    t.is_true(synthesis_call.stdin:find("Phase R transcripts:", 1, true) ~= nil)
+    t.is_true(synthesis_call.stdin:find("You are running in an empty runtime scratch directory", 1, true) ~= nil)
   end,
 
   test_split_verdicts_rebuttal_unanimity_raises_consensus_reached = function()
@@ -398,7 +408,7 @@ return {
     mock_rebuttal("parsimony", "update", "approve", "Parsimony now approves after teleology named the purpose.", "teleology purpose claim")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
 
-    local result = run_decide(proposal(), opts("split-rebuttal-unanimity"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/split-rebuttal-unanimity" }), opts("split-rebuttal-unanimity"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_reached")
@@ -411,7 +421,8 @@ return {
     t.eq(#result.raises[1].payload.p2_verdicts, 3)
     t.eq(count_verdicts(result.raises[1].payload.p2_verdicts, "approve"), 3)
     t.eq(#codex_calls(), 6)
-    t.eq(judgment_call("meta-judge"), nil)
+    t.eq(judgment_call("synthesis"), nil)
+    t.eq(judgment_call("synthesis-repair"), nil)
     local parsimony = judgment_call("rebuttal-parsimony")
     assert_judgment_worktree(parsimony, "rebuttal-parsimony")
     t.is_true(parsimony.stdin:find("Your locked Phase B output:", 1, true) ~= nil)
@@ -429,14 +440,14 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs one blocker resolved.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("converge: Should parsimony concerns block this proposal?")
+    mock_synthesis("converge: parsimony concern remains unresolved + inspect the retry-boundary evidence")
 
     local first = run_decide(proposal(), run_opts)
     t.eq(first.exit_code, 0)
     t.eq(#first.raises, 1)
     t.eq(first.raises[1].queue, "consensus_converge")
     t.eq(first.raises[1].payload.dedup_key, "consensus:proposal-42-v1")
-    t.eq(first.raises[1].payload.narrowed_question, "Should parsimony concerns block this proposal?")
+    t.eq(first.raises[1].payload.narrowed_question, "parsimony concern remains unresolved + inspect the retry-boundary evidence")
 
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves on replay.")
@@ -445,7 +456,7 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves on replay.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs one blocker resolved.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves on replay.")
-    mock_meta("converge: Replay may re-decide, but downstream dedup must see the same key.")
+    mock_synthesis("converge: replay disagreement remains unresolved + inspect the downstream dedup key")
 
     local second = run_decide(proposal(), run_opts)
     t.eq(second.exit_code, 0)
@@ -455,11 +466,11 @@ return {
     t.eq(second.raises[1].payload.round, 0)
     t.eq(second.raises[1].payload.source_ref.kind, "proposal")
     t.eq(second.raises[1].payload.source_ref.ref, "demo/consensus/42")
-    t.eq(second.raises[1].payload.narrowed_question, "Replay may re-decide, but downstream dedup must see the same key.")
+    t.eq(second.raises[1].payload.narrowed_question, "replay disagreement remains unresolved + inspect the downstream dedup key")
     t.eq(#codex_calls(), 14)
   end,
 
-  test_meta_plan_flows_into_next_converge_round = function()
+  test_synthesis_parse_failure_retries_once_and_uses_repair_result = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle accepts a small adapter.")
     mock_angle("parsimony", "abstain", "Parsimony angle wants the retry boundary explicit.")
@@ -467,17 +478,23 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still accepts a small adapter.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still wants the retry boundary explicit.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still accepts removing duplicate wiring.")
-    mock_meta("⟦FKST:PLAN⟧ Keep the adapter, make retry ownership explicit, and remove duplicate wiring.")
+    mock_synthesis("⟦FKST:PLAN⟧ Keep the adapter, make retry ownership explicit, and remove duplicate wiring.")
+    mock_synthesis_repair("converge: retry ownership remains unresolved + inspect the retry owner record")
 
-    local result = run_decide(proposal(), opts("split-meta-plan"))
+    local result = run_decide(proposal(), opts("split-synthesis-repair"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(result.raises[1].payload.narrowed_question, "Keep the adapter, make retry ownership explicit, and remove duplicate wiring.")
-    t.eq(#codex_calls(), 7)
+    t.eq(result.raises[1].payload.narrowed_question, "retry ownership remains unresolved + inspect the retry owner record")
+    t.eq(#codex_calls(), 8)
+    local repair = judgment_call("synthesis-repair")
+    assert_judgment_worktree(repair, "synthesis-repair")
+    t.is_true(repair.stdin:find("Repair attempt:", 1, true) ~= nil)
+    t.eq(judgment_call("angle-teleology") ~= nil, true)
+    t.eq(judgment_call("rebuttal-teleology") ~= nil, true)
   end,
 
-  test_malformed_plan_falls_back_to_default_converge = function()
+  test_synthesis_second_parse_failure_converges_without_default_question = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle needs framing.")
@@ -485,33 +502,16 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs framing.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("⟦FKST:PLAN⟧")
+    mock_synthesis("⟦FKST:PLAN⟧")
+    mock_synthesis_repair("malformed")
 
-    local result = run_decide(proposal(), opts("malformed-meta-plan"))
+    local result = run_decide(proposal(), opts("malformed-synthesis"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.is_true(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true) ~= nil)
-    t.eq(#codex_calls(), 7)
-  end,
-
-  test_converge_mode_reject_outputs_raise_consensus_converge = function()
-    mock_judgment_runtime()
-    mock_angle("teleology", "reject", "Teleology angle rejects but converge mode cannot reject.")
-    mock_angle("parsimony", "approve", "Parsimony angle approves.")
-    mock_angle("fidelity", "approve", "Fidelity angle approves.")
-    mock_rebuttal_defend("teleology", "abstain", "Teleology cannot approve in converge mode.")
-    mock_rebuttal_defend("parsimony", "approve", "Parsimony still approves.")
-    mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("converge: What concern prevents approval?")
-
-    local result = run_decide(proposal({ verdict_mode = "converge" }), opts("converge-reject-output"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(result.raises[1].queue, "consensus_converge")
-    t.eq(count_verdicts(result.raises[1].payload.angle_digests, "invalid"), 1)
-    t.eq(result.raises[1].payload.narrowed_question, "What concern prevents approval?")
-    t.eq(#codex_calls(), 7)
+    t.is_true(result.raises[1].payload.narrowed_question:find("synthesis-parse-failed", 1, true) ~= nil)
+    t.is_nil(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true))
+    t.eq(#codex_calls(), 8)
   end,
 
   test_gate_mode_any_reject_raises_consensus_reached_reject_with_gap = function()
@@ -544,28 +544,32 @@ return {
     t.eq(#codex_calls(), 3)
   end,
 
-  test_meta_reached_after_split_raises_consensus_reached = function()
+  test_synthesis_reached_after_split_raises_consensus_reached = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle abstains but accepts the narrowed framing.")
     mock_angle("fidelity", "approve", "Fidelity angle approves.")
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
-    mock_rebuttal_defend("parsimony", "abstain", "Parsimony still abstains.")
+    mock_rebuttal("parsimony", "update", "abstain", "Parsimony still abstains after teleology synthesis claim.", "teleology synthesis claim")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("reached:approve approve the narrowed framing")
+    mock_synthesis("reached:approve approve the narrowed framing\nverified-move: angle=parsimony phase=P2 citation=teleology synthesis claim")
 
-    local result = run_decide(proposal(), opts("split-meta-reached"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/split-synthesis-reached" }), opts("split-synthesis-reached"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_reached")
     t.eq(result.raises[1].payload.schema, "consensus.consensus_reached.v1")
     t.eq(result.raises[1].payload.decision, "approve")
-    t.eq(result.raises[1].payload.framing, "approve approve the narrowed framing")
+    t.eq(result.raises[1].payload.framing, "approve the narrowed framing")
+    t.eq(result.raises[1].payload.verdict_path, "synthesis")
+    t.eq(result.raises[1].payload.verified_moves, 1)
+    t.eq(result.raises[1].payload.p1_verdicts[2].verdict, "abstain")
+    t.eq(result.raises[1].payload.p2_verdicts[2].verdict, "abstain")
     t.eq(result.raises[1].payload.body:find("Meta-judge framing:", 1, true), nil)
     t.eq(#codex_calls(), 7)
   end,
 
-  test_meta_reached_with_failed_angle_falls_back_to_consensus_converge = function()
+  test_synthesis_reached_with_failed_angle_falls_back_to_consensus_converge = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_judgment_dir()
@@ -577,21 +581,21 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
     mock_rebuttal_defend("fidelity", "abstain", "Fidelity still abstains.")
-    mock_meta("reached:approve approve the narrowed framing")
+    mock_synthesis("reached:approve approve the narrowed framing")
 
-    local run_opts = opts("split-meta-reached-degraded")
+    local run_opts = opts("split-synthesis-reached-degraded")
     local result = run_decide(proposal({
-      dedup_key = "proposal-42-v1/split-meta-reached-degraded",
+      dedup_key = "proposal-42-v1/split-synthesis-reached-degraded",
     }), run_opts)
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/split-meta-reached-degraded")))
+    t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/split-synthesis-reached-degraded")))
     t.eq(#codex_calls(), 7)
   end,
 
-  test_meta_reached_with_failed_angle_falls_back_to_consensus_converge_in_gate_mode = function()
+  test_synthesis_reached_with_failed_angle_falls_back_to_consensus_converge_in_gate_mode = function()
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_judgment_dir()
@@ -603,18 +607,18 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
     mock_rebuttal_defend("fidelity", "comment", "Fidelity still has a non-blocking concern.")
-    mock_meta("reached:approve approve the narrowed framing")
+    mock_synthesis("reached:approve approve the narrowed framing")
 
-    local run_opts = opts("gate-split-meta-reached-degraded")
+    local run_opts = opts("gate-split-synthesis-reached-degraded")
     local result = run_decide(proposal({
       verdict_mode = "gate",
-      dedup_key = "proposal-42-v1/gate-split-meta-reached-degraded",
+      dedup_key = "proposal-42-v1/gate-split-synthesis-reached-degraded",
     }), run_opts)
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/gate-split-meta-reached-degraded")))
+    t.is_nil(cache_get(core.reached_cache_key("proposal-42-v1/gate-split-synthesis-reached-degraded")))
     t.eq(#codex_calls(), 7)
   end,
 
@@ -626,9 +630,9 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still abstains.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("converge: Ask parsimony to name the one blocker that prevents approval.")
+    mock_synthesis("converge: parsimony blocker remains unresolved + inspect the named blocker")
 
-    local result = run_decide(proposal(), opts("abstain"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/abstain" }), opts("abstain"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
@@ -647,23 +651,23 @@ return {
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge after the failed P1.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_meta("converge: Retry the failed parsimony angle with a concrete blocker.")
+    mock_synthesis("converge: parsimony angle failed + inspect the failed parsimony evidence")
 
-    local result = run_decide(proposal(), opts("codex-fails"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/codex-fails" }), opts("codex-fails"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    local invalid = false
+    local has_parsimony = false
     for _, digest in ipairs(result.raises[1].payload.angle_digests) do
-      if digest.verdict == "invalid" then
-        invalid = true
+      if digest.angle == "parsimony" and digest.verdict == "abstain" then
+        has_parsimony = true
       end
     end
-    t.eq(invalid, true)
+    t.eq(has_parsimony, true)
     t.eq(#codex_calls(), 7)
   end,
 
-  test_unparseable_output_raises_consensus_converge_with_default_question = function()
+  test_unparseable_output_raises_consensus_converge_with_synthesis_parse_failure = function()
     mock_judgment_runtime()
     mock_judgment_dir()
     t.mock_command("consensus-angle-teleology", { stdout = "no verdict here", exit_code = 0 })
@@ -674,14 +678,16 @@ return {
     mock_rebuttal_defend("teleology", "abstain", "Teleology cannot judge malformed P1.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony cannot judge malformed P1.")
     mock_rebuttal_defend("fidelity", "abstain", "Fidelity cannot judge malformed P1.")
-    mock_meta("malformed")
+    mock_synthesis("malformed")
+    mock_synthesis_repair("still malformed")
 
-    local result = run_decide(proposal(), opts("unparseable"))
+    local result = run_decide(proposal({ dedup_key = "proposal-42-v1/unparseable" }), opts("unparseable"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "consensus_converge")
-    t.is_true(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true) ~= nil)
-    t.eq(#codex_calls(), 7)
+    t.is_true(result.raises[1].payload.narrowed_question:find("synthesis-parse-failed", 1, true) ~= nil)
+    t.is_nil(result.raises[1].payload.narrowed_question:find("Resolve the concrete disagreement", 1, true))
+    t.eq(#codex_calls(), 8)
   end,
 
   test_missing_source_ref_fails_closed_without_codex = function()
