@@ -169,6 +169,22 @@ return {
     t.eq(count_gh_pr_create(), 0)
   end,
 
+  test_terminal_child_lineage_is_not_readopted_for_same_generation = function()
+    local pr_proposal = "github-devloop/pr/owner/repo/7"
+    local delegated = m_builders.pr_delegation_marker(issue_proposal, pr_proposal, 7, impl_version, "g1")
+    local terminal_child = m_builders.pr_origin_marker(issue_proposal, issue_number, branch, impl_version, base_branch)
+      .. "\n" .. core.state_marker(issue_proposal, "blocked", impl_version .. "/blocked/child-pr-blocked")
+    mock_branch_list(7)
+
+    local result = core.ensure_pr_child(issue({
+      comments = { render_comment(delegated) },
+      pr_comments = { render_comment(terminal_child) },
+    }), impl_version, 1)
+
+    t.eq(result, nil)
+    t.eq(count_gh_pr_create(), 0)
+  end,
+
   test_child_start_dsl_gate_matches_visible_child_start_markers = function()
     local delegated = m_builders.pr_delegation_marker(issue_proposal, pr_proposal(7), 7, impl_version, "g1")
     local matching_origin = m_builders.pr_origin_marker(issue_proposal, issue_number, branch, impl_version, base_branch)

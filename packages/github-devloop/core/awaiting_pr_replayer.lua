@@ -78,9 +78,18 @@ local function read_delegated_child_pr(dept, issue, delegation)
   return current_pr
 end
 
+local function version_is_same_lineage_or_descendant(version, lineage)
+  local candidate = tostring(version or "")
+  local base = tostring(lineage or "")
+  if transition_version.strip_suffixes(candidate) == transition_version.strip_suffixes(base) then
+    return true
+  end
+  return base ~= "" and (candidate == base or candidate:sub(1, #base + 1) == base .. "/")
+end
+
 local function child_lineage_matches_delegation(state, delegation, child_state)
   return tostring(delegation.version or "") == tostring(state.version or "")
-    and transition_version.strip_suffixes(child_state.version) == transition_version.strip_suffixes(delegation.version)
+    and version_is_same_lineage_or_descendant(child_state.version, delegation.version)
 end
 
 local function autonomy_post_merge_pr(pr)
@@ -268,6 +277,9 @@ function M.replay_awaiting_pr_state(dept, issue, state, row, facts)
   end
   if transition == "idempotent" then
     return log_skip(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "skip-idempotent(already at to_state)", "parent issue already reflects delegated child terminal")
+  end
+  if devloop_state.has_state_marker(issue.comments, proposal_id, next_state.to_state, next_state.version) then
+    return log_skip(dept, proposal_id, state, "awaiting-pr", next_state.to_state, "skip-idempotent(target marker already visible)", "parent issue already has the exact delegated child terminal marker")
   end
 
   local comment_request = build_resume_comment_request(issue, state, next_state, child_state, delegation, current_pr)
