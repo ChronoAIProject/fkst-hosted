@@ -530,6 +530,7 @@ local function process_issue_event(event)
 
     local state_view = require("devloop.github_proxy_entity_view").fetch_issue_view_state(issue.repo, issue.number, issue.updated_at, {
       force_fresh = true,
+      allow_cached_validator = issue.source == "liveness-scan",
     })
     if state_view.exit_code ~= 0 then
       error("github-devloop: issue-read-failed: gh issue state view failed: " .. tostring(state_view.stderr))
@@ -748,6 +749,7 @@ local function process_pr_event(event)
 
   local pr_view = devloop_entity_view.fetch_pr_view_origin(pr.repo, pr.number, pr.updated_at, {
     force_fresh = true,
+    allow_cached_validator = true,
     consumer = "observe_issue",
   })
   if pr_view.exit_code ~= 0 then
