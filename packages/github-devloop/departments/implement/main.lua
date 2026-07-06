@@ -21,6 +21,15 @@ local config = require("devloop.config")
 local fork_gate = require("departments.implement.fork_gate")
 local m_mq = require("devloop.merge_queue")
 
+local dispatch_liveness = {
+  restart_transition_table = function(...)
+    return core.restart_transition_table(...)
+  end,
+  restart_row_receiver_liveness = function(...)
+    return core.restart_row_receiver_liveness(...)
+  end,
+}
+
 local payloads_builders = require("devloop.payloads.builders")
 local payloads_predicates = require("devloop.payloads.predicates")
 local v_ready = require("devloop.validators.ready")
@@ -225,11 +234,6 @@ local function implementing_mismatch_is_durable(current, proposal_id, state)
   local version = state and state.version
   return core.latest_implement_attempt_fact(current and current.comments, proposal_id, version) ~= nil
     or m_facts.implementing_fact(current and current.comments, proposal_id, version) ~= nil
-end
-
-local function live_implement_attempt_visible(comments, proposal_id, version)
-  local _, status = core.implement_attempt_exec_live_fact(comments, proposal_id, version)
-  return status == "running"
 end
 
 implemented_branch_head = function(base_head, branch)
@@ -527,21 +531,21 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
     local link = m_facts.pr_link_fact(current.comments, marker_ready.proposal_id)
     if link ~= nil and tostring(link.impl_version or "") == tostring(marker_ready.dedup_key) then
       handoff_existing_pr_link(repo, issue_number, marker_ready, current, link, "linked PR fact is already visible")
-      return false
+      return nil
     end
     if not transitions.expected_states_include(expected_from_states, "implementing") then
       devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation state marker already visible")
-      return false
+      return nil
     end
-    return true
+    return state, current
   end
   if state.state == "impl-failed" and tostring(state.version or "") == tostring(marker_ready.dedup_key or "") then
     devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "implementing", "impl-failed", "skip-idempotent(already failed)", "implementation failure marker already visible")
-    return false
+    return nil
   end
   for _, expected in ipairs(expected_from_states or {}) do
     if transitions.expected_state_matches(state, expected) then
-      return true
+      return state, current
     end
   end
   local transition = transitions.implementation_transition_status(state, expected_from_states or { "ready" }, marker_ready.dedup_key)
@@ -552,12 +556,16 @@ local function precheck_implementation_write_gate(repo, issue_number, marker_rea
         version = marker_ready.dedup_key,
         stage_rank = devloop_state.stage_rank("ready"),
       }, "ready", "implementing", "apply(own-ready-hand-off)", "pre-spawn ready hand-off still matches this generation")
-      return true
+      return {
+        state = "ready",
+        version = marker_ready.dedup_key,
+        stage_rank = devloop_state.stage_rank("ready"),
+      }, current
     end
     devloop_logging.log_cas_decision("implement", marker_ready.proposal_id, state, "ready", "implementing", devloop_state.cas_outcome(state, transition, marker_ready.dedup_key), "pre-spawn issue state changed")
-    return false
+    return nil
   end
-  return true
+  return state, current
 end
 
 local function backing_original(current, managed)
@@ -688,7 +696,12 @@ local function process_ready_event(event)
         return
       end
       local fact = m_facts.implementing_fact(current.comments, ready.proposal_id, marker_ready.dedup_key)
-      if fact == nil and live_implement_attempt_visible(current.comments, ready.proposal_id, marker_ready.dedup_key) then
+      if fact == nil and dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "implement", ready.proposal_id, marker_ready.dedup_key, {
+        state = state,
+        proposal_id = ready.proposal_id,
+        current = current,
+        now_seconds = now(),
+      }) then
         devloop_logging.log_cas_decision("implement", ready.proposal_id, state, "ready", "implementing", "skip-idempotent(already at to_state)", "implementation attempt heartbeat is still live")
         return
       end
@@ -815,14 +828,20 @@ local function process_ready_event(event)
 
   local worktree, codex_started_at, exec_ref
   with_lock(lock_key, function()
-    if precheck_implementation_write_gate(
+    local pre_spawn_state, pre_spawn_current = precheck_implementation_write_gate(
       repo,
       issue_number,
       attempt_plan.marker_ready,
       attempt_plan.expected_from_states,
       attempt_plan.accepted_ready_hand_off
-    ) then
-      if dispatch_live_run.dispatch_live_run_dedup("implement", attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key) then
+    )
+    if pre_spawn_state ~= nil then
+      if dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "implement", attempt_plan.marker_ready.proposal_id, attempt_plan.marker_ready.dedup_key, {
+        state = pre_spawn_state,
+        current = pre_spawn_current,
+        proposal_id = attempt_plan.marker_ready.proposal_id,
+        now_seconds = now(),
+      }) then
         devloop_logging.log_cas_decision(
           "implement",
           attempt_plan.marker_ready.proposal_id,

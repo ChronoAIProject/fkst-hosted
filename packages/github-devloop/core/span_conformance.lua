@@ -742,7 +742,6 @@ local SCANNED_SOURCE_FILES = {
   "packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua",
   "packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua",
   "packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/implement_attempt.lua",
   "packages/github-devloop/core/restart/liveness_signal_producers/index.lua",
   "packages/github-devloop/core/restart/liveness_signal_producers/merge_gate_wait.lua",
   "packages/github-devloop/core/restart/liveness_signal_producers/review_converge_round.lua",
