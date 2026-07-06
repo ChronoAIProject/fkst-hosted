@@ -16,6 +16,7 @@ MAX_PLAN_DIGEST_BYTES = 64
 MAX_SLOT_ID_BYTES = 128
 MAX_CHILD_ISSUE_BYTES = 30
 MAX_TERMINAL_REASON_CODE_BYTES = 128
+MAX_DEDUP_KEY_BYTES = 512
 
 MATERIALIZATION_STATE_RANK = {
     "pending": 1,
@@ -25,6 +26,8 @@ MATERIALIZATION_STATE_RANK = {
 TERMINAL_STATES = {"done", "blocked", "error"}
 
 MARKER_RE = re.compile(r"<!--\s*fkst:github-devloop-workflow:(blueprint|materialization|terminal):v1\b(.*?)-->")
+INTAKE_DECISION_RE = re.compile(r"<!--\s*fkst:github-devloop:intake-decision:v1\b(.*?)-->")
+DEBUG_STAMP_RE = re.compile(r"\s*<!--\s*fkst:debug-stamp:v1\b.*?-->\s*$", re.DOTALL)
 ATTR_RE = re.compile(r'([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"')
 
 
@@ -84,8 +87,8 @@ def read_comments() -> tuple[list[Any] | None, str | None]:
     return comments, None
 
 
-def trusted_comment_bodies(comments: list[Any], bot_login: str) -> list[str]:
-    bodies = []
+def trusted_comments(comments: list[Any], bot_login: str) -> list[dict[str, Any]]:
+    trusted = []
     for comment in comments:
         if not isinstance(comment, dict):
             continue
@@ -93,25 +96,95 @@ def trusted_comment_bodies(comments: list[Any], bot_login: str) -> list[str]:
             continue
         body = comment.get("body")
         if isinstance(body, str):
-            bodies.append(body)
-    return bodies
+            trusted.append({"body": body})
+    return trusted
 
 
-def blueprint_fact(attrs: dict[str, str], origin: str) -> dict[str, str] | None:
+def decimal_checksum(value: str) -> str:
+    result = 2166136261
+    for byte in value.encode("utf-8"):
+        result = (result * 16777619 + byte) % 4294967291
+    return f"{result:010d}"
+
+
+def sanitize_key(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._\-/#]", "-", value)
+    sanitized = re.sub(r"/+", "/", sanitized).strip("/")
+    if sanitized == "":
+        return "empty"
+    segments = ["-" if segment in {".", ".."} else segment for segment in sanitized.split("/")]
+    sanitized = "/".join(segments)
+    return sanitized or "empty"
+
+
+def truncate_utf8(value: str, limit: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= limit:
+        return value
+    return encoded[:limit].decode("utf-8", errors="ignore")
+
+
+def dedup_key(parts: list[str]) -> str:
+    key = sanitize_key("/".join(parts))
+    if len(key.encode("utf-8")) > MAX_DEDUP_KEY_BYTES:
+        suffix = "-" + decimal_checksum(key)
+        key = truncate_utf8(key, MAX_DEDUP_KEY_BYTES - len(suffix.encode("utf-8"))).rstrip("/-") + suffix
+    return key
+
+
+def proxy_comment_marker(dedup: str) -> str:
+    return f"<!-- fkst:github-proxy:comment:{dedup} -->"
+
+
+def has_tail_proxy_stamp(body: str, dedup: str) -> bool:
+    tail = DEBUG_STAMP_RE.sub("", body).rstrip()
+    return tail.endswith(proxy_comment_marker(dedup))
+
+
+def blueprint_dedup_from_comment(body: str, origin: str) -> str | None:
+    for match in INTAKE_DECISION_RE.finditer(body):
+        attrs = parse_attrs(match.group(1))
+        proposal = safe_attr(attrs.get("proposal"), MAX_ORIGIN_PROPOSAL_ID_BYTES)
+        decision = safe_attr(attrs.get("decision"), MAX_SLOT_ID_BYTES)
+        marker_dedup = safe_attr(attrs.get("dedup"), MAX_DEDUP_KEY_BYTES)
+        if proposal == origin and decision == "track" and marker_dedup is not None:
+            return dedup_key(["workflow", "blueprint-decision", origin, marker_dedup])
+    return None
+
+
+def blueprint_fact(attrs: dict[str, str], origin: str, body: str) -> dict[str, str] | None:
     marker_origin = safe_attr(attrs.get("origin"), MAX_ORIGIN_PROPOSAL_ID_BYTES)
     workflow = safe_attr(attrs.get("workflow"), MAX_WORKFLOW_ID_BYTES)
     digest = safe_attr(attrs.get("digest"), MAX_PLAN_DIGEST_BYTES)
     if marker_origin != origin or workflow is None or digest is None:
         return None
+    expected_dedup = blueprint_dedup_from_comment(body, origin)
+    if expected_dedup is None or not has_tail_proxy_stamp(body, expected_dedup):
+        return None
     return {"workflow": workflow, "digest": digest}
 
 
-def materialization_fact(attrs: dict[str, str], origin: str, seq: int) -> dict[str, Any] | None:
+def materialization_fact(attrs: dict[str, str], origin: str, seq: int, body: str) -> dict[str, Any] | None:
     marker_origin = safe_attr(attrs.get("origin"), MAX_ORIGIN_PROPOSAL_ID_BYTES)
+    predecessor_ref_digest = safe_attr(attrs.get("predecessor_ref_digest"), MAX_PLAN_DIGEST_BYTES)
+    gen_spec_digest = safe_attr(attrs.get("gen_spec_digest"), MAX_PLAN_DIGEST_BYTES)
     slot = safe_attr(attrs.get("slot"), MAX_SLOT_ID_BYTES)
     state = safe_attr(attrs.get("state"), MAX_SLOT_ID_BYTES)
     child_issue = safe_attr(attrs.get("child_issue"), MAX_CHILD_ISSUE_BYTES, allow_empty=True)
-    if marker_origin != origin or slot is None or state not in MATERIALIZATION_STATE_RANK or child_issue is None:
+    if marker_origin != origin or predecessor_ref_digest is None or gen_spec_digest is None or slot is None or state not in MATERIALIZATION_STATE_RANK or child_issue is None:
+        return None
+    expected_dedup = dedup_key([
+        "workflow",
+        "comment",
+        origin,
+        "materialization",
+        slot,
+        predecessor_ref_digest,
+        gen_spec_digest,
+        state,
+        child_issue,
+    ])
+    if not has_tail_proxy_stamp(body, expected_dedup):
         return None
     return {
         "slot": slot,
@@ -121,37 +194,41 @@ def materialization_fact(attrs: dict[str, str], origin: str, seq: int) -> dict[s
     }
 
 
-def terminal_fact(attrs: dict[str, str], origin: str, seq: int) -> dict[str, Any] | None:
+def terminal_fact(attrs: dict[str, str], origin: str, seq: int, body: str) -> dict[str, Any] | None:
     marker_origin = safe_attr(attrs.get("origin"), MAX_ORIGIN_PROPOSAL_ID_BYTES)
     state = safe_attr(attrs.get("state"), MAX_SLOT_ID_BYTES)
     reason_code = safe_attr(attrs.get("reason_code"), MAX_TERMINAL_REASON_CODE_BYTES)
     if marker_origin != origin or state not in TERMINAL_STATES or reason_code is None:
         return None
+    expected_dedup = dedup_key(["workflow", "comment", origin, "terminal", state, reason_code])
+    if not has_tail_proxy_stamp(body, expected_dedup):
+        return None
     return {"state": state, "reason_code": reason_code, "seq": seq}
 
 
-def collect_facts(bodies: list[str], origin: str) -> dict[str, Any]:
+def collect_facts(comments: list[dict[str, Any]], origin: str) -> dict[str, Any]:
     facts: dict[str, Any] = {
         "blueprint": None,
         "materializations": [],
         "terminal": None,
     }
     seq = 0
-    for body in bodies:
+    for comment in comments:
+        body = str(comment.get("body") or "")
         for match in MARKER_RE.finditer(body):
             seq += 1
             kind = match.group(1)
             attrs = parse_attrs(match.group(2))
             if kind == "blueprint":
-                fact = blueprint_fact(attrs, origin)
+                fact = blueprint_fact(attrs, origin, body)
                 if fact is not None:
                     facts["blueprint"] = fact
             elif kind == "materialization":
-                fact = materialization_fact(attrs, origin, seq)
+                fact = materialization_fact(attrs, origin, seq, body)
                 if fact is not None:
                     facts["materializations"].append(fact)
             elif kind == "terminal":
-                fact = terminal_fact(attrs, origin, seq)
+                fact = terminal_fact(attrs, origin, seq, body)
                 if fact is not None:
                     facts["terminal"] = fact
     return facts
@@ -206,8 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"workflow-board-fact: {err}", file=sys.stderr)
         return 2
 
-    bodies = trusted_comment_bodies(comments, args.bot_login)
-    fact = board_fact(collect_facts(bodies, args.origin))
+    fact = board_fact(collect_facts(trusted_comments(comments, args.bot_login), args.origin))
     if fact is None:
         return 1
     print(f"{fact[0]}\t{fact[1]}")
