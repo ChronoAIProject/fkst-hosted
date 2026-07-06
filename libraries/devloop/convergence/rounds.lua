@@ -20,6 +20,7 @@ local converge_angles_digest = shared.converge_angles_digest
 local attr = shared.attr
 local is_digest = shared.is_digest
 local is_bounded_attr = shared.is_bounded_attr
+local normalize_findings_record = shared.normalize_findings_record
 
 local function converge_record_map(comments, kind, matches)
   local records_by_round = {}
@@ -37,6 +38,7 @@ local function converge_record_map(comments, kind, matches)
       local narrowed_question = decode_attr(attr(marker, "narrowed_question"))
       local angle_digests = decode_angle_replay(attr(marker, "angle_digests"))
       local findings_record = decode_findings_record(attr(marker, "findings_record"))
+      local essence_stall = attr(marker, "essence_stall") == "true"
       local version = attr(marker, "version")
       if round ~= nil
         and matches(marker)
@@ -52,6 +54,8 @@ local function converge_record_map(comments, kind, matches)
           narrowed_question = narrowed_question,
           angle_digests = angle_digests,
           findings_record = findings_record,
+          essence_stall = essence_stall,
+          resolvable_findings = findings_record ~= nil,
         }
       end
     end
@@ -66,19 +70,53 @@ local function converge_record_map(comments, kind, matches)
   end)
   return facts
 end
-function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key, findings_record)
+function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key, findings_record, essence_stall)
   local copied = {}
   for _, fact in ipairs(facts or {}) do
     table.insert(copied, fact)
   end
+  local normalized_findings = normalize_findings_record(findings_record)
   table.insert(copied, {
     round = round,
     question = converge_question_digest(narrowed_question),
     verdicts = converge_verdicts_digest(angle_digests),
     dedup = dedup_key,
-    findings_record = shared.normalize_findings_record(findings_record),
+    findings_record = normalized_findings,
+    essence_stall = essence_stall == true,
+    resolvable_findings = normalized_findings ~= nil,
   })
   return copied
+end
+
+function C.has_essence_stall(facts)
+  for _, fact in ipairs(facts or {}) do
+    if type(fact) == "table" and fact.essence_stall == true then
+      return true
+    end
+  end
+  return false
+end
+
+local function has_resolvable_findings(fact)
+  return type(fact) == "table" and normalize_findings_record(fact.findings_record) ~= nil
+end
+
+local function resolvable_count(facts)
+  local count = 0
+  for _, fact in ipairs(facts or {}) do
+    if has_resolvable_findings(fact) then
+      count = count + 1
+    end
+  end
+  return count
+end
+
+function C.should_continue_resolvable_boundary(facts_with_current)
+  return resolvable_count(facts_with_current) <= 1
+end
+
+function C.resolvability_exhausted(facts_with_current)
+  return resolvable_count(facts_with_current) > 1
 end
 
 function C.converge_base_version(consensus_dedup)
@@ -89,7 +127,7 @@ function C.converge_proposal_base_dedup(consensus_dedup)
   local base_version = C.converge_base_version(consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end
-function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record)
+function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record, essence_stall)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid converge round")
@@ -105,9 +143,10 @@ function C.converge_round_marker(proposal_id, base_version, source_ref_digest, r
     .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" findings_record="' .. encode_findings_record(findings_record)
+    .. '" essence_stall="' .. (essence_stall == true and "true" or "false")
     .. '" -->'
 end
-function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record)
+function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record, essence_stall)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid review converge round")
@@ -126,6 +165,7 @@ function C.review_converge_round_marker(M, review_proposal_id, issue_proposal_id
     .. '" narrowed_question="' .. safe_attr(narrowed_question, max_question_len)
     .. '" angle_digests="' .. encode_angle_replay(angle_digests)
     .. '" findings_record="' .. encode_findings_record(findings_record)
+    .. '" essence_stall="' .. (essence_stall == true and "true" or "false")
     .. '" -->'
 end
 
@@ -153,17 +193,6 @@ function C.converge_round_facts_for_proposal(comments, proposal_id)
   return converge_record_map(comments, "converge%-round", matches)
 end
 
-function C.converge_round_facts_for_proposal_boundary(comments, proposal_id, narrowed_question, angle_digests)
-  local question = converge_question_digest(narrowed_question)
-  local verdicts = converge_verdicts_digest(angle_digests)
-  local matches = function(marker)
-    return attr(marker, "proposal") == tostring(proposal_id)
-      and attr(marker, "question") == question
-      and attr(marker, "verdicts") == verdicts
-  end
-  return converge_record_map(comments, "converge%-round", matches)
-end
-
 function C.review_converge_round_facts(M, comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)
   local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
   local matches = function(marker)
@@ -178,18 +207,6 @@ end
 
 function C.converge_budget_round(comments, proposal_id)
   return C.max_converge_round(C.converge_round_facts_for_proposal(comments, proposal_id))
-end
-
-function C.converge_boundary_budget_round(comments, proposal_id, narrowed_question, angle_digests)
-  return C.max_converge_round(C.converge_round_facts_for_proposal_boundary(comments, proposal_id, narrowed_question, angle_digests))
-end
-
-function C.review_converge_budget_round(comments, review_proposal_id, issue_proposal_id)
-  local matches = function(marker)
-    return attr(marker, "proposal") == tostring(review_proposal_id)
-      and attr(marker, "issue_proposal") == tostring(issue_proposal_id)
-  end
-  return C.max_converge_round(converge_record_map(comments, "review%-converge%-round", matches))
 end
 
 function C.max_converge_round(facts)

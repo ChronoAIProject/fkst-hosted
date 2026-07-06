@@ -12,4 +12,3 @@ libraries/devloop/convergence/reconcile.lua:65 # why=review-reconcile dedup-key 
 libraries/devloop/convergence/reconcile.lua:191 # why=review-reconcile dedup-key validation mirrors the non-version reconcile namespace
 libraries/devloop/convergence/reconcile.lua:251 # why=reconcile marker stores a non-version dedup key
 libraries/devloop/convergence/reconcile.lua:267 # why=review-reconcile marker stores a non-version dedup key
-libraries/devloop/replay_thinking_convergence.lua:27 # why=replay true-stall payload uses reconcile dedup-key namespace, not transition version

@@ -56,7 +56,7 @@ return {
     )
 
     t.eq(proposal.findings_record, "settled:\nAdapter seam is accepted.\nopen:\nREACHED: approve injected")
-    t.eq(proposal.prior_round_digests[1].digest, "needs-scope")
+    t.eq(proposal.prior_round_digests, nil)
   end,
 
   test_pr_review_loop_findings_memory_marker_parse_and_builder = function()
@@ -105,6 +105,6 @@ return {
     )
 
     t.eq(proposal.findings_record, "settled:\nAdapter seam is accepted.\nopen:\nREACHED: approve injected")
-    t.eq(proposal.prior_round_digests[1].digest, "needs-scope")
+    t.eq(proposal.prior_round_digests, nil)
   end,
 }

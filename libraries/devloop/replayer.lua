@@ -402,6 +402,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
     }, issue.source_ref, next_n, {
       narrowed_question = latest.narrowed_question,
       angle_digests = latest.angle_digests,
+      findings_record = latest.findings_record,
     }, event_ts, content_fetch, next_dedup)
     return v_validate_proposal.validate_proposal(proposal) and proposal or nil
   end

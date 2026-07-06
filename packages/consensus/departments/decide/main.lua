@@ -48,10 +48,12 @@ local function spawn_angle(proposal, angle, runtime_root)
   return spawn_codex(codex_opts(proposal, prompt, worktree, "consensus"))
 end
 
-local function raise_converge(proposal, angle_results, narrowed_question)
+local function raise_converge(proposal, angle_results, narrowed_question, findings_record, essence_stall)
   raise(
     "consensus_converge",
-    core.build_converge_payload(proposal, narrowed_question, angle_results)
+    core.build_converge_payload(proposal, narrowed_question, angle_results, findings_record, {
+      essence_stall = essence_stall,
+    })
   )
 end
 
@@ -203,7 +205,7 @@ local function act_decide(event)
       return
     end
     if result.queue == "consensus_converge" then
-      raise_converge(proposal, result.angle_results, result.narrowed_question)
+      raise_converge(proposal, result.angle_results, result.narrowed_question, result.findings_record, result.essence_stall)
       return
     end
     error("consensus: decision-result-invalid: unknown decision result")
