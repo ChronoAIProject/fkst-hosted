@@ -14,7 +14,7 @@ from typing import Callable
 RAISER_PRODUCES_RE = re.compile(r"\bproduces\s*=\s*(?P<quote>[\"'])(?P<queue>[A-Za-z0-9_]+)(?P=quote)")
 RAISER_FILE_WATCH_RE = re.compile(r"\btype\s*=\s*(?P<quote>[\"'])file_watch(?P=quote)")
 RAISER_GLOB_RE = re.compile(r"\bglob\s*=\s*(?P<quote>[\"'])(?P<glob>[^\"']+)(?P=quote)")
-SPEC_FIELD_RE = re.compile(r"\b(?P<field>consumes|produces)\s*=\s*\{(?P<body>.*?)\}", re.S)
+SPEC_FIELD_RE = re.compile(r"\b(?P<field>consumes|produces|ephemeral)\s*=\s*\{(?P<body>.*?)\}", re.S)
 LITERAL_QUEUE_RE = re.compile(r"(?P<quote>[\"'])(?P<queue>[A-Za-z0-9_.-]+)(?P=quote)")
 
 

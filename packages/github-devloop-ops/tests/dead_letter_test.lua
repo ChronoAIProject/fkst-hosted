@@ -88,6 +88,11 @@ return {
     t.eq(
       logs[1],
       "github-devloop dept=dead_letter tag=DEAD_LETTER"
+        .. " error_class=dead-letter"
+        .. " fingerprint=" .. core.error_fingerprint("dead-letter", "github-devloop-decompose.devloop_decompose", "github-devloop-decompose.decompose", "gh pr decomposed marker comment failed\nwhile writing marker")
+        .. " source_ref=external:owner/repo#issue/140"
+        .. " attempt=3"
+        .. " terminal=true"
         .. " delivery_id=delivery/v1/raised/queue/github-devloop-decompose.devloop_decompose/dept/github-devloop-decompose.decompose/01HY"
         .. " queue=github-devloop-decompose.devloop_decompose"
         .. " dead_dept=github-devloop-decompose.decompose"

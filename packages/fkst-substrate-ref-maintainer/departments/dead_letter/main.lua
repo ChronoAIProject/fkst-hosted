@@ -1,4 +1,3 @@
-local core = require("core")
 local dead_letter = require("workflow.dead_letter")
 local saga = require("workflow.saga")
 
@@ -9,6 +8,5 @@ local spec = {
 }
 
 return saga.department(spec, dead_letter.handlers({
-  package = "consensus",
-  wrap = core.wrap_pipeline_failure,
+  package = "fkst-substrate-ref-maintainer",
 }))
