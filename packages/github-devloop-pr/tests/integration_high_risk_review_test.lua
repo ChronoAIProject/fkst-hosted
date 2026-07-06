@@ -168,7 +168,7 @@ return {
     local result = run_review_pr(event, opts("high-risk-review-proposal"))
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(table.concat(proposal.angles, ","), "minimal,structural,delete,high-risk")
+    t.eq(table.concat(proposal.angles, ","), "teleology,parsimony,fidelity,high-risk")
   end,
 
   test_high_risk_review_loop_proposal_inherits_high_risk_angle = function()
@@ -196,7 +196,7 @@ return {
     local result = run_review_loop(unresolved, opts("high-risk-review-loop-proposal"))
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(table.concat(proposal.angles, ","), "minimal,structural,delete,high-risk")
+    t.eq(table.concat(proposal.angles, ","), "teleology,parsimony,fidelity,high-risk")
   end,
 
   test_high_risk_approve_missing_high_risk_angle_routes_to_fixing = function()

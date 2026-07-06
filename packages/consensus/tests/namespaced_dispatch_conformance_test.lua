@@ -21,7 +21,7 @@ local function proposal_payload()
     title = "Adopt consensus package",
     body = "Create a small flat package that asks several angles to judge a proposal.",
     content_fetch = "fetch-source --ref demo/consensus/42 --full",
-    angles = { "minimal", "structural", "delete" },
+    angles = { "teleology", "parsimony", "fidelity" },
     dedup_key = "proposal-42-v1",
     source_ref = {
       kind = "proposal",
