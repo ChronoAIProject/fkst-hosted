@@ -272,6 +272,9 @@ function M.maybe_timeout_redrive_from_table(dept, entity, state, table_row, fact
     stage_rank = state.stage_rank,
     marker_created_at = state.marker_created_at,
   }, row, facts)
+  if replay.kind == "deferred" then
+    return true
+  end
   if replay.kind == "stuck" then
     devloop_logging.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "timeout-stuck(" .. tostring(replay.outcome or "replay-declined") .. ")", "state output obligation is unmet and replay did not emit a consumable redrive")
   end

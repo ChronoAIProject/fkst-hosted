@@ -1,5 +1,4 @@
 local git_mechanics = require("devloop.git_mechanics")
-local devloop_base = require("devloop.base")
 local entity_lib = require("devloop.entity")
 local base_ids = require("devloop.base_ids")
 local requests_labels = require("devloop.requests.labels")
@@ -19,6 +18,7 @@ local transition_version = require("contract.transition_version")
 local context_bundle = require("devloop.context_bundle")
 local decompose_lib = require("devloop.decompose")
 local devloop_logging = require("devloop.logging")
+local dispatch_live_run = require("devloop.dispatch_live_run")
 
 local skip_capture_by_core = setmetatable({}, { __mode = "k" })
 
@@ -377,33 +377,42 @@ local function log_skip(M, dept, proposal_id, state, from_state, to_state, outco
   return false
 end
 
+local function latest_thinking_converge_round(M, comments, proposal_id, state_version, source_ref)
+  local base_version = transition_version.strip_suffixes(state_version)
+  local latest = M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
+  local consensus_latest = M.latest_complete_converge_round(comments, proposal_id, "consensus:" .. tostring(base_version):gsub("^consensus:", ""), source_ref)
+  if latest == nil or (consensus_latest ~= nil and consensus_latest.round > latest.round) then
+    return consensus_latest
+  end
+  return latest
+end
+
 function C.replay_log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
   return log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
 end
 
 local function build_thinking_replay_proposal(M, issue, proposal_id, state, current, event_ts)
-  local stable_version = transition_version.strip_suffixes(state.version)
-  local latest = M.latest_complete_converge_round(current.comments, proposal_id, stable_version, issue.source_ref)
+  local latest = latest_thinking_converge_round(M, current.comments, proposal_id, state.version, issue.source_ref)
   if latest ~= nil then
     local base_version = conv_rounds.converge_proposal_base_dedup(latest.dedup)
-    local next_n = latest.round + 1
-    local next_dedup = transition_version.loop_at(base_version, next_n)
+    local replay_n = latest.round + 1
+    local replay_dedup = transition_version.loop_at(base_version, replay_n)
     local content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
       dept = "observe_issue",
       repo = issue.repo,
       issue_number = issue.number,
       proposal_id = proposal_id,
-      version = next_dedup,
+      version = replay_dedup,
       tick = event_ts,
     })
     local proposal = payloads_builders.build_board_loop_proposal(M, issue.repo, issue.number, {
       title = issue.title,
       updated_at = issue.updated_at,
-    }, issue.source_ref, next_n, {
+    }, issue.source_ref, replay_n, {
       narrowed_question = latest.narrowed_question,
       angle_digests = latest.angle_digests,
       findings_record = latest.findings_record,
-    }, event_ts, content_fetch, next_dedup)
+    }, event_ts, content_fetch, replay_dedup)
     return v_validate_proposal.validate_proposal(proposal) and proposal or nil
   end
 
@@ -411,9 +420,7 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   for key, value in pairs(issue) do
     replay_issue[key] = value
   end
-  local replay_dedup = devloop_base.proposal_dedup_key(proposal_id, issue.updated_at)
-    .. "/replay"
-    .. tostring(state.version or ""):sub(#stable_version + 1)
+  local replay_dedup = transition_version.strip_timeout_suffixes(state.version)
   replay_issue.content_fetch = context_bundle.context_fetch_ref_from_bundle(M, {
     dept = "observe_issue",
     repo = issue.repo,
@@ -424,6 +431,10 @@ local function build_thinking_replay_proposal(M, issue, proposal_id, state, curr
   })
   local proposal = payloads_builders.build_board_proposal(M, replay_issue, event_ts)
   proposal.dedup_key = replay_dedup
+  local replay_round = transition_version.loop_round(replay_dedup)
+  if replay_round > 0 then
+    proposal.round = replay_round
+  end
   return v_validate_proposal.validate_proposal(proposal) and proposal or nil
 end
 
@@ -457,6 +468,19 @@ local function replay_thinking(M, dept, issue, state, row, facts)
   local proposal = build_thinking_replay_proposal(M, issue, proposal_id, state, facts.current, facts.event_ts)
   if proposal == nil then
     return log_skip(M, dept, proposal_id, state, row.from_state, row.driving_queue, "skip-foreign(payload)", "cannot rebuild thinking replay proposal")
+  end
+  if dispatch_live_run.dispatch_live_run_dedup(M, "consensus", proposal_id, proposal.dedup_key, {
+    state = {
+      state = "thinking",
+      version = proposal.dedup_key,
+      proposal_id = proposal_id,
+      marker_created_at = state.marker_created_at,
+    },
+    current = facts.current,
+    proposal_id = proposal_id,
+    now_seconds = facts.now_seconds or now(),
+  }) then
+    return log_skip(M, dept, proposal_id, state, row.from_state, row.driving_queue, "skip-idempotent(live-exec-ref)", "matching consensus codex run is still live")
   end
   devloop_logging.log_cas_decision(dept, proposal_id, state, row.from_state, row.driving_queue, "applied(replay)", "replaying consensus proposal from trusted state facts")
   return raise_effects(M, dept, proposal_id, "thinking", proposal.dedup_key, { add = {}, remove = {} }, {
@@ -959,6 +983,9 @@ function C.replay_from_table_classified(M, dept, entity, state, table_row, facts
   if not ok then error(issued) end
   if issued then
     return { kind = "issued", issued = true }
+  end
+  if capture.outcome == "skip-idempotent(live-exec-ref)" then
+    return { kind = "deferred", issued = false, outcome = capture.outcome, reason = capture.reason }
   end
   return { kind = "stuck", issued = false, outcome = capture.outcome, reason = capture.reason }
 end

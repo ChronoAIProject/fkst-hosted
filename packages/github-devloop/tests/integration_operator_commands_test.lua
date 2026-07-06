@@ -168,7 +168,7 @@ return {
     local comment_raise = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     local proposal_raise = find_raise(result.raises, "consensus.proposal")
     t.is_true(comment_raise.payload.body:find("operator command accepted: rereview", 1, true) ~= nil)
-    t.eq(proposal_raise.payload.dedup_key, base_version .. "/replay")
+    t.eq(proposal_raise.payload.dedup_key, base_version)
     t.eq(proposal_raise.payload.round, nil)
     t.eq(proposal_raise.payload.source_ref.ref, "owner/repo#issue/42")
   end,
