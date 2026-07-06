@@ -139,7 +139,7 @@ return {
     local first_proposal = find_raise(first.raises, "consensus.proposal").payload
     t.eq(first_proposal.schema, "consensus.proposal.v1")
     t.eq(first_proposal.proposal_id, original.proposal_id)
-    t.eq(first_proposal.dedup_key, original.dedup_key .. "/replay")
+    t.eq(first_proposal.dedup_key, original.dedup_key)
     t.eq(first_proposal.source_ref.ref, "owner/repo#issue/42")
 
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
@@ -160,9 +160,8 @@ return {
     t.eq(second.exit_code, 0)
     t.eq(#second.raises, 1)
     local second_proposal = find_raise(second.raises, "consensus.proposal").payload
-    t.eq(second_proposal.dedup_key, payloads_builders.build_proposal(updated_event).dedup_key .. "/replay")
-    t.is_true(second_proposal.dedup_key ~= first_proposal.dedup_key)
-    t.is_true(second_proposal.content_fetch ~= first_proposal.content_fetch)
+    t.eq(second_proposal.dedup_key, first_proposal.dedup_key)
+    t.eq(second_proposal.content_fetch, first_proposal.content_fetch)
     t.eq(count_calls("--json body"), 0)
   end,
 
@@ -207,7 +206,7 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, current.dedup_key .. "/replay")
+    t.eq(proposal.dedup_key, current.dedup_key)
     t.eq(proposal.round, nil)
     t.eq(proposal.convergence_question, nil)
     t.eq(count_calls("--json body"), 0)
@@ -229,7 +228,8 @@ return {
     t.eq(result.exit_code, 0)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
     t.eq(proposal.proposal_id, original.proposal_id)
-    t.eq(proposal.dedup_key, original.dedup_key .. "/replay/loop/1")
+    t.eq(proposal.dedup_key, original.dedup_key .. "/loop/1")
+    t.eq(proposal.round, 1)
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
   end,
 
@@ -250,7 +250,7 @@ return {
     t.eq(#result.raises, 2)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
     t.eq(proposal.proposal_id, original.proposal_id)
-    t.eq(proposal.dedup_key, original.dedup_key .. "/replay")
+    t.eq(proposal.dedup_key, original.dedup_key)
     t.eq(proposal.source_ref.ref, "owner/repo#issue/42")
     local attempt = find_raise(result.raises, "github-proxy.github_issue_comment_request")
     t.is_true(attempt ~= nil)
