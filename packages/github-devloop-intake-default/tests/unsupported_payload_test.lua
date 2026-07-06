@@ -38,6 +38,19 @@ end
 
 local function payload_for_queue(queue)
   local payloads = {
+    dead_letter = {
+      delivery_id = "delivery/v1/raised/queue/github-devloop-intake-default.devloop_intake_candidate/dept/github-devloop-intake-default.intake_judge/01HY",
+      queue = "github-devloop-intake-default.devloop_intake_candidate",
+      dept = "github-devloop-intake-default.intake_judge",
+      error_class = "namespaced-dispatch-test",
+      dedup_key = "namespaced-dispatch/dead-letter",
+      attempt = 1,
+      error = "namespaced dispatch test error",
+      source_ref = {
+        kind = "external",
+        ref = "owner/repo#issue/42",
+      },
+    },
     ["github-devloop-intake.devloop_intake_candidate"] = payloads_builders.build_devloop_intake_candidate_payload("owner/repo", "42", "2026-06-03T01:02:03Z"),
   }
   local payload = payloads[queue]

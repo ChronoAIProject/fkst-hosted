@@ -1,4 +1,6 @@
 local C = {}
+local dead_letter = require("workflow.dead_letter")
+local saga = require("workflow.saga")
 
 local function shell_single_quote(value)
   return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
@@ -47,6 +49,36 @@ local function production_queue_name(package_name, queue)
     return text
   end
   return tostring(package_name) .. "." .. text
+end
+
+local function default_dead_letter_payload(package_name)
+  return {
+    delivery_id = "delivery/v1/raised/queue/" .. tostring(package_name) .. ".namespaced_probe/dept/" .. tostring(package_name) .. ".namespaced_dispatch/01HY",
+    queue = tostring(package_name) .. ".namespaced_probe",
+    dept = tostring(package_name) .. ".namespaced_dispatch",
+    error_class = "namespaced-dispatch-test",
+    dedup_key = "namespaced-dispatch/dead-letter",
+    attempt = 1,
+    error = "namespaced dispatch test error",
+    source_ref = {
+      kind = "external",
+      ref = "owner/repo#issue/42",
+    },
+  }
+end
+
+local function load_standard_department(package_name, path)
+  if path ~= "departments/dead_letter/main.lua" then
+    return nil
+  end
+  local spec = {
+    consumes = { "dead_letter" },
+    produces = {},
+    stall_window = "2m",
+  }
+  return saga.department(spec, dead_letter.handlers({
+    package = package_name,
+  }))
 end
 
 local fallthrough_needles = {
@@ -167,13 +199,26 @@ function C.assert_all_consumed_queues_route(config)
   for _, path in ipairs(department_paths(root)) do
     local module = departments[path]
     if module == nil then
+      module = load_standard_department(package_name, path)
+    end
+    if module == nil then
       error("namespaced-dispatch: missing loaded department for " .. tostring(path))
     end
     local department = normalize_department(path, module)
     for _, queue in ipairs(department.spec.consumes or {}) do
+      local payload
+      if queue == "dead_letter" then
+        if type(config.dead_letter_payload) == "function" then
+          payload = config.dead_letter_payload(path, queue)
+        else
+          payload = default_dead_letter_payload(package_name)
+        end
+      else
+        payload = payload_for_queue(path, queue)
+      end
       local event = {
         queue = production_queue_name(package_name, queue),
-        payload = payload_for_queue(path, queue),
+        payload = payload,
       }
       local opts = nil
       if type(opts_for_case) == "function" then
