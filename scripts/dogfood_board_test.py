@@ -65,6 +65,7 @@ class DogfoodBoardHarness:
                     printf '%s\\t%s\\t%s\\t%s\\n' 39 2026-06-27T00:00:00Z '__fkst_stateless__' 'Forged workflow parent'
                     printf '%s\\t%s\\t%s\\t%s\\n' 40 2026-06-27T00:00:00Z '__fkst_stateless__' 'Peer workflow parent'
                     printf '%s\\t%s\\t%s\\t%s\\n' 41 2026-06-27T00:00:00Z '__fkst_stateless__' 'Peer devloop parent'
+                    printf '%s\\t%s\\t%s\\t%s\\n' 42 2026-06-27T00:00:00Z '__fkst_stateless__' 'Untrusted foreign marker'
                     ;;
                   repos/ChronoAIProject/fkst-packages/issues/37/comments?per_page=100)
                     printf '[]\\n'
@@ -87,6 +88,11 @@ JSON
                   repos/ChronoAIProject/fkst-packages/issues/41/comments?per_page=100)
                     cat <<'JSON'
 [{"user":{"login":"ElonSG"},"body":"github-devloop thinking: consensus started\\n\\n<!-- fkst:github-devloop:state:v1 proposal=\\\"github-devloop/issue/ChronoAIProject/fkst-packages/41\\\" state=\\\"thinking\\\" version=\\\"peer-version\\\" stage_rank=\\\"100\\\" -->"}]
+JSON
+                    ;;
+                  repos/ChronoAIProject/fkst-packages/issues/42/comments?per_page=100)
+                    cat <<'JSON'
+[{"user":{"login":"random-user"},"body":"github-devloop thinking: consensus started\\n\\n<!-- fkst:github-devloop:state:v1 proposal=\\\"github-devloop/issue/ChronoAIProject/fkst-packages/42\\\" state=\\\"thinking\\\" version=\\\"untrusted-version\\\" stage_rank=\\\"100\\\" -->"}]
 JSON
                     ;;
                   *)
@@ -129,6 +135,7 @@ JSON
         env = os.environ.copy()
         env["DOGFOOD_CONFIG"] = str(self.config)
         env["FKST_GITHUB_BOT_LOGIN"] = "loning"
+        env["FKST_DEVLOOP_MANAGED_BOT_LOGINS"] = "loning,ElonSG"
         env["PATH"] = f"{self.bin}:{env['PATH']}"
         return subprocess.run(
             ["/bin/bash", ".claude/skills/dogfood-github-devloop/dogfood.sh", "board", "packages", "6"],
@@ -166,6 +173,9 @@ class DogfoodBoardTest(unittest.TestCase):
             self.assertIn("#41   [stateless   ] peer-managed(ElonSG)", result.stdout)
             self.assertNotIn("#41   [stateless   ] ⚠ STRANDED stateless", result.stdout)
             self.assertNotIn("#41   [thinking    ]", result.stdout)
+            self.assertIn("#42   [stateless   ] ⚠ STRANDED stateless 12h", result.stdout)
+            self.assertNotIn("#42   [stateless   ] peer-managed(random-user)", result.stdout)
+            self.assertNotIn("#42   [thinking    ]", result.stdout)
         finally:
             h.close()
 

@@ -205,7 +205,8 @@ workflow_board_fact() { # $1 issue-number
   comments=$(gh api --paginate "repos/$REPO/issues/$num/comments?per_page=100" 2>/dev/null) || return 1
   fact=$(printf '%s' "$comments" | python3 "$tool" \
     --origin "$origin" \
-    --bot-login "$BOT" 2>/dev/null) || return 1
+    --bot-login "$BOT" \
+    --managed-bot-logins "$MANAGED_BOT_LOGINS" 2>/dev/null) || return 1
   [ -n "$fact" ] || return 1
   printf '%s\n' "$fact"
 }
