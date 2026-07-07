@@ -615,6 +615,102 @@ local outcome = run_fix_attempt(attempt_plan)
     t.eq(#errors, 0)
   end,
 
+  test_review_meta_codex_dispatch_without_live_run_dedup_fails = function()
+    local errors = span.errors_from_sources({
+      ["packages/github-devloop-pr/core/restart/transitions/review_meta.lua"] = [[
+return function(M, h)
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
+  return {
+    from_state = "review-meta",
+    responsibility_signature = responsibility_signature({
+      state_kind = "decision",
+    }),
+    liveness_contract = {
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "review-meta",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+      },
+    },
+    span_contract = span_contract({
+      department = "review_meta",
+      durable_start_marker = "state:v1 review-meta",
+      spawn_predecessor = "load_review_meta_context",
+      spawn_function = "review_meta_codex_decision",
+    }),
+  }
+end
+]],
+      ["packages/github-devloop-pr/departments/review_meta/main.lua"] = [[
+local function load_review_meta_context(repo, issue_number, review_meta, event)
+  local durable_start_marker = "state:v1 review-meta"
+  return { state = "review-meta" }
+end
+
+local function review_meta_codex_decision(plan)
+  return spawn_codex_sync({ prompt = prompt })
+end
+
+local plan = load_review_meta_context(repo, issue_number, review_meta, event)
+local parsed = review_meta_codex_decision(plan)
+]],
+    })
+    t.is_true(contains_error(errors, "review_meta_codex_decision call must be preceded by dispatch_live_run_dedup"), "missing review-meta live-run dispatch dedup error")
+  end,
+
+  test_review_meta_codex_dispatch_with_live_run_dedup_passes = function()
+    local errors = span.errors_from_sources({
+      ["packages/github-devloop-pr/core/restart/transitions/review_meta.lua"] = [[
+return function(M, h)
+  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
+  return {
+    from_state = "review-meta",
+    responsibility_signature = responsibility_signature({
+      state_kind = "decision",
+    }),
+    liveness_contract = {
+      real_execution = {
+        primitive = "fkst.codex_runs",
+        match = {
+          role = "review-meta",
+          proposal_id = "state.proposal_id",
+          dedup_key = "state.version",
+        },
+      },
+    },
+    span_contract = span_contract({
+      department = "review_meta",
+      durable_start_marker = "state:v1 review-meta",
+      spawn_predecessor = "load_review_meta_context",
+      spawn_function = "review_meta_codex_decision",
+    }),
+  }
+end
+]],
+      ["packages/github-devloop-pr/departments/review_meta/main.lua"] = [[
+local function load_review_meta_context(repo, issue_number, review_meta, event)
+  local durable_start_marker = "state:v1 review-meta"
+  return { state = "review-meta" }
+end
+
+local function review_meta_codex_decision(plan)
+  return spawn_codex_sync({ prompt = prompt })
+end
+
+local plan = load_review_meta_context(repo, issue_number, review_meta, event)
+local dispatch_live_run = require("devloop.dispatch_live_run")
+if dispatch_live_run.dispatch_live_run_dedup(liveness, "review-meta", review_meta.proposal_id, review_meta.version) then
+  return
+end
+local parsed = review_meta_codex_decision(plan)
+]],
+    })
+    t.is_true(#errors == 0, join_error_messages(errors))
+  end,
+
   test_worker_span_contract_declaration_reuses_strict_contract = function()
     local rows = {}
     for index, row in ipairs(core.restart_transition_table()) do

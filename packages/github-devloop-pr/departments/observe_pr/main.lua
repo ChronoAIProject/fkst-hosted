@@ -116,6 +116,10 @@ local function maybe_label_hints(origin, pr_number, current_pr, state, pr_source
   maybe_pr_label_hint(origin, pr_number, current_pr, state, pr_source_ref_value)
 end
 
+local function build_reviewing_comment_request(origin, pr_number, source_ref)
+  return requests_review.build_reviewing_comment_request(core, origin.repo, origin.issue_number, origin, pr_number, source_ref)
+end
+
 local function issue_reviewing_for_origin(origin)
   if origin.issue_number == nil then
     return nil
@@ -372,6 +376,51 @@ local function maybe_redrive_not_mergeable_pr(origin, pr_number, current_pr, sta
   return true
 end
 
+local function visible_pr_base_unmanaged_block_state(state, origin, current_pr)
+  local blocked_version = requests_review.pr_base_unmanaged_blocked_version(origin.impl_version)
+  local pr_open_phase = devloop_state.compare_phase(state, "pr-open", { milestone_domain = "github-devloop-pr" })
+  if devloop_state.compare_phase(state, "blocked", { milestone_domain = "github-devloop-pr" }) == 0
+    and tostring(state.version or "") == blocked_version then
+    return state
+  end
+  if (pr_open_phase == nil or pr_open_phase == 0)
+    and devloop_state.has_state_marker(current_pr.comments, origin.proposal_id, "blocked", blocked_version) then
+    return {
+      state = "blocked",
+      version = blocked_version,
+      stage_rank = devloop_state.stage_rank("blocked"),
+    }
+  end
+  return nil
+end
+
+local function maybe_heal_pr_base_unmanaged_block(origin, pr_number, current_pr, state, branches, source_ref)
+  local blocked_state = visible_pr_base_unmanaged_block_state(state, origin, current_pr)
+  if blocked_state == nil
+    or not origin_base_matches_current_pr(origin, current_pr)
+    or not origin_base_matches_integration(origin, branches) then
+    return false
+  end
+  if tostring(current_pr.state or ""):lower() ~= "open" then
+    devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, blocked_state, "blocked", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
+    return true
+  end
+  local healed_version = devloop_state.next_review_loop_version(origin.impl_version)
+  local healed_origin = {}
+  for key, value in pairs(origin) do
+    healed_origin[key] = value
+  end
+  healed_origin.impl_version = healed_version
+  local comment_request = build_reviewing_comment_request(healed_origin, pr_number, source_ref)
+  devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, blocked_state, "blocked", "reviewing", "applied(pr-base-unmanaged-self-heal)", "current PR base now matches the managed integration branch")
+  devloop_logging.log_apply("observe_pr", origin.proposal_id, "reviewing", healed_version, { add = { "fkst-dev:reviewing" }, remove = { "fkst-dev:blocked" } }, {
+    "github-proxy.github_pr_comment_request",
+  })
+  devloop_logging.log_raise("observe_pr", origin.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  maybe_label_hints(origin, pr_number, current_pr, { state = "reviewing", version = healed_version }, source_ref)
+  return true
+end
+
 local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, source_ref)
   if origin.issue_number == nil then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, { state = nil, version = nil }, "pr-open", "blocked", "skip-not-owned", "backing issue is absent")
@@ -390,6 +439,9 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
       return
     end
     if state.state == "blocked" then
+      if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref) then
+        return
+      end
       devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-idempotent(already at to_state)", "blocked marker visible on PR")
       maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
       return
@@ -496,6 +548,9 @@ local function process_pr_event(event)
     if maybe_redrive_not_mergeable_pr(origin, pr.number, current_pr, state, source_ref, issue_current) then
       return
     end
+    if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref) then
+      return
+    end
     if state.state ~= nil and state.state ~= "pr-open" then
       if pr.source == "poll"
         and raw.source == "liveness-scan"
@@ -538,7 +593,7 @@ local function process_pr_event(event)
       return
     end
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "reviewing", "applied", "writing PR-local reviewing marker")
-    local comment_request = requests_review.build_reviewing_comment_request(core, origin.repo, origin.issue_number, origin, pr.number, source_ref)
+    local comment_request = build_reviewing_comment_request(origin, pr.number, source_ref)
     local raised = {
       "github-proxy.github_pr_comment_request",
     }

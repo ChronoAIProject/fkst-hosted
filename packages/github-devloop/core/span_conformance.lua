@@ -361,9 +361,20 @@ local function worker_rows(transition_sources)
   return rows
 end
 
+local function restart_rows(transition_sources)
+  local rows = {}
+  for _, path in ipairs(sorted_keys(transition_sources)) do
+    local source = transition_sources[path]
+    for start_pos, _quote, state in source:gmatch("()from_state%s*=%s*([\"'])(.-)%2") do
+      table.insert(rows, { state = state, path = path, line = line_number(source, start_pos), start = start_pos })
+    end
+  end
+  return rows
+end
+
 local function span_contracts(transition_sources)
   local contracts = {}
-  for _, row in ipairs(worker_rows(transition_sources)) do
+  for _, row in ipairs(restart_rows(transition_sources)) do
     local source = transition_sources[row.path]
     local contract_start, body_start = source:find("span_contract%s*=%s*span_contract%s*%(%s*%{", row.start)
     if contract_start ~= nil then
@@ -474,7 +485,7 @@ local function spawn_start_messages(transition_sources, department_sources, supp
   local contracts = span_contracts(transition_sources)
   local functions = function_index(support_sources or department_sources)
   local messages = {}
-  for _, row in ipairs(worker_rows(transition_sources)) do
+  for _, row in ipairs(restart_rows(transition_sources)) do
     local contract = contracts[row.state]
     if contract ~= nil and contract.department:sub(1, #"external:") ~= "external:" then
       if not function_binds_marker(functions, contract.spawn_predecessor, contract.durable_start_marker) then
@@ -546,14 +557,11 @@ end
 local function dispatch_live_run_dedup_messages(transition_sources, department_sources)
   local contracts = span_contracts(transition_sources)
   local messages = {}
-  local required_roles = {
-    implement = true,
-    fix = true,
-  }
-  for _, row in ipairs(worker_rows(transition_sources)) do
+  for _, row in ipairs(restart_rows(transition_sources)) do
     local contract = contracts[row.state]
     if contract ~= nil
-      and required_roles[tostring(contract.dispatch_live_run_role or "")] == true
+      and tostring(contract.dispatch_live_run_role or "") ~= ""
+      and tostring(contract.department or ""):sub(1, #"external:") ~= "external:"
       and contract.spawn_function ~= nil then
       local sources = department_spawn_sources(department_sources, contract.department)
       for _, source_path in ipairs(sorted_keys(sources)) do

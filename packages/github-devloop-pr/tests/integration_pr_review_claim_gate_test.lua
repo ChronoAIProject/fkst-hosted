@@ -1,5 +1,6 @@
 local m_claims = require("devloop.claims")
 local h = require("tests.devloop_helpers")
+local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
 local t = h.t
 local core = h.core
@@ -58,6 +59,51 @@ local function unmanaged_comment_raise(result)
   return h.find_raise(result.raises, "github-proxy.github_pr_comment_request", function(payload)
     return tostring(payload.body or ""):find("pr-base-unmanaged", 1, true) ~= nil
   end)
+end
+
+local function mock_observe_pr_env(integration_branch)
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = tostring(integration_branch or ""),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+local function run_observe_pr_with_integration(event, name, integration_branch)
+  mock_observe_pr_env(integration_branch)
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "github-proxy.github_entity_changed",
+    payload = event,
+  }, opts(name))
+end
+
+local function mock_precise_pr_origin(fields)
+  local f = fields or {}
+  entity_read_mocks.mock_pr_view_selector(t, {
+    repo = "owner/repo",
+    number = 7,
+    comments = f.comments,
+    head = f.head or "devloop-owner-repo-42-01HY",
+    head_sha = f.head_sha or "def456",
+    state = f.state or "OPEN",
+    base_branch = f.base_branch or "integration",
+    labels = f.labels or {},
+  }, entity_read_mocks.pr_origin_selector)
 end
 
 return {
@@ -147,9 +193,9 @@ return {
     local impl_version = reviewing().version
     mock_bot_env()
     mock_pr_origin({
-      unmanaged_origin_marker(impl_version, "integration"),
+      unmanaged_origin_marker(impl_version, "feature-unmanaged"),
       pr_open_state_marker(impl_version),
-    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "integration")
+    }, "devloop-owner-repo-42-01HY", "def456", "OPEN", "feature-unmanaged")
     mock_issue_reviewing({ "fkst-dev:pr-open" }, {
       pr_open_state_marker(impl_version),
     }, {
@@ -163,7 +209,7 @@ return {
     t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker("github-devloop/issue/owner/repo/42", "blocked", impl_version .. "/blocked/pr-base-unmanaged"), 1, true) ~= nil)
     t.is_true(comment.payload.body:find('reason="pr-base-unmanaged"', 1, true) ~= nil)
-    t.is_true(comment.payload.body:find('pr_base="integration"', 1, true) ~= nil)
+    t.is_true(comment.payload.body:find('pr_base="feature-unmanaged"', 1, true) ~= nil)
     t.is_true(comment.payload.body:find('integration_branch="dev"', 1, true) ~= nil)
 
     local issue_label = h.find_raise(result.raises, "github-proxy.github_issue_label_request", function(payload)
@@ -180,6 +226,75 @@ return {
     t.eq(label.payload.add_labels[1], "fkst-dev:blocked")
     t.eq(label.payload.target_number, 7)
     t.eq(h.find_raise(result.raises, "devloop_reviewing"), nil)
+  end,
+
+  test_observe_pr_self_heals_spurious_unmanaged_base_block_after_integration_branch_recovers = function()
+    local impl_version = reviewing().version
+    local blocked_version = impl_version .. "/blocked/pr-base-unmanaged"
+    local blocked_marker = core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version)
+
+    mock_precise_pr_origin({
+      comments = {
+        unmanaged_origin_marker(impl_version, "integration"),
+        pr_open_state_marker(impl_version),
+      },
+      base_branch = "integration",
+    })
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      pr_open_state_marker(impl_version),
+    }, {
+      assignees = { "fkst-test-bot" },
+    })
+
+    local first = run_observe_pr_with_integration(pr_event(), "observe-pr-two-pass-wrong-integration", "dev")
+    t.eq(first.exit_code, 0)
+
+    local blocked_comment = unmanaged_comment_raise(first)
+    t.is_true(blocked_comment ~= nil)
+    t.is_true(blocked_comment.payload.body:find(core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version), 1, true) ~= nil)
+    t.is_true(blocked_comment.payload.body:find('pr_base="integration"', 1, true) ~= nil)
+    t.is_true(blocked_comment.payload.body:find('integration_branch="dev"', 1, true) ~= nil)
+    t.eq(h.find_raise(first.raises, "devloop_reviewing"), nil)
+
+    local blocked_handoff = h.run_comment_handoff_from_request(
+      blocked_comment.payload,
+      "IC_two_pass_unmanaged_base_blocked_1",
+      "observe-pr-two-pass-blocked-handoff"
+    )
+    local blocked_label = h.find_raise(blocked_handoff.raises, "github-proxy.github_issue_label_request", function(payload)
+      return tostring(payload.target_kind or "issue") == "pr"
+    end)
+    t.eq(blocked_label.payload.add_labels[1], "fkst-dev:blocked")
+
+    mock_precise_pr_origin({
+      comments = {
+        unmanaged_origin_marker(impl_version, "integration"),
+        pr_open_state_marker(impl_version),
+        blocked_marker,
+      },
+      base_branch = "integration",
+      labels = { "fkst-dev:blocked" },
+    })
+    mock_issue_reviewing({ "fkst-dev:pr-open" }, {
+      pr_open_state_marker(impl_version),
+    }, {
+      assignees = { "fkst-test-bot" },
+    })
+
+    local second = run_observe_pr_with_integration(pr_event(), "observe-pr-two-pass-correct-integration", "integration")
+    t.eq(second.exit_code, 0)
+    t.eq(unmanaged_comment_raise(second), nil)
+
+    local reviewing_comment = h.find_raise(second.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return payload.handoff ~= nil and payload.handoff.kind == "github-devloop.reviewing"
+    end)
+    t.is_true(reviewing_comment ~= nil)
+    t.eq(reviewing_comment.payload.handoff.version, core.next_review_loop_version(impl_version))
+    t.is_true(reviewing_comment.payload.body:find(core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", core.next_review_loop_version(impl_version)), 1, true) ~= nil)
+
+    local reviewing_raise = h.find_causal_raise(second, "devloop_reviewing")
+    t.is_true(reviewing_raise ~= nil)
+    t.eq(reviewing_raise.payload.version, core.next_review_loop_version(impl_version))
   end,
 
   test_observe_pr_leaves_foreign_claimed_unmanaged_base_untouched = function()

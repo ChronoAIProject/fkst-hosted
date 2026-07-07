@@ -107,6 +107,7 @@ return function(M, h)
     span_contract = span_contract({
       department = "review_meta",
       durable_start_marker = "state:v1 review-meta",
+      spawn_predecessor = "load_review_meta_context",
       spawn_function = "review_meta_codex_decision",
     }),
   }
