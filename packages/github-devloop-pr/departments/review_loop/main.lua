@@ -169,17 +169,20 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.dedup_key,
       unresolved.narrowed_question,
       unresolved.angle_digests,
-      unresolved.findings_record
+      unresolved.findings_record,
+      unresolved.essence_stall == true
     )
-    local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record)
-    local budget_round = math.max(round, conv_rounds.review_converge_budget_round(current_pr.comments, unresolved.proposal_id, origin.proposal_id))
-    local hit_round_cap = budget_round >= config.max_converge_rounds()
-    if hit_round_cap or conv_rounds.is_true_stall(facts_with_current, round) then
+    local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record, unresolved.essence_stall == true)
+    local resolvability_exhausted = conv_rounds.resolvability_exhausted(facts_with_current)
+    local essence_stall = conv_rounds.has_essence_stall(facts_with_current)
+    if essence_stall or resolvability_exhausted or conv_rounds.is_true_stall(facts_with_current, round) then
       local comment_request = requests_review.build_review_converge_round_comment_request(core, origin.repo, origin.issue_number, unresolved, origin.proposal_id, round, marker_body, pr_source_ref)
       local review_reconcile = conv_reconcile.build_devloop_review_reconcile_payload(unresolved, round, origin.proposal_id, review_version, reviewed_head_sha)
-      local reason = hit_round_cap
-        and ("PR review convergence budget reached at round " .. tostring(budget_round))
-        or ("true PR review convergence stall at round " .. tostring(round))
+      local reason = essence_stall
+        and ("PR review essence stall at round " .. tostring(round))
+        or resolvability_exhausted
+          and ("PR review resolvability budget reached at round " .. tostring(round))
+          or ("true PR review convergence stall at round " .. tostring(round))
       devloop_logging.log_cas_decision("review_loop", origin.proposal_id, state, "reviewing", "reviewing", devloop_state.cas_outcome(state, transition, review_version), reason)
       devloop_logging.log_apply("review_loop", origin.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_pr_comment_request",

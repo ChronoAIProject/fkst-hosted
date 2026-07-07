@@ -61,11 +61,41 @@ return {
     t.eq(reached.framing, "use the synthesis framing")
     t.eq(reached.verified_moves, 1)
 
-    local converge = synthesis.parse_output("converge: dependency semantics remain disputed + inspect the blockedBy native relation")
+    local converge = synthesis.parse_output(table.concat({
+      "converge: dependency semantics remain disputed + inspect the blockedBy native relation",
+      "settled: dependency gate shape is agreed, by refutation of missing-state claim docs/state.md:12",
+      "settled-by-agreement (unverified): retry ownership stays unchanged",
+      "open: dependency semantics remain disputed",
+      "verified-move: angle=fidelity phase=P1 citation=missing-state claim docs/state.md:12",
+    }, "\n"))
     t.eq(converge.kind, "converge")
     t.eq(converge.disagreement, "dependency semantics remain disputed")
     t.eq(converge.resolving_evidence, "inspect the blockedBy native relation")
     t.eq(converge.narrowed_question, "dependency semantics remain disputed + inspect the blockedBy native relation")
+    t.eq(converge.findings_record, table.concat({
+      "settled-by-agreement (unverified):",
+      "dependency gate shape is agreed, by refutation of missing-state claim docs/state.md:12",
+      "settled-by-agreement (unverified):",
+      "retry ownership stays unchanged",
+      "open:",
+      "dependency semantics remain disputed",
+    }, "\n"))
+  end,
+
+  test_settled_findings_without_verified_move_are_unverified_memory = function()
+    local converge = synthesis.parse_output(table.concat({
+      "converge: dependency semantics remain disputed + inspect the blockedBy native relation",
+      "settled: dependency gate shape is agreed, by refutation of missing-state claim docs/state.md:12",
+      "open: dependency semantics remain disputed",
+    }, "\n"))
+
+    t.eq(converge.kind, "converge")
+    t.eq(converge.findings_record, table.concat({
+      "settled-by-agreement (unverified):",
+      "dependency gate shape is agreed, by refutation of missing-state claim docs/state.md:12",
+      "open:",
+      "dependency semantics remain disputed",
+    }, "\n"))
   end,
 
   test_parse_output_accepts_gate_reject_only_in_gate_mode = function()
@@ -86,6 +116,9 @@ return {
     t.is_nil(synthesis.parse_output("reached:approve"))
     t.is_nil(synthesis.parse_output("converge: disagreement without evidence"))
     t.is_nil(synthesis.parse_output("converge: disagreement + "))
+    t.is_nil(synthesis.parse_output("converge: disagreement + evidence"))
+    t.is_nil(synthesis.parse_output("converge: disagreement + evidence\nsettled: lacks refutation citation"))
+    t.is_nil(synthesis.parse_output("converge: disagreement + evidence\nopen: " .. string.rep("x", 701)))
     t.is_nil(synthesis.parse_output("⟦FKST:PLAN⟧ merge"))
     t.is_nil(synthesis.parse_output("reached:approve ok\nThis narrative must not pass."))
     t.is_nil(synthesis.parse_output("Preamble\nconverge: disagreement + evidence"))

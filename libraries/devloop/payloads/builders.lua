@@ -348,11 +348,9 @@ function C.build_board_proposal(M, issue, tick)
   return board.append_board_digest_to_proposal(M, C.build_proposal(issue), issue.repo, tick)
 end
 
--- Thread the meta-judge's narrowing onto a re-raised next-round proposal so the next
--- angles converge instead of blindly re-judging the same question. The next round sees
--- ONLY the bounded convergence_question + prior-round digests (verdict + short reply),
--- never prior peer full text, preserving angle peer-invisibility. The `/loop/N` dedup
--- shape stays unchanged so the existing round parsing + budget endpoint still work.
+-- Thread the synthesis narrowing plus canonical findings memory onto a re-raised
+-- next-round proposal. Angle digests stay marker telemetry only; they are not
+-- deliberative input to the next consensus proposal.
 local function apply_converge_fields(proposal, n, converge)
   proposal.round = n
   if type(converge) ~= "table" then
@@ -360,9 +358,6 @@ local function apply_converge_fields(proposal, n, converge)
   end
   if converge.narrowed_question ~= nil and converge.narrowed_question ~= "" then
     proposal.convergence_question = converge.narrowed_question
-  end
-  if type(converge.angle_digests) == "table" then
-    proposal.prior_round_digests = converge.angle_digests
   end
   local findings_record = convergence_shared.normalize_findings_record(converge.findings_record)
   if findings_record ~= nil then

@@ -1,7 +1,6 @@
 local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local forks = require("devloop.forks")
-local config = require("devloop.config")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local m_builders = require("devloop.markers.builders")
@@ -598,8 +597,7 @@ return {
     t.eq(result.raises[1].payload.handoff.source_ref.ref, "owner/repo#issue/42")
   end,
 
-  test_loop_round_cap_records_round_and_handoff_reconcile_even_when_question_varies = function()
-    local cap = config.max_converge_rounds()
+  test_loop_second_resolvable_findings_handoff_reconcile_even_when_question_varies = function()
     local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local function varying_digest(round)
       return {
@@ -607,25 +605,25 @@ return {
       }
     end
     local event = unresolved({
-      dedup_key = base_version .. "/loop/" .. tostring(cap),
-      round = cap,
-      narrowed_question = "Question " .. tostring(cap),
-      angle_digests = varying_digest(cap),
+      dedup_key = base_version .. "/loop/1",
+      round = 1,
+      narrowed_question = "Question 1",
+      angle_digests = varying_digest(1),
+      findings_record = "open:\nsecond resolvable finding",
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      conv_rounds.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 2, base_version .. "/loop/" .. tostring(cap - 2), "Question " .. tostring(cap - 2), varying_digest(cap - 2)),
-      conv_rounds.converge_round_marker(event.proposal_id, base_version, sr_digest, cap - 1, base_version .. "/loop/" .. tostring(cap - 1), "Question " .. tostring(cap - 1), varying_digest(cap - 1)),
+      conv_rounds.converge_round_marker(event.proposal_id, base_version, sr_digest, 0, base_version, "Question 0", varying_digest(0), "open:\nfirst resolvable finding"),
     })
 
-    local result = run_loop(event, opts("loop-round-cap"))
+    local result = run_loop(event, opts("loop-second-resolvable-findings"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
-    t.is_true(result.raises[1].payload.body:find('round="' .. tostring(cap) .. '"', 1, true) ~= nil)
+    t.is_true(result.raises[1].payload.body:find('round="1"', 1, true) ~= nil)
     t.eq(find_raise(result.raises, "devloop_reconcile"), nil)
     t.eq(result.raises[1].payload.handoff.kind, "github-devloop.reconcile")
-    t.eq(result.raises[1].payload.handoff.round, cap)
+    t.eq(result.raises[1].payload.handoff.round, 1)
     t.eq(result.raises[1].payload.handoff.base_version, base_version)
   end,
 

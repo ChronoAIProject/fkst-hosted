@@ -176,10 +176,21 @@ local function mock_rebuttal_defend(angle, verdict, reply)
   mock_rebuttal(angle, "defend", verdict, reply)
 end
 
+local function synthesis_stdout(line)
+  local text = tostring(line or "")
+  if text:find("converge:", 1, true) == 1
+    and text:find("\nopen:", 1, true) == nil
+    and text:find("\nsettled:", 1, true) == nil
+    and text:find("\nsettled-by-agreement", 1, true) == nil then
+    text = text .. "\nopen: unresolved synthesis disagreement"
+  end
+  return text .. "\n"
+end
+
 local function mock_synthesis(line, exit_code)
   mock_judgment_dir()
   t.mock_command("consensus-synthesis-proposal", {
-    stdout = tostring(line or "") .. "\n",
+    stdout = synthesis_stdout(line),
     stderr = "",
     exit_code = exit_code or 0,
   })
@@ -188,7 +199,7 @@ end
 local function mock_synthesis_repair(line, exit_code)
   mock_judgment_dir()
   t.mock_command("consensus-synthesis-repair-proposal", {
-    stdout = tostring(line or "") .. "\n",
+    stdout = synthesis_stdout(line),
     stderr = "",
     exit_code = exit_code or 0,
   })
@@ -387,11 +398,18 @@ return {
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle needs one blocker resolved.")
-    mock_angle("fidelity", "approve", "Fidelity angle approves.")
+    mock_angle("fidelity", "approve", "Fidelity angle approves. unbounded-loop claim docs/retry.md:12")
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs one blocker resolved.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
-    mock_synthesis("converge: parsimony concern remains unresolved + inspect the retry-boundary evidence")
+    mock_synthesis(table.concat({
+      "converge: parsimony concern remains unresolved + inspect the retry-boundary evidence",
+      "settled: retry scope is bounded, by refutation of unbounded-loop claim docs/retry.md:12",
+      "settled: adapter seam has agreement only, by refutation of uncited adapter claim docs/adapter.md:9",
+      "settled-by-agreement (unverified): adapter seam stays unchanged",
+      "open: parsimony concern remains unresolved",
+      "verified-move: angle=fidelity phase=P1 citation=unbounded-loop claim docs/retry.md:12",
+    }, "\n"))
 
     local result = run_decide(proposal({ dedup_key = "proposal-42-v1/split" }), opts("split"))
     t.eq(result.exit_code, 0)
@@ -402,6 +420,16 @@ return {
     t.eq(result.raises[1].payload.dedup_key, "consensus:proposal-42-v1/split")
     t.eq(result.raises[1].payload.round, 0)
     t.eq(result.raises[1].payload.narrowed_question, "parsimony concern remains unresolved + inspect the retry-boundary evidence")
+    t.eq(result.raises[1].payload.findings_record, table.concat({
+      "settled:",
+      "retry scope is bounded, by refutation of unbounded-loop claim docs/retry.md:12",
+      "settled-by-agreement (unverified):",
+      "adapter seam has agreement only, by refutation of uncited adapter claim docs/adapter.md:9",
+      "settled-by-agreement (unverified):",
+      "adapter seam stays unchanged",
+      "open:",
+      "parsimony concern remains unresolved",
+    }, "\n"))
     t.eq(result.raises[1].payload.source_ref.kind, "proposal")
     t.eq(result.raises[1].payload.source_ref.ref, "demo/consensus/42")
     t.eq(#result.raises[1].payload.angle_digests, 3)

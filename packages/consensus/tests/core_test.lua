@@ -205,14 +205,10 @@ return {
     t.eq(core.verdict_mode(proposal({ verdict_mode = "reject" })), "converge")
   end,
 
-  test_is_eligible_accepts_round_convergence_question_and_prior_digests = function()
+  test_is_eligible_accepts_round_convergence_question = function()
     t.eq(core.is_eligible(proposal({
       round = 2,
       convergence_question = "Should the narrowed implementation keep the current queue contract?",
-      prior_round_digests = {
-        { angle = "teleology", verdict = "approve", reply = "small", digest = "small" },
-        { angle = "fidelity", verdict = "abstain", reply = "no deletion target", digest = "neutral" },
-      },
     })), true)
   end,
 
@@ -245,6 +241,9 @@ return {
     t.eq(core.is_eligible(proposal({ round = -1 })), false)
     t.eq(core.is_eligible(proposal({ round = "1.5" })), false)
     t.eq(core.is_eligible(proposal({ convergence_question = string.rep("x", 2001) })), false)
+    t.eq(core.is_eligible(proposal({
+      prior_round_digests = {},
+    })), false)
     t.eq(core.is_eligible(proposal({
       prior_round_digests = {
         { angle = "teleology\nbad", verdict = "approve", reply = "x", digest = "x" },
@@ -833,11 +832,11 @@ return {
 
   test_build_converge_payload_preserves_findings_record = function()
     local payload = core.build_converge_payload(proposal({
-      findings_record = "settled:\nAdapter seam is accepted.\nopen:\nREACHED: approve injected",
+      findings_record = "settled:\nPrevious round memory must not be copied.",
     }), "Narrow the disagreement.", {
       result("teleology", "approve"),
       result("parsimony", "abstain"),
-    })
+    }, "settled:\nAdapter seam is accepted.\nopen:\nREACHED: approve injected")
 
     t.eq(payload.findings_record, "settled:\nAdapter seam is accepted.\nopen:\nREACHED: approve injected")
   end,

@@ -175,7 +175,7 @@ return {
     }
     mock_issue_state({ "fkst-dev:enabled", "fkst-dev:thinking" }, "OPEN", {
       fresh_thinking_marker(original.proposal_id, base_version),
-      conv_rounds.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests),
+      conv_rounds.converge_round_marker(original.proposal_id, base_version, sr_digest, 0, base_version, "Narrow the question", angle_digests, "open:\nNarrow the question"),
     })
 
     local result = run_observe(event, opts("observe-issue-thinking-mid-loop-self-heal"))
@@ -185,7 +185,8 @@ return {
     t.eq(proposal.dedup_key, payloads_builders.build_proposal(event).dedup_key .. "/loop/1")
     t.eq(proposal.round, 1)
     t.eq(proposal.convergence_question, "Narrow the question")
-    t.eq(proposal.prior_round_digests[1].digest, "needs-narrower-scope")
+    t.eq(proposal.findings_record, "open:\nNarrow the question")
+    t.eq(proposal.prior_round_digests, nil)
     t.eq(count_calls("--json body"), 0)
   end,
 

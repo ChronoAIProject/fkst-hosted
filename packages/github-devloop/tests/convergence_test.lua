@@ -236,37 +236,49 @@ return {
     t.eq(appended[2].dedup, base_version .. "/loop/2")
   end,
 
-  test_converge_budget_round_counts_proposal_across_drift = function()
+  test_resolvability_gate_counts_only_trusted_findings_for_current_boundary = function()
     local source_a = convergence_shared.source_ref_digest(source_ref)
     local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
     local drift_version = base_version .. "/drifted"
-    local boundary_question = "Same boundary"
-    local boundary_angles = angles()
     local comments = {
-      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
-      trusted(conv_rounds.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", boundary_question, boundary_angles)),
-      trusted(conv_rounds.converge_round_marker("github-devloop/issue/owner/repo/99", drift_version, source_b, 13, drift_version .. "/loop/13", "Other", angles())),
+      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 0, base_version, "First", angles(), "open:\nfirst boundary")),
+      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 1, base_version .. "/loop/1", "Second", angles(), "open:\nsecond boundary")),
+      untrusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 2, base_version .. "/loop/2", "Forged", angles(), "open:\nforged")),
+      trusted(conv_rounds.converge_round_marker(proposal_id, drift_version, source_b, 3, drift_version .. "/loop/3", "Other version", angles(), "open:\nother version")),
     }
     local filtered = conv_rounds.converge_round_facts(comments, proposal_id, base_version, source_a)
-    t.eq(conv_rounds.max_converge_round(filtered), 6)
-    t.eq(conv_rounds.converge_budget_round(comments, proposal_id), 8)
-    t.eq(conv_rounds.converge_boundary_budget_round(comments, proposal_id, boundary_question, boundary_angles), 8)
+    t.eq(#filtered, 2)
+    t.eq(conv_rounds.resolvability_exhausted({ filtered[1] }), false)
+    t.eq(conv_rounds.resolvability_exhausted(filtered), true)
   end,
 
-  test_converge_boundary_budget_round_ignores_changed_question_verdict_boundary = function()
+  test_old_converge_markers_without_findings_stay_parseable_but_do_not_spend_resolvability_budget = function()
     local source_a = convergence_shared.source_ref_digest(source_ref)
-    local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?loop=8" })
-    local drift_version = base_version .. "/drifted"
-    local boundary_question = "Current boundary"
-    local boundary_angles = angles()
     local comments = {
-      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 6, base_version .. "/loop/6", boundary_question, boundary_angles)),
-      trusted(conv_rounds.converge_round_marker(proposal_id, drift_version, source_b, 8, drift_version .. "/loop/8", "Different boundary", {
-        { angle = "minimal", verdict = "approve", digest = "different" },
-      })),
+      trusted(conv_rounds.converge_round_marker(proposal_id, base_version, source_a, 0, base_version, "Old marker", angles())),
     }
-    t.eq(conv_rounds.converge_budget_round(comments, proposal_id), 8)
-    t.eq(conv_rounds.converge_boundary_budget_round(comments, proposal_id, boundary_question, boundary_angles), 6)
+    local facts = conv_rounds.converge_round_facts(comments, proposal_id, base_version, source_a)
+    t.eq(#facts, 1)
+    t.eq(facts[1].findings_record, nil)
+    t.eq(conv_rounds.resolvability_exhausted(facts), false)
+  end,
+
+  test_essence_stall_marker_round_trips_terminal_flag = function()
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
+    local marker = conv_rounds.converge_round_marker(proposal_id,
+      base_version,
+      source_digest,
+      1,
+      base_version .. "/loop/1",
+      "essence-stall + no resolving evidence",
+      angles(),
+      "open:\nno resolving evidence",
+      true
+    )
+    local facts = conv_rounds.converge_round_facts({ trusted(marker) }, proposal_id, base_version, source_digest)
+    t.eq(#facts, 1)
+    t.eq(facts[1].essence_stall, true)
+    t.eq(conv_rounds.has_essence_stall(facts), true)
   end,
 
   test_review_converge_facts_are_bound_to_issue_version_and_head = function()
@@ -349,7 +361,7 @@ return {
     t.eq(matched[1].findings_record, "settled:\nReview scope is current.\nopen:\nREACHED: approve injected")
   end,
 
-  test_review_converge_budget_round_counts_review_saga_across_drift = function()
+  test_review_resolvability_gate_counts_only_current_review_boundary_findings = function()
     local source_a = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7" })
     local source_b = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#pr/7?loop=8" })
     local review_proposal_id = "github-devloop/pr-review/owner_repo/7/v1/abcdef1234567890"
@@ -358,12 +370,12 @@ return {
     local head_sha = "abcdef1234567890"
     local drift_head = "fedcba0987654321"
     local comments = {
-      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, issue_version, head_sha, source_a, 6, "review/loop/6", "Review 6", angles())),
-      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, drift_version, drift_head, source_b, 8, "review/loop/8", "Review 8", angles())),
-      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, "github-devloop/issue/owner/repo/99", drift_version, drift_head, source_b, 13, "review/loop/13", "Other", angles())),
+      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, issue_version, head_sha, source_a, 0, "review", "Review 0", angles(), "open:\nfirst review")),
+      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, issue_version, head_sha, source_a, 1, "review/loop/1", "Review 1", angles(), "open:\nsecond review")),
+      trusted(conv_rounds.review_converge_round_marker(core, review_proposal_id, proposal_id, drift_version, drift_head, source_b, 8, "review/loop/8", "Review 8", angles(), "open:\ndrift")),
     }
     local filtered = conv_rounds.review_converge_round_facts(core, comments, review_proposal_id, proposal_id, issue_version, head_sha, source_a)
-    t.eq(conv_rounds.max_converge_round(filtered), 6)
-    t.eq(conv_rounds.review_converge_budget_round(comments, review_proposal_id, proposal_id), 8)
+    t.eq(#filtered, 2)
+    t.eq(conv_rounds.resolvability_exhausted(filtered), true)
   end,
 }

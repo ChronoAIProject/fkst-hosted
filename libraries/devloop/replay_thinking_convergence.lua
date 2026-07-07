@@ -17,16 +17,15 @@ local function visible_true_stall(M, issue, state, facts)
     local sr_digest = convergence_shared.source_ref_digest(source_ref)
     local converge_facts = conv_rounds.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
     local round = conv_rounds.max_converge_round(converge_facts)
-    if not conv_rounds.is_true_stall(converge_facts, round) then
+    if not conv_rounds.is_true_stall(converge_facts, round)
+      and not conv_rounds.resolvability_exhausted(converge_facts)
+      and not conv_rounds.has_essence_stall(converge_facts) then
       return nil
     end
-    return {
+    return conv_reconcile.build_devloop_reconcile_payload({
       proposal_id = proposal_id,
-      base_version = base_version,
-      round = round,
-      dedup_key = "reconcile:" .. tostring(base_version) .. "/loop/" .. tostring(round),
       source_ref = base_ids.normalize_source_ref(source_ref),
-    }
+    }, round, base_version)
 end
 
 function C.replay_thinking_true_stall_blocked(M, dept, issue, state, facts, log_skip, raise_effects)

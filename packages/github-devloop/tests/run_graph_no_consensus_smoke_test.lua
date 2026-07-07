@@ -1,10 +1,12 @@
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local config = require("devloop.config")
+local convergence_shared = require("devloop.convergence.shared")
+local conv_rounds = require("devloop.convergence.rounds")
 
 local t = h.t
 local core = h.core
+local base_version = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
 
 local function source_ref()
   return {
@@ -17,7 +19,22 @@ local function state_marker()
   return core.state_marker(
     "github-devloop/issue/owner/repo/42",
     "thinking",
-    "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    base_version
+  )
+end
+
+local function first_resolvable_marker()
+  return conv_rounds.converge_round_marker(
+    "github-devloop/issue/owner/repo/42",
+    base_version,
+    convergence_shared.source_ref_digest(source_ref()),
+    0,
+    base_version,
+    "First resolvable question",
+    {
+      { angle = "minimal", verdict = "abstain", digest = "first-blocked" },
+    },
+    "open:\nfirst resolvable finding"
   )
 end
 
@@ -81,7 +98,7 @@ local function mock_issue_reads()
   entity_read_mocks.mock_issue_read_with_defaults(
     t,
     { "fkst-dev:thinking" },
-    { state_marker() },
+    { state_marker(), first_resolvable_marker() },
     {
       repo = "owner/repo",
       number = 42,
@@ -97,7 +114,7 @@ local function mock_issue_reads()
     updated_at = "2026-06-03T01:02:03Z",
     state = "OPEN",
     labels = { "fkst-dev:thinking" },
-    comments = { state_marker() },
+    comments = { state_marker(), first_resolvable_marker() },
   }, "title,updatedAt,labels,comments,state")
   t.mock_command("gh issue view 42 --repo owner/repo --json 'title,updatedAt,labels,comments,state'", {
     stdout = entity_read_mocks.issue_view_stdout({
@@ -107,32 +124,32 @@ local function mock_issue_reads()
       updated_at = "2026-06-03T01:02:03Z",
       state = "OPEN",
       labels = { "fkst-dev:thinking" },
-      comments = { state_marker() },
+      comments = { state_marker(), first_resolvable_marker() },
     }),
     stderr = "",
     exit_code = 0,
   })
 end
 
-local function unresolved_at_cap()
-  local cap = config.max_converge_rounds()
+local function second_resolvable_unresolved()
   return {
     schema = "consensus.consensus_converge.v1",
     proposal_id = "github-devloop/issue/owner/repo/42",
-    dedup_key = "consensus:github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z/loop/" .. tostring(cap),
+    dedup_key = base_version .. "/loop/1",
     source_ref = source_ref(),
-    round = cap,
-    narrowed_question = "Question " .. tostring(cap),
+    round = 1,
+    narrowed_question = "Second resolvable question",
     angle_digests = {
       { angle = "minimal", verdict = "abstain", digest = "still-blocked" },
     },
+    findings_record = "open:\nsecond resolvable finding",
   }
 end
 
 local function initial_event()
   return {
     queue = "consensus.consensus_converge",
-    payload = unresolved_at_cap(),
+    payload = second_resolvable_unresolved(),
     source_ref = {
       kind = "external",
       reference = "owner/repo#issue/42",

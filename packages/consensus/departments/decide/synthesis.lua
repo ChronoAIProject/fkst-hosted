@@ -3,6 +3,8 @@ local provenance = require("departments.decide.provenance")
 local strings = require("contract.strings")
 
 local max_field_len = 1000
+local max_findings_record_len = 1500
+local max_findings_entry_len = 700
 local max_narrowed_question_len = 2000
 local max_verified_moves = 64
 local max_mover_len = 240
@@ -46,6 +48,88 @@ local function line_with_prefix(line, prefix)
   return nil
 end
 
+local function findings_line(value)
+  local text = trim(value)
+  if text == "" or #text > max_findings_entry_len then
+    return nil
+  end
+  if text:find("%c") ~= nil then
+    return nil
+  end
+  return text
+end
+
+local function parse_findings_value(value)
+  local prefix, rest = trim(value):match("^([^:]+):%s*(.+)$")
+  prefix = prefix and trim(prefix):lower() or nil
+  rest = findings_line(rest)
+  if rest == nil then
+    return nil
+  end
+  if prefix == "settled" then
+    local citation = trim(rest:match("%f[%a]by%s+refutation%s+of%f[%A]%s*(.+)$") or "")
+    if citation == "" then
+      return nil
+    end
+    return {
+      kind = "settled",
+      text = rest,
+      citation = citation,
+    }
+  end
+  if prefix == "settled-by-agreement (unverified)" then
+    return {
+      kind = "settled-by-agreement",
+      text = rest,
+    }
+  end
+  if prefix == "open" then
+    return {
+      kind = "open",
+      text = rest,
+    }
+  end
+  return nil
+end
+
+local function render_finding(entry, verified_citations)
+  if type(entry) ~= "table" then
+    return nil
+  end
+  if entry.kind == "settled" then
+    if type(verified_citations) == "table" and verified_citations[entry.citation] then
+      return "settled:\n" .. entry.text
+    end
+    return "settled-by-agreement (unverified):\n" .. entry.text
+  end
+  if entry.kind == "settled-by-agreement" then
+    return "settled-by-agreement (unverified):\n" .. entry.text
+  end
+  if entry.kind == "open" then
+    return "open:\n" .. entry.text
+  end
+  return nil
+end
+
+local function combine_findings_records(records, verified_citations)
+  if #records == 0 then
+    return nil
+  end
+  local rendered = {}
+  for _, entry in ipairs(records) do
+    local line = render_finding(entry, verified_citations)
+    if line == nil then
+      return nil
+    end
+    table.insert(rendered, line)
+  end
+  local text = table.concat(rendered, "\n")
+  if #text > max_findings_record_len then
+    return nil
+  end
+  return text
+end
+
 local function parse_reached(value, verdict_mode)
   local first, framing = trim(value):match("^(%S+)%s+(.+)$")
   local decision = first and first:lower() or nil
@@ -76,6 +160,14 @@ local function parse_converge(value)
     resolving_evidence = evidence,
     narrowed_question = disagreement .. " + " .. evidence,
   }
+end
+
+local function parse_essence_stall(value)
+  local reason = bounded_text(value, max_field_len)
+  if reason == nil then
+    return nil
+  end
+  return M.essence_stall(reason)
 end
 
 local function parse_verified_move(line)
@@ -112,15 +204,24 @@ function M.parse_output(stdout, verdict_mode)
   local outcome_count = 0
   local verified_moves = {}
   local seen_verified_move = {}
+  local findings = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
     local reached = line_with_prefix(line, "reached:")
     local converge = line_with_prefix(line, "converge:")
+    local essence_stall = line_with_prefix(line, "essence-stall:")
+    local unresolvable = line_with_prefix(line, "unresolvable:")
     if reached ~= nil then
       outcome_count = outcome_count + 1
       parsed = parse_reached(reached, verdict_mode)
     elseif converge ~= nil then
       outcome_count = outcome_count + 1
       parsed = parse_converge(converge)
+    elseif essence_stall ~= nil then
+      outcome_count = outcome_count + 1
+      parsed = parse_essence_stall(essence_stall)
+    elseif unresolvable ~= nil then
+      outcome_count = outcome_count + 1
+      parsed = parse_essence_stall(unresolvable)
     else
       local move = parse_verified_move(line)
       if move ~= nil then
@@ -136,7 +237,16 @@ function M.parse_output(stdout, verdict_mode)
       elseif line:match("^%s*verified%-move:") ~= nil then
         return nil
       else
-        return nil
+        local finding = parse_findings_value(line)
+        if finding ~= nil then
+          table.insert(findings, finding)
+        elseif line:match("^%s*settled%s*:") ~= nil
+          or line:match("^%s*settled%-by%-agreement%s*%([Uu][Nn][Vv][Ee][Rr][Ii][Ff][Ii][Ee][Dd]%)%s*:") ~= nil
+          or line:match("^%s*open%s*:") ~= nil then
+          return nil
+        else
+          return nil
+        end
       end
     end
   end
@@ -144,9 +254,30 @@ function M.parse_output(stdout, verdict_mode)
   if outcome_count ~= 1 or parsed == nil then
     return nil
   end
+  local findings_record = combine_findings_records(findings)
+  if parsed.kind == "converge" and parsed.essence_stall ~= true and findings_record == nil then
+    return nil
+  end
+  if findings_record ~= nil then
+    parsed.findings_record = findings_record
+  end
+  parsed.findings_entries = findings
   parsed.verified_moves = #verified_moves
   parsed.verified_move_records = verified_moves
   return parsed
+end
+
+function M.essence_stall(disagreement)
+  local text = findings_line(disagreement) or "synthesis produced no resolvable continuation"
+  return {
+    kind = "converge",
+    disagreement = "essence-stall",
+    resolving_evidence = "No concrete resolving evidence was named for: " .. text,
+    narrowed_question = "essence-stall + No concrete resolving evidence was named for: " .. text,
+    findings_record = "open:\n" .. text,
+    essence_stall = true,
+    verified_moves = 0,
+  }
 end
 
 local function result_text_contains(results, angle, citation)
@@ -163,26 +294,38 @@ local function result_text_contains(results, angle, citation)
   return false
 end
 
-function M.count_verified_moves(records, p1_results, p2_results)
+local function verified_move_citations(records, p1_results, p2_results)
   local count = 0
   local seen = {}
+  local citations = {}
   for _, record in ipairs(records or {}) do
     local key = record.angle .. "\n" .. record.phase .. "\n" .. record.citation
     if not seen[key] then
       seen[key] = true
       if record.phase == "P1" and result_text_contains(p1_results, record.angle, record.citation) then
         count = count + 1
+        citations[record.citation] = true
       elseif record.phase == "P2" and result_text_contains(p2_results, record.angle, record.citation) then
         count = count + 1
+        citations[record.citation] = true
       end
     end
   end
+  return citations, count
+end
+
+function M.count_verified_moves(records, p1_results, p2_results)
+  local _, count = verified_move_citations(records, p1_results, p2_results)
   return count
 end
 
 local function stamp_verified_count(parsed, p1_results, p2_results)
   if parsed ~= nil then
-    parsed.verified_moves = M.count_verified_moves(parsed.verified_move_records, p1_results, p2_results)
+    local citations, count = verified_move_citations(parsed.verified_move_records, p1_results, p2_results)
+    parsed.verified_moves = count
+    if parsed.findings_entries ~= nil then
+      parsed.findings_record = combine_findings_records(parsed.findings_entries, citations)
+    end
   end
   return parsed
 end
@@ -210,6 +353,7 @@ function M.parse_or_retry(ctx)
     disagreement = "synthesis-parse-failed",
     resolving_evidence = "Provide one valid synthesis outcome using reached:<decision> <framing> or converge:<named disagreement> + <concrete resolving evidence>.",
     narrowed_question = "synthesis-parse-failed + Provide one valid synthesis outcome using reached:<decision> <framing> or converge:<named disagreement> + <concrete resolving evidence>.",
+    findings_record = "open:\nsynthesis-parse-failed",
     verified_moves = 0,
   }
 end
@@ -221,6 +365,7 @@ function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
         queue = "consensus_converge",
         angle_results = p2_results,
         narrowed_question = "synthesis-parse-failed + Re-run synthesis after every Phase R result succeeds.",
+        findings_record = "open:\nsynthesis-parse-failed",
       }
     end
     return {
@@ -239,6 +384,8 @@ function M.to_decision_result(proposal, p1_results, p2_results, parsed, caps)
     queue = "consensus_converge",
     angle_results = p2_results,
     narrowed_question = parsed.narrowed_question,
+    findings_record = parsed.findings_record,
+    essence_stall = parsed.essence_stall == true,
   }
 end
 
