@@ -655,4 +655,39 @@ return {
       t.eq(reconcile.payload.round, 3)
     end)
   end,
-}
+
+  test_review_meta_dispatch_with_live_run_without_completion_markers_skips_redelivery = function()
+    local event = h.review_meta_event()
+    local run_opts = opts("review-meta-dispatch-live-run-no-marker")
+    seed_role_codex_run(run_opts, "review-meta", event.proposal_id, event.version)
+    h.mock_issue_review_meta({ "fkst-dev:review-meta" }, {
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+    })
+    h.mock_meta_codex("block", "duplicate review-meta should not spawn")
+
+    local result = h.run_review_meta(event, run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+  end,
+
+  test_review_meta_dispatch_with_expired_codex_run_starts_one_replacement = function()
+    local event = h.review_meta_event()
+    local run_opts = opts("review-meta-dispatch-expired-run-starts")
+    seed_role_codex_run(run_opts, "review-meta", event.proposal_id, event.version, {
+      lease_expires_at_ms = (now() - 60) * 1000,
+      timeout_seconds = 1,
+    })
+    h.mock_issue_review_meta({ "fkst-dev:review-meta" }, {
+      core.state_marker(event.proposal_id, "review-meta", event.version),
+    })
+    h.mock_meta_codex("block", "replacement review-meta ran")
+
+    local result = h.run_review_meta(event, run_opts)
+    t.eq(result.exit_code, 0)
+    t.eq(count_calls("codex exec"), 1)
+    local comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(comment ~= nil)
+    t.is_true(tostring(comment.payload.body or ""):find('state="blocked"', 1, true) ~= nil)
+  end,
+  }

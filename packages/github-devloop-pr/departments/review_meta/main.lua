@@ -8,9 +8,19 @@ local m_facts = require("devloop.markers.facts")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local v_review_meta = require("devloop.validators.review_meta")
 local workflow_codex = require("workflow.codex")
+local dispatch_live_run = require("devloop.dispatch_live_run")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
+
+local dispatch_liveness = {
+  restart_transition_table = function(...)
+    return core.restart_transition_table(...)
+  end,
+  restart_row_receiver_liveness = function(...)
+    return core.restart_row_receiver_liveness(...)
+  end,
+}
 
 -- Preserve existing body line coordinates for the coverage ratchet.
 
@@ -23,6 +33,113 @@ local spec = {
   stall_window = "2m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+local function load_review_meta_context(repo, issue_number, review_meta, event, current_pr, current_issue, state)
+  local durable_start_marker = "state:v1 review-meta"
+  if not devloop_state.has_state_marker(current_pr.comments, review_meta.proposal_id, "review-meta", review_meta.version) then
+    error("github-devloop: review-meta-marker-missing: " .. durable_start_marker .. " marker not visible during context load")
+  end
+  local content_fetch = context_bundle.context_fetch_from_bundle(core, {
+    dept = "review_meta",
+    repo = repo,
+    issue_number = issue_number,
+    pr_number = review_meta.pr_number,
+    proposal_id = review_meta.proposal_id,
+    version = review_meta.dedup_key,
+    tick = event.ts,
+  })
+  return {
+    repo = repo,
+    issue_number = issue_number,
+    review_meta = review_meta,
+    current_pr = current_pr,
+    current_issue = current_issue,
+    state = state,
+    content_fetch = content_fetch,
+    event_queue = event.queue,
+  }
+end
+
+local function review_meta_codex_decision(plan)
+  devloop_logging.log_cas_decision("review_meta", plan.review_meta.proposal_id, plan.state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
+  devloop_logging.log_codex_start("review_meta", plan.review_meta.proposal_id, "review-meta")
+  local codex_opts = workflow_codex.judgment_codex_opts(
+    core.build_review_meta_prompt(plan.review_meta, plan.current_issue, plan.content_fetch),
+    devloop_base.judgment_worktree_with_exec(exec_sync, "review-meta", plan.review_meta.dedup_key)
+  )
+  codex_opts.role = "review-meta"
+  codex_opts.proposal_id = plan.review_meta.proposal_id
+  codex_opts.dedup_key = plan.review_meta.version
+  local result = spawn_codex_sync(codex_opts)
+  if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
+    local stderr = type(result) == "table" and result.stderr or "nil result"
+    devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, nil, stderr, {
+      queue = plan.event_queue,
+      source_ref = plan.review_meta.source_ref,
+      terminal = false,
+    })
+    error("github-devloop: review-meta-codex-failed: review-meta codex failed: " .. tostring(stderr))
+  end
+  local parsed = core.parse_review_meta_action(result.stdout)
+  if parsed == nil then
+    devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, nil, "parse-failed", {
+      queue = plan.event_queue,
+      source_ref = plan.review_meta.source_ref,
+      terminal = false,
+    })
+    parsed = {
+      action = "block",
+      reason = "Review-meta codex output was unparseable.",
+    }
+  end
+  local is_reflection = plan.review_meta.mode == "fix-reflection"
+  local allowed_action = false
+  if is_reflection then
+    allowed_action = parsed.action == "continue" or parsed.action == "spec-gap"
+  else
+    allowed_action = parsed.action == "fix" or parsed.action == "block" or parsed.action == "spec-amendment"
+  end
+  if not allowed_action then
+    devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, nil, "invalid-action-for-mode")
+    parsed = {
+      action = is_reflection and "spec-gap" or "block",
+      reason = "Review-meta codex output used an action outside this decision mode.",
+    }
+  end
+  if parsed.action == "fix"
+    and not strings.is_bounded_string(parsed.blocking_gap, devloop_base._max_blocking_gap_len) then
+    devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
+    parsed = {
+      action = "block",
+      reason = "Review-meta fix output omitted a bounded blocking gap.",
+    }
+  end
+  devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
+  return parsed
+end
+
+local function apply_review_meta_decision(plan, parsed)
+  local review_meta = plan.review_meta
+  local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
+  local exit_version = devloop_state.next_review_meta_action_version(review_meta.version)
+  local comment_request = core.build_review_meta_comment_request(plan.repo, plan.issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
+  local label_request = nil
+  if plan.issue_number ~= nil then
+    label_request = core.build_review_meta_label_request(plan.repo, plan.issue_number, review_meta, parsed.action, exit_version)
+  end
+  local add_labels, remove_labels = devloop_state.state_label_changes(to_state)
+  local raised = {
+    "github-proxy.github_pr_comment_request",
+  }
+  if label_request ~= nil then
+    table.insert(raised, "github-proxy.github_issue_label_request")
+  end
+  devloop_logging.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
+  devloop_logging.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
+  if label_request ~= nil then
+    devloop_logging.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
+  end
+end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local review_meta = event.payload or {}
@@ -94,89 +211,26 @@ return saga.department(spec, { done = function() return false end, act = functio
       return
     end
 
-    devloop_logging.log_cas_decision("review_meta", review_meta.proposal_id, state, "review-meta", "fixing|blocked", "applied", "running review-meta codex decision")
-    local codex_started_at = now()
-    devloop_logging.log_codex_start("review_meta", review_meta.proposal_id, "review-meta")
-    local content_fetch = context_bundle.context_fetch_from_bundle(core, {
-      dept = "review_meta",
-      repo = repo,
-      issue_number = issue_number,
-      pr_number = review_meta.pr_number,
+    local plan = load_review_meta_context(repo, issue_number, review_meta, event, current_pr, current_issue, state)
+    if dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "review-meta", review_meta.proposal_id, review_meta.version, {
+      state = state,
+      current_pr = current_pr,
       proposal_id = review_meta.proposal_id,
-      version = review_meta.dedup_key,
-      tick = event.ts,
-    })
-    local codex_opts = workflow_codex.judgment_codex_opts(
-      core.build_review_meta_prompt(review_meta, current_issue, content_fetch),
-      devloop_base.judgment_worktree_with_exec(exec_sync, "review-meta", review_meta.dedup_key)
-    )
-    codex_opts.role = "review-meta"
-    codex_opts.proposal_id = review_meta.proposal_id
-    codex_opts.dedup_key = review_meta.version
-    local result = spawn_codex_sync(codex_opts)
-    if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
-      local stderr = type(result) == "table" and result.stderr or "nil result"
-      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, stderr, {
-        queue = event.queue,
-        source_ref = review_meta.source_ref,
-        terminal = false,
-      })
-      error("github-devloop: review-meta-codex-failed: review-meta codex failed: " .. tostring(stderr))
+      now_seconds = now(),
+    }) then
+      devloop_logging.log_cas_decision(
+        "review_meta",
+        review_meta.proposal_id,
+        { state = "review-meta", version = review_meta.version, stage_rank = devloop_state.stage_rank("review-meta") },
+        "review-meta",
+        "fixing|blocked",
+        "skip-idempotent(live-exec-ref)",
+        "matching review-meta codex run is still live"
+      )
+      return
     end
-    local parsed = core.parse_review_meta_action(result.stdout)
-    if parsed == nil then
-      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "parse-failed", {
-        queue = event.queue,
-        source_ref = review_meta.source_ref,
-        terminal = false,
-      })
-      parsed = {
-        action = "block",
-        reason = "Review-meta codex output was unparseable.",
-      }
-    end
-    local is_reflection = review_meta.mode == "fix-reflection"
-    local allowed_action = false
-    if is_reflection then
-      allowed_action = parsed.action == "continue" or parsed.action == "spec-gap"
-    else
-      allowed_action = parsed.action == "fix" or parsed.action == "block" or parsed.action == "spec-amendment"
-    end
-    if not allowed_action then
-      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "invalid-action-for-mode")
-      parsed = {
-        action = is_reflection and "spec-gap" or "block",
-        reason = "Review-meta codex output used an action outside this decision mode.",
-      }
-    end
-    if parsed.action == "fix"
-      and not strings.is_bounded_string(parsed.blocking_gap, devloop_base._max_blocking_gap_len) then
-      devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, nil, "missing-blocking-gap")
-      parsed = {
-        action = "block",
-        reason = "Review-meta fix output omitted a bounded blocking gap.",
-      }
-    end
-    devloop_logging.log_codex_result("review_meta", review_meta.proposal_id, "review-meta", result, "action=" .. tostring(parsed.action) .. " reason=" .. tostring(parsed.reason), nil)
 
-    local to_state = (parsed.action == "fix" or parsed.action == "continue") and "fixing" or "blocked"
-    local exit_version = devloop_state.next_review_meta_action_version(review_meta.version)
-    local comment_request = core.build_review_meta_comment_request(repo, issue_number, review_meta, parsed.action, parsed.reason, exit_version, parsed.blocking_gap)
-    local label_request = nil
-    if issue_number ~= nil then
-      label_request = core.build_review_meta_label_request(repo, issue_number, review_meta, parsed.action, exit_version)
-    end
-    local add_labels, remove_labels = devloop_state.state_label_changes(to_state)
-    local raised = {
-      "github-proxy.github_pr_comment_request",
-    }
-    if label_request ~= nil then
-      table.insert(raised, "github-proxy.github_issue_label_request")
-    end
-    devloop_logging.log_apply("review_meta", review_meta.proposal_id, to_state, exit_version, { add = add_labels, remove = remove_labels }, raised)
-    devloop_logging.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_pr_comment_request", comment_request)
-    if label_request ~= nil then
-      devloop_logging.log_raise("review_meta", review_meta.proposal_id, "github-proxy.github_issue_label_request", label_request)
-    end
+    local parsed = review_meta_codex_decision(plan)
+    apply_review_meta_decision(plan, parsed)
   end)
 end, wrap = devloop_logging.wrap_pipeline_failure, name = "review_meta" })
