@@ -6,6 +6,7 @@ local strings = require("contract.strings")
 
 
 local default_angles = { "teleology", "parsimony", "fidelity" }
+local debate_phases = { "blind", "rebuttal", "synthesis" }
 local max_angles = 4
 local max_key_len = 200
 local max_title_len = 240
@@ -311,6 +312,10 @@ end
 
 function M.angles(proposal)
   return normalized_angles(proposal)
+end
+
+function M.debate_phase_names()
+  return { debate_phases[1], debate_phases[2], debate_phases[3] }
 end
 
 function M.render_template(template, vars)
