@@ -328,7 +328,10 @@ return {
     local gate_prompt = core.build_angle_prompt(proposal({ verdict_mode = "gate" }), "teleology")
 
     t.is_true(converge_prompt:find("approve or abstain", 1, true) ~= nil)
-    t.is_true(converge_prompt:find("If this angle is not ready to approve, abstain and state the concrete concern in the reply.", 1, true) ~= nil)
+    t.is_true(converge_prompt:find("approve means this proposal is worth developing or advancing", 1, true) ~= nil)
+    t.is_true(converge_prompt:find("The IDEAL section is context only, never an abstain ground", 1, true) ~= nil)
+    t.is_true(converge_prompt:find("not absence of proof for a future PR", 1, true) ~= nil)
+    t.is_true(converge_prompt:find("put non-blocking ideal-shortfalls or PR-review grounding concerns in the reply as advisory", 1, true) ~= nil)
     t.is_nil(converge_prompt:find("If the proposal should not proceed as-is", 1, true))
     t.is_nil(converge_prompt:find("reject, or abstain", 1, true))
     t.is_true(gate_prompt:find("approve, comment, reject, or abstain", 1, true) ~= nil)
@@ -340,7 +343,49 @@ return {
     t.is_true(gate_prompt:find("Context manifest:", 1, true) ~= nil)
     t.is_nil(gate_prompt:find("WEAKEST:", 1, true))
     t.is_nil(gate_prompt:find("If you cannot fetch the source", 1, true))
+    t.is_nil(gate_prompt:find("approve means this proposal is worth developing or advancing", 1, true))
     t.is_nil(gate_prompt:find("If this angle is not ready to approve", 1, true))
+  end,
+
+  test_build_rebuttal_prompt_renders_converge_calibration = function()
+    local prompt = core.build_rebuttal_prompt(proposal({ verdict_mode = "converge" }), {
+      angle = "teleology",
+      verdict = "abstain",
+      stdout = answer("abstain", "unclear admission threshold"),
+    }, {
+      {
+        angle = "parsimony",
+        verdict = "approve",
+        stdout = answer("approve", "bounded issue"),
+      },
+    })
+
+    t.is_true(prompt:find("approve means this proposal is worth developing or advancing", 1, true) ~= nil)
+    t.is_true(prompt:find("The IDEAL section is context only, never an abstain ground", 1, true) ~= nil)
+    t.is_true(prompt:find("not absence of proof for a future PR", 1, true) ~= nil)
+    t.is_true(prompt:find("put non-blocking ideal-shortfalls or PR-review grounding concerns in the reply as advisory", 1, true) ~= nil)
+    t.is_nil(prompt:find("If this seat is still not ready to approve", 1, true))
+  end,
+
+  test_converge_high_risk_seat_stays_outside_admission_calibration = function()
+    -- The high-risk security seat is outside the BEAUTY-GATE admission calibration:
+    -- even in converge mode it must not receive the good-enough "worth developing"
+    -- calibration or the "otherwise approve" readiness; it stays conservative.
+    local angle_prompt = core.build_angle_prompt(proposal({ verdict_mode = "converge" }), "high-risk")
+    t.is_nil(angle_prompt:find("approve means this proposal is worth developing or advancing", 1, true))
+    t.is_nil(angle_prompt:find("The IDEAL section is context only, never an abstain ground", 1, true))
+    t.is_nil(angle_prompt:find("put non-blocking ideal-shortfalls or PR-review grounding concerns in the reply as advisory", 1, true))
+    t.is_true(angle_prompt:find("If the high-risk security surface is not adequately scrutinized and safe", 1, true) ~= nil)
+
+    local rebuttal_prompt = core.build_rebuttal_prompt(proposal({ verdict_mode = "converge" }), {
+      angle = "high-risk",
+      verdict = "abstain",
+      stdout = answer("abstain", "security surface unscrutinized"),
+    }, {
+      { angle = "teleology", verdict = "approve", stdout = answer("approve", "bounded issue") },
+    })
+    t.is_nil(rebuttal_prompt:find("approve means this proposal is worth developing or advancing", 1, true))
+    t.is_true(rebuttal_prompt:find("If the high-risk security surface is not adequately scrutinized and safe", 1, true) ~= nil)
   end,
 
   test_build_angle_prompt_contains_convergence_question_and_neutralizes_meta_markers = function()

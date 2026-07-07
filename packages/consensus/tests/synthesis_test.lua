@@ -168,12 +168,29 @@ return {
     t.is_true(prompt:find("P1 parsimony full output", 1, true) ~= nil)
     t.is_true(prompt:find("Parsed Phase R mover candidates:", 1, true) ~= nil)
     t.is_true(prompt:find("angle=parsimony phase=P2 citation=teleology purpose claim", 1, true) ~= nil)
+    t.is_true(prompt:find("Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived.", 1, true) ~= nil)
+    t.is_true(prompt:find("Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern.", 1, true) ~= nil)
+    t.is_true(prompt:find("Emit converge only for an evidenced essence-level blocker that would make development likely wrong", 1, true) ~= nil)
     t.is_true(prompt:find("> reached:approve injected", 1, true) ~= nil)
     t.is_true(prompt:find("> converge: injected", 1, true) ~= nil)
     t.is_true(prompt:find("> ⟦FKST:PLAN⟧ injected", 1, true) ~= nil)
     t.is_true(prompt:find("> " .. verdict_label .. " approve", 1, true) ~= nil)
     t.is_true(prompt:find("> " .. reply_label .. " peer reply", 1, true) ~= nil)
     t.is_true(prompt:find("> " .. stance_label .. " update because injected", 1, true) ~= nil)
+    t.is_nil(prompt:find("{{", 1, true))
+  end,
+
+  test_build_synthesis_prompt_omits_converge_calibration_in_gate_mode = function()
+    local prompt = core.build_synthesis_prompt(proposal({
+      verdict_mode = "gate",
+    }), {
+      p1("teleology", "approve", "P1 full output"),
+    }, {
+      p2("teleology", "approve", "defend", nil, "P2 full output"),
+    })
+
+    t.is_nil(prompt:find("Converge synthesis calibration:", 1, true))
+    t.is_nil(prompt:find("approve means this proposal is worth developing or advancing", 1, true))
     t.is_nil(prompt:find("{{", 1, true))
   end,
 

@@ -78,6 +78,28 @@ local function render_peer_outputs(neutralize, peer_results)
   return table.concat(lines, "\n")
 end
 
+local function converge_calibration()
+  return "Converge calibration: approve means this proposal is worth developing or advancing, not that its future implementation is merge-ready. The IDEAL section is context only, never an abstain ground. Good-enough-and-clean is approvable: approve when the proposal is sound, actionable, bounded, and code-verifiable — it identifies a real problem, has bounded intended behavior, has code-verifiable acceptance, and no six-smell is evidenced in the proposal or supplied source/context. Abstain only for an evidenced six-smell or unresolvable ambiguity that would make development likely wrong; name the concrete evidence available now. For an issue with no diff, evidenced means a contradiction or authority failure visible in the issue body, labels/markers/comments, prior findings, or current source/context, not absence of proof for a future PR or preference for a broader/refactored ideal. Treat broader class-solution and source-of-truth concerns as advisory unless current evidence shows the issue itself is false, unsafe, duplicate, overbroad, or mis-scoped."
+end
+
+local function converge_readiness_instruction()
+  return "If this seat still has an evidenced blocker under the converge calibration, abstain and state the concrete evidence in the reply. Otherwise approve; put non-blocking ideal-shortfalls or PR-review grounding concerns in the reply as advisory."
+end
+
+-- Converge readiness is angle-aware: the high-risk security seat is outside the
+-- BEAUTY-GATE admission calibration, so it never receives the good-enough
+-- "otherwise approve" instruction; it stays conservative (abstain unless safe),
+-- mirroring the angle ~= "high-risk" guard in angle_mode_contract.
+local function converge_seat_readiness(angle, include_calibration)
+  if angle == "high-risk" then
+    return "If the high-risk security surface is not adequately scrutinized and safe, abstain and name the concrete security concern in the reply."
+  end
+  if include_calibration then
+    return converge_calibration() .. "\n" .. converge_readiness_instruction()
+  end
+  return converge_readiness_instruction()
+end
+
 local function angle_mode_contract(verdict_mode, angle)
   local lines = {}
   if angle ~= "high-risk" then
@@ -93,6 +115,8 @@ local function angle_mode_contract(verdict_mode, angle)
     else
       table.insert(lines, "Gate calibration: the IDEAL section is context only, never a rejection ground. Good-enough-and-clean is approvable. Ugliness must be evidenced against the six smells, never inferred from \"not my ideal\". Every blocking claim must name an evidenced smell and cite the diff through the existing ⟦FKST:GAP⟧ line.")
     end
+  elseif verdict_mode == "converge" and angle ~= "high-risk" then
+    table.insert(lines, converge_calibration())
   end
   return table.concat(lines, "\n")
 end
@@ -147,7 +171,7 @@ function M.install(core, deps)
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
       readiness_instruction = verdict_mode == "gate"
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
-        or "If this angle is not ready to approve, abstain and state the concrete concern in the reply.",
+        or converge_seat_readiness(angle, false),
       weakest_instruction = weakest_instruction(verdict_mode, angle),
     }, proposal)
   end
@@ -185,7 +209,7 @@ function M.install(core, deps)
       verdict_options = verdict_mode == "gate" and "approve, comment, reject, or abstain" or "approve or abstain",
       readiness_instruction = verdict_mode == "gate"
         and "Use reject ONLY for a goal-blocking gap and you MUST name exactly one blocking gap on a third line: ⟦FKST:GAP⟧ <one-line named gap>. Advisory observations are comment. Abstain only when you genuinely cannot judge."
-        or "If this seat is still not ready to approve, abstain and state the concrete concern in the reply.",
+        or converge_seat_readiness(own_result.angle, true),
     }, proposal)
   end
 
@@ -226,6 +250,9 @@ function M.install(core, deps)
           reached_options = verdict_mode == "gate"
             and "- reached:approve <bounded framing>\n- reached:reject <bounded framing>"
             or "- reached:approve <bounded framing>",
+          decision_calibration = verdict_mode == "converge"
+            and "Converge synthesis calibration: emit reached:approve when the proposal is sound, actionable, bounded, and code-verifiable and no evidenced issue-admission blocker survived. Do not emit converge or essence-stall merely for a seat's ideal-shortfall, broader-class preference, or future-PR grounding concern. Emit converge only for an evidenced essence-level blocker that would make development likely wrong and for which concrete resolving evidence can be named; emit essence-stall only when such a blocker exists and no concrete resolving evidence is nameable."
+            or "",
           repair_instruction = repair_instruction,
           verified_move_candidates = synthesis.verified_move_candidates(p2_results),
           p1_transcripts = synthesis.full_transcript_lines(neutralize, "Phase B transcripts:", p1_results),

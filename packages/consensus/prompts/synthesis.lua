@@ -7,6 +7,7 @@ Execution boundary:
 - Read required source content only from the context manifest below.
 
 Read the proposal plus the complete Phase B and Phase R transcripts. Verify only citations or claims resolvable inside the in-invocation proposal, context manifest, and transcripts. Unverified movers have weight zero.
+{{decision_calibration}}
 
 {{repair_instruction}}
 
