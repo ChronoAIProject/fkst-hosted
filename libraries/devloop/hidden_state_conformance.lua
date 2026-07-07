@@ -371,7 +371,17 @@ local function fact_value(core, row, state, family, successor)
       round = 3,
       dedup = transition_version.loop_at(state.version, 3),
       narrowed_question = stalled and "behavioral fixture narrowed question" or "behavioral fixture changing question",
-      angle_digests = stalled and { "a", "b", "c" } or { "a", "b", "changed" },
+      angle_digests = stalled
+        and {
+          { angle = "minimal", verdict = "abstain", digest = "a" },
+          { angle = "structural", verdict = "abstain", digest = "b" },
+          { angle = "safety", verdict = "abstain", digest = "c" },
+        }
+        or {
+          { angle = "minimal", verdict = "abstain", digest = "a" },
+          { angle = "structural", verdict = "approve", digest = "b" },
+          { angle = "safety", verdict = "abstain", digest = "changed" },
+        },
       true_stall_fixture = stalled,
       visible_round_sequence = not stalled,
     }
@@ -459,7 +469,11 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
       end
     elseif value.visible_round_sequence == true then
       for round = 1, value.round - 1 do
-        table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, transition_version.loop_at(state.version, round), "behavioral fixture narrowed question", { "a", "b", "c" }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
+        table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), round, transition_version.loop_at(state.version, round), "behavioral fixture narrowed question", {
+          { angle = "minimal", verdict = "abstain", digest = "a" },
+          { angle = "structural", verdict = "abstain", digest = "b" },
+          { angle = "safety", verdict = "abstain", digest = "c" },
+        }), "2026-06-03T01:03:1" .. tostring(round) .. "Z"))
       end
       table.insert(entity.comments, comment(core, conv_rounds.converge_round_marker(ISSUE_PROPOSAL, state.version, convergence_shared.source_ref_digest(SOURCE_REF), value.round, value.dedup, value.narrowed_question, value.angle_digests), "2026-06-03T01:03:10Z"))
     else

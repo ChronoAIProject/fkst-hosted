@@ -10,7 +10,6 @@ local v_validate_proposal = require("devloop.validators.validate_proposal")
 local m_facts = require("devloop.markers.facts")
 local m_mgw = require("devloop.merge_gate_wait")
 local C = {}
-local convergence_shared = require("devloop.convergence.shared")
 local replay_thinking_convergence = require("devloop.replay_thinking_convergence")
 local replay_fields = require("devloop.replay_fields")
 local forge_validators = require("devloop.forge_validators")
@@ -19,6 +18,7 @@ local context_bundle = require("devloop.context_bundle")
 local decompose_lib = require("devloop.decompose")
 local devloop_logging = require("devloop.logging")
 local dispatch_live_run = require("devloop.dispatch_live_run")
+local config = require("devloop.config")
 
 local skip_capture_by_core = setmetatable({}, { __mode = "k" })
 
@@ -174,8 +174,7 @@ local function require_marker_fact(M, facts, family)
     return fetch_child_state_fact(M, facts)
   end
   if family == "converge-round" then
-    local base_version = M.version_loop_round(facts.state.version) > 0 and conv_rounds.converge_base_version(facts.state.version) or nil
-    return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, base_version, facts.issue.source_ref)
+    return M.latest_complete_converge_round(facts.snapshot.comments, facts.proposal_id, transition_version.strip_suffixes(facts.state.version), facts.issue.source_ref)
   end
   if family == "dependency-release" then
     return M.dependency_release_fact(facts.snapshot.comments, facts.proposal_id, facts.state.version)
@@ -379,12 +378,7 @@ end
 
 local function latest_thinking_converge_round(M, comments, proposal_id, state_version, source_ref)
   local base_version = transition_version.strip_suffixes(state_version)
-  local latest = M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
-  local consensus_latest = M.latest_complete_converge_round(comments, proposal_id, "consensus:" .. tostring(base_version):gsub("^consensus:", ""), source_ref)
-  if latest == nil or (consensus_latest ~= nil and consensus_latest.round > latest.round) then
-    return consensus_latest
-  end
-  return latest
+  return M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
 end
 
 function C.replay_log_skip(M, dept, proposal_id, state, from_state, to_state, outcome, reason)
@@ -446,12 +440,13 @@ function C.has_thinking_converge_replay(M, current, proposal_id, state, source_r
   if state.state ~= "thinking" then
     return false
   end
-  local base_version = transition_version.strip_suffixes(state.version)
-  local sr_digest = convergence_shared.source_ref_digest(source_ref)
-  local facts = conv_rounds.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
+  local facts = conv_rounds.converge_round_facts_for_generation(current.comments, proposal_id, transition_version.strip_suffixes(state.version))
   local round = conv_rounds.max_converge_round(facts)
-  return M.latest_complete_converge_round(current.comments, proposal_id, base_version, source_ref) ~= nil
+  return M.latest_complete_converge_round(current.comments, proposal_id, transition_version.strip_suffixes(state.version), source_ref) ~= nil
+    or (#facts > 0 and round >= config.max_converge_rounds())
     or conv_rounds.is_true_stall(facts, round)
+    or conv_rounds.resolvability_exhausted(facts)
+    or conv_rounds.has_essence_stall(facts)
 end
 
 local function replay_thinking(M, dept, issue, state, row, facts)

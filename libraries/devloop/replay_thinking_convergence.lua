@@ -2,9 +2,9 @@ local base_ids = require("devloop.base_ids")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
 local C = {}
-local convergence_shared = require("devloop.convergence.shared")
 local transition_version = require("contract.transition_version")
 local devloop_logging = require("devloop.logging")
+local config = require("devloop.config")
 
 local function visible_true_stall(M, issue, state, facts)
     local current = facts and facts.current or issue
@@ -14,12 +14,13 @@ local function visible_true_stall(M, issue, state, facts)
       return nil
     end
     local base_version = transition_version.strip_suffixes(state.version)
-    local sr_digest = convergence_shared.source_ref_digest(source_ref)
-    local converge_facts = conv_rounds.converge_round_facts(current.comments, proposal_id, base_version, sr_digest)
+    local converge_facts = conv_rounds.converge_round_facts_for_generation(current.comments, proposal_id, base_version)
     local round = conv_rounds.max_converge_round(converge_facts)
-    if not conv_rounds.is_true_stall(converge_facts, round)
+    if #converge_facts == 0
+      or (round < config.max_converge_rounds()
+      and not conv_rounds.is_true_stall(converge_facts, round)
       and not conv_rounds.resolvability_exhausted(converge_facts)
-      and not conv_rounds.has_essence_stall(converge_facts) then
+      and not conv_rounds.has_essence_stall(converge_facts)) then
       return nil
     end
     return conv_reconcile.build_devloop_reconcile_payload({

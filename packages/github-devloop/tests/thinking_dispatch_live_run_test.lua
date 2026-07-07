@@ -13,7 +13,7 @@ local mock_issue_state = h.mock_issue_state
 local mock_issue_loop = h.mock_issue_loop
 local find_raise = h.find_raise
 
-local function converge_round_comment(event, proposal_id, base_version, round, question)
+local function converge_round_comment(event, proposal_id, base_version, round, question, verdict)
   return {
     body = conv_rounds.converge_round_marker(proposal_id,
       base_version,
@@ -22,7 +22,7 @@ local function converge_round_comment(event, proposal_id, base_version, round, q
       base_version .. "/loop/" .. tostring(round),
       question or ("Question " .. tostring(round)),
       {
-        { angle = "minimal", verdict = "abstain", digest = "round-digest-" .. tostring(round) },
+        { angle = "minimal", verdict = verdict or "abstain", digest = "round-digest-" .. tostring(round) },
       }),
     created_at = "2026-06-03T00:0" .. tostring(round) .. ":00Z",
   }
@@ -88,9 +88,9 @@ return {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
         created_at = "2026-06-03T00:00:00Z",
       },
-      converge_round_comment(event, original.proposal_id, base_version, 0),
-      converge_round_comment(event, original.proposal_id, base_version, 1),
-      converge_round_comment(event, original.proposal_id, base_version, 2, "Latest visible question"),
+      converge_round_comment(event, original.proposal_id, base_version, 0, nil, "abstain"),
+      converge_round_comment(event, original.proposal_id, base_version, 1, nil, "comment"),
+      converge_round_comment(event, original.proposal_id, base_version, 2, "Latest visible question", "abstain"),
     })
 
     local result = run_observe(event, opts("thinking-replay-latest-converge-round", {
@@ -111,7 +111,7 @@ return {
       round = proposal.payload.round,
       narrowed_question = "Round 3 still needs a handoff",
       angle_digests = {
-        { angle = "minimal", verdict = "abstain", digest = "round-digest-3" },
+        { angle = "minimal", verdict = "approve", digest = "round-digest-3" },
       },
       dedup_key = "consensus:" .. proposal.payload.dedup_key,
       source_ref = proposal.payload.source_ref,
@@ -121,9 +121,9 @@ return {
         body = core.state_marker(original.proposal_id, "thinking", original.dedup_key),
         created_at = "2026-06-03T00:00:00Z",
       },
-      converge_round_comment(event, original.proposal_id, base_version, 0),
-      converge_round_comment(event, original.proposal_id, base_version, 1),
-      converge_round_comment(event, original.proposal_id, base_version, 2, "Latest visible question"),
+      converge_round_comment(event, original.proposal_id, base_version, 0, nil, "abstain"),
+      converge_round_comment(event, original.proposal_id, base_version, 1, nil, "comment"),
+      converge_round_comment(event, original.proposal_id, base_version, 2, "Latest visible question", "abstain"),
     })
     local loop = run_loop(loop_event, opts("thinking-replay-loop-regenerates-lost-handoff"))
     t.eq(loop.exit_code, 0)

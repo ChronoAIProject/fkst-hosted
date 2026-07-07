@@ -1,7 +1,6 @@
 local parsers_misc = require("devloop.parsers.misc")
 local conv_rounds = require("devloop.convergence.rounds")
 local S = {}
-local convergence_shared = require("devloop.convergence.shared")
 local registry = require("workflow.registry")
 local transition_version = require("contract.transition_version")
 
@@ -325,12 +324,11 @@ function M.restart_effect_contract_errors(rows, consumer_sources)
   return errors
 end
 
-function M.latest_complete_converge_round(comments, proposal_id, base_version, source_ref)
-  local sr_digest = convergence_shared.source_ref_digest(source_ref)
+function M.latest_complete_converge_round(comments, proposal_id, generation_key, _source_ref)
   local latest = nil
-  local facts = base_version ~= nil
-    and conv_rounds.converge_round_facts(comments, proposal_id, base_version, sr_digest)
-    or conv_rounds.converge_round_facts_for_source(comments, proposal_id, sr_digest)
+  local facts = generation_key == nil
+    and conv_rounds.converge_round_facts_for_proposal(comments, proposal_id)
+    or conv_rounds.converge_round_facts_for_generation(comments, proposal_id, generation_key)
   for _, fact in ipairs(facts) do
     if fact.narrowed_question ~= nil
       and fact.narrowed_question ~= ""

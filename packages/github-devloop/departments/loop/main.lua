@@ -5,11 +5,13 @@ local parsers_issue = require("devloop.parsers.issue")
 local convergence_shared = require("devloop.convergence.shared")
 local core, saga = require("core"), require("workflow.saga")
 local context_bundle = require("devloop.context_bundle")
+local config = require("devloop.config")
 
 
 
 local payloads_builders = require("devloop.payloads.builders")
 local conv_rounds = require("devloop.convergence.rounds")
+local valid_round = require("devloop.rounds").valid_round
 local v_unresolved = require("devloop.validators.unresolved")
 local v_validate_proposal = require("devloop.validators.validate_proposal")
 local entity_lib = require("devloop.entity")
@@ -27,6 +29,16 @@ local spec = {
   stall_window = "30s",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
+
+local function latest_lineage_fact(lineage)
+  local latest = nil
+  for _, fact in ipairs(lineage or {}) do
+    if type(fact) == "table" and (latest == nil or tonumber(fact.round) > tonumber(latest.round)) then
+      latest = fact
+    end
+  end
+  return latest
+end
 
 return saga.department(spec, { done = function() return false end, act = function(event)
   local unresolved = event.payload or {}
@@ -72,12 +84,67 @@ return saga.department(spec, { done = function() return false end, act = functio
 
     local base_version = conv_rounds.converge_base_version(unresolved.dedup_key)
     local sr_digest = convergence_shared.source_ref_digest(unresolved.source_ref)
-    local facts = conv_rounds.converge_round_facts(current.comments, unresolved.proposal_id, base_version, sr_digest)
-    local round = math.max(tonumber(unresolved.round) or 0, conv_rounds.max_converge_round(facts))
-    if conv_rounds.has_converge_round_marker(current.comments, unresolved.proposal_id, base_version, sr_digest, round) then
-      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-idempotent(converge round marker already visible)", "converge round marker for incoming round is already visible")
+    local function build_comment_request(unresolved_for_comment, round_for_comment, marker_body_for_comment, handoff_for_comment)
+      return requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved_for_comment, round_for_comment, marker_body_for_comment, handoff_for_comment)
+    end
+    local generation_key = conv_rounds.thinking_generation_key(state.version)
+    local current_base_version = transition_version.strip_suffixes(state.version)
+    local lineage = conv_rounds.converge_round_facts_for_generation(current.comments, unresolved.proposal_id, generation_key)
+    local has_lineage = #lineage > 0
+    local latest_round = conv_rounds.max_converge_round(lineage)
+    if not has_lineage then
+      local legacy_round = conv_rounds.max_converge_round(conv_rounds.legacy_converge_round_facts_without_generation(current.comments, unresolved.proposal_id))
+      if legacy_round > 0 then
+        devloop_logging.log_line("info", "loop", unresolved.proposal_id, "CONVERGENCE_MIGRATION", {
+          "action=ignore-legacy-no-generation-budget",
+          "generation=" .. tostring(generation_key),
+          "legacy_max_round=" .. tostring(legacy_round),
+          "current_max_round=0",
+          "reason=legacy markers without generation are outside explicit generation lineage",
+        })
+      end
+    end
+    local latest_fact = latest_lineage_fact(lineage)
+    local terminal_lineage = has_lineage
+      and (latest_round >= config.max_converge_rounds()
+        or conv_rounds.is_true_stall(lineage, latest_round)
+        or conv_rounds.has_essence_stall(lineage)
+        or conv_rounds.resolvability_exhausted(lineage))
+    if terminal_lineage then
+      local terminal_base_version = current_base_version
+      local terminal_unresolved = {
+        proposal_id = unresolved.proposal_id,
+        dedup_key = (latest_fact and latest_fact.dedup) or unresolved.dedup_key,
+        source_ref = unresolved.source_ref,
+        narrowed_question = (latest_fact and latest_fact.narrowed_question) or unresolved.narrowed_question,
+        angle_digests = (latest_fact and latest_fact.angle_digests) or unresolved.angle_digests,
+      }
+      local comment_request = build_comment_request(terminal_unresolved, latest_round, "", {
+        kind = "github-devloop.reconcile",
+        proposal_id = unresolved.proposal_id,
+        round = latest_round,
+        base_version = terminal_base_version,
+        source_ref = base_ids.normalize_source_ref(unresolved.source_ref),
+      })
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "convergence lineage terminal at round " .. tostring(latest_round))
+      devloop_logging.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
+        "github-proxy.github_issue_comment_request",
+      })
+      devloop_logging.log_raise("loop", unresolved.proposal_id, "github-proxy.github_issue_comment_request", comment_request)
       return
     end
+
+    local incoming_round = valid_round(unresolved.round) or 0
+    if has_lineage and incoming_round <= latest_round then
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-stale(converge round lineage already advanced)", "incoming converge round is not newer than the proposal lineage")
+      return
+    end
+    local expected_round = has_lineage and (latest_round + 1) or 0
+    if incoming_round ~= expected_round then
+      devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", "skip-stale(converge round gap)", "incoming converge round is not the next proposal lineage round")
+      return
+    end
+    local round = incoming_round
 
     local marker_body = conv_rounds.converge_round_marker(unresolved.proposal_id,
       base_version,
@@ -87,13 +154,16 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.narrowed_question,
       unresolved.angle_digests,
       unresolved.findings_record,
-      unresolved.essence_stall == true
+      unresolved.essence_stall == true,
+      generation_key
     )
-    local facts_with_current = conv_rounds.append_converge_round_fact(facts, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record, unresolved.essence_stall == true)
-    local resolvability_exhausted = conv_rounds.resolvability_exhausted(facts_with_current)
-    local essence_stall = conv_rounds.has_essence_stall(facts_with_current)
-    if essence_stall or resolvability_exhausted or conv_rounds.is_true_stall(facts_with_current, round) then
-      local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body, {
+    local lineage_with_current = conv_rounds.append_converge_round_fact(lineage, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record, unresolved.essence_stall == true, generation_key)
+    local cap_exhausted = conv_rounds.max_converge_round(lineage_with_current) >= config.max_converge_rounds()
+    local resolvability_exhausted = conv_rounds.resolvability_exhausted(lineage_with_current)
+    local essence_stall = conv_rounds.has_essence_stall(lineage_with_current)
+    local true_stall = conv_rounds.is_true_stall(lineage_with_current, round)
+    if essence_stall or resolvability_exhausted or cap_exhausted or true_stall then
+      local comment_request = build_comment_request(unresolved, round, marker_body, {
         kind = "github-devloop.reconcile",
         proposal_id = unresolved.proposal_id,
         round = round,
@@ -104,7 +174,9 @@ return saga.department(spec, { done = function() return false end, act = functio
         and ("essence stall at round " .. tostring(round))
         or resolvability_exhausted
           and ("resolvability budget reached at round " .. tostring(round))
-          or ("true convergence stall at round " .. tostring(round))
+          or cap_exhausted
+            and ("convergence round cap reached at round " .. tostring(round))
+            or ("true convergence stall at round " .. tostring(round))
       devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), reason)
       devloop_logging.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {
         "github-proxy.github_issue_comment_request",
@@ -126,13 +198,13 @@ return saga.department(spec, { done = function() return false end, act = functio
     local proposal = payloads_builders.build_board_loop_proposal(core, repo, issue_number, current, unresolved.source_ref, next_n, {
       narrowed_question = unresolved.narrowed_question,
       angle_digests = unresolved.angle_digests,
-      findings_record = facts_with_current[#facts_with_current] and facts_with_current[#facts_with_current].findings_record,
+      findings_record = lineage_with_current[#lineage_with_current] and lineage_with_current[#lineage_with_current].findings_record,
     }, event.ts, content_fetch, next_dedup)
     if not v_validate_proposal.validate_proposal(proposal) then
       log.warn("github-devloop dept=loop proposal_id=" .. tostring(unresolved.proposal_id) .. " tag=SKIP reason=cannot-build-valid-loop-proposal")
       return
     end
-    local comment_request = requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved, round, marker_body)
+    local comment_request = build_comment_request(unresolved, round, marker_body)
 
     devloop_logging.log_cas_decision("loop", unresolved.proposal_id, state, "thinking", "thinking", devloop_state.cas_outcome(state, transition, unresolved.dedup_key), "raising loop proposal round " .. tostring(next_n))
     devloop_logging.log_apply("loop", unresolved.proposal_id, nil, nil, { add = {}, remove = {} }, {

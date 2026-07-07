@@ -40,6 +40,7 @@ local function converge_record_map(comments, kind, matches)
       local findings_record = decode_findings_record(attr(marker, "findings_record"))
       local essence_stall = attr(marker, "essence_stall") == "true"
       local version = attr(marker, "version")
+      local generation = attr(marker, "generation")
       if round ~= nil
         and matches(marker)
         and is_digest(question)
@@ -51,6 +52,7 @@ local function converge_record_map(comments, kind, matches)
           verdicts = verdicts,
           dedup = dedup,
           version = version,
+          generation = generation,
           narrowed_question = narrowed_question,
           angle_digests = angle_digests,
           findings_record = findings_record,
@@ -70,7 +72,7 @@ local function converge_record_map(comments, kind, matches)
   end)
   return facts
 end
-function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key, findings_record, essence_stall)
+function C.append_converge_round_fact(facts, round, narrowed_question, angle_digests, dedup_key, findings_record, essence_stall, generation_key)
   local copied = {}
   for _, fact in ipairs(facts or {}) do
     table.insert(copied, fact)
@@ -81,6 +83,7 @@ function C.append_converge_round_fact(facts, round, narrowed_question, angle_dig
     question = converge_question_digest(narrowed_question),
     verdicts = converge_verdicts_digest(angle_digests),
     dedup = dedup_key,
+    generation = generation_key == nil and nil or C.thinking_generation_key(generation_key),
     findings_record = normalized_findings,
     essence_stall = essence_stall == true,
     resolvable_findings = normalized_findings ~= nil,
@@ -123,17 +126,24 @@ function C.converge_base_version(consensus_dedup)
   return transition_version.strip_trailing_loop(consensus_dedup)
 end
 
+function C.thinking_generation_key(version)
+  local key = transition_version.strip_suffixes(version)
+  return key:match("^consensus:(.+)$") or key
+end
+
 function C.converge_proposal_base_dedup(consensus_dedup)
   local base_version = C.converge_base_version(consensus_dedup)
   return base_version:match("^consensus:(.+)$") or base_version
 end
-function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record, essence_stall)
+function C.converge_round_marker(proposal_id, base_version, source_ref_digest, round, consensus_dedup, narrowed_question, angle_digests, findings_record, essence_stall, generation_key)
   local n = valid_round(round)
   if n == nil then
     error("github-devloop: invalid converge round")
   end
+  local generation = C.thinking_generation_key(generation_key or base_version)
   return '<!-- fkst:github-devloop:converge-round:v1 proposal="' .. safe_attr(proposal_id, devloop_base._max_key_len)
     .. '" version="' .. safe_attr(base_version, devloop_base._max_dedup_len)
+    .. '" generation="' .. safe_attr(generation, devloop_base._max_dedup_len)
     .. '" source_ref="' .. safe_attr(source_ref_digest, max_digest_len)
     .. '" round="' .. tostring(n)
     .. '" dedup="' .. safe_attr(consensus_dedup, devloop_base._max_dedup_len)
@@ -193,6 +203,31 @@ function C.converge_round_facts_for_proposal(comments, proposal_id)
   return converge_record_map(comments, "converge%-round", matches)
 end
 
+function C.converge_round_facts_for_generation(comments, proposal_id, generation_key)
+  local expected_generation = C.thinking_generation_key(generation_key)
+  local matches = function(marker)
+    local marker_generation = attr(marker, "generation")
+    -- Legacy converge-round:v1 markers written before generation scoping have no
+    -- generation attribute. They are intentionally excluded from explicit-generation
+    -- lineage so an old over-cap generation cannot terminalize a freshly entered
+    -- generation during deploy transition.
+    return attr(marker, "proposal") == tostring(proposal_id)
+      and marker_generation ~= nil
+      and marker_generation ~= ""
+      and tostring(marker_generation) == tostring(expected_generation)
+  end
+  return converge_record_map(comments, "converge%-round", matches)
+end
+
+function C.legacy_converge_round_facts_without_generation(comments, proposal_id)
+  local matches = function(marker)
+    local marker_generation = attr(marker, "generation")
+    return attr(marker, "proposal") == tostring(proposal_id)
+      and (marker_generation == nil or marker_generation == "")
+  end
+  return converge_record_map(comments, "converge%-round", matches)
+end
+
 function C.review_converge_round_facts(M, comments, review_proposal_id, issue_proposal_id, issue_version, head_sha, source_ref_digest)
   local heartbeat_version = M.liveness_heartbeat_version(issue_version, M.liveness_signal_producer_contract("review-converge-round"))
   local matches = function(marker)
@@ -205,8 +240,11 @@ function C.review_converge_round_facts(M, comments, review_proposal_id, issue_pr
   return converge_record_map(comments, "review%-converge%-round", matches)
 end
 
-function C.converge_budget_round(comments, proposal_id)
-  return C.max_converge_round(C.converge_round_facts_for_proposal(comments, proposal_id))
+function C.converge_budget_round(comments, proposal_id, generation_key)
+  local facts = generation_key == nil
+    and C.converge_round_facts_for_proposal(comments, proposal_id)
+    or C.converge_round_facts_for_generation(comments, proposal_id, generation_key)
+  return C.max_converge_round(facts)
 end
 
 function C.max_converge_round(facts)
@@ -271,9 +309,7 @@ function C.is_true_stall(facts, current_round)
     return false
   end
 
-return current.question == previous.question
-    and previous.question == before_previous.question
-    and current.verdicts == previous.verdicts
+  return current.verdicts == previous.verdicts
     and previous.verdicts == before_previous.verdicts
 end
 

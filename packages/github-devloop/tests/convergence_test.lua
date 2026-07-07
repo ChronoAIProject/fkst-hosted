@@ -77,13 +77,13 @@ return {
     t.eq(conv_rounds.is_true_stall(facts, 4), false)
   end,
 
-  test_is_true_stall_false_when_round_three_question_changes = function()
+  test_is_true_stall_ignores_changing_question_surface = function()
     local facts = {
       fact(1),
       fact(2),
       fact(3, "q-different", "v-same"),
     }
-    t.eq(conv_rounds.is_true_stall(facts, 3), false)
+    t.eq(conv_rounds.is_true_stall(facts, 3), true)
   end,
 
   test_is_true_stall_false_when_round_three_verdicts_change = function()
@@ -186,6 +186,24 @@ return {
     local facts = conv_rounds.converge_round_facts({ trusted(marker) }, proposal_id, base_version, source_digest)
     t.eq(#facts, 1)
     t.eq(facts[1].angle_digests[1].digest, "contains | pipe; semicolon % percent")
+  end,
+
+  test_explicit_generation_lineage_excludes_missing_generation_markers = function()
+    local source_digest = convergence_shared.source_ref_digest(source_ref)
+    local legacy_marker = conv_rounds.converge_round_marker(proposal_id,
+      base_version,
+      source_digest,
+      8,
+      base_version .. "/loop/8",
+      "Legacy marker before generation scoping",
+      angles(),
+      nil,
+      false,
+      base_version
+    ):gsub(' generation="[^"]*"', "")
+
+    local explicit = conv_rounds.converge_round_facts_for_generation({ trusted(legacy_marker) }, proposal_id, base_version)
+    t.eq(#explicit, 0)
   end,
 
   test_converge_round_facts_keep_last_marker_for_same_round = function()

@@ -132,6 +132,10 @@ function C.max_fix_rounds()
   return 12
 end
 
+function C.max_converge_rounds()
+  return 8
+end
+
 function C.default_test_command()
   return "scripts/run.sh test"
 end
