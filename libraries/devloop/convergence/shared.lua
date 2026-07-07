@@ -95,7 +95,7 @@ local function normalize_findings_line(value)
     return nil
   end
   if #text > findings_component_len then
-    text = text:sub(1, findings_component_len)
+    return nil
   end
   return text
 end
@@ -123,7 +123,7 @@ local function normalize_findings_text(value)
   end
   local normalized = table.concat(lines, "\n")
   if #normalized > findings_record_len then
-    normalized = normalized:sub(1, findings_record_len)
+    return nil
   end
   return normalized
 end
@@ -152,7 +152,7 @@ local function normalize_findings_record(record)
     return nil
   end
   if #text > findings_record_len then
-    text = text:sub(1, findings_record_len)
+    return nil
   end
   return text
 end
@@ -162,7 +162,7 @@ local function encode_findings_record(record)
   if text == nil then
     return ""
   end
-  return safe_attr(text:gsub("%%", "%%25"):gsub("\n", "%%0A"), findings_record_len)
+  return text:gsub("%%", "%%25"):gsub('"', "'"):gsub("[<>]", ""):gsub("\n", "%%0A")
 end
 
 local function decode_findings_record(value)

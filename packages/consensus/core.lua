@@ -18,7 +18,6 @@ local max_gap_len = 240
 local max_gaps = 4
 local max_narrowed_question_len = 2000
 local max_digest_len = 600
-local max_prior_round_digests = 12
 local findings_record_len = 1500
 local max_scratch_slug_len = 120
 local stale_generation_context_error_class = "stale_generation_context"
@@ -245,40 +244,6 @@ local function clean_verdict_vector(value)
   return vector
 end
 
-local function valid_digest_item(item)
-  if type(item) ~= "table" then
-    return false
-  end
-  if not is_bounded_string(item.angle, max_key_len) or item.angle:find("%c") ~= nil then
-    return false
-  end
-  if not is_verdict(item.verdict) then
-    return false
-  end
-  if item.reply ~= nil and #tostring(item.reply) > max_digest_len then
-    return false
-  end
-  if item.digest ~= nil and #tostring(item.digest) > max_digest_len then
-    return false
-  end
-  return true
-end
-
-local function valid_prior_round_digests(value)
-  if value == nil then
-    return true
-  end
-  if type(value) ~= "table" or #value > max_prior_round_digests then
-    return false
-  end
-  for _, item in ipairs(value) do
-    if not valid_digest_item(item) then
-      return false
-    end
-  end
-  return true
-end
-
 local function normalized_angles(proposal)
   if type(proposal.angles) ~= "table" then
     return default_angles
@@ -338,7 +303,7 @@ function M.is_eligible(proposal)
     and not is_bounded_string(proposal.findings_record, findings_record_len) then
     return false
   end
-  if not valid_prior_round_digests(proposal.prior_round_digests) then
+  if proposal.prior_round_digests ~= nil then
     return false
   end
   return normalized_angles(proposal) ~= nil
@@ -739,7 +704,7 @@ function M.build_reached_payload(proposal, decision, angle_results, framing, pro
   return payload
 end
 
-function M.build_converge_payload(proposal, narrowed_question, angle_results)
+function M.build_converge_payload(proposal, narrowed_question, angle_results, findings_record, options)
   if type(proposal) ~= "table" then
     error("consensus: proposal-invalid: proposal must be a table")
   end
@@ -762,8 +727,14 @@ function M.build_converge_payload(proposal, narrowed_question, angle_results)
   if proposal.effect_version ~= nil then
     payload.effect_version = tostring(proposal.effect_version)
   end
-  if proposal.findings_record ~= nil and proposal.findings_record ~= "" then
-    payload.findings_record = bounded(proposal.findings_record, findings_record_len)
+  if findings_record ~= nil and findings_record ~= "" then
+    if not is_bounded_string(findings_record, findings_record_len) then
+      error("consensus: findings-record-invalid: findings_record is overlong")
+    end
+    payload.findings_record = findings_record
+  end
+  if type(options) == "table" and options.essence_stall == true then
+    payload.essence_stall = true
   end
   return payload
 end

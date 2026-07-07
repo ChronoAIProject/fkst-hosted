@@ -102,7 +102,8 @@ return {
     t.eq(proposal.payload.dedup_key, original.dedup_key .. "/loop/3")
     t.eq(proposal.payload.round, 3)
     t.eq(proposal.payload.convergence_question, "Latest visible question")
-    t.eq(proposal.payload.prior_round_digests[1].digest, "round-digest-2")
+    t.eq(proposal.payload.findings_record, nil)
+    t.eq(proposal.payload.prior_round_digests, nil)
 
     local loop_event = {
       schema = "consensus.consensus_converge.v1",

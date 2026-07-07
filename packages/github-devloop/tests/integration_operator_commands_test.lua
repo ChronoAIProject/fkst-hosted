@@ -97,7 +97,8 @@ local function thinking_changing_converge_comments(event, rounds, command)
       "Narrowed question " .. tostring(n),
       {
         { angle = "minimal", verdict = "abstain", digest = "digest-" .. tostring(n) },
-      }
+      },
+      "open:\nNarrowed question " .. tostring(n)
     ))
   end
   if command ~= nil then
@@ -147,7 +148,8 @@ return {
     t.eq(proposal_raise.payload.dedup_key, base_version .. "/loop/8")
     t.eq(proposal_raise.payload.round, 8)
     t.eq(proposal_raise.payload.convergence_question, "Narrowed question 7")
-    t.eq(proposal_raise.payload.prior_round_digests[1].digest, "digest-7")
+    t.eq(proposal_raise.payload.findings_record, "open:\nNarrowed question 7")
+    t.eq(proposal_raise.payload.prior_round_digests, nil)
   end,
 
   test_issue_rereview_command_reenters_stalled_plain_thinking = function()

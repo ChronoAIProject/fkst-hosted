@@ -784,17 +784,16 @@ return {
   end,
 
   test_loop_proposals_thread_convergence_narrowing = function()
-    -- A re-raised next-round proposal must carry the convergence narrowing
-    -- (convergence_question + round + bounded prior_round_digests) so the next angles
-    -- converge instead of blindly re-judging the same question. The `/loop/N` dedup shape
-    -- and proposal validity stay intact, and angle peer-invisibility is preserved by
-    -- carrying only verdict + short-reply digests, never prior peer full text.
+    -- A re-raised next-round proposal must carry the convergence narrowing plus the
+    -- canonical findings record. Angle digests remain marker telemetry and are not
+    -- deliberative input to the next proposal.
     local converge = {
       narrowed_question = "Does the locking change still break idempotency under retry?",
       angle_digests = {
         { angle = "minimal", verdict = "approve", reply = "ok", digest = "smallest fix is sound" },
         { angle = "structural", verdict = "abstain", reply = "no", digest = "contract leak under growth" },
       },
+      findings_record = "settled:\nLocking scope is bounded.\nopen:\nDoes the locking change still break idempotency under retry?",
     }
 
     local thinking = payloads_builders.build_loop_proposal("owner/repo", "42", {
@@ -805,8 +804,8 @@ return {
     t.eq(thinking.round, 2)
     t.eq(thinking.verdict_mode, "converge")
     t.eq(thinking.convergence_question, converge.narrowed_question)
-    t.eq(#thinking.prior_round_digests, 2)
-    t.eq(thinking.prior_round_digests[2].verdict, "abstain")
+    t.eq(thinking.findings_record, converge.findings_record)
+    t.eq(thinking.prior_round_digests, nil)
     t.is_true(thinking.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(v_validate_proposal.validate_proposal(thinking))
 
@@ -818,7 +817,8 @@ return {
     t.eq(review.round, 2)
     t.eq(review.verdict_mode, "gate")
     t.eq(review.convergence_question, converge.narrowed_question)
-    t.eq(#review.prior_round_digests, 2)
+    t.eq(review.findings_record, converge.findings_record)
+    t.eq(review.prior_round_digests, nil)
     t.is_true(review.dedup_key:find("/loop/2", 1, true) ~= nil)
     t.is_true(v_validate_proposal.validate_proposal(review))
 
@@ -842,7 +842,7 @@ return {
     t.is_true(v_validate_proposal.validate_proposal(high_risk_board_review))
 
     -- Without a converge carry the proposal stays valid and blind-compatible: the round is
-    -- still tracked, but no convergence_question / prior_round_digests are injected.
+    -- still tracked, but no convergence_question / findings_record are injected.
     local blind = payloads_builders.build_loop_proposal("owner/repo", "42", {
       title = "Blind",
       body = "Body",
@@ -851,6 +851,7 @@ return {
     t.eq(blind.round, 1)
     t.eq(blind.verdict_mode, "converge")
     t.eq(blind.convergence_question, nil)
+    t.eq(blind.findings_record, nil)
     t.eq(blind.prior_round_digests, nil)
     t.is_true(v_validate_proposal.validate_proposal(blind))
   end,
