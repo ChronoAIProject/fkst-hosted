@@ -14,7 +14,7 @@ local function visible_true_stall(M, issue, state, facts)
       return nil
     end
     local base_version = transition_version.strip_suffixes(state.version)
-    local converge_facts = conv_rounds.converge_round_facts_for_generation(current.comments, proposal_id, base_version)
+    local converge_facts = conv_rounds.converge_round_facts_for_proposal(current.comments, proposal_id)
     local round = conv_rounds.max_converge_round(converge_facts)
     if #converge_facts == 0
       or (round < config.max_converge_rounds()

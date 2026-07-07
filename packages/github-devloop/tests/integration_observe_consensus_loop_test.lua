@@ -580,7 +580,6 @@ return {
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.state_marker(event.proposal_id, "thinking", base_version),
       conv_rounds.converge_round_marker(event.proposal_id, base_version, sr_digest, 1, base_version .. "/loop/1", event.narrowed_question, event.angle_digests),
       conv_rounds.converge_round_marker(event.proposal_id, base_version, sr_digest, 2, base_version .. "/loop/2", event.narrowed_question, event.angle_digests),
     })
@@ -614,7 +613,6 @@ return {
     })
     local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
     mock_issue_loop({ "fkst-dev:thinking" }, {
-      core.state_marker(event.proposal_id, "thinking", base_version),
       conv_rounds.converge_round_marker(event.proposal_id, base_version, sr_digest, 0, base_version, "Question 0", varying_digest(0), "open:\nfirst resolvable finding"),
     })
 

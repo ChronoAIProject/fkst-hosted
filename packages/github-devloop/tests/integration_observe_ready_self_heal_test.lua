@@ -190,7 +190,7 @@ return {
     t.eq(count_calls("--json body"), 0)
   end,
 
-  test_observe_issue_does_not_replay_prior_generation_thinking_lineage = function()
+  test_observe_issue_replays_proposal_wide_thinking_lineage = function()
     local old_event = issue()
     local event = issue({ updated_at = "2026-06-03T01:02:04Z" })
     local original = payloads_builders.build_proposal(old_event)
@@ -206,9 +206,9 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     local proposal = find_raise(result.raises, "consensus.proposal").payload
-    t.eq(proposal.dedup_key, payloads_builders.build_proposal(event).dedup_key)
-    t.eq(proposal.round, nil)
-    t.eq(proposal.convergence_question, nil)
+    t.eq(proposal.dedup_key, original.dedup_key .. "/loop/1")
+    t.eq(proposal.round, 1)
+    t.eq(proposal.convergence_question, "Old question")
     t.eq(count_calls("--json body"), 0)
   end,
 

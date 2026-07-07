@@ -188,24 +188,6 @@ return {
     t.eq(facts[1].angle_digests[1].digest, "contains | pipe; semicolon % percent")
   end,
 
-  test_explicit_generation_lineage_excludes_missing_generation_markers = function()
-    local source_digest = convergence_shared.source_ref_digest(source_ref)
-    local legacy_marker = conv_rounds.converge_round_marker(proposal_id,
-      base_version,
-      source_digest,
-      8,
-      base_version .. "/loop/8",
-      "Legacy marker before generation scoping",
-      angles(),
-      nil,
-      false,
-      base_version
-    ):gsub(' generation="[^"]*"', "")
-
-    local explicit = conv_rounds.converge_round_facts_for_generation({ trusted(legacy_marker) }, proposal_id, base_version)
-    t.eq(#explicit, 0)
-  end,
-
   test_converge_round_facts_keep_last_marker_for_same_round = function()
     local source_digest = convergence_shared.source_ref_digest(source_ref)
     local first_question = "Which boundary should narrow first?"

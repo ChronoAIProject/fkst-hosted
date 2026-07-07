@@ -324,11 +324,9 @@ function M.restart_effect_contract_errors(rows, consumer_sources)
   return errors
 end
 
-function M.latest_complete_converge_round(comments, proposal_id, generation_key, _source_ref)
+function M.latest_complete_converge_round(comments, proposal_id, _base_version, _source_ref)
   local latest = nil
-  local facts = generation_key == nil
-    and conv_rounds.converge_round_facts_for_proposal(comments, proposal_id)
-    or conv_rounds.converge_round_facts_for_generation(comments, proposal_id, generation_key)
+  local facts = conv_rounds.converge_round_facts_for_proposal(comments, proposal_id)
   for _, fact in ipairs(facts) do
     if fact.narrowed_question ~= nil
       and fact.narrowed_question ~= ""

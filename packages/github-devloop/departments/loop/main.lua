@@ -87,23 +87,9 @@ return saga.department(spec, { done = function() return false end, act = functio
     local function build_comment_request(unresolved_for_comment, round_for_comment, marker_body_for_comment, handoff_for_comment)
       return requests_lifecycle.build_converge_round_comment_request(core, repo, issue_number, unresolved_for_comment, round_for_comment, marker_body_for_comment, handoff_for_comment)
     end
-    local generation_key = conv_rounds.thinking_generation_key(state.version)
-    local current_base_version = transition_version.strip_suffixes(state.version)
-    local lineage = conv_rounds.converge_round_facts_for_generation(current.comments, unresolved.proposal_id, generation_key)
+    local lineage = conv_rounds.converge_round_facts_for_proposal(current.comments, unresolved.proposal_id)
     local has_lineage = #lineage > 0
     local latest_round = conv_rounds.max_converge_round(lineage)
-    if not has_lineage then
-      local legacy_round = conv_rounds.max_converge_round(conv_rounds.legacy_converge_round_facts_without_generation(current.comments, unresolved.proposal_id))
-      if legacy_round > 0 then
-        devloop_logging.log_line("info", "loop", unresolved.proposal_id, "CONVERGENCE_MIGRATION", {
-          "action=ignore-legacy-no-generation-budget",
-          "generation=" .. tostring(generation_key),
-          "legacy_max_round=" .. tostring(legacy_round),
-          "current_max_round=0",
-          "reason=legacy markers without generation are outside explicit generation lineage",
-        })
-      end
-    end
     local latest_fact = latest_lineage_fact(lineage)
     local terminal_lineage = has_lineage
       and (latest_round >= config.max_converge_rounds()
@@ -111,7 +97,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         or conv_rounds.has_essence_stall(lineage)
         or conv_rounds.resolvability_exhausted(lineage))
     if terminal_lineage then
-      local terminal_base_version = current_base_version
+      local terminal_base_version = latest_fact and latest_fact.version or base_version
       local terminal_unresolved = {
         proposal_id = unresolved.proposal_id,
         dedup_key = (latest_fact and latest_fact.dedup) or unresolved.dedup_key,
@@ -154,10 +140,9 @@ return saga.department(spec, { done = function() return false end, act = functio
       unresolved.narrowed_question,
       unresolved.angle_digests,
       unresolved.findings_record,
-      unresolved.essence_stall == true,
-      generation_key
+      unresolved.essence_stall == true
     )
-    local lineage_with_current = conv_rounds.append_converge_round_fact(lineage, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record, unresolved.essence_stall == true, generation_key)
+    local lineage_with_current = conv_rounds.append_converge_round_fact(lineage, round, unresolved.narrowed_question, unresolved.angle_digests, unresolved.dedup_key, unresolved.findings_record, unresolved.essence_stall == true)
     local cap_exhausted = conv_rounds.max_converge_round(lineage_with_current) >= config.max_converge_rounds()
     local resolvability_exhausted = conv_rounds.resolvability_exhausted(lineage_with_current)
     local essence_stall = conv_rounds.has_essence_stall(lineage_with_current)

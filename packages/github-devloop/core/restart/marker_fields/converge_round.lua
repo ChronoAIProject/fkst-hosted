@@ -2,7 +2,6 @@ return {
   family = "converge-round",
   proposal = true,
       version = true,
-      generation = true,
       source_ref = true,
       round = true,
       question = true,

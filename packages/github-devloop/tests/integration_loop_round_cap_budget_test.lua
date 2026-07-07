@@ -2,6 +2,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_reconcile = require("devloop.convergence.reconcile")
+local config = require("devloop.config")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -21,16 +22,53 @@ local function cap_angles(round)
   return angles(round, verdicts[(round % #verdicts) + 1])
 end
 
-local function findings(text)
-  return "open:\n" .. tostring(text or "current unresolved finding")
+local function no_consensus_angles(round)
+  local verdicts = { "abstain", "comment" }
+  return angles(round, verdicts[(round % #verdicts) + 1])
 end
 
-local function without_generation(marker)
-  local body, replaced = tostring(marker):gsub(' generation="[^"]*"', "")
-  if replaced ~= 1 then
-    error("github-devloop test fixture expected one generation attribute")
+local function real_drifting_version(round)
+  local suffixes = {
+    [0] = "intake/1261458050",
+    [1] = "2026-07-07T13-16-51Z",
+    [2] = "2026-07-07T13-20-54Z",
+    [3] = "2026-07-07T13-25-10Z",
+    [4] = "2026-07-07T13-29-44Z",
+    [5] = "2026-07-07T13-33-18Z",
+    [6] = "2026-07-07T13-37-02Z",
+    [7] = "2026-07-07T13-41-26Z",
+    [8] = "2026-07-07T13-45-30Z",
+  }
+  return "consensus:github-devloop/issue/owner/repo/42/" .. tostring(suffixes[round])
+end
+
+local function real_drifting_dedup(round)
+  local version = real_drifting_version(round)
+  if round == 0 then
+    return version
   end
-  return body
+  return version .. "/loop/" .. tostring(round)
+end
+
+local function real_drifting_round_comments(event, last_round)
+  local comments = {}
+  local sr_digest = convergence_shared.source_ref_digest(event.source_ref)
+  for round = 0, last_round do
+    local version = real_drifting_version(round)
+    table.insert(comments, conv_rounds.converge_round_marker(event.proposal_id,
+      version,
+      sr_digest,
+      round,
+      real_drifting_dedup(round),
+      "Real drifting question " .. tostring(round),
+      no_consensus_angles(round)
+    ))
+  end
+  return comments
+end
+
+local function findings(text)
+  return "open:\n" .. tostring(text or "current unresolved finding")
 end
 
 local function run_comment_handoff_from_request(request, comment_id, name)
@@ -143,7 +181,7 @@ return {
         body = conv_rounds.converge_round_marker(event.proposal_id, base_version, current_digest, 1, base_version .. "/loop/1", "Forged", angles(1), findings("forged finding")),
         author_login = "ordinary-user",
       },
-      conv_rounds.converge_round_marker(event.proposal_id, drift_version, drift_digest, 2, drift_version .. "/loop/2", "Other boundary", angles(2), findings("drifted finding"), false, base_version),
+      conv_rounds.converge_round_marker(event.proposal_id, drift_version, drift_digest, 2, drift_version .. "/loop/2", "Other boundary", angles(2), findings("drifted finding")),
     })
 
     local result = run_loop(event, opts("loop-drifted-lineage-budget"))
@@ -170,7 +208,7 @@ return {
     local drift_digest = convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?drift=1" })
     mock_issue_loop({ "fkst-dev:thinking" }, {
       core.state_marker(event.proposal_id, "thinking", base_version),
-      conv_rounds.converge_round_marker(event.proposal_id, drift_version, drift_digest, 2, drift_version .. "/loop/2", "Other boundary", angles(2), nil, false, base_version),
+      conv_rounds.converge_round_marker(event.proposal_id, drift_version, drift_digest, 2, drift_version .. "/loop/2", "Other boundary", angles(2)),
     })
 
     local result = run_loop(event, opts("loop-stale-lower-drifted-lineage"))
@@ -199,10 +237,7 @@ return {
         round,
         drift_version .. "/loop/" .. tostring(round),
         "Question " .. tostring(round),
-        cap_angles(round),
-        nil,
-        false,
-        base_version
+        cap_angles(round)
       ))
     end
     mock_issue_loop({ "fkst-dev:thinking" }, comments)
@@ -219,146 +254,65 @@ return {
     t.is_true(comment.payload.body:find('round="8"', 1, true) ~= nil)
   end,
 
-  test_loop_prior_generation_cap_does_not_terminalize_new_generation = function()
-    local old_generation = "consensus:github-devloop/issue/owner/repo/42/intake/old"
-    local new_generation = "consensus:github-devloop/issue/owner/repo/42/intake/new"
-    local event = unresolved({
-      dedup_key = new_generation,
-      round = 0,
-      narrowed_question = "New generation question",
-      angle_digests = angles(0, "abstain"),
+  test_loop_real_drifting_versions_keep_proposal_lineage_bounded = function()
+    local advancing_round = 3
+    local advancing_version = real_drifting_version(advancing_round)
+    local advancing_event = unresolved({
+      dedup_key = real_drifting_dedup(advancing_round),
+      round = advancing_round,
+      narrowed_question = "Real drifting question " .. tostring(advancing_round),
+      angle_digests = no_consensus_angles(advancing_round),
     })
-    local comments = {
-      core.state_marker(event.proposal_id, "blocked", old_generation .. "/loop/8"),
-      core.state_marker(event.proposal_id, "thinking", new_generation),
-    }
-    for round = 0, 8 do
-      table.insert(comments, conv_rounds.converge_round_marker(event.proposal_id,
-        old_generation,
-        convergence_shared.source_ref_digest({ kind = "external", ref = "owner/repo#issue/42?old=" .. tostring(round) }),
-        round,
-        old_generation .. "/loop/" .. tostring(round),
-        "Old generation question " .. tostring(round),
-        cap_angles(round),
-        nil,
-        false,
-        old_generation
-      ))
-    end
-    mock_issue_loop({ "fkst-dev:thinking" }, comments)
+    local advancing_comments = real_drifting_round_comments(advancing_event, advancing_round - 1)
+    table.insert(advancing_comments, 1, core.state_marker(advancing_event.proposal_id, "thinking", advancing_version))
+    mock_issue_loop({ "fkst-dev:thinking" }, advancing_comments)
 
-    local result = run_loop(event, opts("loop-prior-generation-cap-isolated"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local proposal = find_raise(result.raises, "consensus.proposal")
+    local advancing = run_loop(advancing_event, opts("loop-real-drifting-lineage-advances"))
+    t.eq(advancing.exit_code, 0)
+    t.eq(#advancing.raises, 2)
+    local proposal = find_raise(advancing.raises, "consensus.proposal")
     t.is_true(proposal ~= nil)
-    t.eq(proposal.payload.round, 1)
-    t.eq(proposal.payload.dedup_key, "github-devloop/issue/owner/repo/42/intake/new/loop/1")
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
-    t.is_true(comment ~= nil)
-    t.is_nil(comment.payload.handoff)
-    t.is_true(comment.payload.body:find('round="0"', 1, true) ~= nil)
-    t.is_true(comment.payload.body:find('generation="github-devloop/issue/owner/repo/42/intake/new"', 1, true) ~= nil)
-  end,
+    t.eq(proposal.payload.round, advancing_round + 1)
+    t.eq(proposal.payload.dedup_key, "github-devloop/issue/owner/repo/42/2026-07-07T13-25-10Z/loop/4")
+    local advancing_comment = find_raise(advancing.raises, "github-proxy.github_issue_comment_request")
+    t.is_true(advancing_comment ~= nil)
+    t.is_true(advancing_comment.payload.body:find('round="3"', 1, true) ~= nil)
+    t.eq(find_raise(advancing.raises, "devloop_reconcile"), nil)
 
-  test_loop_legacy_missing_generation_budget_is_observable_and_does_not_drop = function()
-    local current_generation = "consensus:github-devloop/issue/owner/repo/42/intake/current"
-    local event = unresolved({
-      dedup_key = current_generation,
-      round = 0,
-      source_ref = { kind = "external", ref = "owner/repo#issue/42?current=deploy" },
-      narrowed_question = "Current generation starts after deploy",
-      angle_digests = angles(0, "abstain"),
+    local terminal_round = config.max_converge_rounds()
+    local terminal_version = real_drifting_version(terminal_round)
+    local terminal_event = unresolved({
+      dedup_key = real_drifting_dedup(terminal_round),
+      round = terminal_round,
+      narrowed_question = "Real drifting question " .. tostring(terminal_round),
+      angle_digests = no_consensus_angles(terminal_round),
     })
-    local comments = {
-      core.state_marker(event.proposal_id, "thinking", current_generation),
-    }
-    for round = 1, 8 do
-      local drift_version = "consensus:github-devloop/issue/owner/repo/42/intake/drifted-" .. tostring(round)
-      local source_ref = { kind = "external", ref = "owner/repo#issue/42?legacy=" .. tostring(round) }
-      table.insert(comments, without_generation(conv_rounds.converge_round_marker(event.proposal_id,
-        drift_version,
-        convergence_shared.source_ref_digest(source_ref),
-        round,
-        drift_version .. "/loop/" .. tostring(round),
-        "Legacy question " .. tostring(round),
-        cap_angles(round),
-        nil,
-        false,
-        current_generation
-      )))
-    end
-    mock_issue_loop({ "fkst-dev:thinking" }, comments)
+    local terminal_comments = real_drifting_round_comments(terminal_event, terminal_round - 1)
+    table.insert(terminal_comments, 1, core.state_marker(terminal_event.proposal_id, "thinking", terminal_version))
+    mock_issue_loop({ "fkst-dev:thinking" }, terminal_comments)
 
-    local current_lineage = conv_rounds.converge_round_facts_for_generation(comments, event.proposal_id, current_generation)
-    local legacy_lineage = conv_rounds.legacy_converge_round_facts_without_generation(comments, event.proposal_id)
-    t.eq(#current_lineage, 0)
-    t.eq(conv_rounds.max_converge_round(legacy_lineage), 8)
-
-    local result = run_loop(event, opts("loop-legacy-missing-generation-observable"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 2)
-    local proposal = find_raise(result.raises, "consensus.proposal")
-    t.is_true(proposal ~= nil)
-    t.eq(proposal.payload.round, 1)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
-    t.is_true(comment ~= nil)
-    t.is_nil(comment.payload.handoff)
-  end,
-
-  test_loop_current_generation_terminates_with_current_base_despite_drifted_versions = function()
-    local current_generation = "consensus:github-devloop/issue/owner/repo/42/intake/current"
-    local event = unresolved({
-      dedup_key = current_generation .. "/loop/9",
-      round = 9,
-      source_ref = { kind = "external", ref = "owner/repo#issue/42?current=9" },
-      narrowed_question = "Current generation over cap",
-      angle_digests = cap_angles(9),
-    })
-    local comments = {
-      core.state_marker(event.proposal_id, "thinking", current_generation),
-    }
-    for round = 1, 8 do
-      local legacy_version = "consensus:github-devloop/issue/owner/repo/42/intake/legacy-drifted-" .. tostring(round)
-      local source_ref = { kind = "external", ref = "owner/repo#issue/42?legacy-terminal=" .. tostring(round) }
-      table.insert(comments, without_generation(conv_rounds.converge_round_marker(event.proposal_id,
-        legacy_version,
-        convergence_shared.source_ref_digest(source_ref),
-        round,
-        legacy_version .. "/loop/" .. tostring(round),
-        "Legacy question " .. tostring(round),
-        cap_angles(round),
-        nil,
-        false,
-        current_generation
-      )))
-    end
-    for round = 0, 8 do
-      local drift_version = "consensus:github-devloop/issue/owner/repo/42/intake/current-drifted-" .. tostring(round)
-      local source_ref = { kind = "external", ref = "owner/repo#issue/42?current-drift=" .. tostring(round) }
-      table.insert(comments, conv_rounds.converge_round_marker(event.proposal_id,
-        drift_version,
-        convergence_shared.source_ref_digest(source_ref),
-        round,
-        drift_version .. "/loop/" .. tostring(round),
-        "Current question " .. tostring(round),
-        cap_angles(round),
-        nil,
-        false,
-        current_generation
-      ))
-    end
-    mock_issue_loop({ "fkst-dev:thinking" }, comments)
-
-    local result = run_loop(event, opts("loop-current-generation-terminal-base"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    t.eq(find_raise(result.raises, "consensus.proposal"), nil)
-    local comment = find_raise(result.raises, "github-proxy.github_issue_comment_request")
+    local terminal = run_loop(terminal_event, opts("loop-real-drifting-lineage-cap"))
+    t.eq(terminal.exit_code, 0)
+    t.eq(#terminal.raises, 1)
+    t.eq(find_raise(terminal.raises, "consensus.proposal"), nil)
+    local comment = find_raise(terminal.raises, "github-proxy.github_issue_comment_request")
     t.is_true(comment ~= nil)
     t.eq(comment.payload.handoff.kind, "github-devloop.reconcile")
-    t.eq(comment.payload.handoff.round, 8)
-    t.eq(comment.payload.handoff.base_version, current_generation)
+    t.eq(comment.payload.handoff.proposal_id, terminal_event.proposal_id)
+    t.eq(comment.payload.handoff.round, terminal_round)
+    t.eq(comment.payload.handoff.base_version, terminal_version)
+    t.is_true(comment.payload.body:find('round="' .. tostring(terminal_round) .. '"', 1, true) ~= nil)
+
+    local handoff = run_comment_handoff_from_request(
+      comment.payload,
+      "IC_real_drifting_reconcile",
+      "loop-real-drifting-comment-handoff-reconcile"
+    )
+    t.eq(handoff.exit_code, 0)
+    local reconcile_raise = find_raise(handoff.raises, "devloop_reconcile")
+    t.is_true(reconcile_raise ~= nil)
+    t.eq(reconcile_raise.payload.round, terminal_round)
+    t.eq(reconcile_raise.payload.base_version, terminal_version)
   end,
 
   test_loop_distinct_progressing_rounds_below_cap_continue = function()
