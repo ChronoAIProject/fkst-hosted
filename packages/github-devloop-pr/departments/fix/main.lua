@@ -8,6 +8,8 @@ local parsers_issue = require("devloop.parsers.issue")
 local core = require("core")
 local git_adapter = require("forge.git")
 local saga = require("workflow.saga")
+local convergence_identity = require("contract.convergence_identity")
+local workflow_codex = require("workflow.codex")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
@@ -445,10 +447,18 @@ local function run_fix_attempt(plan)
     version = plan.fix.dedup_key,
     tick = plan.event_ts,
   })
-  local result = spawn_codex_sync({
+  local result = workflow_codex.dispatch(convergence_identity.from_parts("fix", plan.fix.proposal_id, plan.fix.version, {
+    angle_lane = "worker",
+  }), {
     prompt = core.build_fix_prompt(plan.fix, plan.current_issue, plan.feedback_reason, plan.fix.framing, content_fetch, merge_context),
-    worktree = worktree, role = "fix", proposal_id = plan.fix.proposal_id, dedup_key = plan.fix.version, timeout = 2 * 60 * 60,  -- 2h: fix loops code+test (#1481)
+    worktree = worktree,
+    timeout = 2 * 60 * 60,  -- 2h: fix loops code+test (#1481)
+    sync = true,
   })
+  if type(result) == "table" and result.deferred then
+    devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, "result=deferred", nil)
+    return nil
+  end
   if type(result) ~= "table" or result.exit_code ~= 0 then
     local stderr = type(result) == "table" and result.stderr or "nil result"
     devloop_logging.log_codex_result("fix", plan.fix.proposal_id, "fix", result, nil, stderr, {
@@ -853,6 +863,9 @@ local function act_fix(event)
     return
   end
   local outcome = run_fix_attempt(attempt_plan)
+  if outcome == nil then
+    return
+  end
   with_lock(lock_key, function()
     apply_fix_outcome(repo, issue_number, fix, attempt_plan.branch, outcome)
   end)

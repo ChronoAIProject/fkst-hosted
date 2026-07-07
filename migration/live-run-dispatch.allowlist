@@ -1,0 +1,4 @@
+# Unguarded identity-carrying codex dispatch migration ratchet.
+# Format: path:line
+# New entries fail the shrink-only expectation; remove entries as sites migrate to
+# workflow.codex.dispatch.

@@ -429,7 +429,7 @@ local result = spawn_codex_sync({ prompt = prompt })
 raise_implementing_state(repo, issue_number, ready)
 ]],
     })
-    t.is_true(contains_error(errors, "spawn_codex_sync must be preceded by span start predecessor"), "missing spawn order error")
+    t.is_true(contains_error(errors, "codex dispatch must be preceded by span start predecessor"), "missing spawn order error")
   end,
 
   test_declared_start_predecessor_can_bind_marker_through_shared_helper = function()
@@ -456,6 +456,28 @@ function C.build_implementing_state_comment_request(M, repo, issue_number, ready
   local marker = M.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
   return { body = marker }
 end
+]],
+    })
+    t.eq(#errors, 0)
+  end,
+
+  test_declared_start_predecessor_can_order_workflow_codex_dispatch = function()
+    local errors = span.errors_from_sources({
+      ["libraries/devloop/restart/issue/transitions/implementing.lua"] = transition_source([[
+    span_contract = span_contract({
+      department = "implement",
+      durable_start_marker = "implement-attempt:v1",
+      spawn_predecessor = "raise_implementing_state",
+    }),
+]]),
+      ["packages/github-devloop/departments/implement/main.lua"] = [[
+local function raise_implementing_state(repo, issue_number, ready)
+  local marker = core.implement_attempt_marker(ready.proposal_id, ready.dedup_key, 1, now())
+  raise("github-proxy.github_issue_comment_request", { body = marker })
+end
+
+raise_implementing_state(repo, issue_number, ready)
+local result = workflow_codex.dispatch(identity, { prompt = prompt, sync = true })
 ]],
     })
     t.eq(#errors, 0)
@@ -505,212 +527,6 @@ local outcome = run_fix_attempt(attempt_plan)
     t.eq(#errors, 0)
   end,
 
-  test_long_running_dispatch_spawn_without_live_run_dedup_fails = function()
-    local errors = span.errors_from_sources({
-      ["packages/github-devloop-pr/core/restart/transitions/fixing.lua"] = [[
-return function(M, h)
-  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
-  return {
-    from_state = "fixing",
-    responsibility_signature = responsibility_signature({
-      state_kind = "worker",
-    }),
-    liveness_contract = {
-      real_execution = {
-        primitive = "fkst.codex_runs",
-        match = {
-          role = "fix",
-          proposal_id = "state.proposal_id",
-          dedup_key = "state.version",
-        },
-      },
-    },
-    span_contract = span_contract({
-      department = "fix",
-      durable_start_marker = "state:v1 fixing",
-      spawn_predecessor = "precheck_fix_write_gate",
-      spawn_function = "run_fix_attempt",
-    }),
-  }
-end
-]],
-      ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
-local function validate_fix_write_gate_snapshot(pr, fix)
-  local rechecked_state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
-  if rechecked_state.state ~= "fixing" then
-    return nil
-  end
-  return pr
-end
-
-local function precheck_fix_write_gate(repo, fix, branch)
-  return validate_fix_write_gate_snapshot(pr, fix) ~= nil
-end
-
-local function run_fix_attempt(plan)
-  return spawn_codex_sync({ prompt = prompt })
-end
-
-precheck_fix_write_gate(repo, fix, branch)
-local outcome = run_fix_attempt(attempt_plan)
-]],
-    })
-    t.is_true(contains_error(errors, "run_fix_attempt call must be preceded by dispatch_live_run_dedup"), "missing live-run dispatch dedup error")
-  end,
-
-  test_long_running_dispatch_spawn_with_live_run_dedup_passes = function()
-    local errors = span.errors_from_sources({
-      ["packages/github-devloop-pr/core/restart/transitions/fixing.lua"] = [[
-return function(M, h)
-  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
-  return {
-    from_state = "fixing",
-    responsibility_signature = responsibility_signature({
-      state_kind = "worker",
-    }),
-    liveness_contract = {
-      real_execution = {
-        primitive = "fkst.codex_runs",
-        match = {
-          role = "fix",
-          proposal_id = "state.proposal_id",
-          dedup_key = "state.version",
-        },
-      },
-    },
-    span_contract = span_contract({
-      department = "fix",
-      durable_start_marker = "state:v1 fixing",
-      spawn_predecessor = "precheck_fix_write_gate",
-      spawn_function = "run_fix_attempt",
-    }),
-  }
-end
-]],
-      ["packages/github-devloop-pr/departments/fix/main.lua"] = [[
-local function validate_fix_write_gate_snapshot(pr, fix)
-  local rechecked_state = require("devloop.entity").current_entity_state(pr.comments, fix.proposal_id)
-  if rechecked_state.state ~= "fixing" then
-    return nil
-  end
-  return pr
-end
-
-local function precheck_fix_write_gate(repo, fix, branch)
-  return validate_fix_write_gate_snapshot(pr, fix) ~= nil
-end
-
-local function run_fix_attempt(plan)
-  return spawn_codex_sync({ prompt = prompt })
-end
-
-precheck_fix_write_gate(repo, fix, branch)
-local dispatch_live_run = require("devloop.dispatch_live_run")
-if dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", attempt_plan.fix.proposal_id, attempt_plan.fix.version) then
-  return
-end
-local outcome = run_fix_attempt(attempt_plan)
-]],
-    })
-    t.eq(#errors, 0)
-  end,
-
-  test_review_meta_codex_dispatch_without_live_run_dedup_fails = function()
-    local errors = span.errors_from_sources({
-      ["packages/github-devloop-pr/core/restart/transitions/review_meta.lua"] = [[
-return function(M, h)
-  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
-  return {
-    from_state = "review-meta",
-    responsibility_signature = responsibility_signature({
-      state_kind = "decision",
-    }),
-    liveness_contract = {
-      real_execution = {
-        primitive = "fkst.codex_runs",
-        match = {
-          role = "review-meta",
-          proposal_id = "state.proposal_id",
-          dedup_key = "state.version",
-        },
-      },
-    },
-    span_contract = span_contract({
-      department = "review_meta",
-      durable_start_marker = "state:v1 review-meta",
-      spawn_predecessor = "load_review_meta_context",
-      spawn_function = "review_meta_codex_decision",
-    }),
-  }
-end
-]],
-      ["packages/github-devloop-pr/departments/review_meta/main.lua"] = [[
-local function load_review_meta_context(repo, issue_number, review_meta, event)
-  local durable_start_marker = "state:v1 review-meta"
-  return { state = "review-meta" }
-end
-
-local function review_meta_codex_decision(plan)
-  return spawn_codex_sync({ prompt = prompt })
-end
-
-local plan = load_review_meta_context(repo, issue_number, review_meta, event)
-local parsed = review_meta_codex_decision(plan)
-]],
-    })
-    t.is_true(contains_error(errors, "review_meta_codex_decision call must be preceded by dispatch_live_run_dedup"), "missing review-meta live-run dispatch dedup error")
-  end,
-
-  test_review_meta_codex_dispatch_with_live_run_dedup_passes = function()
-    local errors = span.errors_from_sources({
-      ["packages/github-devloop-pr/core/restart/transitions/review_meta.lua"] = [[
-return function(M, h)
-  local responsibility_signature = h.responsibility_signature; local span_contract = h.span_contract
-  return {
-    from_state = "review-meta",
-    responsibility_signature = responsibility_signature({
-      state_kind = "decision",
-    }),
-    liveness_contract = {
-      real_execution = {
-        primitive = "fkst.codex_runs",
-        match = {
-          role = "review-meta",
-          proposal_id = "state.proposal_id",
-          dedup_key = "state.version",
-        },
-      },
-    },
-    span_contract = span_contract({
-      department = "review_meta",
-      durable_start_marker = "state:v1 review-meta",
-      spawn_predecessor = "load_review_meta_context",
-      spawn_function = "review_meta_codex_decision",
-    }),
-  }
-end
-]],
-      ["packages/github-devloop-pr/departments/review_meta/main.lua"] = [[
-local function load_review_meta_context(repo, issue_number, review_meta, event)
-  local durable_start_marker = "state:v1 review-meta"
-  return { state = "review-meta" }
-end
-
-local function review_meta_codex_decision(plan)
-  return spawn_codex_sync({ prompt = prompt })
-end
-
-local plan = load_review_meta_context(repo, issue_number, review_meta, event)
-local dispatch_live_run = require("devloop.dispatch_live_run")
-if dispatch_live_run.dispatch_live_run_dedup(liveness, "review-meta", review_meta.proposal_id, review_meta.version) then
-  return
-end
-local parsed = review_meta_codex_decision(plan)
-]],
-    })
-    t.is_true(#errors == 0, join_error_messages(errors))
-  end,
-
   test_worker_span_contract_declaration_reuses_strict_contract = function()
     local rows = {}
     for index, row in ipairs(core.restart_transition_table()) do
@@ -725,15 +541,32 @@ local parsed = review_meta_codex_decision(plan)
     t.is_true(contains_error(errors, "implementing: worker row must declare span_contract"), "missing strict span error")
   end,
 
-  test_source_list_tracks_old_gspan_scan_surface = function()
+  test_source_list_discovers_package_and_library_scan_surface = function()
     local listed = {}
-    for _, path in ipairs(span.source_paths()) do
+    local paths = span.source_paths()
+    for _, path in ipairs(paths) do
       listed[path] = true
     end
-    t.eq(listed["libraries/devloop/requests/lifecycle.lua"], true)
-    t.eq(listed["libraries/devloop/restart/issue/transitions/implementing.lua"], true)
-    t.eq(listed["packages/github-devloop/departments/implement/main.lua"], true)
-    t.eq(listed["packages/github-devloop-pr/core/restart/transitions/fixing.lua"], true)
-    t.eq(listed["packages/github-devloop-pr/departments/fix/main.lua"], true)
+    local function assert_listed(path)
+      t.is_true(listed[path] == true, path .. " missing from source paths:\n" .. table.concat(paths, "\n"))
+    end
+    assert_listed("libraries/devloop/requests/lifecycle.lua")
+    assert_listed("libraries/devloop/restart/issue/transitions/implementing.lua")
+    assert_listed("packages/github-devloop/departments/implement/main.lua")
+    assert_listed("packages/consensus/departments/decide/main.lua")
+    assert_listed("packages/github-devloop-pr/core/restart/transitions/fixing.lua")
+    assert_listed("packages/github-devloop-pr/departments/fix/main.lua")
+  end,
+
+  test_source_roots_prefer_worktree_and_exclude_fkst_runtime = function()
+    local roots = span._source_roots()
+    local by_logical = {}
+    for _, root in ipairs(roots) do
+      t.is_true(tostring(root.logical):find(".fkst", 1, true) == nil, "runtime logical root leaked: " .. tostring(root.logical))
+      t.is_true(tostring(root.actual):find("/.fkst/", 1, true) == nil, "runtime actual root leaked: " .. tostring(root.actual))
+      by_logical[root.logical] = root.actual
+    end
+    t.is_true(tostring(by_logical.packages or ""):find("/packages", 1, true) ~= nil, "packages worktree root missing")
+    t.is_true(tostring(by_logical.libraries or ""):find("/libraries", 1, true) ~= nil, "libraries worktree root missing")
   end,
 }

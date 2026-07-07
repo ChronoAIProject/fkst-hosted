@@ -1,6 +1,8 @@
 local core = require("core")
+local convergence_identity = require("contract.convergence_identity")
 local rebuttal = require("departments.decide.rebuttal")
 local synthesis = require("departments.decide.synthesis")
+local workflow_codex = require("workflow.codex")
 local saga = require("workflow.saga")
 
 local aggregate = core.aggregate
@@ -33,11 +35,34 @@ local function prepare_judgment_worktree(path)
 end
 
 local function codex_opts(proposal, prompt, worktree, role)
-  local opts = core.judgment_codex_opts(prompt, worktree)
-  opts.role = role or "consensus"
-  opts.proposal_id = proposal.proposal_id
-  opts.dedup_key = proposal.dedup_key
-  return opts
+  return core.judgment_codex_opts(prompt, worktree)
+end
+
+local function codex_identity(proposal, role, angle_lane)
+  return convergence_identity.from_proposal(role or "consensus", proposal, {
+    angle_lane = angle_lane,
+  })
+end
+
+local function defer_live_run(identity)
+  error(
+    "consensus: live-run-active: role=" .. tostring(identity.role)
+      .. " proposal_id=" .. tostring(identity.proposal_id)
+      .. " dedup_key=" .. tostring(identity.dedup_key)
+  )
+end
+
+local function dispatch_codex(proposal, prompt, worktree, role, angle_lane, opts)
+  local run_identity = codex_identity(proposal, role, angle_lane)
+  local dispatch_opts = codex_opts(proposal, prompt, worktree, run_identity.role)
+  for key, value in pairs(opts or {}) do
+    dispatch_opts[key] = value
+  end
+  local result = workflow_codex.dispatch(run_identity, dispatch_opts)
+  if type(result) == "table" and result.deferred then
+    defer_live_run(run_identity)
+  end
+  return result
 end
 
 local function spawn_angle(proposal, angle, runtime_root)
@@ -45,7 +70,7 @@ local function spawn_angle(proposal, angle, runtime_root)
   local worktree = prepare_judgment_worktree(
     judgment_scratch_worktree(runtime_root, "angle-" .. tostring(angle), proposal.dedup_key)
   )
-  return spawn_codex(codex_opts(proposal, prompt, worktree, "consensus"))
+  return dispatch_codex(proposal, prompt, worktree, "consensus", tostring(angle))
 end
 
 local function raise_converge(proposal, angle_results, narrowed_question, findings_record, essence_stall)
@@ -58,12 +83,18 @@ local function raise_converge(proposal, angle_results, narrowed_question, findin
 end
 
 local function decide(proposal)
-  local runtime_root = read_runtime_root()
-
   local angle_results = {}
   local handles = {}
   local angles = core.angles(proposal)
   local verdict_mode = core.verdict_mode(proposal)
+  for _, angle in ipairs(angles) do
+    local run_identity = codex_identity(proposal, "consensus", tostring(angle))
+    if workflow_codex.live_run_active(run_identity) then
+      defer_live_run(run_identity)
+    end
+  end
+
+  local runtime_root = read_runtime_root()
   for _, angle in ipairs(angles) do
     table.insert(handles, spawn_angle(proposal, angle, runtime_root))
   end
@@ -108,7 +139,9 @@ local function decide(proposal)
       judgment_scratch_worktree = function(root, kind, identity)
         return judgment_scratch_worktree(root, kind, identity)
       end,
-      spawn_codex = spawn_codex,
+      dispatch_codex = function(target_proposal, prompt, worktree, role, angle_lane)
+        return dispatch_codex(target_proposal, prompt, worktree, role, angle_lane)
+      end,
     })
     local rebuttal_outputs = await_all(rebuttal_handles)
     rebuttal_results = rebuttal.collect(angle_results, rebuttal_outputs, verdict_mode, {
@@ -144,7 +177,9 @@ local function decide(proposal)
       local worktree = prepare_judgment_worktree(
         judgment_scratch_worktree(runtime_root, repair and "synthesis-repair" or "synthesis", proposal.dedup_key)
       )
-      return spawn_codex_sync(codex_opts(proposal, prompt, worktree, "consensus"))
+      return dispatch_codex(proposal, prompt, worktree, "consensus", repair and "synthesis-repair" or "synthesis", {
+        sync = true,
+      })
     end,
   })
   return synthesis.to_decision_result(proposal, angle_results, rebuttal_results, parsed, {

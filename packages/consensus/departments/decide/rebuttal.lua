@@ -87,7 +87,7 @@ function M.spawn_all(ctx)
     local worktree = ctx.prepare_judgment_worktree(
       ctx.judgment_scratch_worktree(ctx.runtime_root, "rebuttal-" .. tostring(result.angle), ctx.proposal.dedup_key)
     )
-    table.insert(handles, ctx.spawn_codex(ctx.codex_opts(ctx.proposal, prompt, worktree, "consensus")))
+    table.insert(handles, ctx.dispatch_codex(ctx.proposal, prompt, worktree, "consensus", "rebuttal-" .. tostring(result.angle)))
   end
   return handles
 end

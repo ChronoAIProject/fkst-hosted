@@ -19,6 +19,7 @@ import check_repo_intake_default_surface
 import check_repo_intake_routing
 import check_repo_integration_coverage
 import check_repo_lower_injected_m
+import check_repo_live_run_dispatch
 import check_repo_monotone_gate
 import check_repo_namespaced_queue
 import check_repo_producer_liveness
@@ -145,6 +146,8 @@ def run_generic(c, config: check_repo_config.CheckRepoConfig, violations: list[s
             c.add(violations, "G-NAMESPACED-QUEUE", message)
     for message in check_repo_dead_letter.repository_messages(root, c.read_text):
         c.add(violations, "G-DEAD-LETTER", message)
+    for message in check_repo_live_run_dispatch.repository_messages(root, allowlists, enforce_base):
+        c.add(violations, "G-LIVE-RUN-DISPATCH", message)
     check_monotone_gate(c, root, violations, allowlists, enforce_base)
     c.check_saga_handler_ratchet(root, violations, warnings, allowlists, enforce_base)
     sources = {c.rel(root, path): c.read_text(path) for package_root in c.package_roots(root) for path in sorted(package_root.glob("*/departments/*/main.lua")) if path.is_file()}

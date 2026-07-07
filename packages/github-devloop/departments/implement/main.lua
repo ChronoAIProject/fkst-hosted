@@ -9,12 +9,15 @@ local core = require("core")
 local git_adapter = require("forge.git")
 local queue = require("devloop.queue")
 local saga = require("workflow.saga")
+local convergence_identity = require("contract.convergence_identity")
+local workflow_codex = require("workflow.codex")
 local pr_child_handoff = require("departments.implement.pr_child_handoff")
 local forks = require("devloop.forks")
 local slice_gate = require("departments.implement.slice_gate")
 local substrate_pin = require("departments.implement.substrate_pin")
 local transitions = require("departments.implement.transitions")
 local worktree_lifecycle = require("departments.implement.worktree")
+local branch_progress = require("departments.implement.branch_progress")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
@@ -40,7 +43,6 @@ local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
 local MAX_IMPLEMENT_ATTEMPTS = 2
 local MAX_VERSION_MISMATCH_DELIVERIES = 3
-local implemented_branch_head
 local spec = {
   consumes = { "devloop_ready" },
   produces = {
@@ -110,59 +112,6 @@ local function publish_implementation_branch(repo, issue_number, ready, worktree
   if push.exit_code ~= 0 then
     error("github-devloop: branch-push-failed: git implementation branch push failed: " .. tostring(push.stderr))
   end
-end
-
-local function remote_branch_fact(branch, base_branch, source_fact)
-  local fetch_result = devloop_commands.git_fetch_branch("origin", branch, 60)
-  if fetch_result.exit_code ~= 0 then
-    return nil
-  end
-  local head_result = devloop_commands.git_remote_branch_head("origin", branch, 30)
-  if head_result.exit_code ~= 0 then
-    if head_result.exit_code == 1 then
-      return nil
-    end
-    error("github-devloop: git-head-read-failed: git implementing remote branch head failed: " .. tostring(head_result.stderr))
-  end
-  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
-    error("github-devloop: unsafe-head-sha: unsafe implementing remote branch head")
-  end
-  if source_fact ~= nil and source_fact.head_sha ~= nil and head_sha ~= source_fact.head_sha then
-    local ancestry = git_mechanics.git_is_ancestor(core.git, source_fact.head_sha, head_sha, 30)
-    if ancestry.exit_code ~= 0 then
-      return nil
-    end
-  end
-  return {
-    proposal_id = source_fact and source_fact.proposal_id,
-    dedup_key = source_fact and source_fact.dedup_key,
-    branch = branch,
-    head_sha = head_sha,
-    base_branch = (source_fact and source_fact.base_branch) or base_branch,
-    base_sha = source_fact and source_fact.base_sha,
-  }
-end
-
-local function local_branch_fact(base_head, branch, base_branch, dedup_key)
-  local branch_ref = devloop_commands.git_show_ref_branch(branch, 30)
-  if branch_ref.exit_code ~= 0 then
-    if branch_ref.exit_code == 1 then
-      return nil
-    end
-    error("github-devloop: branch-ref-check-failed: git branch ref check failed: " .. tostring(branch_ref.stderr))
-  end
-  local head_sha = implemented_branch_head(base_head, branch)
-  if head_sha == nil or substrate_pin.is_only_pin_delta(base_head, branch) then
-    return nil
-  end
-  return {
-    dedup_key = dedup_key,
-    branch = branch,
-    head_sha = head_sha,
-    base_branch = base_branch,
-    base_sha = base_head,
-  }
 end
 
 local function handoff_existing_pr_link(repo, issue_number, ready, current, link, reason)
@@ -236,27 +185,6 @@ local function implementing_mismatch_is_durable(current, proposal_id, state)
     or m_facts.implementing_fact(current and current.comments, proposal_id, version) ~= nil
 end
 
-implemented_branch_head = function(base_head, branch)
-  local ahead_result = devloop_commands.git_branch_ahead_count(base_head, branch, 30)
-  if ahead_result.exit_code ~= 0 then
-    error("github-devloop: branch-fact-read-failed: git branch ahead check failed: " .. tostring(ahead_result.stderr))
-  end
-  local ahead_count = tonumber(tostring(ahead_result.stdout or ""):match("%d+"))
-  if ahead_count == nil or ahead_count <= 0 then
-    return nil
-  end
-
-  local head_result = devloop_commands.git_branch_head(branch, 30)
-  if head_result.exit_code ~= 0 then
-    error("github-devloop: git-head-read-failed: git branch head failed: " .. tostring(head_result.stderr))
-  end
-  local head_sha = tostring(head_result.stdout or ""):gsub("%s+$", "")
-  if not require("devloop.pr_safety").is_safe_head_sha(head_sha) then
-    error("github-devloop: unsafe-head-sha: unsafe implementing branch head")
-  end
-  return head_sha
-end
-
 local function merge_integration_for_implementation(worktree, integration_branch, base_head)
   local merge_result = devloop_commands.git_worktree_merge_no_edit(worktree, base_head, 120)
   if merge_result.exit_code == 0 then return true end
@@ -295,12 +223,18 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
     version = ready.dedup_key,
     tick = event_ts,
   })
-  local result = spawn_codex_sync({
+  local result = workflow_codex.dispatch(convergence_identity.from_parts("implement", ready.proposal_id, ready.dedup_key, {
+    angle_lane = "worker",
+  }), {
     prompt = core.build_implement_prompt(ready.proposal_id, current, ready.framing, content_fetch),
     worktree = worktree, timeout = 2 * 60 * 60,  -- 2h: implement loops code+test until green; complex tasks exceed the 60min default (#1481)
-    role = "implement", proposal_id = ready.proposal_id, dedup_key = ready.dedup_key,
+    sync = true,
   })
 
+  if type(result) == "table" and result.deferred then
+    devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, "result=deferred", nil)
+    return nil
+  end
   if type(result) ~= "table" or result.exit_code ~= 0 then
     local stderr = type(result) == "table" and result.stderr or "nil result"
     devloop_logging.log_codex_result("implement", ready.proposal_id, "implement", result, nil, stderr, {
@@ -329,7 +263,7 @@ local function run_attempt(repo, issue_number, ready, current, branches, branch,
   end
 
   if tostring(status.stdout or "") == "" then
-    local head_sha = implemented_branch_head(base_head, branch)
+    local head_sha = branch_progress.implemented_branch_head(base_head, branch)
     if head_sha ~= nil and not substrate_pin.is_only_pin_delta(base_head, branch) then
       devloop_logging.log_line("info", "implement", ready.proposal_id, "IMPLEMENT", {
         "branch=" .. tostring(branch),
@@ -707,9 +641,9 @@ local function process_ready_event(event)
       end
       local progress = nil
       if fact ~= nil then
-        progress = remote_branch_fact(fact.branch, fact.base_branch, fact)
+        progress = branch_progress.remote_branch_fact(core.git, fact.branch, fact.base_branch, fact)
       else
-        progress = remote_branch_fact(branch, branches.integration, {
+        progress = branch_progress.remote_branch_fact(core.git, branch, branches.integration, {
           proposal_id = ready.proposal_id,
           dedup_key = marker_ready.dedup_key,
         })
@@ -721,7 +655,7 @@ local function process_ready_event(event)
         return
       end
       local base_head = worktree_lifecycle.prepare_base(branches)
-      local local_progress = local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
+      local local_progress = branch_progress.local_branch_fact(base_head, branch, branches.integration, marker_ready.dedup_key)
       if local_progress ~= nil then
         local_progress.proposal_id = ready.proposal_id
         pr_child_handoff.raise_awaiting_pr_from_fact("implement", repo, issue_number, marker_ready, current, local_progress, "local implementation branch progress is visible")
@@ -886,6 +820,9 @@ local function process_ready_event(event)
     event.ts,
     event.queue
   )
+  if outcome == nil then
+    return
+  end
   with_lock(lock_key, function()
     if recheck_implementation_write_gate(repo, issue_number, attempt_plan.marker_ready, attempt_plan.expected_from_states, attempt_plan.accepted_ready_hand_off, true) then
       raise_attempt_outcome(repo, issue_number, outcome)

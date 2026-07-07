@@ -1,5 +1,7 @@
 local base_ids = require("devloop.base_ids")
+local convergence_identity = require("contract.convergence_identity")
 local devloop_logging = require("devloop.logging")
+local workflow_codex = require("workflow.codex")
 local C = {}
 
 function C.dispatch_live_run_exec_ref(role, proposal_id, dedup_key)
@@ -58,6 +60,12 @@ local function matching_liveness_row(liveness, role)
 end
 
 local function shared_liveness_live(liveness, role, proposal_id, dedup_key, facts)
+  local run_identity = convergence_identity.from_parts(role, proposal_id, dedup_key, {
+    angle_lane = "worker",
+  })
+  if workflow_codex.live_run_active(run_identity) then
+    return true
+  end
   if type(liveness) ~= "table" or type(liveness.restart_row_receiver_liveness) ~= "function" then
     return nil
   end

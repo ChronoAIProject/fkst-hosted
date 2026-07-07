@@ -7,6 +7,7 @@ local parsers_issue = require("devloop.parsers.issue")
 local m_facts = require("devloop.markers.facts")
 local core, saga, context_bundle = require("core"), require("workflow.saga"), require("devloop.context_bundle")
 local v_review_meta = require("devloop.validators.review_meta")
+local convergence_identity = require("contract.convergence_identity")
 local workflow_codex = require("workflow.codex")
 local dispatch_live_run = require("devloop.dispatch_live_run")
 local devloop_logging = require("devloop.logging")
@@ -67,10 +68,14 @@ local function review_meta_codex_decision(plan)
     core.build_review_meta_prompt(plan.review_meta, plan.current_issue, plan.content_fetch),
     devloop_base.judgment_worktree_with_exec(exec_sync, "review-meta", plan.review_meta.dedup_key)
   )
-  codex_opts.role = "review-meta"
-  codex_opts.proposal_id = plan.review_meta.proposal_id
-  codex_opts.dedup_key = plan.review_meta.version
-  local result = spawn_codex_sync(codex_opts)
+  codex_opts.sync = true
+  local result = workflow_codex.dispatch(convergence_identity.from_parts("review-meta", plan.review_meta.proposal_id, plan.review_meta.version, {
+    angle_lane = "worker",
+  }), codex_opts)
+  if type(result) == "table" and result.deferred then
+    devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, "result=deferred", nil)
+    return nil
+  end
   if type(result) ~= "table" or result.exit_code ~= 0 or result.stdout == nil then
     local stderr = type(result) == "table" and result.stderr or "nil result"
     devloop_logging.log_codex_result("review_meta", plan.review_meta.proposal_id, "review-meta", result, nil, stderr, {
@@ -231,6 +236,9 @@ return saga.department(spec, { done = function() return false end, act = functio
     end
 
     local parsed = review_meta_codex_decision(plan)
+    if parsed == nil then
+      return
+    end
     apply_review_meta_decision(plan, parsed)
   end)
 end, wrap = devloop_logging.wrap_pipeline_failure, name = "review_meta" })

@@ -393,18 +393,6 @@ local function span_contracts(transition_sources)
         }
       end
     end
-    local real_execution_start, real_execution_body_start = source:find("real_execution%s*=%s*%{", row.start)
-    if contracts[row.state] ~= nil and real_execution_start ~= nil then
-      local real_execution_body_end = source:find("%}%s*,?%s*%}%s*,?%s*%)", real_execution_body_start + 1)
-        or source:find("%}%s*,?%s*%}%s*,?", real_execution_body_start + 1)
-      local body = real_execution_body_end ~= nil
-        and source:sub(real_execution_body_start + 1, real_execution_body_end - 1)
-        or source:sub(real_execution_body_start + 1)
-      local fields = key_value_strings(body)
-      if fields.primitive == "fkst.codex_runs" then
-        contracts[row.state].dispatch_live_run_role = fields.role
-      end
-    end
   end
   return contracts
 end
@@ -442,9 +430,14 @@ local function predecessor_call_before(source, function_name, index)
   return found
 end
 
+local function contains_codex_dispatch(source)
+  return source:find("%f[%w_]spawn_codex_sync%s*%(") ~= nil
+    or source:find("%f[%w_]dispatch%s*%(") ~= nil
+end
+
 local function function_contains_spawn(source, function_name)
   for _, block in ipairs(function_blocks(source)) do
-    if short_function_name(block.name) == function_name and block.body:find("%f[%w_]spawn_codex_sync%s*%(") ~= nil then
+    if short_function_name(block.name) == function_name and contains_codex_dispatch(block.body) then
       return true
     end
   end
@@ -478,6 +471,10 @@ local function spawn_positions(source)
   for start_pos in source:gmatch("()%f[%w_]spawn_codex_sync%s*%(") do
     table.insert(positions, start_pos)
   end
+  for start_pos in source:gmatch("()%f[%w_]dispatch%s*%(") do
+    table.insert(positions, start_pos)
+  end
+  table.sort(positions)
   return positions
 end
 
@@ -530,7 +527,7 @@ local function spawn_start_messages(transition_sources, department_sources, supp
               saw_spawn = true
               if predecessor_call_before(source, contract.spawn_predecessor, spawn_pos) < 0 then
                 table.insert(messages, string.format(
-                  "%s:%d spawn_codex_sync must be preceded by span start predecessor %q for durable start marker %q",
+                  "%s:%d codex dispatch must be preceded by span start predecessor %q for durable start marker %q",
                   source_path,
                   line_number(source, spawn_pos),
                   contract.spawn_predecessor,
@@ -542,7 +539,7 @@ local function spawn_start_messages(transition_sources, department_sources, supp
         end
         if not saw_spawn then
           table.insert(messages, string.format(
-            "%s:%d span_contract department %q has no spawn_codex_sync call",
+            "%s:%d span_contract department %q has no codex dispatch call",
             contract.path,
             contract.line,
             contract.department
@@ -553,256 +550,6 @@ local function spawn_start_messages(transition_sources, department_sources, supp
   end
   return messages
 end
-
-local function dispatch_live_run_dedup_messages(transition_sources, department_sources)
-  local contracts = span_contracts(transition_sources)
-  local messages = {}
-  for _, row in ipairs(restart_rows(transition_sources)) do
-    local contract = contracts[row.state]
-    if contract ~= nil
-      and tostring(contract.dispatch_live_run_role or "") ~= ""
-      and tostring(contract.department or ""):sub(1, #"external:") ~= "external:"
-      and contract.spawn_function ~= nil then
-      local sources = department_spawn_sources(department_sources, contract.department)
-      for _, source_path in ipairs(sorted_keys(sources)) do
-        local source = sources[source_path]
-        for _, call_pos in ipairs(function_call_positions(source, contract.spawn_function)) do
-          if predecessor_call_before(source, "dispatch_live_run_dedup", call_pos) < 0 then
-            table.insert(messages, string.format(
-              "%s:%d %s call must be preceded by dispatch_live_run_dedup for role %q before long-running codex dispatch",
-              source_path,
-              line_number(source, call_pos),
-              contract.spawn_function,
-              contract.dispatch_live_run_role
-            ))
-          end
-        end
-      end
-    end
-  end
-  return messages
-end
-
-local SCANNED_SOURCE_FILES = {
-  "libraries/devloop/autonomy_ledger.lua",
-  "libraries/devloop/base.lua",
-  "libraries/devloop/claims.lua",
-  "libraries/devloop/commands.lua",
-  "libraries/devloop/commands/dashboard.lua",
-  "libraries/devloop/commands/git_ops.lua",
-  "libraries/devloop/commands/issue_reads.lua",
-  "libraries/devloop/commands/labels.lua",
-  "libraries/devloop/commands/observe_lists.lua",
-  "libraries/devloop/commands/prs.lua",
-  "libraries/devloop/commands/support.lua",
-  "libraries/devloop/commands/validators.lua",
-  "libraries/devloop/comment_handoff.lua",
-  "libraries/devloop/config.lua",
-  "libraries/devloop/conflict_telemetry.lua",
-  "libraries/devloop/context_bundle.lua",
-  "libraries/devloop/convergence.lua",
-  "libraries/devloop/convergence/attempts.lua",
-  "libraries/devloop/convergence/reconcile.lua",
-  "libraries/devloop/convergence/rounds.lua",
-  "libraries/devloop/convergence/shared.lua",
-  "libraries/devloop/decompose.lua",
-  "libraries/devloop/entity.lua",
-  "libraries/devloop/entity_list_cache.lua",
-  "libraries/devloop/forks.lua",
-  "libraries/devloop/gate.lua",
-  "libraries/devloop/git_mechanics.lua",
-  "libraries/devloop/github_proxy_entity_view.lua",
-  "libraries/devloop/github_risk.lua",
-  "libraries/devloop/liveness.lua",
-  "libraries/devloop/liveness/signal.lua",
-  "libraries/devloop/liveness/timeout.lua",
-  "libraries/devloop/liveness_scan.lua",
-  "libraries/devloop/logging.lua",
-  "libraries/devloop/markers.lua",
-  "libraries/devloop/markers/builders.lua",
-  "libraries/devloop/markers/facts.lua",
-  "libraries/devloop/markers/shared.lua",
-  "libraries/devloop/merge_batch.lua",
-  "libraries/devloop/merge_gate_wait.lua",
-  "libraries/devloop/merge_queue.lua",
-  "libraries/devloop/operator_commands.lua",
-  "libraries/devloop/parsers.lua",
-  "libraries/devloop/parsers/issue.lua",
-  "libraries/devloop/parsers/misc.lua",
-  "libraries/devloop/parsers/pr.lua",
-  "libraries/devloop/parsers/shared.lua",
-  "libraries/devloop/payloads.lua",
-  "libraries/devloop/payloads/board.lua",
-  "libraries/devloop/payloads/builders.lua",
-  "libraries/devloop/payloads/predicates.lua",
-  "libraries/devloop/payloads/shared.lua",
-  "libraries/devloop/pr_safety.lua",
-  "libraries/devloop/prompts.lua",
-  "libraries/devloop/queue.lua",
-  "libraries/devloop/queue_starvation.lua",
-  "libraries/devloop/replayer.lua",
-  "libraries/devloop/requests.lua",
-  "libraries/devloop/requests/bodies.lua",
-  "libraries/devloop/requests/labels.lua",
-  "libraries/devloop/requests/lifecycle.lua",
-  "libraries/devloop/requests/review.lua",
-  "libraries/devloop/requests/shared.lua",
-  "libraries/devloop/restart.lua",
-  "libraries/devloop/restart/issue/pr_partition_contract.lua",
-  "libraries/devloop/restart/issue/transitions/awaiting_pr.lua",
-  "libraries/devloop/restart/issue/transitions/blocked.lua",
-  "libraries/devloop/restart/issue/transitions/dependency_wait.lua",
-  "libraries/devloop/restart/issue/transitions/impl_failed.lua",
-  "libraries/devloop/restart/issue/transitions/implementing.lua",
-  "libraries/devloop/restart/issue/transitions/index.lua",
-  "libraries/devloop/restart/issue/transitions/merged.lua",
-  "libraries/devloop/restart/issue/transitions/ready.lua",
-  "libraries/devloop/restart/issue/transitions/thinking.lua",
-  "libraries/devloop/restart/issue_lifecycle.lua",
-  "libraries/devloop/restart_actionable_epoch.lua",
-  "libraries/devloop/restart_responsibility_contract.lua",
-  "libraries/devloop/rounds.lua",
-  "libraries/devloop/state.lua",
-  "libraries/devloop/strings.lua",
-  "libraries/devloop/sweep_bounds.lua",
-  "libraries/devloop/validators.lua",
-  "libraries/devloop/validators/fixing.lua",
-  "libraries/devloop/validators/intake_candidate.lua",
-  "libraries/devloop/validators/issue.lua",
-  "libraries/devloop/validators/merge_ready.lua",
-  "libraries/devloop/validators/pr.lua",
-  "libraries/devloop/validators/pr_review_unresolved.lua",
-  "libraries/devloop/validators/ready.lua",
-  "libraries/devloop/validators/result.lua",
-  "libraries/devloop/validators/review_meta.lua",
-  "libraries/devloop/validators/review_result.lua",
-  "libraries/devloop/validators/reviewing.lua",
-  "libraries/devloop/validators/unresolved.lua",
-  "libraries/devloop/validators/validate_proposal.lua",
-  "packages/github-devloop-pr/core.lua",
-  "packages/github-devloop-pr/core/devloop_wiring.lua",
-  "packages/github-devloop-pr/core/merge_ci_wait.lua",
-  "packages/github-devloop-pr/core/merge_executor.lua",
-  "packages/github-devloop-pr/core/merge_runtime_files.lua",
-  "packages/github-devloop-pr/core/pr_label_requests.lua",
-  "packages/github-devloop-pr/core/pr_review_replayer.lua",
-  "packages/github-devloop-pr/core/restart/liveness_signal_producers/index.lua",
-  "packages/github-devloop-pr/core/restart/liveness_signal_producers/merge_gate_wait.lua",
-  "packages/github-devloop-pr/core/restart/liveness_signal_producers/review_converge_round.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/fix_reflection.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/index.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/merge_gate.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/merge_gate_wait.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/merge_ready.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/merged.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/merging.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/pr_delegation.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/pr_link.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/review_carry_over.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/review_converge_round.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/review_meta.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/review_result.lua",
-  "packages/github-devloop-pr/core/restart/marker_fields/state.lua",
-  "packages/github-devloop-pr/core/restart/required_replay_payload_fields/fixing.lua",
-  "packages/github-devloop-pr/core/restart/required_replay_payload_fields/index.lua",
-  "packages/github-devloop-pr/core/restart/transitions/blocked.lua",
-  "packages/github-devloop-pr/core/restart/transitions/closed_unmerged.lua",
-  "packages/github-devloop-pr/core/restart/transitions/fixing.lua",
-  "packages/github-devloop-pr/core/restart/transitions/index.lua",
-  "packages/github-devloop-pr/core/restart/transitions/merge_ready.lua",
-  "packages/github-devloop-pr/core/restart/transitions/merged.lua",
-  "packages/github-devloop-pr/core/restart/transitions/merging.lua",
-  "packages/github-devloop-pr/core/restart/transitions/pr_open.lua",
-  "packages/github-devloop-pr/core/restart/transitions/review_meta.lua",
-  "packages/github-devloop-pr/core/restart/transitions/reviewing.lua",
-  "packages/github-devloop-pr/core/review_carry_over.lua",
-  "packages/github-devloop-pr/core/review_meta_requests.lua",
-  "packages/github-devloop-pr/core/review_redrive.lua",
-  "packages/github-devloop-pr/departments/comment_handoff/main.lua",
-  "packages/github-devloop-pr/departments/fix/main.lua",
-  "packages/github-devloop-pr/departments/liveness_scan/main.lua",
-  "packages/github-devloop-pr/departments/merge/main.lua",
-  "packages/github-devloop-pr/departments/merge_queue/main.lua",
-  "packages/github-devloop-pr/departments/observe_pr/main.lua",
-  "packages/github-devloop-pr/departments/reconcile/main.lua",
-  "packages/github-devloop-pr/departments/review_loop/main.lua",
-  "packages/github-devloop-pr/departments/review_meta/main.lua",
-  "packages/github-devloop-pr/departments/review_pr/main.lua",
-  "packages/github-devloop-pr/departments/review_result/main.lua",
-  "packages/github-devloop-pr/prompts/fix.lua",
-  "packages/github-devloop-pr/prompts/fix_reflection.lua",
-  "packages/github-devloop-pr/prompts/review_meta.lua",
-  "packages/github-devloop-pr/raisers/liveness_poll.lua",
-  "packages/github-devloop-pr/raisers/merge_queue_poll.lua",
-  "packages/github-devloop/core.lua",
-  "packages/github-devloop/core/awaiting_pr_replayer.lua",
-  "packages/github-devloop/core/dependencies.lua",
-  "packages/github-devloop/core/devloop_wiring.lua",
-  "packages/github-devloop/core/" .. "gates/child_start_visible.lua",
-  "packages/github-devloop/core/github_graphql.lua",
-  "packages/github-devloop/core/impl_failure.lua",
-  "packages/github-devloop/core/implement_attempt.lua",
-  "packages/github-devloop/core/liveness_bounds.lua",
-  "packages/github-devloop/core/pr_delegation.lua",
-  "packages/github-devloop/core/ratchet_slice_ledger.lua",
-  "packages/github-devloop/core/ready_split.lua",
-  "packages/github-devloop/core/reconcile_requests.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/child_state.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/converge_round.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/dependency_wait.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/index.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/merge_gate_wait.lua",
-  "packages/github-devloop/core/restart/liveness_signal_producers/review_converge_round.lua",
-  "packages/github-devloop/core/restart/marker_fields/autonomy_result.lua",
-  "packages/github-devloop/core/restart/marker_fields/converge_round.lua",
-  "packages/github-devloop/core/restart/marker_fields/decomposed.lua",
-  "packages/github-devloop/core/restart/marker_fields/dependency_cycle.lua",
-  "packages/github-devloop/core/restart/marker_fields/dependency_release.lua",
-  "packages/github-devloop/core/restart/marker_fields/dependency_unresolvable.lua",
-  "packages/github-devloop/core/restart/marker_fields/dependency_void.lua",
-  "packages/github-devloop/core/restart/marker_fields/dependency_wait.lua",
-  "packages/github-devloop/core/restart/marker_fields/dependency_waiver.lua",
-  "packages/github-devloop/core/restart/marker_fields/fix_reflection.lua",
-  "packages/github-devloop/core/restart/marker_fields/impl_failure.lua",
-  "packages/github-devloop/core/restart/marker_fields/implement_attempt.lua",
-  "packages/github-devloop/core/restart/marker_fields/implementing.lua",
-  "packages/github-devloop/core/restart/marker_fields/index.lua",
-  "packages/github-devloop/core/restart/marker_fields/merge_gate.lua",
-  "packages/github-devloop/core/restart/marker_fields/merge_gate_wait.lua",
-  "packages/github-devloop/core/restart/marker_fields/merge_ready.lua",
-  "packages/github-devloop/core/restart/marker_fields/merged.lua",
-  "packages/github-devloop/core/restart/marker_fields/merging.lua",
-  "packages/github-devloop/core/restart/marker_fields/pr_delegation.lua",
-  "packages/github-devloop/core/restart/marker_fields/pr_link.lua",
-  "packages/github-devloop/core/restart/marker_fields/review_carry_over.lua",
-  "packages/github-devloop/core/restart/marker_fields/review_converge_round.lua",
-  "packages/github-devloop/core/restart/marker_fields/review_meta.lua",
-  "packages/github-devloop/core/restart/marker_fields/review_result.lua",
-  "packages/github-devloop/core/restart/marker_fields/state.lua",
-  "packages/github-devloop/core/restart/required_replay_payload_fields/fixing.lua",
-  "packages/github-devloop/core/restart/required_replay_payload_fields/index.lua",
-  "packages/github-devloop/departments/comment_handoff/main.lua",
-  "packages/github-devloop/departments/consensus_result/main.lua",
-  "packages/github-devloop/departments/execute_start/main.lua",
-  "packages/github-devloop/departments/implement/main.lua",
-  "packages/github-devloop/departments/implement/pr_child_handoff.lua",
-  "packages/github-devloop/departments/implement/slice_gate.lua",
-  "packages/github-devloop/departments/implement/substrate_pin.lua",
-  "packages/github-devloop/departments/implement/transitions.lua",
-  "packages/github-devloop/departments/implement/worktree.lua",
-  "packages/github-devloop/departments/liveness_scan/main.lua",
-  "packages/github-devloop/departments/loop/main.lua",
-  "packages/github-devloop/departments/observe_issue/main.lua",
-  "packages/github-devloop/departments/reconcile/main.lua",
-  "packages/github-devloop/departments/test_board_digest_probe/main.lua",
-  "packages/github-devloop/departments/test_cache_seed/main.lua",
-  "packages/github-devloop/departments/test_context_bundle_probe/main.lua",
-  "packages/github-devloop/prompts/fix.lua",
-  "packages/github-devloop/prompts/fix_reflection.lua",
-  "packages/github-devloop/prompts/implement.lua",
-  "packages/github-devloop/prompts/review_meta.lua",
-  "packages/github-devloop/raisers/liveness_poll.lua",
-}
 
 local function normalize_path(path)
   return tostring(path or ""):gsub("\\", "/"):gsub("/+$", "")
@@ -832,6 +579,10 @@ local function current_package_root()
   return strip_suffix(debug_source_path(1), "/core/span_conformance.lua")
 end
 
+local function parent_dir(path)
+  return normalize_path(path):match("^(.*)/[^/]+$")
+end
+
 local function devloop_library_root()
   local ok, base = pcall(require, "devloop.base")
   if not ok or type(base) ~= "table" then
@@ -840,51 +591,106 @@ local function devloop_library_root()
   return strip_suffix(debug_source_path(base.install), "/base.lua")
 end
 
-local function sibling_package_root(owner_root, package_name)
-  local parent = normalize_path(owner_root):match("^(.*)/[^/]+$")
-  if parent == nil then
+local function repo_root_from_package_root(owner_root)
+  local package_parent = parent_dir(owner_root)
+  if package_parent == nil then
     return nil
   end
-  return parent .. "/" .. package_name
-end
-
-local function path_suffix(path, prefix)
-  if path:sub(1, #prefix) == prefix then
-    return path:sub(#prefix + 1)
+  if package_parent:sub(-#"/.fkst/local-packages") == "/.fkst/local-packages" then
+    return parent_dir(parent_dir(package_parent))
+  end
+  if package_parent:match("/packages$") then
+    return parent_dir(package_parent)
   end
   return nil
 end
 
+local function add_source_root(out, seen, actual, logical)
+  if actual == nil or logical == nil then
+    return
+  end
+  if logical ~= "packages" and logical ~= "libraries" then
+    return
+  end
+  local normalized = normalize_path(actual)
+  if normalized:find("/.fkst/", 1, true) ~= nil then
+    return
+  end
+  if seen[normalized] then
+    return
+  end
+  seen[normalized] = true
+  table.insert(out, { actual = normalized, logical = logical })
+end
+
 local function source_roots()
+  local out = {}
+  local seen = {}
   local owner_root = current_package_root()
-  return {
-    devloop = devloop_library_root(),
-    github_devloop = owner_root,
-    github_devloop_pr = owner_root and sibling_package_root(owner_root, "github-devloop-pr") or nil,
-  }
+  local repo_root = repo_root_from_package_root(owner_root)
+  if repo_root == nil and file.exists("packages") and file.exists("libraries") then
+    repo_root = "."
+  end
+  if repo_root ~= nil then
+    add_source_root(out, seen, repo_root .. "/packages", "packages")
+    add_source_root(out, seen, repo_root .. "/libraries", "libraries")
+  else
+    add_source_root(out, seen, parent_dir(owner_root), "packages")
+  end
+
+  local devloop_root = devloop_library_root()
+  add_source_root(out, seen, parent_dir(devloop_root), "libraries")
+  return out
+end
+
+local function path_suffix(path, prefix)
+  path = normalize_path(path)
+  prefix = normalize_path(prefix)
+  if path == prefix then
+    return ""
+  end
+  local rooted_prefix = prefix .. "/"
+  if path:sub(1, #rooted_prefix) == rooted_prefix then
+    return path:sub(#rooted_prefix + 1)
+  end
+  return nil
 end
 
 local function actual_source_path(roots, source_path)
-  local suffix = path_suffix(source_path, "libraries/devloop/")
-  if suffix ~= nil and roots.devloop ~= nil then
-    return roots.devloop .. "/" .. suffix
-  end
-  suffix = path_suffix(source_path, "packages/github-devloop-pr/")
-  if suffix ~= nil and roots.github_devloop_pr ~= nil then
-    return roots.github_devloop_pr .. "/" .. suffix
-  end
-  suffix = path_suffix(source_path, "packages/github-devloop/")
-  if suffix ~= nil and roots.github_devloop ~= nil then
-    return roots.github_devloop .. "/" .. suffix
+  for _, root in ipairs(roots or {}) do
+    local suffix = path_suffix(source_path, root.logical)
+    if suffix ~= nil then
+      return suffix == "" and root.actual or (root.actual .. "/" .. suffix)
+    end
   end
   return source_path
 end
 
+local function should_scan_source(suffix)
+  local value = normalize_path(suffix)
+  return value:sub(-4) == ".lua"
+    and value:find("/tests/", 1, true) == nil
+    and value:sub(1, #"tests/") ~= "tests/"
+end
+
 local function collect_source_paths()
   local paths = {}
-  for _, path in ipairs(SCANNED_SOURCE_FILES) do
-    table.insert(paths, path)
+  local seen = {}
+  for _, root in ipairs(source_roots()) do
+    if file.exists(root.actual) then
+      for _, actual in ipairs(file.list(root.actual)) do
+        local suffix = path_suffix(actual, root.actual)
+        if suffix ~= nil and should_scan_source(suffix) then
+          local logical = root.logical .. "/" .. suffix
+          if not seen[logical] then
+            seen[logical] = true
+            table.insert(paths, logical)
+          end
+        end
+      end
+    end
   end
+  table.sort(paths)
   return paths
 end
 
@@ -941,9 +747,6 @@ function S.errors_from_sources(sources)
   for _, message in ipairs(spawn_start_messages(transition_sources, department_sources, sources)) do
     table.insert(out, record("gspan.spawn-order", message))
   end
-  for _, message in ipairs(dispatch_live_run_dedup_messages(transition_sources, department_sources)) do
-    table.insert(out, record("gspan.dispatch-live-run-dedup", message))
-  end
   return out
 end
 
@@ -967,7 +770,7 @@ end
 
 S._completion_fact_name_messages = completion_fact_name_messages
 S._spawn_start_messages = spawn_start_messages
-S._dispatch_live_run_dedup_messages = dispatch_live_run_dedup_messages
 S._span_declaration_errors = span_declaration_errors
+S._source_roots = source_roots
 
 return S
