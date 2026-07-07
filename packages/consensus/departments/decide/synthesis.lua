@@ -67,25 +67,63 @@ local function parse_findings_value(value)
     return nil
   end
   if prefix == "settled" then
-    if rest:find("%f[%a]by%s+refutation%s+of%f[%A]") == nil then
+    local citation = trim(rest:match("%f[%a]by%s+refutation%s+of%f[%A]%s*(.+)$") or "")
+    if citation == "" then
       return nil
     end
-    return "settled:\n" .. rest
+    return {
+      kind = "settled",
+      text = rest,
+      citation = citation,
+    }
   end
   if prefix == "settled-by-agreement (unverified)" then
-    return "settled-by-agreement (unverified):\n" .. rest
+    return {
+      kind = "settled-by-agreement",
+      text = rest,
+    }
   end
   if prefix == "open" then
-    return "open:\n" .. rest
+    return {
+      kind = "open",
+      text = rest,
+    }
   end
   return nil
 end
 
-local function combine_findings_records(records)
+local function render_finding(entry, verified_citations)
+  if type(entry) ~= "table" then
+    return nil
+  end
+  if entry.kind == "settled" then
+    if type(verified_citations) == "table" and verified_citations[entry.citation] then
+      return "settled:\n" .. entry.text
+    end
+    return "settled-by-agreement (unverified):\n" .. entry.text
+  end
+  if entry.kind == "settled-by-agreement" then
+    return "settled-by-agreement (unverified):\n" .. entry.text
+  end
+  if entry.kind == "open" then
+    return "open:\n" .. entry.text
+  end
+  return nil
+end
+
+local function combine_findings_records(records, verified_citations)
   if #records == 0 then
     return nil
   end
-  local text = table.concat(records, "\n")
+  local rendered = {}
+  for _, entry in ipairs(records) do
+    local line = render_finding(entry, verified_citations)
+    if line == nil then
+      return nil
+    end
+    table.insert(rendered, line)
+  end
+  local text = table.concat(rendered, "\n")
   if #text > max_findings_record_len then
     return nil
   end
@@ -223,6 +261,7 @@ function M.parse_output(stdout, verdict_mode)
   if findings_record ~= nil then
     parsed.findings_record = findings_record
   end
+  parsed.findings_entries = findings
   parsed.verified_moves = #verified_moves
   parsed.verified_move_records = verified_moves
   return parsed
@@ -255,26 +294,38 @@ local function result_text_contains(results, angle, citation)
   return false
 end
 
-function M.count_verified_moves(records, p1_results, p2_results)
+local function verified_move_citations(records, p1_results, p2_results)
   local count = 0
   local seen = {}
+  local citations = {}
   for _, record in ipairs(records or {}) do
     local key = record.angle .. "\n" .. record.phase .. "\n" .. record.citation
     if not seen[key] then
       seen[key] = true
       if record.phase == "P1" and result_text_contains(p1_results, record.angle, record.citation) then
         count = count + 1
+        citations[record.citation] = true
       elseif record.phase == "P2" and result_text_contains(p2_results, record.angle, record.citation) then
         count = count + 1
+        citations[record.citation] = true
       end
     end
   end
+  return citations, count
+end
+
+function M.count_verified_moves(records, p1_results, p2_results)
+  local _, count = verified_move_citations(records, p1_results, p2_results)
   return count
 end
 
 local function stamp_verified_count(parsed, p1_results, p2_results)
   if parsed ~= nil then
-    parsed.verified_moves = M.count_verified_moves(parsed.verified_move_records, p1_results, p2_results)
+    local citations, count = verified_move_citations(parsed.verified_move_records, p1_results, p2_results)
+    parsed.verified_moves = count
+    if parsed.findings_entries ~= nil then
+      parsed.findings_record = combine_findings_records(parsed.findings_entries, citations)
+    end
   end
   return parsed
 end

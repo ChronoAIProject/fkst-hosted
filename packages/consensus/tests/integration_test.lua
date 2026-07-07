@@ -398,15 +398,17 @@ return {
     mock_judgment_runtime()
     mock_angle("teleology", "approve", "Teleology angle approves.")
     mock_angle("parsimony", "abstain", "Parsimony angle needs one blocker resolved.")
-    mock_angle("fidelity", "approve", "Fidelity angle approves.")
+    mock_angle("fidelity", "approve", "Fidelity angle approves. unbounded-loop claim docs/retry.md:12")
     mock_rebuttal_defend("teleology", "approve", "Teleology still approves.")
     mock_rebuttal_defend("parsimony", "abstain", "Parsimony still needs one blocker resolved.")
     mock_rebuttal_defend("fidelity", "approve", "Fidelity still approves.")
     mock_synthesis(table.concat({
       "converge: parsimony concern remains unresolved + inspect the retry-boundary evidence",
       "settled: retry scope is bounded, by refutation of unbounded-loop claim docs/retry.md:12",
+      "settled: adapter seam has agreement only, by refutation of uncited adapter claim docs/adapter.md:9",
       "settled-by-agreement (unverified): adapter seam stays unchanged",
       "open: parsimony concern remains unresolved",
+      "verified-move: angle=fidelity phase=P1 citation=unbounded-loop claim docs/retry.md:12",
     }, "\n"))
 
     local result = run_decide(proposal({ dedup_key = "proposal-42-v1/split" }), opts("split"))
@@ -421,6 +423,8 @@ return {
     t.eq(result.raises[1].payload.findings_record, table.concat({
       "settled:",
       "retry scope is bounded, by refutation of unbounded-loop claim docs/retry.md:12",
+      "settled-by-agreement (unverified):",
+      "adapter seam has agreement only, by refutation of uncited adapter claim docs/adapter.md:9",
       "settled-by-agreement (unverified):",
       "adapter seam stays unchanged",
       "open:",

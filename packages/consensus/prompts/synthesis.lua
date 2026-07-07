@@ -16,9 +16,10 @@ Response contract:
 - converge:<named essence-level disagreement> + <concrete evidence that would resolve it>
 - essence-stall:<explicit unresolvable/essence-stall reason when no concrete resolving evidence exists>
 - Also emit one or more findings lines after the outcome:
-  settled: <finding>, by refutation of <challenged claim> <citation resolvable inside supplied materials>
+  settled: <finding>, by refutation of <exact verified-move citation>
   settled-by-agreement (unverified): <finding>
   open: <still-open finding>
+- If a settled finding has no matching verified-move citation, it will be stored as settled-by-agreement (unverified).
 - A converge outcome must include at least one findings line. An essence-stall outcome is terminal and may omit findings.
 - Optionally emit verified-move lines after the outcome, one per mechanically verified mover:
   verified-move: angle=<seat> phase=P1|P2 citation=<citation resolvable inside supplied materials>
