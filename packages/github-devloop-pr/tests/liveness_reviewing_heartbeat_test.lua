@@ -4,6 +4,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local h = require("tests.devloop_helpers")
 local conv_rounds = require("devloop.convergence.rounds")
 local conv_attempts = require("devloop.convergence.attempts")
+local requests_review = require("devloop.requests.review")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -44,6 +45,19 @@ local function mock_branch_config_env()
   })
 end
 
+local function mock_branch_config_env_value(integration_branch)
+  t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
+    stdout = "dev",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_INTEGRATION_BRANCH"', {
+    stdout = tostring(integration_branch or "dev"),
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
 local function run_observe_pr(name)
   mock_branch_config_env()
   return t.run_department("departments/observe_pr/main.lua", {
@@ -60,6 +74,24 @@ local function run_observe_pr(name)
       source_ref = entity_lib.pr_source_ref(repo, 7),
     },
   }, opts(name or "observe-pr-reviewing-heartbeat"))
+end
+
+local function run_observe_pr_with_integration(name, integration_branch)
+  mock_branch_config_env_value(integration_branch)
+  return t.run_department("departments/observe_pr/main.lua", {
+    queue = "devloop_observe_pr",
+    payload = {
+      schema = "github-proxy.v1",
+      type = "pr",
+      repo = repo,
+      number = 7,
+      state = "open",
+      updated_at = "2026-06-04T01:02:03Z",
+      dedup_key = "liveness-scan/owner/repo/pr/7",
+      source = "liveness-scan",
+      source_ref = entity_lib.pr_source_ref(repo, 7),
+    },
+  }, opts(name or "observe-pr-base-unmanaged-heal"))
 end
 
 local function mock_repo()
@@ -124,6 +156,32 @@ local function mock_pr_state(comments)
     updated_at = "2026-06-04T01:02:03Z",
     comments = comments,
     labels = {},
+  }, entity_read_mocks.pr_origin_selector)
+end
+
+local function mock_pr_state_base(comments, base_branch)
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = repo,
+    number = 7,
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = base_branch or "dev",
+    state = "OPEN",
+    updated_at = "2026-06-04T01:02:03Z",
+    comments = comments,
+    labels = { "fkst-dev:blocked" },
+    times = 1,
+  })
+  entity_read_mocks.mock_pr_view_selector(t, {
+    repo = repo,
+    number = 7,
+    head = "devloop-owner-repo-42-01HY",
+    head_sha = "def456",
+    base_branch = base_branch or "dev",
+    state = "OPEN",
+    updated_at = "2026-06-04T01:02:03Z",
+    comments = comments,
+    labels = { "fkst-dev:blocked" },
   }, entity_read_mocks.pr_origin_selector)
 end
 
@@ -273,5 +331,35 @@ return {
     t.eq(reconcile.payload.issue_version, timeout_version)
     t.eq(reconcile.payload.round, 3)
     t.eq(reconcile.payload.source_ref.ref, "owner/repo#pr/7")
+  end,
+
+  test_liveness_scan_pr_base_unmanaged_block_reinjects_observe_before_decompose = function()
+    local blocked_version = requests_review.pr_base_unmanaged_blocked_version(version)
+    local comments = {
+      m_builders.pr_origin_marker(proposal_id, "42", "devloop-owner-repo-42-01HY", version, "dev"),
+      state_comment("blocked", blocked_version, "2026-06-01T00:00:00Z"),
+    }
+    mock_branch_config_env_value("dev")
+    mock_repo()
+    mock_issue_list()
+    mock_pr_list()
+    mock_issue_claim()
+    mock_pr_state_base(comments, "dev")
+
+    local scanned = run_liveness_scan("liveness-scan-pr-base-unmanaged-heal")
+    t.eq(scanned.exit_code, 0)
+    t.eq(find_raise(scanned, "github-devloop-decompose.devloop_decompose"), nil)
+    t.eq(find_pr_comment_with(scanned, "fkst:github-devloop:timeout-attempt"), nil)
+    local observe = find_raise(scanned, "devloop_observe_pr")
+    t.is_true(observe ~= nil)
+    t.eq(observe.payload.source, "liveness-scan")
+
+    mock_issue_claim()
+    mock_pr_state_base(comments, "dev")
+    local observed = run_observe_pr_with_integration("observe-pr-base-unmanaged-heal-from-liveness", "dev")
+    t.eq(observed.exit_code, 0)
+    local reviewing = h.find_causal_raise(observed, "devloop_reviewing")
+    t.is_true(reviewing ~= nil)
+    t.eq(reviewing.payload.version, core.next_review_loop_version(version))
   end,
 }

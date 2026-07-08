@@ -3,6 +3,7 @@ local entity_lib = require("devloop.entity")
 local m_claims = require("devloop.claims")
 local parsers_pr = require("devloop.parsers.pr")
 local m_facts = require("devloop.markers.facts")
+local requests_review = require("devloop.requests.review")
 local core, sweep_bounds = require("core"), require("devloop.sweep_bounds")
 local liveness_scan = require("devloop.liveness_scan")
 local entity_list_cache = require("devloop.entity_list_cache")
@@ -10,6 +11,8 @@ local saga = require("workflow.saga")
 local forge_validators = require("devloop.forge_validators")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+local config = require("devloop.config")
+local devloop_state = require("devloop.state")
 
 local LIVENESS_SCAN_CURSOR_PREFIX = "github-devloop-pr/liveness-scan/pr-cursor/"
 
@@ -30,6 +33,21 @@ local spec = {
   fanout = { "devloop_liveness_tick" },
   stall_window = "30s",
 }
+
+local function should_reinject_pr_base_unmanaged_heal(origin, current, state)
+  if origin == nil or current == nil or state == nil then
+    return false
+  end
+  local blocked_phase = devloop_state.compare_phase(state, "blocked", { milestone_domain = "github-devloop-pr" })
+  if blocked_phase ~= 0
+    or tostring(state.version or "") ~= requests_review.pr_base_unmanaged_blocked_version(origin.impl_version)
+    or tostring(current.base_ref_name or "") ~= tostring(origin.base_branch or "")
+    or origin.base_branch == nil
+    or tostring(current.state or ""):lower() ~= "open" then
+    return false
+  end
+  return tostring(origin.base_branch or "") == tostring(config.branch_config().integration)
+end
 
 local function should_reinject_pr(repo, pr, limits, deadline)
   if not forge_validators.is_positive_pr_number(pr.number) then
@@ -65,6 +83,9 @@ local function should_reinject_pr(repo, pr, limits, deadline)
   local state = require("devloop.entity").current_entity_state(current.comments, origin.proposal_id)
   if not liveness_scan.liveness_scan_should_reinject_state(core, proposal_id, state) then
     return false
+  end
+  if should_reinject_pr_base_unmanaged_heal(origin, current, state) then
+    return true
   end
   local source_ref = entity_lib.pr_source_ref(repo, pr.number)
   local timeout_action = liveness_scan.liveness_scan_maybe_timeout_action(core, liveness_scan.liveness_scan_issue_entity(origin.repo, origin.issue_number), state, {

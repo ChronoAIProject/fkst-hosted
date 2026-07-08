@@ -394,7 +394,7 @@ local function visible_pr_base_unmanaged_block_state(state, origin, current_pr)
   return nil
 end
 
-local function maybe_heal_pr_base_unmanaged_block(origin, pr_number, current_pr, state, branches, source_ref)
+local function maybe_heal_pr_base_unmanaged_block(origin, pr_number, current_pr, state, branches, source_ref, issue_current)
   local blocked_state = visible_pr_base_unmanaged_block_state(state, origin, current_pr)
   if blocked_state == nil
     or not origin_base_matches_current_pr(origin, current_pr)
@@ -403,6 +403,17 @@ local function maybe_heal_pr_base_unmanaged_block(origin, pr_number, current_pr,
   end
   if tostring(current_pr.state or ""):lower() ~= "open" then
     devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, blocked_state, "blocked", "reviewing", "skip-stale(pr-closed)", "re-derived PR is not open")
+    return true
+  end
+  if not m_claims.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
+    local status = m_claims.issue_claim_state(issue_current and issue_current.assignees, m_claims.claim_owner(), issue_current and issue_current.labels)
+    local outcome = "skip-not-owned(pr-base-unmanaged-self-heal)"
+    local reason = "backing issue is not self-owned"
+    if status == "other" then
+      outcome = "skip-claimed-by-other(pr-base-unmanaged-self-heal)"
+      reason = "backing issue assignee claim is held by another login"
+    end
+    devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, blocked_state, "blocked", "reviewing", outcome, reason)
     return true
   end
   local healed_version = devloop_state.next_review_loop_version(origin.impl_version)
@@ -435,13 +446,13 @@ local function maybe_block_unmanaged_base(pr, origin, current_pr, branches, sour
   with_lock(lock_key, function()
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local issue_current = issue_claim_for_origin(origin)
+    if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref, issue_current) then
+      return
+    end
     if not m_claims.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
     end
     if state.state == "blocked" then
-      if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref) then
-        return
-      end
       devloop_logging.log_cas_decision("observe_pr", origin.proposal_id, state, "pr-open", "blocked", "skip-idempotent(already at to_state)", "blocked marker visible on PR")
       maybe_label_hints(origin, pr.number, current_pr, state, source_ref)
       return
@@ -523,6 +534,9 @@ local function process_pr_event(event)
   with_lock(lock_key, function()
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local issue_current = issue_claim_for_origin(origin)
+    if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref, issue_current) then
+      return
+    end
     if not m_claims.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
     end
@@ -546,9 +560,6 @@ local function process_pr_event(event)
       return
     end
     if maybe_redrive_not_mergeable_pr(origin, pr.number, current_pr, state, source_ref, issue_current) then
-      return
-    end
-    if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref) then
       return
     end
     if state.state ~= nil and state.state ~= "pr-open" then
