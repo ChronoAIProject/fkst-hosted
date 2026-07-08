@@ -164,18 +164,7 @@ function M.filter_gh_content_json(json_string, kind, whitelist, records)
     error("github-devloop: content provenance JSON decode failed")
   end
 
-  -- The entity-level author (issue/PR opener) is only present when the fetch
-  -- includes the "author" field. When absent, the opener's own title/body are
-  -- left intact (the issue body is the task the pipeline is asked to process);
-  -- comment bodies -- the third-party injection surface -- are ALWAYS filtered
-  -- by their own author below.
   local found = {}
-  local entity_author = author_login(decoded)
-  if entity_author ~= nil then
-    filter_field(decoded, "title", kind .. ".title", entity_author, whitelist, found)
-    filter_field(decoded, "body", kind .. ".body", entity_author, whitelist, found)
-  end
-
   if type(decoded.comments) == "table" then
     for _, comment in ipairs(decoded.comments) do
       if type(comment) == "table" then

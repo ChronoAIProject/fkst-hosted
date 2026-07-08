@@ -122,6 +122,16 @@ local function capture_first_delivery_facts(result)
 end
 
 local function mock_decompose_codex(stdout)
+  local ok = { stdout = "", stderr = "", exit_code = 0 }
+  for _ = 1, 4 do
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+      stdout = "fkst-test-bot",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
+    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
+  end
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
     stderr = "",

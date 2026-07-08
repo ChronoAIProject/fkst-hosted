@@ -84,6 +84,15 @@ function M.new(deps)
     local repo, issue_number = issue_identity_from_payload(payload)
     local ok = { stdout = "", stderr = "", exit_code = 0 }
     for _ = 1, 8 do
+      helpers.t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+        stdout = "fkst-test-bot",
+        stderr = "",
+        exit_code = 0,
+      })
+      helpers.t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
+      helpers.t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
+    end
+    for _ = 1, 8 do
       helpers.t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
         stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
         stderr = "",

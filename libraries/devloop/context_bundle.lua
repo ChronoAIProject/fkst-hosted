@@ -11,20 +11,11 @@ local decimal_checksum = strings.decimal_checksum
 -- Resolve the codex-bundle authored-content whitelist from host env. Bot login is
 -- required (fail-closed); the additive optional entries are read under pcall so an
 -- unset/unmocked var degrades to bot-only (fail-closed direction: fewer whitelisted
--- authors = MORE redaction) rather than erroring the whole bundle.
--- The codex-bundle content filter's trust anchor is FKST_GITHUB_BOT_LOGIN (the
--- system identity that authors state markers and trusted pipeline content). The
--- filter can only distinguish trusted from untrusted authors when that anchor is
--- configured, so it is ACTIVE iff the bot login is set. Production always sets it
--- (the pipeline requires it for every GitHub write) -> the filter is always active
--- and fail-closed. When absent (a non-production/test context with no trust
--- anchor), content_whitelist returns nil and the bundle is written unfiltered --
--- there is no trust context to redact against, and production never reaches here.
+-- authors = more redaction) rather than erroring the whole bundle.
 local function content_whitelist(exec)
-  local ok_bot, bot_login = pcall(devloop_base.read_env, "FKST_GITHUB_BOT_LOGIN", exec)
-  bot_login = ok_bot and strings.trim(bot_login or "") or ""
+  local bot_login = strings.trim(devloop_base.read_env("FKST_GITHUB_BOT_LOGIN", exec) or "")
   if bot_login == "" then
-    return nil
+    error("github-devloop: FKST_GITHUB_BOT_LOGIN is required for context bundle content provenance")
   end
   local logins = { bot_login }
   for _, name in ipairs({ "FKST_DEVLOOP_MANAGED_BOT_LOGINS", "FKST_GITHUB_AUTHORIZED_LOGINS" }) do
