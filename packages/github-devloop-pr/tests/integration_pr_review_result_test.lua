@@ -122,6 +122,31 @@ return {
     t.eq(fixing_raise.payload.reviewed_head_sha, "def456")
   end,
 
+  test_review_result_reject_canonicalizes_converged_review_dedup = function()
+    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff.", blocking_gap = "missing regression guard" })
+    local canonical_review_dedup = event.dedup_key
+    event.dedup_key = canonical_review_dedup .. "/loop/2"
+    local impl_version = reviewing().version
+    local fix_version = core.fix_version_from_review_version(impl_version)
+    mock_pr_origin({
+      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
+    })
+    mock_issue_result({ "fkst-dev:reviewing" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
+    })
+
+    local result = run_review_result(event, opts("review-result-reject-loop-dedup"))
+
+    t.eq(result.exit_code, 0)
+    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    local fixing_raise = find_causal_raise(result, "devloop_fixing")
+    t.is_true(comment_raise.payload.body:find('dedup="' .. canonical_review_dedup .. '"', 1, true) ~= nil)
+    t.is_nil(comment_raise.payload.body:find('dedup="' .. event.dedup_key .. '"', 1, true))
+    t.eq(comment_raise.payload.handoff.review_dedup_key, canonical_review_dedup)
+    t.eq(fixing_raise.payload.review_dedup_key, canonical_review_dedup)
+    t.eq(fixing_raise.payload.version, fix_version)
+  end,
+
   test_review_result_skips_other_owned_backing_issue_before_raising = function()
     local event = review_reached()
     local impl_version = reviewing().version

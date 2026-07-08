@@ -1,0 +1,692 @@
+diff --git a/libraries/devloop/base.lua b/libraries/devloop/base.lua
+index 811b46fe..1f67c114 100644
+--- a/libraries/devloop/base.lua
++++ b/libraries/devloop/base.lua
+@@ -274,6 +274,64 @@ function C.parse_pr_review_proposal_id(id)
+   return repo, pr_number, version, head_sha
+ end
+ 
++function C.pr_review_proposal_dedup_key(review_proposal_id)
++  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
++    error("github-devloop: invalid PR review proposal id")
++  end
++  return dedup_key({
++    tostring(review_proposal_id),
++    "review",
++  })
++end
++
++function C.pr_review_consensus_dedup_key(review_proposal_id)
++  return "consensus:" .. C.pr_review_proposal_dedup_key(review_proposal_id)
++end
++
++local function parse_canonical_pr_review_consensus_dedup_key(dedup_key)
++  local inner = tostring(dedup_key or ""):match("^consensus:(.+)$")
++  if inner == nil then
++    return nil
++  end
++  local review_proposal = inner:match("^(.+)/review$")
++  if review_proposal == nil or C.parse_pr_review_proposal_id(review_proposal) == nil then
++    return nil
++  end
++  if inner ~= C.pr_review_proposal_dedup_key(review_proposal) then
++    return nil
++  end
++  return review_proposal, "consensus:" .. inner
++end
++
++function C.canonical_pr_review_consensus_dedup_key(dedup_key)
++  if not is_bounded_string(dedup_key, max_dedup_len) then
++    return nil
++  end
++  local canonical = transition_version.strip_trailing_loop(dedup_key)
++  local _, parsed = parse_canonical_pr_review_consensus_dedup_key(canonical)
++  return parsed
++end
++
++function C.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
++  local canonical = C.canonical_pr_review_consensus_dedup_key(dedup_key)
++  if canonical == nil then
++    return nil
++  end
++  local review_proposal = parse_canonical_pr_review_consensus_dedup_key(canonical)
++  return review_proposal
++end
++
++function C.canonical_pr_review_consensus_dedup_for_proposal(dedup_key, review_proposal_id)
++  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
++    return nil
++  end
++  local canonical = C.canonical_pr_review_consensus_dedup_key(dedup_key)
++  if canonical == nil or canonical ~= C.pr_review_consensus_dedup_key(review_proposal_id) then
++    return nil
++  end
++  return canonical
++end
++
+ function C.parse_pr_source_ref(source_ref)
+   if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
+     return nil
+diff --git a/libraries/devloop/hidden_state_conformance.lua b/libraries/devloop/hidden_state_conformance.lua
+index b636b04a..b90ba007 100644
+--- a/libraries/devloop/hidden_state_conformance.lua
++++ b/libraries/devloop/hidden_state_conformance.lua
+@@ -206,7 +206,7 @@ local function awaiting_pr_child_state_for_successor(successor)
+ end
+ 
+ local function review_proposal(core, state) return devloop_base.pr_review_proposal_id(REPO, PR_NUMBER, state.version, HEAD_SHA) end
+-local function review_dedup(core, state) return "consensus:" .. review_proposal(core, state) .. "/review" end
++local function review_dedup(core, state) return devloop_base.pr_review_consensus_dedup_key(review_proposal(core, state)) end
+ 
+ local function add_common_pr_facts(core, entity, state, facts, include_pr_link_marker)
+   local link = {
+@@ -311,7 +311,7 @@ local function fact_value(core, row, state, family, successor)
+       version = state.version,
+       pr_number = PR_NUMBER,
+       review_proposal_id = review_id,
+-      review_dedup_key = "consensus:" .. review_id .. "/review",
++      review_dedup_key = devloop_base.pr_review_consensus_dedup_key(review_id),
+       reviewed_head_sha = reviewed,
+       reason = "behavioral-fixture",
+     }
+diff --git a/libraries/devloop/markers/facts.lua b/libraries/devloop/markers/facts.lua
+index fb43972c..36da84cb 100644
+--- a/libraries/devloop/markers/facts.lua
++++ b/libraries/devloop/markers/facts.lua
+@@ -22,17 +22,20 @@ local function review_result_fact_from_marker(marker, comment, issue_proposal_id
+   local decision = marker_attr(marker, "decision")
+   local review_dedup = marker_attr(marker, "dedup")
+   local _, _, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+-  local expected_dedup = review_proposal ~= nil and ("consensus:" .. tostring(review_proposal) .. "/review") or nil
++  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    review_dedup,
++    review_proposal
++  )
+   if marker_issue == tostring(issue_proposal_id)
+     and (expected_decision == nil or decision == expected_decision)
+     and (decision == "approve" or decision == "reject")
+     and review_version == transition_version.safe_version_segment(devloop_state._strip_latest_fix_version_suffix(issue_version))
+-    and review_dedup == expected_dedup
+-    and strings.is_bounded_string(review_dedup, devloop_base._max_dedup_len)
++    and canonical_review_dedup ~= nil
++    and strings.is_bounded_string(canonical_review_dedup, devloop_base._max_dedup_len)
+     and forge_validators.is_git_sha(reviewed_head_sha) then
+     local fact = {
+       review_proposal_id = review_proposal,
+-      review_dedup_key = review_dedup,
++      review_dedup_key = canonical_review_dedup,
+       reviewed_head_sha = reviewed_head_sha,
+       decision = decision,
+       review_reason = parsers_misc._comment_body(comment),
+@@ -56,7 +59,7 @@ local function review_result_fact_from_marker(marker, comment, issue_proposal_id
+ end
+ 
+ local function review_proposal_from_dedup(dedup_key)
+-  return tostring(dedup_key or ""):match("^consensus:(.+)/review$")
++  return devloop_base.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
+ end
+ 
+ function C.intake_decision_fact(comments, issue_proposal_id)
+@@ -276,9 +279,20 @@ local function merge_gate_fix_fact_matches_bindings(fact, opts)
+   if type(opts) ~= "table" then
+     return true
+   end
++  local fact_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    fact.review_dedup_key,
++    fact.review_proposal_id
++  )
++  local opts_review_dedup = nil
++  if opts.review_dedup_key ~= nil or opts.review_proposal_id ~= nil then
++    opts_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++      opts.review_dedup_key,
++      opts.review_proposal_id
++    )
++  end
+   local baseline_bound = opts.match_gate_baseline_sha == true or opts.gate_baseline_sha ~= nil
+   return (opts.review_proposal_id == nil or fact.review_proposal_id == tostring(opts.review_proposal_id))
+-    and (opts.review_dedup_key == nil or fact.review_dedup_key == tostring(opts.review_dedup_key))
++    and (opts.review_dedup_key == nil or (fact_review_dedup ~= nil and fact_review_dedup == opts_review_dedup))
+     and (not baseline_bound
+       or (opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha == tostring(opts.gate_baseline_sha))
+       or (opts.gate_baseline_sha == nil and fact.gate_baseline_sha == nil))
+@@ -381,6 +395,10 @@ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
+   if not strings.is_bounded_string(paths_digest, devloop_base._max_key_len) then
+     return nil
+   end
++  local canonical_expected_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    review_dedup_key,
++    review_proposal_id
++  )
+   local marker_pattern = "<!%-%- fkst:github%-devloop:high%-risk%-review%-evidence:v1.-%-%->"
+   local best = nil
+   local best_seconds = nil
+@@ -397,12 +415,17 @@ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
+       local marker_verdict = marker_attr(marker, "verdict")
+       local marker_paths_digest = marker_attr(marker, "paths_digest")
+       local marker_angle_digest = marker_attr(marker, "angle_digest")
++      local canonical_marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        marker_review_dedup,
++        marker_review_proposal
++      )
+       if marker_issue == tostring(issue_proposal_id)
+         and marker_version == tostring(issue_version)
+         and tostring(marker_pr or "") == tostring(pr_number or "")
+         and tostring(marker_head_sha or "") == tostring(head_sha or "")
+         and tostring(marker_review_proposal or "") == tostring(review_proposal_id or "")
+-        and tostring(marker_review_dedup or "") == tostring(review_dedup_key or "")
++        and canonical_marker_review_dedup ~= nil
++        and canonical_marker_review_dedup == canonical_expected_review_dedup
+         and marker_risk == "high"
+         and marker_angle == "high-risk"
+         and marker_verdict == "approve"
+@@ -419,7 +442,7 @@ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
+           head_sha = marker_head_sha,
+           reviewed_head_sha = marker_head_sha,
+           review_proposal_id = marker_review_proposal,
+-          review_dedup_key = marker_review_dedup,
++          review_dedup_key = canonical_marker_review_dedup,
+           risk = marker_risk,
+           angle = marker_angle,
+           verdict = marker_verdict,
+@@ -450,10 +473,19 @@ function C.review_result_approval_matches_event(comments, merge_ready)
+       local decision = marker:match('decision="([^"]+)"')
+       local review_dedup = marker:match('dedup="([^"]*)"')
+       local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
++      local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        review_dedup,
++        review_proposal
++      )
++      local canonical_merge_ready_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        merge_ready.review_dedup_key,
++        merge_ready.review_proposal_id
++      )
+       if tostring(review_proposal or "") == tostring(merge_ready.review_proposal_id or "")
+         and tostring(issue_proposal or "") == tostring(merge_ready.proposal_id or "")
+         and decision == "approve"
+-        and tostring(review_dedup or "") == tostring(merge_ready.review_dedup_key or "")
++        and canonical_review_dedup ~= nil
++        and canonical_review_dedup == canonical_merge_ready_dedup
+         and tostring(review_pr_number or "") == tostring(merge_ready.pr_number or "")
+         and tostring(reviewed_head_sha or "") == tostring(merge_ready.reviewed_head_sha or "")
+         and tostring(review_version or "") == transition_version.safe_version_segment(merge_ready.version) then
+@@ -482,11 +514,20 @@ function C.merge_ready_approval_matches_event(fact, merge_ready)
+   if type(fact) ~= "table" or type(merge_ready) ~= "table" then
+     return false, "missing-merge-ready-approval"
+   end
++  local fact_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    fact.review_dedup_key,
++    fact.review_proposal_id
++  )
++  local merge_ready_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    merge_ready.review_dedup_key,
++    merge_ready.review_proposal_id
++  )
+   if tostring(fact.proposal_id or "") ~= tostring(merge_ready.proposal_id or "")
+     or tostring(fact.pr_number or "") ~= tostring(merge_ready.pr_number or "")
+     or tostring(fact.version or "") ~= tostring(merge_ready.version or "")
+     or tostring(fact.review_proposal_id or "") ~= tostring(merge_ready.review_proposal_id or "")
+-    or tostring(fact.review_dedup_key or "") ~= tostring(merge_ready.review_dedup_key or "")
++    or fact_review_dedup == nil
++    or fact_review_dedup ~= merge_ready_review_dedup
+     or tostring(fact.head_sha or "") ~= tostring(merge_ready.reviewed_head_sha or "") then
+     return false, "merge-ready-approval-mismatch"
+   end
+@@ -579,13 +620,24 @@ function C.has_review_result_marker(comments, review_proposal_id, issue_proposal
+   if type(comments) ~= "table" then
+     return false
+   end
++  local canonical_expected_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    dedup_key,
++    review_proposal_id
++  )
+   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+     for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
+-      if marker_attr(marker, "proposal") == tostring(review_proposal_id)
++      local marker_review_proposal = marker_attr(marker, "proposal")
++      local marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        marker_attr(marker, "dedup"),
++        marker_review_proposal
++      )
++      local raw_marker_review_dedup = marker_attr(marker, "dedup")
++      if marker_review_proposal == tostring(review_proposal_id)
+         and marker_attr(marker, "issue_proposal") == tostring(issue_proposal_id)
+         and marker_attr(marker, "decision") == tostring(decision)
+-        and marker_attr(marker, "dedup") == tostring(dedup_key) then
++        and ((marker_review_dedup ~= nil and marker_review_dedup == canonical_expected_dedup)
++          or (canonical_expected_dedup == nil and raw_marker_review_dedup == tostring(dedup_key))) then
+         return true
+       end
+     end
+diff --git a/libraries/devloop/payloads/builders.lua b/libraries/devloop/payloads/builders.lua
+index 2deb6bc0..349f58fc 100644
+--- a/libraries/devloop/payloads/builders.lua
++++ b/libraries/devloop/payloads/builders.lua
+@@ -435,10 +435,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
+     title = devloop_base.neutralize_untrusted_prompt_text(title),
+     body = body,
+     content_fetch = content_fetch,
+-    dedup_key = base_ids.dedup_key({
+-      review_id,
+-      "review",
+-    }),
++    dedup_key = devloop_base.pr_review_proposal_dedup_key(review_id),
+     source_ref = base_ids.normalize_source_ref(source_ref),
+   }, high_risk)
+ end
+diff --git a/libraries/devloop/requests/review.lua b/libraries/devloop/requests/review.lua
+index 71ea2ff9..7b077862 100644
+--- a/libraries/devloop/requests/review.lua
++++ b/libraries/devloop/requests/review.lua
+@@ -176,6 +176,13 @@ function C.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, inte
+ end
+ 
+ function C.build_review_result_comment_request(M, repo, issue_number, issue_proposal_id, issue_version, reached, source_ref)
++  local review_dedup_key = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    reached.dedup_key,
++    reached.proposal_id
++  )
++  if review_dedup_key == nil then
++    error("github-devloop: invalid review result dedup")
++  end
+   local to_state = reached.reflection_checkpoint and "review-meta"
+     or reached.decision == "approve" and "merge-ready"
+     or "fixing"
+@@ -185,15 +192,15 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
+     fix_round = M.version_fix_round(issue_version)
+   end
+   local blocking_gap = shared.bounded_blocking_gap(reached)
+-  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
++  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, review_dedup_key, fix_round, blocking_gap)
+   local reflection_marker = ""
+   if reached.reflection_checkpoint then
+-    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, reached.dedup_key, "checkpoint", issue_version, fix_round)
++    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, review_dedup_key, "checkpoint", issue_version, fix_round)
+   end
+   local merge_marker = ""
+   if reached.decision == "approve" then
+     local _, pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
+-    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
++    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, review_dedup_key, reviewed_head_sha)
+   end
+   local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
+   local verdict_summary = shared.build_verdict_summary(M, reached.angle_results)
+@@ -220,7 +227,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
+     "comment",
+     tostring(issue_proposal_id),
+     tostring(reached.decision),
+-    tostring(reached.dedup_key),
++    tostring(review_dedup_key),
+   }), source_ref)
+   if reached.decision == "approve" then
+     local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
+@@ -230,7 +237,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
+       pr_number = pr_number,
+       version = issue_version,
+       review_proposal_id = reached.proposal_id,
+-      review_dedup_key = reached.dedup_key,
++      review_dedup_key = review_dedup_key,
+       reviewed_head_sha = reviewed_head_sha,
+       current_head_sha = reached.current_head_sha or reviewed_head_sha,
+       source_ref = base_ids.normalize_source_ref(source_ref),
+@@ -239,7 +246,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
+     local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
+     C.attach_fixing_handoff(request, issue_proposal_id, pr_number, issue_version, {
+       review_proposal_id = reached.proposal_id,
+-      review_dedup_key = reached.dedup_key,
++      review_dedup_key = review_dedup_key,
+       reviewed_head_sha = reviewed_head_sha,
+       framing = reached.framing,
+       blocking_gap = reached.blocking_gap,
+@@ -250,12 +257,19 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
+ end
+ 
+ function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
++  local review_dedup_key = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    reached.dedup_key,
++    reached.proposal_id
++  )
++  if review_dedup_key == nil then
++    error("github-devloop: invalid high-risk review evidence dedup")
++  end
+   local marker = m_builders.high_risk_review_evidence_marker(issue_proposal_id,
+     issue_version,
+     pr_number,
+     reviewed_head_sha,
+     reached.proposal_id,
+-    reached.dedup_key,
++    review_dedup_key,
+     paths_digest,
+     angle_digest
+   )
+@@ -271,7 +285,7 @@ function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_
+     tostring(issue_proposal_id),
+     tostring(issue_version),
+     tostring(reached.proposal_id),
+-    tostring(reached.dedup_key),
++    tostring(review_dedup_key),
+     tostring(paths_digest),
+     tostring(angle_digest),
+   }), source_ref)
+diff --git a/libraries/devloop/restart/pr_review_replay_facts.lua b/libraries/devloop/restart/pr_review_replay_facts.lua
+index f0db1d40..05865238 100644
+--- a/libraries/devloop/restart/pr_review_replay_facts.lua
++++ b/libraries/devloop/restart/pr_review_replay_facts.lua
+@@ -10,6 +10,16 @@ local transition_version = require("contract.transition_version")
+ 
+ local S = {}
+ 
++local function review_proposal_from_dedup(dedup_key)
++  return devloop_base.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
++end
++
++local function same_review_result_dedup(left, right)
++  local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
++  local right_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(right)
++  return left_canonical ~= nil and left_canonical == right_canonical
++end
++
+ local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
+   if type(comments) ~= "table" then
+     return nil
+@@ -63,7 +73,7 @@ local function build_ops(ctx)
+       for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
+         local marker_issue = marker:match('proposal="([^"]+)"')
+         local marker_dedup = marker:match('dedup="([^"]*)"')
+-        local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
++        local review_proposal = review_proposal_from_dedup(marker_dedup)
+         local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+         if marker_issue == tostring(issue_proposal_id)
+           and tostring(review_pr_number or "") == tostring(pr_number)
+@@ -88,7 +98,8 @@ local function build_ops(ctx)
+         local verdict = marker:match('verdict="([^"]+)"')
+         local marker_version = marker:match('version="([^"]*)"')
+         local round = tonumber(marker:match('fix_round="(%d+)"'))
+-        local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
++        local review_proposal = review_proposal_from_dedup(marker_dedup)
++        local canonical_marker_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(marker_dedup)
+         local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+         if marker_issue == tostring(issue_proposal_id)
+           and verdict == "checkpoint"
+@@ -100,15 +111,15 @@ local function build_ops(ctx)
+           local reject_fact = m_facts.review_reject_fact(comments, issue_proposal_id, issue_version)
+           if reject_fact == nil
+             or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
+-            or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
++            or not same_review_result_dedup(reject_fact.review_dedup_key, marker_dedup)
+             or not strings.is_bounded_string(reject_fact.blocking_gap, ctx._max_blocking_gap_len) then
+             return nil
+           end
+-          local reflection_dedup = payloads_builders.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, marker_dedup)
++          local reflection_dedup = payloads_builders.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, canonical_marker_dedup)
+           return {
+             proposal_id = review_proposal,
+             dedup_key = reflection_dedup,
+-            review_dedup_key = marker_dedup,
++            review_dedup_key = canonical_marker_dedup,
+             source_ref = entity_lib.pr_source_ref(repo, pr_number),
+             pr_number = tonumber(pr_number),
+             n = tonumber(n) or 0,
+diff --git a/libraries/devloop/validators/validate_proposal.lua b/libraries/devloop/validators/validate_proposal.lua
+index 81346d1e..c81edbd6 100644
+--- a/libraries/devloop/validators/validate_proposal.lua
++++ b/libraries/devloop/validators/validate_proposal.lua
+@@ -3,6 +3,7 @@ local base_ids = require("devloop.base_ids")
+ local strings = require("contract.strings")
+ local source_refs = require("contract.source_ref")
+ local convergence_shared = require("devloop.convergence.shared")
++local transition_version = require("contract.transition_version")
+ 
+ local C = {}
+ function C.is_intake_hand_off(hand_off, proposal)
+@@ -32,7 +33,9 @@ function C.validate_proposal(proposal)
+     if review_repo == nil or pr_number == nil then
+       return false
+     end
+-    if not strings.is_path_safe_key(proposal.proposal_id, devloop_base._max_key_len) or not strings.is_path_safe_key(proposal.dedup_key, devloop_base._max_dedup_len) then
++    local review_dedup_key = devloop_base.pr_review_proposal_dedup_key(proposal.proposal_id)
++    if not strings.is_path_safe_key(proposal.proposal_id, devloop_base._max_key_len)
++      or transition_version.strip_trailing_loop(proposal.dedup_key) ~= review_dedup_key then
+       return false
+     end
+   else
+diff --git a/packages/github-devloop-pr/core/review_carry_over.lua b/packages/github-devloop-pr/core/review_carry_over.lua
+index ea3a402e..56c0198b 100644
+--- a/packages/github-devloop-pr/core/review_carry_over.lua
++++ b/packages/github-devloop-pr/core/review_carry_over.lua
+@@ -19,7 +19,7 @@ local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version,
+     return true, "normal-risk"
+   end
+   local new_review_proposal = devloop_base.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
+-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
++  local new_review_dedup = devloop_base.pr_review_consensus_dedup_key(new_review_proposal)
+   local fact = m_facts.high_risk_review_evidence_fact(
+     comments,
+     issue_proposal_id,
+@@ -76,7 +76,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
+     return nil, risk_reason
+   end
+   local new_review_proposal = devloop_base.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
+-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
++  local new_review_dedup = devloop_base.pr_review_consensus_dedup_key(new_review_proposal)
+   return {
+     version = version,
+     old_review_proposal_id = fact.review_proposal_id,
+diff --git a/packages/github-devloop-pr/departments/fix/main.lua b/packages/github-devloop-pr/departments/fix/main.lua
+index 7c4205c7..109eea87 100644
+--- a/packages/github-devloop-pr/departments/fix/main.lua
++++ b/packages/github-devloop-pr/departments/fix/main.lua
+@@ -42,6 +42,12 @@ local spec = {
+   retry = { max_attempts = 12, base = "5s", cap = "30s" },
+ }
+ 
++local function same_review_result_dedup(left, right)
++  local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
++  local right_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(right)
++  return left_canonical ~= nil and left_canonical == right_canonical
++end
++
+ local git = git_adapter.production_handle
+ 
+ local function fix_done(_event)
+@@ -731,7 +737,7 @@ local function act_fix(event)
+     local feedback_reason = nil
+     if reject_fact ~= nil then
+       if reject_fact.review_proposal_id ~= fix.review_proposal_id
+-        or reject_fact.review_dedup_key ~= fix.review_dedup_key
++        or not same_review_result_dedup(reject_fact.review_dedup_key, fix.review_dedup_key)
+         or reject_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
+         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-fact-mismatch)", "fix event does not match canonical reject review marker")
+         return
+@@ -745,7 +751,7 @@ local function act_fix(event)
+       feedback_reason = meta_fix_fact.review_reason
+     else
+       if merge_gate_fact.review_proposal_id ~= fix.review_proposal_id
+-        or merge_gate_fact.review_dedup_key ~= fix.review_dedup_key
++        or not same_review_result_dedup(merge_gate_fact.review_dedup_key, fix.review_dedup_key)
+         or merge_gate_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
+         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
+         return
+diff --git a/packages/github-devloop-pr/departments/review_result/main.lua b/packages/github-devloop-pr/departments/review_result/main.lua
+index b7644e4a..665486b8 100644
+--- a/packages/github-devloop-pr/departments/review_result/main.lua
++++ b/packages/github-devloop-pr/departments/review_result/main.lua
+@@ -34,6 +34,15 @@ local spec = {
+   retry = { max_attempts = 12, base = "5s", cap = "30s" },
+ }
+ 
++local function copy_reached_with_review_dedup(reached, review_dedup_key)
++  local copy = {}
++  for key, value in pairs(reached or {}) do
++    copy[key] = value
++  end
++  copy.dedup_key = review_dedup_key
++  return copy
++end
++
+ return saga.department(spec, { done = function() return false end, act = function(event)
+   local reached = event.payload or {}
+   if not v_review_result.is_supported_review_result(reached) then
+@@ -91,6 +100,14 @@ return saga.department(spec, { done = function() return false end, act = functio
+     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
+     return
+   end
++  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    reached.dedup_key,
++    reached.proposal_id
++  )
++  if canonical_review_dedup == nil then
++    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(review-dedup)", "review result dedup does not match PR review proposal")
++    return
++  end
+   if reached.decision == "reject"
+     and not strings.is_bounded_string(reached.blocking_gap, devloop_base._max_blocking_gap_len) then
+     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
+@@ -111,7 +128,7 @@ return saga.department(spec, { done = function() return false end, act = functio
+     devloop_logging.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
+     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
+     local effective_decision = reached.decision
+-    local comment_reached = reached
++    local comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
+     local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(reached.blocking_gap)
+     local out_of_contract_reject = reached.decision == "reject" and payloads_predicates.is_out_of_contract_review_gap(reached.blocking_gap)
+     if gate_owned_reject or out_of_contract_reject then
+@@ -143,10 +160,7 @@ return saga.department(spec, { done = function() return false end, act = functio
+         if not high_risk_approved then
+           effective_decision = "reject"
+           high_risk_angle_not_approved = true
+-          comment_reached = {}
+-          for key, value in pairs(reached) do
+-            comment_reached[key] = value
+-          end
++          comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
+           comment_reached.decision = "reject"
+           comment_reached.blocking_gap = "high-risk-angle-not-approved"
+           comment_reached.body = "High-risk PR approval did not include an approving high-risk angle."
+@@ -174,11 +188,11 @@ return saga.department(spec, { done = function() return false end, act = functio
+       stage_rank = state.stage_rank,
+     }, { "reviewing" }, to_state, reviewed_issue_version)
+     if transition == "idempotent" or transition == "stale" then
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "review decision cannot advance current marker")
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "review decision cannot advance current marker")
+       return
+     end
+     if transition == "pending" then
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "reviewing state marker not yet visible")
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "reviewing state marker not yet visible")
+       error("github-devloop: review-result-marker-missing: reviewing marker not yet visible for review result; retrying")
+     end
+ 
+@@ -194,7 +208,7 @@ return saga.department(spec, { done = function() return false end, act = functio
+         local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
+           proposal_id = origin.proposal_id,
+           review_proposal_id = reached.proposal_id,
+-          review_dedup_key = reached.dedup_key,
++          review_dedup_key = canonical_review_dedup,
+           reviewed_head_sha = reviewed_head_sha,
+           pr_number = pr_number,
+           source_ref = pr_source_ref,
+@@ -208,15 +222,12 @@ return saga.department(spec, { done = function() return false end, act = functio
+       end
+     end
+     if high_risk_angle_not_approved then
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
+     else
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "review decision=" .. tostring(reached.decision))
+     end
+     if (gate_owned_reject or out_of_contract_reject) and not high_risk_angle_not_approved then
+-      comment_reached = {}
+-      for key, value in pairs(reached) do
+-        comment_reached[key] = value
+-      end
++      comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
+       comment_reached.decision = "approve"
+       local advisory_reason = "rejected only for gate-owned fact: "
+       if out_of_contract_reject then
+@@ -242,7 +253,7 @@ return saga.department(spec, { done = function() return false end, act = functio
+     local comment_request = requests_review.build_review_result_comment_request(core, origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
+     local evidence_request = nil
+     if effective_decision == "approve" and #high_risk_paths > 0 then
+-      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
++      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, comment_reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+     end
+     local label_request = nil
+     if origin.issue_number ~= nil then
+@@ -262,10 +273,10 @@ return saga.department(spec, { done = function() return false end, act = functio
+     if reflection_checkpoint then
+       reflection_payload = payloads_builders.build_devloop_fix_reflection_payload({
+         proposal_id = reached.proposal_id,
+-        dedup_key = reached.dedup_key,
++        dedup_key = canonical_review_dedup,
+         source_ref = pr_source_ref,
+       }, origin.proposal_id, issue_version, pr_number, devloop_state.version_fix_round(issue_version), pr_source_ref)
+-      reflection_payload.blocking_gap = reached.blocking_gap
++      reflection_payload.blocking_gap = comment_reached.blocking_gap
+       table.insert(raised, "devloop_review_meta")
+     end
+     devloop_logging.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)
+diff --git a/packages/github-devloop-pr/tests/integration_pr_review_result_test.lua b/packages/github-devloop-pr/tests/integration_pr_review_result_test.lua
+index 2e7df4fb..336025c6 100644
+--- a/packages/github-devloop-pr/tests/integration_pr_review_result_test.lua
++++ b/packages/github-devloop-pr/tests/integration_pr_review_result_test.lua
+@@ -122,6 +122,31 @@ return {
+     t.eq(fixing_raise.payload.reviewed_head_sha, "def456")
+   end,
+ 
++  test_review_result_reject_canonicalizes_converged_review_dedup = function()
++    local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff.", blocking_gap = "missing regression guard" })
++    local canonical_review_dedup = event.dedup_key
++    event.dedup_key = canonical_review_dedup .. "/loop/2"
++    local impl_version = reviewing().version
++    local fix_version = core.fix_version_from_review_version(impl_version)
++    mock_pr_origin({
++      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
++    })
++    mock_issue_result({ "fkst-dev:reviewing" }, {
++      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
++    })
++
++    local result = run_review_result(event, opts("review-result-reject-loop-dedup"))
++
++    t.eq(result.exit_code, 0)
++    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
++    local fixing_raise = find_causal_raise(result, "devloop_fixing")
++    t.is_true(comment_raise.payload.body:find('dedup="' .. canonical_review_dedup .. '"', 1, true) ~= nil)
++    t.is_nil(comment_raise.payload.body:find('dedup="' .. event.dedup_key .. '"', 1, true))
++    t.eq(comment_raise.payload.handoff.review_dedup_key, canonical_review_dedup)
++    t.eq(fixing_raise.payload.review_dedup_key, canonical_review_dedup)
++    t.eq(fixing_raise.payload.version, fix_version)
++  end,
++
+   test_review_result_skips_other_owned_backing_issue_before_raising = function()
+     local event = review_reached()
+     local impl_version = reviewing().version
+diff --git a/packages/github-devloop-pr/tests/review_protocol_v2_test.lua b/packages/github-devloop-pr/tests/review_protocol_v2_test.lua
+index f624674e..900ea753 100644
+--- a/packages/github-devloop-pr/tests/review_protocol_v2_test.lua
++++ b/packages/github-devloop-pr/tests/review_protocol_v2_test.lua
+@@ -545,6 +545,22 @@ return {
+     t.is_nil(ledger)
+   end,
+ 
++  test_review_result_legacy_loop_dedup_marker_is_canonicalized = function()
++    local issue_version = h.reviewing().version
++    local fix_version = core.next_fix_version(issue_version)
++    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
++    local canonical_review_dedup = devloop_base.pr_review_consensus_dedup_key(review_id)
++    local legacy = {
++      body = m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", canonical_review_dedup .. "/loop/2", 1, "missing guard"),
++      author_login = "fkst-test-bot",
++    }
++
++    local fact = m_facts.review_reject_fact({ legacy }, "github-devloop/issue/owner/repo/42", fix_version)
++
++    t.eq(fact.review_dedup_key, canonical_review_dedup)
++    t.eq(fact.blocking_gap, "missing guard")
++  end,
++
+   test_prior_round_ledger_rejects_stale_version_and_untrusted_author = function()
+     local current_version = h.reviewing().version
+     local stale_version = current_version .. "/fix/1"

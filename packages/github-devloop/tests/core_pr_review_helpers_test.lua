@@ -125,6 +125,30 @@ return {
     t.is_true(#proposal.proposal_id <= 200)
     t.eq(v_validate_proposal.validate_proposal(proposal), true)
   end,
+  test_pr_review_proposal_rejects_oversized_loop_dedup = function()
+    local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
+    local head_sha = "abcdef1234567890"
+    local proposal = payloads_builders.build_pr_review_proposal(core,
+      "owner/repo",
+      "42",
+      7,
+      version,
+      head_sha,
+      {
+        title = "Implement decision recorder",
+        body = "Issue body",
+      },
+      { kind = "external", ref = "owner/repo#pr/7" }
+    )
+    local base_dedup = proposal.dedup_key
+
+    proposal.dedup_key = base_dedup .. "/loop/2"
+    t.eq(v_validate_proposal.validate_proposal(proposal), true)
+
+    proposal.dedup_key = base_dedup .. "/loop/" .. string.rep("9", core._max_dedup_len)
+    t.is_true(#proposal.dedup_key > core._max_dedup_len)
+    t.eq(v_validate_proposal.validate_proposal(proposal), false)
+  end,
   test_pr_review_proposal_uses_fetch_instruction_when_issue_body_is_long = function()
     local version = "ready/consensus-github-devloop/issue/owner/repo/42/2026-06-03T01-02-03Z"
     local head_sha = "abcdef1234567890"

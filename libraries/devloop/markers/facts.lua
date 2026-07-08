@@ -22,17 +22,20 @@ local function review_result_fact_from_marker(marker, comment, issue_proposal_id
   local decision = marker_attr(marker, "decision")
   local review_dedup = marker_attr(marker, "dedup")
   local _, _, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
-  local expected_dedup = review_proposal ~= nil and ("consensus:" .. tostring(review_proposal) .. "/review") or nil
+  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    review_dedup,
+    review_proposal
+  )
   if marker_issue == tostring(issue_proposal_id)
     and (expected_decision == nil or decision == expected_decision)
     and (decision == "approve" or decision == "reject")
     and review_version == transition_version.safe_version_segment(devloop_state._strip_latest_fix_version_suffix(issue_version))
-    and review_dedup == expected_dedup
-    and strings.is_bounded_string(review_dedup, devloop_base._max_dedup_len)
+    and canonical_review_dedup ~= nil
+    and strings.is_bounded_string(canonical_review_dedup, devloop_base._max_dedup_len)
     and forge_validators.is_git_sha(reviewed_head_sha) then
     local fact = {
       review_proposal_id = review_proposal,
-      review_dedup_key = review_dedup,
+      review_dedup_key = canonical_review_dedup,
       reviewed_head_sha = reviewed_head_sha,
       decision = decision,
       review_reason = parsers_misc._comment_body(comment),
@@ -56,7 +59,7 @@ local function review_result_fact_from_marker(marker, comment, issue_proposal_id
 end
 
 local function review_proposal_from_dedup(dedup_key)
-  return tostring(dedup_key or ""):match("^consensus:(.+)/review$")
+  return devloop_base.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
 end
 
 function C.intake_decision_fact(comments, issue_proposal_id)
@@ -276,9 +279,14 @@ local function merge_gate_fix_fact_matches_bindings(fact, opts)
   if type(opts) ~= "table" then
     return true
   end
+  local fact_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(fact.review_dedup_key)
+  local opts_review_dedup = nil
+  if opts.review_dedup_key ~= nil then
+    opts_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(opts.review_dedup_key)
+  end
   local baseline_bound = opts.match_gate_baseline_sha == true or opts.gate_baseline_sha ~= nil
   return (opts.review_proposal_id == nil or fact.review_proposal_id == tostring(opts.review_proposal_id))
-    and (opts.review_dedup_key == nil or fact.review_dedup_key == tostring(opts.review_dedup_key))
+    and (opts.review_dedup_key == nil or (fact_review_dedup ~= nil and fact_review_dedup == opts_review_dedup))
     and (not baseline_bound
       or (opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha == tostring(opts.gate_baseline_sha))
       or (opts.gate_baseline_sha == nil and fact.gate_baseline_sha == nil))
@@ -381,6 +389,10 @@ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
   if not strings.is_bounded_string(paths_digest, devloop_base._max_key_len) then
     return nil
   end
+  local canonical_expected_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    review_dedup_key,
+    review_proposal_id
+  )
   local marker_pattern = "<!%-%- fkst:github%-devloop:high%-risk%-review%-evidence:v1.-%-%->"
   local best = nil
   local best_seconds = nil
@@ -397,12 +409,17 @@ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
       local marker_verdict = marker_attr(marker, "verdict")
       local marker_paths_digest = marker_attr(marker, "paths_digest")
       local marker_angle_digest = marker_attr(marker, "angle_digest")
+      local canonical_marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+        marker_review_dedup,
+        marker_review_proposal
+      )
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(issue_version)
         and tostring(marker_pr or "") == tostring(pr_number or "")
         and tostring(marker_head_sha or "") == tostring(head_sha or "")
         and tostring(marker_review_proposal or "") == tostring(review_proposal_id or "")
-        and tostring(marker_review_dedup or "") == tostring(review_dedup_key or "")
+        and canonical_marker_review_dedup ~= nil
+        and canonical_marker_review_dedup == canonical_expected_review_dedup
         and marker_risk == "high"
         and marker_angle == "high-risk"
         and marker_verdict == "approve"
@@ -419,7 +436,7 @@ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_ver
           head_sha = marker_head_sha,
           reviewed_head_sha = marker_head_sha,
           review_proposal_id = marker_review_proposal,
-          review_dedup_key = marker_review_dedup,
+          review_dedup_key = canonical_marker_review_dedup,
           risk = marker_risk,
           angle = marker_angle,
           verdict = marker_verdict,
@@ -450,10 +467,19 @@ function C.review_result_approval_matches_event(comments, merge_ready)
       local decision = marker:match('decision="([^"]+)"')
       local review_dedup = marker:match('dedup="([^"]*)"')
       local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+      local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+        review_dedup,
+        review_proposal
+      )
+      local canonical_merge_ready_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+        merge_ready.review_dedup_key,
+        merge_ready.review_proposal_id
+      )
       if tostring(review_proposal or "") == tostring(merge_ready.review_proposal_id or "")
         and tostring(issue_proposal or "") == tostring(merge_ready.proposal_id or "")
         and decision == "approve"
-        and tostring(review_dedup or "") == tostring(merge_ready.review_dedup_key or "")
+        and canonical_review_dedup ~= nil
+        and canonical_review_dedup == canonical_merge_ready_dedup
         and tostring(review_pr_number or "") == tostring(merge_ready.pr_number or "")
         and tostring(reviewed_head_sha or "") == tostring(merge_ready.reviewed_head_sha or "")
         and tostring(review_version or "") == transition_version.safe_version_segment(merge_ready.version) then
@@ -482,11 +508,20 @@ function C.merge_ready_approval_matches_event(fact, merge_ready)
   if type(fact) ~= "table" or type(merge_ready) ~= "table" then
     return false, "missing-merge-ready-approval"
   end
+  local fact_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    fact.review_dedup_key,
+    fact.review_proposal_id
+  )
+  local merge_ready_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    merge_ready.review_dedup_key,
+    merge_ready.review_proposal_id
+  )
   if tostring(fact.proposal_id or "") ~= tostring(merge_ready.proposal_id or "")
     or tostring(fact.pr_number or "") ~= tostring(merge_ready.pr_number or "")
     or tostring(fact.version or "") ~= tostring(merge_ready.version or "")
     or tostring(fact.review_proposal_id or "") ~= tostring(merge_ready.review_proposal_id or "")
-    or tostring(fact.review_dedup_key or "") ~= tostring(merge_ready.review_dedup_key or "")
+    or fact_review_dedup == nil
+    or fact_review_dedup ~= merge_ready_review_dedup
     or tostring(fact.head_sha or "") ~= tostring(merge_ready.reviewed_head_sha or "") then
     return false, "merge-ready-approval-mismatch"
   end
@@ -579,13 +614,24 @@ function C.has_review_result_marker(comments, review_proposal_id, issue_proposal
   if type(comments) ~= "table" then
     return false
   end
+  local canonical_expected_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    dedup_key,
+    review_proposal_id
+  )
   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
     for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
-      if marker_attr(marker, "proposal") == tostring(review_proposal_id)
+      local marker_review_proposal = marker_attr(marker, "proposal")
+      local marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+        marker_attr(marker, "dedup"),
+        marker_review_proposal
+      )
+      local raw_marker_review_dedup = marker_attr(marker, "dedup")
+      if marker_review_proposal == tostring(review_proposal_id)
         and marker_attr(marker, "issue_proposal") == tostring(issue_proposal_id)
         and marker_attr(marker, "decision") == tostring(decision)
-        and marker_attr(marker, "dedup") == tostring(dedup_key) then
+        and ((marker_review_dedup ~= nil and marker_review_dedup == canonical_expected_dedup)
+          or (canonical_expected_dedup == nil and raw_marker_review_dedup == tostring(dedup_key))) then
         return true
       end
     end

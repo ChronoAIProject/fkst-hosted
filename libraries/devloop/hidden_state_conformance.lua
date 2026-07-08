@@ -206,7 +206,7 @@ local function awaiting_pr_child_state_for_successor(successor)
 end
 
 local function review_proposal(core, state) return devloop_base.pr_review_proposal_id(REPO, PR_NUMBER, state.version, HEAD_SHA) end
-local function review_dedup(core, state) return "consensus:" .. review_proposal(core, state) .. "/review" end
+local function review_dedup(core, state) return devloop_base.pr_review_consensus_dedup_key(review_proposal(core, state)) end
 
 local function add_common_pr_facts(core, entity, state, facts, include_pr_link_marker)
   local link = {
@@ -311,7 +311,7 @@ local function fact_value(core, row, state, family, successor)
       version = state.version,
       pr_number = PR_NUMBER,
       review_proposal_id = review_id,
-      review_dedup_key = "consensus:" .. review_id .. "/review",
+      review_dedup_key = devloop_base.pr_review_consensus_dedup_key(review_id),
       reviewed_head_sha = reviewed,
       reason = "behavioral-fixture",
     }

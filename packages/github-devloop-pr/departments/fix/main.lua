@@ -42,6 +42,12 @@ local spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
+local function same_review_result_dedup(left, right)
+  local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
+  local right_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(right)
+  return left_canonical ~= nil and left_canonical == right_canonical
+end
+
 local git = git_adapter.production_handle
 
 local function fix_done(_event)
@@ -731,7 +737,7 @@ local function act_fix(event)
     local feedback_reason = nil
     if reject_fact ~= nil then
       if reject_fact.review_proposal_id ~= fix.review_proposal_id
-        or reject_fact.review_dedup_key ~= fix.review_dedup_key
+        or not same_review_result_dedup(reject_fact.review_dedup_key, fix.review_dedup_key)
         or reject_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(review-fact-mismatch)", "fix event does not match canonical reject review marker")
         return
@@ -745,7 +751,7 @@ local function act_fix(event)
       feedback_reason = meta_fix_fact.review_reason
     else
       if merge_gate_fact.review_proposal_id ~= fix.review_proposal_id
-        or merge_gate_fact.review_dedup_key ~= fix.review_dedup_key
+        or not same_review_result_dedup(merge_gate_fact.review_dedup_key, fix.review_dedup_key)
         or merge_gate_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-fact-mismatch)", "fix event does not match canonical merge-gate marker")
         return

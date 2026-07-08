@@ -65,7 +65,11 @@ local function sign_order(value)
 end
 
 local function slash_numeric_suffix(parts, pos, spec)
-  local n = tonumber(parts[pos + 1])
+  local raw = parts[pos + 1]
+  if type(raw) ~= "string" or raw:match("^%d+$") == nil then
+    return nil
+  end
+  local n = tonumber(raw)
   if n == nil then
     return nil
   end
@@ -74,8 +78,12 @@ end
 
 local function slash_state_numeric_suffix(parts, pos, spec)
   local state = parts[pos + 1]
-  local n = tonumber(parts[pos + 2])
-  if state == nil or state == "" or n == nil then
+  local raw = parts[pos + 2]
+  if state == nil or state == "" or type(raw) ~= "string" or raw:match("^%d+$") == nil then
+    return nil
+  end
+  local n = tonumber(raw)
+  if n == nil then
     return nil
   end
   return { kind = spec.kind, state = state, n = n, separator = "slash" }, pos + 3

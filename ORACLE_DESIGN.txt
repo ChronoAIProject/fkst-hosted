@@ -1,0 +1,451 @@
+I read the code path. The best fix is not “make every consumer lenient” as the primary policy. The best fix is:
+Define one PR-review consensus dedup constructor/parser pair, canonicalize the review-result boundary at write time, and keep read-side canonicalization only for legacy markers already written with /loop/N.
+The /loop/N suffix is meaningful for the consensus run and review convergence telemetry. It is not meaningful for the review-result outcome marker. The initial PR review proposal dedup is <review_id>/review, and review-loop proposals add transition_version.loop_at(...), which creates <review_id>/review/loop/N; consensus then wraps the proposal dedup as consensus:<proposal.dedup_key>.
+The bug is exactly that this consensus-run identity leaks into the outcome marker and downstream handoffs. review_result/main.lua starts with the raw reached payload as comment_reached; requests/review.lua writes reached.dedup_key into the review-result:v1 marker, merge-ready marker, reflection marker, comment dedup, and handoff payloads; then facts.lua insists the marker dedup exactly equals consensus:<review_proposal>/review, so /loop/N makes the reject fact disappear.    The fix worker then calls review_reject_fact; if it is nil, it retries with fix-feedback-marker-missing and never reaches the Codex attempt.
+Why canonicalizing at write is correct
+A review-result:v1 marker is not “the result of convergence loop 3.” It is “the accepted PR review outcome for this review proposal, reviewed head, issue version, and fix round.” The review proposal ID already carries PR number, version segment, and head SHA.  Reject markers also carry fix_round separately and validate that it matches the issue version’s fix round.  So stripping /loop/N from the outcome marker does not collapse distinct fix rounds. It collapses duplicate convergence attempts for the same reviewed head into one outcome, which is exactly the idempotency shape the rest of the code already expects.
+The only thing we lose by stripping is provenance of which convergence round yielded the final consensus. That provenance belongs on review-converge markers or an explicit provenance attr, not in the review-result identity.
+Concrete diffs
+These are the production hunks I would land. I’m including read-side tolerance because real PRs already have bad markers, but all future writes should be canonical.
+Diffdiff --git a/libraries/devloop/base.lua b/libraries/devloop/base.lua
+@@
+ function C.parse_pr_review_proposal_id(id)
+@@
+   return repo, pr_number, version, head_sha
+ end
++
++function C.pr_review_proposal_dedup_key(review_proposal_id)
++  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
++    error("github-devloop: invalid PR review proposal id")
++  end
++  return base_ids.dedup_key({
++    tostring(review_proposal_id),
++    "review",
++  })
++end
++
++function C.pr_review_consensus_dedup_key(review_proposal_id)
++  return "consensus:" .. C.pr_review_proposal_dedup_key(review_proposal_id)
++end
++
++local function parse_canonical_pr_review_consensus_dedup_key(dedup_key)
++  local inner = tostring(dedup_key or ""):match("^consensus:(.+)$")
++  if inner == nil then
++    return nil
++  end
++
++  local review_proposal = inner:match("^(.+)/review$")
++  if review_proposal == nil then
++    return nil
++  end
++  if C.parse_pr_review_proposal_id(review_proposal) == nil then
++    return nil
++  end
++  if inner ~= C.pr_review_proposal_dedup_key(review_proposal) then
++    return nil
++  end
++  return review_proposal, "consensus:" .. inner
++end
++
++function C.canonical_pr_review_consensus_dedup_key(dedup_key)
++  if not is_bounded_string(dedup_key, max_dedup_len) then
++    return nil
++  end
++  local canonical = transition_version.strip_trailing_loop(dedup_key)
++  local _, parsed = parse_canonical_pr_review_consensus_dedup_key(canonical)
++  return parsed
++end
++
++function C.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
++  local canonical = C.canonical_pr_review_consensus_dedup_key(dedup_key)
++  if canonical == nil then
++    return nil
++  end
++  local review_proposal = parse_canonical_pr_review_consensus_dedup_key(canonical)
++  return review_proposal
++end
++
++function C.canonical_pr_review_consensus_dedup_for_proposal(dedup_key, review_proposal_id)
++  local canonical = C.canonical_pr_review_consensus_dedup_key(dedup_key)
++  if canonical == nil or C.parse_pr_review_proposal_id(review_proposal_id) == nil then
++    return nil
++  end
++  if canonical ~= C.pr_review_consensus_dedup_key(review_proposal_id) then
++    return nil
++  end
++  return canonical
++end
+ 
+ function C.parse_pr_source_ref(source_ref)
+@@
+ function C.is_safe_pr_review_result_ref(proposal_id, dedup_key)
+@@
+-  local repo, pr_number = C.parse_pr_review_proposal_id(proposal_id)
+-  return repo ~= nil and pr_number ~= nil
++  local repo, pr_number = C.parse_pr_review_proposal_id(proposal_id)
++  return repo ~= nil
++    and pr_number ~= nil
++    and C.canonical_pr_review_consensus_dedup_for_proposal(dedup_key, proposal_id) ~= nil
+ end
+Diffdiff --git a/libraries/devloop/payloads/builders.lua b/libraries/devloop/payloads/builders.lua
+@@
+-    dedup_key = base_ids.dedup_key({
+-      review_id,
+-      "review",
+-    }),
++    dedup_key = devloop_base.pr_review_proposal_dedup_key(review_id),
+Diffdiff --git a/packages/github-devloop-pr/departments/review_result/main.lua b/packages/github-devloop-pr/departments/review_result/main.lua
+@@
+ local spec = {
+@@
+ }
++
++local function copy_reached_with_review_dedup(reached, review_dedup_key)
++  local copy = {}
++  for key, value in pairs(reached or {}) do
++    copy[key] = value
++  end
++  copy.dedup_key = review_dedup_key
++  return copy
++end
+ 
+ return saga.department(spec, { done = function() return false end, act = function(event)
+@@
+   local reviewed_issue_version = tostring(review_version or "")
+   if reviewed_issue_version == "" then
+@@
+     return
+   end
++  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    reached.dedup_key,
++    reached.proposal_id
++  )
++  if canonical_review_dedup == nil then
++    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(review-dedup)", "review result dedup does not match PR review proposal")
++    return
++  end
+   if reached.decision == "reject"
+@@
+-    local comment_reached = reached
++    local comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
+@@
+-          comment_reached = {}
+-          for key, value in pairs(reached) do
+-            comment_reached[key] = value
+-          end
++          comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
+           comment_reached.decision = "reject"
+@@
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "review decision cannot advance current marker")
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "review decision cannot advance current marker")
+@@
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "reviewing state marker not yet visible")
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "reviewing state marker not yet visible")
+@@
+-          review_dedup_key = reached.dedup_key,
++          review_dedup_key = canonical_review_dedup,
+@@
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
+@@
+-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
++      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "review decision=" .. tostring(reached.decision))
+@@
+-      comment_reached = {}
+-      for key, value in pairs(reached) do
+-        comment_reached[key] = value
+-      end
++      comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
+       comment_reached.decision = "approve"
+@@
+-      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
++      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, comment_reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+@@
+-        dedup_key = reached.dedup_key,
++        dedup_key = canonical_review_dedup,
+@@
+-      reflection_payload.blocking_gap = reached.blocking_gap
++      reflection_payload.blocking_gap = comment_reached.blocking_gap
+Diffdiff --git a/libraries/devloop/requests/review.lua b/libraries/devloop/requests/review.lua
+@@
+ function C.build_review_result_comment_request(M, repo, issue_number, issue_proposal_id, issue_version, reached, source_ref)
++  local review_dedup_key = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    reached.dedup_key,
++    reached.proposal_id
++  )
++  if review_dedup_key == nil then
++    error("github-devloop: invalid review result dedup")
++  end
+   local to_state = reached.reflection_checkpoint and "review-meta"
+@@
+-  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
++  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, review_dedup_key, fix_round, blocking_gap)
+@@
+-    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, reached.dedup_key, "checkpoint", issue_version, fix_round)
++    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, review_dedup_key, "checkpoint", issue_version, fix_round)
+@@
+-    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
++    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, review_dedup_key, reviewed_head_sha)
+@@
+-    tostring(reached.dedup_key),
++    tostring(review_dedup_key),
+@@
+-      review_dedup_key = reached.dedup_key,
++      review_dedup_key = review_dedup_key,
+@@
+-      review_dedup_key = reached.dedup_key,
++      review_dedup_key = review_dedup_key,
+@@
+ function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
++  local review_dedup_key = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    reached.dedup_key,
++    reached.proposal_id
++  )
++  if review_dedup_key == nil then
++    error("github-devloop: invalid high-risk review evidence dedup")
++  end
+   local marker = m_builders.high_risk_review_evidence_marker(issue_proposal_id,
+@@
+-    reached.dedup_key,
++    review_dedup_key,
+@@
+-    tostring(reached.dedup_key),
++    tostring(review_dedup_key),
+Diffdiff --git a/libraries/devloop/markers/facts.lua b/libraries/devloop/markers/facts.lua
+@@
+   local decision = marker_attr(marker, "decision")
+   local review_dedup = marker_attr(marker, "dedup")
+   local _, _, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
+-  local expected_dedup = review_proposal ~= nil and ("consensus:" .. tostring(review_proposal) .. "/review") or nil
++  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    review_dedup,
++    review_proposal
++  )
+   if marker_issue == tostring(issue_proposal_id)
+@@
+-    and review_dedup == expected_dedup
+-    and strings.is_bounded_string(review_dedup, devloop_base._max_dedup_len)
++    and canonical_review_dedup ~= nil
++    and strings.is_bounded_string(canonical_review_dedup, devloop_base._max_dedup_len)
+@@
+-      review_dedup_key = review_dedup,
++      review_dedup_key = canonical_review_dedup,
+@@
+ local function review_proposal_from_dedup(dedup_key)
+-  return tostring(dedup_key or ""):match("^consensus:(.+)/review$")
++  return devloop_base.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
+ end
+@@
+ function C.high_risk_review_evidence_fact(comments, issue_proposal_id, issue_version, pr_number, head_sha, review_proposal_id, review_dedup_key, paths_digest)
+@@
+-      if marker_issue == tostring(issue_proposal_id)
++      local canonical_marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        marker_review_dedup,
++        marker_review_proposal
++      )
++      local canonical_expected_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        review_dedup_key,
++        review_proposal_id
++      )
++      if marker_issue == tostring(issue_proposal_id)
+@@
+-        and tostring(marker_review_dedup or "") == tostring(review_dedup_key or "")
++        and canonical_marker_review_dedup ~= nil
++        and canonical_marker_review_dedup == canonical_expected_review_dedup
+@@
+-          review_dedup_key = marker_review_dedup,
++          review_dedup_key = canonical_marker_review_dedup,
+@@
+ function C.review_result_approval_matches_event(comments, merge_ready)
+@@
+-      if tostring(review_proposal or "") == tostring(merge_ready.review_proposal_id or "")
++      local canonical_marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        review_dedup,
++        review_proposal
++      )
++      local canonical_merge_ready_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        merge_ready.review_dedup_key,
++        merge_ready.review_proposal_id
++      )
++      if tostring(review_proposal or "") == tostring(merge_ready.review_proposal_id or "")
+@@
+-        and tostring(review_dedup or "") == tostring(merge_ready.review_dedup_key or "")
++        and canonical_marker_review_dedup ~= nil
++        and canonical_marker_review_dedup == canonical_merge_ready_review_dedup
+@@
+ function C.merge_ready_approval_matches_event(fact, merge_ready)
+@@
++  local fact_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    fact.review_dedup_key,
++    fact.review_proposal_id
++  )
++  local merge_ready_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    merge_ready.review_dedup_key,
++    merge_ready.review_proposal_id
++  )
+   if tostring(fact.proposal_id or "") ~= tostring(merge_ready.proposal_id or "")
+@@
+-    or tostring(fact.review_dedup_key or "") ~= tostring(merge_ready.review_dedup_key or "")
++    or fact_review_dedup == nil
++    or fact_review_dedup ~= merge_ready_review_dedup
+@@
+ function C.has_review_result_marker(comments, review_proposal_id, issue_proposal_id, decision, dedup_key)
+@@
++  local canonical_expected_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++    dedup_key,
++    review_proposal_id
++  )
+   local marker_pattern = "<!%-%- fkst:github%-devloop:review%-result:v1.-%-%->"
+@@
+-      if marker_attr(marker, "proposal") == tostring(review_proposal_id)
++      local marker_review_proposal = marker_attr(marker, "proposal")
++      local marker_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
++        marker_attr(marker, "dedup"),
++        marker_review_proposal
++      )
++      if marker_review_proposal == tostring(review_proposal_id)
+         and marker_attr(marker, "issue_proposal") == tostring(issue_proposal_id)
+         and marker_attr(marker, "decision") == tostring(decision)
+-        and marker_attr(marker, "dedup") == tostring(dedup_key) then
++        and marker_review_dedup ~= nil
++        and marker_review_dedup == canonical_expected_dedup then
+         return true
+       end
+Diffdiff --git a/packages/github-devloop-pr/departments/fix/main.lua b/packages/github-devloop-pr/departments/fix/main.lua
+@@
+ local spec = {
+@@
+ }
++
++local function same_review_result_dedup(left, right)
++  local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
++  local right_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(right)
++  return left_canonical ~= nil and left_canonical == right_canonical
++end
+ 
+@@
+     if reject_fact ~= nil then
+       if reject_fact.review_proposal_id ~= fix.review_proposal_id
+-        or reject_fact.review_dedup_key ~= fix.review_dedup_key
++        or not same_review_result_dedup(reject_fact.review_dedup_key, fix.review_dedup_key)
+         or reject_fact.reviewed_head_sha ~= fix.reviewed_head_sha then
+That extra fix hunk matters for already-queued legacy fixing events. Once review_reject_fact starts returning a canonical dedup for an old /loop/N marker, the old fixing payload may still carry the loop-suffixed dedup. Without canonical comparison here, existing bad PRs can move from “feedback marker missing” to “review fact mismatch.”
+Diffdiff --git a/libraries/devloop/restart/pr_review_replay_facts.lua b/libraries/devloop/restart/pr_review_replay_facts.lua
+@@
+ local function review_proposal_from_dedup(dedup_key)
+-  return tostring(dedup_key or ""):match("^consensus:([^/].-)/review")
++  return devloop_base.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
+ end
++
++local function same_review_result_dedup(left, right)
++  local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
++  local right_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(right)
++  return left_canonical ~= nil and left_canonical == right_canonical
++end
+@@
+-    local review_proposal = marker_dedup and marker_dedup:match("^consensus:([^/].-)/review") or nil
++    local review_proposal = review_proposal_from_dedup(marker_dedup)
+@@
+-    local review_proposal = marker_dedup and marker_dedup:match("^consensus:([^/].-)/review") or nil
++    local review_proposal = review_proposal_from_dedup(marker_dedup)
++    local canonical_marker_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(marker_dedup)
+@@
+-        or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup or "")
++        or not same_review_result_dedup(reject_fact.review_dedup_key, marker_dedup)
+@@
+-          review_dedup_key = marker_dedup,
++          review_dedup_key = canonical_marker_dedup,
+I would preserve raw /loop/N on review-meta facts where the marker’s identity really is a converge-round or review-meta event. The change above only canonicalizes fix-reflection replay, which is part of the review-result/fix-feedback chain.
+Diffdiff --git a/libraries/devloop/hidden_state_conformance.lua b/libraries/devloop/hidden_state_conformance.lua
+@@
+ local function review_dedup(core, state)
+-  return "consensus:" .. review_proposal(core, state) .. "/review"
++  return devloop_base.pr_review_consensus_dedup_key(review_proposal(core, state))
+ end
+@@
+-      review_dedup_key = "consensus:" .. review_id .. "/review",
++      review_dedup_key = devloop_base.pr_review_consensus_dedup_key(review_id),
+Diffdiff --git a/packages/github-devloop-pr/core/review_carry_over.lua b/packages/github-devloop-pr/core/review_carry_over.lua
+@@
+-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
++  local new_review_dedup = devloop_base.pr_review_consensus_dedup_key(new_review_proposal)
+@@
+-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
++  local new_review_dedup = devloop_base.pr_review_consensus_dedup_key(new_review_proposal)
+Add a regression test that forces a converged review reject and asserts that both the marker and the fixing handoff are canonical:
+Diffdiff --git a/packages/github-devloop-pr/tests/integration_pr_review_result_test.lua b/packages/github-devloop-pr/tests/integration_pr_review_result_test.lua
+@@
+   test_review_result_reject_marks_issue_fixing = function()
+@@
+   end,
++
++  test_review_result_reject_canonicalizes_converged_review_dedup = function()
++    local event = review_reached({
++      decision = "reject",
++      body = "Review consensus rejects the diff.",
++      blocking_gap = "missing regression guard",
++    })
++    local canonical_review_dedup = event.dedup_key
++    event.dedup_key = canonical_review_dedup .. "/loop/2"
++
++    local impl_version = reviewing().version
++    local fix_version = core.fix_version_from_review_version(impl_version)
++    mock_pr_origin({
++      m_builders.pr_origin_marker("github-devloop/issue/owner/repo/42", "42", "devloop-owner-repo-42-01HY", impl_version, "dev"),
++    })
++    mock_issue_result({ "fkst-dev:reviewing" }, {
++      core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", impl_version),
++    })
++
++    local result = run_review_result(event, opts("review-result-reject-loop-dedup"))
++    t.eq(result.exit_code, 0)
++
++    local comment_raise = find_raise(result.raises, "github-proxy.github_pr_comment_request")
++    local fixing_raise = find_causal_raise(result, "devloop_fixing")
++
++    t.is_true(comment_raise.payload.body:find('dedup="' .. canonical_review_dedup .. '"', 1, true) ~= nil)
++    t.is_true(comment_raise.payload.body:find('dedup="' .. event.dedup_key .. '"', 1, true) == nil)
++    t.eq(comment_raise.payload.handoff.review_dedup_key, canonical_review_dedup)
++    t.eq(fixing_raise.payload.review_dedup_key, canonical_review_dedup)
++    t.eq(fixing_raise.payload.version, fix_version)
++  end,
+I would also add a low-level fact parser test with a hand-written legacy marker containing dedup=".../review/loop/2" and assert review_reject_fact(...).review_dedup_key == canonical. That catches the repair path for existing PRs, not just future writes.
+Other parser sites and class status
+This is a class bug, not a one-off. The class is “review consensus dedup is reconstructed or parsed ad hoc.” Current examples:
+
+
+facts.lua constructs and compares the base form directly, and its parser is anchored to /review$.
+
+
+pr_review_replay_facts.lua uses a different, unanchored parser. It happens to tolerate /loop/N, but it is still a second grammar.
+
+
+hidden_state_conformance.lua and review_carry_over.lua construct the base string manually.
+
+
+The helper pair kills the class by making the framework own both shapes:
+
+
+pr_review_proposal_dedup_key(review_proposal_id) creates the consensus proposal dedup without consensus:.
+
+
+pr_review_consensus_dedup_key(review_proposal_id) creates the marker/event binding form with consensus:.
+
+
+canonical_pr_review_consensus_dedup_key(dedup) strips only a trailing /loop/N.
+
+
+canonical_pr_review_consensus_dedup_for_proposal(dedup, proposal_id) verifies the dedup and proposal match.
+
+
+That still lets review-converge and review-meta markers keep /loop/N where it is genuinely part of their event identity. It prevents the review-result outcome marker, merge-ready marker, fixing handoff, high-risk evidence marker, and carry-over checks from drifting.
+Decompose escalation
+There are two separate paths.
+Max fix rounds: the existing path appears intentionally wired to decompose. When review-result receives a reject and fix_round >= max_fix_rounds, it raises both devloop_fix_reconcile and github-devloop-decompose.devloop_decompose.  The decompose department consumes devloop_decompose, but waits until the blocked/fix-reconcile marker is visible before creating child issues.   So for “fix genuinely cannot converge after max_fix_rounds,” the intended decompose path is present.
+Fixing timeout: this is a separate defect if the intended product behavior is “too big should split, not timeout to blocked.” The generic liveness timeout helper force-terminates to blocked after retries.  The timeout reconcile pipeline writes a blocked timeout-reconcile result for non-blocked states and does not raise devloop_decompose; it only emits a decompose-exhausted marker when the state is already blocked and the decompose output obligation itself has timed out.   That should not be mixed into #1999. It needs a second patch: the fixing timeout reconciliation policy should raise a fix-reconcile plus decompose, or transition through the same max-fix-round decompose pathway, rather than directly blocking.
+===CONCLUSION===
+(a) Pick: unify constructor/parser plus canonicalize at write. Read-side tolerance is included only to heal already-written /loop/N review-result markers and already-queued loop-suffixed fixing payloads.
+(b) Exact files: libraries/devloop/base.lua, libraries/devloop/payloads/builders.lua, packages/github-devloop-pr/departments/review_result/main.lua, libraries/devloop/requests/review.lua, libraries/devloop/markers/facts.lua, packages/github-devloop-pr/departments/fix/main.lua, libraries/devloop/restart/pr_review_replay_facts.lua, libraries/devloop/hidden_state_conformance.lua, packages/github-devloop-pr/core/review_carry_over.lua, plus regression tests in packages/github-devloop-pr/tests/integration_pr_review_result_test.lua and a low-level facts parser test.
+(c) #1999 is a class bug. The class is scattered PR-review consensus dedup grammars. The fix kills it by centralizing construction and parsing, then making review-result writers emit only one canonical identity.
+(d) Decompose escalation is a separate needed fix for fixing timeout, not for max_fix_rounds. Max fix rounds already raises fix-reconcile plus decompose. Timeout reconcile still blocks directly and does not raise decompose.
+(e) Biggest risk: over-normalizing dedups that are truly per-converge-round, especially review-meta and review-converge markers. The mitigation is to canonicalize only review-result outcome bindings and to leave review-meta/converge marker identity raw where /loop/N is load-bearing.

@@ -3,6 +3,7 @@ local base_ids = require("devloop.base_ids")
 local strings = require("contract.strings")
 local source_refs = require("contract.source_ref")
 local convergence_shared = require("devloop.convergence.shared")
+local transition_version = require("contract.transition_version")
 
 local C = {}
 function C.is_intake_hand_off(hand_off, proposal)
@@ -32,7 +33,10 @@ function C.validate_proposal(proposal)
     if review_repo == nil or pr_number == nil then
       return false
     end
-    if not strings.is_path_safe_key(proposal.proposal_id, devloop_base._max_key_len) or not strings.is_path_safe_key(proposal.dedup_key, devloop_base._max_dedup_len) then
+    local review_dedup_key = devloop_base.pr_review_proposal_dedup_key(proposal.proposal_id)
+    if not strings.is_path_safe_key(proposal.proposal_id, devloop_base._max_key_len)
+      or not strings.is_path_safe_key(proposal.dedup_key, devloop_base._max_dedup_len)
+      or transition_version.strip_trailing_loop(proposal.dedup_key) ~= review_dedup_key then
       return false
     end
   else

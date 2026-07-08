@@ -19,7 +19,7 @@ local function carry_over_risk_gate(repo, pr_number, issue_proposal_id, version,
     return true, "normal-risk"
   end
   local new_review_proposal = devloop_base.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
+  local new_review_dedup = devloop_base.pr_review_consensus_dedup_key(new_review_proposal)
   local fact = m_facts.high_risk_review_evidence_fact(
     comments,
     issue_proposal_id,
@@ -76,7 +76,7 @@ function M.approved_lineage_carry_over(repo, pr_number, issue_proposal_id, versi
     return nil, risk_reason
   end
   local new_review_proposal = devloop_base.pr_review_proposal_id(repo, pr_number, version, current_head_sha)
-  local new_review_dedup = "consensus:" .. new_review_proposal .. "/review"
+  local new_review_dedup = devloop_base.pr_review_consensus_dedup_key(new_review_proposal)
   return {
     version = version,
     old_review_proposal_id = fact.review_proposal_id,

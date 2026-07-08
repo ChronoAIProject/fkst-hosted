@@ -545,6 +545,22 @@ return {
     t.is_nil(ledger)
   end,
 
+  test_review_result_legacy_loop_dedup_marker_is_canonicalized = function()
+    local issue_version = h.reviewing().version
+    local fix_version = core.next_fix_version(issue_version)
+    local review_id = devloop_base.pr_review_proposal_id("owner/repo", 7, issue_version, "def456")
+    local canonical_review_dedup = devloop_base.pr_review_consensus_dedup_key(review_id)
+    local legacy = {
+      body = m_builders.review_result_marker(review_id, "github-devloop/issue/owner/repo/42", "reject", canonical_review_dedup .. "/loop/2", 1, "missing guard"),
+      author_login = "fkst-test-bot",
+    }
+
+    local fact = m_facts.review_reject_fact({ legacy }, "github-devloop/issue/owner/repo/42", fix_version)
+
+    t.eq(fact.review_dedup_key, canonical_review_dedup)
+    t.eq(fact.blocking_gap, "missing guard")
+  end,
+
   test_prior_round_ledger_rejects_stale_version_and_untrusted_author = function()
     local current_version = h.reviewing().version
     local stale_version = current_version .. "/fix/1"

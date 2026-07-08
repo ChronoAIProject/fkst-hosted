@@ -274,6 +274,64 @@ function C.parse_pr_review_proposal_id(id)
   return repo, pr_number, version, head_sha
 end
 
+function C.pr_review_proposal_dedup_key(review_proposal_id)
+  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
+    error("github-devloop: invalid PR review proposal id")
+  end
+  return dedup_key({
+    tostring(review_proposal_id),
+    "review",
+  })
+end
+
+function C.pr_review_consensus_dedup_key(review_proposal_id)
+  return "consensus:" .. C.pr_review_proposal_dedup_key(review_proposal_id)
+end
+
+local function parse_canonical_pr_review_consensus_dedup_key(dedup_key)
+  local inner = tostring(dedup_key or ""):match("^consensus:(.+)$")
+  if inner == nil then
+    return nil
+  end
+  local review_proposal = inner:match("^(.+)/review$")
+  if review_proposal == nil or C.parse_pr_review_proposal_id(review_proposal) == nil then
+    return nil
+  end
+  if inner ~= C.pr_review_proposal_dedup_key(review_proposal) then
+    return nil
+  end
+  return review_proposal, "consensus:" .. inner
+end
+
+function C.canonical_pr_review_consensus_dedup_key(dedup_key)
+  if not is_bounded_string(dedup_key, max_dedup_len) then
+    return nil
+  end
+  local canonical = transition_version.strip_trailing_loop(dedup_key)
+  local _, parsed = parse_canonical_pr_review_consensus_dedup_key(canonical)
+  return parsed
+end
+
+function C.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
+  local canonical = C.canonical_pr_review_consensus_dedup_key(dedup_key)
+  if canonical == nil then
+    return nil
+  end
+  local review_proposal = parse_canonical_pr_review_consensus_dedup_key(canonical)
+  return review_proposal
+end
+
+function C.canonical_pr_review_consensus_dedup_for_proposal(dedup_key, review_proposal_id)
+  if C.parse_pr_review_proposal_id(review_proposal_id) == nil then
+    return nil
+  end
+  local canonical = C.canonical_pr_review_consensus_dedup_key(dedup_key)
+  if canonical == nil or canonical ~= C.pr_review_consensus_dedup_key(review_proposal_id) then
+    return nil
+  end
+  return canonical
+end
+
 function C.parse_pr_source_ref(source_ref)
   if type(source_ref) ~= "table" or source_ref.kind ~= "external" then
     return nil
