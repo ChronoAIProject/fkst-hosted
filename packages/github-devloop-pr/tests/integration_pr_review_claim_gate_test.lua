@@ -148,6 +148,20 @@ local function mock_precise_pr_origin(fields)
   }, entity_read_mocks.pr_origin_selector)
 end
 
+local function mock_precise_pr_read_forms(fields)
+  local f = fields or {}
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = "owner/repo",
+    number = 7,
+    comments = f.comments,
+    head = f.head or "devloop-owner-repo-42-01HY",
+    head_sha = f.head_sha or "def456",
+    state = f.state or "OPEN",
+    base_branch = f.base_branch or "integration",
+    labels = f.labels or {},
+  })
+end
+
 return {
   test_verify_pr_review_issue_claim_accepts_unassigned_self_author = function()
     mock_bot_env()
@@ -384,6 +398,42 @@ return {
     local reviewing_raise = h.find_causal_raise(result, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(reviewing_raise.payload.version, core.next_review_loop_version(impl_version))
+  end,
+
+  test_observe_pr_logs_stranded_pr_base_unmanaged_block_claim_skip_before_return = function()
+    local impl_version = reviewing().version
+    local blocked_version = impl_version .. "/blocked/pr-base-unmanaged"
+
+    mock_precise_pr_origin({
+      comments = {
+        unmanaged_origin_marker(impl_version, "integration"),
+        core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version),
+      },
+      base_branch = "integration",
+      labels = { "fkst-dev:blocked" },
+    })
+    mock_precise_pr_read_forms({
+      comments = {
+        unmanaged_origin_marker(impl_version, "integration"),
+        core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version),
+      },
+      base_branch = "integration",
+      labels = { "fkst-dev:blocked" },
+    })
+    mock_issue_reviewing({ "fkst-dev:blocked" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version),
+    }, {
+      assignees = { "other-bot" },
+    })
+
+    local result, logs = run_observe_pr_with_logs(pr_event(), "observe-pr-stranded-base-unmanaged-claim-skip", "integration")
+    t.eq(result.exit_code, 0)
+    t.eq(unmanaged_comment_raise(result), nil)
+    t.eq(h.find_causal_raise(result, "devloop_reviewing"), nil)
+
+    local observed_logs = log_text(result, logs)
+    t.is_true(observed_logs:find("tag=CAS", 1, true) ~= nil)
+    t.is_true(observed_logs:find("outcome=skip-claimed-by-other(pr-base-unmanaged-self-heal)", 1, true) ~= nil)
   end,
 
   test_observe_pr_leaves_foreign_claimed_unmanaged_base_untouched = function()
