@@ -5,7 +5,50 @@ local strings = require("contract.strings")
 local github_risk = require("devloop.github_risk")
 local base_ids = require("devloop.base_ids")
 local devloop_logging = require("devloop.logging")
+local content_provenance = require("devloop.content_provenance")
 local decimal_checksum = strings.decimal_checksum
+
+-- Resolve the codex-bundle authored-content whitelist from host env. Bot login is
+-- required (fail-closed); the additive optional entries are read under pcall so an
+-- unset/unmocked var degrades to bot-only (fail-closed direction: fewer whitelisted
+-- authors = MORE redaction) rather than erroring the whole bundle.
+-- The codex-bundle content filter's trust anchor is FKST_GITHUB_BOT_LOGIN (the
+-- system identity that authors state markers and trusted pipeline content). The
+-- filter can only distinguish trusted from untrusted authors when that anchor is
+-- configured, so it is ACTIVE iff the bot login is set. Production always sets it
+-- (the pipeline requires it for every GitHub write) -> the filter is always active
+-- and fail-closed. When absent (a non-production/test context with no trust
+-- anchor), content_whitelist returns nil and the bundle is written unfiltered --
+-- there is no trust context to redact against, and production never reaches here.
+local function content_whitelist(exec)
+  local ok_bot, bot_login = pcall(devloop_base.read_env, "FKST_GITHUB_BOT_LOGIN", exec)
+  bot_login = ok_bot and strings.trim(bot_login or "") or ""
+  if bot_login == "" then
+    return nil
+  end
+  local logins = { bot_login }
+  for _, name in ipairs({ "FKST_DEVLOOP_MANAGED_BOT_LOGINS", "FKST_GITHUB_AUTHORIZED_LOGINS" }) do
+    local ok, raw = pcall(devloop_base.read_env, name, exec)
+    if ok then
+      for login in tostring(raw or ""):gmatch("[^,%s]+") do
+        table.insert(logins, login)
+      end
+    end
+  end
+  return content_provenance.build_whitelist(logins)
+end
+
+local function log_content_redactions(dept, proposal_id, repo, entity, records)
+  for _, record in ipairs(records or {}) do
+    devloop_logging.log_line("warn", dept or "context_bundle", proposal_id, "GH_CONTENT_REDACTION", {
+      "repo=" .. tostring(repo or ""),
+      "entity=" .. tostring(entity or ""),
+      "field=" .. tostring(record.field or ""),
+      "author_login=" .. tostring(record.author_login or "unknown"),
+      "bytes_removed=" .. tostring(record.bytes_removed or 0),
+    })
+  end
+end
 
 local max_bundle_file_len = 10 * 1024 * 1024
 local max_context_cache_key_len = 180
@@ -459,11 +502,17 @@ function C.build_context_bundle(M, args)
   write_file(tmp_bundle.notice_path, notice, args.exec)
   tmp_bundle.notice_bytes = #notice
 
+  local whitelist = content_whitelist(args.exec)
   local issue_json = '{"title":"PR-only context","body":"No backing GitHub issue is available for this delivery.","labels":[],"comments":[],"state":"UNKNOWN"}\n'
   if issue_number ~= nil then
     issue_json = fetch_result(function(timeout)
       return M.gh_issue_view(repo, issue_number, "title,body,updatedAt,labels,comments,state", timeout, args.exec)
     end, "issue fetch")
+    if whitelist ~= nil then
+      local issue_redactions = {}
+      issue_json = content_provenance.filter_gh_content_json(issue_json, "issue", whitelist, issue_redactions)
+      log_content_redactions(args.dept, proposal_id, repo, "issue/" .. tostring(issue_number), issue_redactions)
+    end
   end
   issue_json = truncate_if_needed(issue_json, args.dept, proposal_id, "issue.json")
   write_file(tmp_bundle.issue_path, issue_json, args.exec)
@@ -473,6 +522,11 @@ function C.build_context_bundle(M, args)
     local pr_json = fetch_result(function(timeout)
       return M.gh_pr_view_context(repo, args.pr_number, timeout, args.exec)
     end, "pr fetch")
+    if whitelist ~= nil then
+      local pr_redactions = {}
+      pr_json = content_provenance.filter_gh_content_json(pr_json, "pr", whitelist, pr_redactions)
+      log_content_redactions(args.dept, proposal_id, repo, "pr/" .. tostring(args.pr_number), pr_redactions)
+    end
     pr_json = truncate_if_needed(pr_json, args.dept, proposal_id, "pr.json")
     write_file(tmp_bundle.pr_path, pr_json, args.exec)
     tmp_bundle.pr_bytes = #pr_json

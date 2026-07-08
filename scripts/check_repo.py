@@ -775,6 +775,37 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
             )
 
 
+def check_github_content_gate(root: Path, violations: list[str]) -> None:
+    # G-GITHUB-CONTENT-GATE: authored GitHub content that reaches a codex worker
+    # must be routed through the provenance filter AT THE CODEX-BUNDLE BOUNDARY,
+    # and the SHARED entity view must NOT be filtered -- state markers live in
+    # comment bodies and must reach the state machine intact.
+    bundle = root / "libraries" / "devloop" / "context_bundle.lua"
+    if bundle.is_file():
+        text = read_text(bundle)
+        for needle in (
+            'content_provenance.filter_gh_content_json(issue_json, "issue"',
+            'content_provenance.filter_gh_content_json(pr_json, "pr"',
+        ):
+            if needle not in text:
+                add(
+                    violations,
+                    "G-GITHUB-CONTENT-GATE",
+                    f"{rel(root, bundle)} must route codex-bundle content through content_provenance.filter_gh_content_json (missing: {needle})",
+                )
+    for shared in (
+        "libraries/devloop/github_proxy_entity_view.lua",
+        "packages/github-proxy/core/rest_view.lua",
+    ):
+        path = root / shared
+        if path.is_file() and "filter_gh_content_json" in read_text(path):
+            add(
+                violations,
+                "G-GITHUB-CONTENT-GATE",
+                f"{shared} must NOT filter authored content: the shared entity view feeds the state machine (state markers must stay intact); redact only in the codex bundle",
+            )
+
+
 def check_error_class_prefixes(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:
     current = check_repo_error_class.current_sites(root, package_lua_files, read_text, rel, unclassified_error_call_lines)
     allowlist = check_repo_error_class.load_allowlist(allowlist_path(root, check_repo_error_class.ALLOWLIST, allowlist_dir))

@@ -36,6 +36,7 @@ public = [
   "devloop.comment_handoff",
   "devloop.config",
   "devloop.conflict_telemetry",
+  "devloop.content_provenance",
   "devloop.context_bundle",
   "devloop.convergence",
   "devloop.convergence.attempts",
