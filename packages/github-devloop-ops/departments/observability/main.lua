@@ -52,6 +52,11 @@ function core.observe_devloop_entities(event)
 
   core.reap_orphan_prs(repo, observed.list)
   local queue_starvation_result = queue_starvation.observe_queue_starvation(core, repo, observed.list, limits, deadline, observed.now_seconds)
+  for _, entity in ipairs(observed.list or {}) do
+    for _, raised in ipairs(core.blocked_obligation_patrol_once(entity)) do
+      devloop_logging.log_raise("blocked_obligation_patrol", raised.fact.proposal_id, raised.queue, raised.payload)
+    end
+  end
   local conflict_hotspot = core.observe_conflict_hotspots(repo, core.observability_call_timeout(limits, deadline))
   local rendered_dashboard = core.render_observability_dashboard({
     entities = observed.list,
