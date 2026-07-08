@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local base_ids = require("devloop.base_ids")
 local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
+local parsers_misc = require("devloop.parsers.misc")
 local S = {}
 
 function S.install(M)
@@ -179,6 +180,199 @@ local function display_source_ref(source_ref)
   return display_text(value, M._max_key_len * 2 + 1)
 end
 
+local function attr(marker, name)
+  return tostring(marker or ""):match(tostring(name) .. '="([^"]*)"')
+end
+
+local function output_obligation_reason_class(reason_class)
+  local value = tostring(reason_class or "")
+  if value == "state-output-obligation-timeout" then
+    return value
+  end
+  if value == "decompose-output-obligation-timeout" then
+    return value
+  end
+  return nil
+end
+
+local function output_obligation_dedup_key(repo, proposal_id, terminal_version, reason_class)
+  return base_ids.dedup_key({
+    "output-obligation",
+    "blocked",
+    base_ids.safe_repo(repo),
+    tostring(proposal_id or "unknown"),
+    tostring(terminal_version or "unknown"),
+    tostring(reason_class or "unknown"),
+  })
+end
+
+local function output_obligation_drain_edge(comments, dedup_key)
+  if type(comments) ~= "table" then
+    return nil
+  end
+  local pattern = "<!%-%- fkst:github%-proxy:issue%-created:v1.-%-%->"
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    for marker in parsers_misc._comment_body(comment):gmatch(pattern) do
+      if attr(marker, "dedup") == tostring(dedup_key) then
+        local issue_number = attr(marker, "issue")
+        if issue_number ~= nil and tostring(issue_number):match("^%d+$") then
+          return {
+            kind = "superseded-by-escalation-issue",
+            issue_id = tostring(issue_number),
+            dedup_key = tostring(dedup_key),
+          }
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function normalized_output_obligation_fact(source)
+  if type(source) ~= "table" then
+    return nil, "payload-not-table"
+  end
+  local reason_class = output_obligation_reason_class(source.reason_class)
+  if reason_class == nil then
+    return nil, "not-output-obligation"
+  end
+  if tostring(source.terminal_state or source.state or "") ~= "blocked" then
+    return nil, "not-blocked-terminal"
+  end
+  local ok_ref, source_ref = pcall(function()
+    return base_ids.normalize_source_ref(source.source_ref)
+  end)
+  if not ok_ref then
+    return nil, "missing-source-ref"
+  end
+  local repo, issue_number = devloop_base.parse_issue_source_ref(source_ref)
+  if repo == nil then
+    return nil, "missing-issue-source-ref"
+  end
+  local terminal_version = tostring(source.terminal_version or source.version or "")
+  if terminal_version == "" then
+    return nil, "missing-terminal-version"
+  end
+  local proposal_id = tostring(source.proposal_id or base_ids.proposal_id(repo, issue_number))
+  local dedup_key = output_obligation_dedup_key(repo, proposal_id, terminal_version, reason_class)
+  return {
+    failure_kind = "OutputObligationFailure",
+    source_repo = repo,
+    issue_number = tostring(issue_number),
+    proposal_id = proposal_id,
+    terminal_state = "blocked",
+    terminal_version = terminal_version,
+    reason_class = reason_class,
+    source_ref = source_ref,
+    from_state = tostring(source.from_state or ""),
+    from_version = tostring(source.from_version or ""),
+    attempt = tostring(source.attempt or ""),
+    attempt_limit = tostring(source.attempt_limit or ""),
+    driving_queue = tostring(source.driving_queue or ""),
+    why_text = tostring(source.why_text or source.why or ""),
+    dedup_key = dedup_key,
+    drain_edge = output_obligation_drain_edge(source.comments, dedup_key),
+  }, nil
+end
+
+local function timeout_reconcile_facts(comments, proposal_id)
+  local facts = {}
+  if type(comments) ~= "table" then
+    return facts
+  end
+  local pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
+  for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
+    local body_text = parsers_misc._comment_body(comment)
+    for marker in body_text:gmatch(pattern) do
+      local reason_class = output_obligation_reason_class(attr(marker, "reason_class"))
+      if attr(marker, "proposal") == tostring(proposal_id)
+        and attr(marker, "action") == "drop"
+        and reason_class ~= nil then
+        table.insert(facts, {
+          proposal_id = attr(marker, "proposal"),
+          terminal_state = "blocked",
+          terminal_version = attr(marker, "version"),
+          reason_class = reason_class,
+          from_state = attr(marker, "from_state"),
+          from_version = attr(marker, "from_version"),
+          attempt = attr(marker, "attempt"),
+          attempt_limit = attr(marker, "attempt_limit"),
+          driving_queue = attr(marker, "driving_queue"),
+          source_ref = {
+            kind = attr(marker, "source_ref_kind"),
+            ref = attr(marker, "source_ref"),
+          },
+          why_text = body_text:match("Structured WHY:\n(.*)") or "",
+        })
+      end
+    end
+  end
+  return facts
+end
+
+local function output_obligation_title(fact)
+  local result = "Escalate blocked output obligation: "
+    .. display_text(fact.reason_class, M._max_key_len)
+    .. " for #" .. display_text(fact.issue_number, M._max_key_len)
+  if #result > M._max_title_len then
+    result = base_ids.truncate_utf8(result, M._max_title_len)
+  end
+  return result
+end
+
+local function output_obligation_body(fact)
+  local lines = {
+    "Blocked-obligation patrol filed this issue from a persisted terminal workflow fact.",
+    "",
+    "Classification:",
+    "- `failure_kind`: `OutputObligationFailure`",
+    "- `reason_class`: `" .. display_text(fact.reason_class, M._max_key_len) .. "`",
+    "- `terminal_state`: `" .. display_text(fact.terminal_state, M._max_key_len) .. "`",
+    "- `parent`: `" .. display_text(tostring(fact.source_repo or "") .. "#" .. tostring(fact.issue_number or ""), M._max_key_len * 2 + 1) .. "`",
+    "- `proposal_id`: `" .. display_text(fact.proposal_id, M._max_key_len) .. "`",
+    "- `terminal_version`: `" .. display_text(fact.terminal_version, M._max_dedup_len) .. "`",
+    "- `source_ref`: `" .. display_source_ref(fact.source_ref) .. "`",
+    "",
+    "Terminal WHY:",
+    "- `from_state`: `" .. display_text(fact.from_state, M._max_key_len) .. "`",
+    "- `from_version`: `" .. display_text(fact.from_version, M._max_dedup_len) .. "`",
+    "- `attempt`: `" .. display_text(fact.attempt, M._max_key_len) .. "`",
+    "- `attempt_limit`: `" .. display_text(fact.attempt_limit, M._max_key_len) .. "`",
+    "- `driving_queue`: `" .. display_text(fact.driving_queue, M._max_key_len) .. "`",
+    "",
+    "Requested outcome:",
+    "- Diagnose why this blocked terminal still has an unresolved output obligation.",
+    "- Implement any fix through the normal issue -> PR -> review -> merge pipeline.",
+    "- Treat the parent terminal as covered by this escalation issue; do not mutate runtime state directly.",
+  }
+  if fact.why_text ~= nil and fact.why_text ~= "" then
+    table.insert(lines, "")
+    table.insert(lines, "WHY text:")
+    table.insert(lines, devloop_base.neutralize_untrusted_comment_text(fact.why_text))
+  end
+  local result = table.concat(lines, "\n")
+  if #result > M._max_body_len then
+    result = base_ids.truncate_utf8(result, M._max_body_len)
+  end
+  return result
+end
+
+local function output_obligation_issue_request(fact)
+  return {
+    schema = "github-proxy.issue-create.v1",
+    repo = fact.source_repo,
+    title = output_obligation_title(fact),
+    body = output_obligation_body(fact),
+    labels = json.decode("[]"),
+    dedup_key = fact.dedup_key,
+    parent_comment_target = {
+      repo = fact.source_repo,
+      issue_number = tonumber(fact.issue_number),
+    },
+    source_ref = fact.source_ref,
+  }
+end
+
 local function title(fact)
   local result = "Investigate L2 failure: " .. display_text(fact.error_class, M._max_key_len)
     .. " in " .. display_text(fact.queue, M._max_key_len)
@@ -237,6 +431,78 @@ function M.build_failure_triage_issue_create_request(fact, count)
     parent_comment_target = fact.parent_target,
     source_ref = fact.source_ref,
   }
+end
+
+function M.output_obligation_failure_dedup_key(repo, proposal_id, terminal_version, reason_class)
+  return output_obligation_dedup_key(repo, proposal_id, terminal_version, reason_class)
+end
+
+function M.output_obligation_failure_drain_edge(comments, dedup_key)
+  return output_obligation_drain_edge(comments, dedup_key)
+end
+
+function M.classify_output_obligation_failure(payload)
+  local source = type(payload) == "table" and type(payload.payload) == "table" and payload.payload or payload
+  return normalized_output_obligation_fact(source)
+end
+
+function M.blocked_output_obligation_failures(entity)
+  if type(entity) ~= "table" then
+    return {}
+  end
+  local current = entity.current_state or entity.state
+  if type(current) ~= "table" or current.state ~= "blocked" then
+    return {}
+  end
+  local repo = entity.repo
+  local parsed_repo, parsed_issue = base_ids.parse_proposal_id(entity.proposal_id)
+  if repo == nil then
+    repo = parsed_repo
+  end
+  local issue_number = entity.number or entity.issue_number or parsed_issue
+  local comments = entity.comments
+  if comments == nil and type(entity.parent_issue) == "table" then
+    comments = entity.parent_issue.comments
+  end
+  local source_ref = entity.source_ref
+  if source_ref == nil and repo ~= nil and issue_number ~= nil then
+    source_ref = base_ids.issue_source_ref(repo, issue_number)
+  end
+  local failures = {}
+  for _, fact in ipairs(timeout_reconcile_facts(comments, entity.proposal_id)) do
+    if fact.terminal_version == current.version then
+      if fact.source_ref == nil or fact.source_ref.kind == nil or fact.source_ref.ref == nil or fact.source_ref.ref == "" then
+        fact.source_ref = source_ref
+      end
+      local normalized = normalized_output_obligation_fact(fact)
+      if normalized ~= nil then
+        normalized.drain_edge = output_obligation_drain_edge(comments, normalized.dedup_key)
+        table.insert(failures, normalized)
+      end
+    end
+  end
+  return failures
+end
+
+function M.build_output_obligation_issue_create_request(fact)
+  if type(fact) ~= "table" then
+    error("github-devloop: output-obligation-fact-missing: output obligation fact is required")
+  end
+  return output_obligation_issue_request(fact)
+end
+
+function M.blocked_obligation_patrol_once(entity)
+  local raised = {}
+  for _, fact in ipairs(M.blocked_output_obligation_failures(entity)) do
+    if fact.drain_edge == nil then
+      table.insert(raised, {
+        queue = "github-proxy.github_issue_create_request",
+        payload = M.build_output_obligation_issue_create_request(fact),
+        fact = fact,
+      })
+    end
+  end
+  return raised
 end
 
 function M.failure_triage_decision(payload)
