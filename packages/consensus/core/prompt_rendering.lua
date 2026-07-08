@@ -82,6 +82,24 @@ local function converge_calibration()
   return "Converge calibration: approve means this proposal is worth developing or advancing, not that its future implementation is merge-ready. The IDEAL section is context only, never an abstain ground. Good-enough-and-clean is approvable: approve when the proposal is sound, actionable, bounded, and code-verifiable — it identifies a real problem, has bounded intended behavior, has code-verifiable acceptance, and no six-smell is evidenced in the proposal or supplied source/context. Abstain only for an evidenced six-smell or unresolvable ambiguity that would make development likely wrong; name the concrete evidence available now. For an issue with no diff, evidenced means a contradiction or authority failure visible in the issue body, labels/markers/comments, prior findings, or current source/context, not absence of proof for a future PR or preference for a broader/refactored ideal. Treat broader class-solution and source-of-truth concerns as advisory unless current evidence shows the issue itself is false, unsafe, duplicate, overbroad, or mis-scoped."
 end
 
+local function ideal_rubric_lines()
+  return {
+    "1. ESSENCE: independently derive the problem essence before engaging the proposal's own story.",
+    "2. IDEAL: sketch the most faithful solution, unconstrained by the proposal.",
+    "3. Six-smell comparison: compare the proposal against that ideal using the full BEAUTY-GATE smell rubric: magic numbers, proxy-over-truth, symptom branches, narrative-over-verification, missing-inevitability, and skipped-purpose.",
+  }
+end
+
+local function calibrated_ideal_contract(verdict_mode)
+  local lines = ideal_rubric_lines()
+  if verdict_mode == "gate" then
+    table.insert(lines, "Gate calibration: the IDEAL section is context only, never a rejection ground. Good-enough-and-clean is approvable. Ugliness must be evidenced against the six smells, never inferred from \"not my ideal\". Every blocking claim must name an evidenced smell and cite the diff through the existing ⟦FKST:GAP⟧ line.")
+  else
+    table.insert(lines, converge_calibration())
+  end
+  return lines
+end
+
 local function converge_readiness_instruction()
   return "If this seat still has an evidenced blocker under the converge calibration, abstain and state the concrete evidence in the reply. Otherwise approve; put non-blocking ideal-shortfalls or PR-review grounding concerns in the reply as advisory."
 end
@@ -101,22 +119,15 @@ local function converge_seat_readiness(angle, include_calibration)
 end
 
 local function angle_mode_contract(verdict_mode, angle)
-  local lines = {}
   if angle ~= "high-risk" then
-    table.insert(lines, "1. ESSENCE: independently derive the problem essence before engaging the proposal's own story.")
-    table.insert(lines, "2. IDEAL: sketch the most faithful solution, unconstrained by the proposal.")
-    table.insert(lines, "3. Six-smell comparison: compare the proposal against that ideal using the full BEAUTY-GATE smell rubric: magic numbers, proxy-over-truth, symptom branches, narrative-over-verification, missing-inevitability, and skipped-purpose.")
-  else
-    table.insert(lines, "Assess the diff under the high-risk security threat model, outside the BEAUTY-GATE philosopher seats.")
+    return table.concat(calibrated_ideal_contract(verdict_mode), "\n")
   end
+
+  local lines = {
+    "Assess the diff under the high-risk security threat model, outside the BEAUTY-GATE philosopher seats.",
+  }
   if verdict_mode == "gate" then
-    if angle == "high-risk" then
-      table.insert(lines, "Gate calibration: every blocking claim must name an evidenced high-risk security gap and cite the diff through the existing ⟦FKST:GAP⟧ line. Advisory observations are comment.")
-    else
-      table.insert(lines, "Gate calibration: the IDEAL section is context only, never a rejection ground. Good-enough-and-clean is approvable. Ugliness must be evidenced against the six smells, never inferred from \"not my ideal\". Every blocking claim must name an evidenced smell and cite the diff through the existing ⟦FKST:GAP⟧ line.")
-    end
-  elseif verdict_mode == "converge" and angle ~= "high-risk" then
-    table.insert(lines, converge_calibration())
+    table.insert(lines, "Gate calibration: every blocking claim must name an evidenced high-risk security gap and cite the diff through the existing ⟦FKST:GAP⟧ line. Advisory observations are comment.")
   end
   return table.concat(lines, "\n")
 end
