@@ -237,6 +237,7 @@ function C.parse_issue_view_observe(M, stdout)
   local decoded = json.decode(stdout or "{}")
   return {
     title = tostring(decoded.title or ""),
+    body = tostring(decoded.body or ""),
     created_at = decoded.createdAt or decoded.created_at,
     state = decoded.state,
     state_reason = decoded.stateReason or decoded.state_reason,

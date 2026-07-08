@@ -64,6 +64,17 @@ local function created_marker(dedup_key, created_issue_number)
     .. '" -->')
 end
 
+local function observed_escalation_issue(dedup_key, issue_number)
+  return {
+    issue_number = tonumber(issue_number),
+    parent_issue = {
+      body = "Escalation issue body.\n\n<!-- fkst:github-proxy:issue-create:" .. tostring(dedup_key) .. " -->\n",
+      author_login = "fkst-test-bot",
+      comments = {},
+    },
+  }
+end
+
 local function find_raise(raises, queue)
   for _, raised in ipairs(raises or {}) do
     if raised.queue == queue then
@@ -181,6 +192,34 @@ return {
     t.eq(#second, 0)
   end,
 
+  test_blocked_obligation_patrol_marks_observed_escalation_issue_body_edge = function()
+    local first = core.blocked_obligation_patrol_once(entity())
+    t.eq(#first, 1)
+    local dedup_key = first[1].payload.dedup_key
+
+    local edge = core.output_obligation_failure_drain_edge({}, dedup_key, {
+      observed_escalation_issue(dedup_key, 2028),
+    })
+    t.eq(edge.kind, "superseded-by-observed-escalation-issue")
+    t.eq(edge.issue_id, "2028")
+
+    local second = core.blocked_obligation_patrol_once(entity(), {
+      observed_escalation_issue(dedup_key, 2028),
+    })
+    t.eq(#second, 0)
+  end,
+
+  test_blocked_obligation_patrol_ignores_untrusted_escalation_issue_body_edge = function()
+    local first = core.blocked_obligation_patrol_once(entity())
+    t.eq(#first, 1)
+    local dedup_key = first[1].payload.dedup_key
+    local untrusted = observed_escalation_issue(dedup_key, 2028)
+    untrusted.parent_issue.author_login = "mallory"
+
+    local second = core.blocked_obligation_patrol_once(entity(), { untrusted })
+    t.eq(#second, 1)
+  end,
+
   test_observability_patrol_raises_issue_request_for_blocked_obligation = function()
     mock_observe_env()
     local department = require("departments.observability.main")
@@ -198,5 +237,43 @@ return {
     t.eq(raised.payload.repo, repo)
     t.eq(raised.payload.parent_comment_target.issue_number, issue_number)
     t.is_true(raised.payload.body:find("`failure_kind`: `OutputObligationFailure`", 1, true) ~= nil)
+  end,
+
+  test_observability_patrol_skips_when_escalation_issue_body_is_observed = function()
+    mock_observe_env()
+    local department = require("departments.observability.main")
+    local parent = entity()
+    local request = core.blocked_obligation_patrol_once(parent)[1].payload
+
+    local result = with_observability_stubs(parent, function()
+      local originals = {
+        collect_observability_entities = core.collect_observability_entities,
+      }
+      core.collect_observability_entities = function()
+        return {
+          list = {
+            parent,
+            observed_escalation_issue(request.dedup_key, 2028),
+          },
+          counts = { blocked = 1 },
+          stalls = {},
+          state_gap_report = { edges = {} },
+          now_seconds = now(),
+        }
+      end
+      local ok, observed_result = pcall(function()
+        return testing.run_fake(department, {
+          queue = "devloop_observe_tick",
+          payload = { schema = "github-devloop.observe-tick.v1" },
+        })
+      end)
+      core.collect_observability_entities = originals.collect_observability_entities
+      if not ok then
+        error(observed_result)
+      end
+      return observed_result
+    end)
+
+    t.eq(find_raise(result.raises, "github-proxy.github_issue_create_request"), nil)
   end,
 }

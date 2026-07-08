@@ -150,7 +150,7 @@ local function mock_issue_view(comments, state, extra)
     comments = comments,
     assignees = extra.assignees or {},
     author_login = extra.author or "fkst-test-bot",
-  }, "title,comments,state,stateReason,assignees,author")
+  }, "title,body,comments,state,stateReason,assignees,author")
 end
 
 local function mock_pr_view(comments, extra)

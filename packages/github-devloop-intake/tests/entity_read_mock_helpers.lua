@@ -261,7 +261,7 @@ local issue_view_selectors = {
   "title,body,createdAt,updatedAt,labels,comments,state,assignees,author",
   "title,comments,state",
   "title,labels,state,comments,assignees,author",
-  "title,comments,state,stateReason,assignees,author",
+  "title,body,comments,state,stateReason,assignees,author",
   "assignees,author",
   "labels,comments",
   "title,updatedAt,labels,comments,state",

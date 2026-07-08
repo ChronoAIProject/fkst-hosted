@@ -519,7 +519,7 @@ return {
       comments = {
         authored_comment(marker, "loning", "2026-06-29T03:44:36Z", 4001),
       },
-    }, "title,comments,state,stateReason,assignees,author")
+    }, "title,body,comments,state,stateReason,assignees,author")
 
     local recent_issues = core.collect_recent_merged_issues("owner/repo", core.observability_limits(), now() + 90)
     local facts = core.collect_avm_scoreboard_facts({}, 1770000000, {}, recent_issues)
