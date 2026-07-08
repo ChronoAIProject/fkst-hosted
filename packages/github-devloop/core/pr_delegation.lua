@@ -156,7 +156,7 @@ local function build_issue_delegation_comment_request(repo, issue_number, issue_
 end
 
 local function build_parent_awaiting_comment(repo, issue_number, ready, child)
-  local body = "github-devloop delegated implementation to PR #" .. tostring(child.pr_number)
+  local body = "github-devloop parent issue advanced to awaiting-pr for delegated PR #" .. tostring(child.pr_number)
     .. "\n\n" .. devloop_state.state_marker(ready.proposal_id, "awaiting-pr", ready.dedup_key)
     .. "\n" .. m_builders.pr_delegation_marker(ready.proposal_id,
       child.pr_proposal_id,

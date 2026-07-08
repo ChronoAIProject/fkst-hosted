@@ -97,6 +97,10 @@ local function render_comment(body)
   }
 end
 
+local function first_line(body)
+  return (tostring(body or ""):match("^[^\n]*"))
+end
+
 return {
   test_ensure_pr_child_creates_then_adopts_by_branch_and_writes_split_facts = function()
     mock_branch_list(nil, 7)
@@ -126,6 +130,22 @@ return {
     t.eq(pr_effect.payload.handoff.version, impl_version)
     t.is_true(issue_effect.payload.body:find('fkst:github-devloop:pr-delegation:v1', 1, true) ~= nil)
     t.is_true(issue_effect.payload.body:find('state="pr-open"', 1, true) == nil)
+    local fact_first_line = first_line(issue_effect.payload.body)
+    t.eq(fact_first_line, "github-devloop delegated implementation to PR #7")
+    local awaiting_request = core.build_parent_awaiting_pr_comment_request(repo, issue_number, {
+      proposal_id = issue_proposal,
+      dedup_key = impl_version,
+      source_ref = source_ref(),
+    }, {
+      pr_number = 7,
+      pr_proposal_id = pr_proposal(7),
+      delegation_generation = "g1",
+    })
+    local awaiting_first_line = first_line(awaiting_request.body)
+    t.eq(awaiting_first_line, "github-devloop parent issue advanced to awaiting-pr for delegated PR #7")
+    t.is_true(fact_first_line ~= awaiting_first_line)
+    t.is_true(awaiting_request.body:find('state="awaiting-pr"', 1, true) ~= nil)
+    t.is_true(awaiting_request.body:find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
   end,
 
   test_ensure_pr_child_rerun_with_visible_facts_is_idempotent = function()

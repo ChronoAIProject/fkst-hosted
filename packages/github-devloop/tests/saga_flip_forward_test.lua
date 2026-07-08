@@ -96,6 +96,10 @@ local function find_body_raise(raises, queue, text)
   end)
 end
 
+local function first_line(body)
+  return (tostring(body or ""):match("^[^\n]*"))
+end
+
 return {
   test_implement_success_visible_child_flips_parent_to_awaiting_pr = function()
     local event = ready()
@@ -115,6 +119,7 @@ return {
     t.eq(result.exit_code, 0)
     local comment = find_body_raise(result.raises, "github-proxy.github_issue_comment_request", 'state="awaiting-pr"')
     t.is_true(comment ~= nil)
+    t.eq(first_line(comment.payload.body), "github-devloop parent issue advanced to awaiting-pr for delegated PR #7")
     t.is_true(tostring(comment.payload.body):find("fkst:github-devloop:pr-delegation:v1", 1, true) ~= nil)
     t.is_true(tostring(comment.payload.body):find('pr="7"', 1, true) ~= nil)
     local label = find_raise(result.raises, "github-proxy.github_issue_label_request")
