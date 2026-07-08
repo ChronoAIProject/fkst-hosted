@@ -713,7 +713,7 @@ local function install_legacy_command_renderers(core)
     return gh_issue_view_command(repo, number, "title,labels,comments,state,assignees")
   end
   core.gh_issue_view_observe_cmd = core.gh_issue_view_observe_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,comments,state,stateReason,assignees,author")
+    return gh_issue_view_command(repo, number, "title,body,comments,state,stateReason,assignees,author")
   end
 
   core.gh_pr_view_origin_cmd = core.gh_pr_view_origin_cmd or function(repo, number)

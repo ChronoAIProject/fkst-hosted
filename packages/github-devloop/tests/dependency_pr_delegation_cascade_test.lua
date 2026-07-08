@@ -66,7 +66,7 @@ local function mock_delegated_blocker_issue()
     },
     assignees = { "fkst-test-bot" },
     author_login = "fkst-test-bot",
-  }, "title,comments,state,stateReason,assignees,author")
+  }, "title,body,comments,state,stateReason,assignees,author")
 end
 
 local function mock_merged_child_pr()
