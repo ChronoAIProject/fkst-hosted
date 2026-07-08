@@ -70,6 +70,7 @@ function M.new(deps)
         FKST_CANDIDATE_PREFIX = "candidate",
         FKST_CANDIDATE_FROM_SEP = "-from-",
         FKST_DEVLOOP_UPSTREAM_BRANCH = "dev",
+        FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
       },
     }
     for key, value in pairs((extra and extra.env) or extra or {}) do
