@@ -109,6 +109,36 @@ local SOURCES = {
 }
 ]==],
   },
+  {
+    path = "builtin:software-diagnose-plan-flow",
+    json = [==[
+{
+  "schema": "fkst.workflow.v1",
+  "id": "software-diagnose-plan-flow",
+  "version": "2026-07-09",
+  "summary": "Give a directionless issue a clear goal first: derive root cause and a source-grounded implementation plan as a committed plan document, then implement against that merged plan.",
+  "applies_when": "Conservative router: choose this only when the origin issue text unambiguously matches this flow and exactly one flow: a directionless diagnose-then-implement request where a single pass would likely choose the wrong patch unless root cause is established separately. Use only for AUTO-FILED system escalation/diagnostic issues (for example blocked-obligation-patrol) whose requested outcome is essentially 'diagnose why X and implement any fix', OR explicit requests to diagnose a SYSTEMIC/cross-component/state-machine failure whose root cause is not localizable to one file/component. Do not choose it for ordinary bug reports, even symptom-only reports, when the fix is plausibly localizable and plain devloop can diagnose inline; when in doubt, or when one competent implementation pass can plausibly localize the cause, choose none/plain devloop. Exclude features, refactors, migrations, epics/trackers, trivial, docs-only, and ambiguous requests; choose none/plain devloop or the matching type-specific flow instead.",
+  "steps": [
+    {
+      "id": "diagnose-and-plan",
+      "title": "Diagnose root cause and write the implementation plan",
+      "content": {
+        "kind": "generated",
+        "generator": "Read the origin issue from its source_ref (full issue body + all comments + linked entities) and investigate the repository at ground-truth to emit exactly one child issue title and body for the diagnose-and-plan step. Scope the child PR to ADD ONE plan document only -- a new Markdown file under `docs/devloop/plans/` named for the origin issue (e.g. `docs/devloop/plans/<origin-issue-number>-<slug>.md`) -- and change NO production code. The plan MUST contain, each section grounded in cited source (file:line / marker / CI fact), never narrative: (1) Root cause -- the actual cause derived from source ground-truth, not the symptom; (2) Goal -- what this issue is FOR, one clear objective derived from purpose; (3) Approach -- the beautiful solution: anchored in established prior art / industry best practice (name it), no magic number, no proxy signal, no symptom-branch, making illegal states unrepresentable where possible, and stating what it deliberately does NOT do; (4) Acceptance -- concrete, code/test-verifiable criteria; (5) Non-goals / out of scope. Keep the plan bounded and specific enough that a separate implementer can execute it without re-deriving the root cause. TDD not required for a docs-only plan PR, but the plan must specify the tests the implementation step will add. Do not ask the child to duplicate devloop consensus, CI, PR review, or merge gates; devloop provides those. The child may produce no changes ONLY when a source-grounded plan genuinely cannot be derived because the issue is truly under-specified or unactionable; NOT merely because the issue looks clear enough to implement directly. no-changes is fatal and blocks the origin."
+      }
+    },
+    {
+      "id": "implement-from-plan",
+      "title": "Implement the change against the merged plan",
+      "content": {
+        "kind": "generated",
+        "generator": "Read the origin issue and the MERGED diagnose-and-plan result through the predecessor source_ref (which includes the committed plan document under docs/devloop/plans/) and emit exactly one child issue title and body for the implement-from-plan step. Scope the child PR to implement EXACTLY the approach in the merged plan and satisfy its stated acceptance criteria, adding the tests the plan specified, all green. Do not re-scope beyond the plan or re-litigate the root cause; if the plan is wrong or infeasible against current source, the child must produce no changes with a clear WHY naming the plan defect; no-changes is fatal and blocks the origin. TDD/tests live inside this child PR. Do not ask the child to duplicate devloop consensus, CI, PR review, or merge gates; devloop provides those."
+      }
+    }
+  ]
+}
+]==],
+  },
 }
 
 -- Structural count of built-in catalogs: no json.decode, safe at module load.
