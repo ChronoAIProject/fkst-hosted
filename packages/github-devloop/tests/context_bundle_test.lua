@@ -95,10 +95,43 @@ return {
     local result = run_probe("content_redaction", runtime_root("content-redaction"))
 
     t.eq(result.ok, true)
+    t.eq(result.issue_title, "Bundle issue")
+    t.eq(result.issue_body, "Full issue body")
     t.is_true(result.external_comment_body:find("[fkst:blocked-github-content:v1", 1, true) == 1)
     t.is_nil(result.external_comment_body:find("evil", 1, true))
     t.eq(result.bot_comment_body, result.bot_expected)
     t.is_true(result.issue_content:find("github-devloop:state:v1", 1, true) ~= nil)
+  end,
+
+  test_context_bundle_redacts_pr_comment_and_preserves_bot_comment = function()
+    local result = run_probe("pr_content_redaction", runtime_root("pr-content-redaction"))
+
+    t.eq(result.ok, true)
+    t.eq(result.pr_title, "PR title")
+    t.eq(result.pr_body, "PR body")
+    t.is_true(result.external_comment_body:find("[fkst:blocked-github-content:v1", 1, true) == 1)
+    t.is_nil(result.external_comment_body:find("evil", 1, true))
+    t.eq(result.bot_comment_body, result.bot_expected)
+    t.is_true(result.pr_content:find("github-devloop:review-result:v1", 1, true) ~= nil)
+  end,
+
+  test_context_bundle_whitelist_env_expands_authorized_comment_sources = function()
+    local result = run_probe("content_redaction_whitelist_env", runtime_root("content-redaction-whitelist-env"))
+
+    t.eq(result.ok, true)
+    t.eq(result.managed_comment_body, "managed bot comment")
+    t.eq(result.authorized_comment_body, "authorized operator comment")
+    t.is_true(result.external_comment_body:find("[fkst:blocked-github-content:v1", 1, true) == 1)
+    t.is_nil(result.external_comment_body:find("external payload", 1, true))
+  end,
+
+  test_context_bundle_unreadable_optional_whitelist_env_degrades_to_bot_only = function()
+    local result = run_probe("content_redaction_optional_env_unreadable", runtime_root("content-redaction-optional-env-unreadable"))
+
+    t.eq(result.ok, true)
+    t.eq(result.bot_comment_body, "bot comment")
+    t.is_true(result.optional_comment_body:find("[fkst:blocked-github-content:v1", 1, true) == 1)
+    t.is_nil(result.optional_comment_body:find("optional comment", 1, true))
   end,
 
   test_context_bundle_content_filter_requires_bot_login = function()

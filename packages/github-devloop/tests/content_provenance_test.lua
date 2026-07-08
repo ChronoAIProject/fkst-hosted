@@ -14,6 +14,7 @@ local MARKER = "[fkst:blocked-github-content:v1"
 return {
   test_canon_login_strips_bot_suffix_trims_lowercases = function()
     t.eq(cp.canon_login("Fkst-Bot[bot]"), "fkst-bot")
+    t.eq(cp.canon_login("Fkst-Bot[BOT]"), "fkst-bot")
     t.eq(cp.canon_login("  Alice  "), "alice")
     t.is_nil(cp.canon_login(nil))
     t.is_nil(cp.canon_login(""))
@@ -72,6 +73,34 @@ return {
     t.eq(decoded.title, "Task")
     t.eq(decoded.body, "issue body")
     t.eq(#records, 3)
+  end,
+
+  test_filter_gh_content_json_accepts_pr_kind_and_user_author_shape = function()
+    local records = {}
+    local input = '{"title":"PR","body":"PR body","comments":['
+      .. '{"body":"trusted","user":{"login":"Fkst-Test-Bot[BOT]"}},'
+      .. '{"body":"external","user":{"login":"mallory"}}]}'
+    local out = cp.filter_gh_content_json(input, "pr", wl("fkst-test-bot"), records)
+    local ok, decoded = pcall(json.decode, out)
+    t.eq(ok, true)
+    t.eq(decoded.title, "PR")
+    t.eq(decoded.body, "PR body")
+    t.eq(decoded.comments[1].body, "trusted")
+    t.is_true(decoded.comments[2].body:find(MARKER, 1, true) == 1)
+    t.is_nil(decoded.comments[2].body:find("external", 1, true))
+    t.eq(#records, 1)
+  end,
+
+  test_filter_gh_content_json_rejects_invalid_kind = function()
+    local ok, err = pcall(cp.filter_gh_content_json, '{"comments":[]}', "review", wl("fkst-test-bot"), {})
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("content provenance invalid kind", 1, true) ~= nil)
+  end,
+
+  test_filter_gh_content_json_rejects_invalid_json = function()
+    local ok, err = pcall(cp.filter_gh_content_json, "{not json", "issue", wl("fkst-test-bot"), {})
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("content provenance JSON decode failed", 1, true) ~= nil)
   end,
 
   test_filter_gh_content_json_byte_identical_when_nothing_redacted = function()

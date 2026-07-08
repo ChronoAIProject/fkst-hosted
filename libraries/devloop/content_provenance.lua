@@ -93,8 +93,8 @@ function M.canon_login(login)
   if login == nil then
     return nil
   end
-  local value = strings.trim(login):gsub("%[bot%]$", "")
-  value = strings.trim(value):lower()
+  local value = strings.trim(login):lower():gsub("%[bot%]$", "")
+  value = strings.trim(value)
   if value == "" then
     return nil
   end
