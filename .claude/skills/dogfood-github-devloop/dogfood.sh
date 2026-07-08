@@ -525,10 +525,40 @@ durable_health_one() {
   echo "  $1: ${summary:-observe unavailable}"
 }
 
+# stray_supervise_report: enumerate EVERY running framework supervise on this host and flag any whose
+# --project-root is not one of this host's managed dogfood targets. doctor_one/pidof_df only ever look
+# at the managed project-roots ($HOST per target), so a supervise from a DEAD session (e.g. a /tmp
+# project-root left by a prior Claude session) or another integration branch reusing the SAME bot login
+# is structurally invisible to them — yet it observes the SHARED repos and writes conflicting state
+# markers, silently poisoning the managed instances. Observed 2026-07-08: a 3-day-old orphan on
+# /tmp/fkst-website-wf (integration=workflow-dogfood, same bot login `loning`) blocked a healthy website
+# PR into a 30h review livelock + false-terminal cascade (#260/#261/PR#265). Only a hand-run `ps` found
+# it. This turns that into a mechanical doctor signal. Always enumerates ALL targets (not the arg) —
+# a stray is a host-global hazard regardless of which target you are inspecting.
+stray_supervise_report() {
+  local managed pid cmd root n stray=0
+  managed=$(for n in $(expand all); do ( cfg "$n" >/dev/null 2>&1 && printf '%s\n' "$HOST" ); done)
+  # Match on `supervise --project-root` (every supervise carries it) rather than the framework BIN
+  # name, so this read-only enumeration does not trip the G-DOGFOOD-BOUNDARY launch-path ratchet;
+  # same match pattern as pidof_df above. A transient test-spawned supervise (temp project-root)
+  # may appear briefly during a concurrent test run — an orphan is the one that persists on re-check.
+  for pid in $(pgrep -f -- 'supervise --project-root' 2>/dev/null); do
+    cmd=$(ps -o command= -p "$pid" 2>/dev/null) || continue
+    root=$(printf '%s\n' "$cmd" | grep -oE -- '--project-root [^ ]+' | head -1 | awk '{print $2}')
+    [ -n "$root" ] || continue
+    if ! printf '%s\n' "$managed" | grep -qxF -- "$root"; then
+      printf '  ⚠ STRAY pid %s project-root %s — unmanaged supervise; may poison SHARED repo state (kill if orphaned)\n' "$pid" "$root"
+      stray=1
+    fi
+  done
+  [ "$stray" -eq 0 ] && echo "  none (every running supervise is a managed target)"
+}
+
 cmd_doctor() {
   echo "engine BIN:"; bin_freshness_report | sed 's/^/  /'
   echo "supervises:"
   for n in $(expand "${1:-all}"); do doctor_one "$n"; done
+  echo "stray supervises (unmanaged — poison shared state):"; stray_supervise_report
   echo "upstream($UPSTREAM_BRANCH) CI:"; for n in $(expand "${1:-all}"); do upstream_ci_one "$n"; done
   echo "durable (redb delivery state):"; for n in $(expand "${1:-all}"); do durable_health_one "$n"; done
   echo "graphql: $(gh api rate_limit --jq '.resources.graphql.remaining' 2>/dev/null||echo ?)/5000"
