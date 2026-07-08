@@ -574,6 +574,26 @@ local tests = {
     t.is_nil(calls[1].stdin:find("software-dev-flow", 1, true))
   end,
 
+  test_ordinary_localizable_bug_report_falls_through_to_plain_devloop = function()
+    local _result, calls = run_fallthrough_case(
+      "/tmp/fkst-packages-test/github-devloop-workflow/no-extra-catalog",
+      {
+        title = "Settings spinner never stops after saving",
+        body = "The settings save button leaves the page spinner running forever after the save request returns. Please fix the local settings save flow and add a regression test.",
+        labels = { "bug" },
+      },
+      "⟦FKST:WORKFLOW_SELECT⟧ none"
+    )
+
+    t.eq(#calls, 2)
+    t.is_true(calls[1].stdin:find("⟦FKST:WORKFLOW_SELECT⟧", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("software-diagnose-plan-flow", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("Do not choose it for ordinary bug reports, even symptom-only reports", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("when the fix is plausibly localizable", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("when in doubt", 1, true) ~= nil)
+    t.is_true(calls[2].stdin:find("⟦FKST:INTAKE⟧", 1, true) ~= nil)
+  end,
+
   test_workflow_selection_skips_blueprint_when_fresh_issue_is_closed = function()
     with_catalog({
       ["workflow-alpha.json"] = workflow_json("workflow-alpha", '{"labels_any":["workflow"]}', "Do the workflow step."),

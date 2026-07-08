@@ -118,11 +118,52 @@ local function assert_step_ids(bp, expected)
   end
 end
 
+local function assert_generated_step_ids(bp, expected)
+  t.eq(#bp.steps, #expected)
+  for index, id in ipairs(expected) do
+    t.eq(bp.steps[index].id, id)
+    t.eq(bp.steps[index].content.kind, "generated")
+    t.is_true(#bp.steps[index].content.generator <= blueprint_schema.MAX_GENERATOR_BYTES)
+    assert_contains(bp.steps[index].content.generator, "source_ref")
+    assert_contains(bp.steps[index].content.generator, "devloop consensus, CI, PR review, or merge gates")
+    assert_contains(bp.steps[index].content.generator, "devloop provides those")
+    assert_contains(bp.steps[index].content.generator, "no-changes is fatal")
+    assert_not_contains(bp.steps[index].content.generator, "feasibility_probe")
+    assert_not_contains(bp.steps[index].content.generator, "EligibilityManifest")
+  end
+end
+
 local function assert_conservative_applies_when(bp)
   assert_contains(bp.applies_when, "Conservative router")
   assert_contains(bp.applies_when, "origin issue text")
   assert_contains(bp.applies_when, "unambiguously matches this flow and exactly one flow")
   assert_contains(bp.applies_when, "choose none/plain devloop")
+end
+
+local function assert_diagnose_applies_when_is_conservative(bp)
+  assert_contains(bp.applies_when, "directionless diagnose-then-implement request")
+  assert_contains(bp.applies_when, "single pass would likely choose the wrong patch")
+  assert_contains(bp.applies_when, "root cause is established separately")
+  assert_contains(bp.applies_when, "AUTO-FILED system escalation/diagnostic issues")
+  assert_contains(bp.applies_when, "blocked-obligation-patrol")
+  assert_contains(bp.applies_when, "diagnose why X and implement any fix")
+  assert_contains(bp.applies_when, "SYSTEMIC/cross-component/state-machine failure")
+  assert_contains(bp.applies_when, "not localizable to one file/component")
+  assert_contains(bp.applies_when, "Do not choose it for ordinary bug reports, even symptom-only reports")
+  assert_contains(bp.applies_when, "when the fix is plausibly localizable")
+  assert_contains(bp.applies_when, "plain devloop")
+  assert_contains(bp.applies_when, "when in doubt")
+  assert_contains(bp.applies_when, "one competent implementation pass can plausibly localize the cause")
+  assert_contains(bp.applies_when, "choose none/plain devloop")
+  assert_contains(bp.applies_when, "features")
+  assert_contains(bp.applies_when, "refactors")
+  assert_contains(bp.applies_when, "migrations")
+  assert_contains(bp.applies_when, "epics/trackers")
+  assert_contains(bp.applies_when, "trivial")
+  assert_contains(bp.applies_when, "docs-only")
+  assert_contains(bp.applies_when, "ambiguous requests")
+  assert_contains(bp.applies_when, "matching type-specific flow")
+  assert_not_contains(bp.applies_when, "bug report naming a symptom without a located cause")
 end
 
 local tests = {
@@ -185,10 +226,11 @@ local tests = {
 
     t.eq(#loaded.errors, 0)
     t.eq(#loaded.duplicates, 0)
-    t.eq(default_catalog.count, 3)
+    t.eq(default_catalog.count, 4)
     t.eq(loaded.valid["software-feature-flow"].path, "builtin:software-feature-flow")
     t.eq(loaded.valid["software-refactor-flow"].path, "builtin:software-refactor-flow")
     t.eq(loaded.valid["software-contract-migration-flow"].path, "builtin:software-contract-migration-flow")
+    t.eq(loaded.valid["software-diagnose-plan-flow"].path, "builtin:software-diagnose-plan-flow")
     t.is_nil(loaded.valid["software-dev-flow"])
   end,
 
@@ -197,10 +239,12 @@ local tests = {
     local feature = loaded.valid["software-feature-flow"].blueprint
     local refactor = loaded.valid["software-refactor-flow"].blueprint
     local migration = loaded.valid["software-contract-migration-flow"].blueprint
+    local diagnose = loaded.valid["software-diagnose-plan-flow"].blueprint
 
     assert_conservative_applies_when(feature)
     assert_conservative_applies_when(refactor)
     assert_conservative_applies_when(migration)
+    assert_conservative_applies_when(diagnose)
 
     assert_step_ids(feature, { "walking-skeleton", "production-slice" })
     assert_contains(feature.steps[1].content.generator, "Cockburn walking skeleton")
@@ -226,6 +270,24 @@ local tests = {
     assert_contains(migration.steps[3].content.generator, "MERGED migrate result")
     assert_contains(migration.steps[3].content.generator, "remove the old contract form")
     assert_contains(migration.steps[3].content.generator, "temporary bridge")
+
+    assert_generated_step_ids(diagnose, { "diagnose-and-plan", "implement-from-plan" })
+    assert_contains(diagnose.summary, "derive root cause and a source-grounded implementation plan")
+    assert_diagnose_applies_when_is_conservative(diagnose)
+    assert_contains(diagnose.steps[1].content.generator, "ADD ONE plan document only")
+    assert_contains(diagnose.steps[1].content.generator, "docs/devloop/plans/")
+    assert_contains(diagnose.steps[1].content.generator, "Root cause")
+    assert_contains(diagnose.steps[1].content.generator, "beautiful solution")
+    assert_contains(diagnose.steps[1].content.generator, "TDD not required for a docs-only plan PR")
+    assert_contains(diagnose.steps[1].content.generator, "ONLY when a source-grounded plan genuinely cannot be derived")
+    assert_contains(diagnose.steps[1].content.generator, "truly under-specified or unactionable")
+    assert_contains(diagnose.steps[1].content.generator, "NOT merely because the issue looks clear enough to implement directly")
+    assert_contains(diagnose.steps[2].content.generator, "MERGED diagnose-and-plan result")
+    assert_contains(diagnose.steps[2].content.generator, "predecessor source_ref")
+    assert_contains(diagnose.steps[2].content.generator, "which includes the committed plan document under docs/devloop/plans/")
+    assert_not_contains(diagnose.steps[2].content.generator, "the merged plan document")
+    assert_contains(diagnose.steps[2].content.generator, "Do not re-scope beyond the plan")
+    assert_contains(diagnose.steps[2].content.generator, "TDD/tests live inside this child PR")
   end,
 
   test_validate_records_rejects_duplicate_ids_across_sources = function()
