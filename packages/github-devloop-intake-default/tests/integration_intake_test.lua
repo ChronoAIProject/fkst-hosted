@@ -7,6 +7,9 @@ local opts = h.opts
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_rounds = require("devloop.convergence.rounds")
+local convergence_shared = require("devloop.convergence.shared")
 local m_builders = require("devloop.markers.builders")
 
 local function mock_repo_env(repo)
@@ -792,6 +795,40 @@ return {
     t.eq(count_calls("codex exec"), 1)
   end,
 
+  test_judge_reintake_rejudges_terminal_blocked_issue = function()
+    local command = trusted_reintake_command("IC_reintake_blocked_judge")
+    local payload = reintake_candidate(command)
+    local base_version = expected_decision_key(payload)
+    local blocked_version = conv_reconcile.reconcile_state_version(base_version, 3)
+    local source_digest = convergence_shared.source_ref_digest(payload.source_ref)
+    mock_bot_env()
+    mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:blocked" }, {
+      m_builders.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload, nil, command), "standard"),
+      core.state_marker(payload.proposal_id, "thinking", base_version .. "/loop/3"),
+      conv_rounds.converge_round_marker(payload.proposal_id, base_version, source_digest, 3, base_version .. "/loop/3", "Same narrowed question", {
+        { angle = "minimal", verdict = "abstain", digest = "same-digest" },
+      }),
+      conv_reconcile.reconcile_marker(payload.proposal_id, base_version, 3, "drop"),
+      core.state_marker(payload.proposal_id, "blocked", blocked_version),
+      command,
+    })
+    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Reintake abandons the blocked framing and starts a fresh intake generation.")
+
+    local result = run_judge(payload, opts("intake-reintake-terminal-blocked"))
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 4)
+    local command_comment = find_comment_body(result.raises, "operator command accepted: reintake")
+    local intake_comment = find_comment_body(result.raises, 'decision="enable"')
+    local request = find_raise(result.raises, "github-devloop.devloop_execute_request").payload
+    t.is_true(command_comment ~= nil)
+    t.is_true(intake_comment ~= nil)
+    t.is_true(intake_comment.body:find(expected_decision_key(payload, nil, command), 1, true) ~= nil)
+    t.eq(request.dedup_key, expected_decision_key(payload, nil, command))
+    t.eq(request.dedup_key == expected_decision_key(payload), false)
+    assert_execution_request_chain(result.raises, payload, nil, command)
+    t.eq(count_calls("codex exec"), 1)
+  end,
+
   test_judge_reintake_stale_candidate_is_skipped = function()
     local payload = candidate()
     local command = trusted_reintake_command("IC_reintake_stale")
@@ -821,7 +858,8 @@ return {
     t.eq(#result.raises, 1)
     local refusal = find_comment_body(result.raises, "operator command refused")
     t.is_true(refusal ~= nil)
-    t.is_true(refusal.body:find("reintake requires no active devloop state", 1, true) ~= nil)
+    t.is_true(refusal.body:find("reintake requires terminal blocked or no active devloop state", 1, true) ~= nil)
+    t.is_true(refusal.body:find("use rereview, reready, or reimplement", 1, true) ~= nil)
     t.eq(count_calls("codex exec"), 0)
   end,
 

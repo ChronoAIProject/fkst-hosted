@@ -6,9 +6,10 @@ local S = {}
 local operator_commands = require("devloop.operator_commands")
 
 function S.install(M)
-local function has_devloop_state_label(labels)
+local function has_active_devloop_state_label(labels, blocked_reached)
   for _, label in ipairs(labels or {}) do
-    if devloop_state.is_state_label(label) then
+    if devloop_state.is_state_label(label)
+      and not (blocked_reached and tostring(label) == tostring(devloop_base._blocked_label)) then
       return true
     end
   end
@@ -16,7 +17,15 @@ local function has_devloop_state_label(labels)
 end
 
 function M.should_skip_known_intake_issue(labels)
-  return devloop_base.is_intake_held(labels) or devloop_base.is_opted_in(labels) or has_devloop_state_label(labels)
+  return devloop_base.is_intake_held(labels) or devloop_base.is_opted_in(labels) or has_active_devloop_state_label(labels)
+end
+
+function M.reintake_has_active_devloop_state(labels, comments, proposal_id)
+  local blocked_reached = devloop_state.reached(comments, proposal_id, "blocked", {
+    domain = "github-devloop-issue",
+  })
+  return (devloop_base.is_opted_in(labels) and not blocked_reached)
+    or has_active_devloop_state_label(labels, blocked_reached)
 end
 
 function M.pending_reintake_command(comments)

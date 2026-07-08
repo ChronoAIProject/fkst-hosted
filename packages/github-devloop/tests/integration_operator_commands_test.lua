@@ -345,4 +345,47 @@ return {
     t.eq(ready_raise.payload.dedup_key, ready_version)
     t.eq(ready_raise.payload.impl_retry_attempt, 2)
   end,
+
+  test_issue_reimplement_command_reenters_blocked_implementing_timeout_without_pr = function()
+    local event = issue()
+    local proposal_id = base_ids.proposal_id(event.repo, event.number)
+    local inner_version = "github-devloop/issue/owner/repo/42/intake/2226"
+    local ready_version = payloads_builders.build_devloop_ready_payload(core, {
+      proposal_id = proposal_id,
+      dedup_key = inner_version,
+      source_ref = event.source_ref,
+    }).dedup_key
+    local blocked_version = conv_reconcile.timeout_reconcile_state_version(ready_version, "implementing", 3)
+    local command = trusted_issue_command("reimplement", "IC_issue_reimplement_timeout_without_pr")
+    mock_issue_state({ "fkst-dev:enabled", "fkst-dev:blocked" }, "OPEN", {
+      core.state_marker(proposal_id, "implementing", ready_version),
+      core.state_marker(proposal_id, "blocked", blocked_version),
+      conv_reconcile.timeout_reconcile_marker(proposal_id, ready_version, "implementing", 3, "drop", {
+        terminal_version = blocked_version,
+        from_state = "implementing",
+        from_version = ready_version,
+        reason_class = "state-output-obligation-timeout",
+        source_ref = event.source_ref,
+      }),
+      command,
+    })
+
+    local result = run_observe(event, opts("operator-issue-reimplement-timeout-without-pr"))
+    t.eq(result.exit_code, 0)
+    local command_response = find_issue_comment_raise(result.raises, "operator command accepted: reimplement")
+    local ready_raise = find_raise(result.raises, "devloop_ready")
+    t.is_true(command_response ~= nil)
+    t.is_true(ready_raise ~= nil)
+    t.eq(ready_raise.payload.proposal_id, proposal_id)
+    t.eq(ready_raise.payload.dedup_key, ready_version)
+    t.eq(ready_raise.payload.impl_retry_attempt, 2)
+    t.eq(core.implementation_attempt_version(ready_raise.payload.dedup_key, ready_raise.payload.impl_retry_attempt), ready_version .. "/reimplement/2")
+    t.eq(ready_raise.payload.operator_reentry.command, "reimplement")
+    t.eq(ready_raise.payload.operator_reentry.from_state, "blocked")
+    t.eq(ready_raise.payload.operator_reentry.terminal_reason, "implementing-timeout-without-pr")
+    t.eq(ready_raise.payload.operator_reentry.state_version, blocked_version)
+    t.eq(ready_raise.payload.operator_reentry.impl_version, ready_version)
+    t.eq(ready_raise.payload.operator_reentry.timeout_round, 3)
+    t.eq(ready_raise.payload.operator_reentry.pr_number, nil)
+  end,
 }

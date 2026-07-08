@@ -307,7 +307,10 @@ local function timeout_reconcile_reready_reentry_state(current, proposal_id, sta
   if state.state ~= "blocked" or link ~= nil then
     return nil, "reready requires ready or dependency_wait state"
   end
-  local fact = conv_reconcile.timeout_reconcile_fact_for_terminal_version(core, current.comments, proposal_id, state.version)
+  local fact = conv_reconcile.timeout_reconcile_fact_for_terminal_version_from_states(current.comments, proposal_id, state.version, {
+    ready = true,
+    dependency_wait = true,
+  })
   if fact == nil then
     return nil, "reready requires ready or dependency_wait state"
   end
@@ -331,6 +334,11 @@ local function timeout_reconcile_reready_reentry_state(current, proposal_id, sta
       timeout_round = fact.round,
     },
   }, nil
+end
+
+local function source_ref_matches(left, right)
+  return tostring(left and left.kind or "") == tostring(right and right.kind or "")
+    and tostring(left and left.ref or "") == tostring(right and right.ref or "")
 end
 
 local function maybe_apply_issue_reready_command(issue, proposal_id, current, state, link)
@@ -364,6 +372,22 @@ local function maybe_apply_issue_reready_command(issue, proposal_id, current, st
   )
   replayer.replay_from_table(core, "observe_issue", issue, replay_state, row, replay_facts)
   return true
+end
+
+local function implementing_timeout_reimplement_fact(current, proposal_id, state, source_ref, link)
+  if state.state ~= "blocked" or link ~= nil then
+    return nil
+  end
+  local fact = conv_reconcile.timeout_reconcile_fact_for_terminal_version_from_states(current.comments, proposal_id, state.version, {
+    implementing = true,
+  })
+  if fact == nil
+    or fact.from_state ~= "implementing"
+    or fact.reason_class ~= "state-output-obligation-timeout"
+    or not source_ref_matches(fact.source_ref, source_ref) then
+    return nil
+  end
+  return fact
 end
 
 local function has_unmet_blocker(gate, blocker_number)
@@ -461,13 +485,15 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
     return false
   end
   local link = m_facts.pr_link_fact(current.comments, proposal_id)
-  local blocked_reentry = state.state == "blocked" and linked_open_pr(snapshot, link and link.pr_number) ~= nil
+  local blocked_open_pr_reentry = state.state == "blocked" and linked_open_pr(snapshot, link and link.pr_number) ~= nil
+  local timeout_reentry = implementing_timeout_reimplement_fact(current, proposal_id, state, issue.source_ref, link)
+  local blocked_reentry = blocked_open_pr_reentry or timeout_reentry ~= nil
   if state.state ~= "impl-failed" and not blocked_reentry then
-    devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed or blocked state with an open linked PR")
+    devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)|blocked(implementing-timeout)", "implementing", "refused(invalid-state)", "operator reimplement requires impl-failed, blocked state with an open linked PR, or blocked state from implementing timeout without a PR; use reintake for blocked thinking convergence drops")
     local refusal = operator_commands.build_operator_issue_command_refusal_request(issue.repo,
       issue.number,
       command,
-      "reimplement requires impl-failed or blocked state with an open linked PR",
+      "reimplement requires impl-failed, blocked state with an open linked PR, or blocked state from implementing timeout without a PR; use reintake for blocked thinking convergence drops",
       issue.source_ref
     )
     devloop_logging.log_raise("observe_issue", proposal_id, "github-proxy.github_issue_comment_request", refusal)
@@ -478,23 +504,41 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
   local failure = core.impl_failure_fact(current.comments, proposal_id, state.version)
   if failure ~= nil then
     attempt = tonumber(failure.attempt or 1) + 1
-  elseif blocked_reentry then
-    attempt = (core.implementation_retry_attempt(link.impl_version) or 1) + 1
+  elseif blocked_open_pr_reentry or timeout_reentry ~= nil then
+    -- Both reentry paths derive the retry attempt from a prior implementation
+    -- version; select that version once so the retry-attempt read stays single.
+    local prior_impl_version
+    if blocked_open_pr_reentry then
+      prior_impl_version = link.impl_version
+    else
+      prior_impl_version = timeout_reentry.from_version
+    end
+    attempt = (core.implementation_retry_attempt(prior_impl_version) or 1) + 1
   end
-  local retry_version = blocked_reentry and link.impl_version or state.version
+  local retry_version = blocked_open_pr_reentry and link.impl_version
+    or (timeout_reentry ~= nil and timeout_reentry.from_version or state.version)
   local payload_source = {
     proposal_id = proposal_id,
     dedup_key = core.ready_payload_inner_version(retry_version),
     source_ref = issue.source_ref,
     impl_retry_attempt = attempt,
   }
-  if blocked_reentry then
+  if blocked_open_pr_reentry then
     payload_source.operator_reentry = {
       command = "reimplement",
       from_state = "blocked",
       pr_number = link.pr_number,
       state_version = state.version,
       impl_version = link.impl_version,
+    }
+  elseif timeout_reentry ~= nil then
+    payload_source.operator_reentry = {
+      command = "reimplement",
+      from_state = "blocked",
+      terminal_reason = "implementing-timeout-without-pr",
+      state_version = state.version,
+      impl_version = timeout_reentry.from_version,
+      timeout_round = timeout_reentry.round,
     }
   end
   local payload = payloads_builders.build_devloop_ready_payload(core, payload_source)
@@ -504,7 +548,7 @@ local function maybe_apply_issue_reimplement_command(issue, proposal_id, current
     attempt,
     issue.source_ref
   )
-  devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)", "implementing", "applied(operator-reimplement)", "trusted operator command requested implementation retry")
+  devloop_logging.log_cas_decision("observe_issue", proposal_id, state, "impl-failed|blocked(open-pr)|blocked(implementing-timeout)", "implementing", "applied(operator-reimplement)", "trusted operator command requested implementation retry")
   devloop_logging.log_apply("observe_issue", proposal_id, nil, nil, { add = {}, remove = {} }, {
     "github-proxy.github_issue_comment_request",
     "devloop_ready",

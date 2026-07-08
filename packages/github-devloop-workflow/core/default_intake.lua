@@ -55,9 +55,10 @@ local function copy_fields(value)
   return result
 end
 
-local function issue_has_devloop_state(labels)
+local function issue_has_active_devloop_state(labels, blocked_reached)
   for _, label in ipairs(labels or {}) do
-    if devloop_state.is_state_label(label) then
+    if devloop_state.is_state_label(label)
+      and not (blocked_reached and tostring(label) == tostring(devloop_base._blocked_label)) then
       return true
     end
   end
@@ -123,14 +124,17 @@ function M.read_current_for_candidate(package_core, dept, repo, issue_number, ca
     devloop_logging.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return nil
   end
-  if has_pending_reintake and (devloop_base.is_opted_in(current.labels) or issue_has_devloop_state(current.labels)) then
+  local blocked_reached = devloop_state.reached(current.comments, candidate.proposal_id, "blocked", {
+    domain = "github-devloop-issue",
+  })
+  if has_pending_reintake and ((devloop_base.is_opted_in(current.labels) and not blocked_reached) or issue_has_active_devloop_state(current.labels, blocked_reached)) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,
       issue_number,
       reintake_command,
-      "reintake requires no active devloop state",
+      "reintake requires terminal blocked or no active devloop state; use rereview, reready, or reimplement for recoverable active states",
       candidate.source_ref
     )
-    devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-active-state)", "operator reintake requires no active devloop state")
+    devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "refused(reintake-active-state)", "operator reintake requires terminal blocked or no active devloop state")
     devloop_logging.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return nil
   end
@@ -156,7 +160,7 @@ function M.read_current_for_candidate(package_core, dept, repo, issue_number, ca
     and tostring(intake_fact.dedup_key or "") == tostring(decision_dedup_key or "")
     and not reached_thinking
     and not has_pending_reintake
-  if devloop_base.is_opted_in(current.labels) and not can_replay_enable_successor then
+  if devloop_base.is_opted_in(current.labels) and not has_pending_reintake and not can_replay_enable_successor then
     devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-enabled", "fkst-dev:enabled is already present")
     return nil
   end

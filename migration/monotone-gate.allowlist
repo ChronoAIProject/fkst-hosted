@@ -94,7 +94,6 @@ packages/github-devloop/departments/reconcile/main.lua|pipeline_thinking|cursor-
 packages/github-devloop/departments/reconcile/main.lua|pipeline_timeout|cursor-read|current_entity_state(|line=123|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 packages/github-devloop/departments/reconcile/main.lua|pipeline_timeout|state-equality|blocked|line=175|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 libraries/devloop/entity.lua|M.current_entity_state|cursor-read|current_state(|line=52|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
-libraries/devloop/intake/default_intake.lua|read_current_for_candidate|cursor-read|current_state(|line=154|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 libraries/devloop/liveness_scan.lua|M.liveness_scan_maybe_timeout_action|state-equality|ready|line=115|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 libraries/devloop/merge_queue.lua|M.merge_queue_starvation_candidate|state-equality|merge-ready|line=218|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
 libraries/devloop/merge_queue.lua|M.wip_capacity_allows_start|cursor-read|current_state(|line=488|issue=#1310|why=classified current routing/decision read; migrate only when it is a monotone milestone gate
