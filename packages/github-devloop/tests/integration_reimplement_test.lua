@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local payloads_builders = require("devloop.payloads.builders")
 local m_facts = require("devloop.markers.facts")
+local conv_reconcile = require("devloop.convergence.reconcile")
 local t = h.t
 local core = h.core
 local opts = h.opts
@@ -18,6 +19,7 @@ local mock_git_commit = h.mock_git_commit
 local render_comment = h.render_comment
 local json_string = h.json_string
 local find_raise = h.find_raise
+local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
 
@@ -253,5 +255,37 @@ return {
     t.is_true(comment ~= nil)
     t.is_true(comment.payload.body:find(core.state_marker(event.proposal_id, "implementing", ready.dedup_key .. "/reimplement/2"), 1, true) ~= nil)
     t.eq(m_facts.implementing_fact({ comment.payload.body }, event.proposal_id, ready.dedup_key .. "/reimplement/2"), nil)
+  end,
+
+  test_blocked_timeout_reimplement_receiver_rejects_missing_timeout_source_ref = function()
+    local event = reached()
+    local ready = payloads_builders.build_devloop_ready_payload(core, event)
+    local blocked_version = conv_reconcile.timeout_reconcile_state_version(ready.dedup_key, "implementing", 3)
+    ready.impl_retry_attempt = 2
+    ready.operator_reentry = {
+      command = "reimplement",
+      from_state = "blocked",
+      terminal_reason = "implementing-timeout-without-pr",
+      state_version = blocked_version,
+      impl_version = ready.dedup_key,
+      timeout_round = 3,
+    }
+    mock_issue_implement_raw({ "fkst-dev:blocked" }, {
+      core.state_marker(event.proposal_id, "implementing", ready.dedup_key),
+      core.state_marker(event.proposal_id, "blocked", blocked_version),
+      conv_reconcile.timeout_reconcile_marker(event.proposal_id, ready.dedup_key, "implementing", 3, "drop", {
+        terminal_version = blocked_version,
+        from_state = "implementing",
+        from_version = ready.dedup_key,
+        reason_class = "state-output-obligation-timeout",
+      }),
+    })
+
+    local result = run_implement(ready, opts("implement-blocked-timeout-reimplement-missing-source-ref"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 0)
+    t.eq(count_calls("codex exec"), 0)
+    t.eq(count_calls("git -C"), 0)
   end,
 }

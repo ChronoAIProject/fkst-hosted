@@ -24,6 +24,7 @@ local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local fork_gate = require("departments.implement.fork_gate")
 local m_mq = require("devloop.merge_queue")
+local operator_commands = require("devloop.operator_commands")
 
 local dispatch_liveness = {
   restart_transition_table = function(...)
@@ -527,15 +528,12 @@ local function operator_blocked_reimplement_allowed(ready, current, state)
     local fact = conv_reconcile.timeout_reconcile_fact_for_terminal_version_from_states(current.comments, ready.proposal_id, state.version, {
       implementing = true,
     })
-    local fact_source = fact and fact.source_ref or {}
-    local ready_source = ready.source_ref or {}
     return fact ~= nil
       and fact.from_state == "implementing"
       and fact.reason_class == "state-output-obligation-timeout"
       and tostring(fact.from_version or "") == tostring(reentry.impl_version or "")
       and tonumber(fact.round) == tonumber(reentry.timeout_round)
-      and tostring(fact_source.kind or "") == tostring(ready_source.kind or "")
-      and tostring(fact_source.ref or "") == tostring(ready_source.ref or "")
+      and operator_commands.reintake_source_refs_match(fact.source_ref, ready.source_ref, devloop_base._max_key_len)
       and tostring(reentry.impl_version or "") == tostring(ready.dedup_key or "")
   end
   local link = m_facts.pr_link_fact(current.comments, ready.proposal_id)

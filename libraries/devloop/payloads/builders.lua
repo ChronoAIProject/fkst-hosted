@@ -318,6 +318,7 @@ function C.build_devloop_intake_candidate_payload(repo, issue_number, updated_at
     dedup_key = dedup_key,
     effect_id = effect_id,
     reintake_command_created_at = opts.reintake_command_created_at,
+    reintake_effect_updated_at = opts.reintake_effect_updated_at,
     source_ref = source_ref,
   }
 end

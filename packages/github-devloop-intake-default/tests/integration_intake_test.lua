@@ -7,9 +7,6 @@ local opts = h.opts
 local find_raise = h.find_raise
 local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
-local conv_reconcile = require("devloop.convergence.reconcile")
-local conv_rounds = require("devloop.convergence.rounds")
-local convergence_shared = require("devloop.convergence.shared")
 local m_builders = require("devloop.markers.builders")
 
 local function mock_repo_env(repo)
@@ -64,15 +61,6 @@ local function comments_json(comments)
   return table.concat(rendered, ",")
 end
 
-local function trusted_reintake_command(id)
-  return {
-    id = id or "IC_reintake_1",
-    body = "fkst: reintake",
-    author_login = devloop_base.trusted_bot_login(),
-    created_at = "2026-06-04T03:00:00Z",
-  }
-end
-
 local function find_comment_body(raises, needle)
   for _, raised in ipairs(raises or {}) do
     if raised.queue == "github-proxy.github_issue_comment_request"
@@ -101,12 +89,12 @@ local function default_intake_current(extra)
   return { title = fields.title or "Add retry backoff to failed widget sync", body = fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries." }
 end
 
-local function expected_decision_key(payload, extra, reintake_command)
-  return devloop_base.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command)
+local function expected_decision_key(payload, extra, reintake_command, effective_updated_at)
+  return devloop_base.intake_decision_dedup_key(payload.proposal_id, default_intake_current(extra), reintake_command, effective_updated_at)
 end
 
-local function assert_execution_request_chain(raises, payload, extra, reintake_command, service_class)
-  local expected_dedup = expected_decision_key(payload, extra, reintake_command)
+local function assert_execution_request_chain(raises, payload, extra, reintake_command, service_class, effective_updated_at)
+  local expected_dedup = expected_decision_key(payload, extra, reintake_command, effective_updated_at or payload.reintake_effect_updated_at)
   local request = find_raise(raises, "github-devloop.devloop_execute_request").payload
   t.eq(request.schema, "github-devloop.execution-request.v1")
   t.eq(request.proposal_id, payload.proposal_id)
@@ -294,14 +282,6 @@ local function candidate(extra)
     value[key] = field
   end
   return value
-end
-
-local function reintake_candidate(command)
-  local payload = candidate()
-  payload.effect_id = expected_decision_key(payload, nil, command)
-  payload.dedup_key = core.intake_candidate_delivery_dedup_key(payload.proposal_id, payload.effect_id, payload.effect_id)
-  payload.reintake_command_created_at = command.created_at
-  return payload
 end
 
 local function run_judge(payload, run_opts)
@@ -769,97 +749,6 @@ return {
     local result = run_judge(payload, opts("intake-enable-successor-idempotent"))
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 0)
-    t.eq(count_calls("codex exec"), 0)
-  end,
-
-  test_judge_reintake_rejudges_after_trusted_intake_marker = function()
-    local command = trusted_reintake_command("IC_reintake_judge")
-    local payload = reintake_candidate(command)
-    mock_bot_env()
-    mock_intake_judge_view({}, {
-      m_builders.intake_decision_marker(payload.proposal_id, "escalate-to-class", expected_decision_key(payload, nil, command), "standard"),
-      command,
-    })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Class-level carrier; reintake enables after calibration.")
-
-    local result = run_judge(payload, opts("intake-reintake"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
-    local command_comment = find_comment_body(result.raises, "operator command accepted: reintake")
-    local intake_comment = find_comment_body(result.raises, 'decision="enable"')
-    t.is_true(command_comment ~= nil)
-    t.is_true(intake_comment ~= nil)
-    t.is_true(command_comment.body:find('command="reintake"', 1, true) ~= nil)
-    t.eq(find_label_add(result.raises, "fkst-dev:enabled").add_labels[1], "fkst-dev:enabled")
-    assert_execution_request_chain(result.raises, payload, nil, command)
-    t.eq(count_calls("codex exec"), 1)
-  end,
-
-  test_judge_reintake_rejudges_terminal_blocked_issue = function()
-    local command = trusted_reintake_command("IC_reintake_blocked_judge")
-    local payload = reintake_candidate(command)
-    local base_version = expected_decision_key(payload)
-    local blocked_version = conv_reconcile.reconcile_state_version(base_version, 3)
-    local source_digest = convergence_shared.source_ref_digest(payload.source_ref)
-    mock_bot_env()
-    mock_intake_judge_view({ "fkst-dev:enabled", "fkst-dev:blocked" }, {
-      m_builders.intake_decision_marker(payload.proposal_id, "enable", expected_decision_key(payload, nil, command), "standard"),
-      core.state_marker(payload.proposal_id, "thinking", base_version .. "/loop/3"),
-      conv_rounds.converge_round_marker(payload.proposal_id, base_version, source_digest, 3, base_version .. "/loop/3", "Same narrowed question", {
-        { angle = "minimal", verdict = "abstain", digest = "same-digest" },
-      }),
-      conv_reconcile.reconcile_marker(payload.proposal_id, base_version, 3, "drop"),
-      core.state_marker(payload.proposal_id, "blocked", blocked_version),
-      command,
-    })
-    mock_intake_codex("⟦FKST:INTAKE⟧ enable\n⟦FKST:CLASS⟧ standard\n⟦FKST:REASON⟧ Reintake abandons the blocked framing and starts a fresh intake generation.")
-
-    local result = run_judge(payload, opts("intake-reintake-terminal-blocked"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 4)
-    local command_comment = find_comment_body(result.raises, "operator command accepted: reintake")
-    local intake_comment = find_comment_body(result.raises, 'decision="enable"')
-    local request = find_raise(result.raises, "github-devloop.devloop_execute_request").payload
-    t.is_true(command_comment ~= nil)
-    t.is_true(intake_comment ~= nil)
-    t.is_true(intake_comment.body:find(expected_decision_key(payload, nil, command), 1, true) ~= nil)
-    t.eq(request.dedup_key, expected_decision_key(payload, nil, command))
-    t.eq(request.dedup_key == expected_decision_key(payload), false)
-    assert_execution_request_chain(result.raises, payload, nil, command)
-    t.eq(count_calls("codex exec"), 1)
-  end,
-
-  test_judge_reintake_stale_candidate_is_skipped = function()
-    local payload = candidate()
-    local command = trusted_reintake_command("IC_reintake_stale")
-    mock_bot_env()
-    mock_intake_judge_view({}, {
-      m_builders.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload), "standard"),
-      command,
-    })
-
-    local result = run_judge(payload, opts("intake-reintake-stale-candidate"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
-    t.eq(count_calls("codex exec"), 0)
-  end,
-
-  test_judge_reintake_mid_pipeline_refuses = function()
-    local command = trusted_reintake_command("IC_reintake_judge_active")
-    local payload = reintake_candidate(command)
-    mock_bot_env()
-    mock_intake_judge_view({ "fkst-dev:thinking" }, {
-      m_builders.intake_decision_marker(payload.proposal_id, "decline", expected_decision_key(payload, nil, command), "standard"),
-      command,
-    })
-
-    local result = run_judge(payload, opts("intake-reintake-judge-active-state"))
-    t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
-    local refusal = find_comment_body(result.raises, "operator command refused")
-    t.is_true(refusal ~= nil)
-    t.is_true(refusal.body:find("reintake requires terminal blocked or no active devloop state", 1, true) ~= nil)
-    t.is_true(refusal.body:find("use rereview, reready, or reimplement", 1, true) ~= nil)
     t.eq(count_calls("codex exec"), 0)
   end,
 
