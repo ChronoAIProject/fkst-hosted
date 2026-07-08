@@ -5,6 +5,9 @@ local t = h.t
 local core = h.core
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local conv_reconcile = require("devloop.convergence.reconcile")
+local conv_rounds = require("devloop.convergence.rounds")
+local convergence_shared = require("devloop.convergence.shared")
 local m_builders = require("devloop.markers.builders")
 
 local function mock_repo_env(repo)
@@ -157,6 +160,37 @@ return {
     t.is_true(result.raises[1].payload.dedup_key:find("intake%-candidate/github%-devloop/issue/owner/repo/42", 1, false) ~= nil)
   end,
 
+  test_admission_reintake_requeues_terminal_blocked_issue = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local command = trusted_reintake_command("IC_reintake_blocked_admission")
+    local base_version = "github-devloop/issue/owner/repo/42/intake/1116"
+    local blocked_version = conv_reconcile.reconcile_state_version(base_version, 3)
+    local source_digest = convergence_shared.source_ref_digest(source_ref(42))
+    h.mock_bot_env()
+    mock_repo_env()
+    mock_issue(42, {
+      labels = { "fkst-dev:enabled", "fkst-dev:blocked" },
+      comments = {
+        m_builders.intake_decision_marker(proposal_id, "enable", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
+        core.state_marker(proposal_id, "thinking", base_version .. "/loop/3"),
+        conv_rounds.converge_round_marker(proposal_id, base_version, source_digest, 3, base_version .. "/loop/3", "Same narrowed question", {
+          { angle = "minimal", verdict = "abstain", digest = "same-digest" },
+        }),
+        conv_reconcile.reconcile_marker(proposal_id, base_version, 3, "drop"),
+        core.state_marker(proposal_id, "blocked", blocked_version),
+        command,
+      },
+    })
+
+    local result = run_admission(entity_changed(42), opts("intake-admission-reintake-terminal-blocked"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "devloop_intake_candidate")
+    t.eq(result.raises[1].payload.effect_id, expected_effect_key(proposal_id, command))
+    t.eq(result.raises[1].payload.reintake_command_created_at, command.created_at)
+  end,
+
   test_admission_reintake_without_prior_intake_marker_refuses = function()
     h.mock_bot_env()
     mock_repo_env()
@@ -190,7 +224,8 @@ return {
     t.eq(#result.raises, 1)
     local refusal = find_comment_body(result.raises, "operator command refused")
     t.is_true(refusal ~= nil)
-    t.is_true(refusal.body:find("reintake requires no active devloop state", 1, true) ~= nil)
+    t.is_true(refusal.body:find("reintake requires terminal blocked or no active devloop state", 1, true) ~= nil)
+    t.is_true(refusal.body:find("use rereview, reready, or reimplement", 1, true) ~= nil)
     t.is_true(refusal.body:find('outcome="refused"', 1, true) ~= nil)
   end,
 

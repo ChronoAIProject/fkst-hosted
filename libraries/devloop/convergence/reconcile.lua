@@ -389,10 +389,11 @@ function C.has_timeout_reconcile_marker(M, comments, proposal_id, issue_version,
   return false
 end
 
-function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id, terminal_version)
+function C.timeout_reconcile_fact_for_terminal_version_from_states(comments, proposal_id, terminal_version, allowed_from_states)
   if type(comments) ~= "table" then
     return nil
   end
+  local allowed = allowed_from_states or {}
   local marker_pattern = "<!%-%- fkst:github%-devloop:timeout%-reconcile:v1.-%-%->"
   for _, comment in ipairs(parsers_misc._trusted_marker_comments(comments)) do
     for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
@@ -412,8 +413,7 @@ function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id,
         and round ~= nil
         and state_name ~= nil
         and from_state == state_name
-        and replay_fields.restart_transition_row(M.restart_transition_table(), from_state) ~= nil
-        and replay_fields.restart_transition_row(M.restart_transition_table(), from_state).terminal == false
+        and allowed[from_state] == true
         and strings.is_bounded_string(from_version, devloop_base._max_dedup_len)
         and dedup == expected_dedup then
         return {
@@ -425,6 +425,7 @@ function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id,
           dedup_key = dedup,
           from_state = from_state,
           from_version = from_version,
+          reason_class = attr(marker, "reason_class"),
           source_ref = {
             kind = attr(marker, "source_ref_kind"),
             ref = attr(marker, "source_ref"),
@@ -435,6 +436,19 @@ function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id,
     end
   end
   return nil
+end
+
+function C.timeout_reconcile_fact_for_terminal_version(M, comments, proposal_id, terminal_version)
+  if type(M) ~= "table" or type(M.restart_transition_table) ~= "function" then
+    return nil
+  end
+  local allowed = {}
+  for _, row in ipairs(M.restart_transition_table()) do
+    if row.terminal == false then
+      allowed[row.from_state] = true
+    end
+  end
+  return C.timeout_reconcile_fact_for_terminal_version_from_states(comments, proposal_id, terminal_version, allowed)
 end
 
 return C

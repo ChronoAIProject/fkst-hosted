@@ -49,8 +49,8 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
     devloop_logging.log_cas_decision("admission", proposal_id, { state = nil, version = nil }, "reintake-command", "candidate", "skip-held", "fkst-dev:hold label is present")
     return true
   end
-  if core.should_skip_known_intake_issue(current.labels) then
-    raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires no active devloop state", source_ref)
+  if core.reintake_has_active_devloop_state(current.labels, current.comments, proposal_id) then
+    raise_reintake_refusal(repo, issue.number, proposal_id, command, "reintake requires terminal blocked or no active devloop state; use rereview, reready, or reimplement for recoverable active states", source_ref)
     return true
   end
   if not m_claims.claim_issue_for_management(core, "admission", repo, issue.number, current, proposal_id) then

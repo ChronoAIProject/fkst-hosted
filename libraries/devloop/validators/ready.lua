@@ -5,19 +5,30 @@ local source_refs = require("contract.source_ref")
 
 local payloads_predicates = require("devloop.payloads.predicates")
 local C = {}
+
+local function is_supported_blocked_reimplement(payload)
+  local reentry = payload.operator_reentry
+  if type(reentry) ~= "table"
+    or reentry.command ~= "reimplement"
+    or reentry.from_state ~= "blocked"
+    or not devloop_base.is_safe_proposal_ref(payload.proposal_id, reentry.impl_version)
+    or not devloop_base.is_safe_proposal_ref(payload.proposal_id, reentry.state_version)
+    or reentry.impl_version ~= payload.dedup_key then
+    return false
+  end
+  if reentry.terminal_reason == "implementing-timeout-without-pr" then
+    local round = tonumber(reentry.timeout_round)
+    return reentry.pr_number == nil and round ~= nil and round >= 1 and round == math.floor(round)
+  end
+  return reentry.terminal_reason == nil and forge_validators.is_positive_pr_number(reentry.pr_number)
+end
+
 function C.is_supported_ready(M, payload)
   return type(payload) == "table"
     and payload.schema == "github-devloop.ready.v1"
     and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     and (payload.framing == nil or strings.is_bounded_string(payload.framing, M._max_framing_len))
-    and (payload.operator_reentry == nil
-      or (type(payload.operator_reentry) == "table"
-        and payload.operator_reentry.command == "reimplement"
-        and payload.operator_reentry.from_state == "blocked"
-        and forge_validators.is_positive_pr_number(payload.operator_reentry.pr_number)
-        and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.impl_version)
-        and devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.operator_reentry.state_version)
-        and payload.operator_reentry.impl_version == payload.dedup_key))
+    and (payload.operator_reentry == nil or is_supported_blocked_reimplement(payload))
     and (payload.ready_hand_off == nil
       or (payload.impl_retry_attempt == nil
         and payloads_predicates.is_own_state_marker_hand_off(payload.ready_hand_off, {
