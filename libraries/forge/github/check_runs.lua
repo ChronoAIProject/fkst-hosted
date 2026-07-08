@@ -113,21 +113,25 @@ function C.commit_check_runs_green(runs)
     return false, "missing-status-rollup"
   end
   local seen_required = {}
+  local pending_required = {}
   for _, run in ipairs(runs) do
     local name = check_name(run)
+    local state, conclusion = check_entry_state(run)
+    if state == "COMPLETED" then
+      if not green_check_run_conclusions[conclusion] then
+        return false, "rollup-red"
+      end
+    elseif required_check_run_name_set[name] then
+      pending_required[name] = true
+    end
     if required_check_run_name_set[name] then
       seen_required[name] = true
-      local state, conclusion = check_entry_state(run)
-      if state == "COMPLETED" then
-        if not green_check_run_conclusions[conclusion] then
-          return false, "rollup-red"
-        end
-      else
-        return false, "rollup-pending"
-      end
     end
   end
   for _, name in ipairs(required_check_run_names) do
+    if pending_required[name] then
+      return false, "rollup-pending"
+    end
     if not seen_required[name] then
       return false, "missing-status-rollup"
     end
@@ -244,28 +248,36 @@ function C.required_head_check_run_status(runs, head_sha, required_names)
   end
   required_names = required_names or {}
   local required = {}
+  local pending_required = {}
   for _, name in ipairs(required_names) do
     required[tostring(name)] = false
   end
   local expected = tostring(head_sha):lower()
   for _, run in ipairs(runs) do
-    local name = C.check_run_name(run)
-    if required[name] ~= nil then
-      local run_head = C.check_run_head_sha(run)
-      if run_head == nil or run_head == expected then
-        required[name] = true
-        local state, conclusion = C.check_run_state(run)
-        if state == "COMPLETED" then
-          if not green_required_check_conclusions[conclusion] then
-            return "red"
-          end
-        else
-          return "pending"
+    local run_head = C.check_run_head_sha(run)
+    if run_head == nil or run_head == expected then
+      local state, conclusion = C.check_run_state(run)
+      if state == "COMPLETED" then
+        if not green_required_check_conclusions[conclusion] then
+          return "red"
         end
+      else
+        local name = C.check_run_name(run)
+        if required[name] ~= nil then
+          pending_required[name] = true
+        end
+      end
+
+      local name = C.check_run_name(run)
+      if required[name] ~= nil then
+        required[name] = true
       end
     end
   end
   for _, name in ipairs(required_names) do
+    if pending_required[tostring(name)] then
+      return "pending"
+    end
     if required[tostring(name)] ~= true then
       return "unknown"
     end

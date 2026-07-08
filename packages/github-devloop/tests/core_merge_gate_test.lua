@@ -183,6 +183,24 @@ return {
     t.eq(reason, "rollup-red")
   end,
 
+  test_empty_rollup_fallback_red_host_check_runs_without_test = function()
+    mock_check_runs('{"total_count":2,"check_runs":[{"name":"fkst-host-policy","status":"completed","conclusion":"failure"},{"name":"fast-gates","status":"completed","conclusion":"failure"}]}\n')
+    local ok, reason = core.evaluate_ci_status_gate(pr({ status_check_rollup = {} }), {
+      repo = "owner/repo",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "rollup-red")
+  end,
+
+  test_empty_rollup_fallback_green_host_check_runs_without_test_stays_missing = function()
+    mock_check_runs('{"total_count":2,"check_runs":[{"name":"fkst-host-policy","status":"completed","conclusion":"success"},{"name":"fast-gates","status":"completed","conclusion":"success"}]}\n')
+    local ok, reason = core.evaluate_ci_status_gate(pr({ status_check_rollup = {} }), {
+      repo = "owner/repo",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "missing-status-rollup")
+  end,
+
   test_rollup_red_green_required_head_checks_is_external_ci_red = function()
     mock_check_runs('{"total_count":1,"check_runs":[{"name":"test","status":"completed","conclusion":"success","head_sha":"def456"}]}\n')
     local classification = core.classify_pr_ci_gate(pr({
@@ -215,6 +233,38 @@ return {
     t.eq(classification.reason, "own-ci-red")
   end,
 
+  test_rollup_red_red_host_head_check_is_own_ci_red_without_test = function()
+    mock_check_runs('{"total_count":2,"check_runs":[{"name":"fkst-host-policy","status":"completed","conclusion":"failure","head_sha":"def456"},{"name":"fast-gates","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
+    local classification = core.classify_pr_ci_gate(pr({
+      status_check_rollup = {
+        { name = "fkst-host-policy", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }), {
+      repo = "owner/repo",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+    })
+    t.eq(classification.kind, "OWN_CI_RED")
+    t.eq(classification.merge_blocking, true)
+    t.eq(classification.actionable, true)
+    t.eq(classification.reason, "own-ci-red")
+  end,
+
+  test_rollup_red_host_head_failure_wins_over_pending_required_check = function()
+    mock_check_runs('{"total_count":2,"check_runs":[{"name":"test","status":"in_progress","conclusion":null,"head_sha":"def456"},{"name":"fast-gates","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
+    local classification = core.classify_pr_ci_gate(pr({
+      status_check_rollup = {
+        { name = "fast-gates", state = "COMPLETED", conclusion = "FAILURE" },
+      },
+    }), {
+      repo = "owner/repo",
+      proposal_id = "github-devloop/issue/owner/repo/42",
+    })
+    t.eq(classification.kind, "OWN_CI_RED")
+    t.eq(classification.merge_blocking, true)
+    t.eq(classification.actionable, true)
+    t.eq(classification.reason, "own-ci-red")
+  end,
+
   test_empty_rollup_fallback_pending_required_commit_check_run = function()
     mock_check_runs('{"total_count":1,"check_runs":[{"name":"test","status":"in_progress","conclusion":null}]}\n')
     local ok, reason = core.evaluate_ci_status_gate(pr({ status_check_rollup = {} }), {
@@ -222,6 +272,15 @@ return {
     })
     t.eq(ok, false)
     t.eq(reason, "rollup-pending")
+  end,
+
+  test_empty_rollup_fallback_pending_host_check_run_without_test_stays_missing = function()
+    mock_check_runs('{"total_count":1,"check_runs":[{"name":"fast-gates","status":"in_progress","conclusion":null}]}\n')
+    local ok, reason = core.evaluate_ci_status_gate(pr({ status_check_rollup = {} }), {
+      repo = "owner/repo",
+    })
+    t.eq(ok, false)
+    t.eq(reason, "missing-status-rollup")
   end,
 
   test_empty_rollup_fallback_absent_commit_check_runs_stays_missing = function()
@@ -233,7 +292,7 @@ return {
     t.eq(reason, "missing-status-rollup")
   end,
 
-  test_empty_rollup_fallback_missing_required_check_stays_missing = function()
+  test_empty_rollup_fallback_requires_named_test_check = function()
     mock_check_runs('{"total_count":1,"check_runs":[{"name":"docs","status":"completed","conclusion":"success"}]}\n')
     local ok, reason = core.evaluate_ci_status_gate(pr({ status_check_rollup = {} }), {
       repo = "owner/repo",
