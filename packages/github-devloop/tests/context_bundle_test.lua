@@ -91,6 +91,23 @@ return {
     t.is_nil(result.issue_content:find(core._untrusted_issue_data_begin, 1, true))
   end,
 
+  test_context_bundle_redacts_external_comment_and_preserves_bot_comment = function()
+    local result = run_probe("content_redaction", runtime_root("content-redaction"))
+
+    t.eq(result.ok, true)
+    t.is_true(result.external_comment_body:find("[fkst:blocked-github-content:v1", 1, true) == 1)
+    t.is_nil(result.external_comment_body:find("evil", 1, true))
+    t.eq(result.bot_comment_body, result.bot_expected)
+    t.is_true(result.issue_content:find("github-devloop:state:v1", 1, true) ~= nil)
+  end,
+
+  test_context_bundle_content_filter_requires_bot_login = function()
+    local result = run_probe("content_redaction_requires_bot", runtime_root("content-redaction-requires-bot"))
+
+    t.eq(result.ok, false)
+    t.is_true(result.error:find("FKST_GITHUB_BOT_LOGIN is required for context bundle content provenance", 1, true) ~= nil)
+  end,
+
   test_context_bundle_cache_hit_with_deleted_file_rebuilds = function()
     local result = run_probe("deleted_file", runtime_root("deleted-file"))
 
