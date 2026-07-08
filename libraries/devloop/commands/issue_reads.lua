@@ -20,7 +20,7 @@ local issue_view_fields = {
   commit_subject = "number,title",
   review_loop = "title,labels,comments,assignees,author",
   merge = "title,labels,comments,state,assignees",
-  observe = "title,comments,state,stateReason,assignees,author",
+  observe = "title,body,comments,state,stateReason,assignees,author",
 }
 
 local function issue_fields(fields_key_or_fields)

@@ -265,7 +265,7 @@ local function mock_observability_empty_reads()
     number = 0,
     title = "unused",
     comments = {},
-  }, "title,comments,state,stateReason,assignees,author")
+  }, "title,body,comments,state,stateReason,assignees,author")
 end
 
 return {

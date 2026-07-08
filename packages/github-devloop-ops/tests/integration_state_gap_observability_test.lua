@@ -125,7 +125,7 @@ local function mock_issue_view(comments, number)
     title = "Observed issue",
     state = "OPEN",
     comments = comments,
-  }, "title,comments,state,stateReason,assignees,author")
+  }, "title,body,comments,state,stateReason,assignees,author")
 end
 
 local function mock_pr_view(comments)

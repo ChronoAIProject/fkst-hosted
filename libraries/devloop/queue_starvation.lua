@@ -169,7 +169,7 @@ function C.queue_starvation_recent_closed_merged_issues(M, repo, limits, deadlin
       local view = run_observability_adapter(
         M,
         function(timeout)
-          return github().issue_view(repo, issue.number, "title,comments,state,stateReason,assignees,author", timeout)
+          return github().issue_view(repo, issue.number, "title,body,comments,state,stateReason,assignees,author", timeout)
         end,
         limits,
         deadline,
