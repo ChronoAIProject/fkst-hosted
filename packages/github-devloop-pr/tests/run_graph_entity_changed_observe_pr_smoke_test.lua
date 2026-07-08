@@ -57,6 +57,17 @@ local function mock_runtime_and_pr_view()
     })
   end
 
+  entity_read_mocks.mock_pr_read_forms(t, {
+    repo = repo,
+    number = pr_number,
+    head = "feature/unmanaged",
+    head_sha = "def456",
+    base_branch = "dev",
+    comments = {},
+    state = "OPEN",
+    updated_at = "2026-06-03T02:03:04Z",
+    register_origin_view = false,
+  })
   entity_read_mocks.mock_pr_view_selector(t, {
     repo = repo,
     number = pr_number,
@@ -67,6 +78,12 @@ local function mock_runtime_and_pr_view()
     state = "OPEN",
     updated_at = "2026-06-03T02:03:04Z",
   }, entity_read_mocks.pr_origin_selector)
+  entity_read_mocks.mock_issue_view_selector(t, {
+    repo = repo,
+    number = 42,
+    assignees = { "fkst-test-bot" },
+    author_login = "fkst-test-bot",
+  }, "assignees,author")
 end
 
 return {

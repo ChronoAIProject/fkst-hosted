@@ -92,6 +92,48 @@ local function run_observe_pr_with_integration(event, name, integration_branch)
   }, opts(name))
 end
 
+local function run_observe_pr_with_logs(event, name, integration_branch)
+  local logs = {}
+  local raises = {}
+  local old_log = log
+  local old_raise = raise
+  log = {
+    info = function(message) table.insert(logs, tostring(message)) end,
+    warn = function(message) table.insert(logs, tostring(message)) end,
+    error = function(message) table.insert(logs, tostring(message)) end,
+  }
+  raise = function(queue, payload)
+    table.insert(raises, {
+      queue = queue,
+      payload = payload,
+    })
+  end
+  local ok, result = pcall(function()
+    mock_observe_pr_env(integration_branch)
+    local module = require("departments.observe_pr.main")
+    module.pipeline({
+      queue = "github-proxy.github_entity_changed",
+      payload = event,
+    })
+    return {
+      exit_code = 0,
+      raises = raises,
+    }
+  end)
+  raise = old_raise
+  log = old_log
+  if not ok then
+    error(result)
+  end
+  return result, logs
+end
+
+local function log_text(result, logs)
+  return table.concat(logs or {}, "\n")
+    .. "\n" .. tostring(result and result.stderr or "")
+    .. "\n" .. tostring(result and result.error or "")
+end
+
 local function mock_precise_pr_origin(fields)
   local f = fields or {}
   entity_read_mocks.mock_pr_view_selector(t, {
@@ -293,6 +335,53 @@ return {
     t.is_true(reviewing_comment.payload.body:find(core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", core.next_review_loop_version(impl_version)), 1, true) ~= nil)
 
     local reviewing_raise = h.find_causal_raise(second, "devloop_reviewing")
+    t.is_true(reviewing_raise ~= nil)
+    t.eq(reviewing_raise.payload.version, core.next_review_loop_version(impl_version))
+  end,
+
+  test_observe_pr_directly_self_heals_stranded_pr_base_unmanaged_block_with_cas_fact = function()
+    local impl_version = reviewing().version
+    local blocked_version = impl_version .. "/blocked/pr-base-unmanaged"
+    local rereview_command = {
+      id = "IC_rereview_base_unmanaged",
+      body = "fkst: rereview",
+      author_login = "fkst-test-bot",
+      created_at = "2026-06-04T03:00:00Z",
+    }
+
+    mock_precise_pr_origin({
+      comments = {
+        unmanaged_origin_marker(impl_version, "integration"),
+        core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version),
+        rereview_command,
+      },
+      base_branch = "integration",
+      labels = { "fkst-dev:blocked" },
+    })
+    mock_issue_reviewing({ "fkst-dev:blocked" }, {
+      core.state_marker("github-devloop/issue/owner/repo/42", "blocked", blocked_version),
+    }, {
+      assignees = { "fkst-test-bot" },
+    })
+
+    local result, logs = run_observe_pr_with_logs(pr_event(), "observe-pr-stranded-base-unmanaged-heal", "integration")
+    t.eq(result.exit_code, 0)
+    t.eq(unmanaged_comment_raise(result), nil)
+
+    local observed_logs = log_text(result, logs)
+    t.is_true(observed_logs:find("tag=CAS", 1, true) ~= nil)
+    t.is_true(observed_logs:find("outcome=applied(pr-base-unmanaged-self-heal)", 1, true) ~= nil)
+    t.is_nil(observed_logs:find("outcome=applied(operator-rereview)", 1, true))
+
+    local reviewing_comment = h.find_raise(result.raises, "github-proxy.github_pr_comment_request", function(payload)
+      return payload.handoff ~= nil and payload.handoff.kind == "github-devloop.reviewing"
+    end)
+    t.is_true(reviewing_comment ~= nil)
+    t.eq(reviewing_comment.payload.handoff.version, core.next_review_loop_version(impl_version))
+    t.is_true(reviewing_comment.payload.body:find(core.state_marker("github-devloop/issue/owner/repo/42", "reviewing", core.next_review_loop_version(impl_version)), 1, true) ~= nil)
+    t.is_nil(reviewing_comment.payload.body:find("operator command accepted: rereview", 1, true))
+
+    local reviewing_raise = h.find_causal_raise(result, "devloop_reviewing")
     t.is_true(reviewing_raise ~= nil)
     t.eq(reviewing_raise.payload.version, core.next_review_loop_version(impl_version))
   end,

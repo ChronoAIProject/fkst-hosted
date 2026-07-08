@@ -526,6 +526,9 @@ local function process_pr_event(event)
     if not m_claims.verify_pr_review_issue_claim("observe_pr", origin.repo, origin.issue_number, issue_current, origin.proposal_id) then
       return
     end
+    if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref) then
+      return
+    end
     local merge_gate_feedback = nil
     if state.state == "reviewing" and origin.issue_number ~= nil then
       merge_gate_feedback = m_facts.merge_gate_fix_fact(current_pr.comments, origin.proposal_id, devloop_state.next_fix_version(state.version))
@@ -546,9 +549,6 @@ local function process_pr_event(event)
       return
     end
     if maybe_redrive_not_mergeable_pr(origin, pr.number, current_pr, state, source_ref, issue_current) then
-      return
-    end
-    if maybe_heal_pr_base_unmanaged_block(origin, pr.number, current_pr, state, branches, source_ref) then
       return
     end
     if state.state ~= nil and state.state ~= "pr-open" then
