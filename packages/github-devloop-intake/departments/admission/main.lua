@@ -56,7 +56,7 @@ local function handle_pending_reintake(repo, issue, current, proposal_id, source
   if not m_claims.claim_issue_for_management(core, "admission", repo, issue.number, current, proposal_id) then
     return true
   end
-  local payload = core.build_intake_admission_candidate(repo, issue, command, now())
+  local payload = core.build_intake_admission_candidate(repo, issue, command, now(), current.comments)
   devloop_logging.log_apply("admission", proposal_id, nil, nil, { add = {}, remove = {} }, {
     "devloop_intake_candidate",
   })

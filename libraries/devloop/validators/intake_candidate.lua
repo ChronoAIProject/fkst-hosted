@@ -10,6 +10,7 @@ function C.is_supported_intake_candidate(payload)
     or not devloop_base.is_safe_proposal_ref(payload.proposal_id, payload.dedup_key)
     or (payload.effect_id ~= nil and not strings.is_path_safe_key(payload.effect_id, devloop_base._max_dedup_len))
     or (payload.reintake_command_created_at ~= nil and not strings.is_bounded_string(payload.reintake_command_created_at, 128))
+    or (payload.reintake_effect_updated_at ~= nil and not strings.is_bounded_string(payload.reintake_effect_updated_at, 128))
     or not source_refs.has_bounded_source_ref(payload.source_ref, devloop_base._max_key_len) then
     return false
   end

@@ -55,16 +55,6 @@ local function copy_fields(value)
   return result
 end
 
-local function issue_has_active_devloop_state(labels, blocked_reached)
-  for _, label in ipairs(labels or {}) do
-    if devloop_state.is_state_label(label)
-      and not (blocked_reached and tostring(label) == tostring(devloop_base._blocked_label)) then
-      return true
-    end
-  end
-  return false
-end
-
 local function raise_enable_successor(package_core, dept, repo, issue_number, candidate, current, event_ts, decision_dedup_key, options)
   local opts = options or {}
   local _ = current
@@ -124,10 +114,7 @@ function M.read_current_for_candidate(package_core, dept, repo, issue_number, ca
     devloop_logging.log_raise(dept, candidate.proposal_id, "github-proxy.github_issue_comment_request", refusal)
     return nil
   end
-  local blocked_reached = devloop_state.reached(current.comments, candidate.proposal_id, "blocked", {
-    domain = "github-devloop-issue",
-  })
-  if has_pending_reintake and ((devloop_base.is_opted_in(current.labels) and not blocked_reached) or issue_has_active_devloop_state(current.labels, blocked_reached)) then
+  if has_pending_reintake and operator_commands.reintake_has_active_devloop_state(current.labels, current.comments, candidate.proposal_id) then
     local refusal = operator_commands.build_operator_issue_command_refusal_request(repo,
       issue_number,
       reintake_command,
@@ -141,12 +128,20 @@ function M.read_current_for_candidate(package_core, dept, repo, issue_number, ca
   if has_pending_reintake then
     local expected = tostring(reintake_command.created_at or "")
     if tostring(candidate.reintake_command_created_at or "") ~= expected then
-      devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command timestamp")
+      devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by command identity")
       return nil
     end
   end
 
-  local decision_dedup_key = devloop_base.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil)
+  local effective_updated_at = has_pending_reintake
+    and operator_commands.reintake_effect_updated_at(current, reintake_command, current.comments, candidate.proposal_id)
+    or nil
+  if has_pending_reintake and tostring(candidate.reintake_effect_updated_at or "") ~= tostring(effective_updated_at or "") then
+    devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline", "skip-stale-reintake-candidate", "operator reintake candidate must be keyed by authoritative marker state")
+    return nil
+  end
+
+  local decision_dedup_key = devloop_base.intake_decision_dedup_key(candidate.proposal_id, current, has_pending_reintake and reintake_command or nil, effective_updated_at)
   if expected_decision_dedup_key ~= nil and tostring(decision_dedup_key or "") ~= tostring(expected_decision_dedup_key or "") then
     devloop_logging.log_cas_decision(dept, candidate.proposal_id, { state = nil, version = nil }, "candidate", "enable|track|decline|escalate-to-class", "skip-stale(decision-dedup-changed)", "issue intake inputs changed while codex was running")
     return nil

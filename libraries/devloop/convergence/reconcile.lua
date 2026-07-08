@@ -405,6 +405,10 @@ function C.timeout_reconcile_fact_for_terminal_version_from_states(comments, pro
       local from_state = attr(marker, "from_state")
       local from_version = attr(marker, "from_version")
       local dedup = attr(marker, "dedup")
+      local marker_source_ref = {
+        kind = attr(marker, "source_ref_kind"),
+        ref = attr(marker, "source_ref"),
+      }
       local expected_dedup = "timeout-reconcile:" .. tostring(from_version)
         .. "/timeout-reconcile/" .. tostring(state_name) .. "/" .. tostring(round)
       if marker_proposal == tostring(proposal_id)
@@ -415,6 +419,7 @@ function C.timeout_reconcile_fact_for_terminal_version_from_states(comments, pro
         and from_state == state_name
         and allowed[from_state] == true
         and strings.is_bounded_string(from_version, devloop_base._max_dedup_len)
+        and source_refs.has_bounded_source_ref(marker_source_ref, devloop_base._max_key_len)
         and dedup == expected_dedup then
         return {
           proposal_id = marker_proposal,
@@ -426,10 +431,7 @@ function C.timeout_reconcile_fact_for_terminal_version_from_states(comments, pro
           from_state = from_state,
           from_version = from_version,
           reason_class = attr(marker, "reason_class"),
-          source_ref = {
-            kind = attr(marker, "source_ref_kind"),
-            ref = attr(marker, "source_ref"),
-          },
+          source_ref = marker_source_ref,
           comment_created_at = parsers_misc._comment_created_at(comment),
         }
       end
