@@ -176,6 +176,13 @@ function C.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, inte
 end
 
 function C.build_review_result_comment_request(M, repo, issue_number, issue_proposal_id, issue_version, reached, source_ref)
+  local review_dedup_key = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    reached.dedup_key,
+    reached.proposal_id
+  )
+  if review_dedup_key == nil then
+    error("github-devloop: invalid review result dedup")
+  end
   local to_state = reached.reflection_checkpoint and "review-meta"
     or reached.decision == "approve" and "merge-ready"
     or "fixing"
@@ -185,15 +192,15 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     fix_round = M.version_fix_round(issue_version)
   end
   local blocking_gap = shared.bounded_blocking_gap(reached)
-  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, reached.dedup_key, fix_round, blocking_gap)
+  local marker = m_builders.review_result_marker(reached.proposal_id, issue_proposal_id, reached.decision, review_dedup_key, fix_round, blocking_gap)
   local reflection_marker = ""
   if reached.reflection_checkpoint then
-    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, reached.dedup_key, "checkpoint", issue_version, fix_round)
+    reflection_marker = "\n" .. m_builders.fix_reflection_marker(issue_proposal_id, review_dedup_key, "checkpoint", issue_version, fix_round)
   end
   local merge_marker = ""
   if reached.decision == "approve" then
     local _, pr_number, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
-    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, reached.dedup_key, reviewed_head_sha)
+    merge_marker = "\n" .. m_builders.merge_ready_marker(issue_proposal_id, pr_number, issue_version, reached.proposal_id, review_dedup_key, reviewed_head_sha)
   end
   local body_text = devloop_base.neutralize_untrusted_comment_text(reached.body or "")
   local verdict_summary = shared.build_verdict_summary(M, reached.angle_results)
@@ -220,7 +227,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     "comment",
     tostring(issue_proposal_id),
     tostring(reached.decision),
-    tostring(reached.dedup_key),
+    tostring(review_dedup_key),
   }), source_ref)
   if reached.decision == "approve" then
     local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
@@ -230,7 +237,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
       pr_number = pr_number,
       version = issue_version,
       review_proposal_id = reached.proposal_id,
-      review_dedup_key = reached.dedup_key,
+      review_dedup_key = review_dedup_key,
       reviewed_head_sha = reviewed_head_sha,
       current_head_sha = reached.current_head_sha or reviewed_head_sha,
       source_ref = base_ids.normalize_source_ref(source_ref),
@@ -239,7 +246,7 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
     local _, _, _, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(reached.proposal_id)
     C.attach_fixing_handoff(request, issue_proposal_id, pr_number, issue_version, {
       review_proposal_id = reached.proposal_id,
-      review_dedup_key = reached.dedup_key,
+      review_dedup_key = review_dedup_key,
       reviewed_head_sha = reviewed_head_sha,
       framing = reached.framing,
       blocking_gap = reached.blocking_gap,
@@ -250,12 +257,19 @@ function C.build_review_result_comment_request(M, repo, issue_number, issue_prop
 end
 
 function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, source_ref)
+  local review_dedup_key = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    reached.dedup_key,
+    reached.proposal_id
+  )
+  if review_dedup_key == nil then
+    error("github-devloop: invalid high-risk review evidence dedup")
+  end
   local marker = m_builders.high_risk_review_evidence_marker(issue_proposal_id,
     issue_version,
     pr_number,
     reviewed_head_sha,
     reached.proposal_id,
-    reached.dedup_key,
+    review_dedup_key,
     paths_digest,
     angle_digest
   )
@@ -271,7 +285,7 @@ function C.build_high_risk_review_evidence_comment_request(repo, issue_proposal_
     tostring(issue_proposal_id),
     tostring(issue_version),
     tostring(reached.proposal_id),
-    tostring(reached.dedup_key),
+    tostring(review_dedup_key),
     tostring(paths_digest),
     tostring(angle_digest),
   }), source_ref)

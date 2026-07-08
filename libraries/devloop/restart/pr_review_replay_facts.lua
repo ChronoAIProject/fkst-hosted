@@ -10,6 +10,16 @@ local transition_version = require("contract.transition_version")
 
 local S = {}
 
+local function review_proposal_from_dedup(dedup_key)
+  return devloop_base.pr_review_proposal_id_from_consensus_dedup_key(dedup_key)
+end
+
+local function same_review_result_dedup(left, right)
+  local left_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(left)
+  local right_canonical = devloop_base.canonical_pr_review_consensus_dedup_key(right)
+  return left_canonical ~= nil and left_canonical == right_canonical
+end
+
 local function review_meta_fact_from_converge_marker(M, comments, issue_proposal_id, issue_version)
   if type(comments) ~= "table" then
     return nil
@@ -63,7 +73,7 @@ local function build_ops(ctx)
       for marker in parsers_misc._comment_body(comment):gmatch(marker_pattern) do
         local marker_issue = marker:match('proposal="([^"]+)"')
         local marker_dedup = marker:match('dedup="([^"]*)"')
-        local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
+        local review_proposal = review_proposal_from_dedup(marker_dedup)
         local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
         if marker_issue == tostring(issue_proposal_id)
           and tostring(review_pr_number or "") == tostring(pr_number)
@@ -88,7 +98,8 @@ local function build_ops(ctx)
         local verdict = marker:match('verdict="([^"]+)"')
         local marker_version = marker:match('version="([^"]*)"')
         local round = tonumber(marker:match('fix_round="(%d+)"'))
-        local review_proposal = marker_dedup ~= nil and marker_dedup:match("^consensus:([^/].-)/review") or nil
+        local review_proposal = review_proposal_from_dedup(marker_dedup)
+        local canonical_marker_dedup = devloop_base.canonical_pr_review_consensus_dedup_key(marker_dedup)
         local _, review_pr_number, review_version, reviewed_head_sha = devloop_base.parse_pr_review_proposal_id(review_proposal)
         if marker_issue == tostring(issue_proposal_id)
           and verdict == "checkpoint"
@@ -100,15 +111,15 @@ local function build_ops(ctx)
           local reject_fact = m_facts.review_reject_fact(comments, issue_proposal_id, issue_version)
           if reject_fact == nil
             or tostring(reject_fact.review_proposal_id or "") ~= tostring(review_proposal)
-            or tostring(reject_fact.review_dedup_key or "") ~= tostring(marker_dedup)
+            or not same_review_result_dedup(reject_fact.review_dedup_key, marker_dedup)
             or not strings.is_bounded_string(reject_fact.blocking_gap, ctx._max_blocking_gap_len) then
             return nil
           end
-          local reflection_dedup = payloads_builders.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, marker_dedup)
+          local reflection_dedup = payloads_builders.fix_reflection_dedup_key(issue_proposal_id, issue_version, pr_number, round, canonical_marker_dedup)
           return {
             proposal_id = review_proposal,
             dedup_key = reflection_dedup,
-            review_dedup_key = marker_dedup,
+            review_dedup_key = canonical_marker_dedup,
             source_ref = entity_lib.pr_source_ref(repo, pr_number),
             pr_number = tonumber(pr_number),
             n = tonumber(n) or 0,

@@ -1,0 +1,16 @@
+4TH PERSPECTIVE (mine, independent read):
+- /loop/N origin: review_loop re-dispatches proposal with loop-scoped dedup during converge; reached.dedup_key carries it; review_result writes it verbatim into review-result:v1 marker.dedup.
+- facts.lua builds expected_dedup from CLEAN `proposal` attr → strict == fails on /loop/N.
+- The review-RESULT identity should be keyed on (review_proposal, fix_round) — /loop/N is inner-loop bookkeeping that leaked into an OUTCOME identity (teleology violation).
+- LEAN: option 3 (unify: one review_dedup constructor + one parser that tolerates+canonicalizes the optional /loop/N suffix, used by producer AND all consumers). Makes the two forms structurally impossible to diverge. DRY, framework-stable.
+- If option 3 too invasive, option 1 (canonicalize-at-write) is cleaner than option 2 but MUST verify merge-gate binding + review_carry_over + hidden_state_conformance don't depend on the loop-scoped form. Option 2 (tolerate-at-read via ONE shared canonical_review_dedup helper) is the safe fallback.
+- MUST VERIFY before landing: is marker.dedup used as the marker WRITE idempotency/CAS key such that canonicalizing collides across converge rounds? (review-result is terminal per review, so likely fine, but confirm.)
+- CLASS: yes — same /loop/N intolerance at facts.lua:25/59, pr_review_replay_facts:66/91, hidden_state_conformance, review_carry_over. Fix must kill the class (one canonical parser), not point-patch facts.lua only.
+- decompose escalation: SEPARATE concern — verify reconcile→devloop_decompose fires when fix genuinely can't converge in max_fix_rounds (user's "split if too big"). Do NOT scope-creep into the dedup PR; assess after.
+
+DECOMPOSE VERIFIED (answers brief question 4):
+- decompose trigger = review_result:192 when fix_round >= max_fix_rounds → raise devloop_decompose (split). fix_round < max → fixing (keep fixing). This IS the user's "keep fixing, split if too big" logic, correctly wired.
+- The liveness-timeout path (fix dept can't launch → redrive → state-output-obligation-timeout → reconcile blocked) does NOT raise a fresh decompose (reconcile only handles decompose-EXHAUSTED). So a fixing blocked via liveness-timeout does NOT decompose.
+- #1999 makes the fix loop die via the liveness-timeout path BEFORE fix_round reaches max_fix_rounds → so decompose never fires for #1999-blocked issues (confirmed: #1990/#1993 have 0 decompose activity).
+- CONCLUSION: #1999 is the single root cause of BOTH (fix loop doesn't run + decompose doesn't fire). Fixing #1999 revives fix loop → fix_round advances → hits max_fix_rounds → review_result raises decompose. NO separate decompose fix needed for THIS bug. BUT: verify end-to-end during validation that decompose actually fires at max_fix_rounds after #1999.
+- POSSIBLE follow-up gap (assess later, do NOT scope into dedup PR): if fix codex RUNS but fails to produce a new head (no-fix), does fix_round advance so it eventually hits max_fix_rounds→decompose, or does it die via liveness-timeout without decomposing? If the latter, that's a second escalation gap (liveness-timeout-blocked fixing should also route to decompose). Name it, file separately if real.

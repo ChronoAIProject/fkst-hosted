@@ -1,5 +1,6 @@
 local h = require("tests.devloop_core_helpers")
 local transition_version = require("contract.transition_version")
+local devloop_base = require("devloop.base")
 local core = h.core
 local t = h.t
 
@@ -280,6 +281,17 @@ return {
     t.eq(transition_version.has_review_loop(base .. "/fix/2"), false)
     t.eq(transition_version.has_review_loop(base .. "/fix/2/review-loop/3/review-meta-action/1"), true)
     t.eq(transition_version.strip_before_review_loop(base .. "/fix/2/review-loop/3/review-meta-action/1"), base .. "/fix/2")
+  end,
+
+  test_pr_review_consensus_dedup_canonicalizer_rejects_malformed_loop_rounds = function()
+    local review = devloop_base.pr_review_proposal_id("owner/repo", 7, "ready/v1", "def456")
+    local base = devloop_base.pr_review_consensus_dedup_key(review)
+
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key(base .. "/loop/1.5"), nil)
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key(base .. "/loop/1e3"), nil)
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key(base .. "/loop/0x2"), nil)
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key(base .. "/loop/2"), base)
+    t.eq(devloop_base.canonical_pr_review_consensus_dedup_key(base .. "/loop/2/loop/3"), nil)
   end,
 
   test_devloop_state_builders_delegate_to_byte_exact_transition_constructors = function()

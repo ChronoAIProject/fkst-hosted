@@ -34,6 +34,15 @@ local spec = {
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
 
+local function copy_reached_with_review_dedup(reached, review_dedup_key)
+  local copy = {}
+  for key, value in pairs(reached or {}) do
+    copy[key] = value
+  end
+  copy.dedup_key = review_dedup_key
+  return copy
+end
+
 return saga.department(spec, { done = function() return false end, act = function(event)
   local reached = event.payload or {}
   if not v_review_result.is_supported_review_result(reached) then
@@ -91,6 +100,14 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(version)", "review proposal version is missing")
     return
   end
+  local canonical_review_dedup = devloop_base.canonical_pr_review_consensus_dedup_for_proposal(
+    reached.dedup_key,
+    reached.proposal_id
+  )
+  if canonical_review_dedup == nil then
+    devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "merge-ready|fixing", "skip-foreign(review-dedup)", "review result dedup does not match PR review proposal")
+    return
+  end
   if reached.decision == "reject"
     and not strings.is_bounded_string(reached.blocking_gap, devloop_base._max_blocking_gap_len) then
     devloop_logging.log_cas_decision("review_result", reached.proposal_id, { state = nil, version = nil }, "reviewing", "fixing", "skip-foreign(blocking-gap)", "reject review result is missing a bounded blocking_gap")
@@ -111,7 +128,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     devloop_logging.log_forged_markers("review_result", origin.proposal_id, current_pr.comments)
     local state = require("devloop.entity").current_entity_state(current_pr.comments, origin.proposal_id)
     local effective_decision = reached.decision
-    local comment_reached = reached
+    local comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
     local gate_owned_reject = reached.decision == "reject" and payloads_predicates.is_gate_owned_review_gap(reached.blocking_gap)
     local out_of_contract_reject = reached.decision == "reject" and payloads_predicates.is_out_of_contract_review_gap(reached.blocking_gap)
     if gate_owned_reject or out_of_contract_reject then
@@ -143,10 +160,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         if not high_risk_approved then
           effective_decision = "reject"
           high_risk_angle_not_approved = true
-          comment_reached = {}
-          for key, value in pairs(reached) do
-            comment_reached[key] = value
-          end
+          comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
           comment_reached.decision = "reject"
           comment_reached.blocking_gap = "high-risk-angle-not-approved"
           comment_reached.body = "High-risk PR approval did not include an approving high-risk angle."
@@ -174,11 +188,11 @@ return saga.department(spec, { done = function() return false end, act = functio
       stage_rank = state.stage_rank,
     }, { "reviewing" }, to_state, reviewed_issue_version)
     if transition == "idempotent" or transition == "stale" then
-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "review decision cannot advance current marker")
+      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "review decision cannot advance current marker")
       return
     end
     if transition == "pending" then
-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "reviewing state marker not yet visible")
+      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "reviewing state marker not yet visible")
       error("github-devloop: review-result-marker-missing: reviewing marker not yet visible for review result; retrying")
     end
 
@@ -194,7 +208,7 @@ return saga.department(spec, { done = function() return false end, act = functio
         local fix_reconcile = conv_reconcile.build_devloop_fix_reconcile_payload({
           proposal_id = origin.proposal_id,
           review_proposal_id = reached.proposal_id,
-          review_dedup_key = reached.dedup_key,
+          review_dedup_key = canonical_review_dedup,
           reviewed_head_sha = reviewed_head_sha,
           pr_number = pr_number,
           source_ref = pr_source_ref,
@@ -208,15 +222,12 @@ return saga.department(spec, { done = function() return false end, act = functio
       end
     end
     if high_risk_angle_not_approved then
-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
+      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup) .. "(high-risk-angle-not-approved)", "high-risk PR approval lacks high-risk angle approval")
     else
-      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, reached.dedup_key), "review decision=" .. tostring(reached.decision))
+      devloop_logging.log_cas_decision("review_result", origin.proposal_id, state, "reviewing", to_state, devloop_state.cas_outcome(state, transition, canonical_review_dedup), "review decision=" .. tostring(reached.decision))
     end
     if (gate_owned_reject or out_of_contract_reject) and not high_risk_angle_not_approved then
-      comment_reached = {}
-      for key, value in pairs(reached) do
-        comment_reached[key] = value
-      end
+      comment_reached = copy_reached_with_review_dedup(reached, canonical_review_dedup)
       comment_reached.decision = "approve"
       local advisory_reason = "rejected only for gate-owned fact: "
       if out_of_contract_reject then
@@ -242,7 +253,7 @@ return saga.department(spec, { done = function() return false end, act = functio
     local comment_request = requests_review.build_review_result_comment_request(core, origin.repo, origin.issue_number, origin.proposal_id, issue_version, comment_reached, pr_source_ref)
     local evidence_request = nil
     if effective_decision == "approve" and #high_risk_paths > 0 then
-      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
+      evidence_request = requests_review.build_high_risk_review_evidence_comment_request(origin.repo, origin.proposal_id, issue_version, comment_reached, pr_number, reviewed_head_sha, paths_digest, angle_digest, pr_source_ref)
     end
     local label_request = nil
     if origin.issue_number ~= nil then
@@ -262,10 +273,10 @@ return saga.department(spec, { done = function() return false end, act = functio
     if reflection_checkpoint then
       reflection_payload = payloads_builders.build_devloop_fix_reflection_payload({
         proposal_id = reached.proposal_id,
-        dedup_key = reached.dedup_key,
+        dedup_key = canonical_review_dedup,
         source_ref = pr_source_ref,
       }, origin.proposal_id, issue_version, pr_number, devloop_state.version_fix_round(issue_version), pr_source_ref)
-      reflection_payload.blocking_gap = reached.blocking_gap
+      reflection_payload.blocking_gap = comment_reached.blocking_gap
       table.insert(raised, "devloop_review_meta")
     end
     devloop_logging.log_apply("review_result", origin.proposal_id, to_state, issue_version, { add = add_labels, remove = remove_labels }, raised)

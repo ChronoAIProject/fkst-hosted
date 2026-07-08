@@ -435,10 +435,7 @@ function C.build_pr_review_proposal(M, repo, issue_number, pr_number, version, h
     title = devloop_base.neutralize_untrusted_prompt_text(title),
     body = body,
     content_fetch = content_fetch,
-    dedup_key = base_ids.dedup_key({
-      review_id,
-      "review",
-    }),
+    dedup_key = devloop_base.pr_review_proposal_dedup_key(review_id),
     source_ref = base_ids.normalize_source_ref(source_ref),
   }, high_risk)
 end
