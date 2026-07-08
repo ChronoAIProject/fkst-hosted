@@ -8,6 +8,7 @@ local strings = require("contract.strings")
 local transition_version = require("contract.transition_version")
 local forge_validators = require("devloop.forge_validators")
 local devloop_logging = require("devloop.logging")
+local source_refs = require("contract.source_ref")
 
 local ai_sentinel = "⟦AI:FKST⟧"
 
@@ -94,6 +95,23 @@ function C.operator_rereview_version(current_version, head_sha)
     error("github-devloop: invalid operator rereview head sha")
   end
   return transition_version.next_rereview(current_version, head_sha)
+end
+
+function C.reintake_has_active_devloop_state(labels, comments, proposal_id)
+  return devloop_state.reintake_has_active_devloop_state(labels, comments, proposal_id)
+end
+
+function C.reintake_effect_updated_at(issue, command, comments, proposal_id)
+  return devloop_state.reintake_effect_updated_at(issue, command, comments, proposal_id)
+end
+
+function C.reintake_source_refs_match(left, right, limit)
+  if not source_refs.has_bounded_source_ref(left, limit or devloop_base._max_key_len)
+    or not source_refs.has_bounded_source_ref(right, limit or devloop_base._max_key_len) then
+    return false
+  end
+  return tostring(left.kind) == tostring(right.kind)
+    and tostring(left.ref) == tostring(right.ref)
 end
 
 function C.has_operator_command_response(comments, command)

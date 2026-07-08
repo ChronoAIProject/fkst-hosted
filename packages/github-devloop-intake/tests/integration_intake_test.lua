@@ -88,8 +88,16 @@ local function find_comment_body(raises, needle)
   return nil
 end
 
-local function expected_effect_key(proposal_id, command)
-  return devloop_base.intake_decision_dedup_key(proposal_id, { title = "Issue", body = "" }, command)
+local function expected_effect_key(proposal_id, command, effective_updated_at)
+  return devloop_base.intake_decision_dedup_key(proposal_id, { title = "Issue", body = "" }, command, effective_updated_at)
+end
+
+local function trusted_comment(body, created_at)
+  return {
+    body = body,
+    author_login = devloop_base.trusted_bot_login(),
+    created_at = created_at,
+  }
 end
 
 return {
@@ -155,8 +163,9 @@ return {
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
     t.eq(result.raises[1].payload.issue_number, "42")
-    t.eq(result.raises[1].payload.effect_id, expected_effect_key(proposal_id, command))
+    t.eq(result.raises[1].payload.effect_id, expected_effect_key(proposal_id, command, command.created_at))
     t.eq(result.raises[1].payload.reintake_command_created_at, command.created_at)
+    t.eq(result.raises[1].payload.reintake_effect_updated_at, command.created_at)
     t.is_true(result.raises[1].payload.dedup_key:find("intake%-candidate/github%-devloop/issue/owner/repo/42", 1, false) ~= nil)
   end,
 
@@ -187,8 +196,60 @@ return {
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)
     t.eq(result.raises[1].queue, "devloop_intake_candidate")
-    t.eq(result.raises[1].payload.effect_id, expected_effect_key(proposal_id, command))
+    t.eq(result.raises[1].payload.effect_id, expected_effect_key(proposal_id, command, command.created_at))
     t.eq(result.raises[1].payload.reintake_command_created_at, command.created_at)
+    t.eq(result.raises[1].payload.reintake_effect_updated_at, command.created_at)
+  end,
+
+  test_admission_reintake_refuses_after_blocked_then_newer_active_marker_with_stale_labels = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    h.mock_bot_env()
+    mock_repo_env()
+    mock_issue(42, {
+      labels = { "fkst-dev:enabled", "fkst-dev:blocked" },
+      comments = {
+        m_builders.intake_decision_marker(proposal_id, "enable", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
+        trusted_comment(core.state_marker(proposal_id, "blocked", "github-devloop/issue/owner/repo/42/2026-06-04T01-00-00Z/intake/1"), "2026-06-04T01:00:00Z"),
+        trusted_comment(core.state_marker(proposal_id, "thinking", "github-devloop/issue/owner/repo/42/2026-06-04T02-00-00Z/intake/2"), "2026-06-04T02:00:00Z"),
+        trusted_reintake_command("IC_reintake_active_after_blocked"),
+      },
+    })
+
+    local result = run_admission(entity_changed(42), opts("intake-admission-reintake-current-active-after-blocked"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    local refusal = find_comment_body(result.raises, "operator command refused")
+    t.is_true(refusal ~= nil)
+    t.is_true(refusal.body:find("reintake requires terminal blocked or no active devloop state", 1, true) ~= nil)
+  end,
+
+  test_admission_reintake_effect_timestamp_follows_later_blocked_marker = function()
+    local proposal_id = "github-devloop/issue/owner/repo/42"
+    local command = trusted_reintake_command("IC_reintake_before_blocked")
+    command.created_at = "2026-06-04T03:00:00Z"
+    local blocked_created_at = "2026-06-04T04:00:00Z"
+    local base_version = "github-devloop/issue/owner/repo/42/2026-06-04T02-00-00Z/intake/1"
+    local blocked_version = conv_reconcile.reconcile_state_version(base_version, 3)
+    h.mock_bot_env()
+    mock_repo_env()
+    mock_issue(42, {
+      labels = { "fkst-dev:enabled", "fkst-dev:blocked" },
+      comments = {
+        m_builders.intake_decision_marker(proposal_id, "enable", "intake/github-devloop/issue/owner/repo/42/v1", "standard"),
+        command,
+        trusted_comment(core.state_marker(proposal_id, "blocked", blocked_version), blocked_created_at),
+      },
+    })
+
+    local result = run_admission(entity_changed(42), opts("intake-admission-reintake-command-before-blocked"))
+
+    t.eq(result.exit_code, 0)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "devloop_intake_candidate")
+    t.eq(result.raises[1].payload.reintake_command_created_at, command.created_at)
+    t.eq(result.raises[1].payload.reintake_effect_updated_at, blocked_created_at)
+    t.eq(result.raises[1].payload.effect_id, expected_effect_key(proposal_id, command, blocked_created_at))
   end,
 
   test_admission_reintake_without_prior_intake_marker_refuses = function()
