@@ -250,8 +250,10 @@ local function issue_body_drain_edge(issues, dedup_key)
   return nil
 end
 
-local function output_obligation_drain_edge(comments, dedup_key, issues)
-  return issue_created_drain_edge(comments, dedup_key) or issue_body_drain_edge(issues, dedup_key)
+local function output_obligation_drain_edge(comments, dedup_key, issues, recent_issues)
+  return issue_created_drain_edge(comments, dedup_key)
+    or issue_body_drain_edge(issues, dedup_key)
+    or issue_body_drain_edge(recent_issues, dedup_key)
 end
 
 local function normalized_output_obligation_fact(source)
@@ -463,8 +465,8 @@ function M.output_obligation_failure_dedup_key(repo, proposal_id, terminal_versi
   return output_obligation_dedup_key(repo, proposal_id, terminal_version, reason_class)
 end
 
-function M.output_obligation_failure_drain_edge(comments, dedup_key, issues)
-  return output_obligation_drain_edge(comments, dedup_key, issues)
+function M.output_obligation_failure_drain_edge(comments, dedup_key, issues, recent_issues)
+  return output_obligation_drain_edge(comments, dedup_key, issues, recent_issues)
 end
 
 function M.classify_output_obligation_failure(payload)
@@ -472,7 +474,7 @@ function M.classify_output_obligation_failure(payload)
   return normalized_output_obligation_fact(source)
 end
 
-function M.blocked_output_obligation_failures(entity, observed_entities)
+function M.blocked_output_obligation_failures(entity, observed_entities, recent_merged_issues)
   if type(entity) ~= "table" then
     return {}
   end
@@ -502,7 +504,7 @@ function M.blocked_output_obligation_failures(entity, observed_entities)
       end
       local normalized = normalized_output_obligation_fact(fact)
       if normalized ~= nil then
-        normalized.drain_edge = output_obligation_drain_edge(comments, normalized.dedup_key, observed_entities)
+        normalized.drain_edge = output_obligation_drain_edge(comments, normalized.dedup_key, observed_entities, recent_merged_issues)
         table.insert(failures, normalized)
       end
     end
@@ -517,9 +519,9 @@ function M.build_output_obligation_issue_create_request(fact)
   return output_obligation_issue_request(fact)
 end
 
-function M.blocked_obligation_patrol_once(entity, observed_entities)
+function M.blocked_obligation_patrol_once(entity, observed_entities, recent_merged_issues)
   local raised = {}
-  for _, fact in ipairs(M.blocked_output_obligation_failures(entity, observed_entities)) do
+  for _, fact in ipairs(M.blocked_output_obligation_failures(entity, observed_entities, recent_merged_issues)) do
     if fact.drain_edge == nil then
       table.insert(raised, {
         queue = "github-proxy.github_issue_create_request",
