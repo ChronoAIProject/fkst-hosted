@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
 import { FkstMark } from '../components/brand/fkst-mark';
-
-const REPO_URL = 'https://github.com/ChronoAIProject/fkst-hosted';
+import { LanguageToggle } from '../components/layout/language-toggle';
+import { useContent } from '../i18n';
+import { REPO, MANUAL_URL } from '../i18n/literals';
 
 export function nextCondensed(prev: boolean, y: number): boolean {
   if (y > 140) {
@@ -23,6 +24,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 
 export function Shell() {
   const [condensed, setCondensed] = useState(false);
+  const c = useContent();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -46,34 +48,35 @@ export function Shell() {
             <Link
               to="/"
               className="text-fg no-underline inline-block flex-none"
-              aria-label="FKST — home"
+              aria-label={c.nav.homeAria}
             >
               <FkstMark className="text-[19px]" />
             </Link>
 
             <nav className="flex gap-0.5">
               <NavLink to="/" end className={navLinkClass}>
-                Introduction
+                {c.nav.introduction}
               </NavLink>
               <NavLink to="/get-started" className={navLinkClass}>
-                Get Started
+                {c.nav.getStarted}
               </NavLink>
             </nav>
 
             <div className="flex items-center gap-2 ml-auto">
+              <LanguageToggle />
               <a
-                href={REPO_URL}
+                href={REPO}
                 target="_blank"
                 rel="noreferrer"
-                className="font-mono text-[12px] text-faint hover:text-fg no-underline px-2.5 py-[7px] rounded-control transition-colors max-[600px]:hidden"
+                className="font-mono text-[12px] text-faint hover:text-fg no-underline px-2.5 py-[7px] rounded-control transition-colors max-[720px]:hidden"
               >
                 GitHub ↗
               </a>
               <NavLink
                 to="/get-started"
-                className="font-ui font-semibold text-[12.5px] bg-amber text-amber-ink rounded-control px-3.5 py-[7px] flex-none no-underline transition-colors hover:brightness-[1.06]"
+                className="font-ui font-semibold text-[12.5px] bg-amber text-amber-ink rounded-control px-3.5 py-[7px] flex-none no-underline transition-colors hover:brightness-[1.06] max-[480px]:hidden"
               >
-                Get started →
+                {c.nav.getStartedCta}
               </NavLink>
             </div>
           </header>
@@ -88,26 +91,16 @@ export function Shell() {
         <footer className="border-t border-line py-7 flex items-center gap-x-6 gap-y-2 flex-wrap font-mono text-[11.5px] text-ghost">
           <span className="flex items-center gap-2">
             <FkstMark className="text-[13px] text-dim" />
-            <span>· ChronoAI hosted cloud</span>
+            <span>{c.footer.tagline}</span>
           </span>
           <NavLink to="/get-started" className="text-faint hover:text-fg no-underline">
-            Get Started
+            {c.footer.getStarted}
           </NavLink>
-          <a
-            href={REPO_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="text-faint hover:text-fg no-underline"
-          >
-            GitHub
+          <a href={REPO} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
+            {c.footer.github}
           </a>
-          <a
-            href={`${REPO_URL}/blob/main/skills/fkst-control-plane-manual/SKILL.md`}
-            target="_blank"
-            rel="noreferrer"
-            className="text-faint hover:text-fg no-underline"
-          >
-            Operator manual
+          <a href={MANUAL_URL} target="_blank" rel="noreferrer" className="text-faint hover:text-fg no-underline">
+            {c.footer.manual}
           </a>
         </footer>
       </div>
