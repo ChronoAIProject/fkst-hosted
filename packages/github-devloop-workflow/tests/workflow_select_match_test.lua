@@ -574,12 +574,12 @@ local tests = {
     t.is_nil(calls[1].stdin:find("software-dev-flow", 1, true))
   end,
 
-  test_ordinary_localizable_bug_report_falls_through_to_plain_devloop = function()
+  test_already_clear_work_falls_through_and_prompt_carries_goal_clarity_gate = function()
     local _result, calls = run_fallthrough_case(
       "/tmp/fkst-packages-test/github-devloop-workflow/no-extra-catalog",
       {
         title = "Settings spinner never stops after saving",
-        body = "The settings save button leaves the page spinner running forever after the save request returns. Please fix the local settings save flow and add a regression test.",
+        body = "The settings save button leaves the page spinner running forever after the save request returns. Please fix the local settings save flow so the spinner stops on success and add a regression test.",
         labels = { "bug" },
       },
       "⟦FKST:WORKFLOW_SELECT⟧ none"
@@ -587,11 +587,68 @@ local tests = {
 
     t.eq(#calls, 2)
     t.is_true(calls[1].stdin:find("⟦FKST:WORKFLOW_SELECT⟧", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("software-diagnose-plan-flow", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("Do not choose it for ordinary bug reports, even symptom-only reports", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("when the fix is plausibly localizable", 1, true) ~= nil)
-    t.is_true(calls[1].stdin:find("when in doubt", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("idea-to-goal-flow", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("is the GOAL / OBJECTIVE clear", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("OBJECTIVE itself is genuinely fuzzy/unformed", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("If a concrete OBJECTIVE is already clear", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("even a symptom bug whose fix location is unknown", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("Well-specified feature -> software-feature-flow", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("plain devloop", 1, true) ~= nil)
+    t.is_nil(calls[1].stdin:find("software-diagnose-plan-flow", 1, true))
     t.is_true(calls[2].stdin:find("⟦FKST:INTAKE⟧", 1, true) ~= nil)
+  end,
+
+  test_ordinary_symptom_bug_falls_to_plain_devloop_and_prompt_carries_objective_clarity_rule = function()
+    local _result, calls = run_fallthrough_case(
+      "/tmp/fkst-packages-test/github-devloop-workflow/no-extra-catalog",
+      {
+        title = "Login button returns 500",
+        body = "Login button returns 500 on submit, please fix",
+        labels = { "bug" },
+      },
+      "⟦FKST:WORKFLOW_SELECT⟧ none"
+    )
+
+    t.eq(#calls, 2)
+    t.is_true(calls[1].stdin:find("⟦FKST:WORKFLOW_SELECT⟧", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("idea-to-goal-flow", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("is the GOAL / OBJECTIVE clear", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("Login button returns 500 on submit, please fix", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("OBJECTIVE is clear", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("stop the 500", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("fix location is unknown", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("Ordinary bug reports, even symptom-only ones, go to plain devloop", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("OBJECTIVE itself is genuinely fuzzy/unformed", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("When in doubt, choose plain devloop", 1, true) ~= nil)
+    t.is_true(calls[2].stdin:find("⟦FKST:INTAKE⟧", 1, true) ~= nil)
+  end,
+
+  test_vague_goalless_idea_can_select_idea_to_goal_flow = function()
+    local payload = candidate()
+    mock_env("/tmp/fkst-packages-test/github-devloop-workflow/no-extra-catalog")
+    mock_issue_view({
+      title = "Make workflow ideas less fuzzy",
+      body = "I keep dropping half-formed workflow thoughts into issues and the bot jumps straight to code. There should be some way to turn the thought into the real goal first, but I do not know what exact change or acceptance should be.",
+      labels = { "idea" },
+    }, 2)
+    mock_workflow_codex("⟦FKST:WORKFLOW_SELECT⟧ idea-to-goal-flow")
+
+    local result = run_workflow_select(payload)
+    t.eq(#result.raises, 1)
+    t.eq(result.raises[1].queue, "github-proxy.github_issue_comment_request")
+    t.eq(#raises_to_queue(result.raises, "github-devloop.devloop_execute_request"), 0)
+
+    local request = result.raises[1].payload
+    local blueprint_marker = marker.parse_blueprint_marker(request.body, payload.proposal_id)
+    t.eq(blueprint_marker.workflow, "idea-to-goal-flow")
+
+    local calls = codex_calls()
+    t.eq(#calls, 1)
+    t.is_true(calls[1].stdin:find("⟦FKST:WORKFLOW_SELECT⟧", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("idea-to-goal-flow", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("fuzzy raw idea, exploration, or open-ended wish", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("one concrete, code-verifiable objective", 1, true) ~= nil)
+    t.is_true(calls[1].stdin:find("OBJECTIVE itself is genuinely fuzzy/unformed", 1, true) ~= nil)
   end,
 
   test_workflow_selection_skips_blueprint_when_fresh_issue_is_closed = function()
