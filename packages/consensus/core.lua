@@ -5,7 +5,7 @@ local error_facts = require("contract.error_facts")
 local strings = require("contract.strings")
 
 
-local default_angles = { "teleology", "parsimony", "fidelity" }
+local default_angles = { "teleology", "parsimony", "fidelity", "natural-ownership", "proportional-containment" }
 local debate_phases = { "blind", "rebuttal", "synthesis" }
 local max_angles = 4
 local max_key_len = 200

@@ -28,7 +28,7 @@ local function mock_consensus_approval()
     stderr = "",
     exit_code = 0,
   })
-  for _, angle in ipairs({ "teleology", "parsimony", "fidelity" }) do
+  for _, angle in ipairs({ "teleology", "parsimony", "fidelity", "natural-ownership", "proportional-containment" }) do
     t.mock_command("mkdir -p", {
       stdout = "",
       stderr = "",

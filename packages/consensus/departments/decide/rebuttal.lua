@@ -66,7 +66,10 @@ function M.parse_output(stdout, verdict_mode, caps)
 end
 
 function M.can_run(angle_results)
-  return type(angle_results) == "table" and #angle_results == 3
+  -- Rebuttal (Phase R) is meaningful whenever at least two seats can clash; the
+  -- spawn/collect machinery is generic over N seats, so admission derives from the
+  -- actual seat count rather than a fixed number.
+  return type(angle_results) == "table" and #angle_results >= 2
 end
 
 local function peer_results(angle_results, own_index)
