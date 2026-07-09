@@ -161,6 +161,33 @@ fn build_invalid_session_carries_reason_and_no_work() {
 }
 
 #[test]
+fn pull_job_round_trips_through_json() {
+    let job = PullJob {
+        job_id: "9-123".to_string(),
+        user_id: 9,
+        state: "running".to_string(),
+        phase: "scanning sessions".to_string(),
+        done: 2,
+        total: 5,
+        error: None,
+    };
+    let bytes = serde_json::to_vec(&job).expect("serialize");
+    let back: PullJob = serde_json::from_slice(&bytes).expect("deserialize");
+    assert_eq!(back.job_id, "9-123");
+    assert_eq!(back.user_id, 9);
+    assert_eq!(back.state, "running");
+    assert_eq!(back.done, 2);
+    assert_eq!(back.total, 5);
+    assert!(back.error.is_none(), "absent error must round-trip to None");
+}
+
+#[test]
+fn storage_keys_are_namespaced() {
+    assert_eq!(result_key(42), "dashboards/42.json");
+    assert_eq!(job_key("42-999"), "dashboards/jobs/42-999.json");
+}
+
+#[test]
 fn status_labels_keeps_only_fkst_labels() {
     let i = issue(
         1,
