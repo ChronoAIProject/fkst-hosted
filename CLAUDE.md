@@ -367,9 +367,9 @@ the one genuine increment available now, then wait correctly. ⟦AI:FKST⟧
 ## Git 提交/分支规范
 
 - **语言**：提交信息、PR 标题/正文、分支说明属对外产物，**一律英文**（英文是唯一准绳文本，不附加中文补注）；分支名本身、代码标识符、路径、crate/命令/协议名、测试断言、引用原文保留英文。不要中英混杂凑句。
-- **分支**：集成/默认分支是 `dev`；不直接向 `dev` 提交，一律从 `dev` 切分支并开 PR。分支名用 `<type>/<kebab-topic>`，`type` 只能是 `feat|fix|docs|chore|refactor|test`。合并后删除分支，不留长期僵尸分支。
+- **分支（默认基线随集成分支拓扑，不写死 `dev`）**：**若本机配置了集成分支——dogfood 明确写出本机 fkst 集成分支，即 host `FKST_DEVLOOP_INTEGRATION_BRANCH=integration-<device>`——则默认基线就是该本地集成分支：一切修改（含手动 / 助手改动，不只 autonomous）从它切分支、并 PR 回它**，经 `integration-<device>` 上 CI 绿作 test success，再由 rollup PR 受控回 `dev`（见「集成分支拓扑」）。**未配置集成分支时才回落到 `dev` 作默认基线。** 任何情形都不直接向基线分支提交，一律切分支开 PR；`dev` 始终受保护，manual/autonomous 改动都不直接合进 `dev`。集成分支名不写死在本文件，以 dogfood / host 配置为准（`FKST_DEVLOOP_INTEGRATION_BRANCH`）。分支名用 `<type>/<kebab-topic>`，`type` 只能是 `feat|fix|docs|chore|refactor|test`。合并后删除分支，不留长期僵尸分支。
 - **提交**：一个 commit 是一个自洽逻辑改动，不混入无关改动或格式化噪声。subject 用一行英文祈使句概括做了什么，不堆叠多事；改动多于琐碎时，空行后写 body，说明为什么、影响和取舍，关键词/符号/错误分类保持可 grep。改契约就改完整，旧形态从当前态删除；不留 deprecated shim / `.old` / `_legacy`。
-- **PR / 合并**：对 `dev` 开 PR；标题英文，正文含动机、改动、测试证据（命令 + 结果）。CI 绿才合；合并用 squash，保持 `dev` 线性、一个 feature 一条 commit，subject 末尾保留 `(#PR)`。AI 生成的 PR 正文/变更说明末尾保留 `⟦AI:FKST⟧`。
+- **PR / 合并**：**对默认基线开 PR——配置了集成分支则对本机集成分支 `integration-<device>`，否则对 `dev`**；标题英文，正文含动机、改动、测试证据（命令 + 结果）。CI 绿才合；合并用 squash，保持基线线性、一个 feature 一条 commit，subject 末尾保留 `(#PR)`。**集成分支到 `dev` 只经 rollup PR 受控推进，本流程不在这里直合 `dev`。** AI 生成的 PR 正文/变更说明末尾保留 `⟦AI:FKST⟧`。
 
 ## 纪律（沿用 fkst-substrate）
 
