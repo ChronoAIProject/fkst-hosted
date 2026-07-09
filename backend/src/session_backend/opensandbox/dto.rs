@@ -72,6 +72,13 @@ pub struct SandboxView {
     pub message: Option<String>,
     pub metadata: BTreeMap<String, String>,
     pub extensions: BTreeMap<String, String>,
+    /// The sandbox's creation timestamp, from the wire `createdAt` (a REQUIRED
+    /// RFC3339 field). Kept an `Option` for deserialization resilience (a
+    /// malformed/absent value defaults to `None` rather than failing the whole
+    /// decode). LOAD-BEARING: the fleet reaper's keep-oldest ordering and the
+    /// projected `LivePod.created_at` both read this — defaulting it to "now" every
+    /// sweep would perma-shield a session from idle-kill.
+    pub created_at: Option<String>,
 }
 
 /// The nested wire shape actually returned by create / get / list / patch. Private:
@@ -86,6 +93,8 @@ struct SandboxWire {
     metadata: BTreeMap<String, String>,
     #[serde(default)]
     extensions: BTreeMap<String, String>,
+    #[serde(default)]
+    created_at: Option<String>,
 }
 
 /// The `status` sub-object of the sandbox wire. `state` is required; `reason` /
@@ -109,6 +118,7 @@ impl From<SandboxWire> for SandboxView {
             message: wire.status.message,
             metadata: wire.metadata,
             extensions: wire.extensions,
+            created_at: wire.created_at,
         }
     }
 }
