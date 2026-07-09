@@ -45,6 +45,14 @@ pub const STORAGE_BUCKET_FILE: &str = "storage-bucket";
 /// Default mount path of the per-session credential Secret volume inside the pod.
 pub const DEFAULT_CREDS_DIR: &str = "/var/run/fkst/creds";
 
+/// Sentinel the credential writer creates LAST, after every other credential file is
+/// on disk: its presence proves the whole credential set is complete. The in-pod
+/// `run-substrate` driver gates engine start on it (a bounded wait). In
+/// k8s-customized mode it rides the atomically-mounted Secret, so the gate passes
+/// instantly; a backend that writes creds incrementally makes the driver wait until
+/// the writer finishes. The value is non-secret (a bare marker), never a credential.
+pub const CREDS_COMPLETE_SENTINEL: &str = ".creds-complete";
+
 /// The write-only chrono-storage SA creds injected into a session Secret so the
 /// in-pod log uploader can PUT its bundle. All borrowed `&str` (the caller exposes
 /// its own secret before calling), keeping this module free of a `secrecy`
@@ -139,6 +147,12 @@ impl CredsLayout {
         self.base.join(LLM_API_KEY_FILE)
     }
 
+    /// Path to the credentials-complete sentinel ([`CREDS_COMPLETE_SENTINEL`]) the
+    /// in-pod driver gates engine start on. The ONLY place this path is composed.
+    pub fn creds_complete(&self) -> PathBuf {
+        self.base.join(CREDS_COMPLETE_SENTINEL)
+    }
+
     /// Path to the write-only chrono-storage SA client id (non-secret).
     pub fn storage_client_id(&self) -> PathBuf {
         self.base.join(STORAGE_CLIENT_ID_FILE)
@@ -209,6 +223,14 @@ mod tests {
     fn honors_a_custom_base() {
         let layout = CredsLayout::new("/mnt/creds");
         assert_eq!(layout.github_token(), Path::new("/mnt/creds/github-token"));
+    }
+
+    #[test]
+    fn creds_complete_composes_the_sentinel_path() {
+        assert_eq!(
+            CredsLayout::new("/x").creds_complete(),
+            Path::new("/x/.creds-complete")
+        );
     }
 
     #[test]

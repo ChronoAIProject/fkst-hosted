@@ -3,7 +3,9 @@
 //! limit; included via `#[cfg(test)] #[path = "session_launcher_tests.rs"]`.
 
 use super::*;
-use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
+use crate::session_spec::creds::{
+    credential_secret_data, StorageWriterCreds, CREDS_COMPLETE_SENTINEL,
+};
 
 /// Assemble a `creds` map the way the executor does: through the shared
 /// [`credential_secret_data`] helper, then wrap each value as a [`SecretString`] for
@@ -316,7 +318,10 @@ fn build_session_secret_carries_creds_with_the_userenv_prefix_and_owner() {
     assert_eq!(data["llm-api-key"], "sk-test");
     assert_eq!(data["userenv.FOO"], "foo-val");
     assert_eq!(data["userenv.API_TOKEN"], "tok-val");
-    assert_eq!(data.len(), 4);
+    // The writer stamps the completeness sentinel so the in-pod gate passes at mount.
+    assert_eq!(data[CREDS_COMPLETE_SENTINEL], "1");
+    // Two base creds + two user-env keys + the sentinel.
+    assert_eq!(data.len(), 5);
     assert_eq!(secret.type_.as_deref(), Some("Opaque"));
 
     let owners = secret.metadata.owner_references.as_ref().expect("owners");
@@ -331,7 +336,9 @@ fn build_session_secret_without_user_env_carries_only_the_base_creds() {
     let data = secret.string_data.as_ref().expect("string data");
     assert!(data.contains_key("github-token"));
     assert!(data.contains_key("llm-api-key"));
-    assert_eq!(data.len(), 2);
+    // The writer always stamps the completeness sentinel alongside the base creds.
+    assert_eq!(data[CREDS_COMPLETE_SENTINEL], "1");
+    assert_eq!(data.len(), 3);
     assert!(secret.metadata.owner_references.is_none());
 }
 
@@ -353,7 +360,9 @@ fn build_session_secret_carries_the_write_only_sa_when_configured() {
     assert_eq!(data["storage-token-url"], "https://nyx.example/oauth/token");
     assert_eq!(data["storage-base-url"], "https://storage.example/proxy");
     assert_eq!(data["storage-bucket"], "fkst-logs");
-    assert_eq!(data.len(), 7);
+    // The writer stamps the completeness sentinel on top of the credential set.
+    assert_eq!(data[CREDS_COMPLETE_SENTINEL], "1");
+    assert_eq!(data.len(), 8);
 }
 
 #[test]
