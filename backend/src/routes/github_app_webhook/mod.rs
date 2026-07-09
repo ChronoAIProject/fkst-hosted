@@ -660,6 +660,7 @@ mod tests {
             github_app: None,
             github_app_webhook_secret: None,
             reconciler: Some(handle),
+            session_backend: None,
             storage: None,
             log_registry: Default::default(),
         };
@@ -740,6 +741,7 @@ mod tests {
             github_app: None,
             github_app_webhook_secret: None,
             reconciler: None,
+            session_backend: None,
             storage: None,
             log_registry: Default::default(),
         };

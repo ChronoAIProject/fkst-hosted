@@ -1,7 +1,7 @@
 //! Pure builders for the env-validation Pod, its spec ConfigMap, and the pod
-//! name (issue #338 §3.1/§3.3). Split out of [`super`] so the orchestration
-//! (which needs a live cluster) and the spec-shaping (which does not) stay in
-//! separate files, each testable in isolation and under the 500-line limit.
+//! name (issue #338 §3.1/§3.3). Kept separate from the orchestration (which needs a
+//! live cluster and now lives on the direct-Kubernetes backend's validation verb) so
+//! the spec-shaping stays testable in isolation and under the 500-line limit.
 //!
 //! The validation pod is the SAME hard-isolation box as a session pod: it runs
 //! [`crate::k8s::isolation::apply_isolation`], so a compromised install script

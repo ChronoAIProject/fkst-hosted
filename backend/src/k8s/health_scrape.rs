@@ -1,11 +1,11 @@
 //! The package-AGNOSTIC session-health scrape loop (session health, PR).
 //!
 //! Mirrors [`crate::k8s::token_rotation`]'s `run_*_loop` / `*_once` / `*_one`
-//! shape: every `health_scrape_secs` it LISTs the substrate-session pods (the same
-//! `COMPONENT_LABEL` selector the reconciler uses) and, for each, reads its status +
-//! a bounded window of its OWN framework logs, runs the PURE evaluator
+//! shape: every `health_scrape_secs` it enumerates the substrate-session fleet
+//! (through the [`SessionBackend`]) and, for each, reads its status + a bounded
+//! window of its OWN framework logs, runs the PURE evaluator
 //! ([`crate::k8s::health_eval::evaluate_health`]), and FLAGs or CLEARs the
-//! [`SUBSTRATE_DEGRADED_LABEL`] on the pod's trigger issue.
+//! [`SUBSTRATE_DEGRADED_LABEL`] on the session's trigger issue.
 //!
 //! What it does NOT do: interpret any package's output. "Degraded" is derived only
 //! from the two signals every fkst package shares (pod status + framework log
@@ -13,32 +13,25 @@
 //! it never asserts a diagnosis. This keeps fkst-hosted package-agnostic.
 //!
 //! Discipline (identical to the rotation loop): best-effort + non-failing — only a
-//! failure to LIST the pods surfaces as `Err`; every per-pod failure is logged and
-//! swallowed so one bad session never stalls the rest. No token/secret is ever
+//! failure to LIST the fleet surfaces as `Err`; every per-session failure is logged
+//! and swallowed so one bad session never stalls the rest. No token/secret is ever
 //! logged, and a vanished installation enqueues the repo for a reconcile (kill).
 
+use std::sync::Arc;
 use std::time::Duration;
-
-use k8s_openapi::api::core::v1::Pod;
-use kube::api::{Api, ListParams};
 
 use crate::error::AppError;
 use crate::github_app::{GithubAppError, GithubAppTokens};
-use crate::k8s::client::KubeClient;
-use crate::k8s::health_eval::{evaluate_health, summarize_pod_status, HealthVerdict};
-use crate::k8s::pod_logs::pod_recent_logs;
-use crate::k8s::session_launcher::{
-    ANNOTATION_TRIGGER_ISSUE, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
-};
+use crate::k8s::health_eval::{evaluate_health, HealthVerdict, PodStatusSummary};
 use crate::reconcile::{ReconcileHandle, SUBSTRATE_DEGRADED_LABEL};
 use crate::reconcile_config::ReconcileConfig;
-use crate::session_backend::k8s::repo_key_from_pod;
+use crate::session_backend::{RuntimeStatus, SessionBackend, SessionHandle};
 
-/// The scrape loop: every `health_scrape_secs`, evaluate every live session pod's
+/// The scrape loop: every `health_scrape_secs`, evaluate every live session's
 /// health and flag/clear its trigger issue. Runs for the process lifetime; a sweep
 /// error is logged, never fatal.
 pub async fn run_health_scrape_loop(
-    kube: KubeClient,
+    backend: Arc<dyn SessionBackend>,
     github: GithubAppTokens,
     cfg: ReconcileConfig,
     handle: ReconcileHandle,
@@ -48,60 +41,46 @@ pub async fn run_health_scrape_loop(
     let mut ticker = tokio::time::interval(interval);
     loop {
         ticker.tick().await;
-        if let Err(error) = scrape_once(&kube, &github, &handle).await {
+        if let Err(error) = scrape_once(backend.as_ref(), &github, &handle).await {
             tracing::warn!(error = %error, "session health scrape: sweep failed (will retry)");
         }
     }
 }
 
-/// One scrape sweep: LIST the session pods and evaluate each. Only a failure to LIST
-/// the pods surfaces as `Err`; every per-pod failure is handled (logged / enqueued)
-/// so one bad session never stalls the rest.
+/// One scrape sweep: enumerate the fleet and evaluate each session. Only a failure
+/// to LIST the fleet surfaces as `Err`; every per-session failure is handled (logged
+/// / enqueued) so one bad session never stalls the rest.
 async fn scrape_once(
-    kube: &KubeClient,
+    backend: &dyn SessionBackend,
     github: &GithubAppTokens,
     handle: &ReconcileHandle,
 ) -> Result<(), AppError> {
-    let pods: Api<Pod> = Api::namespaced(kube.client().clone(), kube.namespace());
-    let selector = format!("{COMPONENT_LABEL_KEY}={COMPONENT_LABEL_VALUE}");
-    let list = pods
-        .list(&ListParams::default().labels(&selector))
+    let fleet = backend
+        .list_fleet()
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("health scrape list pods: {e}")))?;
 
-    for pod in &list.items {
-        scrape_one(kube, github, handle, pod).await;
+    for session in &fleet {
+        scrape_one(backend, github, handle, session).await;
     }
     Ok(())
 }
 
-/// Evaluate ONE pod and reconcile the degraded flag on its trigger issue. Skips a
-/// pod that is not fully one of ours (missing repo key / trigger issue / name). A
-/// vanished installation enqueues the repo for a reconcile (kill), mirroring the
-/// rotation loop; every other failure is logged and swallowed.
+/// Evaluate ONE session and reconcile the degraded flag on its trigger issue. Skips
+/// a session with no trigger issue. A vanished installation enqueues the repo for a
+/// reconcile (kill), mirroring the rotation loop; every other failure is logged and
+/// swallowed.
 async fn scrape_one(
-    kube: &KubeClient,
+    backend: &dyn SessionBackend,
     github: &GithubAppTokens,
     handle: &ReconcileHandle,
-    pod: &Pod,
+    session: &SessionHandle,
 ) {
-    let Some((installation, repo)) = repo_key_from_pod(pod) else {
+    let Some(issue) = session.trigger_issue else {
         return;
     };
-    let Some(issue) = trigger_issue_from_pod(pod) else {
-        return;
-    };
-    let Some(name) = pod.metadata.name.as_deref() else {
-        return;
-    };
-    let owner_repo = format!("{}/{}", repo.owner, repo.name);
-    let session_id = pod
-        .metadata
-        .labels
-        .as_ref()
-        .and_then(|l| l.get(SESSION_ID_LABEL))
-        .map(String::as_str)
-        .unwrap_or("");
+    let owner_repo = format!("{}/{}", session.repo.owner, session.repo.name);
+    let session_id = session.session_id.as_str();
 
     // Read the trigger issue's current labels first: it is both the dedupe signal
     // (already-flagged?) and the cheapest call, so an auth/installation failure here
@@ -114,7 +93,7 @@ async fn scrape_one(
                 owner_repo = %owner_repo,
                 "session health: installation gone; enqueueing repo for reconcile (kill)"
             );
-            handle.enqueue((installation, repo));
+            handle.enqueue((session.installation_id, session.repo.clone()));
             return;
         }
         Err(error) => {
@@ -123,10 +102,19 @@ async fn scrape_one(
         }
     };
 
-    let status = summarize_pod_status(pod);
+    // Read the runtime status through the backend. A read error (non-404) skips the
+    // session this cycle rather than risk a wrong verdict; a gone runtime reads as an
+    // empty status (nothing to see).
+    let status = match backend.status_summary(session_id).await {
+        Ok(status) => runtime_status_to_summary(&status),
+        Err(error) => {
+            tracing::warn!(session_id = %session_id, owner_repo = %owner_repo, error = %error, "session health: pod status read failed; skipping pod");
+            return;
+        }
+    };
     // `None` = the logs could not be read (a real transport error), distinct from an
     // empty window — so a Healthy verdict on unreadable logs never CLEARS a flag.
-    let logs = pod_recent_logs(kube, name).await;
+    let logs = backend.recent_output(session_id).await;
     let parsed = logs
         .as_deref()
         .map(crate::k8s::health_eval::parse_severity_lines)
@@ -144,18 +132,19 @@ async fn scrape_one(
     .await;
 }
 
-/// Read the trigger-issue number a pod was stamped with (the same
-/// [`ANNOTATION_TRIGGER_ISSUE`] the session launcher writes + the reconciler reads).
-/// `None` when the annotation is missing / unparseable / zero (the sentinel the
-/// live-pod projection uses for "unknown").
-fn trigger_issue_from_pod(pod: &Pod) -> Option<u64> {
-    let raw = pod
-        .metadata
-        .annotations
-        .as_ref()
-        .and_then(|a| a.get(ANNOTATION_TRIGGER_ISSUE))?;
-    let number = raw.parse::<u64>().ok()?;
-    (number != 0).then_some(number)
+/// Adapt the kube-free [`RuntimeStatus`] back into the pure evaluator's
+/// [`PodStatusSummary`]. The `Option<u32>` restart count round-trips to the signed
+/// count the evaluator reads OUTSIDE the pure health logic (a real count is never
+/// negative, so the conversion never loses information).
+fn runtime_status_to_summary(status: &RuntimeStatus) -> PodStatusSummary {
+    PodStatusSummary {
+        phase: status.phase.clone(),
+        restart_count: status
+            .restart_count
+            .map(|r| i32::try_from(r).unwrap_or(i32::MAX))
+            .unwrap_or(0),
+        waiting_reason: status.stall_reason.clone(),
+    }
 }
 
 /// Reconcile the degraded flag on a trigger issue for a single verdict. Best-effort:

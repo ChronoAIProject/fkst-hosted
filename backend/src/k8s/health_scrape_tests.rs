@@ -1,17 +1,13 @@
-//! Unit tests for the session-health scrape DECISION (flag/clear/no-op) and its
-//! pure helpers. The GitHub effects run against a recording fake [`GithubApi`]
-//! (mirroring `reconcile::execute_tests`) so no network is touched; the pod
-//! LIST + log read need a live cluster and are live-verified, as with the token
-//! rotation loop.
+//! Unit tests for the session-health scrape DECISION (flag/clear/no-op), the
+//! fleet-driven `scrape_one` clear-withholding, and the pure comment bodies. The
+//! GitHub effects run against a recording fake [`GithubApi`] and the runtime reads
+//! against the shared [`FakeSessionBackend`], so no network / cluster is touched.
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
-use k8s_openapi::api::core::v1::Pod;
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use secrecy::SecretString;
 
 use super::*;
@@ -20,6 +16,10 @@ use crate::github_app::api::{
 };
 use crate::github_app::config::GithubAppConfig;
 use crate::k8s::health_eval::HealthVerdict;
+use crate::models::RepoRef;
+use crate::reconcile::reconcile_channel;
+use crate::session_backend::test_support::FakeSessionBackend;
+use crate::session_backend::SessionHandle;
 
 // ---- recording fake GitHub transport ---------------------------------------
 
@@ -158,6 +158,18 @@ fn degraded() -> HealthVerdict {
     }
 }
 
+fn session(session_id: &str) -> SessionHandle {
+    SessionHandle {
+        session_id: session_id.to_string(),
+        installation_id: 1,
+        repo: RepoRef {
+            owner: "acme".to_string(),
+            name: "site".to_string(),
+        },
+        trigger_issue: Some(7),
+    }
+}
+
 // ---- flag / clear / no-op decision -----------------------------------------
 
 #[tokio::test]
@@ -279,39 +291,48 @@ async fn comment_failure_is_swallowed_and_flag_still_attempted() {
     assert_eq!(api.labels_added.lock().unwrap().len(), 1);
 }
 
-// ---- trigger-issue annotation reader ----------------------------------------
+// ---- fleet-driven scrape_one: the clear-withholding gate on recent_output ---
 
-fn pod_with_annotations(pairs: &[(&str, &str)]) -> Pod {
-    let annotations = pairs
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect::<BTreeMap<_, _>>();
-    Pod {
-        metadata: ObjectMeta {
-            annotations: Some(annotations),
-            ..Default::default()
-        },
+#[tokio::test]
+async fn scrape_one_withholds_clear_when_recent_output_is_none() {
+    // Already-flagged issue + a Healthy verdict (default status, no logs) BUT an
+    // unreadable log window (`None`) must NOT clear the flag.
+    let api = Arc::new(RecordingApi {
+        issue_labels: vec![SUBSTRATE_DEGRADED_LABEL.to_string()],
         ..Default::default()
-    }
+    });
+    let github = tokens(api.clone());
+    let (handle, _rx) = reconcile_channel(16);
+    let backend = FakeSessionBackend::default().with_recent("sess-1", None);
+
+    scrape_one(&backend, &github, &handle, &session("sess-1")).await;
+
+    assert!(
+        api.labels_removed.lock().unwrap().is_empty(),
+        "unreadable logs → flag retained"
+    );
+    assert!(
+        api.comments.lock().unwrap().is_empty(),
+        "no recovery comment"
+    );
 }
 
-#[test]
-fn trigger_issue_reads_the_stamped_annotation() {
-    let pod = pod_with_annotations(&[(ANNOTATION_TRIGGER_ISSUE, "123")]);
-    assert_eq!(trigger_issue_from_pod(&pod), Some(123));
-}
+#[tokio::test]
+async fn scrape_one_clears_when_recent_output_is_readable() {
+    // Already-flagged issue + a Healthy verdict + a READABLE (empty) window clears.
+    let api = Arc::new(RecordingApi {
+        issue_labels: vec![SUBSTRATE_DEGRADED_LABEL.to_string()],
+        ..Default::default()
+    });
+    let github = tokens(api.clone());
+    let (handle, _rx) = reconcile_channel(16);
+    let backend = FakeSessionBackend::default().with_recent("sess-1", Some(String::new()));
 
-#[test]
-fn trigger_issue_is_none_when_missing_zero_or_unparseable() {
-    assert_eq!(trigger_issue_from_pod(&pod_with_annotations(&[])), None);
-    assert_eq!(
-        trigger_issue_from_pod(&pod_with_annotations(&[(ANNOTATION_TRIGGER_ISSUE, "0")])),
-        None
-    );
-    assert_eq!(
-        trigger_issue_from_pod(&pod_with_annotations(&[(ANNOTATION_TRIGGER_ISSUE, "nan")])),
-        None
-    );
+    scrape_one(&backend, &github, &handle, &session("sess-1")).await;
+
+    let removed = api.labels_removed.lock().unwrap();
+    assert_eq!(removed.len(), 1, "readable healthy logs → flag cleared");
+    assert_eq!(removed[0].3, SUBSTRATE_DEGRADED_LABEL);
 }
 
 // ---- comment bodies ---------------------------------------------------------

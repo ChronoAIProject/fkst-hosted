@@ -1,74 +1,30 @@
-//! The direct-Kubernetes [`SessionBackend`] implementation (issue #412).
-//!
-//! This is the concrete pod-driving machinery moved verbatim out of the reconciler
-//! (`execute.rs` / `repo.rs` / the sweep in `loops.rs`) and placed behind the
-//! backend-neutral [`SessionBackend`] contract. Everything here — the pod LIST +
-//! `LivePod` projection, the last-pending merge-patch, the grace-honouring delete,
-//! the terminal background delete, and the pod/Secret create — is the SAME code with
-//! the SAME logs and the SAME 404/409 tolerance the reconciler had inline; only its
-//! HOME changed. The reconciler now reaches it only through `Arc<dyn SessionBackend>`.
+//! The session-lifecycle verbs (issue #412): ensure / observe / mark-pending /
+//! stop / GC, plus the pod → [`LivePod`] projection they feed the planner. Moved
+//! verbatim from the reconciler; the logs + 404/409 tolerance are unchanged.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 
-use async_trait::async_trait;
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::chrono::{DateTime, Utc};
-use kube::api::{Api, DeleteParams, ListParams, Patch, PatchParams};
+use kube::api::{DeleteParams, Patch, PatchParams};
 use secrecy::SecretString;
 
-use crate::config::PodConfig;
 use crate::k8s::session_launcher::{
-    ANNOTATION_CONFIG_HASH, ANNOTATION_INSTALLATION, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER,
-    ANNOTATION_REPO, ANNOTATION_TRIGGER_ISSUE, ANNOTATION_WORK_LABEL, COMPONENT_LABEL_KEY,
-    COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
+    ANNOTATION_CONFIG_HASH, ANNOTATION_LAST_PENDING_AT, ANNOTATION_OWNER, ANNOTATION_REPO,
+    ANNOTATION_TRIGGER_ISSUE, ANNOTATION_WORK_LABEL, SESSION_ID_LABEL,
 };
 use crate::k8s::{
-    build_session_pod, create_session_pod, session_object_name, KubeClient, SessionPodOutcome,
-    SessionPodSpec,
+    build_session_pod, create_session_pod, session_object_name, SessionPodOutcome, SessionPodSpec,
 };
 use crate::models::RepoRef;
 use crate::reconcile::desired::{LivePod, PodLiveness};
-use crate::reconcile::RepoKey;
 
-use super::{BackendError, EnsureOutcome, KillReason, SessionBackend};
-
-/// The direct-Kubernetes session backend: drives one long-lived Pod (+ its
-/// owner-referenced creds Secret) per substrate session. Cheap to clone via its
-/// `Arc`-backed [`KubeClient`]; held by the reconciler as `Arc<dyn SessionBackend>`.
-pub struct K8sBackend {
-    kube: KubeClient,
-    pod_config: PodConfig,
-    termination_grace_secs: u64,
-}
+use super::super::{BackendError, EnsureOutcome, KillReason};
+use super::{annotation, K8sBackend};
 
 impl K8sBackend {
-    /// Build from the namespace-bound Kubernetes client, the pod-launch knobs, and
-    /// the configured termination grace (the delete drain window).
-    pub fn new(kube: KubeClient, pod_config: PodConfig, termination_grace_secs: u64) -> Self {
-        Self {
-            kube,
-            pod_config,
-            termination_grace_secs,
-        }
-    }
-
-    /// A namespaced Pod API bound to the reconciler's namespace.
-    fn pods_api(&self) -> Api<Pod> {
-        Api::namespaced(self.kube.client().clone(), self.kube.namespace())
-    }
-}
-
-#[async_trait]
-impl SessionBackend for K8sBackend {
-    async fn check_reachable(&self) -> Result<String, BackendError> {
-        self.kube
-            .check_reachable()
-            .await
-            .map_err(|e| BackendError::Other(anyhow::Error::new(e)))
-    }
-
-    async fn ensure_session(
+    pub(super) async fn ensure_session_impl(
         &self,
         spec: &SessionPodSpec,
         creds: BTreeMap<String, SecretString>,
@@ -92,22 +48,19 @@ impl SessionBackend for K8sBackend {
         }
     }
 
-    async fn observe_repo(&self, repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
-        let selector = format!("{COMPONENT_LABEL_KEY}={COMPONENT_LABEL_VALUE}");
-        let list = self
-            .pods_api()
-            .list(&ListParams::default().labels(&selector))
-            .await
-            .map_err(|e| BackendError::Other(anyhow::Error::new(e)))?;
-        Ok(list
-            .items
+    pub(super) async fn observe_repo_impl(
+        &self,
+        repo: &RepoRef,
+    ) -> Result<Vec<LivePod>, BackendError> {
+        let pods = self.list_component_pods().await?;
+        Ok(pods
             .iter()
             .filter(|pod| pod_matches_repo(pod, repo))
             .filter_map(pod_to_live)
             .collect())
     }
 
-    async fn mark_pending(&self, session_id: &str) -> Result<(), BackendError> {
+    pub(super) async fn mark_pending_impl(&self, session_id: &str) -> Result<(), BackendError> {
         let name = session_object_name(session_id);
         let patch = last_pending_patch(Utc::now());
         match self
@@ -121,7 +74,7 @@ impl SessionBackend for K8sBackend {
         }
     }
 
-    async fn stop_session(
+    pub(super) async fn stop_session_impl(
         &self,
         session_id: &str,
         _reason: KillReason,
@@ -137,7 +90,7 @@ impl SessionBackend for K8sBackend {
         }
     }
 
-    async fn remove_terminal(&self, session_id: &str) -> Result<(), BackendError> {
+    pub(super) async fn remove_terminal_impl(&self, session_id: &str) -> Result<(), BackendError> {
         let name = session_object_name(session_id);
         match self
             .pods_api()
@@ -149,27 +102,6 @@ impl SessionBackend for K8sBackend {
             Err(error) => Err(BackendError::Other(anyhow::Error::new(error))),
         }
     }
-}
-
-/// LIST the substrate-session pods, group them into the `(installation, repo)` keys
-/// they belong to via their stamped annotations, and return the unique set. Used by
-/// the sweep to enqueue every repo that currently has a live pod; the `active_repos`
-/// merge stays in the sweep. A list error is returned as [`BackendError::Other`].
-pub async fn live_repo_keys(kube: &KubeClient) -> Result<HashSet<RepoKey>, BackendError> {
-    let pods: Api<Pod> = Api::namespaced(kube.client().clone(), kube.namespace());
-    let selector = format!("{COMPONENT_LABEL_KEY}={COMPONENT_LABEL_VALUE}");
-    let list = pods
-        .list(&ListParams::default().labels(&selector))
-        .await
-        .map_err(|e| BackendError::Other(anyhow::Error::new(e)))?;
-
-    let mut keys: HashSet<RepoKey> = HashSet::new();
-    for pod in &list.items {
-        if let Some(key) = repo_key_from_pod(pod) {
-            keys.insert(key);
-        }
-    }
-    Ok(keys)
 }
 
 /// The JSON merge patch that sets `last-pending-at` to `now` (RFC3339). Pure +
@@ -189,34 +121,6 @@ fn kill_delete_params(grace_secs: u64) -> DeleteParams {
         grace_period_seconds: Some(u32::try_from(grace_secs).unwrap_or(u32::MAX)),
         ..DeleteParams::default()
     }
-}
-
-/// Read a pod annotation as `&str`, if present.
-fn annotation<'a>(pod: &'a Pod, key: &str) -> Option<&'a str> {
-    pod.metadata
-        .annotations
-        .as_ref()
-        .and_then(|a| a.get(key))
-        .map(String::as_str)
-}
-
-/// Recover the `(installation, repo)` reconcile key a live pod belongs to from its
-/// stamped annotations. `None` when any of the three annotations is missing /
-/// unparseable (the pod is not one of ours, or is malformed). Used by the sweep to
-/// enqueue every repo that currently has a live pod.
-pub fn repo_key_from_pod(pod: &Pod) -> Option<(i64, RepoRef)> {
-    let owner = annotation(pod, ANNOTATION_OWNER)?;
-    let name = annotation(pod, ANNOTATION_REPO)?;
-    let installation = annotation(pod, ANNOTATION_INSTALLATION)?
-        .parse::<i64>()
-        .ok()?;
-    Some((
-        installation,
-        RepoRef {
-            owner: owner.to_string(),
-            name: name.to_string(),
-        },
-    ))
 }
 
 /// Whether a listed pod's owner/repo annotations match `repo` (the LIST selector
@@ -290,5 +194,5 @@ fn pod_to_live(pod: &Pod) -> Option<LivePod> {
 }
 
 #[cfg(test)]
-#[path = "k8s_tests.rs"]
+#[path = "lifecycle_tests.rs"]
 mod tests;

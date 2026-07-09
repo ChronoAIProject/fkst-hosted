@@ -21,6 +21,7 @@ fn test_router() -> axum::Router {
         github_app: None,
         github_app_webhook_secret: None,
         reconciler: None,
+        session_backend: None,
         storage: None,
         log_registry: Default::default(),
     })

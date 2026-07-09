@@ -85,6 +85,7 @@ pub(crate) fn state(
         github_app: None,
         github_app_webhook_secret: None,
         reconciler: None,
+        session_backend: None,
         storage,
         log_registry: registry,
     }

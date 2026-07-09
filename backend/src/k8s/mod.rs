@@ -8,13 +8,17 @@
 pub mod client;
 pub mod env_store;
 pub mod env_validator;
-// Package-AGNOSTIC session-health signal: the pure evaluator ([`health_eval`]), the
-// best-effort recent-log reader ([`pod_logs`]), and the scrape loop ([`health_scrape`])
-// that flags/clears a degraded session on its trigger issue. Gated on pod dispatch.
+// Pure builders for the env-validation Pod + its spec ConfigMap (issue #338), driven
+// by the direct-Kubernetes backend's validation verb. Kept as a standalone module so
+// the spec-shaping (which needs no cluster) stays testable in isolation.
+pub(crate) mod env_validator_pod;
+// Package-AGNOSTIC session-health signal: the pure evaluator ([`health_eval`]) and
+// the scrape loop ([`health_scrape`]) that flags/clears a degraded session on its
+// trigger issue (the recent-log read now lives on the session backend). Gated on pod
+// dispatch.
 pub mod health_eval;
 pub mod health_scrape;
 pub(crate) mod isolation;
-pub mod pod_logs;
 pub mod session_launcher;
 // Model B (issue #359 §5.4, PR5b): the in-place per-session installation-token
 // rotation loop that keeps a long-lived session pod's mounted `github-token`
