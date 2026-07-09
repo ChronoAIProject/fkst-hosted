@@ -30,9 +30,9 @@ use crate::k8s::pod_logs::pod_recent_logs;
 use crate::k8s::session_launcher::{
     ANNOTATION_TRIGGER_ISSUE, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE, SESSION_ID_LABEL,
 };
-use crate::reconcile::repo::repo_key_from_pod;
 use crate::reconcile::{ReconcileHandle, SUBSTRATE_DEGRADED_LABEL};
 use crate::reconcile_config::ReconcileConfig;
+use crate::session_backend::k8s::repo_key_from_pod;
 
 /// The scrape loop: every `health_scrape_secs`, evaluate every live session pod's
 /// health and flag/clear its trigger issue. Runs for the process lifetime; a sweep

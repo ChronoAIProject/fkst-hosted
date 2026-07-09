@@ -26,9 +26,9 @@ use crate::k8s::session_launcher::{
     session_github_token_json, session_object_name, COMPONENT_LABEL_KEY, COMPONENT_LABEL_VALUE,
     SESSION_ID_LABEL,
 };
-use crate::reconcile::repo::repo_key_from_pod;
 use crate::reconcile::ReconcileHandle;
 use crate::reconcile_config::ReconcileConfig;
+use crate::session_backend::k8s::repo_key_from_pod;
 use crate::session_spec::creds::GITHUB_TOKEN_FILE;
 
 /// The rotation loop: every `pod_token_refresh_secs`, refresh every live session

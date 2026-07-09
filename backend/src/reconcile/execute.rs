@@ -15,21 +15,13 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use secrecy::ExposeSecret;
-
-use k8s_openapi::api::core::v1::Pod;
-use k8s_openapi::chrono::{DateTime, Utc};
-use kube::api::{Api, DeleteParams, Patch, PatchParams};
+use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::Config;
 use crate::github_app::listing::GithubListing;
 use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
 use crate::k8s::env_store::{get_environment, load_environment_for_session};
-use crate::k8s::session_launcher::ANNOTATION_LAST_PENDING_AT;
-use crate::k8s::{
-    build_session_pod, build_session_secret, create_session_pod, session_github_token_json,
-    session_object_name, KubeClient, SessionPodOutcome, SessionPodSpec,
-};
+use crate::k8s::{session_github_token_json, KubeClient, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
@@ -39,7 +31,8 @@ use crate::reconcile::execute_comments::{
 };
 use crate::reconcile::reachability;
 use crate::reconcile::retire::retire_work_issues;
-use crate::session_spec::creds::StorageWriterCreds;
+use crate::session_backend::{BackendError, EnsureOutcome, SessionBackend};
+use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
 
 use super::{SUBSTRATE_ANNOUNCED_LABEL, SUBSTRATE_CONFIG_REJECTED_LABEL, SUBSTRATE_INVALID_LABEL};
 
@@ -55,7 +48,12 @@ const ENV_STATUS_READY: &str = "ready";
 /// per-repo task.
 #[derive(Clone)]
 pub struct ReconcileCtx {
-    /// Kubernetes API client (namespace-bound) for the session pod/secret effects.
+    /// The session runtime the executor drives every pod effect through (spawn /
+    /// mark-pending / stop / cleanup / observe). Backend-neutral: the executor never
+    /// touches a concrete Kubernetes type, only this `Arc<dyn SessionBackend>`.
+    pub backend: Arc<dyn SessionBackend>,
+    /// Kubernetes API client (namespace-bound), still used directly for the
+    /// environment-store reads (`resolve_environment`) and the loops' sweep.
     pub kube: KubeClient,
     /// GitHub App token service: mints the session token + posts comments/labels.
     pub github: GithubAppTokens,
@@ -142,11 +140,6 @@ pub async fn execute(action: ReconcileAction, repo: &RepoRef, ctx: &ReconcileCtx
     }
 }
 
-/// A namespaced Pod API bound to the reconciler's namespace.
-fn pods_api(ctx: &ReconcileCtx) -> Api<Pod> {
-    Api::namespaced(ctx.kube.client().clone(), ctx.kube.namespace())
-}
-
 // --- Spawn -------------------------------------------------------------------
 
 /// Spawn a session pod for a desired-but-absent registration: reachability →
@@ -218,37 +211,34 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
     // 4. Assemble the pod spec from the registration.
     let spec = session_pod_spec_from(&reg, ctx.config.reconcile.github_bot_login.clone());
 
-    // 5. Build + create (409 = already-live no-op).
-    let pod = match build_session_pod(&spec, &ctx.config.pod) {
-        Ok(pod) => pod,
-        Err(error) => {
-            tracing::error!(session_id = %reg.session_id, error = %error, "reconcile spawn: pod build failed; not spawning");
-            return;
-        }
-    };
-    // Always inject the write-only SA creds when the control plane configured one
-    // (log streaming is unconditional; the per-session flag was retired). Absent a
-    // configured SA the Secret carries no storage-* keys and the in-pod uploader
-    // fails closed — no bundle, never a crash.
+    // 5. Assemble the per-session credential map (the executor now owns the credential
+    //    layout, threading it through the backend as `SecretString`s). Always inject
+    //    the write-only SA creds when the control plane configured one (log streaming
+    //    is unconditional; the per-session flag was retired). Absent a configured SA
+    //    the Secret carries no storage-* keys and the in-pod uploader fails closed —
+    //    no bundle, never a crash.
     let storage = storage_writer_creds(&ctx.config);
-    let secret = build_session_secret(
-        &spec,
+    let creds: BTreeMap<String, SecretString> = credential_secret_data(
         &github_token_json,
-        &ctx.config.llm_api_key,
-        &user_env,
+        ctx.config.llm_api_key.expose_secret(),
+        user_env.iter().map(|(k, v)| (k.as_str(), v.as_str())),
         storage,
-        None,
-    );
-    match create_session_pod(ctx.kube.client(), pod, secret).await {
-        Ok(SessionPodOutcome::Created) => {
+    )
+    .into_iter()
+    .map(|(k, v)| (k, SecretString::from(v)))
+    .collect();
+
+    // 6. Ensure the session runtime exists (409 = already-live no-op). The backend
+    //    builds + creates the pod and its owner-referenced creds Secret; on failure it
+    //    has already logged the specific error, so an `Err` here is a swallowed no-op.
+    match ctx.backend.ensure_session(&spec, creds).await {
+        Ok(EnsureOutcome::Created) => {
             tracing::info!(session_id = %spec.session_id, owner = %reg.repo.owner, "reconcile spawn: session pod created")
         }
-        Ok(SessionPodOutcome::AlreadyLive) => {
+        Ok(EnsureOutcome::AlreadyLive) => {
             tracing::info!(session_id = %spec.session_id, "reconcile spawn: session pod already live (no-op)")
         }
-        Err(error) => {
-            tracing::error!(session_id = %spec.session_id, error = %error, "reconcile spawn: session pod create failed")
-        }
+        Err(_) => {}
     }
 }
 
@@ -292,69 +282,39 @@ fn storage_writer_creds(config: &Config) -> Option<StorageWriterCreds<'_>> {
 
 // --- Pod lifecycle effects ---------------------------------------------------
 
-/// Refresh a live pod's `last-pending-at` annotation to now (JSON merge patch).
+/// Refresh a live pod's `last-pending-at` annotation to now (via the backend).
 /// 404-tolerant: a pod deleted between the plan and the patch is a benign no-op.
 async fn touch_pending(session_id: &str, ctx: &ReconcileCtx) {
-    let name = session_object_name(session_id);
-    let patch = last_pending_patch(Utc::now());
-    match pods_api(ctx)
-        .patch(&name, &PatchParams::default(), &Patch::Merge(patch))
-        .await
-    {
-        Ok(_) => tracing::debug!(session_id = %session_id, "reconcile: touched last-pending-at"),
-        Err(kube::Error::Api(e)) if e.code == 404 => {}
+    match ctx.backend.mark_pending(session_id).await {
+        Ok(()) => tracing::debug!(session_id = %session_id, "reconcile: touched last-pending-at"),
+        Err(BackendError::NotFound) => {}
         Err(error) => {
             tracing::warn!(session_id = %session_id, error = %error, "reconcile: touch last-pending-at failed")
         }
     }
 }
 
-/// The JSON merge patch that sets `last-pending-at` to `now` (RFC3339). Pure +
-/// unit-tested so the annotation key + shape can never drift from the builder.
-fn last_pending_patch(now: DateTime<Utc>) -> serde_json::Value {
-    let annotations = serde_json::Map::from_iter([(
-        ANNOTATION_LAST_PENDING_AT.to_string(),
-        serde_json::Value::String(now.to_rfc3339()),
-    )]);
-    serde_json::json!({ "metadata": { "annotations": serde_json::Value::Object(annotations) } })
-}
-
-/// Delete a pod for `reason`, honouring the configured termination grace.
-/// 404-tolerant (already gone).
+/// Stop a pod for `reason`, honouring the configured termination grace (via the
+/// backend). 404-tolerant (already gone).
 async fn kill(session_id: &str, reason: KillReason, ctx: &ReconcileCtx) {
-    let name = session_object_name(session_id);
-    let params = kill_delete_params(ctx.config.reconcile.pod_termination_grace_secs);
     tracing::info!(session_id = %session_id, ?reason, "reconcile: killing session pod");
-    match pods_api(ctx).delete(&name, &params).await {
-        Ok(_) => {}
-        Err(kube::Error::Api(e)) if e.code == 404 => {}
+    match ctx.backend.stop_session(session_id, reason).await {
+        Ok(()) => {}
+        Err(BackendError::NotFound) => {}
         Err(error) => {
             tracing::warn!(session_id = %session_id, error = %error, "reconcile: kill delete failed")
         }
     }
 }
 
-/// `DeleteParams` carrying the drain window (`terminationGracePeriodSeconds`). Pure
-/// + unit-tested. A grace beyond `u32::MAX` is clamped (never realistically hit).
-fn kill_delete_params(grace_secs: u64) -> DeleteParams {
-    DeleteParams {
-        grace_period_seconds: Some(u32::try_from(grace_secs).unwrap_or(u32::MAX)),
-        ..DeleteParams::default()
-    }
-}
-
-/// GC a terminal pod (its owner-referenced Secret cascades away in the background).
-/// 404-tolerant.
+/// GC a terminal pod (its owner-referenced Secret cascades away in the background,
+/// via the backend). 404-tolerant.
 async fn cleanup_terminal(session_id: &str, ctx: &ReconcileCtx) {
-    let name = session_object_name(session_id);
-    match pods_api(ctx)
-        .delete(&name, &DeleteParams::background())
-        .await
-    {
-        Ok(_) => {
+    match ctx.backend.remove_terminal(session_id).await {
+        Ok(()) => {
             tracing::info!(session_id = %session_id, "reconcile: cleaned up terminal session pod")
         }
-        Err(kube::Error::Api(e)) if e.code == 404 => {}
+        Err(BackendError::NotFound) => {}
         Err(error) => {
             tracing::warn!(session_id = %session_id, error = %error, "reconcile: terminal cleanup failed")
         }
@@ -515,6 +475,12 @@ async fn resolve_environment(
     }
 }
 
+#[cfg(test)]
+#[path = "execute_test_support.rs"]
+mod execute_test_support;
+#[cfg(test)]
+#[path = "execute_routing_tests.rs"]
+mod routing_tests;
 #[cfg(test)]
 #[path = "execute_tests.rs"]
 mod tests;
