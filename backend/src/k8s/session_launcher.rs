@@ -32,7 +32,7 @@ use crate::models::RepoRef;
 use crate::session_pod::log_stream::{
     ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
 };
-use crate::session_spec::creds::DEFAULT_CREDS_DIR;
+use crate::session_spec::creds::{CREDS_COMPLETE_SENTINEL, DEFAULT_CREDS_DIR};
 
 /// Errors launching a substrate-session Pod (relocated from the deleted Model-A
 /// Job launcher, trimmed to the variants the Pod path actually raises).
@@ -356,18 +356,25 @@ pub fn build_session_pod(spec: &SessionPodSpec, config: &PodConfig) -> Result<Po
 /// now, assembling it through the shared
 /// [`credential_secret_data`](crate::session_spec::creds::credential_secret_data)
 /// helper so the layout never diverges from the Model-A Job Secret. Each value is a
-/// [`SecretString`] and is exposed only here to write it into `string_data`. Owner-
-/// referenced to the Pod (when `owner` is provided) so K8s cascade-deletes it on Pod
-/// GC.
+/// [`SecretString`] and is exposed only here to write it into `string_data`. The
+/// non-secret credentials-complete sentinel ([`CREDS_COMPLETE_SENTINEL`]) is added so
+/// it rides the atomic Secret mount and the in-pod driver's engine-start gate passes
+/// instantly. Owner-referenced to the Pod (when `owner` is provided) so K8s
+/// cascade-deletes it on Pod GC.
 pub fn build_session_secret(
     spec: &SessionPodSpec,
     creds: BTreeMap<String, SecretString>,
     owner: Option<OwnerReference>,
 ) -> Secret {
-    let string_data = creds
+    let mut string_data: BTreeMap<String, String> = creds
         .into_iter()
         .map(|(key, value)| (key, value.expose_secret().to_string()))
         .collect();
+    // The credential writer's completeness signal: present at the atomic Secret mount
+    // so the in-pod driver's engine-start gate passes instantly. Non-secret (a bare
+    // marker), so it rides string_data directly. Deliberately NOT part of the shared
+    // credential_secret_data map — it is a per-backend writer signal, not a credential.
+    string_data.insert(CREDS_COMPLETE_SENTINEL.to_string(), "1".to_string());
 
     Secret {
         metadata: ObjectMeta {

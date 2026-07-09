@@ -23,6 +23,9 @@ use crate::reserved_env::{is_reserved_env_key, LLM_ENV_KEY};
 use crate::session_spec::creds::CredsLayout;
 
 use super::codex::render_codex_config;
+use super::creds_gate::{
+    creds_wait_timeout_from_env, wait_for_creds_complete, CREDS_POLL_INTERVAL,
+};
 use super::creds_helper::{git_config_entries, materialize_helper_script, GitConfigEntry};
 use super::log_stream::collector::{collector_config_from_env, spawn_collector};
 use super::plan::{
@@ -90,6 +93,32 @@ async fn run_substrate(env: &SubstrateEnv) -> Result<ExitCode, String> {
     //    restartPolicy:Always MUST resume durable delivery state, never wipe it.
     create_dir_idempotent(durable_root)?;
     create_dir_idempotent(runtime_root)?;
+
+    // 1b. Gate on the credentials-complete sentinel BEFORE reading any credential:
+    //     the writer creates it LAST, so its presence proves the whole set is on disk.
+    //     In k8s-customized mode it rides the atomic Secret mount → the first check
+    //     passes (~0ms). A writer that never finishes trips the timeout and we abort
+    //     engine start rather than run with a half-written credential set.
+    match wait_for_creds_complete(
+        &creds.creds_complete(),
+        creds_wait_timeout_from_env(),
+        CREDS_POLL_INTERVAL,
+    )
+    .await
+    {
+        Ok(waited) => tracing::info!(
+            wait_ms = waited.as_millis() as u64,
+            "run-substrate: credentials-complete sentinel present; starting engine"
+        ),
+        Err(timeout) => {
+            tracing::error!(
+                sentinel = %timeout.sentinel.display(),
+                elapsed_ms = timeout.elapsed.as_millis() as u64,
+                "run-substrate: credentials not complete before timeout; aborting engine start"
+            );
+            return Err(timeout.to_string());
+        }
+    }
 
     // 2. Read the static secrets. The github-token is deliberately NOT read into a
     //    variable — the helper + shim read the mounted file per-op so the
