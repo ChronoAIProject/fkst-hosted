@@ -34,6 +34,7 @@ export interface SiteContent {
   nav: {
     introduction: string;
     getStarted: string;
+    dashboard: string;
     getStartedCta: string;
     homeAria: string;
   };
@@ -42,11 +43,27 @@ export interface SiteContent {
     en: string;
     zh: string;
   };
+  auth: {
+    signIn: string;
+    signOut: string;
+  };
   footer: {
     tagline: string;
     getStarted: string;
     github: string;
     manual: string;
+  };
+  dashboard: {
+    metaTitle: string;
+    eyebrow: string;
+    title: string;
+    lede: string;
+    signInTitle: string;
+    signInBody: string;
+    notConfigured: string;
+    authError: string;
+    comingSoonTitle: string;
+    comingSoonBody: string;
   };
   intro: {
     metaTitle: string;

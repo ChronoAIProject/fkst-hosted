@@ -4,6 +4,7 @@ export const en: SiteContent = {
   nav: {
     introduction: 'Introduction',
     getStarted: 'Get Started',
+    dashboard: 'Dashboard',
     getStartedCta: 'Get started →',
     homeAria: 'FKST — home',
   },
@@ -12,11 +13,27 @@ export const en: SiteContent = {
     en: 'EN',
     zh: '中文',
   },
+  auth: {
+    signIn: 'Sign in with GitHub',
+    signOut: 'Sign out',
+  },
   footer: {
     tagline: '· ChronoAI hosted cloud',
     getStarted: 'Get Started',
     github: 'GitHub',
     manual: 'Operator manual',
+  },
+  dashboard: {
+    metaTitle: 'FKST — Dashboard',
+    eyebrow: 'Dashboard',
+    title: 'Your fkst sessions',
+    lede: 'Across the repositories where the fkst-hosted App is installed, see every trigger issue and its work issues — grouped session by session.',
+    signInTitle: 'Sign in to view your dashboard',
+    signInBody: 'Connect your GitHub account to load your fkst sessions and issues. You stay signed in — the token refreshes automatically.',
+    notConfigured: 'The dashboard backend is not configured for this deployment yet.',
+    authError: 'Sign-in was cancelled or failed. Please try again.',
+    comingSoonTitle: 'Dashboard coming next',
+    comingSoonBody: 'You’re signed in. The repositories + sessions view lands in the next update.',
   },
   intro: {
     metaTitle: 'FKST — Autonomous coding sessions, hosted',
