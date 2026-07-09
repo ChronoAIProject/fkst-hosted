@@ -3,6 +3,7 @@ local graph = require("testkit.graph")
 local payloads_builders = require("devloop.payloads.builders")
 local t = fkst.test
 local core = require("core")
+local author_policy = require("testkit.github_author_policy")
 
 local function json_string(value)
   return tostring(value or "")
@@ -58,12 +59,8 @@ local function initial_event()
 end
 
 local function mock_env()
+  author_policy.mock_env(t, nil, { times = 12 })
   for _ = 1, 12 do
-    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "",
       stderr = "",

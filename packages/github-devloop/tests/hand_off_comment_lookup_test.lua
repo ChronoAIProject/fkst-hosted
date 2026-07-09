@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local payloads_predicates = require("devloop.payloads.predicates")
 local core = h.core
 local t = h.t
+local author_policy = require("testkit.github_author_policy")
 
 local function json_string(value)
   return tostring(value or "")
@@ -19,7 +20,9 @@ local function mock_comment_get(comment_id, marker)
 end
 
 local function verify(hand_off, expected)
-  h.mock_author_policy_env()
+  author_policy.mock_env(t, nil, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
   return payloads_predicates.verified_hand_off_state(core, "owner/repo", hand_off, expected)
 end
 

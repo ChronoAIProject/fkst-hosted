@@ -8,6 +8,7 @@ local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
 local decompose_lib = require("devloop.decompose")
 local m_builders = require("devloop.markers.builders")
+local author_policy = require("testkit.github_author_policy")
 
 local two_issue_json = [[{"issues":[{"title":"Extract retry helper","body":"Smaller scope: implement retry helper.\nNon-goals: no workflow rewrite.\nAcceptance: helper tests pass."},{"title":"Wire retry helper","body":"Smaller scope: wire one caller.\nNon-goals: no unrelated states.\nAcceptance: integration test passes."}]}]]
 local first_delivery_facts = nil
@@ -123,15 +124,15 @@ end
 
 local function mock_decompose_codex(stdout)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
-  for _ = 1, 4 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
-    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
-  end
+  author_policy.mock_env(t, {
+    env = {
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = "",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+    times = 4,
+  })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
     stderr = "",

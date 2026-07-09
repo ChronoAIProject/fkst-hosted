@@ -1,5 +1,6 @@
 local t = fkst.test
 local core = require("core")
+local author_policy = require("testkit.github_author_policy")
 
 local raw_mock_command = t.mock_command
 local raw_command_calls = t.command_calls
@@ -39,14 +40,9 @@ function t.mock_command(command, response)
   raw_mock_command(command, response)
 end
 
-local function mock_author_policy_env()
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', { stdout = "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', { stdout = "trusted-human", stderr = "", exit_code = 0 })
-end
-
 function t.run_department(...)
-  mock_author_policy_env()
+  local _, _, run_opts = ...
+  author_policy.mock_env(t, run_opts)
   return raw_run_department(...)
 end
 
@@ -89,7 +85,6 @@ local function base_env(name, extra)
 end
 
 local function opts(name, extra_env)
-  mock_author_policy_env()
   return {
     env = base_env(name, extra_env),
   }
@@ -112,9 +107,7 @@ local function mock_write_env(value)
 end
 
 local function mock_bot_env(value)
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = value or "fkst-test-bot" })
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', { stdout = "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', { stdout = "trusted-human", stderr = "", exit_code = 0 })
+  author_policy.mock_env(t, { env = { FKST_GITHUB_BOT_LOGIN = value or "fkst-test-bot" } })
 end
 
 local function mock_issue_list(stdout, exit_code, stderr)

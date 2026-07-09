@@ -2,6 +2,7 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local seam = require("tests.entity_read_mock_helpers")
+local author_policy = require("testkit.github_author_policy")
 
 local function decode(text)
   local ok, value = pcall(json.decode, text or "")
@@ -21,7 +22,9 @@ end
 
 return {
   test_issue_read_seam_registers_equivalent_view_rest_probe_and_comments = function()
-    h.mock_author_policy_env()
+    author_policy.mock_env(t, nil, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     seam.mock_issue_read_forms(t, {
       repo = "owner/repo",
       number = 42,
@@ -64,7 +67,9 @@ return {
   end,
 
   test_pr_read_seam_registers_equivalent_view_rest_probe_and_comments = function()
-    h.mock_author_policy_env()
+    author_policy.mock_env(t, nil, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     seam.mock_pr_read_forms(t, {
       repo = "owner/repo",
       number = 7,
@@ -130,7 +135,9 @@ return {
   end,
 
   test_unregistered_entity_read_fails_closed = function()
-    h.mock_author_policy_env()
+    author_policy.mock_env(t, nil, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     local ok = pcall(function()
       require("devloop.github_proxy_entity_view").fetch_issue_view("owner/repo", 404, "2026-06-14T00:00:00Z", { consumer = "unregistered" })
     end)

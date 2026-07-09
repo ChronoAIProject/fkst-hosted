@@ -100,17 +100,14 @@ end
 
 function H.fire_raiser_child(body)
   return [[
-local t = fkst.test
+	local t = fkst.test
+	local author_policy = require("testkit.github_author_policy")
 
-local function mock_env(repo, max_issues)
-  t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = repo or "owner/repo", stderr = "", exit_code = 0 })
-  for _ = 1, 2 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
-  end
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', { stdout = "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', { stdout = "trusted-human", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
-end
+	local function mock_env(repo, max_issues)
+	  author_policy.mock_env(t, nil, { times = 2 })
+	  t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = repo or "owner/repo", stderr = "", exit_code = 0 })
+	  t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
+	end
 
 local function observe_facts(generated_at_ms, queue)
   return {

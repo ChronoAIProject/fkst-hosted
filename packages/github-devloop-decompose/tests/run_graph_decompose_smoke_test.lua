@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local h = require("tests.devloop_helpers")
 local graph = require("testkit.graph")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local author_policy = require("testkit.github_author_policy")
 
 local payloads_builders = require("devloop.payloads.builders")
 local conv_reconcile = require("devloop.convergence.reconcile")
@@ -42,24 +43,18 @@ local function decompose_payload()
 end
 
 local function mock_env()
+  author_policy.mock_env(t, {
+    env = {
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = "ElonSG",
+      FKST_GITHUB_AUTHORIZED_LOGINS = "authorized-human",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+    times = 8,
+  })
   for _ = 1, 8 do
-    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_MANAGED_BOT_LOGINS"), {
-      stdout = "ElonSG",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_AUTHORIZED_LOGINS"), {
-      stdout = "authorized-human",
       stderr = "",
       exit_code = 0,
     })

@@ -1,4 +1,5 @@
 local M = {}
+local author_policy = require("testkit.github_author_policy")
 
 local bundle_json = '{"title":"Implement decision recorder","body":"Full issue body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"author":{"login":"fkst-test-bot"}}\n'
 local pr_context_json = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[],"author":{"login":"fkst-test-bot"}}\n'
@@ -71,10 +72,6 @@ function M.new(deps)
   local base_run_department = helpers.run_department
 
   helpers.run_department = function(...)
-    if type(helpers.mock_author_policy_env) == "function" then
-      local _, _, run_opts = ...
-      helpers.mock_author_policy_env(run_opts)
-    end
     return base_run_department(...)
   end
 
@@ -112,22 +109,10 @@ function M.new(deps)
   local function mock_context_bundle(payload, run_opts)
     local repo, issue_number = issue_identity_from_payload(payload)
     local ok = { stdout = "", stderr = "", exit_code = 0 }
-    -- Resolve the author-policy env from the caller's run_opts (matching mock_author_policy_env
-    -- defaults) so the ingress filter's whitelist honours managed/authorized logins the test set,
-    -- instead of hardcoding them empty (which would clobber a test's managed/authorized logins).
-    local run_env = (type(run_opts) == "table" and type(run_opts.env) == "table") and run_opts.env or {}
-    local bot_login = run_env.FKST_GITHUB_BOT_LOGIN or "fkst-test-bot"
-    local managed_ok = { stdout = run_env.FKST_DEVLOOP_MANAGED_BOT_LOGINS or "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 }
-    local authorized_ok = { stdout = run_env.FKST_GITHUB_AUTHORIZED_LOGINS or "trusted-human", stderr = "", exit_code = 0 }
-    for _ = 1, 8 do
-      helpers.t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-        stdout = bot_login,
-        stderr = "",
-        exit_code = 0,
-      })
-      helpers.t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', managed_ok)
-      helpers.t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', authorized_ok)
-    end
+    author_policy.mock_env(helpers.t, run_opts, {
+      configure_trusted_bot_login = helpers.mock_author_policy_configure,
+      times = 8,
+    })
     for _ = 1, 8 do
       helpers.t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
         stdout = "/tmp/fkst-packages-test/github-devloop/runtime",

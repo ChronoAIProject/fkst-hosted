@@ -4,24 +4,7 @@ local t = h.t
 local sweep_bounds = require("devloop.sweep_bounds")
 local github_adapter = require("forge.github")
 local github = require("devloop.github_factory").production_handle
-
-local function mock_author_policy_env()
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-    stdout = "fkst-test-bot",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = "fkst-test-bot,ElonSG",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-    stdout = "trusted-human",
-    stderr = "",
-    exit_code = 0,
-  })
-end
+local author_policy = require("testkit.github_author_policy")
 
 local function assert_argv_equal(actual, expected)
   t.eq(#actual, #expected)
@@ -31,7 +14,9 @@ local function assert_argv_equal(actual, expected)
 end
 
 local function with_exec_argv(fn)
-  mock_author_policy_env()
+  author_policy.mock_env(t, nil, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
   local old_exec_argv = exec_argv
   local calls = {}
   exec_argv = function(spec)
@@ -91,11 +76,7 @@ return {
     local injected_github = github_adapter.new(function(spec)
       table.insert(calls, spec)
       return { stdout = "{}", stderr = "", exit_code = 0 }
-    end, {
-      trusted_author_policy = function()
-        return { "fkst-test-bot" }
-      end,
-    })
+    end, author_policy.github_options())
     sweep_bounds.sweep_exec({
       run = function(timeout)
         return injected_github.api_get("owner/repo", "issues/42", timeout)

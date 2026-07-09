@@ -8,6 +8,7 @@ local find_raise = h.find_raise
 local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
+local author_policy = require("testkit.github_author_policy")
 
 local function mock_repo_env(repo)
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', {
@@ -39,7 +40,13 @@ end
 
 local function mock_bot_env(value)
   h.mock_bot_env(value)
-  h.mock_author_policy_env()
+  author_policy.mock_env(t, {
+    env = {
+      FKST_GITHUB_BOT_LOGIN = value or "fkst-test-bot",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
 end
 
 local function encode_json_string(value)
@@ -166,15 +173,15 @@ end
 
 local function mock_intake_codex_with_closed_issues(stdout, closed_issues, exit_code, stderr)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
-  for _ = 1, 4 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
-    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
-  end
+  author_policy.mock_env(t, {
+    env = {
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = "",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+    times = 4,
+  })
   for _ = 1, 3 do
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
       stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
@@ -287,7 +294,9 @@ local function candidate(extra)
 end
 
 local function run_judge(payload, run_opts)
-  h.mock_author_policy_env(run_opts)
+  author_policy.mock_env(t, run_opts, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
   return t.run_department("departments/intake_judge/main.lua", {
     queue = "github-devloop-intake.devloop_intake_candidate",
     payload = payload,

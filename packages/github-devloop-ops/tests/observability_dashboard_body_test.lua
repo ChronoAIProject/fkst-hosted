@@ -4,6 +4,7 @@ local t = h.t
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local m_builders = require("devloop.markers.builders")
+local author_policy = require("testkit.github_author_policy")
 require("departments.observability.main")
 
 local old_dashboard_body_cap = 12000
@@ -27,16 +28,6 @@ local function no_revert_scan()
     revert_commits_complete = true,
     issue_reopens_complete = true,
   }
-end
-
-local function mock_managed_bot_logins(value)
-  for _ = 1, 8 do
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-      stdout = value or "",
-      stderr = "",
-      exit_code = 0,
-    })
-  end
 end
 
 local function large_mermaid(line_count)
@@ -481,7 +472,13 @@ return {
 
   test_recent_merged_issues_feed_closed_issue_autonomy_markers_to_avm_scoreboard = function()
     mock_dashboard_env()
-    mock_managed_bot_logins("loning,ElonSG")
+    author_policy.mock_env(t, {
+      env = {
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "loning,ElonSG",
+      },
+    }, {
+      times = 8,
+    })
     local marker = '<!-- fkst:github-devloop:autonomy-result:v1'
       .. ' proposal="github-devloop/issue/ChronoAIProject/fkst-packages/1649"'
       .. ' repo="ChronoAIProject/fkst-packages"'
@@ -537,7 +534,13 @@ return {
 
   test_avm_scoreboard_uses_managed_bot_trust_and_logs_marker_rejections = function()
     mock_dashboard_env()
-    mock_managed_bot_logins("loning,ElonSG")
+    author_policy.mock_env(t, {
+      env = {
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "loning,ElonSG",
+      },
+    }, {
+      times = 8,
+    })
     local record = autonomy_record({
       proposal_id = "github-devloop/issue/owner/repo/1655",
       issue_number = "1655",

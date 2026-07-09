@@ -3,6 +3,7 @@ local core = h.core
 local t = h.t
 local gh_argv = require("testkit.gh_argv_mock")
 local entity_list_cache = require("devloop.entity_list_cache")
+local author_policy = require("testkit.github_author_policy")
 
 local function count_calls(needle)
   local count = 0
@@ -26,7 +27,9 @@ return {
   end,
 
   test_shared_issue_observe_list_reuses_only_the_same_poll_snapshot = function()
-    h.mock_author_policy_env()
+    author_policy.mock_env(t, nil, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     local repo = "owner/shared-list"
     local command = core.gh_issue_list_observe_cmd(repo)
     t.mock_command(command, {
@@ -59,7 +62,9 @@ return {
   end,
 
   test_shared_pr_observe_list_failures_are_not_cached = function()
-    h.mock_author_policy_env()
+    author_policy.mock_env(t, nil, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     local repo = "owner/shared-pr-list"
     local command = core.gh_pr_list_observe_cmd(repo)
     t.mock_command(command, {

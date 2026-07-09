@@ -16,6 +16,7 @@ local mock_git_status = h.mock_git_status
 local mock_git_commit = h.mock_git_commit
 local count_calls = h.count_calls
 local find_raise = h.find_raise
+local author_policy = require("testkit.github_author_policy")
 
 local original_issue = 1663
 local canonical_issue = 1715
@@ -74,14 +75,6 @@ local function command_count_snapshot()
   }
 end
 
-local function mock_managed_bot_logins(logins)
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = logins or "",
-    stderr = "",
-    exit_code = 0,
-  })
-end
-
 return {
   test_noncanonical_fork_exits_before_implementation = function()
     local event = ready()
@@ -122,7 +115,14 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    mock_managed_bot_logins("loning,ElonSG")
+    author_policy.mock_env(t, {
+      env = {
+        FKST_GITHUB_BOT_LOGIN = "loning",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "loning,ElonSG",
+      },
+    }, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
 
     local before = command_count_snapshot()
     local result = run_implement(event, opts("implement-peer-duplicate-fork", {

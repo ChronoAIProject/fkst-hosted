@@ -1,30 +1,18 @@
 local M = {}
 
 local gh_argv = require("testkit.gh_argv_mock")
+local author_policy = require("testkit.github_author_policy")
 
-local function configure_test_bot_login()
+local function configure_test_bot_login(login)
   local ok, devloop_base = pcall(require, "devloop.base")
   if ok and type(devloop_base) == "table" and type(devloop_base.configure_trusted_bot_login) == "function" then
-    devloop_base.configure_trusted_bot_login("fkst-test-bot")
+    devloop_base.configure_trusted_bot_login(login or "fkst-test-bot")
   end
 end
 
-local function mock_author_policy_env(t)
-  configure_test_bot_login()
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-    stdout = "fkst-test-bot",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = "fkst-test-bot,ElonSG",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-    stdout = "trusted-human",
-    stderr = "",
-    exit_code = 0,
+local function install_author_policy_env(t, run_opts)
+  return author_policy.mock_env(t, run_opts, {
+    configure_trusted_bot_login = configure_test_bot_login,
   })
 end
 
@@ -44,7 +32,7 @@ function M.new(deps)
 
   gh_argv.install(t, core)
   configure_test_bot_login()
-  mock_author_policy_env(t)
+  install_author_policy_env(t)
 
   local function source_ref()
     return {
@@ -112,9 +100,7 @@ function M.new(deps)
     reached = reached,
     unresolved = unresolved,
     argv_rendered = gh_argv.argv_rendered,
-    mock_author_policy_env = function()
-      mock_author_policy_env(t)
-    end,
+    mock_author_policy_configure = configure_test_bot_login,
   }
 end
 

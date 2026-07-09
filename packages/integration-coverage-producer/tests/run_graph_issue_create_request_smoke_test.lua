@@ -1,5 +1,6 @@
 local graph = require("testkit.graph")
 local t = fkst.test
+local author_policy = require("testkit.github_author_policy")
 
 local edge_id = "github-proxy.github_issue_create_request -> github-proxy.github_issue_create"
 
@@ -33,6 +34,7 @@ local function initial_event()
 end
 
 local function mock_env()
+  author_policy.mock_env(t)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
     stdout = "owner/repo",
     stderr = "",
@@ -40,21 +42,6 @@ local function mock_env()
   })
   t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
     stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-    stdout = "fkst-test-bot",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = "fkst-test-bot,ElonSG",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-    stdout = "trusted-human",
     stderr = "",
     exit_code = 0,
   })

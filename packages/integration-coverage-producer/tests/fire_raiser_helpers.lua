@@ -96,7 +96,8 @@ end
 
 function H.fire_raiser_child(body)
   return [=[
-local t = fkst.test
+	local t = fkst.test
+	local author_policy = require("testkit.github_author_policy")
 
 local checker_fixture = [[
 [
@@ -113,28 +114,14 @@ local checker_fixture = [[
 ]
 ]]
 
-local function mock_env()
-  t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
-    stdout = "owner/repo",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-    stdout = "fkst-test-bot",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = "fkst-test-bot,ElonSG",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-    stdout = "trusted-human",
-    stderr = "",
-    exit_code = 0,
-  })
-end
+	local function mock_env()
+	  author_policy.mock_env(t)
+	  t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
+	    stdout = "owner/repo",
+	    stderr = "",
+	    exit_code = 0,
+	  })
+	end
 
 local function mock_checker()
   t.mock_command("tools/check_repo_integration_coverage.py", {

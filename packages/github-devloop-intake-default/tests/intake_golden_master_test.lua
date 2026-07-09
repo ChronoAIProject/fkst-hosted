@@ -8,6 +8,7 @@ local operator_commands = require("devloop.operator_commands")
 local opts = h.opts
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local m_builders = require("devloop.markers.builders")
+local author_policy = require("testkit.github_author_policy")
 
 local function mock_repo_env(repo)
   t.mock_command('printf %s "$FKST_DEVLOOP_UPSTREAM_BRANCH"', { stdout = "dev", stderr = "", exit_code = 0 })
@@ -106,15 +107,15 @@ end
 
 local function mock_intake_codex(stdout)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
-  for _ = 1, 4 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
-    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
-  end
+  author_policy.mock_env(t, {
+    env = {
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = "",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+    times = 4,
+  })
   for _ = 1, 3 do
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
       stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
@@ -175,7 +176,9 @@ local function trusted_reintake_command(id)
 end
 
 local function run_judge(payload, run_opts)
-  h.mock_author_policy_env(run_opts)
+  author_policy.mock_env(t, run_opts, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
   return t.run_department("departments/intake_judge/main.lua", {
     queue = "github-devloop-intake.devloop_intake_candidate",
     payload = payload,

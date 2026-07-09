@@ -1,4 +1,5 @@
 local t = fkst.test
+local author_policy = require("testkit.github_author_policy")
 
 local function run_department_with_logs(path, event, opts)
   local result = t.run_department(path, event, opts)
@@ -18,22 +19,13 @@ local function mock_env_reads()
     exit_code = 0,
   })
   for _ = 1, 2 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
+    author_policy.mock_env(t, {
+      env = {
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
+        FKST_GITHUB_AUTHORIZED_LOGINS = "",
+      },
     })
   end
-  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-    stdout = "",
-    stderr = "",
-    exit_code = 0,
-  })
 end
 
 return {

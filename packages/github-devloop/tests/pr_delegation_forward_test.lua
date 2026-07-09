@@ -6,6 +6,7 @@ local core = h.core
 local t = h.t
 local gh_argv = require("testkit.gh_argv_mock")
 local m_builders = require("devloop.markers.builders")
+local author_policy = require("testkit.github_author_policy")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -55,7 +56,9 @@ local function pr_list(pr_number)
 end
 
 local function mock_branch_list(...)
-  h.mock_author_policy_env()
+  author_policy.mock_env(t, nil, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
   local count = select("#", ...)
   for index = 1, count do
     local pr_number = select(index, ...)

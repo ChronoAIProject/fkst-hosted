@@ -1,5 +1,6 @@
 local core = require("core")
 local error_facts = require("contract.error_facts")
+local author_policy = require("testkit.github_author_policy")
 local t = fkst.test
 
 local raw_mock_command = t.mock_command
@@ -22,12 +23,6 @@ local function mock_command(command, response)
   if normalized ~= command then
     raw_mock_command(normalized, response)
   end
-end
-
-local function mock_author_policy_env()
-  mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
-  mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', { stdout = "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 })
-  mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', { stdout = "trusted-human", stderr = "", exit_code = 0 })
 end
 
 local package_root = "packages/github-proxy"
@@ -338,7 +333,7 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_malformed_success_stdout = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t)
     mock_command("gh api repos/owner/repo/issues/3", {
       stdout = '{"title":',
       stderr = "",
@@ -357,7 +352,7 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_empty_success_stdout = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t)
     mock_command("gh api repos/owner/repo/issues/3", {
       stdout = "",
       stderr = "",
@@ -376,7 +371,7 @@ return {
   end,
 
   test_rest_pr_view_fails_closed_on_malformed_success_stdout = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t)
     mock_command("gh api repos/owner/repo/pulls/7", {
       stdout = "not json",
       stderr = "",
@@ -395,7 +390,7 @@ return {
   end,
 
   test_rest_pr_view_fails_closed_on_empty_success_stdout = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t)
     mock_command("gh api repos/owner/repo/pulls/7", {
       stdout = "",
       stderr = "",
@@ -414,7 +409,7 @@ return {
   end,
 
   test_rest_issue_view_empty_comments_stdout_uses_empty_comments_fallback = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t)
     mock_command("gh api repos/owner/repo/issues/4", {
       stdout = '{"title":"Issue","body":"Body","state":"open","user":{"login":"fkst-test-bot"},"updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
       stderr = "",

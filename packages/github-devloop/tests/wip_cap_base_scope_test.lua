@@ -3,6 +3,7 @@ local h = require("tests.devloop_core_helpers")
 local m_builders = require("devloop.markers.builders")
 local m_mgw = require("devloop.merge_gate_wait")
 local m_mq = require("devloop.merge_queue")
+local author_policy = require("testkit.github_author_policy")
 local core = h.core
 local t = h.t
 
@@ -24,7 +25,9 @@ local function render_comment(body)
 end
 
 local function mock_env(max_inflight)
-  h.mock_author_policy_env()
+  author_policy.mock_env(t, nil, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
   t.mock_command('printf %s "$FKST_DEVLOOP_MAX_INFLIGHT"', {
     stdout = tostring(max_inflight), stderr = "", exit_code = 0,
   })

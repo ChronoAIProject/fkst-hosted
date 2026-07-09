@@ -14,6 +14,7 @@ local count_calls = h.count_calls
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
 local decompose_lib = require("devloop.decompose")
 local m_builders = require("devloop.markers.builders")
+local author_policy = require("testkit.github_author_policy")
 
 local blocked_comments
 
@@ -130,15 +131,15 @@ end
 
 local function mock_decompose_codex(stdout)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
-  for _ = 1, 4 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
-    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
-  end
+  author_policy.mock_env(t, {
+    env = {
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = "",
+    },
+  }, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+    times = 4,
+  })
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop/runtime",
     stderr = "",

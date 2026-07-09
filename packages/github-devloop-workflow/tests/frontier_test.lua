@@ -6,6 +6,7 @@ local core = require("core")
 local m_builders = require("devloop.markers.builders")
 local m_facts = require("devloop.markers.facts")
 local devloop_base = require("devloop.base")
+local author_policy = require("testkit.github_author_policy")
 local t = fkst.test
 
 local repo = "owner/repo"
@@ -76,20 +77,6 @@ local function comment(body)
     author_login = core._test_bot_login,
     created_at = "2026-07-04T00:00:00Z",
   }
-end
-
-local function mock_author_policy_env()
-  devloop_base.configure_trusted_bot_login(core._test_bot_login)
-  t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_MANAGED_BOT_LOGINS"), {
-    stdout = "fkst-test-bot,ElonSG",
-    stderr = "",
-    exit_code = 0,
-  })
-  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_AUTHORIZED_LOGINS"), {
-    stdout = "trusted-human",
-    stderr = "",
-    exit_code = 0,
-  })
 end
 
 local function child_comments_with_delegated_merged_pr(child_proposal_id, pr_number, version)
@@ -316,7 +303,9 @@ local tests = {
   end,
 
   test_delegated_merged_child_materializes_next_slot = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t, { env = { FKST_GITHUB_BOT_LOGIN = core._test_bot_login } }, {
+      configure_trusted_bot_login = devloop_base.configure_trusted_bot_login,
+    })
     local child_issue = 90
     local child_proposal_id = base_ids.proposal_id(repo, child_issue)
     local version = "ready/consensus-github-devloop/issue/owner/repo/90/2026-07-04T00-00-00Z"
@@ -356,7 +345,9 @@ local tests = {
   -- -> premature slot materialization + false workflow terminal-done. Found by
   -- real supervise dogfood 2026-07-04 (origins #135, #93; children #149/#152/#94).
   test_delegated_open_pr_child_is_running_not_ready = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t, { env = { FKST_GITHUB_BOT_LOGIN = core._test_bot_login } }, {
+      configure_trusted_bot_login = devloop_base.configure_trusted_bot_login,
+    })
     local child_issue = 149
     local child_proposal_id = base_ids.proposal_id(repo, child_issue)
     local version = "ready/consensus-github-devloop/issue/owner/repo/90/2026-07-04T00-00-00Z"
@@ -384,7 +375,9 @@ local tests = {
   end,
 
   test_reader_marks_no_changes_child_with_merged_predecessor_blocked_with_why = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t, { env = { FKST_GITHUB_BOT_LOGIN = core._test_bot_login } }, {
+      configure_trusted_bot_login = devloop_base.configure_trusted_bot_login,
+    })
     local first_issue = 201
     local second_issue = 202
     local first_proposal_id = base_ids.proposal_id(repo, first_issue)
@@ -444,7 +437,9 @@ local tests = {
   end,
 
   test_reader_ignores_stale_no_changes_failure_marker_for_current_impl_failed_state = function()
-    mock_author_policy_env()
+    author_policy.mock_env(t, { env = { FKST_GITHUB_BOT_LOGIN = core._test_bot_login } }, {
+      configure_trusted_bot_login = devloop_base.configure_trusted_bot_login,
+    })
     local first_issue = 301
     local second_issue = 302
     local first_proposal_id = base_ids.proposal_id(repo, first_issue)

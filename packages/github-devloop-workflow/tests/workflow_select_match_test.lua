@@ -12,6 +12,7 @@ local marker = require("core.marker")
 local payloads_builders = require("devloop.payloads.builders")
 local testing = require("testkit.testing")
 local t = fkst.test
+local author_policy = require("testkit.github_author_policy")
 
 local candidate_queue = "github-devloop-intake.devloop_intake_candidate"
 
@@ -188,15 +189,14 @@ end
 
 local function mock_default_context_bundle(current)
   local ok = { stdout = "", stderr = "", exit_code = 0 }
-  for _ = 1, 4 do
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
-    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
-  end
+  author_policy.mock_env(t, {
+    env = {
+      FKST_DEVLOOP_MANAGED_BOT_LOGINS = "",
+      FKST_GITHUB_AUTHORIZED_LOGINS = "",
+    },
+  }, {
+    times = 4,
+  })
   for _ = 1, 4 do
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
       stdout = "/tmp/fkst-packages-test/github-devloop-workflow/default-intake-runtime",

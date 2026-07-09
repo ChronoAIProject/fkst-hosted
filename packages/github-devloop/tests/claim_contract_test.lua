@@ -5,6 +5,7 @@ local core = h.core
 local forks = require("devloop.forks")
 local t = h.t
 local gh_argv = require("testkit.gh_argv_mock")
+local author_policy = require("testkit.github_author_policy")
 
 local function mock_bot(login, write_mode, write_reads)
   t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
@@ -24,14 +25,6 @@ local function mock_bot(login, write_mode, write_reads)
       exit_code = 0,
     })
   end
-end
-
-local function mock_managed_bot_logins(logins)
-  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-    stdout = logins or "",
-    stderr = "",
-    exit_code = 0,
-  })
 end
 
 local function count_calls(needle)
@@ -368,7 +361,14 @@ return {
 
   test_managed_bot_author_unassigned_issue_after_grace_skips_without_forking = function()
     mock_bot("fkst-test-bot", "1")
-    mock_managed_bot_logins("peer-bot[bot],other-peer")
+    author_policy.mock_env(t, {
+      env = {
+        FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "peer-bot[bot],other-peer",
+      },
+    }, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 45), {
       stdout = issue_state_json({ author_login = "peer-bot[bot]", created_at = created_after_grace() }),
       stderr = "",
@@ -507,7 +507,14 @@ return {
 
   test_existing_peer_bot_fork_parent_ledger_skips_duplicate_fork = function()
     mock_bot("loning", "1")
-    mock_managed_bot_logins("loning,ElonSG")
+    author_policy.mock_env(t, {
+      env = {
+        FKST_GITHUB_BOT_LOGIN = "loning",
+        FKST_DEVLOOP_MANAGED_BOT_LOGINS = "loning,ElonSG",
+      },
+    }, {
+      configure_trusted_bot_login = h.mock_author_policy_configure,
+    })
     local dedup_key = forks.fork_issue_dedup_key("owner/repo", 42)
     t.mock_command(core.gh_issue_view_state_cmd("owner/repo", 42), {
       stdout = issue_state_json({

@@ -4,6 +4,7 @@ local t = h.t
 local seam = require("tests.entity_read_mock_helpers")
 local gh_argv = require("testkit.gh_argv_mock")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
+local author_policy = require("testkit.github_author_policy")
 
 local function count_calls(needle)
   return gh_argv.count_calls(t, needle)
@@ -41,6 +42,12 @@ local function comments_rest_command(repo, number)
     .. "repos/" .. tostring(repo) .. "/issues/" .. tostring(number) .. "/comments?per_page=100"
 end
 
+local function mock_author_policy()
+  return author_policy.mock_env(t, nil, {
+    configure_trusted_bot_login = h.mock_author_policy_configure,
+  })
+end
+
 local function encode_json_string(value)
   return tostring(value or "")
     :gsub("\\", "\\\\")
@@ -61,7 +68,7 @@ end
 
 return {
   test_marker_issue_state_reader_accepts_explicit_timeout = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     seam.mock_issue_read_forms(t, {
       repo = "owner/repo",
       number = 42,
@@ -89,7 +96,7 @@ return {
   end,
 
   test_validator_match_serves_cached_issue_view_without_graphql = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/cache-hit"
     local issue_number = 4242
     local updated_at = "2026-06-03T01:02:03Z"
@@ -121,7 +128,7 @@ return {
   end,
 
   test_validator_match_can_coalesce_explicit_force_fresh = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/legacy-force-fresh"
     local issue_number = 4246
     local updated_at = "2026-06-03T01:02:03Z"
@@ -155,7 +162,7 @@ return {
   end,
 
   test_observe_validator_match_can_coalesce_legacy_pr_force_fresh = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/legacy-pr-force-fresh"
     local pr_number = 4247
     local updated_at = "2026-06-03T01:02:03Z"
@@ -191,7 +198,7 @@ return {
   end,
 
   test_validator_mismatch_fetches_rest_issue_view_and_recaches = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/cache-miss"
     local issue_number = 4243
     local view_command = core.gh_issue_view_entity_cmd(repo, issue_number)
@@ -226,7 +233,7 @@ return {
   end,
 
   test_force_fresh_issue_view_bypasses_cache_and_recaches = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/force-fresh"
     local issue_number = 4244
     local updated_at = "2026-06-03T01:02:03Z"
@@ -262,7 +269,7 @@ return {
   end,
 
   test_write_invalidation_forces_same_validator_issue_refetch = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/cache-invalidation"
     local issue_number = 4245
     local updated_at = "2026-06-03T01:02:03Z"
@@ -299,7 +306,7 @@ return {
   end,
 
   test_no_validator_uses_rest_probe_before_serving_cached_pr_view = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/probe"
     local pr_number = 7
     local updated_at = "2026-06-03T01:02:03Z"
@@ -348,7 +355,7 @@ return {
   end,
 
   test_no_validator_probe_mismatch_fetches_rest_pr_view = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/probe-miss"
     local pr_number = 8
     local cached_updated_at = "2026-06-03T01:02:03Z"
@@ -387,7 +394,7 @@ return {
   end,
 
   test_observe_cache_miss_rest_pr_shape_preserves_mergeability_fields = function()
-    h.mock_author_policy_env()
+    mock_author_policy()
     local repo = "owner/rest-shape"
     local pr_number = 9
     seam.mock_pr_read_forms(t, {

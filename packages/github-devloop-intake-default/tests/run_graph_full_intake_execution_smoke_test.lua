@@ -6,6 +6,7 @@ local t = fkst.test
 local core = require("core")
 local h = require("tests.devloop_base_helpers")
 local entity_read_mocks = require("tests.entity_read_mock_helpers")
+local author_policy = require("testkit.github_author_policy")
 
 local repo = "owner/repo"
 local issue_number = 42
@@ -42,12 +43,8 @@ local function initial_event()
 end
 
 local function mock_env()
+  author_policy.mock_env(t, nil, { times = 32 })
   for _ = 1, 32 do
-    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
-      stdout = "fkst-test-bot",
-      stderr = "",
-      exit_code = 0,
-    })
     t.mock_command(devloop_base.read_env_command("FKST_GITHUB_WRITE"), {
       stdout = "",
       stderr = "",

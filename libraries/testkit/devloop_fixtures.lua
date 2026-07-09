@@ -8,6 +8,7 @@ local run_fake_expecting_failure = testing.run_fake_expecting_failure
 local gh_fake = require("forge.github_fake")
 local git_fake = require("forge.git_fake")
 local mocks_factory = require("testkit.devloop_fixtures.mocks")
+local author_policy = require("testkit.github_author_policy")
 
 local function nonce()
   return tostring({}):gsub("[^%w._-]", "_")
@@ -326,39 +327,15 @@ function M.new(deps)
     })
   end
 
-  local function mock_author_policy_env(run_opts)
-    local login = "fkst-test-bot"
-    local managed = "fkst-test-bot,ElonSG"
-    local authorized = "trusted-human"
-    if type(run_opts) == "table" and type(run_opts.env) == "table" and run_opts.env.FKST_GITHUB_BOT_LOGIN ~= nil then
-      login = tostring(run_opts.env.FKST_GITHUB_BOT_LOGIN)
-    end
-    devloop_base.configure_trusted_bot_login(login)
-    if type(run_opts) == "table" and type(run_opts.env) == "table" and run_opts.env.FKST_DEVLOOP_MANAGED_BOT_LOGINS ~= nil then
-      managed = tostring(run_opts.env.FKST_DEVLOOP_MANAGED_BOT_LOGINS)
-    end
-    if type(run_opts) == "table" and type(run_opts.env) == "table" and run_opts.env.FKST_GITHUB_AUTHORIZED_LOGINS ~= nil then
-      authorized = tostring(run_opts.env.FKST_GITHUB_AUTHORIZED_LOGINS)
-    end
-    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-      stdout = login,
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
-      stdout = managed,
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
-      stdout = authorized,
-      stderr = "",
-      exit_code = 0,
+  local function install_author_policy_env(run_opts)
+    return author_policy.mock_env(t, run_opts, {
+      configure_trusted_bot_login = devloop_base.configure_trusted_bot_login,
+      times = 8,
     })
   end
 
   local function run_department(path, event, run_opts)
-    mock_author_policy_env(run_opts)
+    install_author_policy_env(run_opts)
     return t.run_department(path, event, run_opts)
   end
 
@@ -620,7 +597,7 @@ function M.new(deps)
     merge_ready = merge_ready,
     run_observe = run_observe,
     run_department = run_department,
-    mock_author_policy_env = mock_author_policy_env,
+    mock_author_policy_configure = devloop_base.configure_trusted_bot_login,
     run_result = run_result,
     run_result_expecting_failure = run_result_expecting_failure,
     mark_result_read_failure = mark_result_read_failure,
