@@ -17,6 +17,9 @@
 //! - `FKST_GITHUB_OAUTH_BASE_URL` — the OAuth host for the authorize + token-exchange
 //!   calls. Default `https://github.com` (overridable for GitHub Enterprise or a
 //!   test mock; distinct from the REST `FKST_GITHUB_API_BASE_URL`).
+//! - `FKST_FRONTEND_URL` — the frontend base URL the OAuth *login* callback
+//!   (`crate::routes::auth`) redirects back to, handing the SPA its token in the URL
+//!   fragment. When unset, the frontend login flow is unavailable.
 //!
 //! Every knob is OPTIONAL (the feature degrades gracefully), with ONE fail-closed:
 //! configuring exactly one of the OAuth id/secret pair is an operator mistake (the
@@ -52,6 +55,8 @@ struct LogVars {
     github_oauth_client_secret: Option<String>,
     #[serde(default)]
     github_oauth_base_url: Option<String>,
+    #[serde(default)]
+    frontend_url: Option<String>,
 }
 
 /// Resolved log-download configuration. Every field is optional except the OAuth
@@ -77,6 +82,10 @@ pub struct LogConfig {
     /// The OAuth host for authorize + token-exchange. Env:
     /// `FKST_GITHUB_OAUTH_BASE_URL`. Default `https://github.com`.
     pub oauth_base_url: String,
+    /// The frontend URL the login callback redirects back to (with the issued
+    /// token in the URL fragment). Env: `FKST_FRONTEND_URL`. `None` (blank
+    /// coerced) → the frontend login flow is unavailable (503).
+    pub frontend_url: Option<String>,
 }
 
 impl Default for LogConfig {
@@ -87,6 +96,7 @@ impl Default for LogConfig {
             oauth_client_id: None,
             oauth_client_secret: None,
             oauth_base_url: DEFAULT_OAUTH_BASE_URL.to_string(),
+            frontend_url: None,
         }
     }
 }
@@ -153,6 +163,7 @@ impl LogConfig {
             oauth_client_id,
             oauth_client_secret: oauth_client_secret.map(SecretString::from),
             oauth_base_url,
+            frontend_url: non_blank(raw.frontend_url),
         })
     }
 }
@@ -203,6 +214,7 @@ mod tests {
             ("FKST_GITHUB_OAUTH_CLIENT_ID", "Iv1.abc"),
             ("FKST_GITHUB_OAUTH_CLIENT_SECRET", "shh"),
             ("FKST_GITHUB_OAUTH_BASE_URL", "https://ghe.example"),
+            ("FKST_FRONTEND_URL", "https://app.example/fkst/"),
         ]))
         .expect("full config loads");
         assert_eq!(
@@ -215,6 +227,10 @@ mod tests {
             "shh"
         );
         assert_eq!(config.oauth_base_url, "https://ghe.example");
+        assert_eq!(
+            config.frontend_url.as_deref(),
+            Some("https://app.example/fkst/")
+        );
     }
 
     #[test]

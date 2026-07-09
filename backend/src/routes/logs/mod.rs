@@ -30,7 +30,9 @@
 //! bundle server-side (a presigned URL is used only internally) and returns the bytes.
 
 mod identity;
-mod oauth;
+// Shared with `crate::routes::auth` (the frontend login flow reuses the signed-state
+// + authorize-URL + token-exchange primitives).
+pub(crate) mod oauth;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};

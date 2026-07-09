@@ -75,7 +75,9 @@ pub fn build_router(state: AppState) -> Result<Router, AppError> {
     // in-handler via a GitHub token or OAuth). It shares this subtree's timeout,
     // which is a comfortable upper bound — its own presign + `/user` round-trips are
     // each independently bounded well below it.
-    let api_routes = routes::environments::router().merge(routes::logs::router());
+    let api_routes = routes::environments::router()
+        .merge(routes::logs::router())
+        .merge(routes::auth::router());
 
     // The GitHub App webhook (issue #108) is UNAUTHENTICATED at the app layer
     // but signature-verified inside the handler over the raw body. It lives at

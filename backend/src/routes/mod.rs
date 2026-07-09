@@ -1,5 +1,6 @@
 //! HTTP route handlers.
 
+pub mod auth;
 pub mod environments;
 pub mod github_app_webhook;
 pub mod health;
