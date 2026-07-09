@@ -110,14 +110,10 @@ A stall means consensus/review activity stops while only polling continues. A bo
 
 Use this path for both branch 3 and branch 4 in the Stall decision tree.
 
-- Run the `sshx` skill on the fix: thinking triplet (3 peer-invisible codex workers, read-only) → meta-judge → implementation worker (isolated git worktree, workspace-write) → review triplet → fix-or-done.
-- Codex worker template:
-
-  ```sh
-  timeout N codex exec --sandbox read-only|workspace-write --skip-git-repo-check --cd "$PWD" "<brief>" </dev/null
-  ```
-
-  Run workers in the background. Each worker emits `===CONCLUSION===`.
+- Run the `sshx` skill on the fix. **The `sshx` skill contract is the sole authority for its stage order, seat count, seat roles, worker-carrier invocation, and completion/verdict routing — this file does not restate them.** Read it; do not reconstruct its shape from memory or from prose that merely describes it.
+- Two rules that dogfooding has repeatedly violated, restated here only as warnings, not as a second specification:
+  - Worker completion is recognized ONLY from the worker's result envelope plus its completion sentinel. Process-table snapshots, log tails, `pgrep`, an empty `git status`, and completion-looking strings in stdout are diagnostic surfaces and are **never** completion or verdict evidence.
+  - This repo additionally dispatches a ChatGPT Pro oracle in parallel with the contract's codex seats, as an extra cross-model-family perspective (see `CLAUDE.md`). It is advisory: it never routes completion or verdicts.
 
 - Land it: from the dedicated worktree (cut from `dev`, never the pinned operator checkout), push the branch and open a PR to `dev`. This is the out-of-band exception: the broken pipeline cannot carry its own fix. Watch CI; squash-merge when green.
 - **Post the review record ON the PR** (before or right after merge): a comment with each reviewer's verdict, blocking findings, fix-pass history, and suite evidence. The audit trail lives on GitHub, not in local `/tmp` logs — same marker-as-fact transparency the autonomous pipeline gives its own PRs (user feedback, PR#226).
