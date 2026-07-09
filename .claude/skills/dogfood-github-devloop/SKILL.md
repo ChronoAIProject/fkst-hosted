@@ -135,12 +135,19 @@ Use this path for both branch 3 and branch 4 in the Stall decision tree.
 
 ### Re-entry by operator command (GitHub-surface, NOT state mutation)
 
-Trusted operator comments (first line `fkst: <cmd>`, authored by the bot login) re-enter a stuck item without hand-mutating state. Each has a precondition — using the wrong one is **refused, not forced** (and you must not force it):
+Trusted operator comments (first line `fkst: <cmd>`, authored by the bot login) re-enter a stuck item without hand-mutating state. Each has a precondition — using the wrong one is **refused, not forced** (and you must not force it).
 
-- `fkst: rereview` — re-runs consensus on a **stalled `thinking`** issue (requires the thinking to be stalled, not active); or re-triggers review on a `reviewing`/`blocked`/`review-meta` issue with an **OPEN** PR.
-- `fkst: reready` — re-triggers implement on an issue at `ready`.
-- `fkst: reimplement` — re-enters implement on an `impl-failed` issue.
-- `fkst: reintake` — re-runs intake; **refused if the issue has any active devloop state** (only for a declined/stateless issue).
+**Post the command on the entity whose comment stream the handler reads.** PR-phase facts are entity-local: they live in the PR's comments, not the issue's. A command posted on the wrong entity is refused by the handler that does read it, with a precondition message that describes a *different* command of the same name. `rereview` is really two commands sharing one name, on two entities:
+
+| Command | Post it on | Read by | Precondition |
+|---|---|---|---|
+| `fkst: rereview` | the **issue** | `observe_issue` | **stalled `thinking`** (not active) |
+| `fkst: rereview` | the **PR** | `observe_pr` | PR entity-local state is `blocked`, `review-meta`, or **stalled** `reviewing` |
+| `fkst: reready` | the **issue** | `observe_issue` | issue at `ready` |
+| `fkst: reimplement` | the **issue** | `observe_issue` | issue at `impl-failed` |
+| `fkst: reintake` | the **issue** | intake | **refused if the issue has any active devloop state** (declined/stateless only) |
+
+An issue that is `blocked` via `child-pr-blocked` is a *derived* parent state: drive the **child PR**, and the parent cascades. `rereview` on such an issue is refused — correctly — because `observe_issue` only knows the `thinking` variant.
 
 **Known re-entry GAPS — the old-instance-strand class. File/drive a SYSTEM issue; do NOT force a command past its precondition and do NOT hand-mutate the marker.** A fix prevents FUTURE failures but does not revive instances already frozen before it landed, and some frozen states have NO working operator re-entry at all:
 
