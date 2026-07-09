@@ -2,7 +2,7 @@ local base_ids = require("devloop.base_ids")
 local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local saga = require("workflow.saga")
-local github = require("forge.github").production_handle
+local github = require("devloop.github_factory").production_handle
 local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
 

@@ -1,6 +1,7 @@
 local M = {}
 local argv_render = require("forge.argv")
 local github_view = require("forge.github_view")
+local stdout_policy = require("forge.github.stdout_policy")
 local append_comments = github_view.append_comments
 local rest_state = github_view.rest_state
 local json_string = github_view.json_string
@@ -43,7 +44,7 @@ local function sanitize_cache_segment(value, allow_slash)
 end
 
 local function issue_view_cache_key(repo, number)
-  return "github-proxy/view/"
+  return "github-proxy/view-v2/"
     .. sanitize_cache_segment(repo, true)
     .. "/issue/"
     .. sanitize_cache_segment(number, false)
@@ -378,7 +379,12 @@ end
 
 function M.install(handle)
   function handle.issue_view(repo, issue_number, fields, timeout)
-    return handle._exec(gh_issue_view_argv(repo, issue_number, fields), timeout, "gh issue view")
+    return handle._exec(
+      gh_issue_view_argv(repo, issue_number, fields),
+      timeout,
+      "gh issue view",
+      stdout_policy.content_json("issue_view")
+    )
   end
 
   function handle.issue_view_cmd(repo, issue_number, fields)
@@ -386,8 +392,18 @@ function M.install(handle)
   end
 
   local function fetch_issue_view_stdout(repo, number, timeout, opts)
-    local issue = handle._exec(gh_issue_rest_argv(repo, number), timeout, "gh issue view")
-    local comments = handle._exec(gh_issue_comments_rest_argv(repo, number), timeout, "gh issue comments")
+    local issue = handle._exec(
+      gh_issue_rest_argv(repo, number),
+      timeout,
+      "gh issue view",
+      stdout_policy.content_json("issue_view")
+    )
+    local comments = handle._exec(
+      gh_issue_comments_rest_argv(repo, number),
+      timeout,
+      "gh issue comments",
+      stdout_policy.content_json("issue_comments")
+    )
     local stdout = rest_issue_to_view_stdout(issue.stdout, comments.stdout)
     cache_successful_issue_view(issue_view_cache_key(repo, number), stdout, opts and opts.consumer or "")
     return stdout
@@ -414,7 +430,12 @@ function M.install(handle)
     end
 
     if cached ~= nil then
-      local current = handle._exec(gh_issue_updated_at_argv(repo, number), timeout, "gh issue updated_at")
+      local current = handle._exec(
+        gh_issue_updated_at_argv(repo, number),
+        timeout,
+        "gh issue updated_at",
+        stdout_policy.plain_text()
+      )
       if parse_updated_at_stdout(current.stdout) == cached.updated_at then
         return M.normalize_issue(cached.stdout, source_ref)
       end
@@ -423,31 +444,57 @@ function M.install(handle)
       end
     end
 
-    local out = handle._exec(gh_issue_view_full_argv(repo, number), timeout, "gh issue view")
+    local out = handle._exec(
+      gh_issue_view_full_argv(repo, number),
+      timeout,
+      "gh issue view",
+      stdout_policy.content_json("issue_view")
+    )
     cache_successful_issue_view(key, out.stdout, options.consumer or "")
     return M.normalize_issue(out.stdout, source_ref)
   end
 
   function handle.issue_rest_view(repo, issue_number, timeout)
-    return handle._exec(gh_issue_rest_argv(repo, issue_number), timeout, "gh issue REST view")
+    return handle._exec(
+      gh_issue_rest_argv(repo, issue_number),
+      timeout,
+      "gh issue REST view",
+      stdout_policy.content_json("issue_view")
+    )
   end
 
   function handle.issue_view(repo, issue_number, fields, timeout)
-    return handle._exec(gh_issue_view_argv(repo, issue_number, fields), timeout, "gh issue view")
+    return handle._exec(
+      gh_issue_view_argv(repo, issue_number, fields),
+      timeout,
+      "gh issue view",
+      stdout_policy.content_json("issue_view")
+    )
   end
 
   function handle.issue_updated_at(repo, issue_number, timeout)
-    return handle._exec(gh_issue_updated_at_argv(repo, issue_number), timeout, "gh issue updated_at")
+    return handle._exec(
+      gh_issue_updated_at_argv(repo, issue_number),
+      timeout,
+      "gh issue updated_at",
+      stdout_policy.plain_text()
+    )
   end
 
   function handle.issue_add_sub_issue(repo, parent_issue_number, sub_issue_number, timeout)
-    local child = handle._exec(gh_issue_rest_argv(repo, sub_issue_number), timeout, "gh issue REST view")
+    local child = handle._exec(
+      gh_issue_rest_argv(repo, sub_issue_number),
+      timeout,
+      "gh issue REST view",
+      stdout_policy.content_json("issue_view")
+    )
     local child_id = issue_database_id(child.stdout, "sub-issue")
     local ok, result = pcall(function()
       return handle._exec(
         gh_issue_add_sub_issue_argv(repo, parent_issue_number, child_id),
         timeout,
-        "gh issue add sub-issue"
+        "gh issue add sub-issue",
+        stdout_policy.write_response()
       )
     end)
     if ok then
@@ -455,7 +502,12 @@ function M.install(handle)
     end
     if maybe_duplicate_sub_issue_error(result) then
       local parent_ok, parent = pcall(function()
-        return handle._exec(gh_issue_sub_issues_argv(repo, parent_issue_number), timeout, "gh issue list sub-issues")
+        return handle._exec(
+          gh_issue_sub_issues_argv(repo, parent_issue_number),
+          timeout,
+          "gh issue list sub-issues",
+          stdout_policy.trusted_metadata_json()
+        )
       end)
       if parent_ok and parent_has_sub_issue_id(parent.stdout, child_id) then
         return { stdout = "", stderr = result.result and result.result.stderr or "", exit_code = 0, idempotent = true }
@@ -475,7 +527,8 @@ function M.install(handle)
     return handle._exec(
       gh_issue_edit_assignee_argv(repo, issue_number, "--add-assignee", login),
       timeout,
-      "gh issue assign"
+      "gh issue assign",
+      stdout_policy.write_response()
     )
   end
 
@@ -483,7 +536,8 @@ function M.install(handle)
     return handle._exec(
       gh_issue_edit_assignee_argv(repo, issue_number, "--remove-assignee", login),
       timeout,
-      "gh issue unassign"
+      "gh issue unassign",
+      stdout_policy.write_response()
     )
   end
 
@@ -491,7 +545,8 @@ function M.install(handle)
     return handle._exec(
       gh_issue_edit_label_argv(repo, issue_number, "--add-label", label),
       timeout,
-      "gh issue add label"
+      "gh issue add label",
+      stdout_policy.write_response()
     )
   end
 
@@ -499,7 +554,8 @@ function M.install(handle)
     return handle._exec(
       gh_issue_edit_label_argv(repo, issue_number, "--remove-label", label),
       timeout,
-      "gh issue remove label"
+      "gh issue remove label",
+      stdout_policy.write_response()
     )
   end
 

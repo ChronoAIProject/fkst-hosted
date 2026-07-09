@@ -24,6 +24,7 @@ local function render_comment(body)
 end
 
 local function mock_env(max_inflight)
+  h.mock_author_policy_env()
   t.mock_command('printf %s "$FKST_DEVLOOP_MAX_INFLIGHT"', {
     stdout = tostring(max_inflight), stderr = "", exit_code = 0,
   })

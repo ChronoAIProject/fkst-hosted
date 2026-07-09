@@ -6,7 +6,7 @@ persistence_class = "composed_judgment_pipeline"
 root = "."
 
 [lib_deps]
-libraries = ["contract", "workflow", "testkit", "forge"]
+libraries = ["contract", "workflow", "testkit", "forge", "devloop"]
 
 [event_deps]
 packages = ["idle-detector", "github-proxy"]

@@ -2,6 +2,7 @@ local github = require("forge.github")
 local github_fake = require("forge.github_fake")
 local git = require("forge.git")
 local git_fake = require("forge.git_fake")
+local policy = require("forge.github.content_filter").author_policy_from_logins({ "author", "human", "fkst-test-bot" })
 
 local function sorted_public_methods(handle)
   local names = {}
@@ -47,7 +48,7 @@ return {
     local stdout = canonical_issue_stdout()
     local real = github.new(function(_opts)
       return { stdout = stdout, stderr = "", exit_code = 0 }
-    end)
+    end, { trusted_author_policy = policy })
     local fake_model = github_fake.model({
       issues = {
         ["owner/repo#issue/42"] = json.decode(stdout),
@@ -79,7 +80,7 @@ return {
       return { stdout = "{}", stderr = "", exit_code = 0 }
     end
     assert_list_equal(
-      sorted_public_methods(github.new(noop_exec)),
+      sorted_public_methods(github.new(noop_exec, { trusted_author_policy = policy })),
       sorted_public_methods(github_fake.new(github_fake.model({}))),
       "forge.github methods"
     )

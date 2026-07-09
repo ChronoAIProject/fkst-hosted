@@ -155,7 +155,7 @@ function M.pr_view_stdout(fields)
   local merged_at = f.merged_at or (state == "MERGED" and "2026-06-03T02:05:04Z" or "")
   local merge_commit_sha = f.merge_commit_sha or (state == "MERGED" and (f.head_sha or "def456") or nil)
   return string.format(
-    '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","mergeCommit":{"oid":%s},"comments":[%s],"labels":[%s],"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
+    '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","mergeCommit":{"oid":%s},"comments":[%s],"labels":[%s],"author":{"login":"%s"},"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
     tonumber(f.number) or 7,
     encode_json_string(f.head or "devloop-owner-repo-42-01HY"),
     encode_json_string(f.head_sha or "def456"),
@@ -169,6 +169,7 @@ function M.pr_view_stdout(fields)
     encode_json_value(merge_commit_sha),
     M.view_comments_json(f.comments),
     encode_labels_json(f.labels),
+    encode_json_string(f.author_login or "fkst-test-bot"),
     encode_json_string(f.head_repo or f.repo or "owner/repo"),
     encode_json_string(owner),
     encode_json_string(owner),
@@ -258,7 +259,7 @@ local function mock_comments(t, repo, issue_number, comments, times)
 end
 
 local issue_view_selectors = {
-  "number,title",
+  "number,title,author",
   "title,body,comments,labels,state,updatedAt,assignees",
   "title,body,comments,labels,state,createdAt,updatedAt,assignees,author",
   "title,body,updatedAt,labels,comments,state",
@@ -268,14 +269,14 @@ local issue_view_selectors = {
   "title,body,comments,state,stateReason,assignees,author",
   "assignees,author",
   "labels,comments",
-  "title,updatedAt,labels,comments,state",
-  "title,labels,comments",
+  "title,updatedAt,labels,comments,state,author",
+  "title,labels,comments,author",
   "title,labels,comments,assignees,author",
-  "title,body,labels,comments",
-  "title,labels,comments,state,assignees",
+  "title,body,labels,comments,author",
+  "title,labels,comments,state,assignees,author",
 }
 
-local pr_origin_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
+local pr_origin_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,author,mergeable,mergeStateStatus"
 local pr_origin_legacy_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_head_selector = "headRefName"
 local pr_fix_selector = "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
@@ -283,7 +284,7 @@ local pr_fix_precheck_selector = "headRefName,headRefOid,baseRefName,state,updat
 local pr_merge_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 local pr_merge_without_rollup_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus"
 local pr_freshness_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
-local pr_context_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"
+local pr_context_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,author"
 M.pr_origin_selector = pr_origin_selector
 M.pr_origin_legacy_selector = pr_origin_legacy_selector
 M.pr_head_selector = pr_head_selector

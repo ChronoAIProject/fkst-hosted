@@ -15,6 +15,7 @@ local detector = "queue-starvation"
 local merge_recent_threshold_minutes = 360
 local recent_closed_limit = 30
 local github_handle = nil
+local github_factory = require("devloop.github_factory")
 
 local function github()
   if github_handle ~= nil then
@@ -23,7 +24,7 @@ local function github()
   if type(exec_argv) ~= "function" then
     error("github-devloop: GitHub adapter requires exec_argv")
   end
-  github_handle = require("forge.github").new(exec_argv)
+  github_handle = github_factory.production_handle()
   return github_handle
 end
 

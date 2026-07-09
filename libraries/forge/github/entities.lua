@@ -3,6 +3,7 @@ local argv_render = require("forge.argv")
 local gitref = require("forge.gitref")
 local gh_result = require("forge.github.result").gh_result
 local shell = require("forge.github.shell")
+local stdout_policy = require("forge.github.stdout_policy")
 
 local function repo_owner(repo)
   return tostring(repo or ""):match("^([^/]+)/")
@@ -234,6 +235,35 @@ local function api_method_argv(method, path, fields, input_file, include_headers
   return argv
 end
 
+local function authored_api_path_policy(method, path)
+  local method_name = tostring(method or "GET"):upper()
+  local value = tostring(path or "")
+  if method_name ~= "GET" then
+    return nil
+  end
+  if value:match("^repos/[^/]+/[^/]+/issues%?") ~= nil then
+    return stdout_policy.content_json("issue_list")
+  end
+  if value:match("^repos/[^/]+/[^/]+/pulls%?") ~= nil then
+    return stdout_policy.content_json("pr_list")
+  end
+  if value:match("^repos/[^/]+/[^/]+/issues/%d+$") ~= nil then
+    return stdout_policy.content_json("issue_view")
+  end
+  if value:match("^repos/[^/]+/[^/]+/pulls/%d+$") ~= nil then
+    return stdout_policy.content_json("pr_view")
+  end
+  return nil
+end
+
+local function api_paginate_slurp_policy(path)
+  return authored_api_path_policy("GET", path) or stdout_policy.trusted_metadata_json()
+end
+
+local function api_method_policy(method, path)
+  return authored_api_path_policy(method, path) or stdout_policy.write_response()
+end
+
 local function issue_create_argv(repo, title, body_file, labels, assignees)
   local argv = {
     "gh",
@@ -321,15 +351,20 @@ end
 
 function M.install(handle)
   function handle.issue_list(repo, timeout)
-    return handle._exec(issue_list_argv(repo), timeout, "gh issue list")
+    return handle._exec(issue_list_argv(repo), timeout, "gh issue list", stdout_policy.content_json("issue_list"))
   end
 
   function handle.issue_list_cli(repo, state, limit, fields, timeout)
-    return handle._exec(issue_list_cli_argv(repo, state, limit, fields), timeout, "gh issue list")
+    return handle._exec(issue_list_cli_argv(repo, state, limit, fields), timeout, "gh issue list", stdout_policy.content_json("issue_list"))
   end
 
   function handle.issue_list_open_assigned(repo, assignee, timeout)
-    return handle._exec(issue_list_open_assigned_argv(repo, assignee), timeout, "gh issue list open assigned")
+    return handle._exec(
+      issue_list_open_assigned_argv(repo, assignee),
+      timeout,
+      "gh issue list open assigned",
+      stdout_policy.content_json("issue_list")
+    )
   end
 
   function handle.issue_list_intake(repo, limit, timeout)
@@ -341,43 +376,63 @@ function M.install(handle)
     if bounded_limit == nil or bounded_limit < 1 or bounded_limit > 100 then
       error("forge.github.entities: invalid closed issue list limit")
     end
-    return handle.issue_list_cli(repo, "closed", math.floor(bounded_limit), "number,title,closedAt,labels", timeout)
+    return handle.issue_list_cli(repo, "closed", math.floor(bounded_limit), "number,title,closedAt,labels,author", timeout)
   end
 
   function handle.issue_list_board_digest(repo, timeout)
-    return handle.issue_list_cli(repo, "open", 100, "number,title,labels", timeout)
+    return handle.issue_list_cli(repo, "open", 100, "number,title,labels,author", timeout)
   end
 
   function handle.pr_list(repo, timeout)
-    return handle._exec(pr_list_argv(repo), timeout, "gh pr list")
+    return handle._exec(pr_list_argv(repo), timeout, "gh pr list", stdout_policy.content_json("pr_list"))
   end
 
   function handle.issue_list_observe(repo, label, page, include_headers, timeout)
-    return handle._exec(issue_list_observe_argv(repo, label, page, include_headers), timeout, "gh issue observe list")
+    return handle._exec(
+      issue_list_observe_argv(repo, label, page, include_headers),
+      timeout,
+      "gh issue observe list",
+      stdout_policy.content_json("issue_list")
+    )
   end
 
   function handle.pr_list_observe(repo, page, include_headers, timeout)
-    return handle._exec(pr_list_observe_argv(repo, page, include_headers), timeout, "gh PR observe list")
+    return handle._exec(
+      pr_list_observe_argv(repo, page, include_headers),
+      timeout,
+      "gh PR observe list",
+      stdout_policy.content_json("pr_list")
+    )
   end
 
   function handle.pr_list_cli(repo, state, limit, fields, timeout)
-    return handle._exec(pr_list_cli_argv(repo, state, limit, fields), timeout, "gh pr list")
+    return handle._exec(pr_list_cli_argv(repo, state, limit, fields), timeout, "gh pr list", stdout_policy.content_json("pr_list"))
   end
 
   function handle.pr_list_recent_merged(repo, limit, timeout)
-    return handle._exec(pr_list_recent_merged_argv(repo, limit), timeout, "gh pr list recent merged")
+    return handle._exec(
+      pr_list_recent_merged_argv(repo, limit),
+      timeout,
+      "gh pr list recent merged",
+      stdout_policy.content_json("pr_list")
+    )
   end
 
   function handle.pr_list_board_digest(repo, timeout)
-    return handle.pr_list_cli(repo, "open", 100, "number,title,labels", timeout)
+    return handle.pr_list_cli(repo, "open", 100, "number,title,labels,author", timeout)
   end
 
   function handle.pr_list_head(repo, branch, base_branch, timeout)
-    return handle._exec(pr_list_head_argv(repo, branch, base_branch), timeout, "gh pr list --head")
+    return handle._exec(pr_list_head_argv(repo, branch, base_branch), timeout, "gh pr list --head", stdout_policy.content_json("pr_list"))
   end
 
   function handle.pr_list_merge_queue(repo, base, timeout)
-    return handle._exec(pr_list_merge_queue_argv(repo, base), timeout, "gh pr merge queue list")
+    return handle._exec(
+      pr_list_merge_queue_argv(repo, base),
+      timeout,
+      "gh pr merge queue list",
+      stdout_policy.content_json("pr_list")
+    )
   end
 
   function handle.pr_list_merge_queue_cmd(repo, base)
@@ -385,11 +440,16 @@ function M.install(handle)
   end
 
   function handle.pr_view(repo, pr_number, timeout)
-    return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST head repository/headRefOid/state")
+    return handle._exec(
+      pr_view_argv(repo, pr_number),
+      timeout,
+      "gh PR REST head repository/headRefOid/state",
+      stdout_policy.content_json("pr_view")
+    )
   end
 
   function handle.pr_cli_view(repo, pr_number, fields, timeout)
-    return handle._exec(pr_view_cli_argv(repo, pr_number, fields), timeout, "gh pr view")
+    return handle._exec(pr_view_cli_argv(repo, pr_number, fields), timeout, "gh pr view", stdout_policy.content_json("pr_view"))
   end
 
   function handle.gh_pr_view_merge(repo, pr_number, timeout)
@@ -403,31 +463,31 @@ function M.install(handle)
   end
 
   function handle.pr_rest_view(repo, pr_number, timeout)
-    return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST view")
+    return handle._exec(pr_view_argv(repo, pr_number), timeout, "gh PR REST view", stdout_policy.content_json("pr_view"))
   end
 
   function handle.pr_diff_name_only(repo, pr_number, timeout)
-    return handle._exec(pr_diff_name_only_argv(repo, pr_number), timeout, "gh pr diff --name-only")
+    return handle._exec(pr_diff_name_only_argv(repo, pr_number), timeout, "gh pr diff --name-only", stdout_policy.plain_text())
   end
 
   function handle.pr_diff(repo, pr_number, timeout)
-    return handle._exec(pr_diff_argv(repo, pr_number), timeout, "gh pr diff")
+    return handle._exec(pr_diff_argv(repo, pr_number), timeout, "gh pr diff", stdout_policy.plain_text())
   end
 
   function handle.pr_ready(repo, pr_number, timeout)
-    return handle._exec(pr_ready_argv(repo, pr_number), timeout, "gh pr ready")
+    return handle._exec(pr_ready_argv(repo, pr_number), timeout, "gh pr ready", stdout_policy.write_response())
   end
 
   function handle.pr_close(repo, pr_number, timeout)
-    return handle._exec(pr_close_argv(repo, pr_number), timeout, "gh pr close")
+    return handle._exec(pr_close_argv(repo, pr_number), timeout, "gh pr close", stdout_policy.write_response())
   end
 
   function handle.issue_close(repo, issue_number, timeout)
-    return handle._exec(issue_close_argv(repo, issue_number), timeout, "gh issue close")
+    return handle._exec(issue_close_argv(repo, issue_number), timeout, "gh issue close", stdout_policy.write_response())
   end
 
   function handle.pr_merge(repo, pr_number, head_sha, timeout)
-    return handle._exec(pr_merge_argv(repo, pr_number, head_sha), timeout, "gh pr merge")
+    return handle._exec(pr_merge_argv(repo, pr_number, head_sha), timeout, "gh pr merge", stdout_policy.write_response())
   end
 
   function handle.gh_pr_merge(repo, pr_number, head_sha, timeout)
@@ -444,15 +504,20 @@ function M.install(handle)
   end
 
   function handle.pr_updated_at(repo, pr_number, timeout)
-    return handle._exec(entity_updated_at_argv(repo, "pr", pr_number), timeout, "gh PR updated_at")
+    return handle._exec(entity_updated_at_argv(repo, "pr", pr_number), timeout, "gh PR updated_at", stdout_policy.plain_text())
   end
 
   function handle.issue_search(repo, query, fields, timeout)
-    return handle._exec(issue_search_argv(repo, query, fields), timeout, "gh issue search")
+    return handle._exec(issue_search_argv(repo, query, fields), timeout, "gh issue search", stdout_policy.content_json("issue_list"))
   end
 
   function handle.api_get(repo, path, timeout)
-    return handle._exec({ "gh", "api", "repos/" .. tostring(repo) .. "/" .. tostring(path) }, timeout, "gh api GET")
+    return handle._exec(
+      { "gh", "api", "repos/" .. tostring(repo) .. "/" .. tostring(path) },
+      timeout,
+      "gh api GET",
+      stdout_policy.trusted_metadata_json()
+    )
   end
 
   function handle.gh_commit_check_runs(repo, head_sha, timeout)
@@ -462,11 +527,11 @@ function M.install(handle)
   end
 
   function handle.api_paginate_slurp(path, timeout)
-    return handle._exec(api_paginate_slurp_argv(path), timeout, "gh api paginated list")
+    return handle._exec(api_paginate_slurp_argv(path), timeout, "gh api paginated list", api_paginate_slurp_policy(path))
   end
 
   function handle.api_method(method, path, fields, input_file, include_headers, timeout)
-    return handle._exec(api_method_argv(method, path, fields, input_file, include_headers), timeout, "gh api method")
+    return handle._exec(api_method_argv(method, path, fields, input_file, include_headers), timeout, "gh api method", api_method_policy(method, path))
   end
 
   function handle.gh_check_run_rerequest(repo, check_run_id, timeout)
@@ -480,39 +545,39 @@ function M.install(handle)
   end
 
   function handle.issue_create(repo, title, body_file, labels, assignees, timeout)
-    return handle._exec(issue_create_argv(repo, title, body_file, labels, assignees), timeout, "gh issue create")
+    return handle._exec(issue_create_argv(repo, title, body_file, labels, assignees), timeout, "gh issue create", stdout_policy.write_response())
   end
 
   function handle.pr_create(repo, branch, base_branch, title, body_file, timeout)
-    return handle._exec(pr_create_argv(repo, branch, base_branch, title, body_file), timeout, "gh pr create")
+    return handle._exec(pr_create_argv(repo, branch, base_branch, title, body_file), timeout, "gh pr create", stdout_policy.write_response())
   end
 
   function handle.pr_create_body(repo, branch, base_branch, title, body, timeout)
-    return handle._exec(pr_create_body_argv(repo, branch, base_branch, title, body), timeout, "gh pr create")
+    return handle._exec(pr_create_body_argv(repo, branch, base_branch, title, body), timeout, "gh pr create", stdout_policy.write_response())
   end
 
   function handle.label_list(repo, timeout)
-    return handle._exec(label_list_argv(repo), timeout, "gh label list")
+    return handle._exec(label_list_argv(repo), timeout, "gh label list", stdout_policy.trusted_metadata_json())
   end
 
   function handle.label_create(repo, label, color, timeout)
-    return handle._exec(label_create_argv(repo, label, color), timeout, "gh label create")
+    return handle._exec(label_create_argv(repo, label, color), timeout, "gh label create", stdout_policy.write_response())
   end
 
   function handle.label_rest_create(repo, name, color, description, timeout)
-    return handle._exec(label_rest_create_argv(repo, name, color, description), timeout, "gh label REST create")
+    return handle._exec(label_rest_create_argv(repo, name, color, description), timeout, "gh label REST create", stdout_policy.write_response())
   end
 
   function handle.label_rest_update(repo, name, color, description, timeout)
-    return handle._exec(label_rest_update_argv(repo, name, color, description), timeout, "gh label REST update")
+    return handle._exec(label_rest_update_argv(repo, name, color, description), timeout, "gh label REST update", stdout_policy.write_response())
   end
 
   function handle.issue_edit_labels(repo, issue_number, add_labels, remove_labels, timeout)
-    return handle._exec(edit_labels_argv("issue", repo, issue_number, add_labels, remove_labels), timeout, "gh issue edit")
+    return handle._exec(edit_labels_argv("issue", repo, issue_number, add_labels, remove_labels), timeout, "gh issue edit", stdout_policy.write_response())
   end
 
   function handle.pr_edit_labels(repo, pr_number, add_labels, remove_labels, timeout)
-    return handle._exec(edit_labels_argv("pr", repo, pr_number, add_labels, remove_labels), timeout, "gh pr edit")
+    return handle._exec(edit_labels_argv("pr", repo, pr_number, add_labels, remove_labels), timeout, "gh pr edit", stdout_policy.write_response())
   end
 end
 

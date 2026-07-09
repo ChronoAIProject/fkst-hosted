@@ -19,6 +19,7 @@ local function mock_comment_get(comment_id, marker)
 end
 
 local function verify(hand_off, expected)
+  h.mock_author_policy_env()
   return payloads_predicates.verified_hand_off_state(core, "owner/repo", hand_off, expected)
 end
 

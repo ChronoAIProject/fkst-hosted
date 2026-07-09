@@ -42,7 +42,7 @@ end
 
 local function pr_json(number, updated_at, state)
   return string.format(
-    '{"number":%d,"title":"PR %d","html_url":"https://github.example/owner/x/pull/%d","updated_at":"%s","state":"%s","labels":[{"name":"review"}]}',
+    '{"number":%d,"title":"PR %d","html_url":"https://github.example/owner/x/pull/%d","updated_at":"%s","state":"%s","user":{"login":"fkst-test-bot"},"labels":[{"name":"review"}]}',
     number,
     number,
     number,
@@ -62,7 +62,7 @@ end
 
 local function issue_json(number, updated_at)
   return string.format(
-    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","labels":[{"name":"adapter-enabled"}],"assignees":[{"login":"fkst-test-bot"}]}',
+    '{"number":%d,"title":"Issue %d","html_url":"https://github.example/owner/x/issues/%d","updated_at":"%s","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"adapter-enabled"}],"assignees":[{"login":"fkst-test-bot"}]}',
     number, number, number, updated_at
   )
 end
@@ -360,7 +360,7 @@ return {
     local event = { queue = "github_poll_tick", payload = {}, ts = "poll-cold" }
     local run_opts = opts("cold-intake-before-replay", { FKST_GITHUB_PROXY_REPLAY_BUDGET = "1" })
     mock_poll_env("1")
-    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}],"assignees":[]}'
+    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"bug"}],"assignees":[]}'
     mock_issue_list(issue_list_from({ issue_json(42, "2026-06-03T01:02:00Z"), issue_json(43, "2026-06-03T01:03:00Z"), intake }))
     mock_pr_list("[]\n")
     local result = t.run_department("departments/github_poll/main.lua", event, run_opts)
@@ -380,7 +380,7 @@ return {
 
   test_inbound_poll_level_replays_stateless_intake_candidates = function()
     local run_opts = opts("stateless-intake-level-replay", { FKST_GITHUB_PROXY_REPLAY_BUDGET = "1" })
-    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"bug"}],"assignees":[]}'
+    local intake = '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"bug"}],"assignees":[]}'
     local managed = issue_json(42, "2026-06-03T01:02:00Z")
 
     mock_poll_env("1")
@@ -412,7 +412,7 @@ return {
 
     mock_poll_env("1")
     mock_issue_list(issue_list_from({
-      '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"adapter-enabled"},{"name":"bug"}],"assignees":[]}',
+      '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"adapter-enabled"},{"name":"bug"}],"assignees":[]}',
       managed,
     }))
     mock_pr_list("[]\n")
@@ -428,7 +428,7 @@ return {
 
     mock_poll_env("1")
     mock_issue_list(issue_list_from({
-      '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","labels":[{"name":"adapter-enabled"},{"name":"bug"}],"assignees":[]}',
+      '{"number":50,"title":"Issue 50","html_url":"https://github.example/owner/x/issues/50","updated_at":"2026-06-03T01:04:00Z","state":"open","author":{"login":"fkst-test-bot"},"labels":[{"name":"adapter-enabled"},{"name":"bug"}],"assignees":[]}',
       managed,
     }))
     mock_pr_list("[]\n")

@@ -12,7 +12,7 @@ require("tests.entity_view_probe_helpers")
 
 local function mock_issue_view(title)
   t.mock_command("gh api repos/owner/x/issues/42", {
-    stdout = '{"title":"' .. tostring(title) .. '","body":"","state":"open","labels":[],"assignees":[],"updated_at":"2026-06-03T01:02:03Z"}\n',
+    stdout = '{"title":"' .. tostring(title) .. '","body":"","state":"open","user":{"login":"fkst-test-bot"},"labels":[],"assignees":[],"updated_at":"2026-06-03T01:02:03Z"}\n',
     stderr = "",
     exit_code = 0,
   })

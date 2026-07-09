@@ -1,4 +1,5 @@
 local S = {}
+local github_factory = require("devloop.github_factory")
 
 local queries = {
   dependency_blocked_by = '{repository(owner:"{{owner}}",name:"{{name}}"){issue(number:{{issue_number}}){blockedBy(first:50){totalCount pageInfo{hasNextPage} nodes{number state stateReason repository{nameWithOwner}}}}}}',
@@ -43,7 +44,7 @@ function S.install(M)
       error("github-devloop: adapter-unavailable: GitHub GraphQL adapter requires exec_argv")
     end
     return github_result(function()
-      return require("forge.github").new(run).graphql(query, nil, timeout or 30)
+      return github_factory.new(run, exec_sync).graphql(query, nil, timeout or 30)
     end)
   end
 end

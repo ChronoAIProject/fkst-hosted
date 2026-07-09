@@ -21,6 +21,8 @@
 {"path":"libraries/devloop/gh_exec.lua","owner":"shared","reason":"shared GitHub argv exec primitive used by devloop scan/cache helpers across issue and PR packages."}
 {"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
+{"path":"libraries/devloop/github_author_policy.lua","owner":"shared","reason":"shared GitHub authored-content policy builder used by issue and PR GitHub read boundaries."}
+{"path":"libraries/devloop/github_factory.lua","owner":"shared","reason":"shared production GitHub handle factory injects authored-content policy for every devloop-family package."}
 {"path":"libraries/devloop/github_risk.lua","owner":"shared","reason":"GitHub risk classification is shared by PR review/fix context and issue-side checks."}
 {"path":"libraries/devloop/hidden_state_conformance.lua","owner":"cross-cutting","reason":"shared behavioral hidden-state conformance applied to issue and PR restart tables."}
 {"path":"libraries/devloop/liveness.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}

@@ -40,7 +40,7 @@ local function mock_env(write_mode, integration)
 end
 
 local function run_scan(run_opts)
-  return t.run_department("departments/pr_freshness_scan/main.lua", {
+  return h.run_department("departments/pr_freshness_scan/main.lua", {
     queue = "devloop_branch_tick",
     payload = { schema = "github-devloop.branch-tick.v1" },
   }, run_opts or opts("pr-freshness-scan"))

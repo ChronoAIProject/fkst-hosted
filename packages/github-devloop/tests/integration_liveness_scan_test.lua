@@ -27,7 +27,7 @@ local function restart_transition_row(state_name)
 end
 
 local function run_timeout_reconcile(payload, run_opts)
-  return t.run_department("departments/reconcile/main.lua", {
+  return h.run_department("departments/reconcile/main.lua", {
     queue = "devloop_timeout_reconcile",
     payload = payload,
   }, run_opts)
@@ -46,7 +46,7 @@ local function recent_iso(seconds_ago)
 end
 
 local function run_liveness_scan(name, run_opts)
-  return t.run_department("departments/liveness_scan/main.lua", {
+  return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = {
       schema = "github-devloop.tick.v1",
@@ -56,7 +56,7 @@ local function run_liveness_scan(name, run_opts)
 end
 
 local function run_liveness_scan_at(name, ts, run_opts)
-  return t.run_department("departments/liveness_scan/main.lua", {
+  return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = {
       schema = "github-devloop.tick.v1",
@@ -208,7 +208,7 @@ local function mock_linked_pr_state(comments, state, exit_code, times, run_opts)
     exit_code = exit_code or 0,
   }, times or 1)
   if exit_code == nil or exit_code == 0 then
-    t.run_department("departments/test_cache_seed/main.lua", { queue = "cache_seed", payload = { key = require("devloop.github_proxy_entity_view").entity_view_cache_key(repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
+    h.run_department("departments/test_cache_seed/main.lua", { queue = "cache_seed", payload = { key = require("devloop.github_proxy_entity_view").entity_view_cache_key(repo, "pr", 7), value = '{"updated_at":"2026-06-04T01:02:03Z","producer":"observe_pr","stdout":"' .. json_string(stdout) .. '"}' } }, run_opts or opts("liveness-scan-linked-pr-cache-seed"))
     entity_read_mocks.mock_pr_read_forms(t, {
       repo = repo,
       number = 7,

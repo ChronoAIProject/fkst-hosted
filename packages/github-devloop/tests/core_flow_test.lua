@@ -831,7 +831,7 @@ return {
     t.is_true(v_validate_proposal.validate_proposal(review))
 
     local function context_fetch_returns_high_risk()
-      return "runtime-cache:github-devloop/context-bundle-manifest/pr-review-owner-repo-7", true
+      return "runtime-cache:github-devloop/context-bundle-manifest-v2/pr-review-owner-repo-7", true
     end
     local high_risk_review = payloads_builders.build_pr_review_loop_proposal(core, "owner/repo", "42", 7, version, "abcdef1234567890", {
       title = "Converge narrowing",

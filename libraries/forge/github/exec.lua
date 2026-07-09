@@ -1,3 +1,6 @@
+local content_filter = require("forge.github.content_filter")
+local stdout_policy = require("forge.github.stdout_policy")
+
 local M = {}
 
 local function stderr_of(result)
@@ -62,7 +65,11 @@ local function misuse_error(argv, context)
   }))
 end
 
-function M.run(exec, argv, timeout, context)
+local function filter_stdout(result, context, policy, author_policy)
+  return content_filter.apply_gh_content_filter(result, context, policy, author_policy, stdout_policy)
+end
+
+function M.run(exec, argv, timeout, context, policy, author_policy)
   if type(argv) ~= "table" or #argv < 1 or argv[1] ~= "gh" then
     misuse_error(argv, context)
   end
@@ -83,7 +90,7 @@ function M.run(exec, argv, timeout, context)
       end,
     }))
   end
-  return result
+  return filter_stdout(result, context, policy, author_policy)
 end
 
 return M

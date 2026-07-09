@@ -38,6 +38,13 @@ local function first_resolvable_marker()
   )
 end
 
+local function trusted_comment(body)
+  return {
+    body = body,
+    author_login = "fkst-test-bot",
+  }
+end
+
 local function mock_runtime_and_context()
   for _ = 1, 24 do
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
@@ -95,10 +102,14 @@ local function mock_github_proxy_writes()
 end
 
 local function mock_issue_reads()
+  local comments = {
+    trusted_comment(state_marker()),
+    trusted_comment(first_resolvable_marker()),
+  }
   entity_read_mocks.mock_issue_read_with_defaults(
     t,
     { "fkst-dev:thinking" },
-    { state_marker(), first_resolvable_marker() },
+    comments,
     {
       repo = "owner/repo",
       number = 42,
@@ -114,8 +125,8 @@ local function mock_issue_reads()
     updated_at = "2026-06-03T01:02:03Z",
     state = "OPEN",
     labels = { "fkst-dev:thinking" },
-    comments = { state_marker(), first_resolvable_marker() },
-  }, "title,updatedAt,labels,comments,state")
+    comments = comments,
+  }, "title,updatedAt,labels,comments,state,author", 2)
   t.mock_command("gh issue view 42 --repo owner/repo --json 'title,updatedAt,labels,comments,state'", {
     stdout = entity_read_mocks.issue_view_stdout({
       repo = "owner/repo",
@@ -124,7 +135,7 @@ local function mock_issue_reads()
       updated_at = "2026-06-03T01:02:03Z",
       state = "OPEN",
       labels = { "fkst-dev:thinking" },
-      comments = { state_marker(), first_resolvable_marker() },
+      comments = comments,
     }),
     stderr = "",
     exit_code = 0,

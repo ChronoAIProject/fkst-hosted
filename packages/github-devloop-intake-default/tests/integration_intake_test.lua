@@ -39,6 +39,7 @@ end
 
 local function mock_bot_env(value)
   h.mock_bot_env(value)
+  h.mock_author_policy_env()
 end
 
 local function encode_json_string(value)
@@ -151,13 +152,14 @@ local function mock_intake_judge_view(labels, comments, extra)
   }, 2)
   entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s]}\n',
+      '{"title":"%s","body":"%s","updatedAt":"%s","state":"%s","labels":[%s],"comments":[%s],"author":{"login":"%s"}}\n',
       encode_json_string(fields.title or "Add retry backoff to failed widget sync"),
       encode_json_string(fields.body or "Implement exponential backoff for widget sync retries. Acceptance: unit tests cover 1s, 2s, and capped retries."),
       encode_json_string(fields.updated_at or "2026-06-03T01:02:03Z"),
       encode_json_string(fields.state or "OPEN"),
       encode_labels_json(labels or {}),
-      comments_json(comments or {})
+      comments_json(comments or {}),
+      encode_json_string(fields.author_login or "fkst-test-bot")
     ),
   })
 end
@@ -285,6 +287,7 @@ local function candidate(extra)
 end
 
 local function run_judge(payload, run_opts)
+  h.mock_author_policy_env(run_opts)
   return t.run_department("departments/intake_judge/main.lua", {
     queue = "github-devloop-intake.devloop_intake_candidate",
     payload = payload,

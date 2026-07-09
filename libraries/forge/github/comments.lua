@@ -1,4 +1,5 @@
 local M = {}
+local stdout_policy = require("forge.github.stdout_policy")
 
 local function issue_comments_argv(repo, issue_number)
   return {
@@ -65,35 +66,35 @@ end
 
 function M.install(handle)
   function handle.issue_comments(repo, issue_number, timeout)
-    return handle._exec(issue_comments_argv(repo, issue_number), timeout, "gh issue comments")
+    return handle._exec(issue_comments_argv(repo, issue_number), timeout, "gh issue comments", stdout_policy.content_json("issue_comments"))
   end
 
   function handle.pr_comments(repo, pr_number, timeout)
-    return handle._exec(issue_comments_argv(repo, pr_number), timeout, "gh PR comments")
+    return handle._exec(issue_comments_argv(repo, pr_number), timeout, "gh PR comments", stdout_policy.content_json("pr_comments"))
   end
 
   function handle.issue_comment_create(repo, issue_number, body_file, timeout)
-    return handle._exec(issue_comment_create_argv(repo, issue_number, body_file), timeout, "gh issue comment")
+    return handle._exec(issue_comment_create_argv(repo, issue_number, body_file), timeout, "gh issue comment", stdout_policy.write_response())
   end
 
   function handle.pr_comment_create(repo, pr_number, body_file, timeout)
-    return handle._exec(issue_comment_create_argv(repo, pr_number, body_file), timeout, "gh pr comment")
+    return handle._exec(issue_comment_create_argv(repo, pr_number, body_file), timeout, "gh pr comment", stdout_policy.write_response())
   end
 
   function handle.comment_update(repo, comment_id, body_file, timeout)
-    return handle._exec(comment_update_argv(repo, comment_id, body_file), timeout, "gh comment edit")
+    return handle._exec(comment_update_argv(repo, comment_id, body_file), timeout, "gh comment edit", stdout_policy.write_response())
   end
 
   function handle.comment_get(repo, comment_id, timeout)
-    return handle._exec(comment_get_argv(repo, comment_id), timeout, "gh comment get")
+    return handle._exec(comment_get_argv(repo, comment_id), timeout, "gh comment get", stdout_policy.content_json("issue_comments"))
   end
 
   function handle.issue_comment(repo, issue_number, body_file, timeout)
-    return handle._exec(cli_comment_argv("issue", repo, issue_number, body_file), timeout, "gh issue comment")
+    return handle._exec(cli_comment_argv("issue", repo, issue_number, body_file), timeout, "gh issue comment", stdout_policy.write_response())
   end
 
   function handle.pr_comment(repo, pr_number, body_file, timeout)
-    return handle._exec(cli_comment_argv("pr", repo, pr_number, body_file), timeout, "gh pr comment")
+    return handle._exec(cli_comment_argv("pr", repo, pr_number, body_file), timeout, "gh pr comment", stdout_policy.write_response())
   end
 end
 

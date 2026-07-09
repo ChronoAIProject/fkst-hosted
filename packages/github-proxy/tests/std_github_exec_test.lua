@@ -1,5 +1,10 @@
 local gh = require("forge.github")
 local git = require("forge.git")
+local content_filter = require("forge.github.content_filter")
+local stdout_policy = require("forge.github.stdout_policy")
+
+local author_policy = content_filter.author_policy_from_logins({ "author", "fkst-test-bot" })
+local disabled_policy = content_filter.test_disabled_author_policy()
 
 local function assert_argv_equal(actual, expected, context)
   assert(type(actual) == "table", context .. " argv must be a table")
@@ -17,10 +22,10 @@ return {
   test_exec_classifies_rate_limit = function()
     local handle = gh.new(function(_opts)
       return { stdout = "", stderr = "API rate limit exceeded for user", exit_code = 1 }
-    end)
+    end, { trusted_author_policy = author_policy })
     local ok, err = pcall(function()
       return handle._exec({ "gh", "api", "x" }, 10, "ctx")
-    end)
+    end, { trusted_author_policy = author_policy })
     assert(ok == false)
     assert(err.class == "gh-rate-limited", "rate-limit stderr must classify as gh-rate-limited")
     assert(err.retryable == true)
@@ -73,8 +78,88 @@ return {
     local handle = gh.new(function(_opts)
       return { stdout = "ok", stderr = "", exit_code = 0 }
     end)
-    local out = handle._exec({ "gh", "api", "z" }, 10, "ctx")
+    local out = handle._exec({ "gh", "api", "z" }, 10, "ctx", stdout_policy.plain_text())
     assert(out.stdout == "ok")
+  end,
+
+  test_exec_requires_declared_stdout_policy = function()
+    local handle = gh.new(function(_opts)
+      return { stdout = "ok", stderr = "", exit_code = 0 }
+    end)
+    local ok, err = pcall(function()
+      return handle._exec({ "gh", "api", "z" }, 10, "ctx")
+    end)
+    assert(ok == false)
+    assert(tostring(err):find("missing or unknown stdout policy", 1, true) ~= nil)
+  end,
+
+  test_content_json_requires_author_policy = function()
+    local handle = gh.new(function(_opts)
+      return { stdout = issue_stdout(), stderr = "", exit_code = 0 }
+    end)
+    local ok, err = pcall(function()
+      return handle._exec({ "gh", "api", "repos/owner/repo/issues/42" }, 10, "ctx", stdout_policy.content_json("issue_view"))
+    end)
+    assert(ok == false)
+    assert(tostring(err):find("missing trusted author policy", 1, true) ~= nil)
+  end,
+
+  test_content_json_filters_untrusted_authored_fields = function()
+    local handle = gh.new(function(_opts)
+      return { stdout = issue_stdout(), stderr = "", exit_code = 0 }
+    end, { trusted_author_policy = content_filter.author_policy_from_logins({ "fkst-test-bot" }) })
+    local out = handle._exec(
+      { "gh", "api", "repos/owner/repo/issues/42" },
+      10,
+      "ctx",
+      stdout_policy.content_json("issue_view")
+    )
+    assert(out.stdout:find("[fkst:blocked-github-content:v1", 1, true) ~= nil)
+    assert(out.content_redacted == true)
+  end,
+
+  test_api_paginate_slurp_issue_list_filters_authored_fields = function()
+    local handle = gh.new(function(_opts)
+      return {
+        stdout = '[{"number":42,"title":"attack","body":"body","user":{"login":"mallory"}}]',
+        stderr = "",
+        exit_code = 0,
+      }
+    end, { trusted_author_policy = content_filter.author_policy_from_logins({ "fkst-test-bot" }) })
+    local out = handle.api_paginate_slurp("repos/owner/repo/issues?state=open&per_page=100", 10)
+    assert(out.stdout:find("[fkst:blocked-github-content:v1", 1, true) ~= nil)
+    assert(out.content_redacted == true)
+  end,
+
+  test_api_method_include_issue_get_filters_json_body_and_preserves_headers = function()
+    local handle = gh.new(function(_opts)
+      return {
+        stdout = 'HTTP/2.0 200 OK\netag: "old"\n\n{"number":42,"title":"attack","body":"body","user":{"login":"mallory"}}\n',
+        stderr = "",
+        exit_code = 0,
+      }
+    end, { trusted_author_policy = content_filter.author_policy_from_logins({ "fkst-test-bot" }) })
+    local out = handle.api_method("GET", "repos/owner/repo/issues/42", nil, nil, true, 10)
+    assert(out.stdout:find('HTTP/2.0 200 OK\netag: "old"\n\n', 1, true) == 1)
+    assert(out.stdout:find("[fkst:blocked-github-content:v1", 1, true) ~= nil)
+    assert(out.content_redacted == true)
+  end,
+
+  test_non_content_policies_do_not_filter_stdout = function()
+    local raw = '{"number":42,"title":"attack","body":"attack","author":{"login":"mallory"}}'
+    local handle = gh.new(function(_opts)
+      return { stdout = raw, stderr = "", exit_code = 0 }
+    end, { trusted_author_policy = content_filter.author_policy_from_logins({ "fkst-test-bot" }) })
+    for _, policy in ipairs({
+      stdout_policy.plain_text(),
+      stdout_policy.trusted_metadata_json(),
+      stdout_policy.write_response(),
+      stdout_policy.no_stdout(),
+    }) do
+      local out = handle._exec({ "gh", "api", "repos/owner/repo/issues/42" }, 10, "ctx", policy)
+      assert(out.stdout == raw)
+      assert(out.content_redacted == nil)
+    end
   end,
 
   test_github_exec_uses_argv_without_shell_fields = function()
@@ -82,9 +167,9 @@ return {
     local handle = gh.new(function(opts)
       seen = opts
       return { stdout = "ok", stderr = "", exit_code = 0 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
-    handle._exec({ "gh", "api", "repos/owner/repo" }, 12, "ctx")
+    handle._exec({ "gh", "api", "repos/owner/repo" }, 12, "ctx", stdout_policy.trusted_metadata_json())
 
     assert_argv_equal(seen.argv, { "gh", "api", "repos/owner/repo" }, "github")
     assert(seen.timeout == 12, "timeout is forwarded")
@@ -147,7 +232,7 @@ return {
         return { stdout = "[]", stderr = "", exit_code = 0 }
       end
       return { stdout = issue_stdout(), stderr = "", exit_code = 0 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     local issue = handle.read_issue({ kind = "external", ref = "owner/repo#issue/42" }, {
       force_fresh = true,
@@ -177,7 +262,7 @@ return {
         return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
       end
       return { stdout = "ok", stderr = "", exit_code = 0 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
 
@@ -211,7 +296,7 @@ return {
         stderr = "HTTP 422: Validation Failed (already linked as a sub-issue)",
         exit_code = 1,
       }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     local result = handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
 
@@ -243,7 +328,7 @@ return {
         return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
       end
       return { stdout = "", stderr = "HTTP 500: upstream unavailable", exit_code = 1 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     local ok, err = pcall(function()
       return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
@@ -261,7 +346,7 @@ return {
         return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
       end
       return { stdout = "", stderr = "HTTP 422: Validation Failed (already linked to another object)", exit_code = 1 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     local ok, err = pcall(function()
       return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
@@ -279,7 +364,7 @@ return {
         return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
       end
       return { stdout = "", stderr = "HTTP 422: Validation Failed (sub-issue already has another parent)", exit_code = 1 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     local ok, err = pcall(function()
       return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
@@ -290,16 +375,16 @@ return {
   end,
 
   test_github_issue_add_sub_issue_does_not_swallow_duplicate_when_parent_list_lacks_child = function()
-    local sub_issues_path = "repos/owner/repo/issues/979/sub_issues?" .. table.concat({ "per", "page=100" }, "_")
+    local sub_issues_path = "repos/owner/repo/issues/979/sub_issues?per_page=100"
     local handle = gh.new(function(opts)
       if opts.argv[3] == "repos/owner/repo/issues/120" then
         return { stdout = '{"id":987654321,"number":120}', stderr = "", exit_code = 0 }
       end
-      if opts.argv[5] == sub_issues_path then
+      if opts.argv[6] == sub_issues_path then
         return { stdout = '[[{"id":111111111,"number":121}]]\n', stderr = "", exit_code = 0 }
       end
       return { stdout = "", stderr = "HTTP 422: Validation Failed (already linked as a sub-issue)", exit_code = 1 }
-    end)
+    end, { trusted_author_policy = author_policy })
 
     local ok, err = pcall(function()
       return handle.issue_add_sub_issue("owner/repo", 979, 120, 31)
@@ -314,7 +399,7 @@ return {
     local handle = gh.new(function(opts)
       table.insert(calls, opts)
       return { stdout = "ok", stderr = "", exit_code = 0 }
-    end)
+    end, { trusted_author_policy = disabled_policy })
 
     handle.issue_list("owner/repo", 11)
     handle.pr_list("owner/repo", 12)
@@ -444,7 +529,7 @@ return {
     local handle = gh.new(function(opts)
       table.insert(calls, opts)
       return { stdout = "ok", stderr = "", exit_code = 0 }
-    end)
+    end, { trusted_author_policy = disabled_policy })
 
     handle.issue_comments("owner/repo", 42, 31)
     handle.pr_comments("owner/repo", 7, 32)

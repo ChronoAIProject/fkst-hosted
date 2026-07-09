@@ -7,6 +7,7 @@ local marker = require("core.marker")
 local materialization = require("core.materialization")
 local parsers_misc = require("devloop.parsers.misc")
 local strings = require("contract.strings")
+local github_factory = require("devloop.github_factory")
 
 local M = {}
 
@@ -289,7 +290,7 @@ function M.find_created_issue_by_dedup(repo, child_dedup, deps)
   if type(exec_argv) ~= "function" then
     return nil
   end
-  local result = require("forge.github").new(exec_argv).issue_search(
+  local result = github_factory.production_handle().issue_search(
     repo,
     issue_create_marker(child_dedup),
     "number,title,state,author,body,url",
@@ -332,7 +333,7 @@ function M.read_created_issue_by_number(repo, issue_number, deps)
   if type(exec_argv) ~= "function" then
     return nil
   end
-  local result = require("forge.github").new(exec_argv).issue_view(
+  local result = github_factory.production_handle().issue_view(
     repo,
     number,
     "number,title,state,author,body,url",

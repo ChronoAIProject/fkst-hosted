@@ -76,7 +76,7 @@ local function mock_issue_reads()
   }, 2)
   entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[],"comments":[]}\n',
+      '{"title":"%s","body":"%s","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[],"comments":[],"author":{"login":"fkst-test-bot"}}\n',
       h.encode_json_string("Add retry backoff to failed widget sync"),
       h.encode_json_string("Implement exponential backoff for widget sync retries.")
     ),
@@ -99,7 +99,7 @@ local function mock_context_bundle()
   })
   entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
     stdout = string.format(
-      '{"title":"%s","body":"%s","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[],"comments":[]}\n',
+      '{"title":"%s","body":"%s","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[],"comments":[],"author":{"login":"fkst-test-bot"}}\n',
       h.encode_json_string("Add retry backoff to failed widget sync"),
       h.encode_json_string("Implement exponential backoff for widget sync retries.")
     ),

@@ -368,7 +368,7 @@ local function make_department(ports)
   return department
 end
 
-M = ports_seam.install(make_department)
+M = ports_seam.install(make_department, ports_seam.github_author_options(core.read_env, "github-external-pr-intake"))
 M.make_department = make_department
 _G.pipeline = M.pipeline
 

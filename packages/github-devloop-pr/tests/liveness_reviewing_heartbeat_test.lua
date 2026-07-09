@@ -25,7 +25,7 @@ local function encode_json_string(value)
 end
 
 local function run_liveness_scan(name)
-  return t.run_department("departments/liveness_scan/main.lua", {
+  return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = { schema = "github-devloop.tick.v1" },
     ts = "2026-06-03T01:32:03Z",
@@ -60,7 +60,7 @@ end
 
 local function run_observe_pr(name)
   mock_branch_config_env()
-  return t.run_department("departments/observe_pr/main.lua", {
+  return h.run_department("departments/observe_pr/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = {
       schema = "github-proxy.v1",
@@ -78,7 +78,7 @@ end
 
 local function run_observe_pr_with_integration(name, integration_branch)
   mock_branch_config_env_value(integration_branch)
-  return t.run_department("departments/observe_pr/main.lua", {
+  return h.run_department("departments/observe_pr/main.lua", {
     queue = "devloop_observe_pr",
     payload = {
       schema = "github-proxy.v1",

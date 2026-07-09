@@ -105,6 +105,7 @@ local function mock_issue_reads()
       state = "OPEN",
       labels = {},
       comments = {},
+      author_login = "fkst-test-bot",
     }),
   }, 3)
 end
@@ -135,6 +136,7 @@ local function mock_context_bundle()
         state = "OPEN",
         labels = {},
         comments = {},
+        author_login = "fkst-test-bot",
       }),
     })
     entity_read_mocks.mock_issue_board_digest_list_raw(t, repo, { stdout = "[]\n" })

@@ -39,7 +39,7 @@ function H.setup_workspace(name, child_test)
   local root = temp_root(name)
   local source = repo_root()
   write_file(root .. "/fkst.workspace.toml", '[workspace]\nunits = ["packages/*", "libraries/*"]\n')
-  for _, lib in ipairs({ "contract", "workflow", "testkit", "forge" }) do
+  for _, lib in ipairs({ "contract", "workflow", "testkit", "forge", "devloop" }) do
     copy_dir(source .. "/libraries/" .. lib, root .. "/libraries/" .. lib)
   end
   copy_dir(source .. "/packages/archaudit", root .. "/packages/archaudit")
@@ -104,7 +104,11 @@ local t = fkst.test
 
 local function mock_env(repo, max_issues)
   t.mock_command('printf %s "$FKST_GITHUB_REPO"', { stdout = repo or "owner/repo", stderr = "", exit_code = 0 })
-  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
+  for _ = 1, 2 do
+    t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
+  end
+  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', { stdout = "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 })
+  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', { stdout = "trusted-human", stderr = "", exit_code = 0 })
   t.mock_command('printf %s "$ARCHAUDIT_MAX_ISSUES_PER_IDLE"', { stdout = max_issues or "3", stderr = "", exit_code = 0 })
 end
 

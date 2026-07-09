@@ -554,7 +554,7 @@ local function make_department(ports)
   return department
 end
 
-M = ports_seam.install(make_department)
+M = ports_seam.install(make_department, ports_seam.github_author_options(read_env, "github-ratchet-migration-slicer"))
 M.make_department = make_department
 _G.pipeline = M.pipeline
 

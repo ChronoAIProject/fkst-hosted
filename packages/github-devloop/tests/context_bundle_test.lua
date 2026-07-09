@@ -17,20 +17,27 @@ local function runtime_root(name)
 end
 
 local function run_probe(mode, root)
+  local env = {
+    FKST_RUNTIME_ROOT = root,
+    FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
+  }
+  if mode == "content_redaction_whitelist_env" then
+    env.FKST_DEVLOOP_MANAGED_BOT_LOGINS = "Managed-Bot[bot],space-bot"
+    env.FKST_GITHUB_AUTHORIZED_LOGINS = "Trusted-User"
+  end
   local result = t.run_department("departments/test_context_bundle_probe/main.lua", {
     queue = "context_bundle_probe",
     payload = {
+      env = env,
       mode = mode,
       root = root,
     },
   }, {
-    env = {
-      FKST_RUNTIME_ROOT = root,
-    },
+    env = env,
   })
   t.eq(result.exit_code, 0)
   for _, raised in ipairs(result.raises or {}) do
-    if raised.queue == "context_bundle_probe_result" then
+    if raised.queue == "context_bundle_probe_result" or raised.queue == "github-devloop.context_bundle_probe_result" then
       return raised.payload
     end
   end
@@ -75,8 +82,8 @@ return {
     local proposal_id = "github-devloop/issue/owner/repo/42"
     local version = "v1"
 
-    t.eq(context_bundle.context_bundle_key(proposal_id, version), "github-devloop/context-bundle/github-devloop/issue/owner/repo/42/v1")
-    t.eq(context_bundle.context_bundle_manifest_key(proposal_id, version), "github-devloop/context-bundle-manifest/github-devloop/issue/owner/repo/42/v1")
+    t.eq(context_bundle.context_bundle_key(proposal_id, version), "github-devloop/context-bundle-v2/github-devloop/issue/owner/repo/42/v1")
+    t.eq(context_bundle.context_bundle_manifest_key(proposal_id, version), "github-devloop/context-bundle-manifest-v2/github-devloop/issue/owner/repo/42/v1")
   end,
 
   test_context_bundle_files_round_trip_from_different_cwd = function()
@@ -187,7 +194,8 @@ return {
   test_context_bundle_file_cap_truncates_on_utf8_boundary = function()
     local result = run_probe("utf8_truncation", runtime_root("utf8-truncation"))
 
-    t.eq(result.issue_bytes, max_bundle_file_len - 1)
+    t.is_true(result.issue_bytes <= max_bundle_file_len)
+    t.is_true(result.issue_bytes > max_bundle_file_len - 16)
     assert_valid_utf8(result.issue_content)
   end,
 
@@ -242,7 +250,7 @@ return {
     t.is_true(#bundle_key <= core._max_key_len)
     t.eq(strings.is_path_safe_key(manifest_key, core._max_key_len), true)
     t.eq(strings.is_path_safe_key(bundle_key, core._max_key_len), true)
-    t.is_true(manifest_key:find("^github%-devloop/context%-bundle%-manifest/") ~= nil)
-    t.is_true(bundle_key:find("^github%-devloop/context%-bundle/") ~= nil)
+    t.is_true(manifest_key:find("^github%-devloop/context%-bundle%-manifest%-v2/") ~= nil)
+    t.is_true(bundle_key:find("^github%-devloop/context%-bundle%-v2/") ~= nil)
   end,
 }

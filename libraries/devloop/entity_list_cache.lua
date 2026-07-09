@@ -24,7 +24,7 @@ local function list_cache_key(repo, kind, scope, poll_key)
   end
   return table.concat({
     "github-devloop",
-    "entity-list",
+    "entity-list-v2",
     base_ids.safe_repo(repo),
     selected_kind,
     strings.sanitize_key(scope or "open", 80):gsub("/", "-"),

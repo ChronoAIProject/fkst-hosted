@@ -35,7 +35,7 @@ local function sanitize_cache_segment(value, allow_slash)
 end
 
 local function entity_view_storage_base_key(repo, kind, number, updated_at)
-  return "github-proxy/view/"
+  return "github-proxy/view-v2/"
     .. sanitize_cache_segment(repo, true)
     .. "/"
     .. sanitize_cache_segment(kind, false)
@@ -46,7 +46,7 @@ local function entity_view_storage_base_key(repo, kind, number, updated_at)
 end
 
 local function entity_view_generation_key(repo, kind, number)
-  return "github-proxy/view-generation/"
+  return "github-proxy/view-generation-v2/"
     .. sanitize_cache_segment(repo, true)
     .. "/"
     .. sanitize_cache_segment(kind, false)

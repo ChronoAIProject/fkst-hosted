@@ -1,5 +1,6 @@
 local parsers_issue = require("devloop.parsers.issue")
 local gh = require("forge.github")
+local disabled_author_policy = require("forge.github.content_filter").test_disabled_author_policy()
 local issue_adapter = require("forge.github.issue")
 local core = require("core")
 
@@ -41,7 +42,7 @@ return {
         stderr = "",
         exit_code = 0,
       }
-    end)
+    end, { trusted_author_policy = disabled_author_policy })
 
     local issue = handle.read_issue({ kind = "external", ref = "owner/repo#issue/42" })
 
@@ -99,7 +100,7 @@ return {
         stderr = "",
         exit_code = 0,
       }
-    end)
+    end, { trusted_author_policy = disabled_author_policy })
 
     local first = handle.read_issue(ref)
     local second = handle.read_issue(ref, {
@@ -141,7 +142,7 @@ return {
         stderr = "",
         exit_code = 0,
       }
-    end)
+    end, { trusted_author_policy = disabled_author_policy })
 
     local stale = handle.read_issue(ref)
     local fresh = handle.read_issue(ref, {

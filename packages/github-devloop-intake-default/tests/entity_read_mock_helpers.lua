@@ -154,7 +154,7 @@ function M.pr_view_stdout(fields)
   local state = tostring(f.state or "OPEN")
   local merged_at = f.merged_at or (state == "MERGED" and "2026-06-03T02:05:04Z" or "")
   return string.format(
-    '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","comments":[%s],"labels":[%s],"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
+    '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"%s","baseRefOid":"%s","state":"%s","updatedAt":"%s","isDraft":%s,"merged":%s,"mergedAt":"%s","comments":[%s],"labels":[%s],"author":{"login":"%s"},"headRepository":{"nameWithOwner":"%s","owner":{"login":"%s"}},"headRepositoryOwner":{"login":"%s"},"isCrossRepository":%s,"mergeable":"%s","mergeStateStatus":"%s"%s}\n',
     tonumber(f.number) or 7,
     encode_json_string(f.head or "devloop-owner-repo-42-01HY"),
     encode_json_string(f.head_sha or "def456"),
@@ -167,6 +167,7 @@ function M.pr_view_stdout(fields)
     encode_json_string(merged_at),
     M.view_comments_json(f.comments),
     encode_labels_json(f.labels),
+    encode_json_string(f.author_login or "fkst-test-bot"),
     encode_json_string(f.head_repo or f.repo or "owner/repo"),
     encode_json_string(owner),
     encode_json_string(owner),
@@ -254,24 +255,26 @@ local function mock_comments(t, repo, issue_number, comments, times)
 end
 
 local issue_view_selectors = {
-  "number,title",
+  "number,title,author",
   "title,body,comments,labels,state,updatedAt,assignees",
+  "title,body,comments,labels,state,updatedAt,assignees,author",
   "title,body,comments,labels,state,createdAt,updatedAt,assignees,author",
   "title,body,updatedAt,labels,comments,state",
+  "title,body,updatedAt,labels,comments,state,author",
   "title,body,createdAt,updatedAt,labels,comments,state,assignees,author",
   "title,comments,state",
   "title,labels,state,comments,assignees,author",
   "title,body,comments,state,stateReason,assignees,author",
   "assignees,author",
   "labels,comments",
-  "title,updatedAt,labels,comments,state",
-  "title,labels,comments",
+  "title,updatedAt,labels,comments,state,author",
+  "title,labels,comments,author",
   "title,labels,comments,assignees,author",
-  "title,body,labels,comments",
-  "title,labels,comments,state,assignees",
+  "title,body,labels,comments,author",
+  "title,labels,comments,state,assignees,author",
 }
 
-local pr_origin_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus"
+local pr_origin_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,author,mergeable,mergeStateStatus"
 local pr_origin_legacy_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,mergeable,mergeStateStatus"
 local pr_head_selector = "headRefName"
 local pr_fix_selector = "headRefName,headRefOid,baseRefName,state,comments,headRepository,headRepositoryOwner,isCrossRepository"
@@ -279,7 +282,7 @@ local pr_fix_precheck_selector = "headRefName,headRefOid,baseRefName,state,updat
 local pr_merge_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 local pr_merge_without_rollup_selector = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus"
 local pr_freshness_selector = "headRefName,headRefOid,baseRefName,state,updatedAt,isDraft,comments,labels,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
-local pr_context_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels"
+local pr_context_selector = "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,author"
 M.pr_origin_selector = pr_origin_selector
 M.pr_origin_legacy_selector = pr_origin_legacy_selector
 M.pr_head_selector = pr_head_selector
@@ -416,9 +419,15 @@ function M.mock_issue_view_selector(t, fields, selector, times)
   local f = fields or {}
   local repo = f.repo or "owner/repo"
   local number = f.number or 42
-  register_view_commands(t, {
+  local commands = {
     issue_view_command(repo, number, selector),
-  }, M.issue_view_stdout(f), times or 1)
+  }
+  if selector == "title,body,updatedAt,labels,comments,state" then
+    table.insert(commands, issue_view_command(repo, number, "title,body,updatedAt,labels,comments,state,author"))
+  elseif selector == "title,body,comments,labels,state,updatedAt,assignees" then
+    table.insert(commands, issue_view_command(repo, number, "title,body,comments,labels,state,updatedAt,assignees,author"))
+  end
+  register_view_commands(t, commands, M.issue_view_stdout(f), times or 1)
   if selector == "title,body,comments,labels,state,createdAt,updatedAt,assignees,author" then
     register_view_commands(t, {
       issue_rest_command(repo, number),
@@ -429,7 +438,14 @@ end
 
 function M.mock_issue_view_raw_selector(t, fields, selector, result, times)
   local f = fields or {}
-  register_command_result(t, issue_view_command(f.repo or "owner/repo", f.number or 42, selector), result or {}, times or 1)
+  local repo = f.repo or "owner/repo"
+  local number = f.number or 42
+  register_command_result(t, issue_view_command(repo, number, selector), result or {}, times or 1)
+  if selector == "title,body,updatedAt,labels,comments,state" then
+    register_command_result(t, issue_view_command(repo, number, "title,body,updatedAt,labels,comments,state,author"), result or {}, times or 1)
+  elseif selector == "title,body,comments,labels,state,updatedAt,assignees" then
+    register_command_result(t, issue_view_command(repo, number, "title,body,comments,labels,state,updatedAt,assignees,author"), result or {}, times or 1)
+  end
 end
 
 function M.mock_pr_view_selector(t, fields, selector, times)

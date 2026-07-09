@@ -1,4 +1,5 @@
 local M = {}
+local stdout_policy = require("forge.github.stdout_policy")
 
 local function graphql_argv(query, fields)
   local argv = { "gh", "api", "graphql", "-f", "query=" .. tostring(query) }
@@ -11,7 +12,7 @@ end
 
 function M.install(handle)
   function handle.graphql(query, fields, timeout)
-    return handle._exec(graphql_argv(query, fields), timeout, "gh GraphQL")
+    return handle._exec(graphql_argv(query, fields), timeout, "gh GraphQL", stdout_policy.content_json("graphql"))
   end
 end
 

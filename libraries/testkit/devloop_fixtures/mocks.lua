@@ -287,7 +287,7 @@ function M.new(ctx, funcs)
     local fields = extra or {}
     local selected = with_default_state_marker(labels or { "fkst-dev:thinking" }, comments)
     entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:thinking" }, selected, fields)
-    entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, title = fields.title, updated_at = fields.updated_at, state = fields.state, assignees = fields.assignees }, "title,updatedAt,labels,comments,state")
+    entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:thinking" }, comments = selected, title = fields.title, updated_at = fields.updated_at, state = fields.state, assignees = fields.assignees, author_login = fields.author_login }, "title,updatedAt,labels,comments,state,author")
   end
 
   local function mock_issue_reconcile(labels, comments, extra)
@@ -296,11 +296,15 @@ function M.new(ctx, funcs)
 
   local function mock_issue_commit_subject_title(fields)
     if fields.commit_title_error ~= nil then
-      entity_read_mocks.mock_issue_view_raw_selector(t, {}, "number,title", { stderr = tostring(fields.commit_title_error), exit_code = 1 })
+      entity_read_mocks.mock_issue_view_raw_selector(t, {}, "number,title,author", { stderr = tostring(fields.commit_title_error), exit_code = 1 })
       return
     end
-    entity_read_mocks.mock_issue_view_raw_selector(t, {}, "number,title", {
-      stdout = string.format('{"number":42,"title":"%s"}\n', json_string(fields.commit_title or fields.title or "Implement decision recorder")),
+    entity_read_mocks.mock_issue_view_raw_selector(t, {}, "number,title,author", {
+      stdout = string.format(
+        '{"number":42,"title":"%s","author":{"login":"%s"}}\n',
+        json_string(fields.commit_title or fields.title or "Implement decision recorder"),
+        json_string(fields.author_login or "fkst-test-bot")
+      ),
     })
   end
 
@@ -335,7 +339,7 @@ function M.new(ctx, funcs)
       state = fields.state,
       assignees = fields.assignees,
       author_login = fields.author_login,
-    }, selector or "title,labels,comments", view_count)
+    }, selector or "title,labels,comments,author", view_count)
     mock_issue_commit_subject_title(fields)
   end
 
@@ -369,7 +373,7 @@ function M.new(ctx, funcs)
     local fields = extra or {}
     local selected = with_default_state_marker(labels or { "fkst-dev:blocked" }, comments)
     entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:blocked" }, selected, { title = fields.title, body = fields.body or "Body from GitHub" })
-    entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:blocked" }, comments = selected, title = fields.title, body = fields.body or "Body from GitHub" }, "title,body,labels,comments")
+    entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:blocked" }, comments = selected, title = fields.title, body = fields.body or "Body from GitHub", author_login = fields.author_login }, "title,body,labels,comments,author")
   end
 
   local function mock_issue_fix(labels, comments, extra)
@@ -397,7 +401,7 @@ function M.new(ctx, funcs)
     local fields = extra or {}
     local selected = with_default_state_marker(labels or { "fkst-dev:merge-ready" }, comments)
     entity_read_mocks.mock_issue_read_with_defaults(t, labels or { "fkst-dev:merge-ready" }, selected, { title = fields.title, state = fields.state, assignees = fields.assignees or { "fkst-test-bot" } })
-    entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:merge-ready" }, comments = selected, title = fields.title, state = fields.state, assignees = fields.assignees or { "fkst-test-bot" } }, "title,labels,comments,state,assignees")
+    entity_read_mocks.mock_issue_view_selector(t, { labels = labels or { "fkst-dev:merge-ready" }, comments = selected, title = fields.title, state = fields.state, assignees = fields.assignees or { "fkst-test-bot" }, author_login = fields.author_login }, "title,labels,comments,state,assignees,author")
   end
 
   return {

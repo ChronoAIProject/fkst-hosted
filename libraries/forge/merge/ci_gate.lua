@@ -1,10 +1,9 @@
 local S = {}
-local github_adapter = require("forge.github")
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("forge.gitref")
 
-function S.install(M, shared)
-local github = github_adapter.production_handle
+function S.install(M, shared, opts)
+local github = opts.github_handle
 local strings = shared.strings
 local is_open_pr = shared.is_open_pr
 local log_check_runs_fallback = shared.log_check_runs_fallback

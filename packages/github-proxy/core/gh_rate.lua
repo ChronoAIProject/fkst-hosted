@@ -8,17 +8,13 @@ local function command_result_exit_code(result)
   return tonumber(result.exit_code)
 end
 
-local github_handle = nil
 local git_handle = nil
 
 local function production_github()
-  if github_handle == nil then
-    if type(exec_argv) ~= "function" then
-      error("github-proxy: adapter-primitive-missing: gh adapter requires exec_argv")
-    end
-    github_handle = require("forge.github").new(exec_argv)
+  if type(exec_argv) ~= "function" then
+    error("github-proxy: adapter-primitive-missing: gh adapter requires exec_argv")
   end
-  return github_handle
+  return require("devloop.github_factory").production_handle()
 end
 
 local function production_git()
@@ -119,7 +115,7 @@ function M.gh_exec_result(run_or_result, timeout, context)
   if type(run_or_result) == "string" then
     local argv = shell_words(run_or_result)
     return M.gh_adapter_result(function(github)
-      return github._exec(argv, timeout or 30, context or "github command")
+      error("github-proxy: raw-gh-string-policy-missing: GitHub command strings must use a typed adapter method")
     end, context)
   end
   local result = run_or_result

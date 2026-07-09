@@ -46,7 +46,7 @@ local function issue_view_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return string.format(
-    '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+    '{"title":"Implement dependency cascade","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
     encode_json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
@@ -59,7 +59,7 @@ local function observe_issue_state_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return string.format(
-    '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+    '{"state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
     encode_json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
@@ -126,7 +126,7 @@ local function mock_blocker_issue(issue_number, state_name)
     table.insert(comments, core.state_marker(base_ids.proposal_id(repo, issue_number), state_name, "v-" .. tostring(issue_number)))
   end
   t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
-    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
+    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. '],"author":{"login":"fkst-test-bot"}}\n',
     stderr = "",
     exit_code = 0,
   })
@@ -159,7 +159,7 @@ local function mock_blocker_issue_with_pr_link(issue_number, pr_number, state_na
   end
   table.insert(comments, m_builders.pr_link_marker(blocker_proposal_id, pr_number, branch, impl_version, "dev"))
   t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
-    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
+    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. '],"author":{"login":"fkst-test-bot"}}\n',
     stderr = "",
     exit_code = 0,
   })
@@ -287,14 +287,14 @@ local function run_result()
 end
 
 local function run_observe()
-  return t.run_department("departments/observe_issue/main.lua", {
+  return h.run_department("departments/observe_issue/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = h.issue(),
   }, h.opts("dependency-observe"))
 end
 
 local function run_liveness_scan()
-  return t.run_department("departments/liveness_scan/main.lua", {
+  return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = { schema = "github-devloop.tick.v1" },
     ts = "2026-06-03T01:32:03Z",
@@ -302,7 +302,7 @@ local function run_liveness_scan()
 end
 
 local function run_implement()
-  return t.run_department("departments/implement/main.lua", {
+  return h.run_department("departments/implement/main.lua", {
     queue = "devloop_ready",
     payload = h.ready(),
   }, h.opts("dependency-implement"))
@@ -726,7 +726,7 @@ return {
     mock_blocked_by(42, { { number = 53 } })
     mock_blocked_by(53, {})
     mock_blocker_issue(53, "merged")
-    local observed = t.run_department("departments/observe_issue/main.lua", {
+    local observed = h.run_department("departments/observe_issue/main.lua", {
       queue = "devloop_observe_issue",
       payload = h.issue({
         dedup_key = changed.payload.dedup_key,

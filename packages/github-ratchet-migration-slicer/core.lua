@@ -12,6 +12,7 @@ local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_WRITE = true,
   FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
+  FKST_GITHUB_AUTHORIZED_LOGINS = true,
 }
 
 local function read_env_command(name)

@@ -1,6 +1,5 @@
 local S = {}
 local check_runs = require("forge.github.check_runs")
-local github_adapter = require("forge.github")
 local forge_validators = require("forge.gitref")
 local strings = require("contract.strings")
 
@@ -23,8 +22,8 @@ local merge_gate_reason_class_entries = {
   },
 }
 
-function S.install(M)
-local github = github_adapter.production_handle
+function S.install(M, opts)
+local github = opts.github_handle
 local is_open_pr = check_runs.is_open_pr
 local check_run_id = check_runs.check_run_id
 local check_run_head_sha = check_runs.check_run_head_sha

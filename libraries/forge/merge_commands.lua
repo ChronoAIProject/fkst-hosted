@@ -1,6 +1,6 @@
 local M = {}
 
-local merge_issue_fields = "title,labels,comments,state,assignees"
+local merge_issue_fields = "title,labels,comments,state,assignees,author"
 local merge_pr_fields = "headRefName,headRefOid,baseRefName,baseRefOid,state,updatedAt,isDraft,mergedAt,comments,headRepository,headRepositoryOwner,isCrossRepository,mergeable,mergeStateStatus,statusCheckRollup"
 
 function M.install(core)

@@ -2,7 +2,28 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 local gh_exec_mod = require("devloop.gh_exec")
-local github = require("forge.github").production_handle
+local sweep_bounds = require("devloop.sweep_bounds")
+local content_filter = require("forge.github.content_filter")
+local stdout_policy = require("forge.github.stdout_policy")
+local github = require("devloop.github_factory").production_handle
+
+local function mock_author_policy_env()
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
+    stdout = "fkst-test-bot,ElonSG",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
+    stdout = "trusted-human",
+    stderr = "",
+    exit_code = 0,
+  })
+end
 
 local function assert_argv_equal(actual, expected)
   t.eq(#actual, #expected)
@@ -12,11 +33,12 @@ local function assert_argv_equal(actual, expected)
 end
 
 local function with_exec_argv(fn)
+  mock_author_policy_env()
   local old_exec_argv = exec_argv
   local calls = {}
   exec_argv = function(spec)
     table.insert(calls, spec)
-    return { stdout = "", stderr = "", exit_code = 0 }
+    return { stdout = "{}", stderr = "", exit_code = 0 }
   end
   local ok, result = pcall(fn, calls)
   exec_argv = old_exec_argv
@@ -37,7 +59,7 @@ return {
     )
     t.eq(
       core.gh_issue_view_merge_cmd("owner/repo", 42),
-      "gh issue view '42' --repo 'owner/repo' --json title,labels,comments,state,assignees"
+      "gh issue view '42' --repo 'owner/repo' --json title,labels,comments,state,assignees,author"
     )
     t.eq(
       core.gh_pr_view_merge_cmd("owner/repo", 7),
@@ -57,15 +79,97 @@ return {
     )
   end,
 
+  test_forge_merge_requires_injected_github_handle = function()
+    local ok, err = pcall(function()
+      require("forge.merge").install({})
+    end)
+
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("forge.merge: github_handle is required", 1, true) ~= nil)
+  end,
+
   test_generic_gh_exec_uses_github_argv_adapter = function()
     local calls = with_exec_argv(function()
-      gh_exec_mod.gh_exec({ argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 })
+      gh_exec_mod.gh_exec(
+        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
+        nil,
+        nil,
+        stdout_policy.trusted_metadata_json()
+      )
     end)
 
     assert_argv_equal(calls[1].argv, { "gh", "api", "repos/owner/repo/issues/42" })
     t.eq(calls[1].timeout, 34)
     t.is_nil(calls[1].cmd)
     t.is_nil(calls[1].rate_pool)
+  end,
+
+  test_generic_gh_exec_requires_declared_stdout_policy = function()
+    local ok, err = pcall(function()
+      gh_exec_mod.gh_exec(
+        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
+        nil,
+        function()
+          return { stdout = "{}", stderr = "", exit_code = 0 }
+        end
+      )
+    end)
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("missing or unknown stdout policy", 1, true) ~= nil)
+  end,
+
+  test_sweep_exec_requires_declared_stdout_policy = function()
+    local ok, err = pcall(function()
+      return sweep_bounds.sweep_exec(
+        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 10 },
+        { call_timeout = 10, wall_clock_budget = 20 },
+        now() + 20,
+        "sweep",
+        nil
+      )
+    end)
+    t.eq(ok, false)
+    t.is_true(tostring(err):find("missing or unknown stdout policy", 1, true) ~= nil)
+  end,
+
+  test_generic_gh_exec_filters_content_json_policy = function()
+    local result = gh_exec_mod.gh_exec(
+      { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
+      nil,
+      function()
+        return {
+          stdout = '{"number":42,"title":"attack","body":"attack","author":{"login":"mallory"},"comments":[]}',
+          stderr = "",
+          exit_code = 0,
+        }
+      end,
+      stdout_policy.content_json("issue_view"),
+      content_filter.author_policy_from_logins({ "fkst-test-bot" })
+    )
+    t.is_true(result.stdout:find("[fkst:blocked-github-content:v1", 1, true) ~= nil)
+    t.eq(result.content_redacted, true)
+  end,
+
+  test_generic_gh_exec_leaves_non_content_stdout_untouched = function()
+    local raw = '{"number":42,"title":"attack","body":"attack","author":{"login":"mallory"}}'
+    for _, policy in ipairs({
+      stdout_policy.plain_text(),
+      stdout_policy.trusted_metadata_json(),
+      stdout_policy.write_response(),
+      stdout_policy.no_stdout(),
+    }) do
+      local result = gh_exec_mod.gh_exec(
+        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
+        nil,
+        function()
+          return { stdout = raw, stderr = "", exit_code = 0 }
+        end,
+        policy,
+        content_filter.author_policy_from_logins({ "fkst-test-bot" })
+      )
+      t.eq(result.stdout, raw)
+      t.is_nil(result.content_redacted)
+    end
   end,
 
   test_dependency_graphql_uses_github_argv_adapter = function()
@@ -113,7 +217,7 @@ return {
       "--repo",
       "owner/repo",
       "--json",
-      "title,labels,comments",
+      "title,labels,comments,author",
     })
     assert_argv_equal(calls[3].argv, {
       "gh",

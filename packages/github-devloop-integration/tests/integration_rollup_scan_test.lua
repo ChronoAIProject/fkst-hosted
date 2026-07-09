@@ -41,7 +41,7 @@ local function mock_env(write_mode, rollup_merge, integration, release_notes_fal
 end
 
 local function run_scan(run_opts)
-  return t.run_department("departments/rollup_scan/main.lua", {
+  return h.run_department("departments/rollup_scan/main.lua", {
     queue = "devloop_branch_tick",
     payload = { schema = "github-devloop.branch-tick.v1" },
   }, run_opts or opts("rollup-scan"))

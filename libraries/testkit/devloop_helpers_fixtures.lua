@@ -1,12 +1,21 @@
 local M = {}
 
-local bundle_json = '{"title":"Implement decision recorder","body":"Full issue body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[]}\n'
-local pr_context_json = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n'
+local bundle_json = '{"title":"Implement decision recorder","body":"Full issue body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:enabled"}],"comments":[],"author":{"login":"fkst-test-bot"}}\n'
+local pr_context_json = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[],"author":{"login":"fkst-test-bot"}}\n'
 
 local function copy_into(target, source)
   for key, value in pairs(source or {}) do
     target[key] = value
   end
+end
+
+local function mock_decompose_context_bundle(helpers, entity_read_mocks, issue_stdout, pr_stdout)
+  entity_read_mocks.mock_issue_view_raw_selector(helpers.t, {}, "title,body,updatedAt,labels,comments,state,author", {
+    stdout = issue_stdout or '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[],"author":{"login":"fkst-test-bot"}}\n',
+  })
+  entity_read_mocks.mock_pr_view_raw_selector(helpers.t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,author", {
+    stdout = pr_stdout or '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[],"author":{"login":"fkst-test-bot"}}\n',
+  })
 end
 
 function M.new(deps)
@@ -52,6 +61,23 @@ function M.new(deps)
     }, "assignees,author", 30)
   end
 
+  local function encoded_comment_json(comment_id, body, author_login)
+    return '{"id":"' .. helpers.json_string(comment_id)
+      .. '","body":"' .. helpers.json_string(body or "")
+      .. '","user":{"login":"' .. helpers.json_string(author_login or "fkst-test-bot")
+      .. '"},"created_at":"2026-06-03T01:00:00Z"}\n'
+  end
+
+  local base_run_department = helpers.run_department
+
+  helpers.run_department = function(...)
+    if type(helpers.mock_author_policy_env) == "function" then
+      local _, _, run_opts = ...
+      helpers.mock_author_policy_env(run_opts)
+    end
+    return base_run_department(...)
+  end
+
   if mode == "decompose" then
     local base_run_decompose = helpers.run_decompose
     helpers.run_decompose = function(payload, run_opts)
@@ -62,6 +88,9 @@ function M.new(deps)
     helpers.mock_default_issue_claim = mock_default_issue_claim
     helpers.issue_identity_from_payload = issue_identity_from_payload
     helpers.mock_required_check_runs_for = pr.mock_required_check_runs_for
+    helpers.mock_decompose_context_bundle = function(issue_stdout, pr_stdout)
+      return mock_decompose_context_bundle(helpers, entity_read_mocks, issue_stdout, pr_stdout)
+    end
     return helpers
   end
 
@@ -80,17 +109,24 @@ function M.new(deps)
     })
   end
 
-  local function mock_context_bundle(payload)
+  local function mock_context_bundle(payload, run_opts)
     local repo, issue_number = issue_identity_from_payload(payload)
     local ok = { stdout = "", stderr = "", exit_code = 0 }
+    -- Resolve the author-policy env from the caller's run_opts (matching mock_author_policy_env
+    -- defaults) so the ingress filter's whitelist honours managed/authorized logins the test set,
+    -- instead of hardcoding them empty (which would clobber a test's managed/authorized logins).
+    local run_env = (type(run_opts) == "table" and type(run_opts.env) == "table") and run_opts.env or {}
+    local bot_login = run_env.FKST_GITHUB_BOT_LOGIN or "fkst-test-bot"
+    local managed_ok = { stdout = run_env.FKST_DEVLOOP_MANAGED_BOT_LOGINS or "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 }
+    local authorized_ok = { stdout = run_env.FKST_GITHUB_AUTHORIZED_LOGINS or "trusted-human", stderr = "", exit_code = 0 }
     for _ = 1, 8 do
       helpers.t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
-        stdout = "fkst-test-bot",
+        stdout = bot_login,
         stderr = "",
         exit_code = 0,
       })
-      helpers.t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', ok)
-      helpers.t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', ok)
+      helpers.t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', managed_ok)
+      helpers.t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', authorized_ok)
     end
     for _ = 1, 8 do
       helpers.t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
@@ -119,13 +155,13 @@ function M.new(deps)
       stderr = "",
       exit_code = 0,
     })
-    entity_read_mocks.mock_issue_view_raw_selector(helpers.t, { repo = repo, number = issue_number }, "title,body,updatedAt,labels,comments,state", {
+    entity_read_mocks.mock_issue_view_raw_selector(helpers.t, { repo = repo, number = issue_number }, "title,body,updatedAt,labels,comments,state,author", {
       stdout = bundle_json,
     })
     entity_read_mocks.mock_pr_view_raw_selector(helpers.t, {
       repo = repo,
       number = payload and payload.pr_number or 7,
-    }, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
+    }, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,author", {
       stdout = pr_context_json,
     })
     helpers.t.mock_command("gh pr diff", {
@@ -181,8 +217,8 @@ function M.new(deps)
 
   helpers.run_implement = function(...)
     mock_empty_dependencies()
-    local payload = ...
-    mock_context_bundle(payload)
+    local payload, run_opts = ...
+    mock_context_bundle(payload, run_opts)
     return base_run_implement(...)
   end
 
@@ -278,12 +314,15 @@ function M.new(deps)
         or request.handoff.kind == "github-devloop.closed_unmerged" and "closed-unmerged"
         or "reviewing"
       helpers.t.mock_command("gh api --method GET 'repos/" .. tostring(request.repo) .. "/issues/comments/" .. tostring(selected_comment_id) .. "'", {
-        stdout = '{"body":"' .. helpers.json_string(helpers.core.state_marker(request.handoff.proposal_id, state, request.handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+        stdout = encoded_comment_json(
+          selected_comment_id,
+          helpers.core.state_marker(request.handoff.proposal_id, state, request.handoff.version)
+        ),
         stderr = "",
         exit_code = 0,
       })
     end
-    return helpers.t.run_department("departments/comment_handoff/main.lua", {
+    return helpers.run_department("departments/comment_handoff/main.lua", {
       queue = "github-proxy.github_comment_written",
       payload = {
         schema = "github-proxy.comment-written.v1",

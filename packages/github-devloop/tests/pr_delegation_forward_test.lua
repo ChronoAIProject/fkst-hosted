@@ -55,6 +55,7 @@ local function pr_list(pr_number)
 end
 
 local function mock_branch_list(...)
+  h.mock_author_policy_env()
   local count = select("#", ...)
   for index = 1, count do
     local pr_number = select(index, ...)

@@ -1,5 +1,5 @@
 local M = {}
-local env = require("workflow.env")
+local github_env = require("core.env")
 local forge_strings = require("forge.strings")
 
 require("core.error_facts").install(M)
@@ -37,14 +37,6 @@ require("core.comment").install(M, shared_helpers)
 require("core.marker_guard").install(M)
 require("core.claims").install(M)
 
-local allowed_env = {
-  FKST_GITHUB_REPO = true,
-  FKST_GITHUB_BOT_LOGIN = true,
-  FKST_GITHUB_WRITE = true,
-  FKST_GITHUB_PROXY_POLL_LABEL_PREFIX = true,
-  FKST_GITHUB_PROXY_REPLAY_BUDGET = true,
-  FKST_DEBUG_STAMP = true,
-}
 local trusted_bot_login = nil
 
 local is_git_ref_safe = forge_strings.is_git_ref_safe
@@ -53,18 +45,8 @@ local function is_git_sha(value)
   return type(value) == "string" and value:find("^[0-9A-Fa-f]+$") ~= nil and #value >= 6 and #value <= 64
 end
 
-local function read_env_command(name)
-  if not allowed_env[name] then
-    error("github-proxy: env-name-denied: env name is not allowed: " .. tostring(name))
-  end
-  return 'printf %s "$' .. name .. '"'
-end
-
-M.read_env_command = read_env_command
-M.read_env = env.read_env(read_env_command, {
-  missing_exec_error = "read_env requires exec_sync",
-  propagate_exec_errors = true,
-})
+M.read_env_command = github_env.read_env_command
+M.read_env = github_env.read_env
 
 function M.write_with_outbound_log(payload, target, log_outbound)
   local repo = payload.repo
@@ -206,6 +188,10 @@ function M.configure_trusted_bot_login(login)
     return nil
   end
   trusted_bot_login = M.strip_bot_login_suffix(login)
+  return trusted_bot_login
+end
+
+function M.configured_trusted_bot_login()
   return trusted_bot_login
 end
 

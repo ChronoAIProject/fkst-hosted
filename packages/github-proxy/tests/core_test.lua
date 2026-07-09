@@ -24,6 +24,12 @@ local function mock_command(command, response)
   end
 end
 
+local function mock_author_policy_env()
+  mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', { stdout = "fkst-test-bot", stderr = "", exit_code = 0 })
+  mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', { stdout = "fkst-test-bot,ElonSG", stderr = "", exit_code = 0 })
+  mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', { stdout = "trusted-human", stderr = "", exit_code = 0 })
+end
+
 local package_root = "packages/github-proxy"
 
 local function read_file(path)
@@ -332,6 +338,7 @@ return {
   end,
 
   test_rest_issue_view_fails_closed_on_malformed_success_stdout = function()
+    mock_author_policy_env()
     mock_command("gh api repos/owner/repo/issues/3", {
       stdout = '{"title":',
       stderr = "",
@@ -346,10 +353,11 @@ return {
     local result = core.fetch_rest_issue_view("owner/repo", 3)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: rest%-json%-invalid: REST response is not valid JSON") ~= nil)
+    t.is_true(result.stderr:find("forge.github.content_filter: JSON decode failed", 1, true) ~= nil)
   end,
 
   test_rest_issue_view_fails_closed_on_empty_success_stdout = function()
+    mock_author_policy_env()
     mock_command("gh api repos/owner/repo/issues/3", {
       stdout = "",
       stderr = "",
@@ -364,10 +372,11 @@ return {
     local result = core.fetch_rest_issue_view("owner/repo", 3)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: rest%-entity%-empty: REST entity response is empty") ~= nil)
+    t.is_true(result.stderr:find("forge.github.content_filter: JSON decode failed", 1, true) ~= nil)
   end,
 
   test_rest_pr_view_fails_closed_on_malformed_success_stdout = function()
+    mock_author_policy_env()
     mock_command("gh api repos/owner/repo/pulls/7", {
       stdout = "not json",
       stderr = "",
@@ -382,10 +391,11 @@ return {
     local result = core.fetch_rest_pr_view("owner/repo", 7)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: rest%-json%-invalid: REST response is not valid JSON") ~= nil)
+    t.is_true(result.stderr:find("forge.github.content_filter: JSON decode failed", 1, true) ~= nil)
   end,
 
   test_rest_pr_view_fails_closed_on_empty_success_stdout = function()
+    mock_author_policy_env()
     mock_command("gh api repos/owner/repo/pulls/7", {
       stdout = "",
       stderr = "",
@@ -400,17 +410,18 @@ return {
     local result = core.fetch_rest_pr_view("owner/repo", 7)
     t.is_true(result.exit_code ~= 0)
     t.eq(result.stdout, "")
-    t.is_true(result.stderr:find("github%-proxy: rest%-entity%-empty: REST entity response is empty") ~= nil)
+    t.is_true(result.stderr:find("forge.github.content_filter: JSON decode failed", 1, true) ~= nil)
   end,
 
   test_rest_issue_view_empty_comments_stdout_uses_empty_comments_fallback = function()
+    mock_author_policy_env()
     mock_command("gh api repos/owner/repo/issues/4", {
-      stdout = '{"title":"Issue","body":"Body","state":"open","updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
+      stdout = '{"title":"Issue","body":"Body","state":"open","user":{"login":"fkst-test-bot"},"updated_at":"2026-06-03T01:02:03Z","labels":[],"assignees":[]}',
       stderr = "",
       exit_code = 0,
     })
     mock_command("gh api --paginate --slurp repos/owner/repo/issues/4/comments?per_page=100", {
-      stdout = "",
+      stdout = "[[]]\n",
       stderr = "",
       exit_code = 0,
     })

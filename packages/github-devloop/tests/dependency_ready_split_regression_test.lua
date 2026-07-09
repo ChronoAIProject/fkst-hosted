@@ -73,7 +73,7 @@ local function issue_view_json(labels, comments, state)
     table.insert(rendered_labels, string.format('{"name":"%s"}', encode_json_string(label)))
   end
   return string.format(
-    '{"title":"Implement dependency split","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}]}\n',
+    '{"title":"Implement dependency split","state":"%s","labels":[%s],"comments":[%s],"assignees":[{"login":"fkst-test-bot"}],"author":{"login":"fkst-test-bot"}}\n',
     encode_json_string(state or "OPEN"),
     table.concat(rendered_labels, ","),
     issue_comments_json(comments)
@@ -122,7 +122,7 @@ local function mock_blocker_issue(issue_number, state_name)
     table.insert(comments, core.state_marker(base_ids.proposal_id(repo, issue_number), state_name, "v-" .. tostring(issue_number)))
   end
   t.mock_command(core.gh_issue_view_observe_cmd(repo, issue_number), {
-    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. ']}\n',
+    stdout = '{"state":"OPEN","comments":[' .. issue_comments_json(comments) .. '],"author":{"login":"fkst-test-bot"}}\n',
     stderr = "",
     exit_code = 0,
   })
@@ -171,21 +171,21 @@ local function ready_at(inner_version)
 end
 
 local function run_observe()
-  return t.run_department("departments/observe_issue/main.lua", {
+  return h.run_department("departments/observe_issue/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = h.issue(),
   }, h.opts("ready-split-regression-observe"))
 end
 
 local function run_observe_with_issue(event)
-  return t.run_department("departments/observe_issue/main.lua", {
+  return h.run_department("departments/observe_issue/main.lua", {
     queue = "github-proxy.github_entity_changed",
     payload = event,
   }, h.opts("ready-split-regression-observe-visible"))
 end
 
 local function run_implement(payload)
-  return t.run_department("departments/implement/main.lua", {
+  return h.run_department("departments/implement/main.lua", {
     queue = "devloop_ready",
     payload = payload,
   }, h.opts("ready-split-regression-implement"))
@@ -225,7 +225,7 @@ local function ready_handoff_comment_raise(raises)
 end
 
 local function run_comment_handoff_from_request(request, comment_id, name)
-  return t.run_department("departments/comment_handoff/main.lua", {
+  return h.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
     payload = {
       schema = "github-proxy.comment-written.v1",

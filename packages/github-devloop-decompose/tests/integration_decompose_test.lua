@@ -42,7 +42,7 @@ local function run_decompose_with_post_marker(event, run_opts, count)
   mock_pr_view(event, blocked_comments(event, {
     decompose_lib.decomposed_marker(event.proposal_id, event.version, event.pr_number, count),
   }), "2026-06-03T02:03:05Z")
-  return t.run_department("departments/decompose/main.lua", {
+  return h.run_department("departments/decompose/main.lua", {
     queue = "devloop_decompose",
     payload = event,
   }, run_opts)
@@ -153,12 +153,7 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
-  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
-    stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[]}\n',
-  })
-  entity_read_mocks.mock_pr_view_raw_selector(t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n',
-  })
+  h.mock_decompose_context_bundle()
   t.mock_command("gh pr diff", {
     stdout = "diff --git a/file.lua b/file.lua\n+return true\n",
     stderr = "",
@@ -430,7 +425,7 @@ return {
     mock_pr_view(event, blocked_comments(event))
 
     h.mock_default_issue_claim()
-    local first = t.run_department("departments/decompose/main.lua", {
+    local first = h.run_department("departments/decompose/main.lua", {
       queue = "devloop_decompose",
       payload = event,
     }, run_opts)

@@ -1,4 +1,5 @@
 local M = {}
+local stdout_policy = require("forge.github.stdout_policy")
 
 local function workflow_run_argv(repo, workflow, ref, fields)
   local argv = {
@@ -22,7 +23,7 @@ end
 
 function M.install(handle)
   function handle.workflow_run(repo, workflow, ref, fields, timeout)
-    return handle._exec(workflow_run_argv(repo, workflow, ref, fields), timeout, "gh workflow run")
+    return handle._exec(workflow_run_argv(repo, workflow, ref, fields), timeout, "gh workflow run", stdout_policy.write_response())
   end
 end
 

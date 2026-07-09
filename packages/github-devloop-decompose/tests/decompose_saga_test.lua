@@ -146,12 +146,7 @@ local function mock_decompose_codex(stdout)
     stderr = "",
     exit_code = 0,
   })
-  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
-    stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[]}\n',
-  })
-  entity_read_mocks.mock_pr_view_raw_selector(t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-04T01:02:03Z","comments":[],"labels":[]}\n',
-  })
+  h.mock_decompose_context_bundle()
   t.mock_command("gh pr diff", {
     stdout = "diff --git a/file.lua b/file.lua\n+return true\n",
     stderr = "",
@@ -215,7 +210,7 @@ local function mock_second_delivery(event)
 end
 
 local function run_decompose(event, name)
-  return t.run_department("departments/decompose/main.lua", {
+  return h.run_department("departments/decompose/main.lua", {
     queue = "devloop_decompose",
     payload = event,
   }, h.opts(name, {

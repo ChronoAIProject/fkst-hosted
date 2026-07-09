@@ -6,18 +6,18 @@ local function run_department_with_logs(path, event, opts)
   return result.exit_code == 0, result
 end
 
-return {
-  test_scan_accepts_production_namespaced_queue = function()
-    t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
-      stdout = "owner/repo",
-      stderr = "",
-      exit_code = 0,
-    })
-    t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
-      stdout = "",
-      stderr = "",
-      exit_code = 0,
-    })
+local function mock_env_reads()
+  t.mock_command('printf %s "$FKST_GITHUB_REPO"', {
+    stdout = "owner/repo",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_WRITE"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  for _ = 1, 2 do
     t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
       stdout = "fkst-test-bot",
       stderr = "",
@@ -28,6 +28,17 @@ return {
       stderr = "",
       exit_code = 0,
     })
+  end
+  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+end
+
+return {
+  test_scan_accepts_production_namespaced_queue = function()
+    mock_env_reads()
     t.mock_command("gh api --paginate --slurp", {
       stdout = "[]\n",
       stderr = "",

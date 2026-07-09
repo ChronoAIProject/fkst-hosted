@@ -27,11 +27,11 @@ end
 
 local function run_comment_handoff_from_request(request, comment_id, name)
   t.mock_command("gh api --method GET 'repos/" .. tostring(request.repo) .. "/issues/comments/" .. tostring(comment_id) .. "'", {
-    stdout = '{"body":"' .. h.json_string(core.state_marker(request.handoff.proposal_id, handoff_state(request.handoff), request.handoff.version)) .. '","user":{"login":"fkst-test-bot"}}\n',
+    stdout = '{"id":"' .. h.json_string(comment_id) .. '","body":"' .. h.json_string(core.state_marker(request.handoff.proposal_id, handoff_state(request.handoff), request.handoff.version)) .. '","user":{"login":"fkst-test-bot"},"created_at":"2026-06-03T01:00:00Z"}\n',
     stderr = "",
     exit_code = 0,
   })
-  return t.run_department("departments/comment_handoff/main.lua", {
+  return h.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
     payload = {
       schema = "github-proxy.comment-written.v1",

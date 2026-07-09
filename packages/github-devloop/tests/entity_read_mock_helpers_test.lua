@@ -10,7 +10,9 @@ local function decode(text)
 end
 
 local function github()
-  return require("forge.github").new(exec_argv)
+  return require("forge.github").new(exec_argv, {
+    trusted_author_policy = require("forge.github.content_filter").test_disabled_author_policy(),
+  })
 end
 
 local function first(value)
@@ -19,6 +21,7 @@ end
 
 return {
   test_issue_read_seam_registers_equivalent_view_rest_probe_and_comments = function()
+    h.mock_author_policy_env()
     seam.mock_issue_read_forms(t, {
       repo = "owner/repo",
       number = 42,
@@ -61,6 +64,7 @@ return {
   end,
 
   test_pr_read_seam_registers_equivalent_view_rest_probe_and_comments = function()
+    h.mock_author_policy_env()
     seam.mock_pr_read_forms(t, {
       repo = "owner/repo",
       number = 7,
@@ -126,6 +130,7 @@ return {
   end,
 
   test_unregistered_entity_read_fails_closed = function()
+    h.mock_author_policy_env()
     local ok = pcall(function()
       require("devloop.github_proxy_entity_view").fetch_issue_view("owner/repo", 404, "2026-06-14T00:00:00Z", { consumer = "unregistered" })
     end)

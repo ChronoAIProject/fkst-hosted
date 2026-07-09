@@ -12,7 +12,7 @@ local find_raise = h.find_raise
 local json_string = h.json_string
 
 local function run_handoff(payload, name)
-  return t.run_department("departments/comment_handoff/main.lua", {
+  return h.run_department("departments/comment_handoff/main.lua", {
     queue = "github-proxy.github_comment_written",
     payload = payload,
   }, opts(name))
@@ -20,7 +20,7 @@ end
 
 local function mock_marker_comment(comment_id, body, author_login)
   t.mock_command("gh api --method GET 'repos/owner/repo/issues/comments/" .. tostring(comment_id) .. "'", {
-    stdout = '{"body":"' .. json_string(body or "") .. '","user":{"login":"' .. tostring(author_login or "fkst-test-bot") .. '"}}\n',
+    stdout = '{"id":"' .. json_string(comment_id) .. '","body":"' .. json_string(body or "") .. '","user":{"login":"' .. tostring(author_login or "fkst-test-bot") .. '"},"created_at":"2026-06-03T01:00:00Z"}\n',
     stderr = "",
     exit_code = 0,
   })

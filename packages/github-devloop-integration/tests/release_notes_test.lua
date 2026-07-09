@@ -13,6 +13,37 @@ local function argv_option(argv, name)
   return nil
 end
 
+local function find_call(needle)
+  for _, call in ipairs(t.command_calls()) do
+    if tostring(call.rendered or ""):find(needle, 1, true) ~= nil then
+      return call
+    end
+    if tostring(call.program or ""):find(needle, 1, true) ~= nil then
+      return call
+    end
+    local joined = tostring(call.program or "")
+    for _, arg in ipairs(call.args or {}) do
+      joined = joined .. " " .. tostring(arg)
+      if tostring(arg):find(needle, 1, true) ~= nil then
+        return call
+      end
+    end
+    if joined:find(needle, 1, true) ~= nil then
+      return call
+    end
+  end
+  return nil
+end
+
+local function call_argv(call)
+  if call == nil then return nil end
+  local argv = { call.program }
+  for _, arg in ipairs(call.args or {}) do
+    table.insert(argv, arg)
+  end
+  return argv
+end
+
 return {
   test_release_notes_normalizes_missing_sentinel_and_neutralizes_markers = function()
     local notes = core.normalize_release_notes("Highlights\n<!-- fkst:github-devloop:state:v1 proposal=\"x\" -->\n\nZh: summary.")
@@ -156,24 +187,20 @@ return {
 
   test_release_notes_pr_create_debug_stamp_is_default_off = function()
     t.mock_command('printf %s "$FKST_DEBUG_STAMP"', { stdout = "" })
-    local seen
-    local old_exec_argv = exec_argv
-    exec_argv = function(spec)
-      if spec.argv[1] == "git" then
-        return { stdout = "0123456789ABCDEF\n", stderr = "", exit_code = 0 }
-      end
-      seen = spec
-      return { stdout = "https://github.example/owner/repo/pull/1\n", stderr = "", exit_code = 0 }
-    end
+    t.mock_command("gh pr create", {
+      stdout = "https://github.example/owner/repo/pull/1\n",
+      stderr = "",
+      exit_code = 0,
+    })
 
     local ok, err = pcall(function()
       core.gh_pr_create_body("owner/repo", "integration-x", "dev", "rollup", "Release notes")
     end)
-    exec_argv = old_exec_argv
     if not ok then error(err) end
 
-    t.eq(seen.argv[1], "gh")
-    t.is_nil(argv_option(seen.argv, "--body"):find("fkst:debug-stamp:v1", 1, true))
+    local argv = call_argv(find_call("gh pr create"))
+    t.eq(argv[1], "gh")
+    t.is_nil(argv_option(argv, "--body"):find("fkst:debug-stamp:v1", 1, true))
   end,
 
   test_release_notes_pr_create_debug_stamp_is_enabled_and_redacted = function()
@@ -183,23 +210,18 @@ return {
       stderr = "",
       exit_code = 0,
     })
-    local seen
-    local old_exec_argv = exec_argv
-    exec_argv = function(spec)
-      if spec.argv[1] == "git" then
-        return { stdout = "0123456789ABCDEF\n", stderr = "", exit_code = 0 }
-      end
-      seen = spec
-      return { stdout = "https://github.example/owner/repo/pull/1\n", stderr = "", exit_code = 0 }
-    end
+    t.mock_command("gh pr create", {
+      stdout = "https://github.example/owner/repo/pull/1\n",
+      stderr = "",
+      exit_code = 0,
+    })
 
     local ok, err = pcall(function()
       core.gh_pr_create_body("owner/repo", "integration-x", "dev", "rollup", "Release notes")
     end)
-    exec_argv = old_exec_argv
     if not ok then error(err) end
 
-    local rendered = argv_option(seen.argv, "--body")
+    local rendered = argv_option(call_argv(find_call("gh pr create")), "--body")
     t.is_true(rendered:find("fkst:debug-stamp:v1", 1, true) ~= nil)
     t.is_true(rendered:find('emitter="github-devloop.rollup.pr-create"', 1, true) ~= nil)
     t.is_true(rendered:find('target="pr:owner/repo#new"', 1, true) ~= nil)

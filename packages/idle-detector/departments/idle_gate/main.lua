@@ -21,6 +21,8 @@ local stale_budget_seconds = 10 * 60
 local allowed_env = {
   FKST_GITHUB_REPO = true,
   FKST_GITHUB_BOT_LOGIN = true,
+  FKST_DEVLOOP_MANAGED_BOT_LOGINS = true,
+  FKST_GITHUB_AUTHORIZED_LOGINS = true,
 }
 
 local function read_env_command(name)
@@ -141,4 +143,4 @@ local function make_department(ports)
   return department
 end
 
-return ports_lib.install(make_department)
+return ports_lib.install(make_department, ports_lib.github_author_options(production_read_env, "idle-detector"))

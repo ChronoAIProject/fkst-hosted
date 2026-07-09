@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local devloop_claims = require("devloop.claims")
 local devloop_entity_view = require("devloop.github_proxy_entity_view")
 local devloop_logging = require("devloop.logging")
+local github_factory = require("devloop.github_factory")
 
 local M = {}
 
@@ -25,7 +26,7 @@ local function github()
   if type(exec_argv) ~= "function" then
     error("github-devloop-workflow: github-adapter-missing-exec-argv: GitHub adapter requires exec_argv")
   end
-  return require("forge.github").new(exec_argv)
+  return github_factory.production_handle()
 end
 
 local function read_ownership(core, deps, repo, issue_number)

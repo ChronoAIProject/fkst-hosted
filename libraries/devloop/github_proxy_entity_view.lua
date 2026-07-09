@@ -1,7 +1,9 @@
 local C = {}
 local github_view = require("forge.github_view")
 local gh_exec_mod = require("devloop.gh_exec")
-local github_handle = nil
+local github_author_policy = require("devloop.github_author_policy")
+local github_factory = require("devloop.github_factory")
+local stdout_policy = require("forge.github.stdout_policy")
 
 local parse_view_updated_at = github_view.parse_view_updated_at
 local parse_updated_at_stdout = github_view.parse_updated_at_stdout
@@ -18,15 +20,15 @@ local decode_comments_json = function(stdout) return github_view.decode_comments
 
 local max_cache_key_segment_len = 120
 
+local function author_policy_for_exec(exec)
+  return github_author_policy.for_exec(exec or exec_sync)
+end
+
 local function github()
-  if github_handle ~= nil then
-    return github_handle
-  end
   if type(exec_argv) ~= "function" then
     error("github-devloop: GitHub adapter requires exec_argv")
   end
-  github_handle = require("forge.github").new(exec_argv)
-  return github_handle
+  return github_factory.production_handle()
 end
 
 local function sanitize_cache_segment(value, allow_slash)
@@ -56,7 +58,7 @@ local function sanitize_cache_segment(value, allow_slash)
 end
 
 local function entity_view_cache_key(repo, kind, number)
-  return "github-proxy/view/"
+  return "github-proxy/view-v2/"
     .. sanitize_cache_segment(repo, true)
     .. "/"
     .. sanitize_cache_segment(kind, false)
@@ -419,7 +421,7 @@ function C.commit_issue_subject_snapshot(repo, issue_number)
   if issue_number == nil then
     return {}
   end
-  local ok, view = pcall(github().issue_view, repo, issue_number, "number,title", 30)
+  local ok, view = pcall(github().issue_view, repo, issue_number, "number,title,author", 30)
   if not ok or type(view) ~= "table" then
     return {}
   end
@@ -462,7 +464,15 @@ function C.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
   if type(cmd) == "function" then
     result = cmd()
   else
-    result = gh_exec_mod.gh_exec(cmd, nil, exec)
+    result = gh_exec_mod.gh_exec(
+      cmd,
+      nil,
+      exec,
+      stdout_policy.content_json("issue_view"),
+      function()
+        return author_policy_for_exec()
+      end
+    )
   end
   if type(result) == "table" and tonumber(result.exit_code) == 0 then
     cache_set(cache_key, tostring(now() + (ttl_seconds or 60)) .. "\n" .. tostring(result.stdout or ""))
@@ -470,9 +480,9 @@ function C.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
   return result
 end
 
--- Readable cache key for an opt-in scan read: github-devloop/ghread/<variant>/<repo>/<number>.
+-- Readable cache key for an opt-in scan read: github-devloop/ghread-v2/<variant>/<repo>/<number>.
 function C.gh_read_cache_key(variant, repo, number)
-  return "github-devloop/ghread/"
+  return "github-devloop/ghread-v2/"
     .. sanitize_cache_segment(variant, false)
     .. "/"
     .. sanitize_cache_segment(repo, true)

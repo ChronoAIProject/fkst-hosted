@@ -46,7 +46,7 @@ local function issue_list_json(count)
   local items = {}
   for n = 1, count do
     table.insert(items, string.format(
-      '{"number":%d,"title":"Issue title number %d that is intentionally long enough to trim after sixty characters","labels":[{"name":"fkst-dev:thinking"}]}',
+      '{"number":%d,"title":"Issue title number %d that is intentionally long enough to trim after sixty characters","labels":[{"name":"fkst-dev:thinking"}],"author":{"login":"fkst-test-bot"}}',
       n,
       n
     ))
@@ -58,7 +58,7 @@ local function pr_list_json(count)
   local items = {}
   for n = 1, count do
     table.insert(items, string.format(
-      '{"number":%d,"title":"PR title number %d","labels":[{"name":"fkst-dev:reviewing"}]}',
+      '{"number":%d,"title":"PR title number %d","labels":[{"name":"fkst-dev:reviewing"}],"author":{"login":"fkst-test-bot"}}',
       n + 100,
       n
     ))
@@ -78,7 +78,7 @@ local function closed_issue_list_json(items)
       table.insert(labels, '{"name":"' .. encode_json_string(label) .. '"}')
     end
     table.insert(rendered, string.format(
-      '{"number":%d,"title":"%s","closedAt":"%s","labels":[%s]}',
+      '{"number":%d,"title":"%s","closedAt":"%s","labels":[%s],"author":{"login":"fkst-test-bot"}}',
       item.number,
       encode_json_string(item.title or "Closed issue"),
       encode_json_string(item.closed_at or "2026-06-01T01:02:03Z"),
@@ -127,7 +127,7 @@ end
 local function mock_board_title(title, repo)
   repo = repo or "owner/repo"
   entity_read_mocks.mock_issue_board_digest_list_raw(t, repo, {
-    stdout = '[{"number":1,"title":"' .. encode_json_string(title) .. '","labels":[{"name":"fkst-dev:thinking"}]}]',
+    stdout = '[{"number":1,"title":"' .. encode_json_string(title) .. '","labels":[{"name":"fkst-dev:thinking"}],"author":{"login":"fkst-test-bot"}}]',
   })
   entity_read_mocks.mock_pr_board_digest_list_raw(t, repo, {
     stdout = "[]",
@@ -143,7 +143,7 @@ end
 
 local function find_raise(raises, queue)
   for _, raised in ipairs(raises or {}) do
-    if raised.queue == queue then
+    if raised.queue == queue or raised.queue == "github-devloop." .. queue then
       return raised
     end
   end
@@ -151,6 +151,12 @@ local function find_raise(raises, queue)
 end
 
 local function run_probe(payload, opts)
+  devloop_base.configure_trusted_bot_login("fkst-test-bot")
+  t.mock_command(devloop_base.read_env_command("FKST_GITHUB_BOT_LOGIN"), {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
   return t.run_department("departments/test_board_digest_probe/main.lua", {
     queue = "board_digest_probe",
     payload = payload,
@@ -216,7 +222,7 @@ return {
     t.is_nil(proposal.body:find("#101 ", 1, true))
     t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 0)
     t.eq(count_calls(h.argv_rendered(core.gh_pr_list_board_digest_cmd("owner/repo"))), 0)
-    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels"), 0)
+    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels,author"), 0)
     t.eq(find_raise(second.raises, "consensus.proposal").payload.body, proposal.body)
   end,
 
@@ -243,9 +249,9 @@ return {
     t.is_nil(first:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true))
     t.is_true(second:find("#2 [fkst-dev:thinking] Issue title number 2", 1, true) ~= nil)
     t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 1)
-    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels,author"), 1)
     t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("other/repo"))), 1)
-    t.eq(count_calls("gh issue list --repo other/repo --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+    t.eq(count_calls("gh issue list --repo other/repo --state closed --limit 30 --json number,title,closedAt,labels,author"), 1)
   end,
 
   test_board_digest_feeds_existing_context_path_from_local_board_command = function()
@@ -406,6 +412,6 @@ return {
     t.eq(loop.round, 2)
     t.eq(review_loop.round, 3)
     t.eq(count_calls(h.argv_rendered(core.gh_issue_list_board_digest_cmd("owner/repo"))), 1)
-    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels"), 1)
+    t.eq(count_calls("gh issue list --repo owner/repo --state closed --limit 30 --json number,title,closedAt,labels,author"), 1)
   end,
 }

@@ -46,7 +46,7 @@ local function mock_branch_config()
 end
 
 local function run_timeout_reconcile(payload, run_opts)
-  return t.run_department("departments/reconcile/main.lua", {
+  return h.run_department("departments/reconcile/main.lua", {
     queue = "devloop_timeout_reconcile",
     payload = payload,
   }, run_opts)

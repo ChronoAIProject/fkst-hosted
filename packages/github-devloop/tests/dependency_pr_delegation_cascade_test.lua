@@ -116,7 +116,7 @@ return {
     mock_delegated_blocker_issue()
     mock_merged_child_pr()
 
-    local result = t.run_department("departments/observe_issue/main.lua", {
+    local result = h.run_department("departments/observe_issue/main.lua", {
       queue = "github-proxy.github_entity_changed",
       payload = h.issue({
         number = dependent_number,

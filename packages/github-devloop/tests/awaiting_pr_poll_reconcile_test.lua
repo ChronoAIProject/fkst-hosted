@@ -617,7 +617,7 @@ return {
       }),
       assignees = { "fkst-test-bot" },
       author_login = "fkst-test-bot",
-    }, "title,updatedAt,labels,comments,state")
+    }, "title,updatedAt,labels,comments,state,author")
 
     local result = run_timeout_reconcile(reconcile.payload, h.opts("awaiting-pr-timeout-reconcile-terminal"))
 

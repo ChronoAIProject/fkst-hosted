@@ -503,17 +503,17 @@ end
 local function gh_issue_list_recent_closed_command(repo, limit)
   return "gh issue list --repo " .. shell_single_quote(repo)
     .. " --state closed --limit " .. tostring(math.floor(tonumber(limit or 30)))
-    .. " --json number,title,closedAt,labels"
+    .. " --json number,title,closedAt,labels,author"
 end
 
 local function gh_issue_list_board_digest_command(repo)
   return "gh issue list --repo " .. shell_single_quote(repo)
-    .. " --state open --limit 100 --json number,title,labels"
+    .. " --state open --limit 100 --json number,title,labels,author"
 end
 
 local function gh_pr_list_board_digest_command(repo)
   return "gh pr list --repo " .. shell_single_quote(repo)
-    .. " --state open --limit 100 --json number,title,labels"
+    .. " --state open --limit 100 --json number,title,labels,author"
 end
 
 local function gh_issue_list_observe_command(repo, label, page, include_headers)
@@ -680,10 +680,10 @@ local function install_legacy_command_renderers(core)
     return gh_issue_view_command(repo, number, "labels,comments")
   end
   core.gh_issue_view_loop_cmd = core.gh_issue_view_loop_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,updatedAt,labels,comments,state")
+    return gh_issue_view_command(repo, number, "title,updatedAt,labels,comments,state,author")
   end
   core.gh_issue_view_meta_cmd = core.gh_issue_view_meta_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,labels,comments")
+    return gh_issue_view_command(repo, number, "title,labels,comments,author")
   end
   core.gh_issue_view_implement_cmd = core.gh_issue_view_implement_cmd or function(repo, number)
     return gh_issue_view_command(repo, number, "title,body,labels,comments,state,author")
@@ -698,26 +698,26 @@ local function install_legacy_command_renderers(core)
     return gh_issue_view_command(repo, number, "title,labels,comments,assignees,author")
   end
   core.gh_issue_view_decompose_cmd = core.gh_issue_view_decompose_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,body,labels,comments")
+    return gh_issue_view_command(repo, number, "title,body,labels,comments,author")
   end
   core.gh_issue_view_fix_cmd = core.gh_issue_view_fix_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,labels,comments")
+    return gh_issue_view_command(repo, number, "title,labels,comments,author")
   end
   core.gh_issue_view_commit_subject_cmd = core.gh_issue_view_commit_subject_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "number,title")
+    return gh_issue_view_command(repo, number, "number,title,author")
   end
   core.gh_issue_view_review_loop_cmd = core.gh_issue_view_review_loop_cmd or function(repo, number)
     return gh_issue_view_command(repo, number, "title,labels,comments,assignees,author")
   end
   core.gh_issue_view_merge_cmd = core.gh_issue_view_merge_cmd or function(repo, number)
-    return gh_issue_view_command(repo, number, "title,labels,comments,state,assignees")
+    return gh_issue_view_command(repo, number, "title,labels,comments,state,assignees,author")
   end
   core.gh_issue_view_observe_cmd = core.gh_issue_view_observe_cmd or function(repo, number)
     return gh_issue_view_command(repo, number, "title,body,comments,state,stateReason,assignees,author")
   end
 
   core.gh_pr_view_origin_cmd = core.gh_pr_view_origin_cmd or function(repo, number)
-    return gh_pr_view_command(repo, number, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,mergeable,mergeStateStatus")
+    return gh_pr_view_command(repo, number, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,mergedAt,comments,labels,author,mergeable,mergeStateStatus")
   end
   core.gh_pr_view_observe_cmd = core.gh_pr_view_observe_cmd or core.gh_pr_view_origin_cmd
   core.gh_pr_view_merge_cmd = core.gh_pr_view_merge_cmd or function(repo, number)
@@ -736,7 +736,7 @@ local function install_legacy_command_renderers(core)
     return gh_pr_view_command(repo, number, "headRefName,baseRefName,state")
   end
   core.gh_pr_view_context_cmd = core.gh_pr_view_context_cmd or function(repo, number)
-    return gh_pr_view_command(repo, number, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels")
+    return gh_pr_view_command(repo, number, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,author")
   end
   core.gh_pr_list_freshness_cmd = core.gh_pr_list_freshness_cmd or function(repo)
     return gh_api_paginate("repos/" .. tostring(repo) .. "/pulls?state=open&per_page=100")

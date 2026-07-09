@@ -8,6 +8,7 @@ local S = {}
 local check_runs = require("forge.github.check_runs")
 local forge_validators = require("devloop.forge_validators")
 local config = require("devloop.config")
+local github_factory = require("devloop.github_factory")
 
 function S.install(M)
 local strings = require("contract.strings")
@@ -40,7 +41,7 @@ end
 
 local function github()
   if github_handle == nil then
-    github_handle = require("forge.github").new(exec_argv)
+    github_handle = github_factory.production_handle()
   end
   return github_handle
 end

@@ -145,12 +145,22 @@ function M.rest_pr_to_view_json(pr_stdout, comments_stdout)
 end
 
 function M.fetch_rest_issue_view(repo, issue_number)
-  local issue = M.gh_exec(function(timeout)
-    return M.github_issue_rest_view(repo, issue_number, timeout)
-  end, 30, "GitHub issue REST view")
-  local comments = M.gh_exec(function(timeout)
-    return M.github_issue_comments_api(repo, issue_number, timeout)
-  end, 30, "GitHub issue comments")
+  local ok_issue, issue = pcall(function()
+    return M.gh_exec(function(timeout)
+      return M.github_issue_rest_view(repo, issue_number, timeout)
+    end, 30, "GitHub issue REST view")
+  end)
+  if not ok_issue then
+    return { stdout = "", stderr = tostring(issue), exit_code = 1 }
+  end
+  local ok_comments, comments = pcall(function()
+    return M.gh_exec(function(timeout)
+      return M.github_issue_comments_api(repo, issue_number, timeout)
+    end, 30, "GitHub issue comments")
+  end)
+  if not ok_comments then
+    return { stdout = "", stderr = tostring(comments), exit_code = 1 }
+  end
   local ok, view_json = pcall(M.rest_issue_to_view_json, issue.stdout, comments.stdout)
   if not ok then
     return {
@@ -167,12 +177,22 @@ function M.fetch_rest_issue_view(repo, issue_number)
 end
 
 function M.fetch_rest_pr_view(repo, pr_number)
-  local pr = M.gh_exec(function(timeout)
-    return M.github_pr_rest_view(repo, pr_number, timeout)
-  end, 30, "GitHub PR REST view")
-  local comments = M.gh_exec(function(timeout)
-    return M.github_issue_comments_api(repo, pr_number, timeout)
-  end, 30, "GitHub PR comments")
+  local ok_pr, pr = pcall(function()
+    return M.gh_exec(function(timeout)
+      return M.github_pr_rest_view(repo, pr_number, timeout)
+    end, 30, "GitHub PR REST view")
+  end)
+  if not ok_pr then
+    return { stdout = "", stderr = tostring(pr), exit_code = 1 }
+  end
+  local ok_comments, comments = pcall(function()
+    return M.gh_exec(function(timeout)
+      return M.github_issue_comments_api(repo, pr_number, timeout)
+    end, 30, "GitHub PR comments")
+  end)
+  if not ok_comments then
+    return { stdout = "", stderr = tostring(comments), exit_code = 1 }
+  end
   local ok, view_json = pcall(M.rest_pr_to_view_json, pr.stdout, comments.stdout)
   if not ok then
     return {

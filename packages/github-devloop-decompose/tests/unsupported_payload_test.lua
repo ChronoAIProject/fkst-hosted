@@ -30,7 +30,7 @@ return {
       },
       title = "Original large issue",
       body = "Child body.\n\n" .. decompose_lib.decompose_lineage_marker(payload.proposal_id, 1),
-    }, "title,body,labels,comments")
+    }, "title,body,labels,comments,author")
     entity_read_mocks.mock_pr_view_selector(t, {
       comments = {
         m_builders.pr_origin_marker(payload.proposal_id, "42", "devloop-owner-repo-42-01HY", payload.version, "dev"),
@@ -42,14 +42,10 @@ return {
       base_branch = "dev",
       state = "OPEN",
     }, entity_read_mocks.pr_origin_selector, 2)
-    local result = t.run_department("departments/decompose/main.lua", {
+    local result = h.run_department("departments/decompose/main.lua", {
       queue = "github-devloop-decompose.devloop_decompose",
       payload = payload,
-    }, {
-      env = {
-        FKST_GITHUB_BOT_LOGIN = "fkst-test-bot",
-      },
-    })
+    }, h.opts("decompose-namespaced-production-queue"))
 
     t.eq(result.exit_code, 0)
     t.eq(#result.raises, 1)

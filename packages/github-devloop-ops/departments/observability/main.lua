@@ -5,6 +5,7 @@ local common = require("departments.observability.common")
 local avm_scoreboard = require("departments.observability.avm_scoreboard")
 local census = require("departments.observability.census")
 local dashboard = require("departments.observability.dashboard")
+local failure_triage_cap = require("failure_triage_cap")
 local queue_starvation = require("devloop.queue_starvation")
 local reaper = require("departments.observability.reaper")
 local topology = require("departments.observability.topology")
@@ -53,7 +54,7 @@ function core.observe_devloop_entities(event)
   core.reap_orphan_prs(repo, observed.list)
   local queue_starvation_result = queue_starvation.observe_queue_starvation(core, repo, observed.list, limits, deadline, observed.now_seconds)
   for _, entity in ipairs(observed.list or {}) do
-    for _, raised in ipairs(core.blocked_obligation_patrol_once(entity, observed.list, recent_merged_issues)) do
+    for _, raised in ipairs(failure_triage_cap.blocked_obligation_patrol_once(entity, observed.list, recent_merged_issues)) do
       devloop_logging.log_raise("blocked_obligation_patrol", raised.fact.proposal_id, raised.queue, raised.payload)
     end
   end

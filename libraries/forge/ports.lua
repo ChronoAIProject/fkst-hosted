@@ -9,6 +9,33 @@
 -- common wiring, the script keeps only its business pipeline).
 local M = {}
 
+function M.github_author_options(read_env, owner)
+  assert(type(read_env) == "function", "forge.ports.github_author_options requires read_env")
+  local content_filter = require("forge.github.content_filter")
+  local strings = require("contract.strings")
+  local policy = nil
+  local function append_csv_logins(logins, raw)
+    for login in tostring(raw or ""):gmatch("[^,%s]+") do
+      table.insert(logins, login)
+    end
+  end
+  return {
+    trusted_author_policy = function()
+      if policy == nil then
+        local bot_login = strings.trim(read_env("FKST_GITHUB_BOT_LOGIN") or "")
+        if bot_login == "" then
+          error(tostring(owner or "forge.ports") .. ": missing-github-bot-login: FKST_GITHUB_BOT_LOGIN is required for authored GitHub reads")
+        end
+        local logins = { bot_login }
+        append_csv_logins(logins, read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS"))
+        append_csv_logins(logins, read_env("FKST_GITHUB_AUTHORIZED_LOGINS"))
+        policy = content_filter.author_policy_from_logins(logins)
+      end
+      return policy
+    end,
+  }
+end
+
 local function production_exec_argv()
   if type(exec_argv) == "function" then
     return exec_argv
@@ -18,10 +45,23 @@ local function production_exec_argv()
   end
 end
 
-function M.production_handles()
+function M.production_handles(opts)
   local run = production_exec_argv()
+  local github_options = opts or {}
+  local github
+  if github_options.trusted_author_policy == nil then
+    github = setmetatable({}, {
+      __index = function()
+        error("forge.ports: trusted_author_policy is required for production GitHub reads")
+      end,
+    })
+  else
+    github = require("forge.github").new(run, {
+      trusted_author_policy = github_options.trusted_author_policy,
+    })
+  end
   return {
-    github = require("forge.github").new(run),
+    github = github,
     git = require("forge.git").new(run),
   }
 end
@@ -52,9 +92,9 @@ local function make_with_pipeline_restore(make_department, handles)
   return department_or_err
 end
 
-function M.install(make_department)
+function M.install(make_department, opts)
   assert(type(make_department) == "function", "forge.ports.install requires a make_department function")
-  local department = make_with_pipeline_restore(make_department, M.production_handles())
+  local department = make_with_pipeline_restore(make_department, M.production_handles(opts))
   _G.pipeline = department.pipeline
   department.make_department = function(handles)
     return make_with_pipeline_restore(make_department, handles)

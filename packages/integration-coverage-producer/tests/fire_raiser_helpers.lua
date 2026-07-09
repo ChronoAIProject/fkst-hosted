@@ -119,6 +119,21 @@ local function mock_env()
     stderr = "",
     exit_code = 0,
   })
+  t.mock_command('printf %s "$FKST_GITHUB_BOT_LOGIN"', {
+    stdout = "fkst-test-bot",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_DEVLOOP_MANAGED_BOT_LOGINS"', {
+    stdout = "fkst-test-bot,ElonSG",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command('printf %s "$FKST_GITHUB_AUTHORIZED_LOGINS"', {
+    stdout = "trusted-human",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_checker()

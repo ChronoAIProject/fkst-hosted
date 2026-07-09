@@ -35,7 +35,10 @@ local function checker_tool_path()
 end
 
 local function read_env_command(name)
-  if name ~= "FKST_GITHUB_REPO" then
+  if name ~= "FKST_GITHUB_REPO"
+    and name ~= "FKST_GITHUB_BOT_LOGIN"
+    and name ~= "FKST_DEVLOOP_MANAGED_BOT_LOGINS"
+    and name ~= "FKST_GITHUB_AUTHORIZED_LOGINS" then
     error("integration-coverage-producer: invalid-env-name: " .. tostring(name), 0)
   end
   return 'printf %s "$' .. name .. '"'
@@ -185,4 +188,4 @@ local function make_department(ports)
   return department
 end
 
-return ports_lib.install(make_department)
+return ports_lib.install(make_department, ports_lib.github_author_options(read_env, "integration-coverage-producer"))

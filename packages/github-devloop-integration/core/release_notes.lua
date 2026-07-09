@@ -2,6 +2,7 @@ local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
 local S = {}
 local forge_validators = require("devloop.forge_validators")
+local github_factory = require("devloop.github_factory")
 
 function S.install(M)
 local max_release_notes_len = 4000
@@ -133,7 +134,7 @@ function M.gh_pr_create_body(repo, head, base, title, body, timeout)
     dedup_key = tostring(head) .. "->" .. tostring(base),
   })
   local ok, result_or_error = pcall(function()
-    return require("forge.github").new(exec_argv).pr_create_body(repo, head, base, title, normalized_body, timeout or 60)
+    return github_factory.production_handle().pr_create_body(repo, head, base, title, normalized_body, timeout or 60)
   end)
   if ok then
     return result_or_error

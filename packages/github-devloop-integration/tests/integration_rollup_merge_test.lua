@@ -21,7 +21,7 @@ local function event(extra)
 end
 
 local function run_merge(payload, run_opts)
-  return t.run_department("departments/rollup_merge/main.lua", {
+  return h.run_department("departments/rollup_merge/main.lua", {
     queue = "devloop_rollup_ready",
     payload = payload,
   }, run_opts or opts("rollup-merge"))

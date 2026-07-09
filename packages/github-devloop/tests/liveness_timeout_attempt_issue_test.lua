@@ -70,7 +70,7 @@ local function mock_decompose_children()
 end
 
 local function run_liveness_scan(name, run_opts)
-  return t.run_department("departments/liveness_scan/main.lua", {
+  return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = { schema = "github-devloop.tick.v1" },
     ts = "2026-06-03T01:32:03Z",

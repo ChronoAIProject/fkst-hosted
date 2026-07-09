@@ -9,17 +9,17 @@ local issue_view_fields = {
   view_state = "title,createdAt,updatedAt,labels,state,comments,assignees,author",
   claim = "assignees,author",
   result = "labels,comments",
-  loop = "title,updatedAt,labels,comments,state",
-  meta = "title,labels,comments",
+  loop = "title,updatedAt,labels,comments,state,author",
+  meta = "title,labels,comments,author",
   implement = "title,body,labels,comments,state,author",
   open_pr = "title,labels,comments,assignees,author",
   reviewing = "labels,comments",
   review = "title,labels,comments,assignees,author",
-  decompose = "title,body,labels,comments",
-  fix = "title,labels,comments",
-  commit_subject = "number,title",
+  decompose = "title,body,labels,comments,author",
+  fix = "title,labels,comments,author",
+  commit_subject = "number,title,author",
   review_loop = "title,labels,comments,assignees,author",
-  merge = "title,labels,comments,state,assignees",
+  merge = "title,labels,comments,state,assignees,author",
   observe = "title,body,comments,state,stateReason,assignees,author",
 }
 
@@ -70,9 +70,9 @@ end
     end)
   end
 
-  function C.gh_issue_view(repo, issue_number, fields_key_or_fields, timeout, run)
+  function C.gh_issue_view(repo, issue_number, fields_key_or_fields, timeout, run, env_run)
     return support.gh_result(function()
-      return support.github(run).issue_view(repo, issue_number, issue_fields(fields_key_or_fields), timeout)
+      return support.github(run, env_run).issue_view(repo, issue_number, issue_fields(fields_key_or_fields), timeout)
     end)
   end
 

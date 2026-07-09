@@ -8,7 +8,7 @@ import sys
 import os, base64, binascii, subprocess
 from dataclasses import dataclass
 from pathlib import Path
-import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_dependency_cycle, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_ingress, check_repo_integration_coverage, check_repo_library_layering, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
+import check_repo_config, check_repo_content_truncation, check_repo_cross_package, check_repo_dedup, check_repo_dependency_cycle, check_repo_error_class, check_repo_gh_git_adapter as gh_git_adapter, check_repo_github_content_ingress, check_repo_ingress, check_repo_integration_coverage, check_repo_library_layering, check_repo_namespaced_queue, check_repo_ownership_gate, check_repo_perm, check_repo_producer_liveness, check_repo_saga_handler, check_repo_saga_head, check_repo_shell_out_to_self, check_repo_std_dependency_model, check_repo_version_suffix, ratchet_base
 LINE_LIMIT = 1000
 # Warn before the hard limit so files split by stable responsibility, not last-minute churn.
 LINE_WARNING_MARGIN = 100
@@ -775,35 +775,9 @@ def check_gh_rate_pool_sizing(root: Path, violations: list[str]) -> None:
             )
 
 
-def check_github_content_gate(root: Path, violations: list[str]) -> None:
-    # G-GITHUB-CONTENT-GATE: authored GitHub content that reaches a codex worker
-    # must be routed through the provenance filter AT THE CODEX-BUNDLE BOUNDARY,
-    # and the SHARED entity view must NOT be filtered -- state markers live in
-    # comment bodies and must reach the state machine intact.
-    bundle = root / "libraries" / "devloop" / "context_bundle.lua"
-    if bundle.is_file():
-        text = read_text(bundle)
-        for needle in (
-            'content_provenance.filter_gh_content_json(issue_json, "issue"',
-            'content_provenance.filter_gh_content_json(pr_json, "pr"',
-        ):
-            if needle not in text:
-                add(
-                    violations,
-                    "G-GITHUB-CONTENT-GATE",
-                    f"{rel(root, bundle)} must route codex-bundle content through content_provenance.filter_gh_content_json (missing: {needle})",
-                )
-    for shared in (
-        "libraries/devloop/github_proxy_entity_view.lua",
-        "packages/github-proxy/core/rest_view.lua",
-    ):
-        path = root / shared
-        if path.is_file() and "filter_gh_content_json" in read_text(path):
-            add(
-                violations,
-                "G-GITHUB-CONTENT-GATE",
-                f"{shared} must NOT filter authored content: the shared entity view feeds the state machine (state markers must stay intact); redact only in the codex bundle",
-            )
+def check_github_content_ingress(root: Path, violations: list[str]) -> None:
+    for message in check_repo_github_content_ingress.messages(root, read_text, rel, package_lua_files, strip_lua_comments_and_strings):
+        add(violations, "G-GITHUB-CONTENT-INGRESS", message)
 
 
 def check_error_class_prefixes(root: Path, violations: list[str], allowlist_dir: Path | None = None, enforce_base: bool = True) -> None:

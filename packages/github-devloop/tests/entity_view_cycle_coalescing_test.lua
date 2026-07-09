@@ -21,7 +21,7 @@ local function pr_proposal_for(number)
 end
 
 local function run_liveness_scan(run_opts)
-  return t.run_department("departments/liveness_scan/main.lua", {
+  return h.run_department("departments/liveness_scan/main.lua", {
     queue = "devloop_liveness_tick",
     payload = {
       schema = "github-devloop.tick.v1",
@@ -31,7 +31,7 @@ local function run_liveness_scan(run_opts)
 end
 
 local function run_observe_issue(payload, run_opts)
-  return t.run_department("departments/observe_issue/main.lua", {
+  return h.run_department("departments/observe_issue/main.lua", {
     queue = "devloop_observe_issue",
     payload = payload,
     ts = "2026-06-03T01:32:04Z",

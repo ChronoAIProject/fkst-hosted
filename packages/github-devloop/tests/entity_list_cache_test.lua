@@ -20,12 +20,13 @@ return {
     local second = entity_list_cache.entity_list_cache_key("owner/repo", "issue", "open", "2026-06-03T01:02:04Z")
     local missing = entity_list_cache.entity_list_cache_key("owner/repo", "issue", "open", nil)
 
-    t.is_true(first:find("^github%-devloop/entity%-list/owner/repo/issue/open/poll%-") ~= nil)
+    t.is_true(first:find("^github%-devloop/entity%-list%-v2/owner/repo/issue/open/poll%-") ~= nil)
     t.eq(first == second, false)
     t.eq(missing, nil)
   end,
 
   test_shared_issue_observe_list_reuses_only_the_same_poll_snapshot = function()
+    h.mock_author_policy_env()
     local repo = "owner/shared-list"
     local command = core.gh_issue_list_observe_cmd(repo)
     t.mock_command(command, {
@@ -58,6 +59,7 @@ return {
   end,
 
   test_shared_pr_observe_list_failures_are_not_cached = function()
+    h.mock_author_policy_env()
     local repo = "owner/shared-pr-list"
     local command = core.gh_pr_list_observe_cmd(repo)
     t.mock_command(command, {

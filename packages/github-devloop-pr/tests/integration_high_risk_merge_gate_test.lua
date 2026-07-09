@@ -252,9 +252,10 @@ return {
     t.is_true(replayed ~= nil)
 
     mock_write_env("1")
+    mock_write_env("1")
     mock_pr_high_risk_diff_name_only()
-    mock_issue_merge({ "fkst-dev:merge-ready" }, merge_comments(event))
-    mock_pr_merge(merge_comments(event))
+    mock_pr_high_risk_diff_name_only()
+    mock_successful_merge_path(event, merge_comments(event))
 
     local result = run_merge(replayed.payload, opts("merge-replayed-high-risk-no-evidence", { FKST_GITHUB_WRITE = "1", FKST_TEST_SKIP_DEFAULT_RISK_MOCK = "1" }))
     t.eq(result.exit_code, 1)

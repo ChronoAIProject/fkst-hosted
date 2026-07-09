@@ -1,5 +1,6 @@
 local sweep_bounds = {}
 local gh_exec = require("devloop.gh_exec")
+local github_author_policy = require("devloop.github_author_policy")
 local sweep = require("workflow.sweep")
 
 local default_call_timeout = 10
@@ -66,7 +67,15 @@ function sweep_bounds.sweep_exec(cmd_or_opts, limits, deadline, error_class, exe
   else
     opts = { cmd = cmd_or_opts, timeout = timeout }
   end
-  return gh_exec.gh_exec(opts, nil, exec)
+  return gh_exec.gh_exec(
+    opts,
+    nil,
+    exec,
+    opts.stdout_policy,
+    function()
+      return github_author_policy.for_exec(exec_sync)
+    end
+  )
 end
 
 function sweep_bounds.sweep_run_cmd(cmd, limits, deadline, error_class, exec)

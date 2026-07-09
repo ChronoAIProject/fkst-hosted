@@ -53,6 +53,16 @@ local function mock_env()
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_MANAGED_BOT_LOGINS"), {
+      stdout = "ElonSG",
+      stderr = "",
+      exit_code = 0,
+    })
+    t.mock_command(devloop_base.read_env_command("FKST_GITHUB_AUTHORIZED_LOGINS"), {
+      stdout = "authorized-human",
+      stderr = "",
+      exit_code = 0,
+    })
   end
   t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', {
     stdout = "/tmp/fkst-packages-test/github-devloop-decompose-run-graph/runtime",
@@ -75,7 +85,7 @@ local function mock_claim_and_reads(payload)
     },
     state = "OPEN",
     updated_at = "2026-06-03T01:02:03Z",
-  }, "title,body,labels,comments")
+  }, "title,body,labels,comments,author")
   entity_read_mocks.mock_pr_view_selector(t, {
     repo = "owner/repo",
     number = 7,
@@ -113,11 +123,11 @@ local function mock_decompose_codex()
     stderr = "",
     exit_code = 1,
   })
-  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state", {
-    stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[]}\n',
+  entity_read_mocks.mock_issue_view_raw_selector(t, {}, "title,body,updatedAt,labels,comments,state,author", {
+    stdout = '{"title":"Original large issue","body":"Original body","updatedAt":"2026-06-03T01:02:03Z","state":"OPEN","labels":[{"name":"fkst-dev:blocked"}],"comments":[],"author":{"login":"fkst-test-bot"}}\n',
   })
-  entity_read_mocks.mock_pr_view_raw_selector(t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels", {
-    stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[],"labels":[]}\n',
+  entity_read_mocks.mock_pr_view_raw_selector(t, {}, "title,body,headRefName,headRefOid,baseRefName,state,updatedAt,comments,labels,author", {
+    stdout = '{"title":"PR title","body":"PR body","headRefName":"devloop-owner-repo-42-01HY","headRefOid":"def456","baseRefName":"dev","state":"OPEN","updatedAt":"2026-06-03T02:03:04Z","comments":[],"labels":[],"author":{"login":"fkst-test-bot"}}\n',
   })
   t.mock_command("gh pr diff", {
     stdout = "diff --git a/file.lua b/file.lua\n+return true\n",

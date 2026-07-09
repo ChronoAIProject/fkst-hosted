@@ -1,3 +1,6 @@
+local content_filter = require("forge.github.content_filter")
+local stdout_policy = require("forge.github.stdout_policy")
+
 local G = {}
 
 local gh_program = table.concat({ "g", "h" })
@@ -23,15 +26,23 @@ local function normalize_gh_argv_exec_opts(cmd_or_opts, timeout)
   return {
     argv = opts.argv,
     timeout = opts.timeout,
+    stdout_policy = opts.stdout_policy,
   }
 end
 
-function G.gh_exec(cmd_or_opts, timeout, exec)
+local function filter_stdout(result, policy, author_policy)
+  return content_filter.apply_gh_content_filter(result, nil, policy, author_policy, stdout_policy)
+end
+
+function G.gh_exec(cmd_or_opts, timeout, exec, policy, author_policy)
   local run = exec or exec_argv
   if type(run) ~= "function" then
     error("github-devloop: GitHub exec requires exec_argv")
   end
-  return run(normalize_gh_argv_exec_opts(cmd_or_opts, timeout))
+  local opts = normalize_gh_argv_exec_opts(cmd_or_opts, timeout)
+  local effective_policy = policy or opts.stdout_policy
+  stdout_policy.validate(effective_policy)
+  return filter_stdout(run({ argv = opts.argv, timeout = opts.timeout }), effective_policy, author_policy)
 end
 
 return G

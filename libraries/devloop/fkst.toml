@@ -58,6 +58,8 @@ public = [
   "devloop.gh_exec",
   "devloop.git_mechanics",
   "devloop.github_proxy_entity_view",
+  "devloop.github_author_policy",
+  "devloop.github_factory",
   "devloop.github_risk",
   "devloop.hidden_state_conformance",
   "devloop.hidden_state_conformance.declarations",
@@ -138,6 +140,7 @@ exact = true
 
 [visibility]
 allow = [
+  "archaudit",
   "github-devloop",
   "github-devloop-decompose",
   "github-devloop-intake-default",
@@ -147,4 +150,5 @@ allow = [
   "github-devloop-pr",
   "github-devloop-workflow",
   "fkst-substrate-ref-maintainer",
+  "github-proxy",
 ]

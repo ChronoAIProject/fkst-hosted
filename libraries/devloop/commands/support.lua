@@ -1,21 +1,15 @@
 local S = {}
-local github_adapter = require("forge.github")
+local github_factory = require("devloop.github_factory")
 
 local github_handle = nil
 local git_handle = nil
 
-function S.github(run)
+function S.github(run, env_run)
   if run ~= nil then
-    if type(run) ~= "function" then
-      error("github-devloop: GitHub adapter requires an exec function")
-    end
-    return github_adapter.new(run)
+    return github_factory.new(run, env_run)
   end
   if github_handle == nil then
-    if type(exec_argv) ~= "function" then
-      error("github-devloop: GitHub adapter requires exec_argv")
-    end
-    github_handle = github_adapter.new(exec_argv)
+    github_handle = github_factory.production_handle()
   end
   return github_handle
 end

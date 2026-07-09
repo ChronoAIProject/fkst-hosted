@@ -151,7 +151,7 @@ function C.strip_bot_login_suffix(login)
   if login == nil then
     return nil
   end
-  return (tostring(login):gsub("%[bot%]$", ""))
+  return (strings.trim(login):lower():gsub("%[bot%]$", ""))
 end
 
 function C.configure_trusted_bot_login(login)
@@ -160,6 +160,10 @@ function C.configure_trusted_bot_login(login)
     return nil
   end
   trusted_bot_login_current = C.strip_bot_login_suffix(login)
+  return trusted_bot_login_current
+end
+
+function C.configured_trusted_bot_login()
   return trusted_bot_login_current
 end
 
