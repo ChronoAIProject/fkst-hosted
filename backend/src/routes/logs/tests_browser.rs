@@ -110,6 +110,7 @@ async fn oauth_callback_happy_path_streams_the_bundle_as_a_download() {
         oauth_client_id: Some("Iv1.clientid".to_string()),
         oauth_client_secret: Some(SecretString::from("oauth-secret".to_string())),
         oauth_base_url: gh.uri(),
+        frontend_url: None,
     };
     let st = state(gh.uri(), Some(storage), log, registry(&[]));
     let signed = super::oauth::sign_state(b"oauth-secret", SESSION_ID);

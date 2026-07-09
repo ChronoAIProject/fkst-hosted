@@ -87,6 +87,10 @@ async fn paths_are_the_trimmed_v1_surface() {
         // The identity-gated log-download endpoint + its browser-OAuth callback.
         "/api/v1/logs/{session_id}",
         "/api/v1/logs/oauth/callback",
+        // The frontend GitHub-OAuth login flow (login → callback → refresh).
+        "/api/v1/auth/github/login",
+        "/api/v1/auth/github/callback",
+        "/api/v1/auth/github/refresh",
         "/health",
         "/metrics",
     ] {
@@ -251,6 +255,7 @@ async fn document_tags_are_exactly_the_live_surface() {
     assert_eq!(
         tags,
         vec![
+            "auth".to_string(),
             "logs".to_string(),
             "system".to_string(),
             "users".to_string(),

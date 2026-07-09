@@ -34,7 +34,7 @@ struct AccessTokenResponse {
 /// the MAC is `HMAC-SHA256(secret, session_id)`. The session id is round-tripped in
 /// the clear (it is not secret) but cannot be TAMPERED with — a changed id fails the
 /// signature check on return.
-pub(super) fn sign_state(secret: &[u8], session_id: &str) -> String {
+pub(crate) fn sign_state(secret: &[u8], session_id: &str) -> String {
     format!("{session_id}.{}", mac_hex(secret, session_id))
 }
 
@@ -43,7 +43,7 @@ pub(super) fn sign_state(secret: &[u8], session_id: &str) -> String {
 /// Returns `Some(session_id)` only when the value is `"<session_id>.<hex>"` and the
 /// recomputed MAC over `session_id` matches `<hex>` in CONSTANT time; `None` for a
 /// malformed or tampered value (so the caller aborts with a 400).
-pub(super) fn verify_state(secret: &[u8], state: &str) -> Option<String> {
+pub(crate) fn verify_state(secret: &[u8], state: &str) -> Option<String> {
     // Split on the LAST '.' so a session id that itself contained '.' would still
     // round-trip (a UUIDv5 session id never does, but be robust).
     let (session_id, hex_sig) = state.rsplit_once('.')?;
@@ -58,7 +58,7 @@ pub(super) fn verify_state(secret: &[u8], state: &str) -> Option<String> {
 /// Build the GitHub user-OAuth `authorize` URL to redirect the browser to. No scopes
 /// are requested — `/user` returns the caller's `{login, id}` with an unscoped token,
 /// which is all identity resolution needs.
-pub(super) fn authorize_url(
+pub(crate) fn authorize_url(
     oauth_base: &str,
     client_id: &str,
     redirect_uri: &str,
@@ -132,6 +132,125 @@ pub(super) async fn exchange_code(
             "github oauth code exchange returned no access token".to_string(),
         )),
     }
+}
+
+/// A parsed OAuth token response. `refresh_token` / `expires_in` are present only
+/// when the GitHub App has "expiring user tokens" enabled; with non-expiring tokens
+/// only `access_token` comes back. Secrets are held in [`SecretString`].
+pub(crate) struct TokenSet {
+    pub access_token: SecretString,
+    pub refresh_token: Option<SecretString>,
+    pub expires_in: Option<i64>,
+    pub refresh_token_expires_in: Option<i64>,
+}
+
+/// The full `login/oauth/access_token` success body (superset of [`AccessTokenResponse`]).
+#[derive(Deserialize)]
+struct FullTokenResponse {
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    expires_in: Option<i64>,
+    #[serde(default)]
+    refresh_token_expires_in: Option<i64>,
+}
+
+/// POST a token request (code-exchange or refresh) to `login/oauth/access_token` and
+/// parse the full [`TokenSet`]. Client secret rides the body only; nothing is logged.
+/// A missing/rejected token → `Unauthorized`; transport/parse failure → `Unavailable`.
+async fn post_token_request(
+    http: &reqwest::Client,
+    oauth_base: &str,
+    form: &[(&str, &str)],
+) -> Result<TokenSet, AppError> {
+    let url = format!(
+        "{}/login/oauth/access_token",
+        oauth_base.trim_end_matches('/')
+    );
+    let response = http
+        .post(&url)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .form(form)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!(error = %e, "oauth token request transport error");
+            AppError::Unavailable(
+                "github oauth token request failed (upstream unreachable)".to_string(),
+            )
+        })?;
+    if !response.status().is_success() {
+        return Err(AppError::Unauthorized(
+            "github oauth token request rejected".to_string(),
+        ));
+    }
+    let body: FullTokenResponse = response.json().await.map_err(|e| {
+        tracing::warn!(error = %e, "oauth token response did not parse");
+        AppError::Unavailable(
+            "github oauth token request failed (bad upstream response)".to_string(),
+        )
+    })?;
+    let access_token = body.access_token.filter(|t| !t.is_empty()).ok_or_else(|| {
+        AppError::Unauthorized("github oauth returned no access token".to_string())
+    })?;
+    Ok(TokenSet {
+        access_token: SecretString::from(access_token),
+        refresh_token: body
+            .refresh_token
+            .filter(|t| !t.is_empty())
+            .map(SecretString::from),
+        expires_in: body.expires_in,
+        refresh_token_expires_in: body.refresh_token_expires_in,
+    })
+}
+
+/// Exchange an OAuth `code` for a full [`TokenSet`] (access + optional refresh token).
+/// The login flow uses this (vs. [`exchange_code`], which yields only the access token).
+pub(crate) async fn exchange_code_tokens(
+    http: &reqwest::Client,
+    oauth_base: &str,
+    client_id: &str,
+    client_secret: &SecretString,
+    code: &str,
+    redirect_uri: &str,
+) -> Result<TokenSet, AppError> {
+    post_token_request(
+        http,
+        oauth_base,
+        &[
+            ("client_id", client_id),
+            ("client_secret", client_secret.expose_secret()),
+            ("code", code),
+            ("redirect_uri", redirect_uri),
+        ],
+    )
+    .await
+}
+
+/// Redeem a `refresh_token` for a fresh [`TokenSet`] via the OAuth
+/// `grant_type=refresh_token` flow. GitHub rotates the refresh token on each use, so
+/// the caller must persist the NEW `refresh_token` from the returned set. An expired
+/// or already-used refresh token → `Unauthorized` (the caller must re-login).
+pub(crate) async fn refresh_tokens(
+    http: &reqwest::Client,
+    oauth_base: &str,
+    client_id: &str,
+    client_secret: &SecretString,
+    refresh_token: &str,
+) -> Result<TokenSet, AppError> {
+    post_token_request(
+        http,
+        oauth_base,
+        &[
+            ("client_id", client_id),
+            ("client_secret", client_secret.expose_secret()),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ],
+    )
+    .await
 }
 
 /// Hex `HMAC-SHA256(secret, message)`.
