@@ -246,6 +246,7 @@ mod tests {
     fn pod_config() -> PodConfig {
         PodConfig {
             dispatch: true,
+            mode: crate::config::PodMode::K8sCustomized,
             namespace: "fkst-sessions".to_string(),
             image: Some("registry/fkst-control-plane:1.0".to_string()),
             service_account: "fkst-session-runner".to_string(),

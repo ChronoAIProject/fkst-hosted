@@ -9,7 +9,8 @@
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use fkst_control_plane::config::Config;
+use fkst_control_plane::config::{Config, PodMode};
+use fkst_control_plane::error::AppError;
 use fkst_control_plane::github_app::HttpGithubListing;
 use fkst_control_plane::reconcile::{
     reconcile_channel, run_full_resync_loop, run_reconcile_loop, run_sweep_loop, ReconcileCtx,
@@ -180,7 +181,13 @@ async fn main() -> ExitCode {
     // path stays available even when the dynamic-session loops are off; `None` (no
     // cluster) is non-fatal — the validate path then reports 503 and the loops do not
     // spawn.
-    let session_backend = build_session_backend(&config).await;
+    let session_backend = match build_session_backend(&config).await {
+        Ok(backend) => backend,
+        Err(error) => {
+            tracing::error!(error = %error, "failed to build session backend");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let reconciler = if pod_dispatch {
         match session_backend.clone() {
@@ -262,28 +269,37 @@ async fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Build the single direct-Kubernetes session backend, UN-gated on pod dispatch so
-/// the env-validation REST path can drive it even when the dynamic-session loops are
-/// off. `None` (the client could not be built) is non-fatal: the validate path then
-/// reports 503 and the reconciler/sweep do not spawn.
+/// Build the single session backend for the configured [`PodMode`], UN-gated on pod
+/// dispatch so the env-validation REST path can drive it even when the dynamic-session
+/// loops are off. For `K8sCustomized`, `Ok(None)` (the client could not be built) is
+/// non-fatal: the validate path then reports 503 and the reconciler/sweep do not spawn.
+/// `Opensandbox` is not shipped yet, so it returns `Err` — a hard, fail-closed startup
+/// error (it is already config-rejected under dispatch, but never reached here anyway).
 async fn build_session_backend(
     config: &Config,
-) -> Option<Arc<dyn fkst_control_plane::session_backend::SessionBackend>> {
-    match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await {
-        Ok(kube) => {
-            let backend = fkst_control_plane::session_backend::k8s::K8sBackend::new(
-                kube,
-                config.pod.clone(),
-                config.reconcile.pod_termination_grace_secs,
-                config.env.validate_deadline_secs,
-                config.env.validate_poll_interval_secs,
-            );
-            Some(Arc::new(backend))
+) -> Result<Option<Arc<dyn fkst_control_plane::session_backend::SessionBackend>>, AppError> {
+    match config.pod.mode {
+        PodMode::K8sCustomized => {
+            match fkst_control_plane::k8s::KubeClient::from_inferred(&config.pod.namespace).await {
+                Ok(kube) => {
+                    let backend = fkst_control_plane::session_backend::k8s::K8sBackend::new(
+                        kube,
+                        config.pod.clone(),
+                        config.reconcile.pod_termination_grace_secs,
+                        config.env.validate_deadline_secs,
+                        config.env.validate_poll_interval_secs,
+                    );
+                    Ok(Some(Arc::new(backend)))
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "session backend unavailable (kubernetes client could not be built); pod-driven features degraded");
+                    Ok(None)
+                }
+            }
         }
-        Err(error) => {
-            tracing::warn!(error = %error, "session backend unavailable (kubernetes client could not be built); pod-driven features degraded");
-            None
-        }
+        PodMode::Opensandbox => Err(AppError::Config(
+            "FKST_POD_MODE=opensandbox is not yet available (the OpenSandbox backend lands in a later release); use k8s-customized".to_string(),
+        )),
     }
 }
 
