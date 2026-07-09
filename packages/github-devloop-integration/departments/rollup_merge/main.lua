@@ -3,8 +3,11 @@ local parsers_pr = require("devloop.parsers.pr")
 local core = require("core")
 local saga = require("workflow.saga")
 local github = require("devloop.github_factory").production_handle
+local git_adapter = require("forge.git").production_handle
 local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
+local strings = require("contract.strings")
+local rollup_health = require("core" .. ".rollup_health")
 
 local spec = {
   consumes = { "devloop_rollup_ready" },
@@ -22,6 +25,16 @@ local function log_skip(payload, reason)
     "pr=" .. tostring(devloop_logging.payload_field(payload, "pr_number")),
     "outcome=skip",
     "reason=" .. tostring(reason),
+  })
+end
+
+local function log_runtime_gate_skip(payload, reason, detail)
+  devloop_logging.log_line("info", "rollup_merge", "rollup", "GATE", {
+    "repo=" .. tostring(devloop_logging.payload_field(payload, "repo")),
+    "pr=" .. tostring(devloop_logging.payload_field(payload, "pr_number")),
+    "outcome=skip",
+    "reason=" .. tostring(reason),
+    "detail=" .. tostring(detail),
   })
 end
 
@@ -48,6 +61,45 @@ local function rollup_liveness_tick_payload(payload)
       tostring(payload.head_sha),
     }),
   }
+end
+
+local function integration_head_soak_verdict(payload, pr)
+  local soak_minutes = config.rollup_runtime_soak_minutes()
+  local git = git_adapter("github-devloop-integration.rollup_merge")
+  local fetch = git.fetch_branch("origin", payload.integration_branch, 60)
+  if fetch.exit_code ~= 0 then
+    return false, "runtime-soak-fetch-failed:" .. tostring(fetch.stderr)
+  end
+  local head = git.fetch_head_commit(30)
+  if head.exit_code ~= 0 then
+    return false, "runtime-soak-head-read-failed:" .. tostring(head.stderr)
+  end
+  local head_sha = strings.trim(head.stdout)
+  if head_sha == "" then
+    return false, "runtime-soak-head-missing"
+  end
+  if tostring(head_sha) ~= tostring(pr and pr.head_sha or "") then
+    return false, "runtime-soak-head-changed:head=" .. tostring(head_sha)
+  end
+  return rollup_health.observe_soak_verdict(pr and pr.comments or {}, head_sha, soak_minutes * 60, now())
+end
+
+local function runtime_stability_gate(payload, pr)
+  local observe_ok, observe_reason, observe_detail = rollup_health.runtime_observe_gate(rollup_health.observe_runtime_health())
+  if not observe_ok then
+    return false, observe_reason, observe_detail
+  end
+  local ok, soaked, reason = pcall(function()
+    local soak_ok, soak_reason = integration_head_soak_verdict(payload, pr)
+    return soak_ok, soak_reason
+  end)
+  if not ok then
+    return false, "runtime-soak-unavailable", soaked
+  end
+  if soaked ~= true then
+    return false, "runtime-soak-unready", reason
+  end
+  return true, "runtime-stable"
 end
 
 local function act(event)
@@ -92,7 +144,6 @@ local function act(event)
       log_skip(payload, gate_reason)
       return
     end
-
     local merged, reason = core.run_verified_pr_merge({
       repo = payload.repo,
       pr_number = payload.pr_number,
@@ -103,9 +154,23 @@ local function act(event)
       proposal_id = "rollup",
       accept_current_head = true,
       match_head_retry_attempts = 3,
+      before_merge = function(rechecked_pr)
+        local stable, stability_reason, stability_detail = runtime_stability_gate(payload, rechecked_pr)
+        if not stable then
+          return false, {
+            reason = stability_reason or "runtime-stability-gate",
+            detail = stability_detail,
+          }
+        end
+        return true, "runtime-stable"
+      end,
     })
     if not merged then
-      log_skip(payload, reason)
+      if type(reason) == "table" and reason.reason ~= nil then
+        log_runtime_gate_skip(payload, reason.reason, reason.detail)
+      else
+        log_skip(payload, reason)
+      end
       return
     end
     devloop_logging.log_apply("rollup_merge", "rollup", "rollup-merged", payload.head_sha, {}, {})

@@ -585,6 +585,28 @@ class BoardScriptTest(unittest.TestCase):
         finally:
             h.close()
 
+    def test_empty_entities_uses_first_non_empty_fallback_timeline(self) -> None:
+        h = BoardHarness(
+            {
+                "entities": [],
+                "entity_timeline": [
+                    {
+                        "entity": "github-devloop/issue/owner/repo/624",
+                        "terminal": False,
+                        "events": [{"queue": "devloop_ready", "ts": "2026-06-14T09:20:00Z"}],
+                    }
+                ],
+            }
+        )
+        try:
+            result = h.run_board("--refresh", "--stall", "1800")
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(result.stdout.splitlines()[0], "1 ANOMALIES NEEDING ATTENTION")
+            self.assertIn("type=stalled-entity", result.stdout)
+            self.assertIn("github-devloop/issue/owner/repo/624", result.stdout)
+        finally:
+            h.close()
+
     def test_recurring_cron_dead_letters_surface_in_board_and_health(self) -> None:
         h = BoardHarness(
             {

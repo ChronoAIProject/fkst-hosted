@@ -52,7 +52,10 @@ local function run_verified_pr_merge(request)
       return false, gate_reason, rechecked_pr, gate_classification
     end
     if type(request.before_merge) == "function" then
-      request.before_merge(rechecked_pr)
+      local before_ok, before_reason = request.before_merge(rechecked_pr)
+      if before_ok == false then
+        return false, before_reason or "before-merge-gate", rechecked_pr
+      end
     end
 
     local merge_result = github("forge.merge").gh_pr_merge(repo, pr_number, merge_head_sha, 120)

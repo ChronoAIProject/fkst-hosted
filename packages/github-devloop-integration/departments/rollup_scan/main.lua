@@ -7,10 +7,15 @@ local github = require("devloop.github_factory").production_handle
 local config = require("devloop.config")
 local devloop_logging = require("devloop.logging")
 local devloop_commands = require("devloop.commands")
+local rollup_health = require("core" .. ".rollup_health")
 
 local spec = {
   consumes = { "devloop_branch_tick" },
-  produces = { "devloop_rollup_ready", "github-proxy.github_issue_create_request" },
+  produces = {
+    "devloop_rollup_ready",
+    "github-proxy.github_issue_create_request",
+    "github-proxy.github_pr_comment_request",
+  },
   fanout = { "devloop_branch_tick" },
   stall_window = "5m",
 }
@@ -150,14 +155,24 @@ local function act(event)
     end
 
     integration_head = integration_head or git_mechanics.remote_head(core.git, branches.integration, "rollup remote head", "unsafe rollup branch head")
+    local rollup_pr = fetch_rollup_pr(repo, pr.number)
     core.observe_rollup_health(
       repo,
       branches.upstream,
       branches.integration,
-      fetch_rollup_pr(repo, pr.number),
+      rollup_pr,
       now(),
       core.rollup_red_window_minutes()
     )
+    local sample = rollup_health.observe_sample_comment_request(
+      repo,
+      pr.number,
+      integration_head,
+      rollup_health.observe_runtime_health(),
+      now(),
+      rollup_pr.comments
+    )
+    devloop_logging.log_raise("rollup_scan", "rollup", "github-proxy.github_pr_comment_request", sample)
     if cfg.rollup_merge == "manual" then
       devloop_logging.log_line("info", "rollup_scan", "rollup", "POSTURE", {
         "posture=manual",

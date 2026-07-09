@@ -19,6 +19,7 @@ local allowed_env = {
   FKST_DEVLOOP_ROLLUP_MERGE = true,
   FKST_DEVLOOP_ROLLUP_AUTOFIX = true,
   FKST_DEVLOOP_ROLLUP_RED_WINDOW_MINUTES = true,
+  FKST_DEVLOOP_ROLLUP_RUNTIME_SOAK_MINUTES = true,
   FKST_DEVLOOP_RELEASE_NOTES_FALLBACK = true,
   FKST_DEVLOOP_CONFLICT_LOG_CMD = true,
   FKST_DEVLOOP_BOARD_CMD = true,
@@ -96,6 +97,18 @@ end
 -- rollup ahead of new issues (expedite class + inflight cap = priority).
 function C.rollup_autofix_enabled(exec)
   return strings.trim(C.read_env("FKST_DEVLOOP_ROLLUP_AUTOFIX", exec) or "") == "1"
+end
+
+function C.rollup_runtime_soak_minutes(exec)
+  local raw = strings.trim(C.read_env("FKST_DEVLOOP_ROLLUP_RUNTIME_SOAK_MINUTES", exec) or "")
+  if raw == "" then
+    return 30
+  end
+  local parsed = tonumber(raw)
+  if parsed == nil or parsed ~= math.floor(parsed) or parsed < 1 or parsed > 1440 then
+    error("github-devloop: invalid FKST_DEVLOOP_ROLLUP_RUNTIME_SOAK_MINUTES")
+  end
+  return parsed
 end
 
 function C.max_inflight(exec)

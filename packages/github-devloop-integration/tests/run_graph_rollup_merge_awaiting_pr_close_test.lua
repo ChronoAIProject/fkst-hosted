@@ -63,6 +63,22 @@ local function child_pr_comments(state)
   }
 end
 
+local function rollup_observe_sample_comments()
+  local sampled_at_ms = (now() - (31 * 60)) * 1000
+  return {
+    comment(
+      '<!-- fkst:github-devloop-integration:rollup-observe-sample:v1 head_sha="'
+        .. rollup_head_sha
+        .. '" status="clean" first_clean_observed_at_ms="'
+        .. tostring(sampled_at_ms)
+        .. '" sampled_at_ms="'
+        .. tostring(sampled_at_ms)
+        .. '" -->',
+      os.date("!%Y-%m-%dT%H:%M:%SZ", now() - (31 * 60))
+    ),
+  }
+end
+
 local function status_rollup_success()
   return '[{"name":"ci","state":"COMPLETED","conclusion":"SUCCESS"}]'
 end
@@ -116,7 +132,29 @@ local function mock_common_env()
       stderr = "",
       exit_code = 0,
     })
+    t.mock_command(devloop_base.read_env_command("FKST_DEVLOOP_ROLLUP_RUNTIME_SOAK_MINUTES"), {
+      stdout = "30",
+      stderr = "",
+      exit_code = 0,
+    })
   end
+end
+
+local function mock_runtime_stability_gate()
+  t.mock_observe({
+    schema_version = 1,
+    generated_at_ms = 1781832600000,
+  })
+  t.mock_command("git fetch origin " .. integration_branch, {
+    stdout = "",
+    stderr = "",
+    exit_code = 0,
+  })
+  t.mock_command("FETCH_HEAD", {
+    stdout = rollup_head_sha .. "\n",
+    stderr = "",
+    exit_code = 0,
+  })
 end
 
 local function mock_rollup_merge_success()
@@ -128,6 +166,7 @@ local function mock_rollup_merge_success()
     base_branch = upstream_branch,
     state = "OPEN",
     head_repo = repo,
+    comments = rollup_observe_sample_comments(),
     status_check_rollup_json = status_rollup_success(),
   }, entity_mocks.pr_merge_selector)
   entity_mocks.mock_pr_view_selector(t, {
@@ -138,6 +177,7 @@ local function mock_rollup_merge_success()
     base_branch = upstream_branch,
     state = "OPEN",
     head_repo = repo,
+    comments = rollup_observe_sample_comments(),
     status_check_rollup_json = status_rollup_success(),
   }, entity_mocks.pr_merge_selector)
   t.mock_command(
@@ -291,6 +331,7 @@ end
 
 local function mock_everything(child_state, landed)
   mock_common_env()
+  mock_runtime_stability_gate()
   mock_rollup_merge_success()
   mock_liveness_scan_inputs(child_state)
   mock_observe_issue_inputs(child_state, landed)

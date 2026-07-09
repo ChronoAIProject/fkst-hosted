@@ -122,6 +122,19 @@ local function mock_pr_list_for(integration, pr)
   })
 end
 
+local function comments_json(comments)
+  local rendered = {}
+  for _, comment in ipairs(comments or {}) do
+    table.insert(rendered, string.format(
+      '{"body":"%s","author":{"login":"%s"},"createdAt":"%s"}',
+      h.json_string(comment.body or ""),
+      h.json_string(comment.author_login or core._test_bot_login),
+      h.json_string(comment.created_at or "2026-06-14T01:02:03Z")
+    ))
+  end
+  return table.concat(rendered, ",")
+end
+
 local function mock_integration_head(head)
   t.mock_command("refs/remotes/'origin'/'integration/dev'^{commit}", {
     stdout = (head or "def456") .. "\n",
@@ -153,11 +166,12 @@ local function mock_rollup_pr_view(fields)
   local completed_at = fields.completed_at or updated_at
   t.mock_command("gh pr view '" .. tostring(fields.pr_number or 9) .. "'", {
     stdout = string.format(
-      '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"test","state":"%s","conclusion":"%s","headSha":"%s","completedAt":"%s"}]}\n',
+      '{"number":%d,"headRefName":"%s","headRefOid":"%s","baseRefName":"dev","state":"OPEN","updatedAt":"%s","isDraft":false,"mergedAt":"","comments":[%s],"headRepository":{"nameWithOwner":"owner/repo"},"headRepositoryOwner":{"login":"owner"},"isCrossRepository":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"test","state":"%s","conclusion":"%s","headSha":"%s","completedAt":"%s"}]}\n',
       fields.pr_number or 9,
       h.json_string(fields.head_ref or "integration/dev"),
       h.json_string(fields.head_sha or "def456"),
       h.json_string(updated_at),
+      comments_json(fields.comments),
       h.json_string(state),
       h.json_string(conclusion),
       h.json_string(fields.head_sha or "def456"),
@@ -166,6 +180,13 @@ local function mock_rollup_pr_view(fields)
     stderr = "",
     exit_code = 0,
   })
+end
+
+local function observe_clean()
+  return {
+    schema_version = 1,
+    generated_at_ms = now() * 1000,
+  }
 end
 
 local function mock_release_notes(body)
@@ -400,7 +421,8 @@ return {
     mock_rollup_pr_view()
     local result = run_scan(opts("rollup-manual", { FKST_GITHUB_WRITE = "1", FKST_DEVLOOP_ROLLUP_MERGE = "manual" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 0)
+    t.eq(h.find_raise(result.raises, "devloop_rollup_ready"), nil)
+    t.is_true(h.find_raise(result.raises, "github-proxy.github_pr_comment_request") ~= nil)
   end,
 
   test_rollup_scan_auto_raises_ready_payload = function()
@@ -413,8 +435,8 @@ return {
     mock_rollup_pr_view()
     local result = run_scan(opts("rollup-auto", { FKST_GITHUB_WRITE = "1" }))
     t.eq(result.exit_code, 0)
-    t.eq(#result.raises, 1)
     local raised = h.find_raise(result.raises, "devloop_rollup_ready")
+    t.is_true(raised ~= nil)
     t.eq(raised.payload.schema, "github-devloop.v1")
     t.eq(raised.payload.repo, "owner/repo")
     t.eq(raised.payload.pr_number, 9)
@@ -423,6 +445,72 @@ return {
     t.eq(raised.payload.head_sha, "def456")
     t.eq(raised.payload.source_ref.ref, "owner/repo#pr/9")
     t.eq(raised.payload.dedup_key, core.rollup_dedup_key("owner/repo", "dev", "integration/dev", 9, "def456"))
+  end,
+
+  test_rollup_scan_records_head_bound_clean_observe_sample = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9 })
+    mock_integration_head("def456")
+    mock_rollup_pr_view()
+    t.mock_observe(observe_clean())
+    local result = run_scan(opts("rollup-observe-sample", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(result.exit_code, 0)
+    local sample = h.find_raise(result.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(sample ~= nil)
+    t.eq(sample.payload.schema, "github-proxy.v1")
+    t.eq(sample.payload.repo, "owner/repo")
+    t.eq(sample.payload.pr_number, 9)
+    t.is_true(tostring(sample.payload.body):find("fkst:github-devloop-integration:rollup-observe-sample:v1", 1, true) ~= nil)
+    t.is_true(tostring(sample.payload.body):find('head_sha="def456"', 1, true) ~= nil)
+    t.is_true(tostring(sample.payload.body):find('status="clean"', 1, true) ~= nil)
+    t.is_true(tostring(sample.payload.body):find('first_clean_observed_at_ms=', 1, true) ~= nil)
+    t.is_true(tostring(sample.payload.body):find('sampled_at_ms=', 1, true) ~= nil)
+    t.eq(sample.payload.dedup_key, "rollup-observe-sample/owner/repo/9")
+    t.eq(sample.payload.replace_marker, "<!-- fkst:github-devloop-integration:rollup-observe-sample:v1")
+    t.is_true(h.find_raise(result.raises, "devloop_rollup_ready") ~= nil)
+  end,
+
+  test_rollup_scan_observe_sample_request_is_stable_replace_in_place_across_polls = function()
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9, head_sha = "def456" })
+    mock_integration_head("def456")
+    mock_rollup_pr_view({ head_sha = "def456" })
+    t.mock_observe(observe_clean())
+    local first = run_scan(opts("rollup-observe-sample-first", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(first.exit_code, 0)
+    local first_sample = h.find_raise(first.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(first_sample ~= nil)
+
+    mock_env("1", "auto")
+    mock_fetches()
+    mock_ahead(2)
+    mock_content_diff(true)
+    mock_pr_list({ number = 9, head_sha = "aaaa1111" })
+    mock_integration_head("aaaa1111")
+    mock_rollup_pr_view({
+      head_sha = "aaaa1111",
+      comments = {
+        { body = first_sample.payload.body, author_login = core._test_bot_login },
+      },
+    })
+    t.mock_observe(observe_clean())
+    local second = run_scan(opts("rollup-observe-sample-second", { FKST_GITHUB_WRITE = "1" }))
+    t.eq(second.exit_code, 0)
+    local second_sample = h.find_raise(second.raises, "github-proxy.github_pr_comment_request")
+    t.is_true(second_sample ~= nil)
+
+    t.eq(first_sample.payload.dedup_key, second_sample.payload.dedup_key)
+    t.eq(second_sample.payload.dedup_key, "rollup-observe-sample/owner/repo/9")
+    t.eq(first_sample.payload.replace_marker, second_sample.payload.replace_marker)
+    t.eq(second_sample.payload.replace_marker, "<!-- fkst:github-devloop-integration:rollup-observe-sample:v1")
+    t.is_true(tostring(second_sample.payload.body):find('head_sha="aaaa1111"', 1, true) ~= nil)
+    t.is_true(tostring(second_sample.payload.body):find('head_sha="def456"', 1, true) == nil)
   end,
 
   test_rollup_scan_surfaces_stale_red_rollup_as_deduped_issue = function()
