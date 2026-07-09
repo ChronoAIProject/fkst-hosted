@@ -195,48 +195,63 @@ fn downward_env_var(name: &str, field_path: &str) -> EnvVar {
     }
 }
 
-/// The log-streaming env, injected on EVERY session (streaming is unconditional).
-/// Carries the session id (the collector's bundle key `logs/<id>/latest.tar.gz`),
-/// the trigger issue + config-hash (for the `meta.json`), and the downward-API pod
-/// UID/name (for the instance id). It adds NO storage credential — the write-only
-/// SA creds ride the per-session Secret (see [`build_session_secret`]), never env.
-fn log_streaming_env(spec: &SessionPodSpec) -> Vec<EnvVar> {
+/// The plain (non-downward-API) env var name/value pairs injected into a session
+/// runtime, factored out so BOTH session backends share ONE env source and can
+/// never drift. This is the §5.2 non-secret env (the ~16 core vars) plus the three
+/// PLAIN log-streaming vars ([`ENV_SESSION_ID`] / [`ENV_TRIGGER_ISSUE`] /
+/// [`ENV_CONFIG_HASH`], the collector's bundle key + `meta.json` inputs) — but NOT
+/// the two downward-API vars ([`ENV_POD_UID`] / [`ENV_POD_NAME`]): those use a pod
+/// fieldRef, so the Kubernetes backend appends them in [`session_env`] while an
+/// OpenSandbox backend (which has no downward API) supplies them as plain values.
+/// It adds NO storage credential — the write-only SA creds ride the per-session
+/// Secret (see [`build_session_secret`]), never env. Order is stable so the rendered
+/// runtime env is deterministic (aids tests + drift detection).
+pub(crate) fn session_env_pairs(
+    spec: &SessionPodSpec,
+    config: &PodConfig,
+) -> Vec<(&'static str, String)> {
     vec![
-        env_var(ENV_SESSION_ID, spec.session_id.clone()),
-        env_var(ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
-        env_var(ENV_CONFIG_HASH, spec.config_hash.clone()),
-        downward_env_var(ENV_POD_UID, "metadata.uid"),
-        downward_env_var(ENV_POD_NAME, "metadata.name"),
-    ]
-}
-
-/// The §5.2 non-secret env injected into the session Pod. Order is stable so the
-/// rendered Pod is deterministic (aids tests + drift detection).
-fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
-    let mut env = vec![
-        env_var(
+        (
             GITHUB_REPO_ENV,
             format!("{}/{}", spec.repo.owner, spec.repo.name),
         ),
-        env_var(GITHUB_BOT_LOGIN_ENV, spec.bot_login.clone()),
-        env_var(GITHUB_WRITE_ENV, GITHUB_WRITE_VALUE),
-        env_var(GITHUB_CLAIM_MODE_ENV, GITHUB_CLAIM_MODE_VALUE),
-        env_var(GITHUB_PROXY_POLL_LABEL_PREFIX_ENV, spec.work_label.clone()),
-        env_var(LLM_MODEL_ENV, config.llm_model.clone()),
-        env_var(LLM_BASE_URL_ENV, config.llm_base_url.clone()),
-        env_var(LLM_WIRE_API_ENV, config.llm_wire_api.clone()),
-        env_var(DURABLE_ROOT_ENV, DURABLE_ROOT_DIR),
-        env_var(RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR),
-        env_var(SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR),
-        env_var(CODEX_HOME_ENV, CODEX_HOME_DIR),
-        env_var(GIT_AUTHOR_NAME_ENV, spec.bot_login.clone()),
-        env_var(GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
-        env_var(SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
-        env_var(SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
-    ];
-    // Log streaming is unconditional: every session carries the (non-secret) log
-    // env + downward-API refs. The write-only storage creds ride the Secret.
-    env.extend(log_streaming_env(spec));
+        (GITHUB_BOT_LOGIN_ENV, spec.bot_login.clone()),
+        (GITHUB_WRITE_ENV, GITHUB_WRITE_VALUE.to_string()),
+        (GITHUB_CLAIM_MODE_ENV, GITHUB_CLAIM_MODE_VALUE.to_string()),
+        (GITHUB_PROXY_POLL_LABEL_PREFIX_ENV, spec.work_label.clone()),
+        (LLM_MODEL_ENV, config.llm_model.clone()),
+        (LLM_BASE_URL_ENV, config.llm_base_url.clone()),
+        (LLM_WIRE_API_ENV, config.llm_wire_api.clone()),
+        (DURABLE_ROOT_ENV, DURABLE_ROOT_DIR.to_string()),
+        (RUNTIME_ROOT_ENV, RUNTIME_ROOT_DIR.to_string()),
+        (SESSION_CREDS_DIR_ENV, CREDS_MOUNT_DIR.to_string()),
+        (CODEX_HOME_ENV, CODEX_HOME_DIR.to_string()),
+        (GIT_AUTHOR_NAME_ENV, spec.bot_login.clone()),
+        (GIT_COMMITTER_NAME_ENV, spec.bot_login.clone()),
+        (SESSION_PACKAGE_ROOTS_ENV, spec.package_roots.join(" ")),
+        (SESSION_WORK_LABEL_ENV, spec.work_label.clone()),
+        // The three PLAIN log-streaming vars; the two downward-API vars are appended
+        // per-backend (pod fieldRef here, plain value in the OpenSandbox backend).
+        (ENV_SESSION_ID, spec.session_id.clone()),
+        (ENV_TRIGGER_ISSUE, spec.trigger_issue_number.to_string()),
+        (ENV_CONFIG_HASH, spec.config_hash.clone()),
+    ]
+}
+
+/// The §5.2 non-secret env injected into the session Pod: the shared
+/// [`session_env_pairs`] rendered as [`EnvVar`]s, then the two downward-API vars
+/// ([`ENV_POD_UID`] / [`ENV_POD_NAME`]) the kubelet fills from the pod's own
+/// fieldRefs (never a literal value — safe inside the #338 hard-isolation box). The
+/// rendered order is IDENTICAL to the pre-refactor env.
+fn session_env(spec: &SessionPodSpec, config: &PodConfig) -> Vec<EnvVar> {
+    let mut env: Vec<EnvVar> = session_env_pairs(spec, config)
+        .into_iter()
+        .map(|(name, value)| env_var(name, value))
+        .collect();
+    // Log streaming is unconditional: every session carries the log env; the pod
+    // UID/name ride the downward API (a fieldRef), never a literal value.
+    env.push(downward_env_var(ENV_POD_UID, "metadata.uid"));
+    env.push(downward_env_var(ENV_POD_NAME, "metadata.name"));
     env
 }
 

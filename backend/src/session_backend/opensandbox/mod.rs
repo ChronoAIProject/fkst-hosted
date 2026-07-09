@@ -36,11 +36,13 @@
 //! - `POST /files/upload`'s `mode` is octal DIGITS, read as `ParseUint(Itoa(mode),
 //!   8)` (`utils.go`), so the real bits `0o400` travel as the integer `400`.
 
+pub mod backend;
 pub mod dto;
 pub mod execd;
 pub mod lifecycle;
 pub mod token;
 
+pub use backend::OsbBackend;
 pub use dto::*;
 pub use execd::ExecdClient;
 pub use lifecycle::OsbLifecycleClient;

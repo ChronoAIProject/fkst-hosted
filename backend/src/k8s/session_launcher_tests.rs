@@ -212,6 +212,39 @@ fn build_session_pod_injects_the_log_streaming_env_unconditionally() {
 }
 
 #[test]
+fn session_env_pairs_are_the_plain_env_minus_the_downward_api_vars() {
+    let spec = spec();
+    let cfg = config();
+    let pairs = session_env_pairs(&spec, &cfg);
+
+    // The two downward-API vars are NOT in the shared pairs (the pod path appends
+    // them as fieldRefs; the OpenSandbox backend supplies them as plain values).
+    assert!(
+        pairs
+            .iter()
+            .all(|(k, _)| *k != "FKST_POD_UID" && *k != "FKST_POD_NAME"),
+        "downward-API vars must not appear in the shared plain pairs"
+    );
+    // The three PLAIN log-streaming vars ARE part of the shared pairs.
+    assert!(pairs.iter().any(|(k, _)| *k == "FKST_SESSION_ID"));
+    assert!(pairs.iter().any(|(k, _)| *k == "FKST_TRIGGER_ISSUE"));
+    assert!(pairs.iter().any(|(k, _)| *k == "FKST_CONFIG_HASH"));
+
+    // Behaviour-preserving proof: the rendered pod env is EXACTLY the shared pairs
+    // (as EnvVars) followed by the two downward-API vars — so extracting
+    // `session_env_pairs` changed nothing about what the pod runs.
+    let pod = build_session_pod(&spec, &cfg).expect("pod builds");
+    let env = pod.spec.unwrap().containers.remove(0).env.unwrap();
+    let mut expected: Vec<EnvVar> = pairs
+        .iter()
+        .map(|(name, value)| env_var(name, value.clone()))
+        .collect();
+    expected.push(downward_env_var("FKST_POD_UID", "metadata.uid"));
+    expected.push(downward_env_var("FKST_POD_NAME", "metadata.name"));
+    assert_eq!(env, expected);
+}
+
+#[test]
 fn build_session_pod_joins_empty_package_roots_to_a_blank_string() {
     let mut spec = spec();
     spec.package_roots = Vec::new();

@@ -128,6 +128,22 @@ fn sandbox_view_lifts_nested_status_to_flat_fields() {
     assert_eq!(view.message.as_deref(), Some("ready"));
     assert_eq!(view.metadata.get("team").map(String::as_str), Some("ml"));
     assert!(view.extensions.is_empty());
+    // No `createdAt` in this wire body → defaults to None rather than failing.
+    assert_eq!(view.created_at, None);
+}
+
+#[test]
+fn sandbox_view_reads_the_created_at_timestamp() {
+    // `createdAt` is a REQUIRED RFC3339 wire field, load-bearing for the reaper's
+    // keep-oldest ordering and the projected LivePod.created_at.
+    let wire = serde_json::json!({
+        "id": "sbx-1",
+        "status": { "state": "Running" },
+        "metadata": {},
+        "createdAt": "2026-07-09T12:34:56Z"
+    });
+    let view: SandboxView = serde_json::from_value(wire).expect("deserialize view");
+    assert_eq!(view.created_at.as_deref(), Some("2026-07-09T12:34:56Z"));
 }
 
 #[test]
