@@ -49,8 +49,12 @@ use super::{ExecdClient, OsbLifecycleClient};
 
 pub mod correlate;
 mod fleet;
+mod health;
+mod logs;
 mod observe;
+mod rotation;
 mod spawn;
+mod validation;
 
 /// Default env var execd reads its per-request access token from (`ServerAccessToken`
 /// in the execd server; gates every `X-EXECD-ACCESS-TOKEN` header). Grounded from the
@@ -84,13 +88,22 @@ pub struct OsbConfig {
     /// The respawn-shield window: how long a just-stopped session is reported as a
     /// synthetic `Terminating` pod so the planner does not thrash (see [`observe`]).
     pub reconcile_window: Duration,
+    /// The validation holder's server-side GC deadline base + the reaper's sweep-age
+    /// budget, in seconds. Mirrors `K8sBackend`'s validate knobs; #420 wires the real
+    /// value, tests set it ad hoc (see [`validation`]).
+    pub validate_deadline_secs: i64,
+    /// The poll cadence while waiting for a validation holder's command to finish.
+    pub validate_poll_interval_secs: u64,
 }
 
 /// The OpenSandbox session backend: one sandbox per substrate session, correlated
 /// entirely through sandbox `metadata`. Held by the reconciler + loops as
 /// `Arc<dyn SessionBackend>`.
 pub struct OsbBackend {
-    lifecycle: OsbLifecycleClient,
+    /// The lifecycle client, behind an `Arc` so the validation drop-guard can hold a
+    /// `'static` handle to spawn a best-effort holder delete on Drop (the client cannot
+    /// derive `Clone` — its `SecretString` API key is non-`Clone`).
+    lifecycle: Arc<OsbLifecycleClient>,
     execd_factory: ExecdFactory,
     pod_config: PodConfig,
     config: OsbConfig,
@@ -98,11 +111,19 @@ pub struct OsbBackend {
     /// `Terminating` (not `Absent`) until the window lapses — see [`observe`] for why
     /// the OpenSandbox read-your-writes delete needs this pacing that K8s gets free.
     shield: Mutex<HashMap<String, ShieldEntry>>,
+    /// Latest full credential bundle per live session, for the full re-push heal path
+    /// (see [`rotation`]): when a container restart wipes the creds dir, the rotation
+    /// verb re-pushes THIS whole bundle rather than only the rotated file. A
+    /// control-plane restart empties this map — the next reconcile tick repopulates it
+    /// via `ensure_session`. `SecretString` is non-`Clone`, so bundles are MOVED in and
+    /// BORROWED out for upload, never cloned.
+    creds: Mutex<HashMap<String, BTreeMap<String, SecretString>>>,
 }
 
 impl OsbBackend {
     /// Build the backend over an injected lifecycle client + execd factory, the shared
-    /// pod-env config, and the static launch config. The shield starts empty.
+    /// pod-env config, and the static launch config. The shield + creds cache start
+    /// empty; the lifecycle client is wrapped in an `Arc` once here.
     pub fn new(
         lifecycle: OsbLifecycleClient,
         execd_factory: ExecdFactory,
@@ -110,11 +131,12 @@ impl OsbBackend {
         config: OsbConfig,
     ) -> Self {
         Self {
-            lifecycle,
+            lifecycle: Arc::new(lifecycle),
             execd_factory,
             pod_config,
             config,
             shield: Mutex::new(HashMap::new()),
+            creds: Mutex::new(HashMap::new()),
         }
     }
 
@@ -237,45 +259,37 @@ impl SessionBackend for OsbBackend {
         self.list_fleet_impl().await
     }
 
-    // --- The five verbs #418 does NOT own: fail-safe stubs (#419) ----------------
-    // Each stub never MISLEADS the reconciler: the two runtime-exec verbs error
-    // loudly (they cannot be silently no-op'd), while the health reads return the
-    // "unknown-safe" empty values so the scrape never fabricates a healthy phase or
-    // clears a degraded flag it cannot justify.
+    // --- The five fleet verbs #419 completes (credential heal, health reads, env
+    // validation). Each delegates to its `*_impl` in a sibling submodule; the taxonomy
+    // + verdict contracts are shared with the Kubernetes backend, never re-derived.
 
     async fn deliver_credential(
         &self,
-        _session_id: &str,
-        _file: &str,
-        _contents: SecretString,
+        session_id: &str,
+        file: &str,
+        contents: SecretString,
     ) -> Result<DeliveryOutcome, BackendError> {
-        Err(BackendError::Other(anyhow::anyhow!(
-            "opensandbox deliver_credential unimplemented (#419)"
-        )))
+        self.deliver_credential_impl(session_id, file, contents)
+            .await
     }
 
-    async fn status_summary(&self, _session_id: &str) -> Result<RuntimeStatus, BackendError> {
-        // All-None "unknown-safe": never fabricates a healthy phase.
-        Ok(RuntimeStatus::default())
+    async fn status_summary(&self, session_id: &str) -> Result<RuntimeStatus, BackendError> {
+        self.status_summary_impl(session_id).await
     }
 
-    async fn recent_output(&self, _session_id: &str) -> Option<String> {
-        // WITHHOLD: cannot clear a degraded flag it cannot justify (a transport-error
-        // `None`, not a benign-empty `Some("")`).
-        None
+    async fn recent_output(&self, session_id: &str) -> Option<String> {
+        self.recent_output_impl(session_id).await
     }
 
     async fn run_validation(
         &self,
-        _req: &ValidationRequest,
+        req: &ValidationRequest,
     ) -> Result<ValidationOutcome, BackendError> {
-        Err(BackendError::Other(anyhow::anyhow!(
-            "opensandbox run_validation unimplemented (#419)"
-        )))
+        self.run_validation_impl(req).await
     }
 
     async fn reap_stale_validations(&self) -> Result<usize, BackendError> {
-        Ok(0)
+        self.reap_stale_validations_impl().await
     }
 }
 

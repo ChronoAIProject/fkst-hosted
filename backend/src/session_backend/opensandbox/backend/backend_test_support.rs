@@ -61,6 +61,8 @@ pub(crate) fn osb_config() -> OsbConfig {
         execd_seed: SecretString::from(EXECD_SEED.to_string()),
         execd_token_env_key: DEFAULT_EXECD_TOKEN_ENV_KEY.to_string(),
         reconcile_window: Duration::from_secs(300),
+        validate_deadline_secs: 300,
+        validate_poll_interval_secs: 1,
     }
 }
 

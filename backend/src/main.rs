@@ -46,7 +46,9 @@ async fn main() -> ExitCode {
     //     verdict as the final stdout line, and exits SUCCESS/FAILURE — it never
     //     binds a socket or builds the server router, so the default arg-less
     //     invocation stays the API server unchanged.
-    if std::env::args().nth(1).as_deref() == Some("validate-env") {
+    if std::env::args().nth(1).as_deref()
+        == Some(fkst_control_plane::install::VALIDATE_ENV_SUBCOMMAND)
+    {
         return fkst_control_plane::install::run_validate_env().await;
     }
 
