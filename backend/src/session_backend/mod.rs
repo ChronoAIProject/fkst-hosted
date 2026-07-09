@@ -21,6 +21,10 @@ use crate::reconcile::desired::{KillReason, LivePod};
 
 pub mod k8s;
 pub mod opensandbox;
+/// Shared, kube-free env-validation verdict parsing (issue #419). Both backends parse
+/// the SAME verdict frame through here so a validation verdict is byte-for-byte
+/// identical regardless of which runtime executed it.
+pub(crate) mod verdict;
 
 #[cfg(test)]
 pub(crate) mod test_support;

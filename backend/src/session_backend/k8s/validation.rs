@@ -10,13 +10,15 @@ use k8s_openapi::api::core::v1::{ConfigMap, Pod};
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::Time;
 use k8s_openapi::chrono::Utc;
 use kube::api::{Api, DeleteParams, ListParams, LogParams, PostParams};
-use serde::Deserialize;
 
 use crate::k8s::env_validator_pod::{
     build_spec_configmap, build_validation_pod, pod_owner_reference, validation_pod_name,
     COMPONENT_LABEL_VALUE,
 };
 
+use super::super::verdict::{
+    last_non_empty_line, parse_verdict_line, verdict_timed_out, verdict_unparseable,
+};
 use super::super::{BackendError, ValidationOutcome, ValidationRequest};
 use super::K8sBackend;
 
@@ -93,14 +95,7 @@ impl K8sBackend {
                         pod = %object_name,
                         "env validation: pod did not reach a terminal phase before the deadline"
                     );
-                    return Ok(ValidationOutcome::Failed {
-                        failed_command_index: 0,
-                        failed_command: String::new(),
-                        exit_code: -1,
-                        timed_out: true,
-                        stderr_tail: "validation pod did not complete before the deadline"
-                            .to_string(),
-                    });
+                    return Ok(verdict_timed_out());
                 }
             };
 
@@ -222,13 +217,7 @@ async fn capture_outcome(
                 phase = %phase,
                 "env validation: no parseable verdict; treating as failed"
             );
-            Ok(ValidationOutcome::Failed {
-                failed_command_index: 0,
-                failed_command: String::new(),
-                exit_code: -1,
-                timed_out: false,
-                stderr_tail: "validation pod exceeded its limits".to_string(),
-            })
+            Ok(verdict_unparseable())
         }
     }
 }
@@ -238,55 +227,3 @@ async fn capture_outcome(
 fn kube_backend(context: &str, error: kube::Error) -> BackendError {
     BackendError::Other(anyhow::anyhow!("{context}: {error}"))
 }
-
-/// The verdict frame the pod prints as its last stdout line (see
-/// [`crate::install::verdict_frame`]). Optional fields let both the `ok` and
-/// `failed` shapes deserialize into one struct.
-#[derive(Deserialize)]
-struct VerdictFrame {
-    status: String,
-    #[serde(default)]
-    commands: Option<usize>,
-    #[serde(default)]
-    index: Option<u64>,
-    #[serde(default)]
-    command: Option<String>,
-    #[serde(default)]
-    exit_code: Option<i32>,
-    #[serde(default)]
-    timed_out: Option<bool>,
-    #[serde(default)]
-    stderr_tail: Option<String>,
-}
-
-/// Parse a single verdict JSON line into a [`ValidationOutcome`]. `None` for a
-/// non-JSON / empty / unrecognized-status line (pure + unit-tested).
-fn parse_verdict_line(line: &str) -> Option<ValidationOutcome> {
-    let frame: VerdictFrame = serde_json::from_str(line.trim()).ok()?;
-    match frame.status.as_str() {
-        "ok" => Some(ValidationOutcome::Passed {
-            commands: frame.commands?,
-        }),
-        "failed" => Some(ValidationOutcome::Failed {
-            failed_command_index: u32::try_from(frame.index?).unwrap_or(0),
-            failed_command: frame.command.unwrap_or_default(),
-            exit_code: frame.exit_code.unwrap_or(-1),
-            timed_out: frame.timed_out.unwrap_or(false),
-            stderr_tail: frame.stderr_tail.unwrap_or_default(),
-        }),
-        _ => None,
-    }
-}
-
-/// The last non-empty (trimmed) line of `text`, or `None` if there is none. The
-/// pod may emit tracing chatter before the frame, so only the final line counts.
-fn last_non_empty_line(text: &str) -> Option<&str> {
-    text.lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-}
-
-#[cfg(test)]
-#[path = "validation_tests.rs"]
-mod tests;
