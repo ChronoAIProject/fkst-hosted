@@ -1,9 +1,6 @@
 local C = {}
 local github_view = require("forge.github_view")
-local gh_exec_mod = require("devloop.gh_exec")
-local github_author_policy = require("devloop.github_author_policy")
 local github_factory = require("devloop.github_factory")
-local stdout_policy = require("forge.github.stdout_policy")
 
 local parse_view_updated_at = github_view.parse_view_updated_at
 local parse_updated_at_stdout = github_view.parse_updated_at_stdout
@@ -19,10 +16,6 @@ local repo_owner_login = github_view.repo_owner_login
 local decode_comments_json = function(stdout) return github_view.decode_comments_json(stdout, "github-devloop: REST") end
 
 local max_cache_key_segment_len = 120
-
-local function author_policy_for_exec(exec)
-  return github_author_policy.for_exec(exec or exec_sync)
-end
 
 local function github()
   if type(exec_argv) ~= "function" then
@@ -451,7 +444,7 @@ end
 -- share a slot. This collapses the dominant GraphQL drain: the same entity
 -- re-read every poll by the same scan dept (measured ~10x duplication on hot
 -- issues).
-function C.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
+function C.gh_exec_cached(read, cache_key, ttl_seconds)
   local cached = cache_get(cache_key)
   if type(cached) == "string" and cached ~= "" then
     local sep = cached:find("\n", 1, true)
@@ -460,20 +453,10 @@ function C.gh_exec_cached(cmd, cache_key, ttl_seconds, exec)
       return { stdout = cached:sub(sep + 1), exit_code = 0, cached = true }
     end
   end
-  local result
-  if type(cmd) == "function" then
-    result = cmd()
-  else
-    result = gh_exec_mod.gh_exec(
-      cmd,
-      nil,
-      exec,
-      stdout_policy.content_json("issue_view"),
-      function()
-        return author_policy_for_exec()
-      end
-    )
+  if type(read) ~= "function" then
+    error("github-devloop: gh_exec_cached requires a typed GitHub read function")
   end
+  local result = read()
   if type(result) == "table" and tonumber(result.exit_code) == 0 then
     cache_set(cache_key, tostring(now() + (ttl_seconds or 60)) .. "\n" .. tostring(result.stdout or ""))
   end

@@ -7,7 +7,6 @@
 {"path":"libraries/devloop/comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}
 {"path":"libraries/devloop/config.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/conflict_telemetry.lua","owner":"shared","reason":"conflict telemetry parsing and logging are used by PR fix and issue-side hotspot patrol."}
-{"path":"libraries/devloop/content_provenance.lua","owner":"shared","reason":"shared codex-bundle content provenance filter used by issue and PR context files; bundle-only redaction, does not touch marker facts."}
 {"path":"libraries/devloop/context_bundle.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/convergence.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/decompose.lua","owner":"shared","reason":"decompose marker grammar and child-completion facts are shared by the issue decompose saga and PR-side replay/observe."}
@@ -18,7 +17,6 @@
 {"path":"libraries/devloop/forge_validators.lua","owner":"shared","reason":"sanctioned pure forge-validator facade shared by typed devloop modules."}
 {"path":"libraries/devloop/forks.lua","owner":"shared","reason":"fork-and-block helpers are shared by intake claim gating and issue implementation checks."}
 {"path":"libraries/devloop/gate.lua","owner":"shared","reason":"shared opaque positive monotone gate DSL runner used by issue and PR gate definitions."}
-{"path":"libraries/devloop/gh_exec.lua","owner":"shared","reason":"shared GitHub argv exec primitive used by devloop scan/cache helpers across issue and PR packages."}
 {"path":"libraries/devloop/git_mechanics.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_proxy_entity_view.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/github_author_policy.lua","owner":"shared","reason":"shared GitHub authored-content policy builder used by issue and PR GitHub read boundaries."}

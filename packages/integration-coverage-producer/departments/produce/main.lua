@@ -45,6 +45,13 @@ local function read_env_command(name)
 end
 
 local read_env = env.read_env(read_env_command, { propagate_exec_errors = true })
+local github_author_policy_env = {
+  bot_login_env = "FKST_GITHUB_BOT_LOGIN",
+  extra_login_envs = {
+    "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+    "FKST_GITHUB_AUTHORIZED_LOGINS",
+  },
+}
 
 local function repo_from_env()
   local repo = core.trim(read_env("FKST_GITHUB_REPO") or "")
@@ -188,4 +195,4 @@ local function make_department(ports)
   return department
 end
 
-return ports_lib.install(make_department, ports_lib.github_author_options(read_env, "integration-coverage-producer"))
+return ports_lib.install(make_department, ports_lib.github_author_options(read_env, "integration-coverage-producer", github_author_policy_env))

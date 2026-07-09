@@ -5,7 +5,7 @@ local strings = require("contract.strings")
 local github_risk = require("devloop.github_risk")
 local base_ids = require("devloop.base_ids")
 local devloop_logging = require("devloop.logging")
-local content_provenance = require("devloop.content_provenance")
+local content_filter = require("forge.github.content_filter")
 local decimal_checksum = strings.decimal_checksum
 
 -- Resolve the codex-bundle authored-content whitelist from host env. Bot login is
@@ -26,7 +26,7 @@ local function content_whitelist(exec)
       end
     end
   end
-  return content_provenance.build_whitelist(logins)
+  return content_filter.build_whitelist(logins)
 end
 
 local function log_content_redactions(dept, proposal_id, repo, entity, records)
@@ -501,7 +501,7 @@ function C.build_context_bundle(M, args)
     end, "issue fetch")
     if whitelist ~= nil then
       local issue_redactions = {}
-      issue_json = content_provenance.filter_gh_content_json(issue_json, "issue", whitelist, issue_redactions)
+      issue_json = content_filter.filter_gh_content_json(issue_json, "issue", whitelist, issue_redactions)
       log_content_redactions(args.dept, proposal_id, repo, "issue/" .. tostring(issue_number), issue_redactions)
     end
   end
@@ -515,7 +515,7 @@ function C.build_context_bundle(M, args)
     end, "pr fetch")
     if whitelist ~= nil then
       local pr_redactions = {}
-      pr_json = content_provenance.filter_gh_content_json(pr_json, "pr", whitelist, pr_redactions)
+      pr_json = content_filter.filter_gh_content_json(pr_json, "pr", whitelist, pr_redactions)
       log_content_redactions(args.dept, proposal_id, repo, "pr/" .. tostring(args.pr_number), pr_redactions)
     end
     pr_json = truncate_if_needed(pr_json, args.dept, proposal_id, "pr.json")

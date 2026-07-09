@@ -18,6 +18,14 @@ local function read_env(name)
   return core.read_env(name)
 end
 
+local github_author_policy_env = {
+  bot_login_env = "FKST_GITHUB_BOT_LOGIN",
+  extra_login_envs = {
+    "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+    "FKST_GITHUB_AUTHORIZED_LOGINS",
+  },
+}
+
 local function write_enabled()
   return read_env("FKST_GITHUB_WRITE") == "1"
 end
@@ -554,7 +562,7 @@ local function make_department(ports)
   return department
 end
 
-M = ports_seam.install(make_department, ports_seam.github_author_options(read_env, "github-ratchet-migration-slicer"))
+M = ports_seam.install(make_department, ports_seam.github_author_options(read_env, "github-ratchet-migration-slicer", github_author_policy_env))
 M.make_department = make_department
 _G.pipeline = M.pipeline
 

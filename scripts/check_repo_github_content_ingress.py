@@ -1,4 +1,10 @@
-"""GitHub authored-content ingress ratchet."""
+"""GitHub authored-content ingress migration backstop.
+
+The GitHub capability seam owns primary enforcement: production code receives an
+authorized GitHub handle whose raw egress path applies the authored-content
+filter. This scanner is a shrink-only migration backstop that keeps known bypass
+shapes from regressing while the Lua surface continues converging.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +16,6 @@ from typing import Callable
 RULE = "G-GITHUB-CONTENT-INGRESS"
 WRAPPER_NEEDLES = {
     "libraries/forge/github/exec.lua": ("content_filter.apply_gh_content_filter",),
-    "libraries/devloop/gh_exec.lua": ("content_filter.apply_gh_content_filter",),
 }
 POLICY_FACTORY_NEEDLE = "devloop.github_factory"
 AUTHORED_LIST_HELPER_SHAPES = {
@@ -145,7 +150,6 @@ def policyless_require_github_constructions(source: str, stripped: str) -> list[
     found: list[tuple[int, str]] = []
     for pattern in (
         r"require\s*\(\s*[\"']forge\.github[\"']\s*\)\s*\.\s*new\s*\(",
-        r"require\s*\(\s*[\"']forge\.github[\"']\s*\)\s*\.\s*production_handle\b",
     ):
         for match in re.finditer(pattern, source):
             quote = source.find("\"", match.start(), match.end())
@@ -192,27 +196,22 @@ def messages(
                 if "argv" in call and ('"gh"' in raw or "'gh'" in raw or obfuscated_head):
                     line = text.count("\n", 0, match.start()) + 1
                     violations.append(
-                        f"{relpath}:{line} raw gh exec_argv egress must use forge.github.exec.run or devloop.gh_exec"
+                        f"{relpath}:{line} raw gh exec_argv egress bypasses the GitHub capability seam; use forge.github.exec.run"
                     )
         if not is_allowed_policyless_github_construction(relpath):
             for start, call in policyless_require_github_constructions(text, stripped):
                 line = text.count("\n", 0, start) + 1
                 if call == "" or ("trusted_author_policy" not in call and "github_author_policy.github_options" not in call):
                     violations.append(
-                        f"{relpath}:{line} production forge.github construction must use {POLICY_FACTORY_NEEDLE} or pass an explicit trusted_author_policy"
+                        f"{relpath}:{line} production forge.github construction bypasses the GitHub capability seam; use {POLICY_FACTORY_NEEDLE} or pass an explicit trusted_author_policy"
                     )
             for match in re.finditer(r"\bgithub_adapter\s*\.\s*new\s*\(", stripped):
                 call = matching_call(stripped, match.end() - 1)
                 line = text.count("\n", 0, match.start()) + 1
                 if "trusted_author_policy" not in call and "github_author_policy.github_options" not in call:
                     violations.append(
-                        f"{relpath}:{line} production forge.github construction must use {POLICY_FACTORY_NEEDLE} or pass an explicit trusted_author_policy"
+                        f"{relpath}:{line} production forge.github construction bypasses the GitHub capability seam; use {POLICY_FACTORY_NEEDLE} or pass an explicit trusted_author_policy"
                     )
-            for match in re.finditer(r"\bgithub_adapter\s*\.\s*production_handle\b", stripped):
-                line = text.count("\n", 0, match.start()) + 1
-                violations.append(
-                    f"{relpath}:{line} production forge.github construction must use {POLICY_FACTORY_NEEDLE} or pass an explicit trusted_author_policy"
-                )
         for match in re.finditer(r"\bhandle\s*\.\s*_exec\s*\(", stripped):
             call = matching_call(stripped, match.end() - 1)
             raw_call = raw_call_for_stripped_call(text, match.end() - 1, call)

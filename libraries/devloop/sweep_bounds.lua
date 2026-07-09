@@ -1,6 +1,4 @@
 local sweep_bounds = {}
-local gh_exec = require("devloop.gh_exec")
-local github_author_policy = require("devloop.github_author_policy")
 local sweep = require("workflow.sweep")
 
 local default_call_timeout = 10
@@ -57,25 +55,7 @@ function sweep_bounds.sweep_exec(cmd_or_opts, limits, deadline, error_class, exe
   if type(cmd_or_opts) == "table" and type(cmd_or_opts.run) == "function" then
     return cmd_or_opts.run(cmd_or_opts.timeout or timeout)
   end
-  local opts
-  if type(cmd_or_opts) == "table" then
-    opts = {}
-    for key, value in pairs(cmd_or_opts) do
-      opts[key] = value
-    end
-    opts.timeout = opts.timeout or timeout
-  else
-    opts = { cmd = cmd_or_opts, timeout = timeout }
-  end
-  return gh_exec.gh_exec(
-    opts,
-    nil,
-    exec,
-    opts.stdout_policy,
-    function()
-      return github_author_policy.for_exec(exec_sync)
-    end
-  )
+  error("github-devloop: sweep_exec requires an injected exec function or a typed run(timeout) command")
 end
 
 function sweep_bounds.sweep_run_cmd(cmd, limits, deadline, error_class, exec)

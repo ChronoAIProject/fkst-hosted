@@ -9,8 +9,14 @@
 -- common wiring, the script keeps only its business pipeline).
 local M = {}
 
-function M.github_author_options(read_env, owner)
+function M.github_author_options(read_env, owner, opts)
   assert(type(read_env) == "function", "forge.ports.github_author_options requires read_env")
+  local options = opts or {}
+  local bot_login_env = options.bot_login_env
+  if type(bot_login_env) ~= "string" or bot_login_env == "" then
+    error("forge.ports.github_author_options requires opts.bot_login_env", 2)
+  end
+  local extra_login_envs = options.extra_login_envs or {}
   local content_filter = require("forge.github.content_filter")
   local strings = require("contract.strings")
   local policy = nil
@@ -22,13 +28,14 @@ function M.github_author_options(read_env, owner)
   return {
     trusted_author_policy = function()
       if policy == nil then
-        local bot_login = strings.trim(read_env("FKST_GITHUB_BOT_LOGIN") or "")
+        local bot_login = strings.trim(read_env(bot_login_env) or "")
         if bot_login == "" then
-          error(tostring(owner or "forge.ports") .. ": missing-github-bot-login: FKST_GITHUB_BOT_LOGIN is required for authored GitHub reads")
+          error(tostring(owner or "forge.ports") .. ": missing-github-bot-login: " .. bot_login_env .. " is required for authored GitHub reads")
         end
         local logins = { bot_login }
-        append_csv_logins(logins, read_env("FKST_DEVLOOP_MANAGED_BOT_LOGINS"))
-        append_csv_logins(logins, read_env("FKST_GITHUB_AUTHORIZED_LOGINS"))
+        for _, env_name in ipairs(extra_login_envs) do
+          append_csv_logins(logins, read_env(env_name))
+        end
         policy = content_filter.author_policy_from_logins(logins)
       end
       return policy
@@ -45,23 +52,24 @@ local function production_exec_argv()
   end
 end
 
-function M.production_handles(opts)
-  local run = production_exec_argv()
-  local github_options = opts or {}
-  local github
+local function github_from_options(run, github_options)
   if github_options.trusted_author_policy == nil then
-    github = setmetatable({}, {
+    return setmetatable({}, {
       __index = function()
         error("forge.ports: trusted_author_policy is required for production GitHub reads")
       end,
     })
-  else
-    github = require("forge.github").new(run, {
-      trusted_author_policy = github_options.trusted_author_policy,
-    })
   end
+  return require("forge.github").new(run, {
+    trusted_author_policy = github_options.trusted_author_policy,
+  })
+end
+
+function M.production_handles(opts)
+  local run = production_exec_argv()
+  local github_options = opts or {}
   return {
-    github = github,
+    github = github_from_options(run, github_options),
     git = require("forge.git").new(run),
   }
 end

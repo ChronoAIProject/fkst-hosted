@@ -14,6 +14,13 @@ local spec = {
 
 local pr_view_fields = "title,headRefName,baseRefName,state,createdAt,updatedAt,author,comments,assignees"
 local bridge_issue_view_fields = "number,title,state,url,labels,comments,author"
+local github_author_policy_env = {
+  bot_login_env = "FKST_GITHUB_BOT_LOGIN",
+  extra_login_envs = {
+    "FKST_DEVLOOP_MANAGED_BOT_LOGINS",
+    "FKST_GITHUB_AUTHORIZED_LOGINS",
+  },
+}
 
 local function bare_queue(queue)
   return tostring(queue or ""):match("%.([^%.]+)$") or tostring(queue or "")
@@ -368,7 +375,7 @@ local function make_department(ports)
   return department
 end
 
-M = ports_seam.install(make_department, ports_seam.github_author_options(core.read_env, "github-external-pr-intake"))
+M = ports_seam.install(make_department, ports_seam.github_author_options(core.read_env, "github-external-pr-intake", github_author_policy_env))
 M.make_department = make_department
 _G.pipeline = M.pipeline
 

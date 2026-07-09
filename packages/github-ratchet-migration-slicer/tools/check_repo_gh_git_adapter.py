@@ -1,4 +1,10 @@
-"""gh/git Ports&Adapters migration ratchet."""
+"""gh/git adapter migration backstop.
+
+The primary defense is the capability seam: production code should receive
+authorized forge.github/forge.git handles instead of constructing command heads.
+This ratchet remains as a shrink-only backstop for known raw gh/git command
+construction shapes until the capability boundary is fully structural.
+"""
 
 from __future__ import annotations
 

@@ -9,7 +9,7 @@ local v_result = require("devloop.validators.result")
 local entity_lib = require("devloop.entity")
 local devloop_logging = require("devloop.logging")
 local devloop_state = require("devloop.state")
-local github_author_policy = require("devloop.github_author_policy")
+local github_factory = require("devloop.github_factory")
 
 local spec = {
   consumes = { "consensus.consensus_reached" },
@@ -220,7 +220,7 @@ local function make_department(ports)
   return department
 end
 
-local M = ports_seam.install(make_department, github_author_policy.github_options(exec_argv))
+local M = ports_seam.install(make_department, github_factory.github_options(exec_argv))
 _G.pipeline = M.pipeline
 
 return M

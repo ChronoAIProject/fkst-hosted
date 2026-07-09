@@ -1,0 +1,2 @@
+# Shrink-only GitHub raw argv egress inventory; entries only get removed as egress collapses to the canonical capability.
+libraries/forge/github/exec.lua:M.run

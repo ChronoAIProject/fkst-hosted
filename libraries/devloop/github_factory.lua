@@ -3,6 +3,9 @@ local github_author_policy = require("devloop.github_author_policy")
 
 local M = {}
 
+-- Single production GitHub capability provider — Step 1 of
+-- docs/superpowers/specs/2026-07-09-github-egress-capability-refactor.md; all
+-- production gh handle construction routes here.
 local production_handle = nil
 
 function M.github_options(exec)

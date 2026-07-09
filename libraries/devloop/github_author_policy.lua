@@ -1,6 +1,6 @@
 local devloop_base = require("devloop.base")
 local strings = require("contract.strings")
-local content_filter = require("devloop.content_provenance")
+local content_filter = require("forge.github.content_filter")
 
 local M = {}
 

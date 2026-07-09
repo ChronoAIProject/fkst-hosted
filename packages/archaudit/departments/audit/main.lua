@@ -4,7 +4,7 @@ local env_port = require("departments.audit.env_port")
 local observe_port = require("departments.audit.observe_port")
 local saga = require("workflow.saga")
 local ports_lib = require("forge.ports")
-local github_author_policy = require("devloop.github_author_policy")
+local github_factory = require("devloop.github_factory")
 local strings = require("contract.strings")
 
 local spec = {
@@ -355,6 +355,6 @@ local function make_department(ports)
   return department
 end
 
-local M = ports_lib.install(make_department, github_author_policy.github_options(exec_sync))
+local M = ports_lib.install(make_department, github_factory.github_options(exec_sync))
 M.observe_port = observe_port
 return M

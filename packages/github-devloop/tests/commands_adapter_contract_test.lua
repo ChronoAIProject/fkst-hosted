@@ -1,10 +1,8 @@
 local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
-local gh_exec_mod = require("devloop.gh_exec")
 local sweep_bounds = require("devloop.sweep_bounds")
-local content_filter = require("forge.github.content_filter")
-local stdout_policy = require("forge.github.stdout_policy")
+local github_adapter = require("forge.github")
 local github = require("devloop.github_factory").production_handle
 
 local function mock_author_policy_env()
@@ -88,15 +86,22 @@ return {
     t.is_true(tostring(err):find("forge.merge: github_handle is required", 1, true) ~= nil)
   end,
 
-  test_generic_gh_exec_uses_github_argv_adapter = function()
-    local calls = with_exec_argv(function()
-      gh_exec_mod.gh_exec(
-        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
-        nil,
-        nil,
-        stdout_policy.trusted_metadata_json()
-      )
-    end)
+  test_sweep_exec_accepts_typed_run_command = function()
+    local calls = {}
+    local injected_github = github_adapter.new(function(spec)
+      table.insert(calls, spec)
+      return { stdout = "{}", stderr = "", exit_code = 0 }
+    end, {
+      trusted_author_policy = function()
+        return { "fkst-test-bot" }
+      end,
+    })
+    sweep_bounds.sweep_exec({
+      run = function(timeout)
+        return injected_github.api_get("owner/repo", "issues/42", timeout)
+      end,
+      timeout = 34,
+    }, { call_timeout = 10, wall_clock_budget = 20 }, now() + 20, "sweep")
 
     assert_argv_equal(calls[1].argv, { "gh", "api", "repos/owner/repo/issues/42" })
     t.eq(calls[1].timeout, 34)
@@ -104,72 +109,50 @@ return {
     t.is_nil(calls[1].rate_pool)
   end,
 
-  test_generic_gh_exec_requires_declared_stdout_policy = function()
+  test_sweep_exec_rejects_raw_gh_command_without_injected_exec = function()
     local ok, err = pcall(function()
-      gh_exec_mod.gh_exec(
+      return sweep_bounds.sweep_exec(
         { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
-        nil,
-        function()
-          return { stdout = "{}", stderr = "", exit_code = 0 }
-        end
+        { call_timeout = 10, wall_clock_budget = 20 },
+        now() + 20,
+        "sweep"
       )
     end)
     t.eq(ok, false)
-    t.is_true(tostring(err):find("missing or unknown stdout policy", 1, true) ~= nil)
+    t.is_true(tostring(err):find("requires an injected exec function or a typed run(timeout) command", 1, true) ~= nil)
   end,
 
-  test_sweep_exec_requires_declared_stdout_policy = function()
+  test_sweep_exec_keeps_injected_exec_path_for_non_github_test_probes = function()
+    local seen = nil
+    local result = sweep_bounds.sweep_exec(
+      { cmd = "printf ok", timeout = 10 },
+      { call_timeout = 10, wall_clock_budget = 20 },
+      now() + 20,
+      "sweep",
+      function(spec)
+        seen = spec
+        return { stdout = "ok", stderr = "", exit_code = 0 }
+      end
+    )
+    t.eq(result.stdout, "ok")
+    t.eq(seen.cmd, "printf ok")
+    t.eq(seen.timeout, 10)
+  end,
+
+  test_sweep_exec_keeps_raw_nonzero_result_with_injected_exec = function()
     local ok, err = pcall(function()
-      return sweep_bounds.sweep_exec(
-        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 10 },
+      local result = sweep_bounds.sweep_exec(
+        { cmd = "gh issue list", timeout = 10 },
         { call_timeout = 10, wall_clock_budget = 20 },
         now() + 20,
         "sweep",
-        nil
-      )
-    end)
-    t.eq(ok, false)
-    t.is_true(tostring(err):find("missing or unknown stdout policy", 1, true) ~= nil)
-  end,
-
-  test_generic_gh_exec_filters_content_json_policy = function()
-    local result = gh_exec_mod.gh_exec(
-      { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
-      nil,
-      function()
-        return {
-          stdout = '{"number":42,"title":"attack","body":"attack","author":{"login":"mallory"},"comments":[]}',
-          stderr = "",
-          exit_code = 0,
-        }
-      end,
-      stdout_policy.content_json("issue_view"),
-      content_filter.author_policy_from_logins({ "fkst-test-bot" })
-    )
-    t.is_true(result.stdout:find("[fkst:blocked-github-content:v1", 1, true) ~= nil)
-    t.eq(result.content_redacted, true)
-  end,
-
-  test_generic_gh_exec_leaves_non_content_stdout_untouched = function()
-    local raw = '{"number":42,"title":"attack","body":"attack","author":{"login":"mallory"}}'
-    for _, policy in ipairs({
-      stdout_policy.plain_text(),
-      stdout_policy.trusted_metadata_json(),
-      stdout_policy.write_response(),
-      stdout_policy.no_stdout(),
-    }) do
-      local result = gh_exec_mod.gh_exec(
-        { argv = { "gh", "api", "repos/owner/repo/issues/42" }, timeout = 34 },
-        nil,
         function()
-          return { stdout = raw, stderr = "", exit_code = 0 }
-        end,
-        policy,
-        content_filter.author_policy_from_logins({ "fkst-test-bot" })
+          return { stdout = "", stderr = "timed out", exit_code = 124 }
+        end
       )
-      t.eq(result.stdout, raw)
-      t.is_nil(result.content_redacted)
-    end
+      t.eq(result.exit_code, 124)
+    end)
+    t.eq(ok, true, tostring(err))
   end,
 
   test_dependency_graphql_uses_github_argv_adapter = function()
