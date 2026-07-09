@@ -56,10 +56,11 @@ frontend/
 ├── src/
 │   ├── app/            # App router + Shell (two-tab nav + footer)
 │   ├── pages/          # introduction.tsx, get-started.tsx
+│   ├── i18n/           # en/zh content catalog + LanguageProvider (see below)
 │   ├── components/
 │   │   ├── brand/      # FkstMark wordmark
-│   │   ├── content/    # CodeBlock, Callout
-│   │   └── layout/     # Eyebrow, SectionHeading
+│   │   ├── content/    # CodeBlock, Callout, Rich (inline markup)
+│   │   └── layout/     # Eyebrow, SectionHeading, LanguageToggle
 │   └── styles/         # design tokens + fonts
 ├── e2e/                # Playwright smoke test
 └── mockups/            # legacy HTML mockups of the earlier app (reference only)
@@ -67,3 +68,15 @@ frontend/
 
 > The `docs/` and `mockups/` folders describe an earlier, backend-driven app design and are
 > kept for reference only — they do not reflect the current static site.
+
+## Internationalization
+
+The site ships **English** and **简体中文** via an in-nav toggle. All copy lives in a typed
+content catalog — `src/i18n/en.ts` and `src/i18n/zh.ts` (both implement `SiteContent` from
+`types.ts`) — read through `useContent()` behind a `LanguageProvider`. The initial language is
+detected from the browser and persisted to `localStorage`; `<html lang>` tracks the choice.
+
+GitHub identifiers, code blocks, commands, and regexes are **not** translated — they live in
+`src/i18n/literals.ts` so they can never drift between languages. Prose strings may use light
+inline markup rendered by `<Rich>`: `` `code` `` → mono chip, `**bold**`, `*italic*`. To add a
+locale, add a catalog implementing `SiteContent` and register it in `context.tsx`.

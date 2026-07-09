@@ -63,4 +63,15 @@ test.describe('static site smoke', () => {
     await page.getByRole('link', { name: 'Introduction' }).click();
     await expect(page).toHaveURL(/\/$/);
   });
+
+  test('language toggle switches to 中文 and persists', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: '中文' }).click();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('自主编码会话');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh');
+    // persists across reload
+    await page.reload();
+    await expect(page.locator('html')).toHaveAttribute('lang', 'zh');
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('自主编码会话');
+  });
 });
