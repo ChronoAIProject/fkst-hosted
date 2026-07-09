@@ -6,12 +6,15 @@
 //! protocol, and no journaling. A goal trigger records a `Pending` session that
 //! pod-per-session execution will later run (milestone #9).
 
+use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use fkst_control_plane::config::{Config, PodMode};
 use fkst_control_plane::error::AppError;
 use fkst_control_plane::github_app::HttpGithubListing;
+use fkst_control_plane::osb_config::OpensandboxConfig;
 use fkst_control_plane::reconcile::{
     reconcile_channel, run_full_resync_loop, run_reconcile_loop, run_sweep_loop, ReconcileCtx,
     ReconcileHandle,
@@ -275,8 +278,8 @@ async fn main() -> ExitCode {
 /// dispatch so the env-validation REST path can drive it even when the dynamic-session
 /// loops are off. For `K8sCustomized`, `Ok(None)` (the client could not be built) is
 /// non-fatal: the validate path then reports 503 and the reconciler/sweep do not spawn.
-/// `Opensandbox` is not shipped yet, so it returns `Err` — a hard, fail-closed startup
-/// error (it is already config-rejected under dispatch, but never reached here anyway).
+/// For `Opensandbox`, `Ok(None)` when the `FKST_OSB_*` block is absent (dispatch-off
+/// staging) — the same degraded path; otherwise the OpenSandbox backend is built.
 async fn build_session_backend(
     config: &Config,
 ) -> Result<Option<Arc<dyn fkst_control_plane::session_backend::SessionBackend>>, AppError> {
@@ -299,10 +302,112 @@ async fn build_session_backend(
                 }
             }
         }
-        PodMode::Opensandbox => Err(AppError::Config(
-            "FKST_POD_MODE=opensandbox is not yet available (the OpenSandbox backend lands in a later release); use k8s-customized".to_string(),
-        )),
+        PodMode::Opensandbox => match &config.opensandbox {
+            Some(osb) => Ok(Some(build_osb_backend(config, osb).await?)),
+            // Dispatch-off staging (mode set, FKST_OSB_* not yet configured): mirror
+            // the K8s "cluster unreachable -> Ok(None)" degraded path so the process
+            // still boots (the validate path reports 503, the loops do not spawn).
+            None => {
+                tracing::warn!(
+                    "FKST_POD_MODE=opensandbox but FKST_OSB_* not configured; session backend unavailable"
+                );
+                Ok(None)
+            }
+        },
     }
+}
+
+/// Construct the OpenSandbox [`fkst_control_plane::session_backend::opensandbox::OsbBackend`]
+/// from the resolved config-layer [`OpensandboxConfig`]: one shared rustls HTTP client
+/// drives the lifecycle client and every per-session execd client (the factory derives
+/// the session-scoped execd token from the seed). The startup reachability probe is
+/// WARN-not-fatal, mirroring the K8s apiserver probe.
+async fn build_osb_backend(
+    config: &Config,
+    osb: &OpensandboxConfig,
+) -> Result<Arc<dyn fkst_control_plane::session_backend::SessionBackend>, AppError> {
+    use fkst_control_plane::session_backend::opensandbox::backend::{
+        ExecdFactory, OsbConfig, DEFAULT_EXECD_TOKEN_ENV_KEY,
+    };
+    use fkst_control_plane::session_backend::opensandbox::{
+        derive_execd_token, ExecdClient, ImageSpec, OsbBackend, OsbLifecycleClient, ResourceLimits,
+    };
+    use fkst_control_plane::session_backend::SessionBackend;
+
+    // Warn once per FKST_POD_* knob the operator set that opensandbox mode ignores (the
+    // sandbox template owns them). Computed in osb_config::from_vars (config.rs does not
+    // log); FKST_POD_NAMESPACE / FKST_POD_IMAGE are never in this set (both still apply).
+    for knob in &osb.ignored_pod_knobs {
+        tracing::warn!(
+            var = knob,
+            "{knob} is ignored in opensandbox mode (the sandbox template owns it)"
+        );
+    }
+
+    // One shared HTTP client (reqwest is built rustls-only, per Cargo.toml), reused by
+    // the lifecycle client and every per-session execd client.
+    let http = reqwest::Client::builder()
+        .user_agent("fkst-hosted-api")
+        .build()
+        .map_err(|e| AppError::Config(format!("failed to build opensandbox http client: {e}")))?;
+
+    let lifecycle =
+        OsbLifecycleClient::new(osb.base_url.clone(), osb.api_key.clone(), http.clone());
+
+    // The execd factory: one closure captures the shared inputs and mints a per-sandbox
+    // execd client, deriving the session-scoped execd token (HMAC of the seed) per call.
+    let base = osb.base_url.clone();
+    let key = osb.api_key.clone();
+    let seed = osb.execd_token_seed.clone();
+    let factory_http = http.clone();
+    let factory: ExecdFactory = Arc::new(move |sandbox_id: &str, session_id: &str| {
+        ExecdClient::new(
+            base.clone(),
+            key.clone(),
+            sandbox_id.to_string(),
+            derive_execd_token(&seed, session_id),
+            factory_http.clone(),
+        )
+    });
+
+    // The static launch config every sandbox is spawned with. The image is the SAME
+    // control-plane image (required in both modes); the entrypoint runs the in-sandbox
+    // binary in `run-substrate` mode (parity with the k8s Job re-exec).
+    let image_uri = config.pod.image.clone().ok_or_else(|| {
+        AppError::Config("FKST_POD_IMAGE must be set when FKST_POD_DISPATCH=true".to_string())
+    })?;
+    let osb_backend_config = OsbConfig {
+        image: ImageSpec {
+            uri: image_uri,
+            auth: None,
+        },
+        entrypoint: vec![osb.entrypoint.clone(), "run-substrate".to_string()],
+        resource_limits: ResourceLimits(BTreeMap::from([
+            ("cpu".to_string(), osb.session_cpu.clone()),
+            ("memory".to_string(), osb.session_memory.clone()),
+        ])),
+        execd_seed: osb.execd_token_seed.clone(),
+        execd_token_env_key: DEFAULT_EXECD_TOKEN_ENV_KEY.to_string(),
+        // The respawn-shield window: one reconcile cadence, so a just-stopped session
+        // stays reported `Terminating` across the next reconcile tick (the window in
+        // which the planner would otherwise re-observe it `Absent` and re-spawn).
+        reconcile_window: Duration::from_secs(config.reconcile.reconcile_interval_secs),
+        validate_deadline_secs: config.env.validate_deadline_secs,
+        validate_poll_interval_secs: config.env.validate_poll_interval_secs,
+    };
+
+    let backend = OsbBackend::new(lifecycle, factory, config.pod.clone(), osb_backend_config);
+
+    // Startup reachability probe: WARN-not-fatal (a transient blip must not crash the
+    // control plane; per-session spawns surface hard errors), mirroring the K8s probe.
+    if let Err(error) = backend.check_reachable().await {
+        tracing::warn!(
+            error = %error,
+            "opensandbox lifecycle server not reachable at startup; continuing"
+        );
+    }
+
+    Ok(Arc::new(backend))
 }
 
 /// Build the Model B reconcile context and spawn its loops, returning the enqueue

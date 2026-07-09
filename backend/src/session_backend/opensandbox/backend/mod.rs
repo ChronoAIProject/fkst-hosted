@@ -62,9 +62,12 @@ mod validation;
 pub const DEFAULT_EXECD_TOKEN_ENV_KEY: &str = "EXECD_ACCESS_TOKEN";
 
 /// Builds a per-sandbox [`ExecdClient`] from `(sandbox_id, session_id)`. Injected so
-/// tests point execd at a wiremock base while the #420 production factory derives the
-/// token via [`super::derive_execd_token`] and targets the real lifecycle proxy.
-pub(crate) type ExecdFactory = Arc<dyn Fn(&str, &str) -> ExecdClient + Send + Sync>;
+/// tests point execd at a wiremock base while the #420 production factory (built in
+/// `main.rs`) derives the token via [`super::derive_execd_token`] and targets the real
+/// lifecycle proxy. `pub` so `main.rs` (a separate binary crate) can name the alias
+/// for the factory it passes to [`OsbBackend::new`] instead of spelling the boxed-`Fn`
+/// type inline (which trips clippy's `type_complexity`).
+pub type ExecdFactory = Arc<dyn Fn(&str, &str) -> ExecdClient + Send + Sync>;
 
 /// One shield entry: when the delete was observed, plus the repo + trigger issue the
 /// synthetic `Terminating` pod is rebuilt with. Keyed by session id.
