@@ -30,6 +30,10 @@ pub mod log_config;
 // and, later, the session's pre-agent install step.
 pub mod install;
 pub mod models;
+// OpenSandbox session-backend config knobs (`FKST_OSB_*`, issue #420). Validated
+// only when pod dispatch is on AND `FKST_POD_MODE=opensandbox`; `main.rs` maps the
+// resolved config into the backend's launch config when it builds `OsbBackend`.
+pub mod osb_config;
 // Model B reconciler config knobs (`FKST_*`, issue #359 §4). Config surface only
 // — no behaviour is wired to these yet (PR5b wires the loop; PR6 flips it on).
 pub mod reconcile_config;
