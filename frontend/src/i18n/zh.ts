@@ -1,0 +1,238 @@
+import type { SiteContent } from './types';
+
+// 简体中文. Backticked tokens, `###` headings, code, commands, regex, numbers,
+// units, and emoji are kept byte-identical to en.ts on purpose — only prose is
+// translated. GitHub domain terms (issue, PR, package, Pod, label) are kept in
+// English where that reads most naturally to Chinese developers.
+export const zh: SiteContent = {
+  nav: {
+    introduction: '介绍',
+    getStarted: '快速开始',
+    getStartedCta: '开始使用 →',
+    homeAria: 'FKST — 首页',
+  },
+  toggle: {
+    aria: '语言',
+    en: 'EN',
+    zh: '中文',
+  },
+  footer: {
+    tagline: '· ChronoAI 托管云',
+    getStarted: '快速开始',
+    github: 'GitHub',
+    manual: '操作手册',
+  },
+  intro: {
+    metaTitle: 'FKST — 托管式自主编码会话',
+    eyebrow: 'ChronoAI · fkst-hosted',
+    heroTitle: '完全由 GitHub issue 驱动的自主编码会话。',
+    heroLede:
+      'hosted 是 ChronoAI 为 fkst 引擎提供的托管云。开一个 issue 即可启动一个长期运行的编码 agent，用更多 issue 排队任务，它会为每个任务提交一个拉取请求（PR）。无需运维任何基础设施，也无需学习任何控制台。',
+    ctaStart: '开始使用 →',
+    ctaManual: '阅读操作手册 ↗',
+    whatIsEyebrow: '什么是 FKST',
+    whatIsTitle: '一个面向自主、由 package 驱动的编码 agent 的引擎 —— 以服务的形式为你运行。',
+    whatIsBody: [
+      '**fkst** 是一个运行自主编码 agent 的引擎（fkst-substrate）。它的行为来自 **package** —— 引擎加载并针对某个 GitHub 仓库运行的小型软件包。',
+      '**fkst-hosted** 以 ChronoAI 云服务的形式为你运行该引擎。这里没有控制台，也没有需要你手动调用的 REST API —— 整个控制面就是 GitHub issue。你通过开 issue 来启动会话，用更多 issue 排队工作，并通过关闭 issue 来停止它。',
+    ],
+    thesis:
+      '一个触发 issue = 一个会话。开着的、带有工作标签的 issue = 该会话处理的队列，每一个都会形成独立的拉取请求。',
+    mentalEyebrow: '心智模型',
+    mental: {
+      session: {
+        term: '会话（Session）',
+        is: '一个长期运行的编码 agent —— 即单个 Kubernetes Pod。',
+        control: '你通过开启或关闭一个触发 issue 来控制它。',
+      },
+      trigger: {
+        term: '触发 issue',
+        is: '会话的声明：它的名称、package 和工作标签。',
+        control: '一个打了 `fkst-substrate-trigger` 标签的 GitHub issue。',
+      },
+      work: {
+        term: '工作项（Work item）',
+        is: '交给会话处理的一个任务 —— 它会形成一个拉取请求。',
+        control: '任意带有该会话工作标签的 issue。',
+      },
+    },
+    providesEyebrow: '托管服务提供什么',
+    providesTitle: '为引擎提供一个托管的家 —— 你带来意图，它带来基础设施。',
+    features: [
+      {
+        title: 'Kubernetes 上的托管引擎',
+        body: '每个运行中的会话一个 Pod，自动置备、自动清理。无需你自己运行、修补或扩缩容任何集群。',
+      },
+      {
+        title: '原生于 GitHub 的操控',
+        body: '完全通过 issue 启动、排队、观察和停止会话。进展会以评论和标签的形式回写到同一批 issue 上。',
+      },
+      {
+        title: '每个任务一个拉取请求',
+        body: '每个工作项都会形成独立的 PR。开启自动合并后，完成的工作会落到你的默认分支并自动关闭。',
+      },
+      {
+        title: '空闲归零，自动复活',
+        body: '没有待处理工作时，会话进入空闲、其 Pod 被回收。开一个新的工作 issue，它便自行重新启动 —— 同一会话，无需重新配置。',
+      },
+      {
+        title: '脱敏日志，按身份鉴权',
+        body: '每个会话都会把脱敏日志流式写入存储。仅触发者、允许列表成员或管理员可从按身份鉴权的端点下载。',
+      },
+      {
+        title: '从设计上确保安全',
+        body: '已注册的配置被冻结，密钥绝不出现在 issue 中 —— 你选择一个预置的环境配置，具体取值在带外提供。',
+      },
+    ],
+    flowEyebrow: '流程如何运转',
+    flow: {
+      trigger: { label: '触发 issue', sub: '声明一个会话' },
+      session: { label: '会话', sub: '一个 K8s Pod' },
+      work: { label: '工作 issue', sub: '队列' },
+      pr: { label: '每任务一个 PR', sub: '独立变更' },
+      merge: { label: '合并', sub: '可选自动合并' },
+    },
+    ctaTitle: '开一个 issue，得到一个拉取请求。',
+    ctaBody:
+      '安装 GitHub App，开一个触发 issue，排入你的第一个任务。它会在一个轮询周期内完成协调 —— 是数秒级，而非即时。',
+    ctaButton: '开始使用 →',
+  },
+  gs: {
+    metaTitle: 'FKST — 快速开始',
+    eyebrow: '快速开始',
+    title: '用 GitHub issue 操控 fkst-hosted',
+    lede: '你通过 GitHub issue 控制一切 —— 没有控制台，也没有需要你手动调用的 REST API。安装一次 App，开一个触发 issue 来启动会话，然后用更多 issue 排队工作。每个操作都通过轮询来协调，因此效果会在一个轮询周期内（数秒）显现，而非即时。',
+    stepWord: '步骤',
+    stepTitles: {
+      install: '安装 GitHub App',
+      start: '启动会话 —— 开一个触发 issue',
+      parameters: '触发 issue 的参数与取值',
+      packages: 'Package 引用',
+      queue: '排队工作 —— 开带工作标签的 issue',
+      status: '查看它回写的状态',
+      logs: '下载会话的日志',
+      lifecycle: '启动、停止与空闲',
+    },
+    requiredLabel: '必填',
+    optionalLabel: '可选',
+    install: {
+      body: '在你希望会话运行的仓库上安装 ChronoAI 的 **fkst-hosted** GitHub App。该 App 负责提交拉取请求、把状态回写到你的 issue，并将声明的状态（你开着的触发 issue）向现实（每个运行中的会话一个 Pod）协调。',
+      calloutTitle: '它需要的访问权限',
+      callout:
+        '该 App 必须安装在该仓库上，*并且*能够访问每一个 package 引用 —— 每个引用要么是公开的，要么位于该 App 可读取的仓库中。无法访问的引用会让协调器给触发 issue 打上 `fkst-substrate-invalid` 标签，直到你修正为止。',
+    },
+    start: {
+      body: '开一个打了 `fkst-substrate-trigger` 标签的 GitHub issue，其正文包含下列 `###` 小节（按标题精确匹配；标题重复会使该 issue 无效）。首个标题之前的任何引言文字都会被忽略。一个触发 issue 恰好创建一个会话。',
+      exampleCaption: 'body.md —— 触发 issue 的正文',
+      createIntro: '用 CLI 创建它：',
+      terminalCaption: '终端',
+      calloutTitle: '如果正文有误',
+      callout:
+        '格式错误的正文或无法访问的 package 会让协调器给触发 issue 打上 `fkst-substrate-invalid` 标签，并评论说明修复方法。修正正文后，该标记会在下一个轮询周期清除。',
+    },
+    parameters: {
+      intro: '触发 issue 正文的每个 `###` 小节就是一个参数。其中三个必填，其余可选。',
+      fieldRules: {
+        sessionName:
+          '恰好一行非空内容。类似 DNS 标签（小写字母、数字和连字符），以便干净地拼接成 Kubernetes 对象名称。',
+        packages: '一行或多行，每行是一个完全限定的 package 引用 `owner/repo@ref:path`（见下方语法）。',
+        workLabel: '恰好一行非空内容 —— 一个有效的 GitHub 标签，长度 ≤ 50 个字符，且不含逗号。',
+        environment:
+          '要注入的一个预置环境名称，留空则表示不注入。它只是选择一个在带外置备的配置 —— 切勿在此处填写密钥取值。',
+        autoMerge:
+          '`true` / `yes` / `on` / `enabled` / `1`（不区分大小写）将其开启：App 机器人的 PR 会被自动合并进默认分支，关联的工作 issue 也会自动关闭。其他任何值都视为关闭。',
+        logAllowlist:
+          '除作者与全局管理员之外，额外获准下载本会话日志的 GitHub 登录名或数字 id。以空白、逗号或换行分隔；开头的 `@` 会被去除。在注册时冻结。',
+      },
+      calloutTitle: '配置不可变',
+      callout:
+        '会话一旦注册，其配置（package、工作标签、环境、自动合并、日志允许列表）即被冻结。编辑触发 issue 正文*不会*重新启动它 —— 控制平面会发布一条一次性的 `fkst-config-rejected` 评论。若要更改配置，请关闭该触发 issue 并新开一个。',
+    },
+    packages: {
+      intro:
+        '`### Packages` 下的每一行是一个引用。它先在第一个 `@` 处贪婪拆分（分为 `owner/repo` 与 `ref:path`），再在第一个 `:` 处拆分（分为 `ref` 与 `path`）。',
+      grammar: {
+        ownerRepo: '匹配 [A-Za-z0-9_.-]+，owner 与 repo 之间恰好一个斜杠。',
+        ref: '一个分支、标签或 SHA —— [A-Za-z0-9_./-]+，不含 “..” 段。',
+        path: '相对于仓库 —— [A-Za-z0-9_./-]+，不得为绝对路径，且不含 “..” 段。',
+      },
+      exampleCaption: '一个 package 引用',
+    },
+    queue: {
+      body: '**每个任务**开一个 issue，并打上该会话的工作标签。给每个 issue 一个清晰的标题、需改动的确切文件、真实的验收标准，以及足够在隔离状态下完成的规格 —— agent 只看到那一个 issue 加仓库，看不到同批的其他待办。会话会认领它们，为每个 issue 提交一个拉取请求，并（在开启自动合并时）合并并关闭它们。',
+      calloutTitle: '保持队列健康',
+      callout:
+        '一个开着的工作 issue 会让 Pod 保持存活；合并或关闭已完成的工作，才能让会话空闲下来。另外，同一仓库中切勿给两个开着的触发 issue 用相同的工作标签。',
+    },
+    status: {
+      intro:
+        '控制平面会在同一批 issue 上以评论和标签的形式报告进展。你只需打 `fkst-substrate-trigger` 和你自己的工作标签 —— 下面每一个其他的 `fkst-*` 标签都由系统为你管理。',
+      onWord: '位于',
+      kind: {
+        registered: '评论',
+        pickup: '评论',
+        pr: '拉取请求',
+        degraded: '标签',
+        retired: '标签',
+        invalid: '标签',
+        configRejected: '标签',
+      },
+      where: {
+        registered: '触发 issue',
+        pickup: '工作 issue',
+        pr: '仓库',
+        degraded: '触发 issue',
+        retired: '开着的工作 issue',
+        invalid: '触发 issue',
+        configRejected: '触发 issue',
+      },
+      meaning: {
+        registered: '会话已接受。该评论附带 📥 日志 URL 以及一个隐藏的配置哈希标记。',
+        pickup: '会话已认领此工作项。',
+        pr: '会话针对某个工作项的产出。',
+        degraded: 'Pod 看起来不健康（崩溃/重启或反复出错）。恢复健康后会清除。',
+        retired: '触发 issue 已关闭 → 会话已退役；该工作项不再被处理。',
+        invalid: '正文解析失败，或某个 package 无法访问。修正后标记会在下一个轮询周期清除。',
+        configRejected: '你编辑了一个已注册会话的配置（配置已冻结）。',
+      },
+    },
+    logs: {
+      intro:
+        '每个会话都会自动把脱敏日志流式写入存储。注册评论中的 📥 日志 URL 为 `/api/v1/logs/{session_id}`。访问按身份鉴权、默认拒绝 —— 仅当你是触发者、在 `### Log Access Allowlist` 中，或为全局管理员时才获授权。有两种方式：',
+      browserTitle: '浏览器',
+      browser:
+        '直接打开该 URL。它会经 GitHub 登录跳转，随后下载脱敏后的 `.tar.gz`。绝不会暴露任何存储 URL —— 控制平面会流式传输字节。',
+      apiTitle: 'Agent / API',
+      api: '发送一个 bearer GitHub token；它会被换取为你的身份，随后脱敏后的 `.tar.gz` 会流式返回。',
+      terminalCaption: '终端',
+      calloutTitle: '你会得到什么',
+      callout:
+        '日志是最近一次刷写 —— 大约每 20 s / 256 KB 刷写一次，并在 Pod 退出时刷写 —— 且已脱敏（密钥被掩码）。可安全分享给获授权的用户，但仍应视为会话敏感信息。',
+    },
+    lifecycle: [
+      {
+        t: '永久停止',
+        d: '关闭触发 issue。会话退役、Pod 被清理，且永不复活 —— 已关闭的触发 issue 绝不会被重新注册。开着的工作 issue 会被打上 `fkst-session-retired`。',
+      },
+      {
+        t: '空闲（自动复活）',
+        d: '触发 issue 开着、但无待处理工作 → Pod 被杀掉以节省资源，但一旦出现匹配的工作 issue，会话立即重新启动。无需新的触发 issue。',
+      },
+      {
+        t: '保持运行',
+        d: '一个开着的工作 issue 会让 Pod 保持存活。若要暂停，关闭或合并所有工作；若要恢复，开一个工作 issue。',
+      },
+    ],
+    rulesEyebrow: '经验法则',
+    rulesTitle: '踩过坑才懂',
+    rules: [
+      '每个开着的触发 issue、每个仓库只用一个工作标签。两个开着的触发 issue 共用同一标签会在同一队列上产生相互竞争的 Pod —— 造成重复认领和重复 PR。',
+      '按依赖分批推进待办。先落地作为基础的工作 issue，合并它们，再开那些依赖它们的 issue。依赖顺序 —— 而非措辞 —— 才是常见的失败原因。',
+      '每个工作 issue 只做一个功能，标题中点明，并附上确切文件和可核对的验收标准。',
+      '切勿在 issue 中放入密钥、token 或环境变量取值。用 `### Environment` 选择一个预置配置；取值在带外提供。',
+      '给它一个轮询周期。操作通过轮询协调 —— 预期为数秒，并请查看该 issue 的评论和标签，而不要期待即时生效。',
+    ],
+    fullRefPrefix: '完整参考：',
+    fullRefLink: '操作手册 ↗',
+  },
+};

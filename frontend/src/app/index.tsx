@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom'
 import { Shell } from './shell';
 import { Introduction } from '../pages/introduction';
 import { GetStarted } from '../pages/get-started';
+import { LanguageProvider } from '../i18n';
 
 // Vite injects BASE_URL from `base` at build time: '/' for dev/preview, and
 // '/fkst-hosted/' for the GitHub Pages build. Deriving the router basename from
@@ -33,5 +34,9 @@ const router = createBrowserRouter(
 );
 
 export function App() {
-  return <RouterProvider router={router} future={{ v7_startTransition: true }} />;
+  return (
+    <LanguageProvider>
+      <RouterProvider router={router} future={{ v7_startTransition: true }} />
+    </LanguageProvider>
+  );
 }
