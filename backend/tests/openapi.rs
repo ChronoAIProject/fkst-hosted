@@ -91,8 +91,10 @@ async fn paths_are_the_trimmed_v1_surface() {
         "/api/v1/auth/github/login",
         "/api/v1/auth/github/callback",
         "/api/v1/auth/github/refresh",
-        // The user's sessions dashboard.
+        // The user's sessions dashboard (cache read + async pull-job + status poll).
         "/api/v1/dashboard",
+        "/api/v1/dashboard/pull",
+        "/api/v1/dashboard/pull/{job_id}",
         "/health",
         "/metrics",
     ] {
