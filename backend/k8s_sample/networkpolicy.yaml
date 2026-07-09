@@ -17,6 +17,22 @@
 # exclude in-cluster traffic. Find them with, e.g.:
 #   kubectl cluster-info dump | grep -E 'cluster-cidr|service-cluster-ip-range'
 # (namespace is intentionally omitted — kustomize sets it for every resource.)
+#
+# OPENSANDBOX MODE (FKST_POD_MODE=opensandbox): the policy below does NOT apply —
+# in opensandbox mode the control plane runs NO in-cluster session/validation
+# pods, so there is nothing here for it to select. The network posture then splits:
+#   * Control plane -> OpenSandbox lifecycle server: this EGRESS is REQUIRED
+#     (create/delete sandboxes, push credentials, read status via FKST_OSB_BASE_URL).
+#     If you enforce a default-deny egress policy on the control-plane pod, add an
+#     allow rule to the lifecycle server before enabling the mode.
+#   * Sandbox network isolation: there are NO sandbox NetworkPolicies in this repo.
+#     They live INFRA-SIDE, owned by the OpenSandbox tenant config, NOT here.
+#   * REGRESSION NOTE: OpenSandbox's default is ALLOW-ALL sandbox egress, which is
+#     an isolation regression vs the deny-by-default, external-DNS-only posture this
+#     file gives k8s-customized sessions. Before enabling opensandbox mode the infra
+#     team must EITHER configure the egress-policy feature for the fkst tenant OR
+#     explicitly sign off on the regression — a HARD GATE tracked in the README
+#     infra-prerequisites checklist (see "Infra prerequisites (opensandbox mode)").
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
