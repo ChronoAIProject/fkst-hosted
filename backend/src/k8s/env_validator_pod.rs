@@ -137,7 +137,7 @@ pub(crate) fn build_validation_pod(
     let container = Container {
         name: VALIDATOR_CONTAINER.to_string(),
         image: Some(image),
-        args: Some(vec!["validate-env".to_string()]),
+        args: Some(vec![crate::install::VALIDATE_ENV_SUBCOMMAND.to_string()]),
         volume_mounts: Some(vec![VolumeMount {
             name: SPEC_VOLUME.to_string(),
             mount_path: SPEC_MOUNT_DIR.to_string(),
