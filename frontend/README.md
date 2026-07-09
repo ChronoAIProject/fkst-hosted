@@ -32,6 +32,23 @@ npm run build      # static bundle to dist/
 
 The production build in `dist/` is a plain static bundle — host it on any static file server or CDN.
 
+## Deploy (GitHub Pages)
+
+The site is published to **https://chronoaiproject.github.io/fkst-hosted/** by
+`.github/workflows/deploy-pages.yml` on every push to `develop` that touches
+`frontend/`. Because it's served under the `/fkst-hosted/` subpath, CI builds
+with `VITE_BASE=/fkst-hosted/` (the Vite `base`), the router derives its
+`basename` from `import.meta.env.BASE_URL`, and a `postbuild` step copies
+`index.html` → `404.html` so deep links (e.g. `/get-started`) resolve on
+refresh. To reproduce the deployed build locally:
+
+```bash
+VITE_BASE=/fkst-hosted/ npm run build && npm run preview
+# → http://localhost:3000/fkst-hosted/
+```
+
+If a custom domain is added later, drop `VITE_BASE` (base becomes `/`).
+
 ## Layout
 
 ```
