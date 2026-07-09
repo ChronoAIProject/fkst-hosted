@@ -150,6 +150,10 @@ struct WebhookVars {
 struct PodVars {
     #[serde(default)]
     dispatch: bool,
+    /// Raw `FKST_POD_MODE` value; parsed into [`PodMode`] in `from_vars` so a
+    /// bad value yields our own precise error (envy would swallow the text).
+    #[serde(default)]
+    mode: Option<String>,
     #[serde(default = "defaults::pod_namespace")]
     namespace: String,
     #[serde(default)]
@@ -185,12 +189,30 @@ struct LlmVars {
     api_key: Option<String>,
 }
 
+/// Which session-execution backend the control plane drives. Selected by
+/// `FKST_POD_MODE`. `K8sCustomized` is the default (and today the only
+/// available) backend; `Opensandbox` is a placeholder for a future backend and
+/// is config-rejected at startup until a later release ships it. Deliberately
+/// NOT `serde::Deserialize`/`FromStr`: it is parsed by hand in `from_vars` so a
+/// bad value surfaces our own precise error text rather than an envy message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PodMode {
+    /// The k8s-customized backend (one Kubernetes Job per session). Default.
+    K8sCustomized,
+    /// The (not-yet-available) OpenSandbox backend. Config-rejected until a
+    /// later release.
+    Opensandbox,
+}
+
 /// Pod-per-session dispatch configuration (milestone #9). When `dispatch` is
 /// false (the default) the control plane never touches Kubernetes.
 #[derive(Clone, Debug)]
 pub struct PodConfig {
     /// Master switch. Env: `FKST_POD_DISPATCH`. Default false.
     pub dispatch: bool,
+    /// The session-execution backend. Env: `FKST_POD_MODE`. Default
+    /// `k8s-customized`; `opensandbox` is config-rejected until a later release.
+    pub mode: PodMode,
     /// Namespace for per-session Jobs + Secrets. Env: `FKST_POD_NAMESPACE`.
     /// Default `fkst-sessions`.
     pub namespace: String,
@@ -228,6 +250,7 @@ impl Default for PodConfig {
     fn default() -> Self {
         Self {
             dispatch: false,
+            mode: PodMode::K8sCustomized,
             namespace: defaults::pod_namespace(),
             image: None,
             service_account: defaults::pod_service_account(),
@@ -399,7 +422,27 @@ impl Config {
             .image
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        // Session-execution backend. Parsed UNCONDITIONALLY (even with dispatch
+        // off) so a bad value fails closed at startup regardless of dispatch.
+        // Blank/unset means the default k8s-customized backend, matching the
+        // repo's blank-as-absent convention.
+        let pod_mode = match pod.mode.as_deref().map(str::trim) {
+            None | Some("") | Some("k8s-customized") => PodMode::K8sCustomized,
+            Some("opensandbox") => PodMode::Opensandbox,
+            Some(other) => {
+                return Err(AppError::Config(format!(
+                    "FKST_POD_MODE must be one of \"k8s-customized\" | \"opensandbox\" (got \"{other}\")"
+                )))
+            }
+        };
         if pod.dispatch {
+            // The OpenSandbox backend is not shipped yet; reject it FIRST so an
+            // opensandbox+dispatch config surfaces this (not the image) error.
+            if pod_mode == PodMode::Opensandbox {
+                return Err(AppError::Config(
+                    "FKST_POD_MODE=opensandbox is not yet available (the OpenSandbox backend lands in a later release); use k8s-customized".to_string(),
+                ));
+            }
             if pod_image.is_none() {
                 return Err(AppError::Config(
                     "FKST_POD_IMAGE must be set when FKST_POD_DISPATCH=true".to_string(),
@@ -445,6 +488,7 @@ impl Config {
         }
         let pod = PodConfig {
             dispatch: pod.dispatch,
+            mode: pod_mode,
             namespace: pod.namespace,
             image: pod_image,
             service_account: pod.service_account,
@@ -649,6 +693,54 @@ mod tests {
         let config = Config::from_vars(vars(&[("FKST_POD_RUNTIME_CLASS", "   ")]))
             .expect("blank runtime class");
         assert_eq!(config.pod.runtime_class, None);
+    }
+
+    // ---- pod mode (FKST_POD_MODE) tests ---------------------------------------
+
+    #[test]
+    fn pod_mode_defaults_to_k8s_customized() {
+        // Unset means the k8s-customized backend — the only one shipped today.
+        let config = Config::from_vars(vars(&[])).expect("defaults");
+        assert_eq!(config.pod.mode, PodMode::K8sCustomized);
+    }
+
+    #[test]
+    fn pod_mode_k8s_customized_is_accepted() {
+        let config = Config::from_vars(vars(&[("FKST_POD_MODE", "k8s-customized")]))
+            .expect("explicit k8s-customized");
+        assert_eq!(config.pod.mode, PodMode::K8sCustomized);
+    }
+
+    #[test]
+    fn pod_mode_unknown_value_is_a_config_error_naming_the_var() {
+        let err = Config::from_vars(vars(&[("FKST_POD_MODE", "bogus")]))
+            .expect_err("unknown mode must fail closed");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains(
+            "FKST_POD_MODE must be one of \"k8s-customized\" | \"opensandbox\" (got \"bogus\")"
+        ));
+    }
+
+    #[test]
+    fn pod_mode_opensandbox_with_dispatch_on_is_rejected() {
+        // The OpenSandbox backend is not shipped yet; dispatch-on config with it
+        // fails closed FIRST (before the image check), naming the unavailability.
+        let err = Config::from_vars(vars(&[
+            ("FKST_POD_DISPATCH", "true"),
+            ("FKST_POD_MODE", "opensandbox"),
+        ]))
+        .expect_err("opensandbox under dispatch must fail closed");
+        assert!(matches!(err, AppError::Config(_)));
+        assert!(err.to_string().contains("is not yet available"));
+    }
+
+    #[test]
+    fn pod_mode_opensandbox_with_dispatch_off_is_allowed() {
+        // The rejection is dispatch-gated: with dispatch off the config parses so
+        // an operator can stage the mode ahead of the backend shipping.
+        let config = Config::from_vars(vars(&[("FKST_POD_MODE", "opensandbox")]))
+            .expect("opensandbox parses when dispatch is off");
+        assert_eq!(config.pod.mode, PodMode::Opensandbox);
     }
 
     #[test]

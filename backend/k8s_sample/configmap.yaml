@@ -41,6 +41,11 @@ data:
   # re-execs it in `run-session` mode. Keep it in lockstep with the Deployment's
   # image (kustomization.yaml `images:`).
   FKST_POD_DISPATCH: "true"
+  # Session-execution backend. Default (and today the only available) value is
+  # "k8s-customized" (one K8s Job per session). "opensandbox" is reserved for a
+  # future backend and is config-rejected at startup until a later release ships
+  # it. Leave unset for the default.
+  # FKST_POD_MODE: "k8s-customized"
   FKST_POD_IMAGE: "fkst-control-plane:dev"
   FKST_POD_SERVICE_ACCOUNT: "fkst-session-runner"
   FKST_POD_RUN_TTL_SECS: "600" # ttlSecondsAfterFinished; > 0
