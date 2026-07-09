@@ -1,15 +1,13 @@
-//! Tests for the struct-level helpers: `resolve_one` (0/1/many), the `OsbError` ->
-//! `BackendError` mapping, and the five fail-safe stubs the #418 backend does not own.
+//! Tests for the struct-level helpers: `resolve_one` (0/1/many) and the `OsbError` ->
+//! `BackendError` mapping. The five fleet verbs #419 completes are covered by the
+//! sibling `rotation_tests` / `health_tests` / `logs_tests` / `validation_tests`.
 
-use std::collections::BTreeMap;
-
-use secrecy::SecretString;
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::session_backend::opensandbox::dto::OsbError;
-use crate::session_backend::{BackendError, RuntimeStatus, SessionBackend, ValidationRequest};
+use crate::session_backend::BackendError;
 
 use super::backend_test_support::{backend, list_page, osb_config, sandbox_json, SESSION_ID};
 
@@ -90,36 +88,4 @@ fn osb_error_maps_not_found_and_folds_the_rest() {
         }),
         BackendError::Other(_)
     ));
-}
-
-#[tokio::test]
-async fn the_five_unowned_verbs_are_fail_safe_stubs() {
-    // No network is touched by the stubs, so a never-served base is fine.
-    let backend = backend("http://127.0.0.1:0", osb_config());
-
-    // The two runtime-exec verbs error loudly (they cannot be silently no-op'd).
-    assert!(matches!(
-        backend
-            .deliver_credential("s", "f", SecretString::from("secret".to_string()))
-            .await,
-        Err(BackendError::Other(_))
-    ));
-    let req = ValidationRequest {
-        github_user_id: 1,
-        name: "env".to_string(),
-        install: Vec::new(),
-        variables: BTreeMap::new(),
-    };
-    assert!(matches!(
-        backend.run_validation(&req).await,
-        Err(BackendError::Other(_))
-    ));
-
-    // The health reads are "unknown-safe": empty status, no output, zero reaped.
-    assert_eq!(
-        backend.status_summary("s").await.expect("status"),
-        RuntimeStatus::default()
-    );
-    assert_eq!(backend.recent_output("s").await, None);
-    assert_eq!(backend.reap_stale_validations().await.expect("reap"), 0);
 }

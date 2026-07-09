@@ -24,8 +24,9 @@ use crate::session_spec::creds::{CredsLayout, DEFAULT_CREDS_DIR};
 use super::{correlate, managed_session_filter, OsbBackend};
 
 /// The mode every credential file (and the sentinel) is uploaded with: owner-read-only
-/// (0o400), matching the Kubernetes backend's Secret mount.
-const CREDS_FILE_MODE: u32 = 0o400;
+/// (0o400), matching the Kubernetes backend's Secret mount. `pub(super)` so the
+/// rotation heal path ([`super::rotation`]) rewrites a single file with the SAME mode.
+pub(super) const CREDS_FILE_MODE: u32 = 0o400;
 
 /// The never-matching session id the reachability probe filters on (one empty page).
 const REACHABILITY_PROBE_ID: &str = "__reachability_probe__";
@@ -81,7 +82,9 @@ impl OsbBackend {
             "opensandbox ensure_session: sandbox created; uploading credentials"
         );
 
-        // (c)+(d) Upload creds (sentinel LAST); roll back on any failure.
+        // (c)+(d) Upload creds (sentinel LAST); roll back on any failure. `creds` is
+        // BORROWED for the upload so it can be MOVED into the cache after (a non-`Clone`
+        // `SecretString` bundle is never cloned).
         if let Err(error) = self
             .upload_creds(&sandbox_id, &spec.session_id, &creds)
             .await
@@ -102,6 +105,15 @@ impl OsbBackend {
             }
             return Err(error);
         }
+
+        // Cache the full bundle so the rotation heal path can re-push it wholesale if a
+        // container restart later wipes the creds dir. Only on a fresh create — NOT the
+        // AlreadyLive early-return, which IS the documented control-plane-restart empty
+        // state the next reconcile repopulates.
+        self.creds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(spec.session_id.clone(), creds);
         Ok(EnsureOutcome::Created)
     }
 
@@ -127,7 +139,9 @@ impl OsbBackend {
 
     /// Push each credential file into the sandbox through execd, then the completeness
     /// sentinel LAST. Each byte value is exposed only to upload it and is NEVER logged.
-    async fn upload_creds(
+    /// `pub(super)` so the rotation heal path ([`super::rotation`]) reuses the exact
+    /// per-file + sentinel-LAST upload for its full-bundle re-push.
+    pub(super) async fn upload_creds(
         &self,
         sandbox_id: &str,
         session_id: &str,
@@ -151,7 +165,8 @@ impl OsbBackend {
 
 /// Render a credential path as the string execd's `/files/upload` expects. Credential
 /// paths are ASCII under [`DEFAULT_CREDS_DIR`]; the lossy fallback never triggers.
-fn path_str(path: &Path) -> String {
+/// `pub(super)` so the rotation heal path composes single-file paths the same way.
+pub(super) fn path_str(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 

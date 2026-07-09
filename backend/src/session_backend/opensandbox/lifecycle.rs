@@ -162,6 +162,51 @@ impl OsbLifecycleClient {
         Ok(())
     }
 
+    /// `GET /v1/sandboxes/{id}/diagnostics/logs?tail=&since=` — the DEPRECATED
+    /// plain-text sandbox log tail, read by the best-effort health scrape
+    /// ([`super::backend::OsbBackend::recent_output`]).
+    ///
+    /// Returns `Ok(Some(text))` on `200` (the raw plain-text body), `Ok(None)` on `404`
+    /// (the sandbox / its logs are gone — a benign empty window), and `Err` on any other
+    /// non-2xx. The `200`/`404` split is kept RAW here (NOT funnelled through
+    /// [`map_response`], which folds `404` into an error) because the caller must map a
+    /// gone sandbox to a benign empty window, distinct from a transport error it must
+    /// WITHHOLD a health-clear on.
+    ///
+    /// DEPRECATION + swap plan: this is the upstream's deprecated plain-text diagnostics
+    /// endpoint (the structured `scope=`-param JSON diagnostics endpoint currently
+    /// answers `501 Not Implemented`). When that structured endpoint ships, swap this
+    /// call for it and parse the JSON frames — the `recent_output` 3-state taxonomy
+    /// (`Some(text)` / `Some("")` / `None`) it feeds stays the contract. NEVER logs the
+    /// body.
+    pub async fn diagnostics_logs(
+        &self,
+        id: &str,
+        tail: u32,
+        since: &str,
+    ) -> Result<Option<String>, OsbError> {
+        let path = format!("/v1/sandboxes/{id}/diagnostics/logs");
+        let method = reqwest::Method::GET;
+        let response = self
+            .request(method.clone(), &path)
+            .query(&[("tail", tail.to_string()), ("since", since.to_string())])
+            .send()
+            .await?;
+        let status = response.status();
+        tracing::debug!(method = %method, path = %path, status = status.as_u16(), "opensandbox diagnostics logs");
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            let message = response.text().await.unwrap_or_default();
+            return Err(OsbError::Api {
+                status: status.as_u16(),
+                message,
+            });
+        }
+        Ok(Some(response.text().await?))
+    }
+
     /// `DELETE /v1/sandboxes/{id}` — delete a sandbox (the API answers `204`). 404 ->
     /// [`OsbError::NotFound`] (LITERAL — a later backend layer owns benign-ness).
     pub async fn delete_sandbox(&self, id: &str) -> Result<(), OsbError> {
