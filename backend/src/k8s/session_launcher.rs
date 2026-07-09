@@ -32,7 +32,7 @@ use crate::models::RepoRef;
 use crate::session_pod::log_stream::{
     ENV_CONFIG_HASH, ENV_POD_NAME, ENV_POD_UID, ENV_SESSION_ID, ENV_TRIGGER_ISSUE,
 };
-use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds, DEFAULT_CREDS_DIR};
+use crate::session_spec::creds::DEFAULT_CREDS_DIR;
 
 /// Errors launching a substrate-session Pod (relocated from the deleted Model-A
 /// Job launcher, trimmed to the variants the Pod path actually raises).
@@ -351,30 +351,23 @@ pub fn build_session_pod(spec: &SessionPodSpec, config: &PodConfig) -> Result<Po
     })
 }
 
-/// Build the per-session creds Secret (pure; no API calls). Carries the rotating
-/// `github-token` (the `{token, expires_at}` JSON), the static `llm-api-key`, one
-/// `userenv.<KEY>` per injected per-user env entry, and — when `storage` is
-/// provided (the control plane configured a write-only chrono-storage SA) — the
-/// five `storage-*` files the in-pod log uploader reads. All via the shared
-/// [`credential_secret_data`] helper so the layout never diverges from the
-/// Model-A Job Secret. Owner-referenced to the Pod (when `owner` is provided) so
-/// K8s cascade-deletes it on Pod GC.
+/// Build the per-session creds Secret (pure; no API calls) from an ALREADY-ASSEMBLED
+/// `creds` map — the caller (the reconciler's executor) owns the credential layout
+/// now, assembling it through the shared
+/// [`credential_secret_data`](crate::session_spec::creds::credential_secret_data)
+/// helper so the layout never diverges from the Model-A Job Secret. Each value is a
+/// [`SecretString`] and is exposed only here to write it into `string_data`. Owner-
+/// referenced to the Pod (when `owner` is provided) so K8s cascade-deletes it on Pod
+/// GC.
 pub fn build_session_secret(
     spec: &SessionPodSpec,
-    github_token_json: &str,
-    llm_api_key: &SecretString,
-    user_env: &BTreeMap<String, String>,
-    storage: Option<StorageWriterCreds<'_>>,
+    creds: BTreeMap<String, SecretString>,
     owner: Option<OwnerReference>,
 ) -> Secret {
-    let data = credential_secret_data(
-        github_token_json,
-        llm_api_key.expose_secret(),
-        user_env
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str())),
-        storage,
-    );
+    let string_data = creds
+        .into_iter()
+        .map(|(key, value)| (key, value.expose_secret().to_string()))
+        .collect();
 
     Secret {
         metadata: ObjectMeta {
@@ -383,7 +376,7 @@ pub fn build_session_secret(
             owner_references: owner.map(|o| vec![o]),
             ..Default::default()
         },
-        string_data: Some(data),
+        string_data: Some(string_data),
         type_: Some("Opaque".to_string()),
         ..Default::default()
     }
@@ -415,15 +408,17 @@ pub enum SessionPodOutcome {
 
 /// Create the session's Pod, then its owner-referenced Secret (idempotent). The
 /// Pod is created FIRST so the Secret can carry its UID as an ownerReference (the
-/// pod waits for the Secret to mount). A `409 AlreadyExists` on the Pod (same
-/// deterministic name) means the session is already live → [`AlreadyLive`],
-/// mirroring the Model-A launcher's idempotent create.
+/// pod waits for the Secret to mount) — the Secret is BUILT here, after the create,
+/// from the already-assembled `creds` so it can be owner-ref'd to the live Pod. A
+/// `409 AlreadyExists` on the Pod (same deterministic name) means the session is
+/// already live → [`AlreadyLive`], mirroring the Model-A launcher's idempotent create.
 ///
 /// [`AlreadyLive`]: SessionPodOutcome::AlreadyLive
 pub async fn create_session_pod(
     client: &kube::Client,
+    spec: &SessionPodSpec,
     pod: Pod,
-    mut secret: Secret,
+    creds: BTreeMap<String, SecretString>,
 ) -> Result<SessionPodOutcome, LaunchError> {
     // Namespace rides on the Pod (build_session_pod set it to config.namespace);
     // the Secret inherits it just before creation.
@@ -448,12 +443,10 @@ pub async fn create_session_pod(
         Err(err) => return Err(LaunchError::Kube(err)),
     };
 
-    // Pin the Secret to the Pod's namespace and owner-ref it to the created Pod
-    // so cascade-GC removes it when the Pod is deleted.
+    // Build the Secret owner-ref'd to the created Pod so cascade-GC removes it when
+    // the Pod is deleted, and pin it to the Pod's namespace.
+    let mut secret = build_session_secret(spec, creds, pod_owner_reference(&created));
     secret.metadata.namespace = Some(namespace.clone());
-    if let Some(owner) = pod_owner_reference(&created) {
-        secret.metadata.owner_references = Some(vec![owner]);
-    }
     match secrets.create(&PostParams::default(), &secret).await {
         Ok(_) => {}
         Err(kube::Error::Api(err)) if err.code == 409 => {

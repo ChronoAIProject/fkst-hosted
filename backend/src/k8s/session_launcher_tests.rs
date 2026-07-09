@@ -3,6 +3,22 @@
 //! limit; included via `#[cfg(test)] #[path = "session_launcher_tests.rs"]`.
 
 use super::*;
+use crate::session_spec::creds::{credential_secret_data, StorageWriterCreds};
+
+/// Assemble a `creds` map the way the executor does: through the shared
+/// [`credential_secret_data`] helper, then wrap each value as a [`SecretString`] for
+/// [`build_session_secret`].
+fn creds_map<'a>(
+    github_token_json: &str,
+    llm_api_key: &str,
+    user_env: impl IntoIterator<Item = (&'a str, &'a str)>,
+    storage: Option<StorageWriterCreds<'_>>,
+) -> BTreeMap<String, SecretString> {
+    credential_secret_data(github_token_json, llm_api_key, user_env, storage)
+        .into_iter()
+        .map(|(k, v)| (k, SecretString::from(v)))
+        .collect()
+}
 
 fn spec() -> SessionPodSpec {
     SessionPodSpec {
@@ -272,9 +288,7 @@ fn build_session_pod_carries_the_reconciler_annotations() {
 
 #[test]
 fn build_session_secret_carries_creds_with_the_userenv_prefix_and_owner() {
-    let mut user_env = BTreeMap::new();
-    user_env.insert("FOO".to_string(), "foo-val".to_string());
-    user_env.insert("API_TOKEN".to_string(), "tok-val".to_string());
+    let user_env = [("FOO", "foo-val"), ("API_TOKEN", "tok-val")];
     let owner = OwnerReference {
         api_version: "v1".to_string(),
         kind: "Pod".to_string(),
@@ -283,14 +297,13 @@ fn build_session_secret_carries_creds_with_the_userenv_prefix_and_owner() {
         controller: Some(true),
         block_owner_deletion: Some(true),
     };
-    let secret = build_session_secret(
-        &spec(),
+    let creds = creds_map(
         r#"{"token":"ghs_xyz","expires_at":"2026-01-01T00:00:00Z"}"#,
-        &SecretString::from("sk-test"),
-        &user_env,
+        "sk-test",
+        user_env,
         None,
-        Some(owner),
     );
+    let secret = build_session_secret(&spec(), creds, Some(owner));
 
     assert_eq!(secret.metadata.name.as_deref(), Some("fkst-sess-abc123"));
     let data = secret.string_data.as_ref().expect("string data");
@@ -312,14 +325,8 @@ fn build_session_secret_carries_creds_with_the_userenv_prefix_and_owner() {
 
 #[test]
 fn build_session_secret_without_user_env_carries_only_the_base_creds() {
-    let secret = build_session_secret(
-        &spec(),
-        "ghs_json",
-        &SecretString::from("sk-test"),
-        &BTreeMap::new(),
-        None,
-        None,
-    );
+    let creds = creds_map("ghs_json", "sk-test", std::iter::empty(), None);
+    let secret = build_session_secret(&spec(), creds, None);
     let data = secret.string_data.as_ref().expect("string data");
     assert!(data.contains_key("github-token"));
     assert!(data.contains_key("llm-api-key"));
@@ -336,14 +343,8 @@ fn build_session_secret_carries_the_write_only_sa_when_configured() {
         base_url: "https://storage.example/proxy",
         bucket: "fkst-logs",
     };
-    let secret = build_session_secret(
-        &spec(),
-        "ghs_json",
-        &SecretString::from("sk-test"),
-        &BTreeMap::new(),
-        Some(storage),
-        None,
-    );
+    let creds = creds_map("ghs_json", "sk-test", std::iter::empty(), Some(storage));
+    let secret = build_session_secret(&spec(), creds, None);
     let data = secret.string_data.as_ref().expect("string data");
     // Base creds + the five write-only storage-* files, nothing else.
     assert_eq!(data["storage-client-id"], "writer-client");

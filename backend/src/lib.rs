@@ -46,9 +46,13 @@ pub mod reserved_env;
 // Runtime OpenAPI 3 document (no static spec): assembled from the live
 // `#[utoipa::path]` handlers + `ToSchema` types and served at GET /openapi.json.
 pub mod k8s;
+// Backend-neutral session-runtime abstraction (issue #412): the reconciler drives
+// session runtimes only through the `SessionBackend` trait; `K8sBackend` is the
+// direct-Kubernetes implementation the pod-driving code was relocated behind.
 pub mod openapi;
 pub mod router;
 pub mod routes;
+pub mod session_backend;
 // Optional chrono-storage object-store client + its NyxID service-account token
 // provider (log-streaming Wave 1). Self-contained + wiremock-tested; disabled
 // (resolves to `None`) unless the `FKST_STORAGE_*` / `FKST_NYXID_*` vars are set.

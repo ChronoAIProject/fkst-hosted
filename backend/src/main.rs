@@ -289,7 +289,19 @@ async fn spawn_reconciler(
         }
     };
 
+    // The concrete session backend the reconciler drives every pod effect through.
+    // Built from the same namespace-bound client; a `clone` here leaves `kube` for
+    // the ctx (still used by the env-store reads + the sweep). Held as
+    // `Arc<dyn SessionBackend>` so the reconciler never touches a Kubernetes type.
+    let backend: Arc<dyn fkst_control_plane::session_backend::SessionBackend> =
+        Arc::new(fkst_control_plane::session_backend::k8s::K8sBackend::new(
+            kube.clone(),
+            config.pod.clone(),
+            config.reconcile.pod_termination_grace_secs,
+        ));
+
     let ctx = ReconcileCtx {
+        backend,
         kube,
         github,
         listing,
