@@ -1,64 +1,82 @@
 # frontend
 
-The React SPA for **fkst-hosted** — a mission-control console for developers running
-autonomous, GitHub-issue-driven AI dev loops over the hosted engine. It fronts this
-repo's Rust/Axum [`backend/`](../backend) (packages + sessions + health), reads GitHub
-through **NyxID** (no token custody in the browser), and is a **read-mostly observer** —
-never a second source of truth.
+The public **static site** for **fkst-hosted** — ChronoAI's hosted cloud for the fkst engine.
+It is a marketing + docs site with two pages and **no backend, auth, or API calls**:
 
-> **Status: planning (docs-first).** This folder currently holds the **design system, the
-> reference mockups, the architecture brief, and the implementation plan** — *no application
-> code yet, by design.* Code lands only after the brief + plan are approved, then one
-> PR-sized increment at a time per the repo's git workflow (issue → branch → PR `Closes #N`
-> → changeset → auto-merge on green CI). See [`../CLAUDE.md`](../CLAUDE.md).
+| Route          | Page             | Purpose |
+|----------------|------------------|---------|
+| `/`            | **Introduction** | What FKST is and what the hosted cloud service provides. |
+| `/get-started` | **Get Started**  | Install the GitHub App, open a trigger issue, specify parameters, queue work, read status, and download logs. |
+
+The Get Started content mirrors the operator manual at
+[`../skills/fkst-control-plane-manual/SKILL.md`](../skills/fkst-control-plane-manual/SKILL.md);
+keep the two in sync when the control-plane contract changes.
+
+## Stack
+
+- **React 18 + Vite + TypeScript**, routing via **react-router-dom**.
+- **Tailwind CSS** with a dark, oklch design system (`src/styles/tokens.css`) —
+  Space Grotesk (display), IBM Plex Sans (UI), IBM Plex Mono (mono), amber accent.
+- **Vitest** + Testing Library (unit), **Playwright** (e2e smoke), **Storybook** (design docs).
+
+## Develop
+
+```bash
+npm install        # first time
+npm run dev        # http://localhost:3000
+npm run typecheck  # tsc --noEmit
+npm run lint       # eslint, zero warnings
+npm run test       # vitest
+npm run build      # static bundle to dist/
+```
+
+The production build in `dist/` is a plain static bundle — host it on any static file server or CDN.
+
+## Deploy (GitHub Pages)
+
+The site is published to **https://chronoaiproject.github.io/fkst-hosted/** by
+`.github/workflows/deploy-pages.yml` on every push to `develop` that touches
+`frontend/`. Because it's served under the `/fkst-hosted/` subpath, CI builds
+with `VITE_BASE=/fkst-hosted/` (the Vite `base`), the router derives its
+`basename` from `import.meta.env.BASE_URL`, and a `postbuild` step copies
+`index.html` → `404.html` so deep links (e.g. `/get-started`) resolve on
+refresh. To reproduce the deployed build locally:
+
+```bash
+VITE_BASE=/fkst-hosted/ npm run build && npm run preview
+# → http://localhost:3000/fkst-hosted/
+```
+
+If a custom domain is added later, drop `VITE_BASE` (base becomes `/`).
 
 ## Layout
 
 ```
 frontend/
-├── README.md                     # you are here
-├── docs/                         # FE WORKING docs (design.md + ARCHITECTURE.md now at repo-root docs/)
-│   ├── IMPLEMENTATION-PLAN.md    # PR-by-PR roadmap, milestones, dependency ordering
-│   ├── PENDING.md                # outstanding FE gaps / follow-ups
-│   ├── QA-TESTPLAN.md            # QA plan
-│   └── VERIFY-REPORT.md          # live-verify report
-└── mockups/                      # the 7 locked production screens (self-contained HTML; open in a browser)
-    ├── overview.html  goals.html  packages.html  goal.html
-    ├── runs.html      settings.html
-    └── inbox.html                # deferred (kept for reference; not in the v1 nav)
+├── src/
+│   ├── app/            # App router + Shell (two-tab nav + footer)
+│   ├── pages/          # introduction.tsx, get-started.tsx
+│   ├── i18n/           # en/zh content catalog + LanguageProvider (see below)
+│   ├── components/
+│   │   ├── brand/      # FkstMark wordmark
+│   │   ├── content/    # CodeBlock, Callout, Rich (inline markup)
+│   │   └── layout/     # Eyebrow, SectionHeading, LanguageToggle
+│   └── styles/         # design tokens + fonts
+├── e2e/                # Playwright smoke test
+└── mockups/            # legacy HTML mockups of the earlier app (reference only)
 ```
 
-## What it fronts (the real v1 surface)
+> The `docs/` and `mockups/` folders describe an earlier, backend-driven app design and are
+> kept for reference only — they do not reflect the current static site.
 
-- **Hosted backend (this repo):** `GET /api/v1/health` · `GET|POST|PUT|DELETE /api/v1/packages`
-  (create, update, delete; UI currently only supports create, with update/delete coming soon) · `POST /api/v1/sessions` (one live session/package) ·
-  `GET /api/v1/sessions/:id` (`pending→validating→running→stopping→stopped/failed`) ·
-  `POST /api/v1/sessions/:id/stop`. Data is **poll-derived (~5-min cron), not live.**
-- **GitHub plane (via NyxID `api-github` proxy):** repos, issues, PRs, trusted `state:v1`
-  comment markers, labels. *Not integrated yet — a v1 gap.*
-- **Host-agent plane (optional, read-only):** redb delivery ledger / logs / topology.
-  *Deferred.*
+## Internationalization
 
-## Information architecture (locked)
+The site ships **English** and **简体中文** via an in-nav toggle. All copy lives in a typed
+content catalog — `src/i18n/en.ts` and `src/i18n/zh.ts` (both implement `SiteContent` from
+`types.ts`) — read through `useContent()` behind a `LanguageProvider`. The initial language is
+detected from the browser and persisted to `localStorage`; `<html lang>` tracks the choice.
 
-Primary nav: **Overview · Goals · Packages.** Settings opens from the **avatar**.
-Goal detail is an **Issue modal** (from any goal) and a full **Goal page**. **Runs** folds
-into Goals. **Inbox is deferred** (hidden from nav). Overview has two views — **Pipeline**
-(control-room hero) and **Board** (kanban).
-
-## Provenance
-
-- **Design system** — verbatim copy of the locked `DESIGN.md` (FKST Mission Control, v2)
-  from `fe-blueprint/`. Treat [`docs/design.md`](../docs/design.md) as authoritative; the
-  upstream blueprint (`00-FRONTEND-TRD.md`, `01-DATA-REFERENCE.md`) is the deeper reference.
-- **Mockups** — copied from the locked screen set `designs/goal-board-20260611/`. They are
-  **fidelity targets**, not shipped code; all seven share one token system and cross-link by
-  relative path, so they browse as a set.
-
-## Honesty contract (non-negotiable)
-
-Poll-derived, not live — say so. An unreachable source reads **"unknown", never "0"**.
-v1 gaps render as a **disabled control + an honest note**, never fictional success. Status
-is never hue-alone. Amber is brand-only, never a status. Every action maps to exactly one
-real capability (a GitHub mutation, a substrate re-trigger, or a posture/topology change) —
-nothing fabricated.
+GitHub identifiers, code blocks, commands, and regexes are **not** translated — they live in
+`src/i18n/literals.ts` so they can never drift between languages. Prose strings may use light
+inline markup rendered by `<Rich>`: `` `code` `` → mono chip, `**bold**`, `*italic*`. To add a
+locale, add a catalog implementing `SiteContent` and register it in `context.tsx`.
