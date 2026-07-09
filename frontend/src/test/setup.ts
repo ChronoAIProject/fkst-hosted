@@ -1,13 +1,10 @@
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import '@testing-library/jest-dom';
-// jsdom has no IndexedDB; the TanStack Query persister (idb-keyval) needs it.
-import 'fake-indexeddb/auto';
 
-// Fix for React Router + JSDOM AbortSignal / Request conflict in Node 18+
-// Modern Node fetch/Request expects native AbortSignal instances.
-// JSDOM overrides globalThis.AbortSignal / AbortController, causing mismatches.
-// We can retrieve the native Node classes from util.transferableAbortController() and restore them.
+// React Router + JSDOM AbortSignal / Request conflict in Node 18+: modern Node
+// fetch/Request expects native AbortSignal instances, but JSDOM overrides the
+// globals. Restore the native Node classes so router data APIs behave.
 import util from 'node:util';
 
 const nativeAC = util.transferableAbortController();
@@ -20,5 +17,3 @@ globalThis.AbortSignal = NodeAbortSignal as typeof AbortSignal;
 afterEach(() => {
   cleanup();
 });
-
-
