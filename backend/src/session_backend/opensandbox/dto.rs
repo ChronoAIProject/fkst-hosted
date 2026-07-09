@@ -148,6 +148,105 @@ impl From<String> for SandboxState {
     }
 }
 
+/// The `metadata` multipart part of `POST /files/upload`.
+///
+/// `mode` is the WIRE octal-DIGITS integer, not the raw permission bits: the server
+/// reads it as `ParseUint(Itoa(mode), 8)`, so owner-read-only (`0o400`) must reach
+/// the wire as the integer `400` (see [`super::execd`] for the conversion). `owner`
+/// / `group` are deliberately NOT sent (the server no-ops on empty), so this part
+/// carries only the two fields that matter.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub(crate) struct ExecdFileMetadata {
+    pub path: String,
+    pub mode: u32,
+}
+
+/// Request body for `POST /command`.
+///
+/// `timeout` is omitted when `None` (`skip_serializing_if`) — unlike the lifecycle
+/// create body, here an absent timeout means "server default", so omission (not a
+/// literal null) is the right wire shape. Field names are already the wire's
+/// snake_case, so no rename is needed.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub(crate) struct RunCommandBody {
+    pub command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+    pub background: bool,
+}
+
+/// One frame of the `POST /command` `text/event-stream` response
+/// (execd's `ServerStreamEvent`). Only the two fields the client reads are modelled
+/// (`type` + `text`); the daemon emits several other event types
+/// (`stdout`/`stderr`/`result`/…) whose fields are ignored here — the client keys
+/// solely off the leading `init` frame, whose `text` is the command id.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ServerStreamFrame {
+    pub r#type: String,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// A handle to a launched command: its execd-assigned id (the `init` frame's
+/// `text`), used to poll status + logs.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CommandRef {
+    pub id: String,
+}
+
+/// Status of a launched command (`GET /command/status/{id}`).
+///
+/// Wire field names are snake_case (matching these Rust idents), so no
+/// `rename_all`. Forward-compatible (no `deny_unknown_fields`): unmodelled fields
+/// the daemon may add are ignored. `running` distinguishes in-flight from finished;
+/// `exit_code` is populated only once the command has exited.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CommandStatus {
+    pub id: String,
+    #[serde(default)]
+    pub content: Option<String>,
+    pub running: bool,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
+}
+
+impl CommandStatus {
+    /// Whether the command has finished (i.e. is no longer running). The daemon
+    /// keys "done-ness" off `running`, not the presence of `exit_code`.
+    pub fn is_finished(&self) -> bool {
+        !self.running
+    }
+}
+
+/// One file's metadata (`GET /files/info`, the value of each entry in the
+/// path-keyed response map).
+///
+/// `mode` is the RAW wire octal-DIGITS integer exactly as the daemon reports it
+/// (e.g. `400` = owner-read-only); fkst does NOT interpret or convert it. Field
+/// names are the wire's snake_case; forward-compatible (no `deny_unknown_fields`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FileInfo {
+    pub path: String,
+    #[serde(default)]
+    pub r#type: Option<String>,
+    pub size: i64,
+    #[serde(default)]
+    pub modified_at: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub group: Option<String>,
+    pub mode: i64,
+}
+
 /// A failure talking to the OpenSandbox lifecycle API.
 ///
 /// [`NotFound`](OsbError::NotFound) is the 404-equivalent surfaced LITERALLY on
