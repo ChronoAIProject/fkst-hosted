@@ -1,9 +1,9 @@
-//! Shared test fixtures for the executor tests, split out so the issue-effect
-//! ([`super::tests`]) and action-routing ([`super::routing_tests`]) test files each
-//! stay under the 500-line limit. `pub(super)` so both sibling test modules can
-//! reuse them (mirrors [`super::super::desired_test_fixtures`]).
+//! Shared test fixtures for the reconciler tests (the executor issue-effect +
+//! action-routing tests and the loop tests), reconcile-wide so each test file stays
+//! under the 500-line limit and all of them can build a `ReconcileCtx`. The shared
+//! session-backend fake lives in [`crate::session_backend::test_support`] and is
+//! re-exported here.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
@@ -19,11 +19,11 @@ use crate::github_app::config::GithubAppConfig;
 use crate::github_app::listing::{GithubListing, InstallationSummary, IssueSummary};
 use crate::github_app::{GithubAppError, GithubAppTokens};
 use crate::goals::trigger_parse::PackageRef;
-use crate::k8s::{KubeClient, SessionPodSpec};
+use crate::k8s::env_store::EnvStore;
 use crate::log_access::LogAccessRegistry;
 use crate::models::RepoRef;
-use crate::reconcile::desired::{KillReason, LivePod, SessionDef, SessionRegistration};
-use crate::session_backend::{BackendError, EnsureOutcome, SessionBackend};
+use crate::reconcile::desired::{SessionDef, SessionRegistration};
+use crate::session_backend::SessionBackend;
 
 // ---- recording fake GitHub transport ---------------------------------------
 
@@ -134,82 +134,11 @@ pub(super) fn tokens(api: Arc<RecordingApi>) -> GithubAppTokens {
     GithubAppTokens::with_api(&test_config(), api).expect("tokens")
 }
 
-// ---- recording fake session backend + ctx builder --------------------------
+// ---- ctx builder -----------------------------------------------------------
 
-/// A recording [`SessionBackend`] fake: every verb pushes its arguments into a
-/// `Mutex<Vec<..>>` so a test can assert the executor routed the right action to the
-/// right verb. Returns `Ok` by default; `mark_pending` can be made to return
-/// [`BackendError::NotFound`] so the 404-swallow path is exercisable.
-#[derive(Default)]
-pub(super) struct FakeSessionBackend {
-    pub(super) ensured: Mutex<Vec<(String, Vec<String>)>>,
-    pub(super) marked_pending: Mutex<Vec<String>>,
-    pub(super) stopped: Mutex<Vec<(String, KillReason)>>,
-    pub(super) removed_terminal: Mutex<Vec<String>>,
-    mark_pending_not_found: bool,
-}
-
-impl FakeSessionBackend {
-    pub(super) fn with_mark_pending_not_found() -> Self {
-        Self {
-            mark_pending_not_found: true,
-            ..Default::default()
-        }
-    }
-}
-
-#[async_trait]
-impl SessionBackend for FakeSessionBackend {
-    async fn check_reachable(&self) -> Result<String, BackendError> {
-        Ok("fake".to_string())
-    }
-
-    async fn ensure_session(
-        &self,
-        spec: &SessionPodSpec,
-        creds: BTreeMap<String, SecretString>,
-    ) -> Result<EnsureOutcome, BackendError> {
-        // Record the session id + the assembled creds KEYS (never their values).
-        let keys: Vec<String> = creds.keys().cloned().collect();
-        self.ensured
-            .lock()
-            .unwrap()
-            .push((spec.session_id.clone(), keys));
-        Ok(EnsureOutcome::Created)
-    }
-
-    async fn observe_repo(&self, _repo: &RepoRef) -> Result<Vec<LivePod>, BackendError> {
-        Ok(Vec::new())
-    }
-
-    async fn mark_pending(&self, session_id: &str) -> Result<(), BackendError> {
-        self.marked_pending
-            .lock()
-            .unwrap()
-            .push(session_id.to_string());
-        if self.mark_pending_not_found {
-            Err(BackendError::NotFound)
-        } else {
-            Ok(())
-        }
-    }
-
-    async fn stop_session(&self, session_id: &str, reason: KillReason) -> Result<(), BackendError> {
-        self.stopped
-            .lock()
-            .unwrap()
-            .push((session_id.to_string(), reason));
-        Ok(())
-    }
-
-    async fn remove_terminal(&self, session_id: &str) -> Result<(), BackendError> {
-        self.removed_terminal
-            .lock()
-            .unwrap()
-            .push(session_id.to_string());
-        Ok(())
-    }
-}
+/// The shared recording [`SessionBackend`] fake, promoted to
+/// [`crate::session_backend::test_support`] so the reconcile loop tests reuse it.
+pub(crate) use crate::session_backend::test_support::FakeSessionBackend;
 
 /// A trivial [`GithubListing`] the routing tests never actually call (only the pod
 /// effects run through the faked backend); present so a `ReconcileCtx` is buildable.
@@ -253,21 +182,12 @@ impl GithubListing for FakeListing {
     }
 }
 
-/// A namespace-bound [`KubeClient`] pointing at a dummy URL. Constructs lazily (no
-/// connection); the routing tests never issue a Kubernetes call through it (the
-/// backend is faked and the env-store path is skipped with no named environment).
-pub(super) fn fake_kube() -> KubeClient {
-    let config = kube::Config::new("https://localhost:6443".parse().expect("uri"));
-    let client = kube::Client::try_from(config).expect("kube client");
-    KubeClient::new(client, "fkst-sessions")
-}
-
 /// Build a [`ReconcileCtx`] wired to `backend`; every other field is a trivial fake
 /// the pod-effect routing tests do not exercise.
-pub(super) fn test_ctx(backend: Arc<dyn SessionBackend>) -> ReconcileCtx {
+pub(crate) fn test_ctx(backend: Arc<dyn SessionBackend>) -> ReconcileCtx {
     ReconcileCtx {
         backend,
-        kube: fake_kube(),
+        env_store: EnvStore::fake(),
         github: tokens(Arc::new(RecordingApi::default())),
         listing: Arc::new(FakeListing),
         http: reqwest::Client::new(),

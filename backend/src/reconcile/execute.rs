@@ -20,8 +20,8 @@ use secrecy::{ExposeSecret, SecretString};
 use crate::config::Config;
 use crate::github_app::listing::GithubListing;
 use crate::github_app::{session_permissions, GithubAppError, GithubAppTokens};
-use crate::k8s::env_store::{get_environment, load_environment_for_session};
-use crate::k8s::{session_github_token_json, KubeClient, SessionPodSpec};
+use crate::k8s::env_store::EnvStore;
+use crate::k8s::{session_github_token_json, SessionPodSpec};
 use crate::models::RepoRef;
 use crate::reconcile::announce::announce_session_comment;
 use crate::reconcile::desired::{KillReason, ReconcileAction, SessionRegistration};
@@ -52,9 +52,9 @@ pub struct ReconcileCtx {
     /// mark-pending / stop / cleanup / observe). Backend-neutral: the executor never
     /// touches a concrete Kubernetes type, only this `Arc<dyn SessionBackend>`.
     pub backend: Arc<dyn SessionBackend>,
-    /// Kubernetes API client (namespace-bound), still used directly for the
-    /// environment-store reads (`resolve_environment`) and the loops' sweep.
-    pub kube: KubeClient,
+    /// The named-environment store the spawn pre-flight reads (`resolve_environment`).
+    /// A cheap-to-clone `EnvStore` seam (no bare Kubernetes client on the ctx).
+    pub env_store: EnvStore,
     /// GitHub App token service: mints the session token + posts comments/labels.
     pub github: GithubAppTokens,
     /// Read-side GitHub transport the driver enumerates issues + counts work with.
@@ -180,7 +180,7 @@ async fn spawn_session(reg: SessionRegistration, ctx: &ReconcileCtx) {
     // 2. Environment: a named environment must exist + be `ready` for the author;
     //    otherwise post feedback and skip (fail closed, no doomed pod).
     let user_env = match resolve_environment(
-        &ctx.kube,
+        &ctx.env_store,
         reg.trigger_author_id,
         reg.def.environment.as_deref(),
     )
@@ -426,7 +426,7 @@ enum EnvResolution {
 /// named selection must EXIST and be `ready`; otherwise (missing, not ready, or a
 /// store-read error) the launch is blocked with a feedback comment — fail closed.
 async fn resolve_environment(
-    kube: &KubeClient,
+    env_store: &EnvStore,
     author_id: i64,
     environment: Option<&str>,
 ) -> EnvResolution {
@@ -439,9 +439,12 @@ async fn resolve_environment(
         Some(name) => name,
     };
 
-    match get_environment(kube, author_id, name).await {
+    match env_store.get_environment(author_id, name).await {
         Ok(Some(record)) if record.status == ENV_STATUS_READY => {
-            match load_environment_for_session(kube, author_id, name).await {
+            match env_store
+                .load_environment_for_session(author_id, name)
+                .await
+            {
                 Ok(Some((install, user_env))) => {
                     tracing::info!(
                         github_user_id = author_id,
@@ -475,9 +478,6 @@ async fn resolve_environment(
     }
 }
 
-#[cfg(test)]
-#[path = "execute_test_support.rs"]
-mod execute_test_support;
 #[cfg(test)]
 #[path = "execute_routing_tests.rs"]
 mod routing_tests;

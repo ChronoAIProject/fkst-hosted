@@ -81,15 +81,19 @@ pub async fn run_sweep_loop(ctx: ReconcileCtx, handle: ReconcileHandle) {
     }
 }
 
-/// LIST the substrate-session pods (through the session backend), group them into
-/// `(installation, repo)` keys via their stamped annotations, and enqueue each unique
-/// key. Returns how many unique repos were enqueued.
+/// Enumerate the substrate-session fleet (through the session backend), group the
+/// handles into `(installation, repo)` keys, and enqueue each unique key. Returns how
+/// many unique repos were enqueued.
 async fn sweep_once(ctx: &ReconcileCtx, handle: &ReconcileHandle) -> Result<usize, AppError> {
-    let mut keys = crate::session_backend::k8s::live_repo_keys(&ctx.kube)
-        .await
-        .map_err(|e| {
-            AppError::Internal(anyhow::anyhow!("sweep list substrate-session pods: {e}"))
-        })?;
+    let fleet = ctx.backend.list_fleet().await.map_err(|e| {
+        AppError::Internal(anyhow::anyhow!("sweep list substrate-session pods: {e}"))
+    })?;
+    // Dedup the fleet into unique reconcile keys (one repo may host several live
+    // sessions; each maps to the same `(installation, repo)`).
+    let mut keys: HashSet<RepoKey> = fleet
+        .into_iter()
+        .map(|h| (h.installation_id, h.repo))
+        .collect();
 
     // Also re-enqueue every repo with an open trigger registration, even those with
     // NO pod yet — so a first-spawn repo is reconciled every sweep (not only by the
@@ -168,8 +172,13 @@ async fn full_resync_once(ctx: &ReconcileCtx, handle: &ReconcileHandle) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use crate::models::RepoRef;
+    use crate::reconcile::execute_test_support::{test_ctx, FakeSessionBackend};
+    use crate::reconcile::reconcile_channel;
+    use crate::session_backend::SessionHandle;
 
     fn key(installation: i64, name: &str) -> RepoKey {
         (
@@ -179,6 +188,43 @@ mod tests {
                 name: name.to_string(),
             },
         )
+    }
+
+    fn fleet_handle(name: &str, installation: i64, issue: u64) -> SessionHandle {
+        SessionHandle {
+            session_id: format!("sess-{name}-{issue}"),
+            installation_id: installation,
+            repo: RepoRef {
+                owner: "acme".to_string(),
+                name: name.to_string(),
+            },
+            trigger_issue: Some(issue),
+        }
+    }
+
+    #[tokio::test]
+    async fn sweep_once_enqueues_one_key_per_distinct_repo() {
+        // Two live sessions on `site` + one on `web`: the sweep collapses the two
+        // `site` handles into one reconcile key and keeps `web` distinct.
+        let fleet = vec![
+            fleet_handle("site", 1, 7),
+            fleet_handle("site", 1, 9),
+            fleet_handle("web", 1, 3),
+        ];
+        let backend = Arc::new(FakeSessionBackend::default().with_fleet(fleet));
+        let ctx = test_ctx(backend);
+        let (tx, mut rx) = reconcile_channel(16);
+
+        let enqueued = sweep_once(&ctx, &tx).await.expect("sweep ok");
+        assert_eq!(enqueued, 2, "two distinct repos (the duplicate collapsed)");
+
+        let mut got: HashSet<RepoKey> = HashSet::new();
+        while let Ok(k) = rx.try_recv() {
+            got.insert(k);
+        }
+        assert_eq!(got.len(), 2);
+        assert!(got.contains(&key(1, "site")));
+        assert!(got.contains(&key(1, "web")));
     }
 
     #[tokio::test]

@@ -1,8 +1,8 @@
-//! Unit tests for the direct-Kubernetes backend's PURE argument-assembly + pod →
-//! [`LivePod`] projection (relocated from `reconcile/repo_tests.rs` and the pod
-//! effect assembly in `reconcile/execute_tests.rs`, unchanged). The live
-//! LIST/patch/delete/create wiring needs a cluster and is live-verified; here we
-//! cover the load-bearing pure mappings the backend does off a sample `Pod`.
+//! Unit tests for the lifecycle verbs' PURE argument-assembly + pod → [`LivePod`]
+//! projection (relocated from `reconcile/repo_tests.rs` and the pod effect assembly
+//! in `reconcile/execute_tests.rs`, unchanged). The live LIST/patch/delete/create
+//! wiring needs a cluster and is live-verified; here we cover the load-bearing pure
+//! mappings the backend does off a sample `Pod`.
 
 use std::collections::BTreeMap;
 

@@ -1,11 +1,7 @@
-//! Tests for [`super`] (the env-validation orchestrator's pure helpers). Split
-//! into a sibling file to keep `env_validator.rs` under the 500-line limit;
-//! included via `#[cfg(test)] #[path = "env_validator_tests.rs"] mod tests;`.
-//!
-//! The live orchestration (`validate_environment`, `sweep_orphans`) needs a
-//! cluster and is exercised by integration paths; here we pin the pure,
-//! cluster-free pieces: verdict parsing + last-line selection. The pod/ConfigMap
-//! builders + name generation are tested in `env_validator_pod.rs`.
+//! Tests for the env-validation verdict parsing (relocated verbatim from
+//! `k8s/env_validator_tests.rs`). The live orchestration (`run_validation`,
+//! `reap_stale_validations`) needs a cluster and is exercised by integration paths;
+//! here we pin the pure, cluster-free pieces: verdict parsing + last-line selection.
 
 use super::*;
 

@@ -28,7 +28,7 @@ use k8s_openapi::ByteString;
 use kube::api::{Api, DeleteParams, ListParams, PostParams};
 
 use crate::error::AppError;
-use crate::k8s::KubeClient;
+use crate::k8s::{KubeClient, KubeError};
 
 #[path = "env_store_meta.rs"]
 mod meta;
@@ -116,200 +116,239 @@ async fn delete_secret(api: &Api<Secret>, name: &str) -> Result<bool, AppError> 
     }
 }
 
-/// Write one named environment as a Secret + ConfigMap pair.
-///
-/// Validate-then-swap write order: the Secret is written FIRST and the ConfigMap
-/// (which carries `validation-status: ready`) LAST, so a partial write is never
-/// observed as ready. Each object is create-or-replace (a `409` on create falls
-/// through to a `resourceVersion`-matched replace). The Secret is always written
-/// — even with no secrets — so the pair exists atomically.
-#[allow(clippy::too_many_arguments)]
-pub async fn put_environment(
-    kube: &KubeClient,
-    id: i64,
-    login: &str,
-    name: &str,
-    install: &[String],
-    variables: &BTreeMap<String, String>,
-    secrets: &BTreeMap<String, String>,
-    validated_at: &str,
-    content_hash: &str,
-    validation_image: &str,
-) -> Result<(), AppError> {
-    let object = env_object_name(id, name);
-    let labels = env_labels(id, login);
-    let annotations = env_annotations(name, validated_at, content_hash, validation_image);
+/// Newtype wrapping the namespace-bound Kubernetes client the named-environment data
+/// layer reads/writes through. Callsites (the REST layer + the reconciler) name
+/// `EnvStore` rather than a bare `KubeClient`, keeping the store's cluster I/O behind
+/// one seam that the direct-Kubernetes runtime dependency lives inside. Cheap to
+/// clone (the wrapped `KubeClient` is `Arc`-backed).
+#[derive(Clone)]
+pub struct EnvStore(KubeClient);
 
-    // Secret FIRST.
-    let secret_data: BTreeMap<String, ByteString> = secrets
-        .iter()
-        .map(|(k, v)| (k.clone(), ByteString(v.clone().into_bytes())))
-        .collect();
-    let secret = Secret {
-        metadata: ObjectMeta {
-            name: Some(object.clone()),
-            labels: Some(labels.clone()),
-            annotations: Some(annotations.clone()),
-            ..Default::default()
-        },
-        data: Some(secret_data),
-        type_: Some("Opaque".to_string()),
-        ..Default::default()
-    };
-    upsert_secret(&secret_api(kube), &object, secret).await?;
-
-    // ConfigMap LAST (carries the `ready` marker).
-    let install_json = serde_json::to_string(install)
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize install: {e}")))?;
-    let variables_json = serde_json::to_string(variables)
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize variables: {e}")))?;
-    let mut data = BTreeMap::new();
-    data.insert(INSTALL_KEY.to_string(), install_json);
-    data.insert(VARIABLES_KEY.to_string(), variables_json);
-    let cm = ConfigMap {
-        metadata: ObjectMeta {
-            name: Some(object.clone()),
-            labels: Some(labels),
-            annotations: Some(annotations),
-            ..Default::default()
-        },
-        data: Some(data),
-        ..Default::default()
-    };
-    upsert_configmap(&configmap_api(kube), &object, cm).await?;
-
-    tracing::info!(github_user_id = id, env = %name, "env store: environment written");
-    Ok(())
-}
-
-/// Read one named environment's public view (install + variables + status +
-/// secret key NAMES). `None` when the ConfigMap is absent. NEVER reads secret
-/// values.
-pub async fn get_environment(
-    kube: &KubeClient,
-    id: i64,
-    name: &str,
-) -> Result<Option<EnvRecord>, AppError> {
-    let object = env_object_name(id, name);
-    let cm = match configmap_api(kube)
-        .get_opt(&object)
-        .await
-        .map_err(map_kube_err)?
-    {
-        Some(cm) => cm,
-        None => return Ok(None),
-    };
-    let data = cm.data.unwrap_or_default();
-    let secret_keys = match secret_api(kube)
-        .get_opt(&object)
-        .await
-        .map_err(map_kube_err)?
-    {
-        Some(secret) => secret_key_names(&secret),
-        None => Vec::new(),
-    };
-    Ok(Some(EnvRecord {
-        name: annotation(&cm.metadata, ENV_NAME_ANNOTATION),
-        status: annotation(&cm.metadata, STATUS_ANNOTATION),
-        validated_at: annotation(&cm.metadata, VALIDATED_AT_ANNOTATION),
-        install: parse_install(&data),
-        variables: parse_variables(&data),
-        secret_keys,
-    }))
-}
-
-/// List a user's named environments as compact summaries (counts only). Joins the
-/// ConfigMaps (install + variable counts) with the Secrets (secret counts) by
-/// object name. Sorted by env name for a stable response.
-pub async fn list_environments(kube: &KubeClient, id: i64) -> Result<Vec<EnvSummary>, AppError> {
-    let selector = owner_selector(id);
-    let lp = ListParams::default().labels(&selector);
-    let configmaps = configmap_api(kube).list(&lp).await.map_err(map_kube_err)?;
-    let secrets = secret_api(kube).list(&lp).await.map_err(map_kube_err)?;
-
-    let secret_counts: BTreeMap<String, usize> = secrets
-        .items
-        .iter()
-        .filter_map(|s| {
-            s.metadata
-                .name
-                .clone()
-                .map(|n| (n, s.data.as_ref().map(|d| d.len()).unwrap_or(0)))
-        })
-        .collect();
-
-    let mut out: Vec<EnvSummary> = configmaps
-        .items
-        .into_iter()
-        .map(|cm| {
-            let object = cm.metadata.name.clone().unwrap_or_default();
-            let data = cm.data.clone().unwrap_or_default();
-            EnvSummary {
-                name: annotation(&cm.metadata, ENV_NAME_ANNOTATION),
-                status: annotation(&cm.metadata, STATUS_ANNOTATION),
-                validated_at: annotation(&cm.metadata, VALIDATED_AT_ANNOTATION),
-                install_command_count: parse_install(&data).len(),
-                variable_count: parse_variables(&data).len(),
-                secret_count: secret_counts.get(&object).copied().unwrap_or(0),
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(out)
-}
-
-/// Count a user's named environments — for the per-user cap check.
-pub async fn count_environments(kube: &KubeClient, id: i64) -> Result<usize, AppError> {
-    let selector = owner_selector(id);
-    let lp = ListParams::default().labels(&selector);
-    let list = configmap_api(kube).list(&lp).await.map_err(map_kube_err)?;
-    Ok(list.items.len())
-}
-
-/// Delete both the ConfigMap and Secret for one named environment. Idempotent /
-/// `404`-tolerant. Returns whether ANYTHING existed (either object present).
-pub async fn delete_environment(kube: &KubeClient, id: i64, name: &str) -> Result<bool, AppError> {
-    let object = env_object_name(id, name);
-    let cm_existed = delete_configmap(&configmap_api(kube), &object).await?;
-    let secret_existed = delete_secret(&secret_api(kube), &object).await?;
-    Ok(cm_existed || secret_existed)
-}
-
-/// SERVER-SIDE ONLY: resolve one environment into `(install, merged_env)` for the
-/// session launcher — install commands plus the variables AND secret VALUES
-/// merged into one injection map.
-///
-/// This is the ONLY function that reads secret VALUES out of the store. It exists
-/// solely for the in-cluster session-injection path and is NEVER wired to any
-/// user-facing route, so a secret value never crosses the API boundary through
-/// here. `None` when the ConfigMap is absent.
-pub async fn load_environment_for_session(
-    kube: &KubeClient,
-    id: i64,
-    name: &str,
-) -> Result<Option<(Vec<String>, BTreeMap<String, String>)>, AppError> {
-    let object = env_object_name(id, name);
-    let cm = match configmap_api(kube)
-        .get_opt(&object)
-        .await
-        .map_err(map_kube_err)?
-    {
-        Some(cm) => cm,
-        None => return Ok(None),
-    };
-    let data = cm.data.unwrap_or_default();
-    let install = parse_install(&data);
-    let mut merged = parse_variables(&data);
-    // Overlay secret values. Keys are unique across the two stores (the route
-    // layer forbids a name in both), so this only fills secret-only keys.
-    if let Some(secret) = secret_api(kube)
-        .get_opt(&object)
-        .await
-        .map_err(map_kube_err)?
-    {
-        for (k, v) in decode_secret_values(&secret) {
-            merged.insert(k, v);
-        }
+impl EnvStore {
+    /// Build from the ambient environment, bound to the control-plane `namespace`
+    /// the environment objects live in.
+    pub async fn from_inferred(namespace: impl Into<String>) -> Result<Self, KubeError> {
+        Ok(Self(KubeClient::from_inferred(namespace).await?))
     }
-    Ok(Some((install, merged)))
+
+    /// Wrap an already-built client (the reconciler shares one client across its ctx).
+    /// `pub` so the binary crate's reconciler-spawn can build the ctx's store.
+    pub fn from_kube(kube: KubeClient) -> Self {
+        Self(kube)
+    }
+
+    /// A store bound to a dummy in-cluster client for tests (constructs lazily; the
+    /// tests that use it never issue a real cluster call).
+    #[cfg(test)]
+    pub(crate) fn fake() -> Self {
+        let config = kube::Config::new("https://localhost:6443".parse().expect("uri"));
+        let client = kube::Client::try_from(config).expect("kube client");
+        Self(KubeClient::new(client, "fkst-sessions"))
+    }
+}
+
+impl EnvStore {
+    /// Write one named environment as a Secret + ConfigMap pair.
+    ///
+    /// Validate-then-swap write order: the Secret is written FIRST and the ConfigMap
+    /// (which carries `validation-status: ready`) LAST, so a partial write is never
+    /// observed as ready. Each object is create-or-replace (a `409` on create falls
+    /// through to a `resourceVersion`-matched replace). The Secret is always written
+    /// — even with no secrets — so the pair exists atomically.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn put_environment(
+        &self,
+        id: i64,
+        login: &str,
+        name: &str,
+        install: &[String],
+        variables: &BTreeMap<String, String>,
+        secrets: &BTreeMap<String, String>,
+        validated_at: &str,
+        content_hash: &str,
+        validation_image: &str,
+    ) -> Result<(), AppError> {
+        let kube = &self.0;
+        let object = env_object_name(id, name);
+        let labels = env_labels(id, login);
+        let annotations = env_annotations(name, validated_at, content_hash, validation_image);
+
+        // Secret FIRST.
+        let secret_data: BTreeMap<String, ByteString> = secrets
+            .iter()
+            .map(|(k, v)| (k.clone(), ByteString(v.clone().into_bytes())))
+            .collect();
+        let secret = Secret {
+            metadata: ObjectMeta {
+                name: Some(object.clone()),
+                labels: Some(labels.clone()),
+                annotations: Some(annotations.clone()),
+                ..Default::default()
+            },
+            data: Some(secret_data),
+            type_: Some("Opaque".to_string()),
+            ..Default::default()
+        };
+        upsert_secret(&secret_api(kube), &object, secret).await?;
+
+        // ConfigMap LAST (carries the `ready` marker).
+        let install_json = serde_json::to_string(install)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize install: {e}")))?;
+        let variables_json = serde_json::to_string(variables)
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("serialize variables: {e}")))?;
+        let mut data = BTreeMap::new();
+        data.insert(INSTALL_KEY.to_string(), install_json);
+        data.insert(VARIABLES_KEY.to_string(), variables_json);
+        let cm = ConfigMap {
+            metadata: ObjectMeta {
+                name: Some(object.clone()),
+                labels: Some(labels),
+                annotations: Some(annotations),
+                ..Default::default()
+            },
+            data: Some(data),
+            ..Default::default()
+        };
+        upsert_configmap(&configmap_api(kube), &object, cm).await?;
+
+        tracing::info!(github_user_id = id, env = %name, "env store: environment written");
+        Ok(())
+    }
+
+    /// Read one named environment's public view (install + variables + status +
+    /// secret key NAMES). `None` when the ConfigMap is absent. NEVER reads secret
+    /// values.
+    pub async fn get_environment(
+        &self,
+        id: i64,
+        name: &str,
+    ) -> Result<Option<EnvRecord>, AppError> {
+        let kube = &self.0;
+        let object = env_object_name(id, name);
+        let cm = match configmap_api(kube)
+            .get_opt(&object)
+            .await
+            .map_err(map_kube_err)?
+        {
+            Some(cm) => cm,
+            None => return Ok(None),
+        };
+        let data = cm.data.unwrap_or_default();
+        let secret_keys = match secret_api(kube)
+            .get_opt(&object)
+            .await
+            .map_err(map_kube_err)?
+        {
+            Some(secret) => secret_key_names(&secret),
+            None => Vec::new(),
+        };
+        Ok(Some(EnvRecord {
+            name: annotation(&cm.metadata, ENV_NAME_ANNOTATION),
+            status: annotation(&cm.metadata, STATUS_ANNOTATION),
+            validated_at: annotation(&cm.metadata, VALIDATED_AT_ANNOTATION),
+            install: parse_install(&data),
+            variables: parse_variables(&data),
+            secret_keys,
+        }))
+    }
+
+    /// List a user's named environments as compact summaries (counts only). Joins the
+    /// ConfigMaps (install + variable counts) with the Secrets (secret counts) by
+    /// object name. Sorted by env name for a stable response.
+    pub async fn list_environments(&self, id: i64) -> Result<Vec<EnvSummary>, AppError> {
+        let kube = &self.0;
+        let selector = owner_selector(id);
+        let lp = ListParams::default().labels(&selector);
+        let configmaps = configmap_api(kube).list(&lp).await.map_err(map_kube_err)?;
+        let secrets = secret_api(kube).list(&lp).await.map_err(map_kube_err)?;
+
+        let secret_counts: BTreeMap<String, usize> = secrets
+            .items
+            .iter()
+            .filter_map(|s| {
+                s.metadata
+                    .name
+                    .clone()
+                    .map(|n| (n, s.data.as_ref().map(|d| d.len()).unwrap_or(0)))
+            })
+            .collect();
+
+        let mut out: Vec<EnvSummary> = configmaps
+            .items
+            .into_iter()
+            .map(|cm| {
+                let object = cm.metadata.name.clone().unwrap_or_default();
+                let data = cm.data.clone().unwrap_or_default();
+                EnvSummary {
+                    name: annotation(&cm.metadata, ENV_NAME_ANNOTATION),
+                    status: annotation(&cm.metadata, STATUS_ANNOTATION),
+                    validated_at: annotation(&cm.metadata, VALIDATED_AT_ANNOTATION),
+                    install_command_count: parse_install(&data).len(),
+                    variable_count: parse_variables(&data).len(),
+                    secret_count: secret_counts.get(&object).copied().unwrap_or(0),
+                }
+            })
+            .collect();
+        out.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(out)
+    }
+
+    /// Count a user's named environments — for the per-user cap check.
+    pub async fn count_environments(&self, id: i64) -> Result<usize, AppError> {
+        let kube = &self.0;
+        let selector = owner_selector(id);
+        let lp = ListParams::default().labels(&selector);
+        let list = configmap_api(kube).list(&lp).await.map_err(map_kube_err)?;
+        Ok(list.items.len())
+    }
+
+    /// Delete both the ConfigMap and Secret for one named environment. Idempotent /
+    /// `404`-tolerant. Returns whether ANYTHING existed (either object present).
+    pub async fn delete_environment(&self, id: i64, name: &str) -> Result<bool, AppError> {
+        let kube = &self.0;
+        let object = env_object_name(id, name);
+        let cm_existed = delete_configmap(&configmap_api(kube), &object).await?;
+        let secret_existed = delete_secret(&secret_api(kube), &object).await?;
+        Ok(cm_existed || secret_existed)
+    }
+
+    /// SERVER-SIDE ONLY: resolve one environment into `(install, merged_env)` for the
+    /// session launcher — install commands plus the variables AND secret VALUES
+    /// merged into one injection map.
+    ///
+    /// This is the ONLY function that reads secret VALUES out of the store. It exists
+    /// solely for the in-cluster session-injection path and is NEVER wired to any
+    /// user-facing route, so a secret value never crosses the API boundary through
+    /// here. `None` when the ConfigMap is absent.
+    pub async fn load_environment_for_session(
+        &self,
+        id: i64,
+        name: &str,
+    ) -> Result<Option<(Vec<String>, BTreeMap<String, String>)>, AppError> {
+        let kube = &self.0;
+        let object = env_object_name(id, name);
+        let cm = match configmap_api(kube)
+            .get_opt(&object)
+            .await
+            .map_err(map_kube_err)?
+        {
+            Some(cm) => cm,
+            None => return Ok(None),
+        };
+        let data = cm.data.unwrap_or_default();
+        let install = parse_install(&data);
+        let mut merged = parse_variables(&data);
+        // Overlay secret values. Keys are unique across the two stores (the route
+        // layer forbids a name in both), so this only fills secret-only keys.
+        if let Some(secret) = secret_api(kube)
+            .get_opt(&object)
+            .await
+            .map_err(map_kube_err)?
+        {
+            for (k, v) in decode_secret_values(&secret) {
+                merged.insert(k, v);
+            }
+        }
+        Ok(Some((install, merged)))
+    }
 }
