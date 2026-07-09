@@ -20,6 +20,7 @@ use crate::models::RepoRef;
 use crate::reconcile::desired::{KillReason, LivePod};
 
 pub mod k8s;
+pub mod opensandbox;
 
 #[cfg(test)]
 pub(crate) mod test_support;
