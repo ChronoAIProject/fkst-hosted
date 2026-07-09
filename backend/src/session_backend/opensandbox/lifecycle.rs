@@ -15,8 +15,9 @@ use serde::Deserialize;
 
 use super::dto::{CreateSandboxRequest, OsbError, SandboxView};
 
-/// The header carrying the API key (`apiKeyAuth` in the spec).
-const API_KEY_HEADER: &str = "OPEN-SANDBOX-API-KEY";
+/// The header carrying the API key (`apiKeyAuth` in the spec). `pub(super)` so the
+/// sibling execd client stamps the SAME key header through its own choke-point.
+pub(super) const API_KEY_HEADER: &str = "OPEN-SANDBOX-API-KEY";
 
 /// Page size requested when walking the paginated list endpoint.
 const LIST_PAGE_SIZE: u32 = 100;
@@ -175,8 +176,9 @@ impl OsbLifecycleClient {
 /// Map a response's status into the [`OsbError`] taxonomy, logging the outcome at
 /// debug (never the key, body values, or metadata). `404` -> `NotFound`; any other
 /// non-2xx -> `Api { status, message }` with the body text; `2xx` -> the response
-/// for the caller to decode.
-async fn map_response(
+/// for the caller to decode. `pub(super)` so the sibling execd client funnels its
+/// responses through the SAME status -> error mapping.
+pub(super) async fn map_response(
     method: &reqwest::Method,
     path: &str,
     response: reqwest::Response,
