@@ -4,6 +4,7 @@ import { FkstMark } from '../components/brand/fkst-mark';
 import { LanguageToggle } from '../components/layout/language-toggle';
 import { useContent } from '../i18n';
 import { REPO, MANUAL_URL } from '../i18n/literals';
+import { useAuth } from '../lib/auth/github-auth';
 
 export function nextCondensed(prev: boolean, y: number): boolean {
   if (y > 140) {
@@ -25,6 +26,7 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 export function Shell() {
   const [condensed, setCondensed] = useState(false);
   const c = useContent();
+  const { isAuthenticated, signOut } = useAuth();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -60,10 +62,22 @@ export function Shell() {
               <NavLink to="/get-started" className={navLinkClass}>
                 {c.nav.getStarted}
               </NavLink>
+              <NavLink to="/dashboard" className={navLinkClass}>
+                {c.nav.dashboard}
+              </NavLink>
             </nav>
 
             <div className="flex items-center gap-2 ml-auto">
               <LanguageToggle />
+              {isAuthenticated && (
+                <button
+                  type="button"
+                  onClick={signOut}
+                  className="font-mono text-[12px] text-faint hover:text-fg px-2.5 py-[7px] rounded-control transition-colors cursor-pointer max-[600px]:hidden"
+                >
+                  {c.auth.signOut}
+                </button>
+              )}
               <a
                 href={REPO}
                 target="_blank"

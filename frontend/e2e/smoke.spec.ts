@@ -64,6 +64,15 @@ test.describe('static site smoke', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
+  test('dashboard tab prompts GitHub sign-in', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('link', { name: 'Dashboard' }).click();
+    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(
+      page.getByRole('heading', { name: 'Sign in to view your dashboard' })
+    ).toBeVisible();
+  });
+
   test('language toggle switches to 中文 and persists', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: '中文' }).click();

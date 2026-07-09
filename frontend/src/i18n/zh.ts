@@ -8,6 +8,7 @@ export const zh: SiteContent = {
   nav: {
     introduction: '介绍',
     getStarted: '快速开始',
+    dashboard: '仪表盘',
     getStartedCta: '开始使用 →',
     homeAria: 'FKST — 首页',
   },
@@ -16,11 +17,27 @@ export const zh: SiteContent = {
     en: 'EN',
     zh: '中文',
   },
+  auth: {
+    signIn: '使用 GitHub 登录',
+    signOut: '退出登录',
+  },
   footer: {
     tagline: '· ChronoAI 托管云',
     getStarted: '快速开始',
     github: 'GitHub',
     manual: '操作手册',
+  },
+  dashboard: {
+    metaTitle: 'FKST — 仪表盘',
+    eyebrow: '仪表盘',
+    title: '你的 fkst 会话',
+    lede: '在所有安装了 fkst-hosted App 的仓库中，查看每一个触发 issue 及其工作 issue —— 按会话逐个分组。',
+    signInTitle: '登录以查看你的仪表盘',
+    signInBody: '连接你的 GitHub 账户以加载你的 fkst 会话和 issue。你会保持登录状态 —— token 会自动刷新。',
+    notConfigured: '此部署尚未配置仪表盘后端。',
+    authError: '登录被取消或失败，请重试。',
+    comingSoonTitle: '仪表盘即将上线',
+    comingSoonBody: '你已登录。仓库 + 会话视图将在下次更新中上线。',
   },
   intro: {
     metaTitle: 'FKST — 托管式自主编码会话',

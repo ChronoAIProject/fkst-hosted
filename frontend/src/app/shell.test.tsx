@@ -2,16 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { Shell, nextCondensed } from './shell';
+import { AuthProvider } from '@/lib/auth/github-auth';
 
 function renderShell() {
   return render(
-    <MemoryRouter initialEntries={['/']}>
-      <Routes>
-        <Route element={<Shell />}>
-          <Route index element={<div>home content</div>} />
-        </Route>
-      </Routes>
-    </MemoryRouter>
+    <AuthProvider>
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route element={<Shell />}>
+            <Route index element={<div>home content</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </AuthProvider>
   );
 }
 
