@@ -11,6 +11,7 @@ local convergence_shared = require("devloop.convergence.shared")
 local forge_validators = require("devloop.forge_validators")
 local contract_time = require("contract.time")
 local devloop_logging = require("devloop.logging")
+local payloads_builders = require("devloop.payloads.builders")
 
 function S.install(M, shared)
 local numeric_minutes = shared.numeric_minutes
@@ -106,6 +107,85 @@ local function codex_run_status(M)
   return status
 end
 
+local function fixing_work_unit_from_fact(fact)
+  if type(fact) ~= "table" then
+    return nil
+  end
+  return payloads_builders.fixing_work_unit_key({
+    repair_input = fact.ci_failure_key ~= nil and "ci-failure" or "review-feedback",
+    ci_failure_key = fact.ci_failure_key,
+    reviewed_head_sha = fact.reviewed_head_sha or fact.head_sha,
+    review_dedup_key = fact.review_dedup_key,
+  })
+end
+
+local function fixing_work_unit_comments(facts)
+  if facts and facts.current_pr and type(facts.current_pr.comments) == "table" then
+    return facts.current_pr.comments
+  end
+  if facts and facts.current and type(facts.current.comments) == "table" then
+    return facts.current.comments
+  end
+  if facts and facts.snapshot and type(facts.snapshot.comments) == "table" then
+    return facts.snapshot.comments
+  end
+  return nil
+end
+
+local function unique_versions(state)
+  local versions = {}
+  local raw = state and state.version or nil
+  local stripped = strip_liveness_timeout_suffixes(raw)
+  if raw ~= nil then
+    table.insert(versions, raw)
+  end
+  if stripped ~= nil and tostring(stripped) ~= tostring(raw or "") then
+    table.insert(versions, stripped)
+  end
+  return versions
+end
+
+local function fixing_work_unit_from_trusted_facts(M, state, facts)
+  if facts and facts.work_unit_key ~= nil then
+    return facts.work_unit_key
+  end
+  if state and state.work_unit_key ~= nil then
+    return state.work_unit_key
+  end
+  if tostring(state and state.state or "") ~= "fixing" then
+    return nil
+  end
+  local direct = fixing_work_unit_from_fact(facts and (facts["merge-gate"] or facts.merge_gate))
+    or fixing_work_unit_from_fact(facts and (facts["review-result"] or facts.review_result))
+    or fixing_work_unit_from_fact(facts and (facts["review-meta"] or facts.review_meta))
+  if direct ~= nil then
+    return direct
+  end
+  local comments = fixing_work_unit_comments(facts)
+  if comments == nil then
+    return nil
+  end
+  local proposal_id = (facts and facts.proposal_id) or (state and state.proposal_id)
+  for _, version in ipairs(unique_versions(state)) do
+    local merge_gate = m_facts.merge_gate_fix_fact(comments, proposal_id, version)
+    local from_merge_gate = fixing_work_unit_from_fact(merge_gate)
+    if from_merge_gate ~= nil then
+      return from_merge_gate
+    end
+    local reject = m_facts.review_reject_fact(comments, proposal_id, version)
+    local from_reject = fixing_work_unit_from_fact(reject)
+    if from_reject ~= nil then
+      return from_reject
+    end
+    local review_meta = m_facts.review_meta_fix_fact(comments, proposal_id, version)
+    local from_review_meta = fixing_work_unit_from_fact(review_meta)
+    if from_review_meta ~= nil then
+      return from_review_meta
+    end
+  end
+  return nil
+end
+
 local function real_execution_expected_value(M, match, key, state, facts)
   local selector = match and match[key] or nil
   if selector == "state.proposal_id" then
@@ -113,6 +193,9 @@ local function real_execution_expected_value(M, match, key, state, facts)
   end
   if selector == "state.version" then
     return strip_liveness_timeout_suffixes(state and state.version)
+  end
+  if selector == "state.work_unit_key" then
+    return fixing_work_unit_from_trusted_facts(M, state, facts)
   end
   return selector
 end

@@ -58,6 +58,8 @@ function C.attach_fixing_handoff(request, proposal_id, pr_number, version, revie
     "blocking_gap",
     "gate_baseline_sha",
     "predecessor_set",
+    "repair_input",
+    "ci_failure_key",
     "gate_failure_excerpt",
   }) do
     if normalized[field] ~= nil then
@@ -147,6 +149,48 @@ end
 
 function C.pr_base_unmanaged_blocked_version(version)
   return tostring(version or "") .. "/blocked/pr-base-unmanaged"
+end
+
+function C.ci_failure_unrepaired_blocked_version(version, ci_failure_key)
+  return base_ids.dedup_key({
+    tostring(version or ""),
+    "blocked",
+    "own-ci-red-unrepaired",
+    tostring(ci_failure_key or "noci"),
+  })
+end
+
+function C.build_ci_failure_unrepaired_blocked_request(repo, fix, reason, detail)
+  local blocked_version = C.ci_failure_unrepaired_blocked_version(fix.version, fix.ci_failure_key)
+  local state_marker = devloop_state.state_marker(fix.proposal_id, "blocked", blocked_version)
+  local safe_reason = devloop_base.neutralize_untrusted_comment_text(reason or "own-ci-red-unrepaired")
+  local safe_detail = devloop_base.neutralize_untrusted_comment_text(detail or "")
+  if safe_detail == "" then
+    safe_detail = "No repaired revision was published for the terminal own-CI failure."
+  end
+  return C.attach_blocked_handoff(entity_lib.build_entity_comment_request({
+    kind = "pr",
+    repo = repo,
+    number = fix.pr_number,
+  }, "github-devloop blocked PR because the own-CI failure was not repaired by its bounded fix attempt."
+    .. "\n\nReason: own-ci-red-unrepaired"
+    .. "\nProposal: " .. tostring(fix.proposal_id)
+    .. "\nPR: " .. tostring(fix.pr_number)
+    .. "\nReviewed head: " .. tostring(fix.reviewed_head_sha)
+    .. "\nCI failure key: " .. tostring(fix.ci_failure_key)
+    .. "\nAttempt result: " .. safe_reason
+    .. "\n\nDetail:\n" .. safe_detail
+    .. "\n\n" .. state_marker
+    .. "\n" .. ai_sentinel, base_ids.dedup_key({
+    "fix",
+    "blocked",
+    "own-ci-red-unrepaired",
+    tostring(fix.proposal_id),
+    tostring(fix.pr_number),
+    tostring(fix.reviewed_head_sha),
+    tostring(fix.ci_failure_key),
+    tostring(reason or "no-repair"),
+  }), fix.source_ref), fix.proposal_id, fix.pr_number, blocked_version, fix.source_ref)
 end
 
 function C.build_pr_base_unmanaged_comment_request(repo, pr_number, origin, integration_branch, source_ref)
@@ -310,7 +354,8 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
     merge_ready.reviewed_head_sha,
     gate_baseline_sha,
     safe_reason,
-    predecessor_set
+    predecessor_set,
+    handoff_fields and handoff_fields.ci_failure_key or nil
   )
   local request = entity_lib.build_entity_comment_request({
     kind = "pr",
@@ -327,6 +372,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
     tostring(merge_ready.version),
     tostring(fix_version),
     tostring(predecessor_set or "nopred"),
+    tostring(handoff_fields and handoff_fields.ci_failure_key or "noci"),
     safe_reason,
   }), source_ref)
   handoff_fields = handoff_fields or {}
@@ -341,6 +387,7 @@ function C.build_merge_gate_fix_comment_request(M, repo, issue_number, merge_rea
     blocking_gap = handoff_fields.blocking_gap,
     gate_baseline_sha = gate_baseline_sha,
     predecessor_set = predecessor_set,
+    ci_failure_key = handoff_fields.ci_failure_key,
     gate_failure_excerpt = gate_failure_excerpt,
     current_head_sha = handoff_fields.current_head_sha,
   }, source_ref)

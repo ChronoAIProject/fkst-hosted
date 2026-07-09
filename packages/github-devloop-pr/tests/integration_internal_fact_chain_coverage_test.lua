@@ -242,13 +242,17 @@ local function assert_declared_merge_gate_fixing_replay_field_set(payload)
   local expected_count = 0
   for field in pairs(row.payload_fields or {}) do
     expected[field] = true
-    expected_count = expected_count + 1
+    if field ~= "ci_failure_key" or payload[field] ~= nil then
+      expected_count = expected_count + 1
+    end
   end
   t.eq(expected.review_proposal_id, true)
   t.eq(expected.review_dedup_key, true)
   t.eq(expected.reviewed_head_sha, true)
   t.eq(expected.gate_baseline_sha, true)
   t.eq(expected.source_ref, true)
+  t.eq(expected.ci_failure_key, true)
+  t.eq(expected.work_unit_key, true)
 
   local actual_count = 0
   for field in pairs(payload or {}) do
@@ -256,7 +260,9 @@ local function assert_declared_merge_gate_fixing_replay_field_set(payload)
     actual_count = actual_count + 1
   end
   for field in pairs(expected) do
-    t.is_true(payload[field] ~= nil)
+    if field ~= "ci_failure_key" then
+      t.is_true(payload[field] ~= nil)
+    end
   end
   t.eq(actual_count, expected_count)
 end
@@ -730,8 +736,8 @@ return {
       blocking_gap = "rollup-red",
     }, entity_lib.pr_source_ref(fixture.repo, fixture.pr_number))
     t.is_true(defective_replay.dedup_key ~= fixing_raise.payload.dedup_key)
-    t.is_true(defective_replay.dedup_key:find("/nobase/nopred/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
-    t.is_true(fixing_raise.payload.dedup_key:find("/" .. fixture.gate_baseline_sha .. "/nopred/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
+    t.is_true(defective_replay.dedup_key:find("/nobase/nopred/noci/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
+    t.is_true(fixing_raise.payload.dedup_key:find("/" .. fixture.gate_baseline_sha .. "/nopred/noci/" .. tostring(event.reviewed_head_sha), 1, true) ~= nil)
     local matching_fact = m_facts.merge_gate_fix_fact(fixture.pr_comments, event.proposal_id, fixture.fixing_version, {
       review_proposal_id = fixture.review_proposal,
       review_dedup_key = fixture.review_dedup,

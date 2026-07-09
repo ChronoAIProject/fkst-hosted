@@ -11,6 +11,7 @@ local forge_validators = require("devloop.forge_validators")
 local shared = require("devloop.payloads.shared")
 local board = require("devloop.payloads.board")
 local transition_version = require("contract.transition_version")
+local ci_failure_keys = require("devloop.ci_failure_keys")
 
 local function commit_subject_title(current)
   if type(current) ~= "table" then
@@ -44,6 +45,34 @@ local function bounded_commit_subject(prefix, issue_number, current)
     end
   end
   return subject
+end
+
+function C.fixing_repair_input(review_fact)
+  if review_fact ~= nil and review_fact.ci_failure_key ~= nil then
+    return "ci-failure"
+  end
+  return "review-feedback"
+end
+
+function C.fixing_work_unit_key(fix)
+  if type(fix) ~= "table" then
+    return nil
+  end
+  if tostring(fix.repair_input or "review-feedback") == "ci-failure" then
+    if fix.ci_failure_key == nil then
+      return nil
+    end
+    return base_ids.dedup_key({
+      "ci-failure",
+      tostring(fix.reviewed_head_sha or "nohead"),
+      tostring(fix.ci_failure_key),
+    })
+  end
+  return base_ids.dedup_key({
+    "review-feedback",
+    tostring(fix.reviewed_head_sha or "nohead"),
+    tostring(fix.review_dedup_key or "noreview"),
+  })
 end
 
 function C.build_devloop_ready_payload(M, source)
@@ -140,12 +169,15 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     review_proposal_id = review_fact.review_proposal_id,
     review_dedup_key = review_fact.review_dedup_key,
     reviewed_head_sha = review_fact.reviewed_head_sha,
+    repair_input = C.fixing_repair_input(review_fact),
+    ci_failure_key = review_fact.ci_failure_key,
     dedup_key = base_ids.dedup_key({
       "fixing",
       tostring(origin.proposal_id),
       tostring(version),
       tostring(pr_number),
       tostring(review_fact.review_dedup_key),
+      tostring(review_fact.ci_failure_key or "noci"),
     }),
     source_ref = base_ids.normalize_source_ref(source_ref),
   }
@@ -169,6 +201,10 @@ function C.build_devloop_fixing_payload(origin, pr_number, review_fact, source_r
     end
     payload.predecessor_set = tostring(review_fact.predecessor_set)
   end
+  if payload.ci_failure_key ~= nil and not ci_failure_keys.is_valid(payload.ci_failure_key, devloop_base._max_dedup_len) then
+    error("github-devloop: invalid ci failure key")
+  end
+  payload.work_unit_key = C.fixing_work_unit_key(payload)
   local gate_failure_excerpt = shared.bounded_control_text(review_fact.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len)
   if gate_failure_excerpt ~= nil then
     payload.gate_failure_excerpt = gate_failure_excerpt
@@ -194,6 +230,7 @@ function C.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     blocking_gap = feedback.blocking_gap,
     gate_baseline_sha = feedback.gate_baseline_sha,
     predecessor_set = feedback.predecessor_set,
+    ci_failure_key = feedback.ci_failure_key,
     gate_failure_excerpt = feedback.review_reason,
   }, source_ref)
   payload.dedup_key = base_ids.dedup_key({
@@ -205,6 +242,7 @@ function C.build_replayed_fixing_payload(origin, pr_number, feedback, source_ref
     tostring(feedback.review_dedup_key),
     replay_fact_sha(feedback.gate_baseline_sha, "nobase"),
     tostring(feedback.predecessor_set or "nopred"),
+    tostring(feedback.ci_failure_key or "noci"),
     replay_fact_sha(feedback.reviewed_head_sha, "nohead"),
   })
   return payload

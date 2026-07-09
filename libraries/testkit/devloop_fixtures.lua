@@ -221,17 +221,15 @@ function M.new(deps)
   local function fixing(extra)
     local event = review_reached({ decision = "reject", body = "Review consensus rejects the diff." })
     local review_version = reviewing().version
-    local value = {
-      schema = "github-devloop.fixing.v1",
+    local value = payloads_builders.build_devloop_fixing_payload({
       proposal_id = "github-devloop/issue/owner/repo/42",
-      pr_number = 7,
-      version = core.fix_version_from_review_version(review_version),
+      impl_version = core.fix_version_from_review_version(review_version),
+    }, 7, {
       review_proposal_id = event.proposal_id,
       review_dedup_key = event.dedup_key,
-      reviewed_head_sha = "def456", blocking_gap = "missing regression guard",
-      dedup_key = "fixing/github-devloop/issue/owner/repo/42/v1",
-      source_ref = pr_source_ref(),
-    }
+      reviewed_head_sha = "def456",
+      blocking_gap = "missing regression guard",
+    }, pr_source_ref())
     for key, field in pairs(extra or {}) do
       value[key] = field
     end

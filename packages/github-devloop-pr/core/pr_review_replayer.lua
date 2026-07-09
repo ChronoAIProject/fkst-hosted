@@ -133,6 +133,7 @@ local function fix_comment_from_feedback(issue, pr_number, version, feedback, so
     {
       blocking_gap = feedback.blocking_gap,
       gate_failure_excerpt = feedback.gate_failure_excerpt or feedback.review_reason or feedback.reason,
+      ci_failure_key = feedback.ci_failure_key,
       preserve_nil_gate_failure_excerpt = feedback.gate_failure_excerpt == nil and feedback.review_reason == nil and feedback.reason == nil,
       current_head_sha = feedback.current_head_sha,
     }
@@ -148,6 +149,7 @@ local function fixing_replay_comment_request(issue, pr_number, fix_payload, feed
     blocking_gap = fix_payload.blocking_gap,
     gate_baseline_sha = fix_payload.gate_baseline_sha,
     predecessor_set = fix_payload.predecessor_set,
+    ci_failure_key = fix_payload.ci_failure_key,
     gate_failure_excerpt = fix_payload.gate_failure_excerpt,
     review_reason = feedback and feedback.review_reason,
     reason = feedback and feedback.reason,
@@ -580,9 +582,16 @@ local function replay_merging_state(dept, issue, state, row, facts, tools)
     })
   end
   if parsers_misc.is_ci_red_reason(ci_reason) then
+    local classification = M.classify_pr_ci_gate(current_pr, { repo = issue.repo, dept = dept, proposal_id = proposal_id })
+    if classification.kind ~= "OWN_CI_RED" then
+      devloop_logging.log_cas_decision(dept, proposal_id, state, "merging", "blocked", "applied(replay)", classification.reason)
+      return tools.raise_effects(dept, proposal_id, "blocked", state.version, { add = { "fkst-dev:blocked" }, remove = { "fkst-dev:merging" } }, {})
+    end
     local fix_version = devloop_state.fix_version_from_review_version(state.version)
     local source_ref = entity_lib.pr_source_ref(issue.repo, link.pr_number)
-    local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, ci_reason, current_pr.base_ref_oid, source_ref)
+    local request = requests_review.build_merge_gate_fix_comment_request(M, issue.repo, issue.number, merge_ready, fix_version, classification.reason, current_pr.base_ref_oid, source_ref, nil, {
+      ci_failure_key = classification.ci_failure_key,
+    })
     local effects = {
       { queue = "github-proxy.github_pr_comment_request", payload = request },
     }

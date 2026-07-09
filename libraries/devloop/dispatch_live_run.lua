@@ -29,7 +29,7 @@ local function row_matches_role(row, role)
     and type(match) == "table"
     and tostring(match.role or "") == tostring(role or "")
     and match.proposal_id == "state.proposal_id"
-    and match.dedup_key == "state.version"
+    and (match.dedup_key == "state.version" or match.dedup_key == "state.work_unit_key")
 end
 
 local function table_opt(value)
@@ -78,6 +78,7 @@ local function shared_liveness_live(liveness, role, proposal_id, dedup_key, fact
     state = row.from_state,
     proposal_id = proposal_id,
     version = dedup_key,
+    work_unit_key = dedup_key,
   })
   current_facts = copy_with_defaults(current_facts, {
     proposal_id = proposal_id,

@@ -11,6 +11,7 @@ local transition_version = require("contract.transition_version")
 local autonomy_ledger = require("devloop.autonomy_ledger")
 local shared = require("devloop.markers.shared")
 local m_builders = require("devloop.markers.builders")
+local ci_failure_keys = require("devloop.ci_failure_keys")
 
 local valid_round = shared.valid_round
 local marker_attr = shared.marker_attr
@@ -287,6 +288,7 @@ local function merge_gate_fix_fact_matches_bindings(fact, opts)
   local baseline_bound = opts.match_gate_baseline_sha == true or opts.gate_baseline_sha ~= nil
   return (opts.review_proposal_id == nil or fact.review_proposal_id == tostring(opts.review_proposal_id))
     and (opts.review_dedup_key == nil or (fact_review_dedup ~= nil and fact_review_dedup == opts_review_dedup))
+    and (opts.ci_failure_key == nil or fact.ci_failure_key == tostring(opts.ci_failure_key))
     and (not baseline_bound
       or (opts.gate_baseline_sha ~= nil and fact.gate_baseline_sha == tostring(opts.gate_baseline_sha))
       or (opts.gate_baseline_sha == nil and fact.gate_baseline_sha == nil))
@@ -306,6 +308,7 @@ function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
       local marker_head_sha = marker:match('head_sha="([^"]+)"')
       local marker_gate_baseline_sha = marker:match('gate_baseline_sha="([^"]+)"')
       local marker_predecessor_set = marker:match('predecessor_set="([^"]+)"')
+      local marker_ci_failure_key = marker:match('ci_failure_key="([^"]+)"')
       local marker_reason = marker:match('reason="([^"]+)"')
       if marker_issue == tostring(issue_proposal_id)
         and marker_version == tostring(issue_version)
@@ -314,13 +317,15 @@ function C.merge_gate_fix_fact(comments, issue_proposal_id, issue_version, opts)
         and strings.is_bounded_string(marker_reason, devloop_base._max_key_len)
         and forge_validators.is_git_sha(marker_head_sha)
         and (marker_gate_baseline_sha == nil or forge_validators.is_git_sha(marker_gate_baseline_sha))
-        and (marker_predecessor_set == nil or strings.is_path_safe_key(marker_predecessor_set, devloop_base._max_dedup_len)) then
+        and (marker_predecessor_set == nil or strings.is_path_safe_key(marker_predecessor_set, devloop_base._max_dedup_len))
+        and (marker_ci_failure_key == nil or ci_failure_keys.is_valid(marker_ci_failure_key, devloop_base._max_dedup_len)) then
         local fact = {
           review_proposal_id = marker_review_proposal,
           review_dedup_key = marker_review_dedup,
           reviewed_head_sha = marker_head_sha,
           gate_baseline_sha = marker_gate_baseline_sha,
           predecessor_set = marker_predecessor_set,
+          ci_failure_key = marker_ci_failure_key,
           reason = marker_reason,
           review_reason = parsers_misc._comment_body(comment),
         }

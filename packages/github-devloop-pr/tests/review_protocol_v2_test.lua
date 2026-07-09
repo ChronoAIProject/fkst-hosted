@@ -155,6 +155,13 @@ return {
     t.is_true(prompt:find("current target branch has already been merged", 1, true) ~= nil)
     t.is_true(prompt:find("Target branch merge context: sync_clean", 1, true) ~= nil)
 
+    local ci_prompt = core.build_fix_prompt(h.fixing({
+      repair_input = "ci-failure",
+      ci_failure_key = "head:def456/checks:digest-0000000101",
+    }), { title = "Fix parser" }, "own-ci-red", nil, manifest)
+    t.is_true(ci_prompt:find("terminal own-CI failure key head:def456/checks:digest-0000000101", 1, true) ~= nil)
+    t.is_true(ci_prompt:find("fix the failing own-CI test", 1, true) ~= nil)
+
     local conflict_prompt = core.build_fix_prompt(fix, {
       title = "Fix parser",
     }, "Review says the implementation raised the bounds.", fix.framing, manifest, {

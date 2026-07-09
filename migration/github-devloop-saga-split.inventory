@@ -1,6 +1,7 @@
 {"path":"libraries/devloop/autonomy_ledger.lua","owner":"shared","reason":"autonomy ledger markers and facts are written by PR merge and read by issue-side observability/tests."}
 {"path":"libraries/devloop/base.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/base_ids.lua","owner":"shared","reason":"shared devloop id/key/dedup helpers (extracted from base.lua) used across issue and PR packages."}
+{"path":"libraries/devloop/ci_failure_keys.lua","owner":"shared","reason":"CI failure key grammar is shared by merge-gate markers, fixing payloads, liveness/replay identity, and PR handoff validation."}
 {"path":"libraries/devloop/claims.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/commands.lua","owner":"shared","reason":"shared devloop kernel used across issue and PR packages."}
 {"path":"libraries/devloop/comment_handoff.lua","owner":"shared","reason":"comment handoff accept/log helpers are shared by issue and PR handoff departments."}

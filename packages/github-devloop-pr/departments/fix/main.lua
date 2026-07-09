@@ -15,14 +15,11 @@ local conflict_telemetry = require("devloop.conflict_telemetry")
 local context_bundle = require("devloop.context_bundle")
 local config = require("devloop.config")
 local m_mq = require("devloop.merge_queue")
+local ci_repair_attempts = require("departments.fix.ci_repair_attempts")
 
 local dispatch_liveness = {
-  restart_transition_table = function(...)
-    return core.restart_transition_table(...)
-  end,
-  restart_row_receiver_liveness = function(...)
-    return core.restart_row_receiver_liveness(...)
-  end,
+  restart_transition_table = function(...) return core.restart_transition_table(...) end,
+  restart_row_receiver_liveness = function(...) return core.restart_row_receiver_liveness(...) end,
 }
 
 local payloads_builders = require("devloop.payloads.builders")
@@ -33,11 +30,7 @@ local devloop_state = require("devloop.state")
 local devloop_commands = require("devloop.commands")
 local spec = {
   consumes = { "devloop_fixing" },
-  produces = {
-    "github-proxy.github_issue_label_request",
-    "github-proxy.github_pr_comment_request",
-    "devloop_review_meta",
-  },
+  produces = { "github-proxy.github_issue_label_request", "github-proxy.github_pr_comment_request", "devloop_review_meta" },
   stall_window = "10m",
   retry = { max_attempts = 12, base = "5s", cap = "30s" },
 }
@@ -226,17 +219,7 @@ local function current_predecessors_for_fix(repo, integration_branch, fix, curre
   return predecessors, m_mq.merge_queue_predecessor_set(predecessors)
 end
 
-local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)
-  if fix.predecessor_set == nil then
-    return nil, "not-speculative"
-  end
-  local predecessors, current_set = current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
-  if predecessors == nil then
-    return nil, current_set
-  end
-  if tostring(current_set) ~= tostring(fix.predecessor_set) then
-    return nil, "predecessor-set-mismatch", current_set
-  end
+local function merge_predecessor_entries_for_fix(worktree, integration_branch, predecessors, current_set)
   if #predecessors == 0 then
     return nil, "not-speculative"
   end
@@ -254,6 +237,20 @@ local function merge_speculative_predecessors_for_fix(worktree, repo, integratio
     })
   end
   return context, "ok"
+end
+
+local function merge_speculative_predecessors_for_fix(worktree, repo, integration_branch, fix, current_pr)
+  if fix.predecessor_set == nil then
+    return nil, "not-speculative"
+  end
+  local predecessors, current_set = current_predecessors_for_fix(repo, integration_branch, fix, current_pr)
+  if predecessors == nil then
+    return nil, current_set
+  end
+  if tostring(current_set) ~= tostring(fix.predecessor_set) then
+    return nil, "predecessor-set-mismatch", current_set
+  end
+  return merge_predecessor_entries_for_fix(worktree, integration_branch, predecessors, current_set)
 end
 
 local function assert_no_unmerged_paths(worktree)
@@ -349,6 +346,8 @@ local function raise_stale_speculation_refix(repo, issue_number, fix, current_st
       blocking_gap = fix.blocking_gap,
       gate_failure_excerpt = fix.gate_failure_excerpt,
       preserve_nil_gate_failure_excerpt = true,
+      repair_input = fix.repair_input,
+      ci_failure_key = fix.ci_failure_key,
     }
   )
   local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
@@ -412,13 +411,24 @@ end
 
 local function run_fix_attempt(plan)
   local worktree = branch_worktree(plan.repo, plan.issue_number, plan.fix.version, plan.branch)
-  local merge_context, speculative_reason, speculative_current_set = merge_speculative_predecessors_for_fix(
-    worktree,
-    plan.repo,
-    plan.branches.integration,
-    plan.fix,
-    plan.current_pr
-  )
+  local merge_context, speculative_reason, speculative_current_set
+  if plan.speculative_predecessors ~= nil then
+    merge_context, speculative_reason = merge_predecessor_entries_for_fix(
+      worktree,
+      plan.branches.integration,
+      plan.speculative_predecessors,
+      plan.speculative_current_set
+    )
+    speculative_current_set = plan.speculative_current_set
+  else
+    merge_context, speculative_reason, speculative_current_set = merge_speculative_predecessors_for_fix(
+      worktree,
+      plan.repo,
+      plan.branches.integration,
+      plan.fix,
+      plan.current_pr
+    )
+  end
   if merge_context == nil and speculative_reason ~= "not-speculative" then
     if speculative_reason == "predecessor-set-mismatch" then
       return {
@@ -453,7 +463,7 @@ local function run_fix_attempt(plan)
     version = plan.fix.dedup_key,
     tick = plan.event_ts,
   })
-  local result = workflow_codex.dispatch(convergence_identity.from_parts("fix", plan.fix.proposal_id, plan.fix.version, {
+  local result = workflow_codex.dispatch(convergence_identity.from_parts("fix", plan.fix.proposal_id, plan.fix.work_unit_key, {
     angle_lane = "worker",
   }), {
     prompt = core.build_fix_prompt(plan.fix, plan.current_issue, plan.feedback_reason, plan.fix.framing, content_fetch, merge_context),
@@ -626,6 +636,11 @@ local function apply_fix_outcome(repo, issue_number, fix, branch, outcome)
     return
   end
   if outcome.kind == "review-meta" then
+    if fix.repair_input == "ci-failure" then
+      ci_repair_attempts.raise_attempt_record(repo, fix, outcome.reason or "no-repair", outcome.detail)
+      ci_repair_attempts.raise_blocked(repo, issue_number, fix, "own-ci-red-unrepaired", outcome.reason or outcome.detail)
+      return
+    end
     raise_review_meta(repo, issue_number, fix, outcome.reason, outcome.detail)
     return
   end
@@ -725,6 +740,7 @@ local function act_fix(event)
         review_dedup_key = fix.review_dedup_key,
         gate_baseline_sha = fix.gate_baseline_sha,
         match_gate_baseline_sha = true,
+        ci_failure_key = fix.ci_failure_key,
       })
       if merge_gate_fact == nil then
         merge_gate_fact = merge_gate_candidate
@@ -758,6 +774,10 @@ local function act_fix(event)
       end
       if merge_gate_fact.gate_baseline_sha ~= fix.gate_baseline_sha then
         devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(merge-gate-baseline-mismatch)", "fix event does not match canonical merge-gate baseline")
+        return
+      end
+      if merge_gate_fact.ci_failure_key ~= fix.ci_failure_key then
+        devloop_logging.log_cas_decision("fix", fix.proposal_id, state, "fixing", "reviewing", "skip-stale(ci-failure-key-mismatch)", "fix event does not match canonical CI failure key")
         return
       end
       feedback_reason = merge_gate_fact.review_reason
@@ -803,6 +823,11 @@ local function act_fix(event)
       return
     end
 
+    if fix.repair_input == "ci-failure" and ci_repair_attempts.fact(current_pr.comments, fix) ~= nil then
+      ci_repair_attempts.raise_blocked(repo, issue_number, fix, "attempt-already-completed", "A bounded repair attempt already completed for this head and CI failure key.")
+      return
+    end
+
     if not assert_fix_write_gate(fix, repo, issue_number) then
       return
     end
@@ -825,6 +850,23 @@ local function act_fix(event)
       return
     end
 
+    local speculative_predecessors = nil
+    local speculative_current_set = nil
+    if fix.predecessor_set ~= nil then
+      speculative_predecessors, speculative_current_set = current_predecessors_for_fix(repo, branches.integration, fix, current_pr)
+      if speculative_predecessors ~= nil and tostring(speculative_current_set) ~= tostring(fix.predecessor_set) then
+        raise_stale_speculation_refix(
+          repo,
+          issue_number,
+          fix,
+          state,
+          speculative_current_set,
+          "speculative predecessor set changed"
+        )
+        return
+      end
+    end
+
     attempt_plan = {
       repo = repo,
       issue_number = issue_number,
@@ -838,6 +880,8 @@ local function act_fix(event)
       state = state,
       event_ts = event.ts,
       event_queue = event.queue,
+      speculative_predecessors = speculative_predecessors,
+      speculative_current_set = speculative_current_set,
     }
   end)
   if attempt_plan == nil then
@@ -847,10 +891,11 @@ local function act_fix(event)
   with_lock(lock_key, function()
     local prechecked_pr, prechecked_state = precheck_fix_write_gate(repo, fix, attempt_plan.branch)
     pre_spawn_gate_ok = prechecked_pr ~= nil
-    if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "fix", fix.proposal_id, fix.version, {
+    if pre_spawn_gate_ok and dispatch_live_run.dispatch_live_run_dedup(dispatch_liveness, "fix", fix.proposal_id, fix.work_unit_key, {
       state = prechecked_state,
       current_pr = prechecked_pr,
       proposal_id = fix.proposal_id,
+      work_unit_key = fix.work_unit_key,
       now_seconds = now(),
     }) then
       devloop_logging.log_cas_decision(

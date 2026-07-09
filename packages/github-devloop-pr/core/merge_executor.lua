@@ -92,7 +92,7 @@ local function raise_decompose_for_max_fix_rounds(merge_ready, current_state, re
   devloop_logging.log_raise("merge", merge_ready.proposal_id, "devloop_fix_reconcile", fix_reconcile)
   devloop_logging.log_raise("merge", merge_ready.proposal_id, "github-devloop-decompose.devloop_decompose", decompose)
 end
-local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position)
+local function raise_fixing(repo, issue_number, merge_ready, current_state, current_pr, reason, queue_position, ci_failure_key)
   local source_ref = entity_lib.pr_source_ref(repo, merge_ready.pr_number)
   if devloop_state.version_fix_round(current_state.version) >= config.max_fix_rounds() then
     raise_decompose_for_max_fix_rounds(merge_ready, current_state, reason, source_ref)
@@ -114,7 +114,9 @@ local function raise_fixing(repo, issue_number, merge_ready, current_state, curr
     end
     predecessor_set = position.predecessor_set
   end
-  local comment_request = requests_review.build_merge_gate_fix_comment_request(core, repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set)
+  local comment_request = requests_review.build_merge_gate_fix_comment_request(core, repo, issue_number, merge_ready, fix_version, reason, gate_baseline_sha, source_ref, predecessor_set, {
+    ci_failure_key = ci_failure_key,
+  })
   local label_request = issue_number ~= nil and requests_labels.build_state_label_request(repo,
     issue_number,
     "fixing",
@@ -561,7 +563,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
         return
       end
       log_gate(merge_ready, "fixing", classification.reason)
-      raise_fixing(repo, issue_number, merge_ready, state, current_pr, classification.reason, queue_position)
+      raise_fixing(repo, issue_number, merge_ready, state, current_pr, classification.reason, queue_position, classification.ci_failure_key)
       return
     end
     if not parsers_misc.is_ci_red_reason(rollup_reason) then
@@ -613,7 +615,7 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   log_gate(merge_ready, "write-ready", "write-time FKST_GITHUB_WRITE=1 and trusted review-result approve")
   devloop_logging.log_cas_decision("merge", merge_ready.proposal_id, rechecked_state, "merge-ready", "merging", "applied", "all merge gates satisfied; invoking PR merge")
-  local merge_ok, merge_reason, merge_rechecked_pr = core.run_verified_pr_merge({
+  local merge_ok, merge_reason, merge_rechecked_pr, merge_gate_classification = core.run_verified_pr_merge({
     repo = repo,
     pr_number = merge_ready.pr_number,
     head_sha = merge_ready.reviewed_head_sha,
@@ -663,7 +665,11 @@ local function process_merge_ready_locked(repo, issue_number, merge_ready, branc
   end
   if not merge_ok and parsers_misc.is_ci_red_reason(merge_reason) then
     log_gate(merge_ready, "fixing", merge_reason)
-    raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason, queue_position)
+    local classification = merge_gate_classification or {}
+    if classification.ci_failure_key == nil then
+      error("github-devloop: write-time-own-ci-red-missing-key: own-CI red write-time merge result lacked CI failure key")
+    end
+    raise_fixing(repo, issue_number, merge_ready, rechecked_state, merge_rechecked_pr, merge_reason, queue_position, classification.ci_failure_key)
     return
   end
   if not merge_ok and parsers_misc.is_ci_wait_reason(merge_reason) then

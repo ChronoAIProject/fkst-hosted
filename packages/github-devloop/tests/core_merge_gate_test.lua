@@ -233,7 +233,7 @@ return {
     t.eq(classification.reason, "own-ci-red")
   end,
 
-  test_rollup_red_red_host_head_check_is_own_ci_red_without_test = function()
+  test_rollup_red_optional_head_failures_without_required_check_are_unknown = function()
     mock_check_runs('{"total_count":2,"check_runs":[{"name":"fkst-host-policy","status":"completed","conclusion":"failure","head_sha":"def456"},{"name":"fast-gates","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
     local classification = core.classify_pr_ci_gate(pr({
       status_check_rollup = {
@@ -243,13 +243,13 @@ return {
       repo = "owner/repo",
       proposal_id = "github-devloop/issue/owner/repo/42",
     })
-    t.eq(classification.kind, "OWN_CI_RED")
+    t.eq(classification.kind, "CI_UNKNOWN")
     t.eq(classification.merge_blocking, true)
-    t.eq(classification.actionable, true)
-    t.eq(classification.reason, "own-ci-red")
+    t.eq(classification.actionable, false)
+    t.eq(classification.reason, "ci-unknown")
   end,
 
-  test_rollup_red_host_head_failure_wins_over_pending_required_check = function()
+  test_pending_required_check_wins_over_failed_optional_head_check = function()
     mock_check_runs('{"total_count":2,"check_runs":[{"name":"test","status":"in_progress","conclusion":null,"head_sha":"def456"},{"name":"fast-gates","status":"completed","conclusion":"failure","head_sha":"def456"}]}\n')
     local classification = core.classify_pr_ci_gate(pr({
       status_check_rollup = {
@@ -259,10 +259,10 @@ return {
       repo = "owner/repo",
       proposal_id = "github-devloop/issue/owner/repo/42",
     })
-    t.eq(classification.kind, "OWN_CI_RED")
+    t.eq(classification.kind, "CHECKS_PENDING")
     t.eq(classification.merge_blocking, true)
-    t.eq(classification.actionable, true)
-    t.eq(classification.reason, "own-ci-red")
+    t.eq(classification.actionable, false)
+    t.eq(classification.reason, "checks-pending")
   end,
 
   test_empty_rollup_fallback_pending_required_commit_check_run = function()

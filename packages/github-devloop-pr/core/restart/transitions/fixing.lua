@@ -42,7 +42,7 @@ return function(M, h)
         match = {
           role = "fix",
           proposal_id = "state.proposal_id",
-          dedup_key = "state.version",
+          dedup_key = "state.work_unit_key",
         },
         status = "running",
         on_error = "defer",
@@ -54,10 +54,10 @@ return function(M, h)
       driving_queue = "devloop_fixing",
       state_kind = "worker",
       liveness_class = "fixing.actionable",
-      input_fact_family = "fix-feedback",
+      input_fact_family = "revision-goal",
       output_postcondition_family = "revision_published",
       phase_rank = devloop_state.stage_rank("fixing"),
-      lineage_keys = { "state.version", "review-result.dedup", "review-result.head_sha", "source_ref" },
+      lineage_keys = { "state.version", "revision-goal.work_unit_key", "review-result.dedup", "review-result.head_sha", "ci-failure.ci_failure_key", "source_ref" },
       successors = {
         {
           state = "reviewing",
@@ -74,7 +74,7 @@ return function(M, h)
       },
     }),
     payload_builder = payloads_builders.build_devloop_fixing_payload,
-    dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<reviewed_head_sha>",
+    dedup_shape = "forward:fixing/<proposal_id>/<version>/<pr>/<review_dedup>/<ci_failure_key-or-noci>; replay:fixing/replay/<proposal_id>/<version>/<pr>/<review_dedup>/<gate_baseline_sha-or-nobase>/<predecessor_set-or-nopred>/<ci_failure_key-or-noci>/<reviewed_head_sha>",
     required_facts = {
       fact("state", "marker-read"),
       fact("pr-link", "marker-read"),
@@ -84,8 +84,8 @@ return function(M, h)
       fact("pr-head", "fetch-before-compare"),
     },
     advancing_facts = {
-      advancing_fact("fix-feedback", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
-      advancing_fact("fix-feedback", "reviewing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("revision-goal", "fixing", { pr = true, liveness_scan = true }, "source_ref:pr"),
+      advancing_fact("revision-goal", "reviewing", { pr = true, liveness_scan = true }, "source_ref:pr"),
     },
     payload_fields = {
       schema = "literal:github-devloop.fixing.v1",
@@ -95,6 +95,9 @@ return function(M, h)
       review_proposal_id = "marker:merge-gate.review_proposal",
       review_dedup_key = "marker:merge-gate.review_dedup",
       reviewed_head_sha = "marker:merge-gate.head_sha",
+      repair_input = "typed:review-feedback|ci-failure",
+      ci_failure_key = "marker:merge-gate.ci_failure_key",
+      work_unit_key = "dedup:fixing-work-unit",
       dedup_key = "dedup:replayed-fixing",
       gate_baseline_sha = "marker:merge-gate.gate_baseline_sha",
       gate_failure_excerpt = "comment_body:fix-feedback",

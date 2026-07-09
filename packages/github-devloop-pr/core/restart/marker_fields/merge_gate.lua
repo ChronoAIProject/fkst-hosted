@@ -7,5 +7,6 @@ return {
       review_dedup = true,
       head_sha = true,
       gate_baseline_sha = true,
+      ci_failure_key = true,
       reason = true,
 }

@@ -16,6 +16,7 @@ Repository state:
 - If any local test fails, treat that failing test as the primary signal to fix and fix the failure before finishing.
 - Do not finish with failing tests. If local verification cannot run because the engine BIN is unreachable, report that environment failure explicitly instead of claiming success.
 - For merge-gate CI failures such as failing CI checks or rollup-red feedback, use the local iteration command for fast feedback while fixing; CI remains the full-suite gate.
+- {{repair_input_instruction}}
 - Apply the SMALLEST change that closes the named blocking gap: {{blocking_gap}}.
 - Target branch merge context: {{target_merge_context}}
 - Do not address advisory comments.

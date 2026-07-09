@@ -5,6 +5,7 @@ local parsers_misc = require("devloop.parsers.misc")
 local source_refs = require("contract.source_ref")
 local forge_validators = require("devloop.forge_validators")
 local entity_lib = require("devloop.entity")
+local ci_failure_keys = require("devloop.ci_failure_keys")
 
 local C = {}
 function C.is_supported_fixing(payload)
@@ -14,6 +15,9 @@ function C.is_supported_fixing(payload)
     or not strings.is_bounded_string(payload.version, devloop_base._max_dedup_len)
     or not devloop_base.is_safe_pr_review_result_ref(payload.review_proposal_id, payload.review_dedup_key)
     or not forge_validators.is_git_sha(payload.reviewed_head_sha)
+    or (payload.repair_input ~= nil and payload.repair_input ~= "review-feedback" and payload.repair_input ~= "ci-failure")
+    or (payload.ci_failure_key ~= nil and not ci_failure_keys.is_valid(payload.ci_failure_key, devloop_base._max_dedup_len))
+    or (payload.work_unit_key ~= nil and not strings.is_path_safe_key(payload.work_unit_key, devloop_base._max_dedup_len))
     or (payload.gate_baseline_sha ~= nil and not forge_validators.is_git_sha(payload.gate_baseline_sha))
     or (payload.predecessor_set ~= nil and not strings.is_path_safe_key(payload.predecessor_set, devloop_base._max_dedup_len))
     or (payload.gate_failure_excerpt ~= nil and not strings.is_bounded_string(payload.gate_failure_excerpt, parsers_misc.max_rollup_failure_summary_len))
@@ -24,6 +28,17 @@ function C.is_supported_fixing(payload)
   end
 
   if not entity_lib.is_safe_entity_proposal_ref(payload.proposal_id, payload.dedup_key) then
+    return false
+  end
+  local repair_input = payload.repair_input or "review-feedback"
+  if repair_input == "ci-failure" and payload.ci_failure_key == nil then
+    return false
+  end
+  if repair_input == "review-feedback" and payload.ci_failure_key ~= nil then
+    return false
+  end
+  local expected_work_unit = require("devloop.payloads.builders").fixing_work_unit_key(payload)
+  if expected_work_unit == nil or tostring(payload.work_unit_key or "") ~= expected_work_unit then
     return false
   end
   if tostring(payload.dedup_key):sub(1, #"fixing/replay/") ~= "fixing/replay/" then
@@ -39,6 +54,7 @@ function C.is_supported_fixing(payload)
     tostring(payload.review_dedup_key),
     tostring(payload.gate_baseline_sha or "nobase"),
     tostring(payload.predecessor_set or "nopred"),
+    tostring(payload.ci_failure_key or "noci"),
     tostring(payload.reviewed_head_sha),
   })
   return tostring(payload.dedup_key) == replay_dedup

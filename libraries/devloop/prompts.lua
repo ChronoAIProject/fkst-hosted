@@ -99,6 +99,14 @@ local function bounded_gap(M, gap)
   return value
 end
 
+local function repair_input_instruction(fix)
+  if type(fix) == "table" and fix.repair_input == "ci-failure" then
+    return "This fix round is for terminal own-CI failure key " .. devloop_base.neutralize_untrusted_prompt_text(fix.ci_failure_key or "")
+      .. "; reproduce with `scripts/run.sh test` or the scoped local iteration command, then fix the failing own-CI test."
+  end
+  return "This fix round is for review-feedback; address the named review blocking gap."
+end
+
 local function target_merge_context(M, merge_context)
   if type(merge_context) ~= "table" then
     return "sync_clean"
@@ -170,6 +178,7 @@ function M.build_fix_prompt(fix, current_issue, review_reason, framing, content_
     reviewed_head_sha = devloop_base.neutralize_untrusted_prompt_text(fix.reviewed_head_sha),
     framing = bounded_framing(M, framing),
     blocking_gap = bounded_gap(M, fix.blocking_gap),
+    repair_input_instruction = repair_input_instruction(fix),
     title = devloop_base.neutralize_untrusted_prompt_text(current_issue.title),
     local_test_command = config.local_iteration_test_command(),
     target_merge_context = target_merge_context(M, merge_context),

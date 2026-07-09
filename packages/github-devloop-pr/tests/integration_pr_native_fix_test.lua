@@ -42,17 +42,14 @@ end
 local function pr_native_fixing(extra)
   local event = pr_native_review_reached()
   local proposal_id = entity_lib.pr_proposal_id("owner/repo", 7)
-  local value = {
-    schema = "github-devloop.fixing.v1",
+  local value = require("devloop.payloads.builders").build_devloop_fixing_payload({
     proposal_id = proposal_id,
-    pr_number = 7,
-    version = core.fix_version_from_review_version("pr-native-version"),
+    impl_version = core.fix_version_from_review_version("pr-native-version"),
+  }, 7, {
     review_proposal_id = event.proposal_id,
     review_dedup_key = event.dedup_key,
     reviewed_head_sha = "def456",
-    dedup_key = "fixing/" .. proposal_id .. "/v1",
-    source_ref = h.pr_source_ref(),
-  }
+  }, h.pr_source_ref())
   for key, field in pairs(extra or {}) do
     value[key] = field
   end

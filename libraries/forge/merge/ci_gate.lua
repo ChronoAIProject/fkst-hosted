@@ -17,6 +17,7 @@ local pr_rollup_green = check_runs.pr_rollup_green
 local pr_mergeable = check_runs.pr_mergeable
 local is_not_mergeable_reason = check_runs.is_not_mergeable_reason
 local required_head_check_run_status = shared.required_head_check_run_status
+local required_head_ci_failure_key = shared.required_head_ci_failure_key
 local ci_classification = shared.ci_classification
 local integration_or_external_red = shared.integration_or_external_red
 local merge_gate_reason_row = shared.merge_gate_reason_row
@@ -59,31 +60,41 @@ local function classify_pr_ci_gate(pr, opts)
   if green then
     return ci_classification("OK", "rollup-green")
   end
-  if reason == "rollup-pending" then
-    return ci_classification("CHECKS_PENDING", "checks-pending")
-  end
   local repo = opts and opts.repo or nil
   local head_sha = tostring(pr and pr.head_sha or "")
   if not forge_validators.is_git_sha(head_sha) then
+    if reason == "rollup-pending" then
+      return ci_classification("CHECKS_PENDING", "checks-pending")
+    end
     return ci_classification("CI_UNKNOWN", "ci-unknown")
   end
   if tostring(repo or "") == "" then
+    if reason == "rollup-pending" then
+      return ci_classification("CHECKS_PENDING", "checks-pending")
+    end
     return ci_classification("CI_UNKNOWN", "ci-unknown")
   end
   local runs, fetch_reason = fetch_commit_check_runs(repo, head_sha)
   if runs == nil then
+    if reason == "rollup-pending" then
+      return ci_classification("CHECKS_PENDING", "checks-pending")
+    end
     return ci_classification("CI_UNKNOWN", fetch_reason or "ci-unknown")
   end
   log_check_runs_fallback(M, opts, repo, head_sha, runs, reason)
   local head_status = required_head_check_run_status(runs, head_sha)
-  if head_status == "red" then
-    return ci_classification("OWN_CI_RED", "own-ci-red", { check_runs = runs })
-  end
   if head_status == "pending" then
     return ci_classification("CHECKS_PENDING", "checks-pending", { check_runs = runs })
   end
   if head_status == "unknown" then
     return ci_classification("CI_UNKNOWN", "ci-unknown", { check_runs = runs })
+  end
+  local ci_failure_key = required_head_ci_failure_key(runs, head_sha)
+  if ci_failure_key ~= nil then
+    return ci_classification("OWN_CI_RED", "own-ci-red", { check_runs = runs, ci_failure_key = ci_failure_key })
+  end
+  if reason == "rollup-pending" then
+    return ci_classification("CHECKS_PENDING", "checks-pending", { check_runs = runs })
   end
   if reason == "rollup-red" then
     return integration_or_external_red(pr, head_sha, runs)
@@ -132,7 +143,7 @@ local function evaluate_ci_merge_gate(pr, opts)
   if not green then
     if green_reason == "rollup-red" then
       local classification = classify_pr_ci_gate(pr, opts)
-      return false, classification.reason
+      return false, classification.reason, classification
     end
     return false, green_reason
   end

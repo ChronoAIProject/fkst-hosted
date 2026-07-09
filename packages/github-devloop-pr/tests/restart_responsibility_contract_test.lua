@@ -2,6 +2,17 @@ local h = require("tests.devloop_core_helpers")
 local core = h.core
 local t = h.t
 
+local function copy_value(value)
+  if type(value) ~= "table" then
+    return value
+  end
+  local out = {}
+  for key, nested in pairs(value) do
+    out[key] = copy_value(nested)
+  end
+  return out
+end
+
 local function rows_by_state(rows)
   local by_state = {}
   for _, row in ipairs(rows or {}) do
@@ -65,5 +76,33 @@ return {
       t.is_true(edge.output_variant ~= "code_repair_needed")
       t.is_true(edge.decision_type ~= "MergeEligibility")
     end
+  end,
+
+  test_fixing_code_producer_keys_liveness_to_revision_goal_work_unit = function()
+    local row = rows_by_state(core.restart_transition_table()).fixing
+    local signature = row.responsibility_signature
+    local match = row.liveness_contract.real_execution.match
+    local lineage = {}
+    for _, key in ipairs(signature.lineage_keys or {}) do
+      lineage[key] = true
+    end
+
+    t.eq(signature.receiver_kind, "code-producer")
+    t.eq(signature.input_fact_family, "revision-goal")
+    t.eq(match.dedup_key, "state.work_unit_key")
+    t.eq(lineage["revision-goal.work_unit_key"], true)
+    t.eq(lineage["ci-failure.ci_failure_key"], true)
+    t.is_true(row.dedup_shape:find("<ci_failure_key-or-noci>", 1, true) ~= nil)
+    t.eq(row.payload_fields.work_unit_key, "dedup:fixing-work-unit")
+    t.eq(row.payload_fields.ci_failure_key, "marker:merge-gate.ci_failure_key")
+  end,
+
+  test_fixing_code_producer_rejects_version_keyed_ci_repair_liveness = function()
+    local row = copy_value(rows_by_state(core.restart_transition_table()).fixing)
+    row.liveness_contract.real_execution.match.dedup_key = "state.version"
+    local strict_errors = core.strict_restart_liveness_contract_errors({ row })
+    local generic_errors = core.liveness_contract_errors({ row })
+    t.is_true(table.concat(strict_errors, "\n"):find("fixing: code-producing CI repair codex_run defer real_execution.match.dedup_key must be state.work_unit_key", 1, true) ~= nil)
+    t.is_true(table.concat(generic_errors, "\n"):find("fixing: live-defer code-producing CI repair real_execution.match.dedup_key must be state.work_unit_key", 1, true) ~= nil)
   end,
 }

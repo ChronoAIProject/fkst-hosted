@@ -62,6 +62,10 @@ local function required_head_check_run_status(runs, head_sha)
   return check_runs.required_head_check_run_status(runs, head_sha, required_check_run_names)
 end
 
+local function required_head_ci_failure_key(runs, head_sha)
+  return check_runs.required_head_ci_failure_key(runs, head_sha, required_check_run_names)
+end
+
 local function ci_classification(kind, reason, extra)
   local result = extra or {}
   result.kind = kind
@@ -144,6 +148,7 @@ return {
   parse_commit_check_runs = parse_commit_check_runs,
   required_check_run_names = required_check_run_names,
   required_head_check_run_status = required_head_check_run_status,
+  required_head_ci_failure_key = required_head_ci_failure_key,
   ci_classification = ci_classification,
   integration_or_external_red = integration_or_external_red,
   merge_gate_reason_classes = merge_gate_reason_classes,

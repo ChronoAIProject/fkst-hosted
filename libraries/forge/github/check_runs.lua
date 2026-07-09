@@ -1,4 +1,5 @@
 local gitref = require("forge.gitref")
+local strings = require("contract.strings")
 
 local C = {}
 
@@ -32,6 +33,10 @@ function C.parse_commit_check_runs(stdout)
         headSha = run.headSha,
         check_suite = run.check_suite,
         checkSuite = run.checkSuite,
+        app = run.app,
+        workflowName = run.workflowName,
+        workflow_name = run.workflow_name,
+        workflow = run.workflow,
       })
     end
   end
@@ -242,6 +247,79 @@ local green_required_check_conclusions = {
   SKIPPED = true,
 }
 
+local function required_name_set(required_names)
+  local required = {}
+  for _, name in ipairs(required_names or {}) do
+    required[tostring(name)] = true
+  end
+  return required
+end
+
+local function run_matches_head(run, expected)
+  local run_head = C.check_run_head_sha(run)
+  return run_head == nil or run_head == expected
+end
+
+local function stable_run_workflow(run)
+  if type(run) ~= "table" then
+    return ""
+  end
+  for _, value in ipairs({
+    run.workflowName,
+    run.workflow_name,
+    type(run.workflow) == "table" and run.workflow.name or nil,
+    type(run.check_suite) == "table" and type(run.check_suite.workflow_run) == "table" and run.check_suite.workflow_run.name or nil,
+    type(run.checkSuite) == "table" and type(run.checkSuite.workflowRun) == "table" and run.checkSuite.workflowRun.name or nil,
+  }) do
+    local text = tostring(value or "")
+    if text ~= "" then
+      return text
+    end
+  end
+  return ""
+end
+
+local function stable_run_app_slug(run)
+  if type(run) ~= "table" then
+    return ""
+  end
+  for _, value in ipairs({
+    type(run.app) == "table" and run.app.slug or nil,
+    type(run.app) == "table" and run.app.name or nil,
+  }) do
+    local text = tostring(value or "")
+    if text ~= "" then
+      return text
+    end
+  end
+  return ""
+end
+
+local function failing_head_runs(runs, head_sha, required_names)
+  if type(runs) ~= "table" or not gitref.is_git_sha(head_sha) then
+    return nil
+  end
+  local required = required_names ~= nil and required_name_set(required_names) or nil
+  local expected = tostring(head_sha):lower()
+  local failing = {}
+  for _, run in ipairs(runs) do
+    local name = C.check_run_name(run)
+    if (required == nil or required[name]) and run_matches_head(run, expected) then
+      local state, conclusion = C.check_run_state(run)
+      if state == "COMPLETED" and not green_required_check_conclusions[conclusion] then
+        table.insert(failing, {
+          id = C.check_run_id(run),
+          name = name,
+          workflow = stable_run_workflow(run),
+          app_slug = stable_run_app_slug(run),
+          conclusion = conclusion,
+        })
+      end
+    end
+  end
+  return failing
+end
+
 function C.required_head_check_run_status(runs, head_sha, required_names)
   if type(runs) ~= "table" or not gitref.is_git_sha(head_sha) then
     return "unknown"
@@ -254,21 +332,17 @@ function C.required_head_check_run_status(runs, head_sha, required_names)
   end
   local expected = tostring(head_sha):lower()
   for _, run in ipairs(runs) do
-    local run_head = C.check_run_head_sha(run)
-    if run_head == nil or run_head == expected then
+    if run_matches_head(run, expected) then
+      local name = C.check_run_name(run)
       local state, conclusion = C.check_run_state(run)
-      if state == "COMPLETED" then
+      if required[name] ~= nil and state == "COMPLETED" then
         if not green_required_check_conclusions[conclusion] then
           return "red"
         end
-      else
-        local name = C.check_run_name(run)
-        if required[name] ~= nil then
-          pending_required[name] = true
-        end
+      elseif required[name] ~= nil then
+        pending_required[name] = true
       end
 
-      local name = C.check_run_name(run)
       if required[name] ~= nil then
         required[name] = true
       end
@@ -283,6 +357,25 @@ function C.required_head_check_run_status(runs, head_sha, required_names)
     end
   end
   return "green"
+end
+
+function C.required_head_ci_failure_key(runs, head_sha, required_names)
+  local failing = failing_head_runs(runs, head_sha, required_names)
+  if failing == nil or #failing == 0 then
+    return nil
+  end
+  local parts = {}
+  for _, run in ipairs(failing) do
+    table.insert(parts, table.concat({
+      "name=" .. tostring(run.name or ""),
+      "workflow=" .. tostring(run.workflow or ""),
+      "app=" .. tostring(run.app_slug or ""),
+      "conclusion=" .. tostring(run.conclusion or ""),
+    }, "\t"))
+  end
+  table.sort(parts)
+  local head = tostring(head_sha):lower()
+  return "head:" .. head .. "/checks:digest-" .. strings.decimal_checksum(head .. "\n" .. table.concat(parts, "\n"))
 end
 
 C.required_check_run_names = required_check_run_names

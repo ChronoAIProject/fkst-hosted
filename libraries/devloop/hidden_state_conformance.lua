@@ -23,6 +23,7 @@ local BASE_BRANCH = "integration/dev"
 local HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
 local BASE_SHA = "fedcba9876543210fedcba9876543210fedcba98"
 local ALT_HEAD_SHA = "89abcdef0123456789abcdef0123456789abcdef"
+local CI_FAILURE_KEY = "head:" .. HEAD_SHA .. "/checks:digest-0000000001"
 local SOURCE_REF = { kind = "external", ref = "owner/repo#issue/42" }
 local PR_SOURCE_REF = { kind = "external", ref = "owner/repo#pr/7" }
 local key = declarations.key
@@ -316,6 +317,20 @@ local function fact_value(core, row, state, family, successor)
       reason = "behavioral-fixture",
     }
   end
+  if family == "revision-goal" then
+    local reviewed = successor == "reviewing" and BASE_SHA or HEAD_SHA
+    local review_id = devloop_base.pr_review_proposal_id(REPO, PR_NUMBER, state.version, reviewed)
+    return {
+      proposal_id = ISSUE_PROPOSAL,
+      version = state.version,
+      pr_number = PR_NUMBER,
+      review_proposal_id = review_id,
+      review_dedup_key = devloop_base.pr_review_consensus_dedup_key(review_id),
+      reviewed_head_sha = reviewed,
+      reason = "behavioral-fixture",
+      ci_failure_key = successor == "fixing" and CI_FAILURE_KEY or nil,
+    }
+  end
   if family == "review-result" then
     return {
       proposal_id = ISSUE_PROPOSAL,
@@ -404,6 +419,11 @@ local function store_fact_value(facts, family, value)
   elseif family == "fix-feedback" then
     facts.fix_feedback = value
     facts.feedback = facts.feedback or value
+  elseif family == "revision-goal" then
+    facts.revision_goal = value
+    facts["merge-gate"] = value
+    facts.merge_gate = value
+    facts.feedback = facts.feedback or value
   elseif family == "review-result" or family == "merge-gate" then
     facts.feedback = facts.feedback or value
   elseif family == "review-meta" or family == "review-converge-round" then
@@ -431,6 +451,8 @@ local function install_marker(core, entity, state, family, value, is_synthetic)
     table.insert(entity.comments, comment(core, decompose_lib.decomposed_marker(ISSUE_PROPOSAL, state.version, PR_NUMBER, value.count or 1), "2026-06-03T01:03:08Z"))
   elseif family == "fix-feedback" then
     table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
+  elseif family == "revision-goal" then
+    table.insert(entity.comments, comment(core, m_builders.merge_gate_marker(ISSUE_PROPOSAL, PR_NUMBER, state.version, value.review_proposal_id, value.review_dedup_key, value.reviewed_head_sha, BASE_SHA, value.reason or "behavioral-fixture", nil, value.ci_failure_key), "2026-06-03T01:03:09Z"))
   elseif family == "review-result" then
     table.insert(entity.comments, comment(core, m_builders.review_result_marker(value.review_proposal_id, ISSUE_PROPOSAL, value.decision or "reject", value.review_dedup_key, devloop_state.version_fix_round(state.version), value.blocking_gap or "behavioral-fixture"), "2026-06-03T01:03:09Z"))
     if value.decision == "approve" then

@@ -351,8 +351,20 @@ local function validate_codex_run_defer(row, errors)
   if match.proposal_id ~= "state.proposal_id" then
     table.insert(errors, state .. ": codex_run defer real_execution.match.proposal_id must be state.proposal_id")
   end
-  if match.dedup_key ~= "state.version" then
-    table.insert(errors, state .. ": codex_run defer real_execution.match.dedup_key must be state.version")
+  if match.dedup_key ~= "state.version" and match.dedup_key ~= "state.work_unit_key" then
+    table.insert(errors, state .. ": codex_run defer real_execution.match.dedup_key must be state.version or state.work_unit_key")
+  end
+  local signature = row.responsibility_signature
+  local lineage = {}
+  for _, key in ipairs(type(signature) == "table" and type(signature.lineage_keys) == "table" and signature.lineage_keys or {}) do
+    lineage[key] = true
+  end
+  if type(signature) == "table"
+    and signature.receiver_kind == "code-producer"
+    and (lineage["ci-failure.ci_failure_key"] == true
+      or (type(row.payload_fields) == "table" and row.payload_fields.ci_failure_key ~= nil))
+    and match.dedup_key ~= "state.work_unit_key" then
+    table.insert(errors, state .. ": code-producing CI repair codex_run defer real_execution.match.dedup_key must be state.work_unit_key")
   end
   if real_execution.status ~= expected_status then
     table.insert(errors, state .. ": codex_run defer real_execution.status must be " .. tostring(expected_status))

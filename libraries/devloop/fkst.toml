@@ -23,6 +23,7 @@ public = [
   "devloop.autonomy.projection",
   "devloop.base",
   "devloop.base_ids",
+  "devloop.ci_failure_keys",
   "devloop.claims",
   "devloop.commands",
   "devloop.commands.dashboard",

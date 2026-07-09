@@ -34,6 +34,13 @@ local merge_queue_lane_states = {
   merging = true,
 }
 
+local function is_merge_queue_lane_state(state_name, allow_current_fixing)
+  if merge_queue_lane_states[state_name] then
+    return true
+  end
+  return allow_current_fixing == true and state_name == "fixing"
+end
+
 C._merge_ready_starvation_threshold_minutes = 60
 
 local function has_merge_ready_created_at(entry)
@@ -137,7 +144,7 @@ local function merge_ready_version_for_lane_state(M, state)
   return version
 end
 
-local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
+local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base, allow_current_fixing)
   if type(pr) ~= "table" or tostring(pr.state or ""):upper() ~= "OPEN" then
     return nil
   end
@@ -145,7 +152,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
     return nil
   end
   local state = current_any_entity_state(M, pr.comments)
-  if not merge_queue_lane_states[state.state] then
+  if not is_merge_queue_lane_state(state.state, allow_current_fixing) then
     return nil
   end
   local current_head_sha = tostring(pr.head_sha or "")
@@ -157,7 +164,7 @@ local function merge_queue_entry_from_pr(M, repo, pr_number, pr, expected_base)
         if marker_issue ~= nil then
           local candidate_state = require("devloop.entity").current_entity_state(pr.comments, marker_issue)
           local merge_ready_version = merge_ready_version_for_lane_state(M, candidate_state)
-          if merge_queue_lane_states[candidate_state.state]
+          if is_merge_queue_lane_state(candidate_state.state, allow_current_fixing)
             and tostring(merge_ready_version or "") == tostring(marker:match('version="([^"]*)"') or "") then
             fact = m_facts.merge_ready_fact(pr.comments, marker_issue, merge_ready_version, pr_number, current_head_sha)
             state = candidate_state
@@ -191,7 +198,7 @@ function C.merge_queue_head(M, repo, base_branch, current)
   local entries = {}
   local seen = {}
   if type(current) == "table" and current.pr_number ~= nil and type(current.pr) == "table" then
-    local entry = merge_queue_entry_from_pr(M, repo, current.pr_number, current.pr, base_branch)
+    local entry = merge_queue_entry_from_pr(M, repo, current.pr_number, current.pr, base_branch, true)
     if entry ~= nil then
       table.insert(entries, entry)
       seen[tostring(entry.pr_number)] = true

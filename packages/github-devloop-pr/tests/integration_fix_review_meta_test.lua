@@ -359,6 +359,7 @@ return {
       reviewed_head_sha = "feedface",
       dedup_key = "fixing/github-devloop/issue/owner/repo/42/v2",
     })
+    second_event.work_unit_key = require("devloop.payloads.builders").fixing_work_unit_key(second_event)
     local recomputed_branch = devloop_base.implement_branch("owner/repo", "42", second_event.version)
     t.eq(first_branch ~= recomputed_branch, true)
     local reject_comment = requests_review.build_review_result_comment_request(core,

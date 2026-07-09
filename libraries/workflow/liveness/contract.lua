@@ -113,7 +113,25 @@ local function validate_liveness_signal_shape(M, state, signal, label, errors)
   validate_liveness_signal_producer(M, state, signal, family, resolver, errors)
 end
 
-local function validate_real_execution_signal(state, real_execution, errors)
+local function lineage_has(row, key)
+  local signature = row and row.responsibility_signature
+  for _, value in ipairs(type(signature) == "table" and type(signature.lineage_keys) == "table" and signature.lineage_keys or {}) do
+    if value == key then
+      return true
+    end
+  end
+  return false
+end
+
+local function consumes_ci_repair_identity(row)
+  local signature = row and row.responsibility_signature
+  return type(signature) == "table"
+    and signature.receiver_kind == "code-producer"
+    and (lineage_has(row, "ci-failure.ci_failure_key")
+      or (type(row.payload_fields) == "table" and row.payload_fields.ci_failure_key ~= nil))
+end
+
+local function validate_real_execution_signal(state, row, real_execution, errors)
   if type(real_execution) ~= "table" then
     table.insert(errors, state .. ": live-defer codex_run must declare real_execution")
     return
@@ -132,8 +150,11 @@ local function validate_real_execution_signal(state, real_execution, errors)
   if match.proposal_id ~= "state.proposal_id" then
     table.insert(errors, state .. ": live-defer codex_run real_execution.match.proposal_id must be state.proposal_id")
   end
-  if match.dedup_key ~= "state.version" then
-    table.insert(errors, state .. ": live-defer codex_run real_execution.match.dedup_key must be state.version")
+  if match.dedup_key ~= "state.version" and match.dedup_key ~= "state.work_unit_key" then
+    table.insert(errors, state .. ": live-defer codex_run real_execution.match.dedup_key must be state.version or state.work_unit_key")
+  end
+  if consumes_ci_repair_identity(row) and match.dedup_key ~= "state.work_unit_key" then
+    table.insert(errors, state .. ": live-defer code-producing CI repair real_execution.match.dedup_key must be state.work_unit_key")
   end
   if real_execution.status ~= "running" then
     table.insert(errors, state .. ": live-defer codex_run real_execution.status must be running")
@@ -179,7 +200,7 @@ local function validate_liveness_contract(M, row, errors)
     if contract.signal ~= nil then
       table.insert(errors, state .. ": live-defer codex_run must not declare marker signal")
     end
-    validate_real_execution_signal(state, contract.real_execution, errors)
+    validate_real_execution_signal(state, row, contract.real_execution, errors)
     return
   end
 

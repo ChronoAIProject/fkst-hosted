@@ -396,7 +396,7 @@ return {
         run_id = "fix-live",
         role = "fix",
         proposal_id = event.proposal_id,
-        dedup_key = event.version,
+        dedup_key = event.work_unit_key,
         status = "running",
         lease_expires_at_ms = (now() + 3600) * 1000,
       },
@@ -461,7 +461,7 @@ return {
     local event = fixing()
     local run_opts = opts("liveness-scan-fixing-live-codex")
     local comments = fixing_comments(event)
-    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.version)
+    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.work_unit_key)
     mock_repo_and_empty_issue_list()
     mock_pr_list()
     mock_issue_claim()
@@ -481,7 +481,7 @@ return {
     local branch = devloop_base.implement_branch(repo, "42", event.version)
     local rejection = reject_comment(event)
     local run_opts = opts("fixing-dispatch-live-run-no-marker", { FKST_GITHUB_WRITE = "1" })
-    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.version)
+    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.work_unit_key)
     mock_fix_dispatch_context(event, branch, rejection)
     t.mock_command('printf %s "$FKST_RUNTIME_ROOT"', { stdout = "/tmp/fkst-packages-test/github-devloop/runtime", stderr = "", exit_code = 0 })
     mock_existing_fix_worktree(branch, event.reviewed_head_sha)
@@ -514,24 +514,24 @@ return {
         run_id = "fix-live",
         role = "fix",
         proposal_id = event.proposal_id,
-        dedup_key = event.version,
+        dedup_key = event.work_unit_key,
         status = "running",
         lease_expires_at_ms = (now() + 3600) * 1000,
       },
     }, function()
-      t.eq(dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", event.proposal_id, event.version, facts), true)
+      t.eq(dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", event.proposal_id, event.work_unit_key, facts), true)
     end)
     with_codex_runs({
       {
         run_id = "fix-expired",
         role = "fix",
         proposal_id = event.proposal_id,
-        dedup_key = event.version,
+        dedup_key = event.work_unit_key,
         status = "running",
         lease_expires_at_ms = (now() - 60) * 1000,
       },
     }, function()
-      t.eq(dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", event.proposal_id, event.version, facts), false)
+      t.eq(dispatch_live_run.dispatch_live_run_dedup(liveness, "fix", event.proposal_id, event.work_unit_key, facts), false)
     end)
   end,
 
@@ -542,7 +542,7 @@ return {
     local run_opts = opts("fixing-dispatch-expired-run-starts", {
       FKST_GITHUB_WRITE = "1",
     })
-    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.version, {
+    seed_role_codex_run(run_opts, "fix", event.proposal_id, event.work_unit_key, {
       lease_expires_at_ms = (now() - 60) * 1000,
       timeout_seconds = 1,
     })
@@ -579,7 +579,7 @@ return {
     }, function()
       local signal = core.restart_row_liveness_signal(row, state, facts, facts.now_seconds)
       t.eq(signal.live, false)
-      t.eq(signal.expected_dedup_key, event.version)
+      t.eq(signal.expected_dedup_key, event.work_unit_key)
     end)
   end,
 

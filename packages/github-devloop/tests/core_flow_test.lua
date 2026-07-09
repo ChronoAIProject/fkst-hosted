@@ -760,17 +760,25 @@ return {
     local new_predecessors = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
       predecessor_set = "pr5-github-devloop/issue/owner/repo/41-ready-aaa111",
     }), source_ref())
+    local new_ci_failure = payloads_builders.build_replayed_fixing_payload(origin, 7, copy_table(feedback, {
+      ci_failure_key = "head:def456/checks:digest-0000000101",
+    }), source_ref())
 
     t.eq(defective.gate_baseline_sha, nil)
     t.eq(corrected.gate_baseline_sha, "828df8d3")
     t.is_true(defective.dedup_key ~= corrected.dedup_key)
     t.is_true(defective.dedup_key ~= new_predecessors.dedup_key)
-    t.is_true(defective.dedup_key:find("/nobase/nopred/def456", 1, true) ~= nil)
-    t.is_true(corrected.dedup_key:find("/828df8d3/nopred/def456", 1, true) ~= nil)
-    t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/def456", 1, true) ~= nil)
+    t.is_true(defective.dedup_key ~= new_ci_failure.dedup_key)
+    t.is_true(defective.dedup_key:find("/nobase/nopred/noci/def456", 1, true) ~= nil)
+    t.is_true(corrected.dedup_key:find("/828df8d3/nopred/noci/def456", 1, true) ~= nil)
+    t.is_true(new_predecessors.dedup_key:find("/nobase/pr5-github-devloop/issue/owner/repo/41-ready-aaa111/noci/def456", 1, true) ~= nil)
+    t.eq(new_ci_failure.repair_input, "ci-failure")
+    t.eq(new_ci_failure.ci_failure_key, "head:def456/checks:digest-0000000101")
+    t.is_true(new_ci_failure.dedup_key:find("/nobase/nopred/head-def456/checks-digest-0000000101/def456", 1, true) ~= nil)
     t.eq(v_fixing.is_supported_fixing(defective), true)
     t.eq(v_fixing.is_supported_fixing(corrected), true)
     t.eq(v_fixing.is_supported_fixing(new_predecessors), true)
+    t.eq(v_fixing.is_supported_fixing(new_ci_failure), true)
   end,
 
   test_parse_pr_view_origin_falls_back_on_empty_name_with_owner = function()

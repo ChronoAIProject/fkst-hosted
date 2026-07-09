@@ -44,13 +44,13 @@ local function run_verified_pr_merge(request)
         return false, validate_reason or "pr-validation-failed", rechecked_pr
       end
     end
-    local gate_ok, gate_reason = ci_gate.evaluate_ci_merge_gate(rechecked_pr, {
+    local gate_ok, gate_reason, gate_classification = ci_gate.evaluate_ci_merge_gate(rechecked_pr, {
       repo = repo,
       dept = request.dept or "merge",
       proposal_id = request.proposal_id,
     })
     if not gate_ok then
-      return false, gate_reason, rechecked_pr
+      return false, gate_reason, rechecked_pr, gate_classification
     end
     if type(request.before_merge) == "function" then
       request.before_merge(rechecked_pr)
