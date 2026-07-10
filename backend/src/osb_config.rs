@@ -18,6 +18,14 @@
 //! Secrets discipline: the API key + execd seed are held in [`SecretString`]s and the
 //! hand-written [`OpensandboxConfig`] `Debug` renders them as `<redacted>` (the
 //! config-module convention, mirroring [`crate::storage::config::ChronoStorageConfig`]).
+//!
+//! Both secrets resolve FILE-FIRST: `FKST_OSB_API_KEY_FILE` /
+//! `FKST_OSB_EXECD_TOKEN_SEED_FILE` point at CSI-mounted secret files (how the
+//! production platform delivers them — GCP Secret Manager → GKE Secrets Store CSI);
+//! when a `*_FILE` var is set the file WINS over the inline var, its contents are
+//! trimmed (mounted secrets carry a trailing newline), and an unreadable or empty
+//! file fails closed rather than silently falling back. The inline vars remain the
+//! local-dev fallback. See [`resolve_secret_file_first`].
 
 use secrecy::SecretString;
 use serde::Deserialize;
@@ -49,8 +57,16 @@ struct OsbVars {
     base_url: Option<String>,
     #[serde(default)]
     api_key: Option<String>,
+    /// Path to a file holding the lifecycle API key (production: a CSI-mounted
+    /// GCP Secret Manager secret). File-first: when set it WINS over `api_key`.
+    #[serde(default)]
+    api_key_file: Option<String>,
     #[serde(default)]
     execd_token_seed: Option<String>,
+    /// Path to a file holding the execd token seed (same CSI channel as the API
+    /// key). File-first: when set it WINS over `execd_token_seed`.
+    #[serde(default)]
+    execd_token_seed_file: Option<String>,
     #[serde(default)]
     session_cpu: Option<String>,
     #[serde(default)]
@@ -78,13 +94,16 @@ pub struct OpensandboxConfig {
     /// The OpenSandbox lifecycle server base URL. Env: `FKST_OSB_BASE_URL`. Parsed
     /// into a [`reqwest::Url`] so an unroutable value fails closed at startup.
     pub base_url: reqwest::Url,
-    /// The lifecycle API key (`OPEN-SANDBOX-API-KEY` header). Env: `FKST_OSB_API_KEY`.
-    /// A [`SecretString`]; never logged, redacted in `Debug`.
+    /// The lifecycle API key (`OPEN-SANDBOX-API-KEY` header). Env: `FKST_OSB_API_KEY`,
+    /// or file-first via `FKST_OSB_API_KEY_FILE` (production: a CSI-mounted GCP
+    /// Secret Manager secret; the file wins and its contents are trimmed). A
+    /// [`SecretString`]; never logged, redacted in `Debug`.
     pub api_key: SecretString,
     /// The long-lived seed the per-session execd access token is derived from (HMAC,
     /// see [`crate::session_backend::opensandbox::derive_execd_token`]). Env:
-    /// `FKST_OSB_EXECD_TOKEN_SEED`. A [`SecretString`]; never logged, redacted in
-    /// `Debug`.
+    /// `FKST_OSB_EXECD_TOKEN_SEED`, or file-first via
+    /// `FKST_OSB_EXECD_TOKEN_SEED_FILE` (same CSI channel as the API key). A
+    /// [`SecretString`]; never logged, redacted in `Debug`.
     pub execd_token_seed: SecretString,
     /// The sandbox `resourceLimits.cpu` value (e.g. `500m`). Env:
     /// `FKST_OSB_SESSION_CPU`.
@@ -133,6 +152,41 @@ fn non_blank(value: Option<String>) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// File-first secret resolution: when `file_path` is set (non-blank) the file MUST
+/// be readable and non-empty after trimming — any failure is a hard, fail-closed
+/// config error naming the path (a typo'd path silently falling back to a stale env
+/// var is worse than failing). The trim matters: CSI-mounted secrets commonly carry
+/// a trailing newline that would otherwise corrupt the outgoing
+/// `OPEN-SANDBOX-API-KEY` header. Only when `file_path` is absent does the inline
+/// env value apply. Neither → an error naming BOTH vars.
+fn resolve_secret_file_first(
+    inline: Option<String>,
+    file_path: Option<String>,
+    inline_var: &str,
+    file_var: &str,
+) -> Result<SecretString, AppError> {
+    if let Some(path) = file_path {
+        let contents = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::Config(format!(
+                "{file_var} points at {path} but the file could not be read: {e}"
+            ))
+        })?;
+        let trimmed = contents.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::Config(format!(
+                "{file_var} points at {path} but the file is empty"
+            )));
+        }
+        return Ok(SecretString::from(trimmed.to_string()));
+    }
+    match inline {
+        Some(value) => Ok(SecretString::from(value)),
+        None => Err(AppError::Config(format!(
+            "{inline_var} or {file_var} must be set when FKST_POD_MODE=opensandbox"
+        ))),
+    }
+}
+
 /// Deserialize the OpenSandbox-backend configuration from environment-style pairs.
 ///
 /// `required` is the caller's `pod.dispatch && pod_mode == Opensandbox` gate: when
@@ -169,25 +223,22 @@ pub(crate) fn from_vars(
         }
     };
 
-    let api_key = match non_blank(raw.api_key) {
-        Some(value) => SecretString::from(value),
-        None => {
-            return Err(AppError::Config(
-                "FKST_OSB_API_KEY must be set when FKST_POD_MODE=opensandbox".to_string(),
-            ))
-        }
-    };
+    let api_key = resolve_secret_file_first(
+        non_blank(raw.api_key),
+        non_blank(raw.api_key_file),
+        "FKST_OSB_API_KEY",
+        "FKST_OSB_API_KEY_FILE",
+    )?;
 
-    // A blank seed is rejected explicitly: an empty seed would derive a constant,
+    // A blank seed is rejected exactly like a missing one (`non_blank` + the
+    // helper's empty-after-trim check): an empty seed would derive a constant,
     // guessable execd token for every session.
-    let execd_token_seed = match non_blank(raw.execd_token_seed) {
-        Some(value) => SecretString::from(value),
-        None => {
-            return Err(AppError::Config(
-                "FKST_OSB_EXECD_TOKEN_SEED must be set when FKST_POD_MODE=opensandbox".to_string(),
-            ))
-        }
-    };
+    let execd_token_seed = resolve_secret_file_first(
+        non_blank(raw.execd_token_seed),
+        non_blank(raw.execd_token_seed_file),
+        "FKST_OSB_EXECD_TOKEN_SEED",
+        "FKST_OSB_EXECD_TOKEN_SEED_FILE",
+    )?;
 
     let session_cpu = match non_blank(raw.session_cpu) {
         Some(value) => value,
@@ -337,28 +388,107 @@ mod tests {
     }
 
     #[test]
-    fn missing_api_key_fails_closed_naming_the_var() {
+    fn missing_api_key_fails_closed_naming_both_vars() {
         let err = from_vars(&full_without("FKST_OSB_API_KEY"), true)
             .expect_err("missing api key must fail closed");
-        assert!(err
-            .to_string()
-            .contains("FKST_OSB_API_KEY must be set when FKST_POD_MODE=opensandbox"));
+        assert!(err.to_string().contains(
+            "FKST_OSB_API_KEY or FKST_OSB_API_KEY_FILE must be set when FKST_POD_MODE=opensandbox"
+        ));
     }
 
     #[test]
-    fn missing_or_blank_execd_seed_fails_closed_naming_the_var() {
+    fn missing_or_blank_execd_seed_fails_closed_naming_both_vars() {
         // Missing.
         let err = from_vars(&full_without("FKST_OSB_EXECD_TOKEN_SEED"), true)
             .expect_err("missing seed must fail closed");
-        assert!(err
-            .to_string()
-            .contains("FKST_OSB_EXECD_TOKEN_SEED must be set when FKST_POD_MODE=opensandbox"));
+        assert!(err.to_string().contains(
+            "FKST_OSB_EXECD_TOKEN_SEED or FKST_OSB_EXECD_TOKEN_SEED_FILE must be set when \
+             FKST_POD_MODE=opensandbox"
+        ));
         // Blank is rejected exactly like missing (a blank seed derives a constant
         // token for every session).
         let mut v = full_without("FKST_OSB_EXECD_TOKEN_SEED");
         v.push(("FKST_OSB_EXECD_TOKEN_SEED".to_string(), "   ".to_string()));
         let err = from_vars(&v, true).expect_err("blank seed must fail closed");
         assert!(err.to_string().contains("FKST_OSB_EXECD_TOKEN_SEED"));
+    }
+
+    /// Write `contents` to a fresh temp file and return its path (kept alive by
+    /// returning the guard alongside).
+    fn secret_file(contents: &str) -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("secret");
+        std::fs::write(&path, contents).expect("write secret file");
+        (dir, path.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn api_key_file_wins_over_inline_env() {
+        let (_guard, path) = secret_file("file-key\n");
+        let mut v = full(); // full() already sets FKST_OSB_API_KEY=osb-key
+        v.push(("FKST_OSB_API_KEY_FILE".to_string(), path));
+        let config = from_vars(&v, true).expect("valid").expect("enabled");
+        assert_eq!(config.api_key.expose_secret(), "file-key");
+    }
+
+    #[test]
+    fn secret_file_content_is_trimmed() {
+        // CSI-mounted secrets commonly carry a trailing newline; it must never
+        // reach the outgoing header.
+        let (_guard, path) = secret_file("  seed-value\n");
+        let mut v = full_without("FKST_OSB_EXECD_TOKEN_SEED");
+        v.push(("FKST_OSB_EXECD_TOKEN_SEED_FILE".to_string(), path));
+        let config = from_vars(&v, true).expect("valid").expect("enabled");
+        assert_eq!(config.execd_token_seed.expose_secret(), "seed-value");
+    }
+
+    #[test]
+    fn unreadable_secret_file_fails_closed_without_env_fallback() {
+        // The file var is set but points nowhere: fail closed naming the file var
+        // and the path — do NOT silently fall back to the (also set) inline value.
+        let mut v = full();
+        v.push((
+            "FKST_OSB_API_KEY_FILE".to_string(),
+            "/nonexistent/fkst-osb-test/api-key".to_string(),
+        ));
+        let err = from_vars(&v, true).expect_err("unreadable file must fail closed");
+        let msg = err.to_string();
+        assert!(msg.contains("FKST_OSB_API_KEY_FILE"), "{msg}");
+        assert!(msg.contains("/nonexistent/fkst-osb-test/api-key"), "{msg}");
+        assert!(msg.contains("could not be read"), "{msg}");
+    }
+
+    #[test]
+    fn empty_secret_file_fails_closed() {
+        let (_guard, path) = secret_file("  \n");
+        let mut v = full();
+        v.push(("FKST_OSB_API_KEY_FILE".to_string(), path.clone()));
+        let err = from_vars(&v, true).expect_err("empty file must fail closed");
+        let msg = err.to_string();
+        assert!(msg.contains("FKST_OSB_API_KEY_FILE"), "{msg}");
+        assert!(msg.contains("is empty"), "{msg}");
+    }
+
+    #[test]
+    fn seed_file_errors_name_the_seed_vars() {
+        // Same helper, seed pair: the error names the SEED vars, not the key vars.
+        let mut v = full();
+        v.push((
+            "FKST_OSB_EXECD_TOKEN_SEED_FILE".to_string(),
+            "/nonexistent/fkst-osb-test/seed".to_string(),
+        ));
+        let err = from_vars(&v, true).expect_err("unreadable seed file must fail closed");
+        assert!(err.to_string().contains("FKST_OSB_EXECD_TOKEN_SEED_FILE"));
+    }
+
+    #[test]
+    fn inline_only_still_works() {
+        // Regression guard: no *_FILE vars set → the inline env values resolve
+        // exactly as before (covered broadly by fully_configured_resolves_to_some,
+        // asserted here against the secrets specifically).
+        let config = from_vars(&full(), true).expect("valid").expect("enabled");
+        assert_eq!(config.api_key.expose_secret(), "osb-key");
+        assert_eq!(config.execd_token_seed.expose_secret(), "execd-seed");
     }
 
     #[test]
