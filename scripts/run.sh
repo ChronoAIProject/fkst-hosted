@@ -90,6 +90,8 @@ DEFAULT_DURABLE_ROOT="$FKST_DIR/run/durable"
 . "$ROOT/scripts/composed_manifest.sh"
 # shellcheck source=scripts/test_affected.sh
 . "$ROOT/scripts/test_affected.sh"
+# shellcheck source=scripts/test_parallel.sh
+. "$ROOT/scripts/test_parallel.sh"
 
 resolve_bin() {
   if ! resolve_bin_contract "$ROOT" "bootstrap"; then
@@ -231,48 +233,65 @@ usage() {
 }
 
 cmd_check() {
-  local fail=0 competence_base_ref=""
-  python3 -B "$ROOT/scripts/check_repo.py" || fail=1
-  python3 -B "$ROOT/scripts/ratchet_base_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_fkst_layout.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_dedup_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_content_truncation_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_coverage_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_devloop_godlib_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_devloop_installer_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_integration_coverage_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_intake_default_surface_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_dead_letter_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_producer_liveness_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_monotone_gate_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_test_graphql.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_interface_test.py" || fail=1
-  python3 -B "$ROOT/scripts/lua_coverage_to_lcov_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_github_content_ingress_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_error_class_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_dependency_cycle_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_shell_out_to_self_test.py" || fail=1; python3 -B "$ROOT/scripts/check_repo_hidden_state_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_std_dependency_model_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_saga_head_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_namespaced_queue_test.py" || fail=1
-  python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py" || fail=1
-  python3 -B "$ROOT/scripts/bin_cache_test.py" || fail=1
-  python3 -B "$ROOT/scripts/bin_bootstrap_test.py" || fail=1
-  python3 -B "$ROOT/scripts/host_entry_test.py" || fail=1
-  python3 -B "$ROOT/scripts/host_run_test.py" || fail=1
-  python3 -B "$ROOT/scripts/host_profile_scaffold_test.py" || fail=1
-  python3 -B "$ROOT/scripts/host_run_equivalence_test.py" || fail=1
-  python3 -B "$ROOT/scripts/run_sh_coverage_test.py" || fail=1
-  python3 -B "$ROOT/scripts/run_sh_test_affected_test.py" || fail=1
-  python3 -B "$ROOT/scripts/composed_manifest_test.py" || fail=1
-  python3 -B "$ROOT/scripts/board_test.py" || fail=1
-  python3 -B "$ROOT/scripts/dogfood_board_test.py" || fail=1
-  python3 -B "$ROOT/scripts/doctor_test.py" || fail=1
-  python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py" || fail=1
-  if ! competence_base_ref="$(competence_gate_base_ref)"; then
+  local fail=0 competence_base_ref="" pool
+  pool="$(detect_pool_size)"
+  # Every unit below is an independent process (its own repo-read + unique tempdir),
+  # so the check verdict is a commutative AND-fold — running them concurrently changes
+  # only wall-clock, not which checks run or their pass/fail. Keep the FULL set.
+  local -a units=(
+    'python3 -B "$ROOT/scripts/check_repo.py"'
+    'python3 -B "$ROOT/scripts/ratchet_base_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_fkst_layout.py"'
+    'python3 -B "$ROOT/scripts/check_repo_dedup_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_content_truncation_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_coverage_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_devloop_godlib_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_devloop_installer_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_integration_coverage_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_intake_default_surface_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_dead_letter_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_producer_liveness_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_monotone_gate_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_test_graphql.py"'
+    'python3 -B "$ROOT/scripts/check_repo_interface_test.py"'
+    'python3 -B "$ROOT/scripts/lua_coverage_to_lcov_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_github_content_ingress_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_error_class_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_dependency_cycle_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_shell_out_to_self_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_hidden_state_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_std_dependency_model_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_saga_head_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_namespaced_queue_test.py"'
+    'python3 -B "$ROOT/scripts/check_repo_fkst_layout_test.py"'
+    'python3 -B "$ROOT/scripts/bin_cache_test.py"'
+    'python3 -B "$ROOT/scripts/bin_bootstrap_test.py"'
+    'python3 -B "$ROOT/scripts/host_entry_test.py"'
+    'python3 -B "$ROOT/scripts/host_run_test.py"'
+    'python3 -B "$ROOT/scripts/host_profile_scaffold_test.py"'
+    'python3 -B "$ROOT/scripts/host_run_equivalence_test.py"'
+    'python3 -B "$ROOT/scripts/run_sh_coverage_test.py"'
+    'python3 -B "$ROOT/scripts/run_sh_test_affected_test.py"'
+    'python3 -B "$ROOT/scripts/composed_manifest_test.py"'
+    'python3 -B "$ROOT/scripts/board_test.py"'
+    'python3 -B "$ROOT/scripts/dogfood_board_test.py"'
+    'python3 -B "$ROOT/scripts/doctor_test.py"'
+    'python3 -B "$ROOT/scripts/ratchet_migration_slicer_test.py"'
+    'python3 -B "$ROOT/scripts/competence_gate_test.py"'
+    'python3 -B "$ROOT/scripts/test_parallel_test.py"'
+  )
+  # competence gate needs a base ref resolved once (a git read) before it can run.
+  if competence_base_ref="$(competence_gate_base_ref)"; then
+    units+=('python3 -B "$ROOT/scripts/competence_gate.py" --base-ref "$competence_base_ref"')
+  else
     echo "error: competence gate requires FKST_COMPETENCE_BASE_REF, GITHUB_BASE_REF, or an integration ref" >&2
     fail=1
-  else
-    python3 -B "$ROOT/scripts/competence_gate.py" --base-ref "$competence_base_ref" || fail=1
   fi
-  python3 -B "$ROOT/scripts/competence_gate_test.py" || fail=1
+  run_units_parallel "$pool" "${units[@]}" || fail=$(( fail + $? ))
+  # engine workspace dependency validation runs only after the ratchets pass, exactly
+  # as before: resolve_bin may exit on an unresolvable BIN, so it must not preempt the
+  # checks (whose failure output some checker unit-tests assert on).
   if [ "$fail" -eq 0 ]; then
     resolve_bin
     "$BIN" deps --project-root "$ROOT" || fail=1
@@ -472,11 +491,15 @@ PY
 # trip the script-wide `set -e`.
 run_quiet_pass() {
   if [ -n "${verbose:-}${FKST_TEST_VERBOSE:-}" ]; then "$@"; return $?; fi
-  local rc
+  local rc had_e=""
+  case $- in *e*) had_e=1 ;; esac
   set +e
   "$@" 2>&1 | grep -vE '^PASS '
   rc=${PIPESTATUS[0]}
-  set -e
+  # Restore the CALLER's errexit posture (not a hard set -e): run_one_package runs
+  # under `set +e` in the pool subshell and must stay that way so a later benign
+  # nonzero standalone command cannot abort it before it records its exit code.
+  if [ -n "$had_e" ]; then set -e; else set +e; fi
   return "$rc"
 }
 
@@ -489,21 +512,23 @@ run_quiet_pass() {
 run_quiet_keep() {
   local keep="$1"; shift
   if [ -n "${verbose:-}${FKST_TEST_VERBOSE:-}" ]; then "$@"; return $?; fi
-  local rc
+  local rc had_e=""
+  case $- in *e*) had_e=1 ;; esac
   set +e
   "$@" 2>&1 | grep -E -- "$keep"
   rc=${PIPESTATUS[0]}
-  set -e
+  # Restore the caller's errexit posture (see run_quiet_pass).
+  if [ -n "$had_e" ]; then set -e; else set +e; fi
   return "$rc"
 }
 
 load_composed_test_roots() { local script; script="$(bash "$ROOT/scripts/composed_test_graph_roots.sh" "$1" "$2")" || return 1; eval "$script"; }
 
 cmd_test() {
-  local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}" rc is_pkg_composed
-  local report_dir report_file coverage_report_dir coverage_dir coverage_file
+  local target="" ran=0 fail=0 pkg name verbose="${FKST_TEST_VERBOSE:-}" rc pool
+  local report_dir coverage_report_dir coverage_file
   local coverage_artifacts=()
-  local test_project_root test_pkg_args
+  local -a pkg_units=() ran_names=()
   # Keep failure-relevant lines only unless verbose; per-test FAIL is anchored so
   # expected error-path logs containing tag=FAILURE do not match.
   local test_failure_filter='^FAIL |passed, [0-9]+ failed|panic'
@@ -516,9 +541,12 @@ cmd_test() {
     shift
   done
 
-  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}"' EXIT
+  # One EXIT trap sweeps all three temp roots — including the per-package roots parent —
+  # so even a SIGKILL/OOM of a parallel package unit cannot leak its runtime/durable dirs.
+  trap 'rm -rf "${TEST_HERMETIC_RUNTIME_ROOT:-}" "${TEST_HERMETIC_DURABLE_ROOT:-}" "${TEST_HERMETIC_PKG_ROOTS:-}"' EXIT
   TEST_HERMETIC_RUNTIME_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-rt.XXXXXX")"
   TEST_HERMETIC_DURABLE_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-durable.XXXXXX")"
+  TEST_HERMETIC_PKG_ROOTS="$(mktemp -d "${TMPDIR:-/tmp}/fkst-test-pkgroots.XXXXXX")"
   export FKST_RUNTIME_ROOT="$TEST_HERMETIC_RUNTIME_ROOT"
   export FKST_DURABLE_ROOT="$TEST_HERMETIC_DURABLE_ROOT"
   unset FKST_GITHUB_WRITE
@@ -539,59 +567,34 @@ cmd_test() {
   fi
 
   ensure_package_view
+  pool="$(detect_pool_size)"
+  # Each package is an independent test unit; build the unit list, then run them
+  # concurrently. Every unit gets its own ephemeral runtime/durable roots inside
+  # run_one_package, and its report/coverage land in $name-keyed collection dirs, so
+  # the aggregated pass/fail + coverage fan-in is identical to the former serial loop.
   for src_pkg in "$SOURCE_PACKAGES_ROOT"/*/; do
     [ -d "$src_pkg" ] || continue
     name="$(basename "$src_pkg")"
     pkg="$LOCAL_PACKAGES_ROOT/$name"
     [ -d "$pkg" ] || continue
     if [ -n "$target" ] && [ "$name" != "$target" ]; then continue; fi
-    echo "=== $name ==="
     ran=$((ran + 1))
     rc=0; is_composed "$pkg" || rc=$?
     case "$rc" in
-      0) is_pkg_composed=1 ;;
-      1) is_pkg_composed=0 ;;
-      *) echo "error: failed to read package composition for $pkg" >&2; fail=$((fail + 1)); continue ;;
+      0) pkg_units+=("run_one_package $(printf '%q' "$name") $(printf '%q' "$pkg") 1 $(printf '%q' "$report_dir") $(printf '%q' "$coverage_report_dir") $(printf '%q' "$TEST_HERMETIC_PKG_ROOTS") $(printf '%q' "$test_failure_filter")"); ran_names+=("$name") ;;
+      1) pkg_units+=("run_one_package $(printf '%q' "$name") $(printf '%q' "$pkg") 0 $(printf '%q' "$report_dir") $(printf '%q' "$coverage_report_dir") $(printf '%q' "$TEST_HERMETIC_PKG_ROOTS") $(printf '%q' "$test_failure_filter")"); ran_names+=("$name") ;;
+      *) echo "error: failed to read package composition for $pkg" >&2; fail=$((fail + 1)) ;;
     esac
-    if [ "$is_pkg_composed" -eq 1 ]; then
-      echo "skip single-package conformance for composed package: $name"
-    else
-      if ! run_quiet_pass "$BIN" conformance --project-root "$pkg" --package-root "$pkg"; then
-        fail=$((fail + 1))
-        continue
-      fi
-    fi
-    report_file="$report_dir/$name.json"
-    coverage_dir="$coverage_report_dir/$name"
-    rm -rf "$coverage_dir"
-    mkdir -p "$coverage_dir"
-    test_project_root="$pkg"; test_pkg_args=(--package-root "$pkg")
-    if [ "$is_pkg_composed" -eq 1 ]; then
-      if ! load_composed_test_roots normal "$name"; then fail=$((fail + 1)); continue; fi
-    fi
-    # Default-quiet: keep only failure-relevant lines (the --report-json that
-    # drives the tally and G5 coverage is unaffected). run_quiet_keep is called
-    # from `if !` so the inner pipe never trips `set -e` on a failing package;
-    # the loop continues, the count is correct, and FAILED: still prints.
-    if ! run_quiet_keep "$test_failure_filter" \
-        "$BIN" test --project-root "$test_project_root" "${test_pkg_args[@]}" --report-json "$report_file" --coverage "$coverage_dir"; then
-      fail=$((fail + 1))
-    else
-      if [ "$is_pkg_composed" -eq 1 ] && compgen -G "$pkg/tests/run_graph*_test.lua" >/dev/null; then
-        if ! load_composed_test_roots graph "$name" || ! run_quiet_keep "$test_failure_filter" \
-            "$BIN" test --project-root "$test_project_root" "${test_pkg_args[@]}" --report-json "$report_dir/$name.graph.json" --coverage "$coverage_dir.graph"; then
-          fail=$((fail + 1))
-          continue
-        fi
-      fi
-      coverage_file="$coverage_dir/coverage.json"
-      if [ ! -f "$coverage_file" ]; then
-        echo "error: fkst-framework test --coverage did not write coverage.json for $name in $coverage_dir" >&2
-        fail=$((fail + 1))
-      else
-        coverage_artifacts+=("$coverage_file")
-      fi
-    fi
+  done
+  if [ "${#pkg_units[@]}" -gt 0 ]; then
+    run_units_parallel "$pool" "${pkg_units[@]}" || fail=$(( fail + $? ))
+  fi
+  # Collect per-package coverage artifacts from their deterministic $name-keyed paths.
+  # Only consumed when fail==0 (all packages passed), matching the serial version's
+  # ratchet precondition; a run_one_package failure already bumped fail above.
+  for name in ${ran_names[@]+"${ran_names[@]}"}; do
+    coverage_file="$coverage_report_dir/$name/coverage.json"
+    [ -f "$coverage_file" ] && coverage_artifacts+=("$coverage_file")
   done
   if [ "$ran" -eq 0 ]; then
     if [ -n "$target" ]; then
