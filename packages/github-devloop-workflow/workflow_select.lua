@@ -239,7 +239,7 @@ end
 local function execution_boundary_clause(source_phrase)
   return table.concat({
     "Execution boundary:",
-    "- You are running in an empty runtime scratch directory, not a repository checkout.",
+    "- You are running in a read-only checkout of the repository.",
     "- Do not clone, checkout, fetch with git, create branches, or modify any repository.",
     "- " .. tostring(source_phrase or ""),
   }, "\n")
